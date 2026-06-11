@@ -23,12 +23,30 @@ def _post(payload: dict) -> None:
 def send_text(body: str) -> None:
     if not config.WHATSAPP_ENABLED:
         return
-    _post({
-        "messaging_product": "whatsapp",
-        "to": config.WHATSAPP_APPROVER_NUMBER,
-        "type": "text",
-        "text": {"body": body[:4096]},
-    })
+    try:
+        _post({
+            "messaging_product": "whatsapp",
+            "to": config.WHATSAPP_APPROVER_NUMBER,
+            "type": "text",
+            "text": {"body": body[:4096]},
+        })
+    except Exception:  # noqa: BLE001 — 24h window closed or API hiccup
+        _email_fallback(body)
+
+
+def _email_fallback(body: str) -> None:
+    from . import gmail_client  # local import avoids circular dependency
+
+    try:
+        gmail_client.send_email(
+            config.NOTIFY_FROM_ALIAS,
+            config.APPROVER_EMAIL,
+            "[Assistant] (WhatsApp unavailable) " + body.splitlines()[0][:80],
+            body + "\n\nSent by email because the WhatsApp 24h window was "
+                   "closed — message the agent on WhatsApp to reopen it.",
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def send_approval(approval_id: str, summary: str) -> None:
