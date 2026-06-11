@@ -76,6 +76,41 @@ def _extract_text(payload: dict) -> str:
     return ""
 
 
+def fetch_unanswered(alias: str, days: int = 14, max_threads: int = 50) -> list[dict]:
+    """Inbox threads from the last N days where the LAST message is not ours —
+    i.e. emails that still need a response. Used for the startup backlog sweep."""
+    svc = service_for(alias)
+    me = config.GMAIL_ACCOUNTS[alias]["email"].lower()
+    resp = (
+        svc.users()
+        .threads()
+        .list(userId="me", q=f"in:inbox -from:me newer_than:{days}d", maxResults=max_threads)
+        .execute()
+    )
+    out = []
+    for ref in resp.get("threads", []):
+        thread = svc.users().threads().get(userId="me", id=ref["id"], format="full").execute()
+        msgs = thread.get("messages", [])
+        if not msgs:
+            continue
+        last = msgs[-1]
+        headers = {h["name"].lower(): h["value"] for h in last["payload"].get("headers", [])}
+        if me in headers.get("from", "").lower():
+            continue  # we already replied last — not awaiting us
+        out.append(
+            {
+                "id": last["id"],
+                "threadId": thread["id"],
+                "from": headers.get("from", ""),
+                "to": headers.get("to", ""),
+                "subject": headers.get("subject", ""),
+                "date": headers.get("date", ""),
+                "body": _extract_text(last["payload"]),
+            }
+        )
+    return out
+
+
 def mark_read(alias: str, message_id: str) -> None:
     service_for(alias).users().messages().modify(
         userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}

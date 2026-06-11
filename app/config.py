@@ -31,6 +31,14 @@ NOTIFY_FROM_ALIAS = os.environ.get("NOTIFY_FROM_ALIAS", "personal")
 POLL_INTERVAL_MIN = int(os.environ.get("POLL_INTERVAL_MIN", "5"))
 DIGEST_HOURS = (8, 20)  # 8am and 8pm America/New_York
 
+# Training-wheels mode: while false, NOTHING is auto-sent — every reply
+# (even to trusted contacts) is drafted and queued for approval in batches.
+AUTO_SEND_ENABLED = os.environ.get("AUTO_SEND_ENABLED", "false").lower() == "true"
+
+# On worker startup, sweep this many days back for emails that never got a
+# reply and queue drafts for them as the first approval batch.
+BACKLOG_DAYS = int(os.environ.get("BACKLOG_DAYS", "14"))
+
 # WhatsApp Cloud API (optional — agent falls back to email until these are set)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")

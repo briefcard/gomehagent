@@ -24,14 +24,20 @@ def already_seen(message_id: str) -> bool:
         ).count() > 0
 
 
-def process_inbox(alias: str) -> None:
-    for email in gmail_client.fetch_unread(alias):
+def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> None:
+    for email in emails:
         if already_seen(email["id"]):
             continue
         trusted = is_trusted(email["from"])
         result = triage.triage_email(email, alias, trusted)
         action = result["action"]
         detail = result.get("reason", "")
+
+        # Training-wheels mode: until AUTO_SEND_ENABLED=true, nothing is sent
+        # without approval — auto-replies become drafts in the approval batch.
+        if action == "auto_reply" and not config.AUTO_SEND_ENABLED:
+            action = "draft"
+            detail += " [auto-send disabled: queued for approval]"
         log.info("[%s] %s -> %s (%s)", alias, email["subject"][:60], action, detail)
 
         if action == "auto_reply":
@@ -46,15 +52,18 @@ def process_inbox(alias: str) -> None:
                 alias, email["from"], result["reply_subject"] or f"Re: {email['subject']}",
                 result["reply_body"], email["threadId"],
             )
-            approvals.request_approval(
+            ap_id = approvals.request_approval(
                 "send_email",
-                f"Reply drafted in [{alias}] to {email['from']}: {email['subject']}",
+                f"Reply drafted in [{alias}] to {email['from']}: {email['subject']}"
+                + (" ⚠️ NEEDS FACTS" if detail.startswith("NEEDS-FACTS") else ""),
                 {
                     "account": alias, "to": email["from"],
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
                     "body": result["reply_body"], "thread_id": email["threadId"],
                 },
+                notify=False,  # batched at end of cycle
             )
+            new_approvals.append(ap_id)
             logged = "drafted"
         elif action == "escalate":
             note = (f"🚨 [{alias}] {email['from']} — {email['subject']}\n{detail}")
@@ -79,23 +88,43 @@ def process_inbox(alias: str) -> None:
 
 
 def poll_all() -> None:
+    new_approvals: list[str] = []
     for alias in config.GMAIL_ACCOUNTS:
         try:
-            process_inbox(alias)
+            process_emails(alias, gmail_client.fetch_unread(alias), new_approvals)
         except Exception:  # noqa: BLE001 — one bad inbox must not kill the loop
             log.exception("inbox %s failed", alias)
+    approvals.notify_batch(new_approvals)  # one email per cycle, not per item
+
+
+def backlog_sweep() -> None:
+    """First-run sweep: every email of the last BACKLOG_DAYS days that never
+    got a reply -> triaged -> one big approval batch for Gomeh."""
+    new_approvals: list[str] = []
+    for alias in config.GMAIL_ACCOUNTS:
+        try:
+            emails = gmail_client.fetch_unanswered(alias, config.BACKLOG_DAYS)
+            log.info("[%s] backlog sweep: %d unanswered threads", alias, len(emails))
+            process_emails(alias, emails, new_approvals)
+        except Exception:  # noqa: BLE001
+            log.exception("backlog sweep %s failed", alias)
+    approvals.notify_batch(
+        new_approvals,
+        title=f"[BACKLOG] {len(new_approvals)} unanswered emails — drafts ready for review",
+    )
 
 
 def main() -> None:
     db.init_db()
-    log.info("Worker starting. Inboxes: %s | WhatsApp: %s",
-             list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED)
+    log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
+             list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED,
+             config.AUTO_SEND_ENABLED)
+    backlog_sweep()  # idempotent: EmailLog dedup skips already-processed messages
     sched = BackgroundScheduler(timezone="America/New_York")
     sched.add_job(poll_all, "interval", minutes=config.POLL_INTERVAL_MIN)
     for hour in config.DIGEST_HOURS:
         sched.add_job(digest.send_digest, "cron", hour=hour, minute=0)
     sched.start()
-    poll_all()  # immediate first pass
     while True:
         time.sleep(60)
 

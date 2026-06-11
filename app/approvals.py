@@ -12,8 +12,9 @@ from . import config, db, gmail_client, whatsapp
 _signer = URLSafeTimedSerializer(config.APPROVAL_SECRET)
 
 
-def request_approval(kind: str, summary: str, payload: dict) -> str:
-    """Create a pending approval and notify Gomeh. Returns approval id."""
+def request_approval(kind: str, summary: str, payload: dict, notify: bool = True) -> str:
+    """Create a pending approval. notify=False lets the caller batch
+    notifications (one email per poll cycle instead of one per item)."""
     with db.SessionLocal() as s:
         ap = db.Approval(kind=kind, summary=summary, payload=payload,
                          channel="whatsapp" if config.WHATSAPP_ENABLED else "email")
@@ -21,19 +22,39 @@ def request_approval(kind: str, summary: str, payload: dict) -> str:
         s.commit()
         ap_id = ap.id
 
-    if config.WHATSAPP_ENABLED:
-        whatsapp.send_approval(ap_id, summary)
-    else:
-        approve = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'approved'])}"
-        deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'denied'])}"
-        gmail_client.send_email(
-            config.NOTIFY_FROM_ALIAS,
-            config.APPROVER_EMAIL,
-            f"[APPROVAL NEEDED] {summary}",
-            f"{summary}\n\nDetails:\n{_fmt(payload)}\n\n"
-            f"APPROVE: {approve}\n\nDENY: {deny}\n\n— Your assistant",
-        )
+    if notify:
+        notify_batch([ap_id])
     return ap_id
+
+
+def notify_batch(ap_ids: list[str], title: str | None = None) -> None:
+    """One notification covering many approvals, each with its own links."""
+    if not ap_ids:
+        return
+    with db.SessionLocal() as s:
+        aps = s.query(db.Approval).filter(db.Approval.id.in_(ap_ids)).all()
+    if config.WHATSAPP_ENABLED:
+        for ap in aps:
+            whatsapp.send_approval(ap.id, ap.summary)
+        return
+    blocks = []
+    for i, ap in enumerate(aps, 1):
+        approve = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap.id, 'approved'])}"
+        deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap.id, 'denied'])}"
+        body = ap.payload.get("body", "")
+        blocks.append(
+            f"{'-' * 50}\n{i}. {ap.summary}\n\n"
+            f"DRAFT:\n{body[:1500]}\n\n"
+            f"APPROVE & SEND: {approve}\nDENY: {deny}\n"
+        )
+    subject = title or f"[{len(aps)} replies awaiting your approval]"
+    gmail_client.send_email(
+        config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL, subject,
+        f"Review each draft, then click its link. Drafts also sit in each "
+        f"inbox's Drafts folder if you'd rather edit before sending "
+        f"(editing there = edit then send manually, then DENY here).\n\n"
+        + "\n".join(blocks) + "\n— Your assistant",
+    )
 
 
 def decide(token: str) -> str:
