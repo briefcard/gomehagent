@@ -52,6 +52,45 @@ def decide(token: str) -> str:
     return f"<html><body style='font-family:sans-serif;padding:3em'><h2>{outcome}</h2></body></html>"
 
 
+# ---- On-demand jobs ----
+
+import threading
+
+_job_status: dict = {}
+
+
+@app.get("/admin/run/{job}")
+def run_job(job: str, key: str = "") -> dict:
+    """Trigger a job: /admin/run/doc_sweep?key=<APPROVAL_SECRET>.
+    Jobs: recategorize | doc_sweep | shipment_audit. Runs in background;
+    check /admin/status?key=... for results. Reports are emailed to Gomeh."""
+    from . import ops_jobs
+
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    if job not in ops_jobs.JOBS:
+        return {"error": f"unknown job; available: {list(ops_jobs.JOBS)}"}
+    if _job_status.get(job) == "running":
+        return {"status": "already running"}
+
+    def _run() -> None:
+        _job_status[job] = "running"
+        try:
+            _job_status[job] = ops_jobs.JOBS[job]()
+        except Exception as exc:  # noqa: BLE001
+            _job_status[job] = f"FAILED: {exc.__class__.__name__}: {str(exc)[:300]}"
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": f"{job} started — report will be emailed"}
+
+
+@app.get("/admin/status")
+def job_status(key: str = "") -> dict:
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    return _job_status or {"status": "no jobs run yet"}
+
+
 # ---- WhatsApp Cloud API webhook (active once Meta app is configured) ----
 
 @app.get("/webhooks/whatsapp")

@@ -202,6 +202,55 @@ def fetch_recent(alias: str, days: int, max_results: int = 200) -> list[dict]:
     return out
 
 
+def _extract_attachments(payload: dict) -> list[dict]:
+    out = []
+    if payload.get("filename") and payload.get("body", {}).get("attachmentId"):
+        out.append({
+            "filename": payload["filename"],
+            "attachment_id": payload["body"]["attachmentId"],
+            "mime": payload.get("mimeType", ""),
+        })
+    for part in payload.get("parts", []) or []:
+        out.extend(_extract_attachments(part))
+    return out
+
+
+def fetch_with_attachments(alias: str, days: int, max_results: int = 150) -> list[dict]:
+    """Messages with attachments (PDF/Office docs) for the document sweep."""
+    svc = service_for(alias)
+    out, token = [], None
+    q = f"has:attachment newer_than:{days}d"
+    while len(out) < max_results:
+        resp = svc.users().messages().list(
+            userId="me", q=q, maxResults=min(100, max_results - len(out)),
+            pageToken=token,
+        ).execute()
+        for ref in resp.get("messages", []):
+            msg = svc.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+            headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+            atts = [a for a in _extract_attachments(msg["payload"])
+                    if a["filename"].lower().endswith(
+                        (".pdf", ".xlsx", ".xls", ".docx", ".csv"))]
+            if atts:
+                out.append({
+                    "id": msg["id"], "threadId": msg["threadId"],
+                    "from": headers.get("from", ""), "subject": headers.get("subject", ""),
+                    "date": headers.get("date", ""),
+                    "snippet": msg.get("snippet", ""), "attachments": atts,
+                })
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
+def download_attachment(alias: str, message_id: str, attachment_id: str) -> bytes:
+    att = service_for(alias).users().messages().attachments().get(
+        userId="me", messageId=message_id, id=attachment_id
+    ).execute()
+    return base64.urlsafe_b64decode(att["data"])
+
+
 def mark_read(alias: str, message_id: str) -> None:
     service_for(alias).users().messages().modify(
         userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}
