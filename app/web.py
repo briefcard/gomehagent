@@ -91,36 +91,34 @@ def job_status(key: str = "") -> dict:
     return _job_status or {"status": "no jobs run yet"}
 
 
+@app.get("/admin/ask", response_class=PlainTextResponse)
+def ask(key: str = "", q: str = "") -> str:
+    """The conversational agent over HTTP, until WhatsApp is live:
+    /admin/ask?key=SECRET&q=pending subscriptions that need cancelling"""
+    from . import command_agent
+
+    if key != config.APPROVAL_SECRET:
+        return "bad key"
+    if not q:
+        return "add &q=your question"
+    try:
+        return command_agent.handle(q)
+    except Exception as exc:  # noqa: BLE001
+        return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
+
+
 def _handle_command(text: str) -> None:
-    """Free-text WhatsApp commands from Gomeh. Keyword routing for now;
-    full conversational agent comes with Phase 2."""
-    from . import digest, ops_jobs, whatsapp
+    """Free-text WhatsApp messages from Gomeh -> conversational agent with
+    the full toolset (email, Drive, Shopify, Calendar, jobs, deadlines)."""
+    from . import command_agent, whatsapp
 
-    t = text.lower()
+    def _run() -> None:
+        try:
+            whatsapp.send_text(command_agent.handle(text))
+        except Exception as exc:  # noqa: BLE001
+            whatsapp.send_text(f"Something broke handling that: {exc.__class__.__name__}")
 
-    def _job(name: str) -> None:
-        threading.Thread(
-            target=lambda: whatsapp.send_text(f"Done: {ops_jobs.JOBS[name]()}"),
-            daemon=True,
-        ).start()
-        whatsapp.send_text(f"On it — running {name}. Report goes to your email; "
-                           "I'll ping you here when finished.")
-
-    if "sweep" in t or ("organize" in t and "doc" in t):
-        _job("doc_sweep")
-    elif "audit" in t or "shipment" in t or "quote" in t:
-        _job("shipment_audit")
-    elif "categor" in t or "bucket" in t:
-        _job("recategorize")
-    elif "status" in t or "digest" in t or "stand" in t:
-        whatsapp.send_text(digest.build_digest())
-    else:
-        whatsapp.send_text(
-            "Commands I know so far: 'sweep inbox docs' (file documents to "
-            "Drive), 'shipment audit' (open shipments & quotes), "
-            "'recategorize' (re-bucket inboxes), 'status' (current digest). "
-            "Full conversational requests are coming next."
-        )
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ---- WhatsApp Cloud API webhook (active once Meta app is configured) ----
