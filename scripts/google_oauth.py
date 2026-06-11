@@ -17,10 +17,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 load_dotenv()
 
+# Everything the agent will EVER need from Google — authorize once, never again.
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/drive.readonly",  # added for Drive tools
+    "https://www.googleapis.com/auth/gmail.modify",   # read/label/mark email
+    "https://www.googleapis.com/auth/gmail.send",     # send approved replies
+    "https://www.googleapis.com/auth/drive",          # read + organize files (Phase 3 doc filing); also covers Sheets
+    "https://www.googleapis.com/auth/calendar",       # scheduling, shipment ETAs as events
 ]
 
 ACCOUNTS = [
