@@ -18,6 +18,33 @@ def health() -> dict:
             "inboxes": list(config.GMAIL_ACCOUNTS)}
 
 
+@app.get("/health/connections")
+def health_connections() -> dict:
+    """Live-test every data connection. Open in a browser to verify setup."""
+    from . import data_tools, gmail_client  # lazy: avoid slowing basic health
+
+    report: dict = {"shopify": {}, "google": {}}
+    for store in config.SHOPIFY_STORES:
+        try:
+            shop = data_tools._shopify(store, "shop.json")["shop"]
+            report["shopify"][store] = f"ok — {shop['name']}"
+        except Exception as exc:  # noqa: BLE001
+            report["shopify"][store] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:200]}"
+    if not config.SHOPIFY_STORES:
+        report["shopify"] = "SHOPIFY_STORES_JSON not set"
+    for alias in config.GMAIL_ACCOUNTS:
+        try:
+            gmail_client.service_for(alias).users().getProfile(userId="me").execute()
+            gmail_ok = "gmail ok"
+        except Exception as exc:  # noqa: BLE001
+            gmail_ok = f"gmail ERROR: {exc.__class__.__name__}"
+        drive_res = data_tools.drive_search(alias, "test")
+        drive_ok = ("drive ok" if not drive_res.startswith("Drive not accessible")
+                    else "drive NOT AUTHORIZED (re-run google_oauth.py with new scopes)")
+        report["google"][alias] = f"{gmail_ok} · {drive_ok}"
+    return report
+
+
 @app.get("/decide/{token}", response_class=HTMLResponse)
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
