@@ -15,12 +15,45 @@ API_VERSION = "2024-10"
 
 
 # ---------- Shopify ----------
+# Supports both auth styles:
+#   legacy static token:   {"domain": "...", "token": "shpat_..."}
+#   Dev Dashboard (2026+): {"domain": "...", "client_id": "...", "client_secret": "..."}
+# Dev Dashboard tokens expire every 24h — fetched and refreshed automatically
+# via the client credentials grant.
+
+import time as _time
+
+_shopify_tokens: dict[str, tuple[str, float]] = {}  # store -> (token, expires_at)
+
+
+def _shopify_token(store: str) -> str:
+    cfg = config.SHOPIFY_STORES[store]
+    if cfg.get("token"):
+        return cfg["token"]
+    cached = _shopify_tokens.get(store)
+    if cached and cached[1] > _time.time() + 300:  # 5-min safety margin
+        return cached[0]
+    r = httpx.post(
+        f"https://{cfg['domain']}/admin/oauth/access_token",
+        json={
+            "client_id": cfg["client_id"],
+            "client_secret": cfg["client_secret"],
+            "grant_type": "client_credentials",
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    data = r.json()
+    token = data["access_token"]
+    _shopify_tokens[store] = (token, _time.time() + int(data.get("expires_in", 86399)))
+    return token
+
 
 def _shopify(store: str, path: str, params: dict | None = None) -> dict:
     cfg = config.SHOPIFY_STORES[store]
     r = httpx.get(
         f"https://{cfg['domain']}/admin/api/{API_VERSION}/{path}",
-        headers={"X-Shopify-Access-Token": cfg["token"]},
+        headers={"X-Shopify-Access-Token": _shopify_token(store)},
         params=params or {},
         timeout=30,
     )
