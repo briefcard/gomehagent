@@ -35,8 +35,12 @@ BUCKETS = {
     "urgent_money": "Costs money NOW or soon: late fees, penalties, demurrage, "
                     "chargebacks, payment disputes, failed payments, invoices due, "
                     "tax/government notices, service suspension warnings",
-    "order_issue": "Customer order problems: cancellation requests, refunds, "
-                   "damaged/wrong items, complaints, anything unclear or emotional",
+    "order_issue": "SERIOUS order problems: wrong/defective/damaged items, "
+                   "refund demands, angry or emotional complaints, anything big",
+    "order_basic": "Easily-handled order requests: subscription cancellation "
+                   "requests, basic asks missing key info (no order number, no "
+                   "email match) where the right reply is a clarifying question "
+                   "or receipt acknowledgment",
     "order_routine": "Routine order questions answerable from Shopify data: "
                      "status, tracking, delivery estimate, address confirmation",
     "logistics": "Freight forwarders, customs brokers, warehouse, shipments, "
@@ -56,6 +60,7 @@ BUCKETS = {
 BUCKET_LABELS = {
     "urgent_money": "Agent/1-Money-Urgent",
     "order_issue": "Agent/2-Order-Issues",
+    "order_basic": "Agent/2-Order-Basic",
     "order_routine": "Agent/3-Order-Routine",
     "logistics": "Agent/4-Logistics",
     "client_comms": "Agent/5-Clients",
@@ -66,10 +71,17 @@ BUCKET_LABELS = {
 }
 
 # Buckets where auto-send is permitted once AUTO_SEND_ENABLED=true.
-# order_routine drafts are tool-verified (Shopify) so they're the safe start.
+# order_routine is tool-verified (Shopify); order_basic replies are
+# clarifying questions / acknowledgments that commit to nothing.
 AUTO_SEND_BUCKETS = set(
-    os.environ.get("AUTO_SEND_BUCKETS", "order_routine").split(",")
+    os.environ.get("AUTO_SEND_BUCKETS", "order_routine,order_basic").split(",")
 )
+
+# Per-bucket model routing: logistics runs on Opus for maximum judgment
+# (documents, customs, money on the line). Everything else uses CLAUDE_MODEL.
+BUCKET_MODELS = json.loads(os.environ.get(
+    "BUCKET_MODELS_JSON", '{"logistics": "claude-opus-4-8"}'
+))
 
 # Cheap model for backfill classification (no drafting, label-only)
 CLASSIFY_MODEL = os.environ.get("CLASSIFY_MODEL", "claude-haiku-4-5-20251001")

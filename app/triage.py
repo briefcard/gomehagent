@@ -50,11 +50,29 @@ Classify the email into EXACTLY ONE bucket:
 
 Then decide ONE action, following per-bucket policy:
 - urgent_money    -> "escalate" always (include deadline if any). Never reply.
-- order_issue     -> "draft" always. Cancellations, refunds, and unclear
-                     complaints are NEVER auto-sent regardless of trust.
+- order_issue     -> "draft" always. Wrong/defective/damaged items, refund
+                     demands, and emotional complaints NEVER auto-send.
+- order_basic     -> "auto_reply" allowed. Two safe reply shapes ONLY:
+                     (a) clarifying question requesting the missing info
+                     (order number, email used, photos for claims);
+                     (b) subscription cancellation: acknowledge receipt and say
+                     the cancellation is being processed and will be confirmed —
+                     do NOT claim it is already done; the actual cancellation is
+                     a separate task Gomeh approves.
 - order_routine   -> "auto_reply" ONLY if you verified the answer with Shopify
                      tools; otherwise "draft".
-- logistics       -> "draft"; "escalate" if customs hold / demurrage / urgent.
+- logistics       -> HIGH-STAKES, work thoroughly before drafting:
+                     1. Use email_history_search to find the shipment's prior
+                        thread(s) and drive_search to locate referenced documents
+                        (commercial invoice, packing list, BOL, arrival notice).
+                     2. When the counterparty requests a document and you found
+                        it in Drive, include its exact Drive link in the draft
+                        and name the file.
+                     3. Anything requiring a SIGNATURE (POA, ISF, customs forms,
+                        releases) -> "escalate" with reason starting
+                        "SIGNATURE NEEDED:".
+                     4. Customs hold / demurrage / storage charges -> "escalate".
+                     5. Otherwise "draft" — never commit to costs or bookings.
 - client_comms    -> "draft" always.
 - sales_leads     -> "draft" always (these are revenue — make the draft good).
 - subscriptions   -> "ignore" for receipts; "escalate" if a renewal, price
@@ -148,11 +166,19 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     # before producing its final JSON verdict.
     from . import data_tools  # local import avoids circular dependency
 
+    # Model routing: cheap pre-classification picks the bucket, the bucket
+    # picks the brain (logistics -> Opus; everything else -> Sonnet).
+    try:
+        bucket_hint = classify_only(email, account_alias)
+    except Exception:  # noqa: BLE001
+        bucket_hint = ""
+    model = config.BUCKET_MODELS.get(bucket_hint, config.CLAUDE_MODEL)
+
     messages: list[dict] = [{"role": "user", "content": user_content}]
     text = ""
     for _ in range(8):
         msg = client.messages.create(
-            model=config.CLAUDE_MODEL,
+            model=model,
             max_tokens=2000,
             system=system,
             tools=data_tools.TOOLS,
