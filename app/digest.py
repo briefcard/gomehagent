@@ -17,7 +17,23 @@ def build_digest(hours_back: int = 12) -> str:
             s.query(db.Approval).filter(db.Approval.status == "pending").all()
         )
 
+    week_ahead = (dt.date.today() + dt.timedelta(days=7)).isoformat()
+    with db.SessionLocal() as s:
+        deadlines = (
+            s.query(db.Deadline)
+            .filter(db.Deadline.status.in_(["open", "alerted"]),
+                    db.Deadline.due_date <= week_ahead)
+            .order_by(db.Deadline.due_date)
+            .all()
+        )
+
     lines = [f"Assistant digest — {dt.datetime.now().strftime('%a %b %d, %I:%M%p')}\n"]
+
+    if deadlines:
+        lines.append("💸 MONEY DEADLINES (next 7 days):")
+        for d in deadlines:
+            lines.append(f"  • {d.due_date} — {d.description} ({d.amount}) [{d.account}]")
+        lines.append("")
 
     if pending:
         lines.append(f"⏳ AWAITING YOUR APPROVAL ({len(pending)}):")

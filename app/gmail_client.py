@@ -150,6 +150,58 @@ def fetch_sent(alias: str, max_results: int = 50) -> list[str]:
     return bodies
 
 
+_labels: dict = {}
+
+
+def ensure_label(alias: str, name: str) -> str:
+    """Get-or-create a Gmail label, cached."""
+    key = (alias, name)
+    if key not in _labels:
+        svc = service_for(alias)
+        existing = {
+            lb["name"]: lb["id"]
+            for lb in svc.users().labels().list(userId="me").execute().get("labels", [])
+        }
+        if name in existing:
+            _labels[key] = existing[name]
+        else:
+            _labels[key] = svc.users().labels().create(
+                userId="me", body={"name": name}
+            ).execute()["id"]
+    return _labels[key]
+
+
+def add_label(alias: str, message_id: str, label_name: str) -> None:
+    service_for(alias).users().messages().modify(
+        userId="me", id=message_id,
+        body={"addLabelIds": [ensure_label(alias, label_name)]},
+    ).execute()
+
+
+def fetch_recent(alias: str, days: int, max_results: int = 200) -> list[dict]:
+    """Recent inbox messages (metadata + short body) for bucket backfill."""
+    svc = service_for(alias)
+    out, token = [], None
+    while len(out) < max_results:
+        resp = svc.users().messages().list(
+            userId="me", q=f"in:inbox newer_than:{days}d",
+            maxResults=min(100, max_results - len(out)), pageToken=token,
+        ).execute()
+        for ref in resp.get("messages", []):
+            msg = svc.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+            headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+            out.append({
+                "id": msg["id"], "threadId": msg["threadId"],
+                "from": headers.get("from", ""), "subject": headers.get("subject", ""),
+                "date": headers.get("date", ""),
+                "body": _extract_text(msg["payload"])[:1500],
+            })
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
 def mark_read(alias: str, message_id: str) -> None:
     service_for(alias).users().messages().modify(
         userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}

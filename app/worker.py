@@ -50,6 +50,24 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
         result = triage.triage_email(email, alias, trusted)
         action = result["action"]
         detail = result.get("reason", "")
+        bucket = result.get("category", "notifications")
+
+        # Organize: apply the bucket label in Gmail
+        try:
+            gmail_client.add_label(alias, email["id"], config.BUCKET_LABELS[bucket])
+        except Exception:  # noqa: BLE001 — labeling is best-effort
+            log.exception("labeling failed")
+
+        # Money ledger: record any extracted deadline
+        dl = result.get("deadline")
+        if isinstance(dl, dict) and dl.get("due_date"):
+            with db.SessionLocal() as s:
+                s.add(db.Deadline(
+                    account=alias, description=dl.get("what", email["subject"]),
+                    amount=dl.get("amount", "unknown"), due_date=dl["due_date"],
+                    source_subject=email["subject"],
+                ))
+                s.commit()
 
         # Training-wheels mode: until AUTO_SEND_ENABLED=true, nothing is sent
         # without approval — auto-replies become drafts in the approval batch.
@@ -103,9 +121,67 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             s.add(db.EmailLog(
                 account=alias, gmail_message_id=email["id"], thread_id=email["threadId"],
                 sender=email["from"], subject=email["subject"],
-                category=result.get("category"), action=logged, detail=detail,
+                category=bucket, action=logged, detail=detail,
             ))
             s.commit()
+
+
+def bucket_backfill() -> None:
+    """One-time: label the last BUCKET_BACKFILL_DAYS of every inbox so Gomeh's
+    mail is organized from day one. Cheap model, no drafting."""
+    with db.SessionLocal() as s:
+        if s.get(db.Setting, "bucket_backfill_done"):
+            return
+    total = 0
+    for alias in config.GMAIL_ACCOUNTS:
+        try:
+            for email in gmail_client.fetch_recent(alias, config.BUCKET_BACKFILL_DAYS):
+                if already_seen(email["id"]) or _sender_email(email["from"]) in OWN_ADDRESSES:
+                    continue
+                bucket = triage.classify_only(email, alias)
+                gmail_client.add_label(alias, email["id"], config.BUCKET_LABELS[bucket])
+                with db.SessionLocal() as s:
+                    s.add(db.EmailLog(
+                        account=alias, gmail_message_id=email["id"],
+                        thread_id=email["threadId"], sender=email["from"],
+                        subject=email["subject"], category=bucket,
+                        action="labeled", detail="backfill",
+                    ))
+                    s.commit()
+                total += 1
+        except Exception:  # noqa: BLE001
+            log.exception("backfill failed for %s", alias)
+    with db.SessionLocal() as s:
+        s.merge(db.Setting(key="bucket_backfill_done", value=str(total)))
+        s.commit()
+    log.info("bucket backfill complete: %d emails labeled", total)
+
+
+def deadline_alerts() -> None:
+    """Daily: escalate anything costing money within 3 days; weekly look-ahead
+    lives in the digest."""
+    import datetime as dt
+    soon = (dt.date.today() + dt.timedelta(days=3)).isoformat()
+    with db.SessionLocal() as s:
+        due = (
+            s.query(db.Deadline)
+            .filter(db.Deadline.status == "open", db.Deadline.due_date <= soon)
+            .order_by(db.Deadline.due_date)
+            .all()
+        )
+        if not due:
+            return
+        lines = [f"• {d.due_date} — {d.description} ({d.amount}) [{d.account}]" for d in due]
+        for d in due:
+            d.status = "alerted"
+        s.commit()
+    note = "💸 MONEY DEADLINES within 3 days:\n" + "\n".join(lines)
+    whatsapp.send_text(note)
+    if not config.WHATSAPP_ENABLED:
+        gmail_client.send_email(
+            config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+            "[URGENT] Money deadlines approaching", note,
+        )
 
 
 def poll_all() -> None:
@@ -142,11 +218,13 @@ def main() -> None:
              list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED,
              config.AUTO_SEND_ENABLED)
     voice_learn.ensure_profiles()  # learn Gomeh's voice per inbox (first run only)
+    bucket_backfill()  # one-time: organize recent mail into bucket labels
     backlog_sweep()  # idempotent: EmailLog dedup skips already-processed messages
     sched = BackgroundScheduler(timezone="America/New_York")
     sched.add_job(poll_all, "interval", minutes=config.POLL_INTERVAL_MIN)
     sched.add_job(approvals.notify_pending, "interval",
                   minutes=config.APPROVAL_BATCH_MINUTES)
+    sched.add_job(deadline_alerts, "cron", hour=9, minute=0)
     for hour in config.DIGEST_HOURS:
         sched.add_job(digest.send_digest, "cron", hour=hour, minute=0)
     sched.start()

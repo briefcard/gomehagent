@@ -67,6 +67,30 @@ class Contact(Base):
     trusted = Column(String, default="no")  # yes -> routine replies may auto-send
 
 
+class Deadline(Base):
+    """Anything with a date that costs money if missed."""
+
+    __tablename__ = "deadlines"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    account = Column(String)
+    description = Column(Text, nullable=False)  # what's due
+    amount = Column(String)  # "$148.50" or "unknown"
+    due_date = Column(String)  # YYYY-MM-DD (lexicographic compare works)
+    source_subject = Column(Text)
+    status = Column(String, default="open")  # open | alerted | done | dismissed
+
+
+class Setting(Base):
+    """Tiny key/value store for run-once markers."""
+
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text)
+
+
 class VoiceProfile(Base):
     """Per-inbox writing style, distilled from past sent emails."""
 

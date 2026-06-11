@@ -45,23 +45,61 @@ GROUNDING RULES — apply to every reply you write:
    safe draft but prefix reason with "NEEDS-FACTS:" and list what's missing
    so Gomeh fills it in before approving.
 
-Classify the email and decide ONE action:
-- "auto_reply": ONLY if sender_trusted is true AND the reply is routine
-  (sending requested shipment docs you reference but don't attach, confirming
-  receipt, providing tracking/status, scheduling). The reply must make no
-  financial commitment of any kind.
-- "draft": write a reply for Gomeh to review (anything financial, novel,
-  negotiation, quotes, complaints, unknown senders).
-- "escalate": urgent — customs hold, demurrage risk, chargeback, angry VIP,
-  payment problem. Include a one-line reason.
-- "ignore": newsletters, promos, spam, notifications needing no reply.
+Classify the email into EXACTLY ONE bucket:
+{bucket_definitions}
+
+Then decide ONE action, following per-bucket policy:
+- urgent_money    -> "escalate" always (include deadline if any). Never reply.
+- order_issue     -> "draft" always. Cancellations, refunds, and unclear
+                     complaints are NEVER auto-sent regardless of trust.
+- order_routine   -> "auto_reply" ONLY if you verified the answer with Shopify
+                     tools; otherwise "draft".
+- logistics       -> "draft"; "escalate" if customs hold / demurrage / urgent.
+- client_comms    -> "draft" always.
+- sales_leads     -> "draft" always (these are revenue — make the draft good).
+- subscriptions   -> "ignore" for receipts; "escalate" if a renewal, price
+                     increase, or trial-end will charge money soon (with deadline).
+- notifications   -> "ignore".
+- promo           -> "ignore".
+
+DEADLINES: whenever the email implies money tied to a date (invoice due date,
+late-fee date, renewal/charge date, dispute response window, customs/storage
+deadline), extract it.
 
 Respond with JSON only:
-{"category": "forwarder|order|invoice|client|junk|other",
+{{"category": "<bucket key>",
  "action": "auto_reply|draft|escalate|ignore",
- "reason": "<one line>",
+ "reason": "<one line: what you understood and why this action>",
  "reply_subject": "<subject or empty>",
- "reply_body": "<full reply text or empty>"}"""
+ "reply_body": "<full reply text or empty>",
+ "deadline": null OR {{"due_date": "YYYY-MM-DD", "amount": "<$ or 'unknown'>",
+                      "what": "<one line>"}}}}"""
+
+SYSTEM = SYSTEM.format(
+    bucket_definitions="\n".join(
+        f"- {key}: {desc}" for key, desc in config.BUCKETS.items()
+    )
+)
+
+CLASSIFY_SYSTEM = (
+    "Classify this email into exactly one bucket. Respond with ONLY the bucket "
+    "key, nothing else.\nBuckets:\n"
+    + "\n".join(f"- {k}: {v}" for k, v in config.BUCKETS.items())
+)
+
+
+def classify_only(email: dict, account_alias: str) -> str:
+    """Cheap bucket classification (no drafting) — used for backfill labeling."""
+    msg = client.messages.create(
+        model=config.CLASSIFY_MODEL,
+        max_tokens=20,
+        system=CLASSIFY_SYSTEM,
+        messages=[{"role": "user", "content":
+                   f"Inbox: {account_alias}\nFrom: {email['from']}\n"
+                   f"Subject: {email['subject']}\n\n{email['body'][:1200]}"}],
+    )
+    cat = msg.content[0].text.strip().lower()
+    return cat if cat in config.BUCKETS else "notifications"
 
 
 SIGNATURES = {
@@ -142,8 +180,14 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     except json.JSONDecodeError:
         result = {"category": "other", "action": "escalate", "reason": "triage parse failure",
                   "reply_subject": "", "reply_body": ""}
-    # Hard guardrail: never auto-send to untrusted senders, regardless of model output.
-    if result.get("action") == "auto_reply" and not sender_trusted:
-        result["action"] = "draft"
-        result["reason"] = (result.get("reason") or "") + " [downgraded: sender not trusted]"
+    # Hard guardrails, regardless of model output:
+    # auto_reply is allowed only for trusted senders OR auto-send-eligible
+    # buckets (e.g. tool-verified order_routine). Everything else -> draft.
+    if result.get("action") == "auto_reply":
+        bucket_ok = result.get("category") in config.AUTO_SEND_BUCKETS
+        if not (sender_trusted or bucket_ok):
+            result["action"] = "draft"
+            result["reason"] = (result.get("reason") or "") + " [downgraded: not trusted/bucket]"
+    if result.get("category") not in config.BUCKETS:
+        result["category"] = "notifications"
     return result
