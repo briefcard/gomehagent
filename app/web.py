@@ -91,6 +91,38 @@ def job_status(key: str = "") -> dict:
     return _job_status or {"status": "no jobs run yet"}
 
 
+def _handle_command(text: str) -> None:
+    """Free-text WhatsApp commands from Gomeh. Keyword routing for now;
+    full conversational agent comes with Phase 2."""
+    from . import digest, ops_jobs, whatsapp
+
+    t = text.lower()
+
+    def _job(name: str) -> None:
+        threading.Thread(
+            target=lambda: whatsapp.send_text(f"Done: {ops_jobs.JOBS[name]()}"),
+            daemon=True,
+        ).start()
+        whatsapp.send_text(f"On it — running {name}. Report goes to your email; "
+                           "I'll ping you here when finished.")
+
+    if "sweep" in t or ("organize" in t and "doc" in t):
+        _job("doc_sweep")
+    elif "audit" in t or "shipment" in t or "quote" in t:
+        _job("shipment_audit")
+    elif "categor" in t or "bucket" in t:
+        _job("recategorize")
+    elif "status" in t or "digest" in t or "stand" in t:
+        whatsapp.send_text(digest.build_digest())
+    else:
+        whatsapp.send_text(
+            "Commands I know so far: 'sweep inbox docs' (file documents to "
+            "Drive), 'shipment audit' (open shipments & quotes), "
+            "'recategorize' (re-bucket inboxes), 'status' (current digest). "
+            "Full conversational requests are coming next."
+        )
+
+
 # ---- WhatsApp Cloud API webhook (active once Meta app is configured) ----
 
 @app.get("/webhooks/whatsapp")
@@ -116,8 +148,8 @@ async def whatsapp_incoming(request: Request) -> dict:
                         action, ap_id = reply_id.split(":", 1)
                         decision = "approved" if action == "approve" else "denied"
                         approvals.apply_decision(ap_id, decision)
-                    # Free-text commands ("status", "where do we stand") arrive
-                    # here too — routed to the agent loop in Phase 2.
+                    elif msg.get("type") == "text":
+                        _handle_command(msg["text"]["body"])
     except Exception:  # noqa: BLE001 — always 200 so Meta doesn't retry-storm
         pass
     return {"status": "received"}
