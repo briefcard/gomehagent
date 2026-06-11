@@ -16,26 +16,35 @@ from . import config
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 _services: dict = {}
+_creds: dict = {}
+
+
+def creds_for(alias: str) -> Credentials:
+    """Refresh-token credentials for one account (shared by Gmail + Drive)."""
+    if alias not in _creds:
+        acct = config.GMAIL_ACCOUNTS[alias]
+        creds = Credentials(
+            token=None,
+            refresh_token=acct["refresh_token"],
+            client_id=config.GOOGLE_CLIENT_ID,
+            client_secret=config.GOOGLE_CLIENT_SECRET,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+        creds.refresh(Request())
+        _creds[alias] = creds
+    return _creds[alias]
 
 
 def service_for(alias: str):
     """Build (and cache) a Gmail API client for one inbox alias."""
-    if alias in _services:
-        return _services[alias]
-    acct = config.GMAIL_ACCOUNTS[alias]
-    creds = Credentials(
-        token=None,
-        refresh_token=acct["refresh_token"],
-        client_id=config.GOOGLE_CLIENT_ID,
-        client_secret=config.GOOGLE_CLIENT_SECRET,
-        token_uri="https://oauth2.googleapis.com/token",
-        scopes=SCOPES,
-    )
-    creds.refresh(Request())
-    _services[alias] = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    if alias not in _services:
+        _services[alias] = build(
+            "gmail", "v1", credentials=creds_for(alias), cache_discovery=False
+        )
     return _services[alias]
 
 

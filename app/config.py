@@ -41,7 +41,12 @@ BACKLOG_DAYS = int(os.environ.get("BACKLOG_DAYS", "14"))
 
 # How often to email Gomeh the pending-approvals batch (escalations are
 # always immediate). Drafts accumulate quietly between batches.
-APPROVAL_BATCH_MINUTES = int(os.environ.get("APPROVAL_BATCH_MINUTES", "60"))
+APPROVAL_BATCH_MINUTES = int(os.environ.get("APPROVAL_BATCH_MINUTES", "30"))
+
+# Shopify Admin API access, one entry per store:
+# {"baci": {"domain": "xxx.myshopify.com", "token": "shpat_..."},
+#  "eien": {"domain": "yyy.myshopify.com", "token": "shpat_..."}}
+SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))

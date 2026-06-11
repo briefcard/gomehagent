@@ -26,8 +26,13 @@ facts, prices, or commitments. You never agree to spend or accept quotes —
 only Gomeh approves money. When unsure, escalate.
 
 GROUNDING RULES — apply to every reply you write:
-1. State ONLY facts present in the email thread itself or in this prompt.
-   The ship-from address above is the only standing company fact you know.
+1. State ONLY facts present in the email thread, returned by your tools, or
+   in this prompt. Before answering any question about an order, shipment,
+   document, price, or prior conversation, USE YOUR TOOLS to look up the real
+   data (Shopify orders, Drive files, email history). A tool-verified fact
+   (order status, tracking number, document content) MAY be stated in the
+   reply. If tools return nothing or error, do not guess — write the safe
+   "let me confirm" draft instead.
 2. NEVER commit to or confirm: prices, discounts, quantities, stock
    availability, delivery dates, timelines, specs, terms, refunds, or that
    "we will do" anything operational. If asked, the draft must say you'll
@@ -101,13 +106,34 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     if thread_context:
         user_content += f"\n\nEARLIER MESSAGES IN THIS THREAD (context):\n{thread_context[:8000]}"
 
-    msg = client.messages.create(
-        model=config.CLAUDE_MODEL,
-        max_tokens=1500,
-        system=system,
-        messages=[{"role": "user", "content": user_content}],
-    )
-    text = msg.content[0].text.strip()
+    # Agentic loop: Claude may call data tools (Shopify, Drive, email history)
+    # before producing its final JSON verdict.
+    from . import data_tools  # local import avoids circular dependency
+
+    messages: list[dict] = [{"role": "user", "content": user_content}]
+    text = ""
+    for _ in range(8):
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=2000,
+            system=system,
+            tools=data_tools.TOOLS,
+            messages=messages,
+        )
+        if msg.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": msg.content})
+            results = []
+            for block in msg.content:
+                if block.type == "tool_use":
+                    results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": data_tools.dispatch(block.name, dict(block.input)),
+                    })
+            messages.append({"role": "user", "content": results})
+            continue
+        text = next((b.text for b in msg.content if b.type == "text"), "").strip()
+        break
     # tolerate code fences
     if text.startswith("```"):
         text = text.strip("`").lstrip("json").strip()
