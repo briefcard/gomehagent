@@ -1,18 +1,16 @@
-"""One-time OAuth for each inbox. Run locally, once per account:
+"""Authorize all three inboxes and build GMAIL_ACCOUNTS_JSON automatically.
 
-    python scripts/google_oauth.py
+Run once:  python scripts/google_oauth.py
+It walks you through all three accounts (a browser opens for each — just pick
+the right account and click Allow). At the end it prints the exact
+GMAIL_ACCOUNTS_JSON value to paste into Render. Tokens are also saved to
+accounts.json locally (git-ignored) in case you need them again.
 
-A browser opens -> pick the account (gomehsaias@gmail.com, then re-run for
-gs@bacimilanousa.com and store@eienhealth.com) -> Allow. The refresh token
-prints here; paste it into GMAIL_ACCOUNTS_JSON on Render. You never sign out
-of anything — Google's account picker handles multiple accounts.
-
-Requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in your environment or .env
-(create a Desktop-type OAuth client in Google Cloud Console, with the Gmail
-API enabled and the three addresses added as test users).
+Requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env or environment.
 """
 import json
 import os
+import pathlib
 
 from dotenv import load_dotenv
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -24,20 +22,38 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
 ]
 
-flow = InstalledAppFlow.from_client_config(
-    {
-        "installed": {
-            "client_id": os.environ["GOOGLE_CLIENT_ID"],
-            "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    },
-    SCOPES,
-)
-creds = flow.run_local_server(port=0, prompt="consent")
+ACCOUNTS = [
+    ("personal", "gomehsaias@gmail.com"),
+    ("baci", "gs@bacimilanousa.com"),
+    ("eien", "store@eienhealth.com"),
+]
 
-print("\n=== SUCCESS — add this to GMAIL_ACCOUNTS_JSON ===\n")
-print(json.dumps({"<alias>": {"email": "<the address you just authorized>",
-                              "refresh_token": creds.refresh_token}}, indent=2))
-print("\nAliases used by the agent: personal | baci | eien")
+CLIENT_CONFIG = {
+    "installed": {
+        "client_id": os.environ["GOOGLE_CLIENT_ID"],
+        "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+}
+
+out_path = pathlib.Path("accounts.json")
+result = json.loads(out_path.read_text()) if out_path.exists() else {}
+
+for alias, email in ACCOUNTS:
+    if alias in result:
+        print(f"[{alias}] {email} — already authorized, skipping.")
+        continue
+    input(f"\n[{alias}] Press Enter to authorize {email} "
+          f"(a browser will open — PICK THIS ACCOUNT, then click Allow)...")
+    flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
+    creds = flow.run_local_server(port=0, prompt="consent")
+    result[alias] = {"email": email, "refresh_token": creds.refresh_token}
+    out_path.write_text(json.dumps(result, indent=2))
+    print(f"[{alias}] ✅ authorized.")
+
+print("\n" + "=" * 60)
+print("DONE. Paste this as the GMAIL_ACCOUNTS_JSON env var in Render:")
+print("=" * 60 + "\n")
+print(json.dumps(result, separators=(",", ":")))
+print("\n(Also saved to accounts.json — do NOT commit that file; it is git-ignored.)")
