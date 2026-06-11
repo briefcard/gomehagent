@@ -39,6 +39,13 @@ AUTO_SEND_ENABLED = os.environ.get("AUTO_SEND_ENABLED", "false").lower() == "tru
 # reply and queue drafts for them as the first approval batch.
 BACKLOG_DAYS = int(os.environ.get("BACKLOG_DAYS", "14"))
 
+# How often to email Gomeh the pending-approvals batch (escalations are
+# always immediate). Drafts accumulate quietly between batches.
+APPROVAL_BATCH_MINUTES = int(os.environ.get("APPROVAL_BATCH_MINUTES", "60"))
+
+# How many prior messages of a thread to give Claude as context.
+THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
+
 # WhatsApp Cloud API (optional — agent falls back to email until these are set)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")

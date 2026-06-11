@@ -59,22 +59,53 @@ Respond with JSON only:
  "reply_body": "<full reply text or empty>"}"""
 
 
+SIGNATURES = {
+    "baci": "Best,\n\nBaci Milano Customer Care",
+    "eien": "Best,\n\nEien Health Customer Care",
+    "personal": "Best,\n\nGomeh",
+}
+
+_voice_cache: dict[str, str] = {}
+
+
+def _voice_rules(alias: str) -> str:
+    if alias not in _voice_cache:
+        from . import db  # local import to avoid cycle at module load
+        with db.SessionLocal() as s:
+            vp = s.get(db.VoiceProfile, alias)
+            _voice_cache[alias] = vp.rules if vp else ""
+    return _voice_cache[alias]
+
+
 def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
+    system = SYSTEM
+    system += (
+        f"\n\nSIGNATURE — end every reply for this inbox EXACTLY with:\n"
+        f"{SIGNATURES.get(account_alias, SIGNATURES['personal'])}"
+    )
+    voice = _voice_rules(account_alias)
+    if voice:
+        system += (
+            "\n\nVOICE PROFILE for this inbox (distilled from the owner's past "
+            "replies — match this style and follow these handling rules):\n" + voice
+        )
+
+    thread_context = email.get("thread_context", "")
+    user_content = (
+        f"Inbox: {account_alias}\n"
+        f"Sender trusted: {sender_trusted}\n"
+        f"From: {email['from']}\nSubject: {email['subject']}\n"
+        f"Date: {email['date']}\n\n"
+        f"NEWEST MESSAGE (the one to act on):\n{email['body'][:6000]}"
+    )
+    if thread_context:
+        user_content += f"\n\nEARLIER MESSAGES IN THIS THREAD (context):\n{thread_context[:8000]}"
+
     msg = client.messages.create(
         model=config.CLAUDE_MODEL,
         max_tokens=1500,
-        system=SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Inbox: {account_alias}\n"
-                    f"Sender trusted: {sender_trusted}\n"
-                    f"From: {email['from']}\nSubject: {email['subject']}\n"
-                    f"Date: {email['date']}\n\n{email['body'][:6000]}"
-                ),
-            }
-        ],
+        system=system,
+        messages=[{"role": "user", "content": user_content}],
     )
     text = msg.content[0].text.strip()
     # tolerate code fences

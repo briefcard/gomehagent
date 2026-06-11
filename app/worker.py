@@ -4,7 +4,7 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import approvals, config, db, digest, gmail_client, triage, whatsapp
+from . import approvals, config, db, digest, gmail_client, triage, voice_learn, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("worker")
@@ -24,10 +24,28 @@ def already_seen(message_id: str) -> bool:
         ).count() > 0
 
 
+OWN_ADDRESSES = {a["email"].lower() for a in config.GMAIL_ACCOUNTS.values()}
+
+
+def _sender_email(sender: str) -> str:
+    return sender.split("<")[-1].rstrip(">").strip().lower()
+
+
 def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> None:
     for email in emails:
         if already_seen(email["id"]):
             continue
+        # LOOP GUARD: never process mail sent by any of our own accounts
+        # (approval batches, digests, escalations) — mark read and move on.
+        if _sender_email(email["from"]) in OWN_ADDRESSES:
+            gmail_client.mark_read(alias, email["id"])
+            continue
+        try:
+            email["thread_context"] = gmail_client.get_thread_context(
+                alias, email["threadId"], config.THREAD_CONTEXT_MESSAGES
+            )
+        except Exception:  # noqa: BLE001 — context is best-effort
+            email["thread_context"] = ""
         trusted = is_trusted(email["from"])
         result = triage.triage_email(email, alias, trusted)
         action = result["action"]
@@ -60,8 +78,11 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     "account": alias, "to": email["from"],
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
                     "body": result["reply_body"], "thread_id": email["threadId"],
+                    "inbound_from": email["from"],
+                    "inbound_snippet": email["body"][:600],
+                    "reason": detail,
                 },
-                notify=False,  # batched at end of cycle
+                notify=False,  # announced on the APPROVAL_BATCH_MINUTES schedule
             )
             new_approvals.append(ap_id)
             logged = "drafted"
@@ -94,7 +115,8 @@ def poll_all() -> None:
             process_emails(alias, gmail_client.fetch_unread(alias), new_approvals)
         except Exception:  # noqa: BLE001 — one bad inbox must not kill the loop
             log.exception("inbox %s failed", alias)
-    approvals.notify_batch(new_approvals)  # one email per cycle, not per item
+    # NOTE: no notification here — approvals.notify_pending runs on its own
+    # schedule so Gomeh gets at most one batch email per APPROVAL_BATCH_MINUTES.
 
 
 def backlog_sweep() -> None:
@@ -108,10 +130,10 @@ def backlog_sweep() -> None:
             process_emails(alias, emails, new_approvals)
         except Exception:  # noqa: BLE001
             log.exception("backlog sweep %s failed", alias)
-    approvals.notify_batch(
-        new_approvals,
-        title=f"[BACKLOG] {len(new_approvals)} unanswered emails — drafts ready for review",
-    )
+    if new_approvals:
+        approvals.notify_pending(
+            title=f"[Assistant · BACKLOG] {len(new_approvals)} unanswered emails — drafts ready",
+        )
 
 
 def main() -> None:
@@ -119,9 +141,12 @@ def main() -> None:
     log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
              list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED,
              config.AUTO_SEND_ENABLED)
+    voice_learn.ensure_profiles()  # learn Gomeh's voice per inbox (first run only)
     backlog_sweep()  # idempotent: EmailLog dedup skips already-processed messages
     sched = BackgroundScheduler(timezone="America/New_York")
     sched.add_job(poll_all, "interval", minutes=config.POLL_INTERVAL_MIN)
+    sched.add_job(approvals.notify_pending, "interval",
+                  minutes=config.APPROVAL_BATCH_MINUTES)
     for hour in config.DIGEST_HOURS:
         sched.add_job(digest.send_digest, "cron", hour=hour, minute=0)
     sched.start()

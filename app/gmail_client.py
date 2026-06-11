@@ -111,6 +111,36 @@ def fetch_unanswered(alias: str, days: int = 14, max_threads: int = 50) -> list[
     return out
 
 
+def get_thread_context(alias: str, thread_id: str, limit: int = 5) -> str:
+    """Last few messages of a thread, formatted for the triage prompt."""
+    svc = service_for(alias)
+    thread = svc.users().threads().get(userId="me", id=thread_id, format="full").execute()
+    parts = []
+    for msg in thread.get("messages", [])[-limit:]:
+        headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+        parts.append(
+            f"--- {headers.get('date', '?')} | From: {headers.get('from', '?')} ---\n"
+            f"{_extract_text(msg['payload'])[:2000]}"
+        )
+    return "\n\n".join(parts)
+
+
+def fetch_sent(alias: str, max_results: int = 50) -> list[str]:
+    """Bodies of recently sent emails — used to learn the owner's voice."""
+    svc = service_for(alias)
+    resp = svc.users().messages().list(
+        userId="me", q="in:sent -to:me", maxResults=max_results
+    ).execute()
+    bodies = []
+    for ref in resp.get("messages", []):
+        msg = svc.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+        headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+        text = _extract_text(msg["payload"])[:1500]
+        if text.strip():
+            bodies.append(f"Subject: {headers.get('subject', '')}\n{text}")
+    return bodies
+
+
 def mark_read(alias: str, message_id: str) -> None:
     service_for(alias).users().messages().modify(
         userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}

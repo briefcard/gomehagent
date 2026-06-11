@@ -67,5 +67,15 @@ class Contact(Base):
     trusted = Column(String, default="no")  # yes -> routine replies may auto-send
 
 
+class VoiceProfile(Base):
+    """Per-inbox writing style, distilled from past sent emails."""
+
+    __tablename__ = "voice_profiles"
+
+    alias = Column(String, primary_key=True)  # personal | baci | eien
+    rules = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)

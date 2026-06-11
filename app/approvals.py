@@ -23,38 +23,62 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
         ap_id = ap.id
 
     if notify:
-        notify_batch([ap_id])
+        notify_pending()
     return ap_id
 
 
-def notify_batch(ap_ids: list[str], title: str | None = None) -> None:
-    """One notification covering many approvals, each with its own links."""
-    if not ap_ids:
-        return
+def notify_pending(title: str | None = None) -> int:
+    """Send ONE email covering every pending approval not yet announced.
+    Called on a schedule (APPROVAL_BATCH_MINUTES), not per item. Returns count."""
     with db.SessionLocal() as s:
-        aps = s.query(db.Approval).filter(db.Approval.id.in_(ap_ids)).all()
-    if config.WHATSAPP_ENABLED:
-        for ap in aps:
-            whatsapp.send_approval(ap.id, ap.summary)
-        return
-    blocks = []
-    for i, ap in enumerate(aps, 1):
-        approve = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap.id, 'approved'])}"
-        deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap.id, 'denied'])}"
-        body = ap.payload.get("body", "")
-        blocks.append(
-            f"{'-' * 50}\n{i}. {ap.summary}\n\n"
-            f"DRAFT:\n{body[:1500]}\n\n"
-            f"APPROVE & SEND: {approve}\nDENY: {deny}\n"
+        aps = (
+            s.query(db.Approval)
+            .filter(db.Approval.status == "pending")
+            .order_by(db.Approval.created_at)
+            .all()
         )
-    subject = title or f"[{len(aps)} replies awaiting your approval]"
+        fresh = [ap for ap in aps if not ap.payload.get("_notified")]
+        if not fresh:
+            return 0
+        for ap in fresh:
+            ap.payload = {**ap.payload, "_notified": True}
+        s.commit()
+        items = [(ap.id, ap.summary, dict(ap.payload)) for ap in fresh]
+
+    if config.WHATSAPP_ENABLED:
+        for ap_id, summary, _ in items:
+            whatsapp.send_approval(ap_id, summary)
+        return len(items)
+
+    blocks = []
+    for i, (ap_id, summary, p) in enumerate(items, 1):
+        approve = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'approved'])}"
+        deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'denied'])}"
+        blocks.append(
+            f"\n{'=' * 58}\n"
+            f"#{i} · [{p.get('account', '?')}] {p.get('inbound_from', p.get('to', '?'))}\n"
+            f"Subject: {p.get('subject', '')}\n"
+            f"{'=' * 58}\n\n"
+            f"THEY WROTE:\n{_quote(p.get('inbound_snippet', '(not captured)'))}\n\n"
+            f"AI UNDERSTOOD: {p.get('reason', '—')}\n\n"
+            f"PROPOSED REPLY (to {p.get('to', '?')}):\n"
+            f"{'-' * 40}\n{p.get('body', '')[:2000]}\n{'-' * 40}\n\n"
+            f"✅ APPROVE & SEND:\n{approve}\n\n"
+            f"❌ DENY:\n{deny}\n"
+        )
+    subject = title or f"[Assistant] {len(items)} draft repl{'y' if len(items) == 1 else 'ies'} awaiting review"
     gmail_client.send_email(
         config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL, subject,
-        f"Review each draft, then click its link. Drafts also sit in each "
-        f"inbox's Drafts folder if you'd rather edit before sending "
-        f"(editing there = edit then send manually, then DENY here).\n\n"
-        + "\n".join(blocks) + "\n— Your assistant",
+        "Each item shows the incoming email, what the AI understood, and its "
+        "proposed reply. Click a link to act; or edit the draft in that "
+        "inbox's Drafts folder, send manually, and click DENY here.\n"
+        + "".join(blocks) + "\n— Your assistant",
     )
+    return len(items)
+
+
+def _quote(text: str) -> str:
+    return "\n".join("> " + line for line in text[:600].splitlines() if line.strip())
 
 
 def decide(token: str) -> str:
