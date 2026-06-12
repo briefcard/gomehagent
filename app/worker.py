@@ -78,6 +78,16 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             ).update({"status": "closed"}, synchronize_session=False)
             s.commit()
 
+        # Expense ledger: receipts captured for tax records
+        ex = result.get("expense")
+        if isinstance(ex, dict) and ex.get("vendor"):
+            with db.SessionLocal() as s:
+                s.add(db.Expense(account=alias, vendor=ex.get("vendor"),
+                                 amount=ex.get("amount", ""),
+                                 expense_date=ex.get("date", ""),
+                                 source_subject=email["subject"]))
+                s.commit()
+
         # Money ledger: record any extracted deadline
         dl = result.get("deadline")
         if isinstance(dl, dict) and dl.get("due_date"):
@@ -136,7 +146,9 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                 )
             logged = "escalated"
         else:
-            gmail_client.mark_read(alias, email["id"])
+            # sales_orders stay UNREAD so Gomeh sees every order himself
+            if bucket != "sales_orders":
+                gmail_client.mark_read(alias, email["id"])
             logged = "ignored"
 
         with db.SessionLocal() as s:

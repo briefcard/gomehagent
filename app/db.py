@@ -152,6 +152,20 @@ class RFQ(Base):
     quotes = Column(JSON, default=dict)  # {forwarder_email: {total, breakdown, notes, received}}
 
 
+class Expense(Base):
+    """Business expense receipts captured from email — tax-season raw material."""
+
+    __tablename__ = "expenses"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    seen_at = Column(DateTime(timezone=True), default=utcnow)
+    account = Column(String)
+    vendor = Column(String)
+    amount = Column(String)
+    expense_date = Column(String)  # YYYY-MM-DD if known
+    source_subject = Column(Text)
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

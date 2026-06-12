@@ -104,9 +104,21 @@ Then decide ONE action, following per-bucket policy:
                      5. Otherwise "draft" — never commit to costs or bookings.
 - client_comms    -> "draft" always.
 - sales_leads     -> "draft" always (these are revenue — make the draft good).
-- subscriptions   -> "ignore" for receipts; "escalate" if a renewal, price
-                     increase, or trial-end will charge money soon (with deadline).
-- notifications   -> "ignore".
+- sales_orders    -> "ignore" (no reply) — these stay UNREAD so Gomeh sees
+                     every order. Examples: Shopify 'You have a new order',
+                     fulfillment/payout notices from our own stores.
+- receipts        -> "ignore" (no reply) BUT always extract the expense:
+                     fill the "expense" field with vendor, amount, date.
+                     Examples: Anthropic receipt, Render invoice paid,
+                     Google Workspace charge. These feed tax records.
+- subscriptions   -> "escalate" if a renewal, price increase, or trial-end
+                     will charge money soon (include deadline); otherwise "ignore".
+- notifications   -> "ignore". ONLY for true noise: logins, system alerts.
+                     If an automated email contains an order, a payment, a
+                     receipt, or a date that costs money — it belongs in
+                     sales_orders / receipts / urgent_money instead. When in
+                     doubt between notifications and a money-related bucket,
+                     NEVER pick notifications.
 - promo           -> "ignore".
 
 DEADLINES: whenever the email implies money tied to a date (invoice due date,
@@ -120,7 +132,9 @@ Respond with JSON only:
  "reply_subject": "<subject or empty>",
  "reply_body": "<full reply text or empty>",
  "deadline": null OR {{"due_date": "YYYY-MM-DD", "amount": "<$ or 'unknown'>",
-                      "what": "<one line>"}}}}"""
+                      "what": "<one line>"}},
+ "expense": null OR {{"vendor": "<company>", "amount": "<$>",
+                     "date": "YYYY-MM-DD or ''"}}}}"""
 
 SYSTEM = SYSTEM.format(
     bucket_definitions="\n".join(

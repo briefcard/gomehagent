@@ -49,10 +49,18 @@ BUCKETS = {
                     "scheduling, project communication",
     "sales_leads": "New business: wholesale inquiries, partnerships, B2B leads, "
                    "press, anyone who could become revenue",
-    "subscriptions": "Software/services: renewal notices, price increases, "
-                     "receipts, trial endings, plan changes",
-    "notifications": "Automated platform notifications needing no reply "
-                     "(Shopify, Google, banks, carriers)",
+    "sales_orders": "Order activity from OUR OWN stores: Shopify/merchant "
+                    "notifications like 'You have a new order', fulfillment "
+                    "confirmations, payout notices — operationally important, "
+                    "never mere noise",
+    "receipts": "Business expense receipts/paid invoices for software, "
+                "services, suppliers (Anthropic, Render, Google, Canva, "
+                "Shopify bills...) — tracked for taxes",
+    "subscriptions": "Software/service lifecycle: upcoming renewals, price "
+                     "increases, trial endings, plan changes — anything that "
+                     "WILL charge soon",
+    "notifications": "Automated platform notifications needing no reply and "
+                     "carrying no money info (logins, system alerts, social)",
     "promo": "Newsletters, marketing blasts, cold outreach spam",
 }
 
@@ -65,6 +73,8 @@ BUCKET_LABELS = {
     "logistics": "Agent/4-Logistics",
     "client_comms": "Agent/5-Clients",
     "sales_leads": "Agent/6-Leads",
+    "sales_orders": "Agent/0-Orders",
+    "receipts": "Agent/7-Receipts",
     "subscriptions": "Agent/7-Subscriptions",
     "notifications": "Agent/8-Notifications",
     "promo": "Agent/9-Promo",
