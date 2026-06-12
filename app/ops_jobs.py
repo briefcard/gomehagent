@@ -21,11 +21,41 @@ DOC_SWEEP_DAYS = 180
 B2B_FOLDER_NAME = "B2B"
 INTAKE_NAME = "_Agent Intake"
 
-DOC_CLASSIFY = """Classify this email attachment for filing. Respond JSON only:
-{"category": "purchase_order|shipment_doc|invoice_payable|quote|other",
- "group": "<short folder name: PO/order/shipment identifier or counterparty,
-            e.g. 'PO-FourSeasons-Naples' or 'Shipment-Turkey-Mar2026';
-            use sender company if nothing better>"}"""
+# Live progress registry — readable via /admin/status and the WhatsApp agent.
+STATUS: dict[str, dict] = {}
+
+
+def _status(job: str, **kw) -> None:
+    import datetime as dt
+    STATUS.setdefault(job, {}).update(kw, updated=dt.datetime.now().strftime("%H:%M:%S"))
+
+
+def _json_extract(text: str) -> dict:
+    text = text.strip().strip("`")
+    return json.loads(text[text.find("{"):text.rfind("}") + 1])
+
+
+FILE_PROMPT = """You are filing business documents into the Baci Milano USA
+B2B Drive. EXISTING FOLDER STRUCTURE (paths relative to B2B):
+{tree}
+
+Given an email and its attachments, decide where each file belongs.
+RULES:
+1. STRONGLY prefer an existing folder whose purpose matches. Only propose a
+   new path when nothing fits, and name it consistently with the existing
+   structure, descriptive and specific (counterparty + PO/shipment/project,
+   e.g. 'Purchase Orders/Four Seasons Naples' — NEVER vague names like
+   'Baci Milano USA', 'Documents', 'Files').
+2. Use the email thread context (sender, subject, conversation) to identify
+   the PO / shipment / project the files belong to.
+3. Superseded drafts/old revisions (filename or thread implies a newer
+   version exists, e.g. v1 when v2 is attached, 'draft', struck quotes):
+   mark "old_version" — they will be filed in an OLD VERSIONS subfolder of
+   the same parent.
+Respond JSON only:
+{{"target_path": "<folder path under B2B>",
+ "files": {{"<filename>": "current|old_version|skip"}},
+ "why": "<one line>"}}"""
 
 
 def recategorize() -> str:
@@ -44,48 +74,59 @@ def doc_sweep() -> str:
     b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
     if not b2b:
         return f"FAILED: no folder named '{B2B_FOLDER_NAME}' found in {alias} Drive"
-    intake = drive_io.ensure_subfolder(alias, b2b, INTAKE_NAME)
+
+    _status("doc_sweep", state="mapping drive structure")
+    tree = drive_io.folder_tree(alias, b2b, depth=3)
+    tree_text = "\n".join(sorted(tree)) [:6000] or "(B2B is empty)"
+    system = FILE_PROMPT.format(tree=tree_text)
 
     emails = gmail_client.fetch_with_attachments(alias, DOC_SWEEP_DAYS)
+    _status("doc_sweep", state="filing", total_emails=len(emails), filed=0)
     filed, skipped = [], 0
-    for em in emails:
+    for idx, em in enumerate(emails, 1):
+        _status("doc_sweep", progress=f"{idx}/{len(emails)} emails", filed=len(filed))
         try:
             msg = client.messages.create(
-                model=config.CLASSIFY_MODEL, max_tokens=120, system=DOC_CLASSIFY,
+                model=config.CLAUDE_MODEL, max_tokens=400, system=system,
                 messages=[{"role": "user", "content":
                            f"From: {em['from']}\nSubject: {em['subject']}\n"
-                           f"Snippet: {em['snippet']}\n"
+                           f"Thread snippet: {em['snippet']}\n"
                            f"Files: {[a['filename'] for a in em['attachments']]}"}],
             )
-            text = msg.content[0].text.strip().strip("`")
-            text = text[text.find("{"):text.rfind("}") + 1]
-            meta = json.loads(text)
+            meta = _json_extract(msg.content[0].text)
         except Exception:  # noqa: BLE001
-            meta = {"category": "other", "group": "Unsorted"}
-        if meta.get("category") == "other":
+            log.exception("filing decision failed")
+            continue
+        decisions = meta.get("files", {})
+        target = (meta.get("target_path") or "").strip().strip("/")
+        if not target:
             skipped += len(em["attachments"])
             continue
-        group_folder = drive_io.ensure_subfolder(alias, intake, meta["group"])
         for att in em["attachments"]:
+            verdict = decisions.get(att["filename"], "current")
+            if verdict == "skip":
+                skipped += 1
+                continue
+            path = target + ("/OLD VERSIONS" if verdict == "old_version" else "")
             try:
+                folder_id = drive_io.ensure_path(alias, b2b, path)
                 data = gmail_client.download_attachment(alias, em["id"], att["attachment_id"])
-                result = drive_io.upload(alias, group_folder, att["filename"], data,
+                result = drive_io.upload(alias, folder_id, att["filename"], data,
                                          att["mime"] or "application/octet-stream")
                 if result != "exists":
-                    filed.append(f"{meta['group']}/{att['filename']} "
-                                 f"({meta['category']}, from {em['from'][:40]})")
+                    filed.append(f"{path}/{att['filename']} (from {em['from'][:40]})")
             except Exception:  # noqa: BLE001
                 log.exception("upload failed: %s", att["filename"])
 
+    _status("doc_sweep", state="done", filed=len(filed))
     report = (
         f"Document sweep of [{alias}] — last {DOC_SWEEP_DAYS} days\n\n"
-        f"Filed {len(filed)} documents into B2B/{INTAKE_NAME}/ "
-        f"(grouped by PO/shipment; duplicates skipped automatically; "
-        f"{skipped} non-business attachments ignored):\n\n"
+        f"Filed {len(filed)} documents into the existing B2B structure "
+        f"(old revisions in OLD VERSIONS subfolders; exact duplicates and "
+        f"{skipped} irrelevant attachments skipped):\n\n"
         + "\n".join(f"  • {f}" for f in filed[:120])
-        + "\n\nReview the _Agent Intake folder and tell the assistant where "
-          "anything should live differently — nothing in your existing B2B "
-          "structure was touched."
+        + "\n\nIf anything landed in the wrong place, tell the assistant on "
+          "WhatsApp — corrections become filing rules."
     )
     from . import emailfmt
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
@@ -181,5 +222,70 @@ def shipment_audit() -> str:
     return f"shipment_audit complete: {drafts_made} drafts, {len(escalations)} escalations"
 
 
+REFILE_PROMPT = """You are reorganizing a messy '_Agent Intake' staging area
+inside the Baci Milano USA B2B Drive. EXISTING FOLDER STRUCTURE:
+{tree}
+
+For each file below (shown with its current intake path, which hints at its
+origin), decide its proper home. Prefer existing folders; propose new
+descriptive paths only when nothing fits (counterparty + PO/shipment —
+never vague). Mark obvious old revisions to go into 'OLD VERSIONS' under
+their parent. Respond JSON only:
+{{"moves": {{"<file_id>": "<target path under B2B, or 'keep'>"}}}}"""
+
+
+def refile_intake() -> str:
+    """Reorganize everything in _Agent Intake into the real B2B structure."""
+    alias = DOC_SWEEP_ALIAS
+    b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
+    if not b2b:
+        return "FAILED: B2B folder not found"
+    intake = drive_io.ensure_subfolder(alias, b2b, INTAKE_NAME)
+    _status("refile_intake", state="listing intake")
+    files = drive_io.list_all_files_recursive(alias, intake)
+    if not files:
+        return "refile_intake: intake is empty"
+    tree_text = "\n".join(sorted(drive_io.folder_tree(alias, b2b, depth=3)))[:6000]
+    system = REFILE_PROMPT.format(tree=tree_text or "(B2B is empty)")
+
+    moved, kept = [], 0
+    _status("refile_intake", state="refiling", total=len(files), moved=0)
+    for i in range(0, len(files), 20):
+        batch = files[i:i + 20]
+        listing = "\n".join(f"- id={f['id']} path={f['path']}" for f in batch)
+        try:
+            msg = client.messages.create(
+                model=config.CLAUDE_MODEL, max_tokens=1500, system=system,
+                messages=[{"role": "user", "content": listing}],
+            )
+            moves = _json_extract(msg.content[0].text).get("moves", {})
+        except Exception:  # noqa: BLE001
+            log.exception("refile decision failed")
+            continue
+        for f in batch:
+            target = (moves.get(f["id"]) or "keep").strip().strip("/")
+            if target.lower() == "keep":
+                kept += 1
+                continue
+            try:
+                folder_id = drive_io.ensure_path(alias, b2b, target)
+                drive_io.move(alias, f["id"], folder_id)
+                moved.append(f"{f['path']} -> {target}")
+            except Exception:  # noqa: BLE001
+                log.exception("move failed: %s", f["path"])
+        _status("refile_intake", progress=f"{min(i + 20, len(files))}/{len(files)}",
+                moved=len(moved))
+
+    _status("refile_intake", state="done", moved=len(moved))
+    from . import emailfmt
+    report = (f"Intake reorganization complete.\n\nMoved {len(moved)} files into "
+              f"the proper B2B structure ({kept} left in intake for your call):\n\n"
+              + "\n".join(f"  • {m}" for m in moved[:120]))
+    gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                            f"Intake reorganized — {len(moved)} files refiled",
+                            report, html=emailfmt.text_to_html(report))
+    return f"refile_intake complete: {len(moved)} moved, {kept} kept"
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
-        "shipment_audit": shipment_audit}
+        "shipment_audit": shipment_audit, "refile_intake": refile_intake}

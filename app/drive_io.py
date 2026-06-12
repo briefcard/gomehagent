@@ -52,6 +52,70 @@ def ensure_subfolder(alias: str, parent_id: str, name: str) -> str:
     return _folder_cache[key]
 
 
+def folder_tree(alias: str, root_id: str, depth: int = 3,
+                _prefix: str = "") -> dict[str, str]:
+    """Map of 'path/under/root' -> folder_id, excluding _Agent Intake."""
+    out: dict[str, str] = {}
+    if depth <= 0:
+        return out
+    resp = svc(alias).files().list(
+        q=f"'{root_id}' in parents and mimeType = '{FOLDER}' and trashed = false",
+        fields="files(id,name)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, pageSize=100,
+    ).execute()
+    for f in resp.get("files", []):
+        if f["name"].startswith("_Agent") or f["name"] == "OLD VERSIONS":
+            continue
+        path = f"{_prefix}{f['name']}"
+        out[path] = f["id"]
+        out.update(folder_tree(alias, f["id"], depth - 1, path + "/"))
+    return out
+
+
+def list_files(alias: str, folder_id: str) -> list[dict]:
+    resp = svc(alias).files().list(
+        q=f"'{folder_id}' in parents and mimeType != '{FOLDER}' and trashed = false",
+        fields="files(id,name)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, pageSize=200,
+    ).execute()
+    return resp.get("files", [])
+
+
+def list_all_files_recursive(alias: str, folder_id: str, _prefix: str = "",
+                             depth: int = 4) -> list[dict]:
+    """Every file under a folder with its relative path — for intake refiling."""
+    out = [dict(f, path=f"{_prefix}{f['name']}") for f in list_files(alias, folder_id)]
+    if depth <= 0:
+        return out
+    resp = svc(alias).files().list(
+        q=f"'{folder_id}' in parents and mimeType = '{FOLDER}' and trashed = false",
+        fields="files(id,name)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, pageSize=100,
+    ).execute()
+    for f in resp.get("files", []):
+        out.extend(list_all_files_recursive(alias, f["id"],
+                                            f"{_prefix}{f['name']}/", depth - 1))
+    return out
+
+
+def move(alias: str, file_id: str, new_parent_id: str) -> None:
+    meta = svc(alias).files().get(fileId=file_id, fields="parents",
+                                  supportsAllDrives=True).execute()
+    svc(alias).files().update(
+        fileId=file_id, addParents=new_parent_id,
+        removeParents=",".join(meta.get("parents", [])),
+        supportsAllDrives=True,
+    ).execute()
+
+
+def ensure_path(alias: str, root_id: str, path: str) -> str:
+    """Get-or-create nested folders 'A/B/C' under root; returns final id."""
+    parent = root_id
+    for segment in [p for p in path.split("/") if p.strip()]:
+        parent = ensure_subfolder(alias, parent, segment.strip())
+    return parent
+
+
 def file_exists(alias: str, folder_id: str, filename: str) -> bool:
     safe = filename.replace("'", " ")
     resp = svc(alias).files().list(

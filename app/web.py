@@ -86,9 +86,12 @@ def run_job(job: str, key: str = "") -> dict:
 
 @app.get("/admin/status")
 def job_status(key: str = "") -> dict:
+    from . import ops_jobs
+
     if key != config.APPROVAL_SECRET:
         return {"error": "bad key"}
-    return _job_status or {"status": "no jobs run yet"}
+    return {"results": _job_status, "live_progress": ops_jobs.STATUS} \
+        if (_job_status or ops_jobs.STATUS) else {"status": "no jobs run yet"}
 
 
 @app.get("/admin/test_whatsapp")

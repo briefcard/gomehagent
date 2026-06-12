@@ -53,12 +53,18 @@ RULES:
 ACTION_TOOLS = [
     {"name": "run_job",
      "description": "Run a maintenance job asynchronously. Jobs: doc_sweep "
-                    "(file email attachments to Drive B2B intake), "
-                    "shipment_audit (open shipments/quotes + follow-up drafts), "
-                    "recategorize (re-bucket all inboxes).",
+                    "(file email attachments into the B2B Drive structure), "
+                    "refile_intake (reorganize the _Agent Intake staging area "
+                    "into proper folders), shipment_audit (open shipments/"
+                    "quotes + follow-up drafts), recategorize (re-bucket inboxes).",
      "input_schema": {"type": "object", "properties": {
-         "job": {"type": "string", "enum": ["doc_sweep", "shipment_audit", "recategorize"]}},
+         "job": {"type": "string", "enum": ["doc_sweep", "refile_intake",
+                                            "shipment_audit", "recategorize"]}},
          "required": ["job"]}},
+    {"name": "job_status",
+     "description": "Live progress of running/finished jobs (doc sweep, "
+                    "refiling, audits) — use when Gomeh asks how a task is going.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "get_digest",
      "description": "Current status digest: pending approvals, recent email "
                     "actions, money deadlines.",
@@ -147,6 +153,8 @@ def _dispatch(name: str, args: dict) -> str:
     try:
         if name == "run_job":
             return _run_job_async(args["job"])
+        if name == "job_status":
+            return json.dumps(ops_jobs.STATUS) or "no jobs have run yet"
         if name == "save_memory":
             return memory.remember(args["topic"], args["content"])
         if name == "forget_memory":
