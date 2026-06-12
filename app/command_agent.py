@@ -43,6 +43,27 @@ BIG-TASK PROTOCOL — for any multi-step or exhaustive request (audits,
 4. CLOSE LOOPS: end with what happens next — drafts queued, memory saved,
    follow-ups armed, or what you need from Gomeh.
 
+HARD RULES (set by Gomeh Jun 12, 2026 — non-negotiable):
+- ACTION CONFIRMATION: never state an action is completed unless a tool
+  result explicitly confirmed it. Otherwise say "queued" or "pending".
+  Applies to filing, refunds, cancellations, emails, payments — everything.
+- TETHERING: one shipment/order may carry several reference numbers (client
+  PO, supplier order #, forwarder ref, invoice #). They are ONE entity: one
+  folder, one shipment record listing ALL refs in its notes. Never split a
+  shipment across folders because a ref looks different.
+- FILING DISCIPLINE: subfolders are plain-English per ORDER (e.g. "FS Amaala
+  Sept 2026"). Group files by order — a healthy B2B tree has ~8-15 order
+  subfolders, never one folder per file. Unmatched files -> '_Agent
+  Intake/_REVIEW', flagged to Gomeh. Old revisions -> 'OLD VERSIONS'; never
+  delete anything. Filing reports state: X filed to Y orders, X to OLD
+  VERSIONS, X flagged for review.
+- THREE ACCOUNTS, NEVER MIXED: personal / baci / eien each have their own
+  inbox and Drive. Never cross-file documents between accounts.
+- REFUNDS & CANCELLATIONS: push back first — understand the issue, offer a
+  fix (replacement, exchange, troubleshooting, discount). If unresolvable,
+  look up the order in Shopify and queue the refund/cancellation for Gomeh's
+  approval. NEVER tell a customer it is processed before it actually is.
+
 RULES:
 - NEVER send email directly — queue_email_draft puts it in his approval queue.
 - Money never moves on your say-so. Cancelling subscriptions, paying, booking:
@@ -118,7 +139,11 @@ ACTION_TOOLS = [
                     "folders; specific names: counterparty + PO/shipment); "
                     "rename_to optional for a cleaner descriptive name.",
      "input_schema": {"type": "object", "properties": {
-         "filename": {"type": "string"}, "target_path": {"type": "string"},
+         "filename": {"type": "string"},
+         "account": {"type": "string", "enum": ["baci", "eien", "personal"],
+                     "description": "Which entity's Drive — NEVER cross-file "
+                                    "between accounts. Default baci."},
+         "target_path": {"type": "string"},
          "rename_to": {"type": "string",
                        "description": "Convention: DocType_Counterparty_ID_Date"
                                       ", e.g. BOL_Primorous_PO2241_2026-04-09.pdf"},
@@ -157,7 +182,10 @@ ACTION_TOOLS = [
      "description": "Create or update a structured shipment record. Only pass "
                     "fields that changed. docs example: {\"BOL\": \"missing\", "
                     "\"packing list\": \"have\"}. status: quoting|booked|"
-                    "in_transit|customs|arrived|received|closed.",
+                    "in_transit|customs|arrived|received|closed. Record ALL "
+                    "reference numbers (client PO, supplier order #, forwarder "
+                    "ref, invoice #) in notes — they all identify this ONE "
+                    "shipment.",
      "input_schema": {"type": "object", "properties": {
          "name": {"type": "string"}, "status": {"type": "string"},
          "eta": {"type": "string"}, "counterparty": {"type": "string"},
@@ -301,13 +329,19 @@ def _dispatch(name: str, args: dict) -> str:
             if f is None:
                 return (f"No attachment named '{args['filename']}' in this "
                         f"conversation. Available: {list(_session_files)}")
-            b2b = drive_io.find_folder("baci", "B2B")
-            if not b2b:
-                return "B2B folder not found in Drive."
-            folder_id = drive_io.ensure_path("baci", b2b,
+            account = args.get("account", "baci")
+            if account == "baci":
+                root = drive_io.find_folder("baci", "B2B")
+                if not root:
+                    return "B2B folder not found in the Baci Drive."
+            else:
+                # eien/personal: file under that account's own 'Agent Filed'
+                root = (drive_io.find_folder(account, "Agent Filed")
+                        or drive_io.ensure_subfolder(account, "root", "Agent Filed"))
+            folder_id = drive_io.ensure_path(account, root,
                                              args["target_path"].strip("/"))
             name_final = args.get("rename_to") or args["filename"]
-            link = drive_io.upload("baci", folder_id, name_final,
+            link = drive_io.upload(account, folder_id, name_final,
                                    f["data"], f["mime"])
             if link == "exists":
                 return f"'{name_final}' already exists in B2B/{args['target_path']} — skipped."

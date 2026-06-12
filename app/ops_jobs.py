@@ -269,13 +269,19 @@ belongs to):
 
 Consolidate into a TETHER MAP: groups of files that belong together because
 they share an anchor (same counterparty/PO/shipment). Rules:
-1. REUSE EXISTING FOLDERS aggressively — remap proposals into existing
-   folders wherever reasonable. A new folder is justified only when a group
-   of 2+ related files has no sensible existing home. Never create a new
-   folder for a single stray file — keep it in intake instead.
-2. Merge near-duplicate targets (e.g. 'Orders/Primorous' and
+1. ONE SHIPMENT = ONE FOLDER, even when ref numbers differ: a single order
+   carries a client PO, supplier order #, forwarder ref, and invoice # —
+   those are THE SAME entity. Tie them by counterparty + route + dates +
+   product, not by matching strings.
+2. REUSE EXISTING FOLDERS aggressively. A healthy result is ~8-15 order
+   subfolders TOTAL — if your plan creates folders anywhere near the number
+   of files, the plan is wrong; re-tether. New folder only when 2+ related
+   files have no sensible existing home, named in plain English per order
+   (e.g. 'FS Amaala Sept 2026').
+3. Merge near-duplicate targets (e.g. 'Orders/Primorous' and
    'Primorous Order') into ONE folder, preferring the existing one.
-3. One short rationale PER GROUP, not per file.
+4. Unmatched single files -> keep_in_intake (they surface in '_REVIEW' for
+   Gomeh). One short rationale PER GROUP, never per file.
 Respond JSON only:
 {{"groups": [{{"target_path": "<folder under B2B>", "existing": true/false,
   "why": "<one line for the whole group>", "file_ids": ["..."]}}],

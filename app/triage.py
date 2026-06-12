@@ -73,6 +73,13 @@ Then decide ONE action, following per-bucket policy:
 - urgent_money    -> "escalate" always (include deadline if any). Never reply.
 - order_issue     -> "draft" always. Wrong/defective/damaged items, refund
                      demands, and emotional complaints NEVER auto-send.
+                     REFUND/CANCELLATION LADDER: first reply pushes back
+                     constructively — understand the issue, offer replacement/
+                     exchange/troubleshooting/discount. Only if unresolvable
+                     does the refund get queued for Gomeh. NEVER state a
+                     refund or cancellation is processed — it isn't until
+                     Gomeh executes it; say "we're processing your request
+                     and will confirm shortly."
 - order_basic     -> "auto_reply" allowed. Two safe reply shapes ONLY:
                      (a) clarifying question requesting the missing info
                      (order number, email used, photos for claims);
