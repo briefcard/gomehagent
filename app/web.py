@@ -1,4 +1,6 @@
 """Web service: health check, approval links, WhatsApp webhook."""
+import json
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
@@ -165,7 +167,19 @@ def _consume() -> None:
     while True:
         kind, payload = _commands.get()
         try:
-            if kind == "voice":
+            if kind == "file":
+                from . import memory, ops_jobs
+                meta = json.loads(payload)
+                memory.save_turn("user", f"[sent document: {meta['filename']}"
+                                 + (f" — \"{meta['caption']}\"" if meta["caption"] else "") + "]")
+                chat = "\n".join(f"{m['role']}: {m['content'][:300]}"
+                                 for m in memory.load_chat_history()[-8:])
+                reply = ops_jobs.file_whatsapp_document(
+                    meta["media_id"], meta["filename"], meta["mime"],
+                    meta["caption"], chat)
+                memory.save_turn("assistant", reply)
+                whatsapp.send_text(reply)
+            elif kind == "voice":
                 audio, mime = whatsapp.download_media(payload)
                 transcript = whatsapp.transcribe(audio, mime)
                 if not transcript:
@@ -238,6 +252,15 @@ async def whatsapp_incoming(request: Request) -> dict:
                         _handle_command(msg["text"]["body"])
                     elif msg.get("type") == "audio":
                         _handle_voice(msg["audio"]["id"])
+                    elif msg.get("type") in ("document", "image"):
+                        m = msg[msg["type"]]
+                        _enqueue("file", json.dumps({
+                            "media_id": m["id"],
+                            "filename": m.get("filename")
+                                        or f"whatsapp-{msg['type']}-{m['id'][:8]}.jpg",
+                            "mime": m.get("mime_type", ""),
+                            "caption": m.get("caption", ""),
+                        }))
     except Exception:  # noqa: BLE001 — always 200 so Meta doesn't retry-storm
         pass
     return {"status": "received"}

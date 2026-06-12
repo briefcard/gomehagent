@@ -398,6 +398,56 @@ def build_onboarding_packet() -> str:
     return (f"packet build complete: {len(placed)} placed, {len(missing)} missing")
 
 
+WHATSAPP_FILE_PROMPT = """Gomeh just sent a document over WhatsApp to be filed
+in the Baci Milano USA B2B Drive. EXISTING FOLDER STRUCTURE:
+{tree}
+
+RECENT CONVERSATION (context for what this document is and which order or
+shipment it belongs to):
+{chat}
+
+Document: filename="{filename}", caption="{caption}"
+
+Decide where it belongs. Prefer existing folders; if naming a new one, be
+specific (counterparty + PO/shipment), consistent with the structure. If the
+conversation names a counterparty (e.g. an order with Primorous), file under
+that counterparty's order/shipment folder. Respond JSON only:
+{{"target_path": "<folder path under B2B>",
+ "rename_to": "<better filename or ''>",
+ "note": "<one line: what this doc is>"}}"""
+
+
+def file_whatsapp_document(media_id: str, filename: str, mime: str,
+                           caption: str, chat_context: str) -> str:
+    """Download a WhatsApp-sent document and file it into the B2B Drive."""
+    from . import drive_io, whatsapp
+    alias = DOC_SWEEP_ALIAS
+    data, real_mime = whatsapp.download_media(media_id)
+    b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
+    if not b2b:
+        return "I couldn't find the B2B folder in Drive — document not filed."
+    tree = "\n".join(sorted(drive_io.folder_tree(alias, b2b, depth=3)))[:6000]
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=300,
+            messages=[{"role": "user", "content": WHATSAPP_FILE_PROMPT.format(
+                tree=tree or "(empty)", chat=chat_context[:3000],
+                filename=filename, caption=caption or "(none)")}],
+        )
+        meta = _json_extract(msg.content[0].text)
+    except Exception:  # noqa: BLE001
+        meta = {"target_path": f"{INTAKE_NAME}/WhatsApp", "rename_to": "",
+                "note": "filed to intake (couldn't classify)"}
+    target = (meta.get("target_path") or f"{INTAKE_NAME}/WhatsApp").strip("/")
+    name = meta.get("rename_to") or filename
+    folder_id = drive_io.ensure_path(alias, b2b, target)
+    link = drive_io.upload(alias, folder_id, name, data,
+                           mime or real_mime or "application/octet-stream")
+    if link == "exists":
+        return f"'{name}' already exists in B2B/{target} — skipped (no duplicate made)."
+    return (f"Filed ✓ {meta.get('note', name)}\n→ B2B/{target}/{name}\n{link}")
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet}
