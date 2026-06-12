@@ -125,6 +125,10 @@ def _execute(ap: db.Approval) -> None:
                 folder_id = drive_io.ensure_path(alias, b2b, m["to"])
                 drive_io.move(alias, m["file_id"], folder_id)
                 done += 1
+                from . import data_tools
+                data_tools.index_document(
+                    m["from"].rsplit("/", 1)[-1], m["to"],
+                    anchor=m["to"].rsplit("/", 1)[-1], source="refile")
             except Exception:  # noqa: BLE001
                 failed += 1
         whatsapp.send_text(f"📁 Refile executed: {done} files moved"

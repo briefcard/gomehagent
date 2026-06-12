@@ -170,6 +170,49 @@ def email_history_search(account: str, query: str) -> str:
         return f"Email search failed: {exc.__class__.__name__}"
 
 
+# ---------- Document registry ----------
+
+def index_document(filename: str, path: str, link: str = "", doc_type: str = "",
+                   anchor: str = "", source: str = "") -> None:
+    """Record a filed document for instant recall. Updates on re-file."""
+    from . import db
+    with db.SessionLocal() as s:
+        row = (s.query(db.DocIndex)
+               .filter(db.DocIndex.filename == filename).first())
+        if row:
+            row.path, row.created_at = path, db.utcnow()
+            if link:
+                row.link = link
+            if anchor:
+                row.anchor = anchor
+            if doc_type:
+                row.doc_type = doc_type
+        else:
+            s.add(db.DocIndex(filename=filename, path=path, link=link,
+                              doc_type=doc_type, anchor=anchor, source=source))
+        s.commit()
+
+
+def find_documents(query: str) -> str:
+    """Search the document registry by counterparty, PO/shipment, doc type,
+    or filename. Much more reliable than Drive full-text search."""
+    from . import db
+    q = f"%{query.strip()}%"
+    with db.SessionLocal() as s:
+        rows = (s.query(db.DocIndex)
+                .filter(db.DocIndex.filename.ilike(q)
+                        | db.DocIndex.path.ilike(q)
+                        | db.DocIndex.anchor.ilike(q)
+                        | db.DocIndex.doc_type.ilike(q))
+                .order_by(db.DocIndex.created_at.desc()).limit(15).all())
+    if not rows:
+        return ("No registry matches — try drive_search as fallback "
+                "(registry only covers documents filed by the agent).")
+    return json.dumps([{"file": r.filename, "path": f"B2B/{r.path}",
+                        "link": r.link, "type": r.doc_type,
+                        "anchor": r.anchor} for r in rows])
+
+
 # ---------- RFQ & forwarder onboarding ----------
 
 PACKET_FOLDER = "Forwarder Onboarding Packet"
@@ -287,6 +330,15 @@ TOOLS = [
 ]
 
 TOOLS += [
+    {"name": "find_documents",
+     "description": "Search the document registry — every file the agent has "
+                    "filed, indexed by counterparty, PO/shipment anchor, doc "
+                    "type, filename. USE THIS FIRST when an email or request "
+                    "references a document ('send the BOL for the Primorous "
+                    "order'); returns paths + Drive links. Fall back to "
+                    "drive_search only if the registry has no match.",
+     "input_schema": {"type": "object", "properties": {
+         "query": {"type": "string"}}, "required": ["query"]}},
     {"name": "onboarding_packet",
      "description": "The standing forwarder-onboarding documents (Power of "
                     "Attorney, FDA docs, sample commercial invoice/packing "
@@ -315,6 +367,7 @@ _HANDLERS = {
     "shopify_order_details": shopify_order_details,
     "drive_search": drive_search,
     "email_history_search": email_history_search,
+    "find_documents": find_documents,
     "onboarding_packet": onboarding_packet,
     "rfq_get": rfq_get,
     "rfq_record_quote": rfq_record_quote,

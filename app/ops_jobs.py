@@ -134,6 +134,10 @@ def doc_sweep() -> str:
                                          att["mime"] or "application/octet-stream")
                 if result != "exists":
                     filed.append(f"{path}/{att['filename']} (from {em['from'][:40]})")
+                    from . import data_tools
+                    data_tools.index_document(
+                        att["filename"], path, result if result.startswith("http") else "",
+                        anchor=target.rsplit("/", 1)[-1], source="sweep")
             except Exception:  # noqa: BLE001
                 log.exception("upload failed: %s", att["filename"])
 

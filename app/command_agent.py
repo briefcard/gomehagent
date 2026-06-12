@@ -119,7 +119,15 @@ ACTION_TOOLS = [
                     "rename_to optional for a cleaner descriptive name.",
      "input_schema": {"type": "object", "properties": {
          "filename": {"type": "string"}, "target_path": {"type": "string"},
-         "rename_to": {"type": "string"}},
+         "rename_to": {"type": "string",
+                       "description": "Convention: DocType_Counterparty_ID_Date"
+                                      ", e.g. BOL_Primorous_PO2241_2026-04-09.pdf"},
+         "anchor": {"type": "string",
+                    "description": "What ties this doc to others: counterparty"
+                                   " + PO/shipment, e.g. 'Primorous PO-2241'"},
+         "doc_type": {"type": "string",
+                      "description": "BOL, commercial invoice, packing list, "
+                                     "POA, quote..."}},
          "required": ["filename", "target_path"]}},
     {"name": "rfq_start",
      "description": "Launch an RFQ round: creates the RFQ + shipment records "
@@ -303,6 +311,9 @@ def _dispatch(name: str, args: dict) -> str:
                                    f["data"], f["mime"])
             if link == "exists":
                 return f"'{name_final}' already exists in B2B/{args['target_path']} — skipped."
+            data_tools.index_document(
+                name_final, args["target_path"].strip("/"), link,
+                args.get("doc_type", ""), args.get("anchor", ""), "whatsapp")
             return f"Saved to B2B/{args['target_path']}/{name_final} — {link}"
         if name == "rfq_start":
             return _rfq_start(args)

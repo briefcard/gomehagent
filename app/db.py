@@ -166,6 +166,22 @@ class Expense(Base):
     source_subject = Column(Text)
 
 
+class DocIndex(Base):
+    """Registry of every document the agent files — instant recall by
+    counterparty/PO/shipment without relying on Drive search."""
+
+    __tablename__ = "doc_index"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    filename = Column(String, nullable=False)
+    path = Column(Text, nullable=False)  # folder path under B2B
+    link = Column(Text, default="")
+    doc_type = Column(String, default="")  # BOL, commercial invoice, PO...
+    anchor = Column(String, default="")  # 'Primorous PO-2241', 'Turkey-Mar2026'
+    source = Column(String, default="")  # email | whatsapp | sweep | refile
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 
