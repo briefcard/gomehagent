@@ -126,16 +126,13 @@ SIGNATURES = {
     "personal": "Best,\n\nGomeh",
 }
 
-_voice_cache: dict[str, str] = {}
-
-
 def _voice_rules(alias: str) -> str:
-    if alias not in _voice_cache:
-        from . import db  # local import to avoid cycle at module load
-        with db.SessionLocal() as s:
-            vp = s.get(db.VoiceProfile, alias)
-            _voice_cache[alias] = vp.rules if vp else ""
-    return _voice_cache[alias]
+    # Read fresh every time: learned rules from Gomeh's feedback must apply
+    # to the very next email (and web/worker are separate processes).
+    from . import db  # local import to avoid cycle at module load
+    with db.SessionLocal() as s:
+        vp = s.get(db.VoiceProfile, alias)
+        return vp.rules if vp else ""
 
 
 def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
@@ -168,6 +165,20 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
         user_content += f"\n\nEARLIER MESSAGES IN THIS THREAD (context):\n{thread_context[:8000]}"
     sender_addr = email["from"].split("<")[-1].rstrip(">").strip()
     user_content += memory.sender_history(sender_addr)
+    user_content += memory.shipments_block()
+
+    # Attach PDF contents (commercial invoices, BOLs, packing lists) so the
+    # agent reads the actual documents, not just the email text.
+    content_blocks: list = []
+    import base64 as _b64
+    for pdf in (email.get("pdfs") or []):
+        content_blocks.append({
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf",
+                       "data": _b64.standard_b64encode(pdf["data"]).decode()},
+        })
+        user_content += f"\n\n[Attached PDF included above: {pdf['filename']}]"
+    content_blocks.append({"type": "text", "text": user_content})
 
     # Agentic loop: Claude may call data tools (Shopify, Drive, email history)
     # before producing its final JSON verdict.
@@ -181,7 +192,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
         bucket_hint = ""
     model = config.BUCKET_MODELS.get(bucket_hint, config.CLAUDE_MODEL)
 
-    messages: list[dict] = [{"role": "user", "content": user_content}]
+    messages: list[dict] = [{"role": "user", "content": content_blocks}]
     text = ""
     for _ in range(8):
         msg = client.messages.create(

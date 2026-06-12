@@ -106,6 +106,38 @@ class Memory(Base):
     status = Column(String, default="active")  # active | archived
 
 
+class FollowUp(Base):
+    """Outbound messages that expect a reply — chased automatically."""
+
+    __tablename__ = "follow_ups"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    account = Column(String, nullable=False)
+    thread_id = Column(String)
+    to = Column(String)
+    subject = Column(Text)
+    due_date = Column(String)  # YYYY-MM-DD
+    status = Column(String, default="waiting")  # waiting | chased | closed | escalated
+
+
+class Shipment(Base):
+    """Structured record per import shipment — the spine of logistics."""
+
+    __tablename__ = "shipments"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+    name = Column(String, unique=True, nullable=False)  # e.g. 'Turkey-Mar2026'
+    status = Column(String, default="quoting")  # quoting|booked|in_transit|customs|arrived|received|closed
+    eta = Column(String)  # YYYY-MM-DD or ''
+    counterparty = Column(String)  # forwarder/broker
+    docs = Column(JSON, default=dict)  # {'BOL': 'have|missing|link', ...}
+    costs = Column(JSON, default=dict)  # {'freight': '...', 'duties': '...'}
+    notes = Column(Text, default="")
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

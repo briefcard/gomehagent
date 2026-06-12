@@ -105,7 +105,35 @@ def _execute(ap: db.Approval) -> None:
         p = ap.payload
         gmail_client.send_email(p["account"], p["to"], p["subject"], p["body"],
                                 p.get("thread_id"))
+        if p.get("expect_reply"):
+            import datetime as dt
+            with db.SessionLocal() as s:
+                s.add(db.FollowUp(
+                    account=p["account"], thread_id=p.get("thread_id"),
+                    to=p["to"], subject=p["subject"],
+                    due_date=(dt.date.today() + dt.timedelta(days=3)).isoformat(),
+                ))
+                s.commit()
     # Future kinds: buy_label (Phase 4), pay (never auto), book_freight (Phase 5)
+
+
+def autonomy_stats(days: int = 30) -> dict:
+    """Approve/deny rates per bucket — the data behind earned autonomy."""
+    import datetime as dt
+    since = db.utcnow() - dt.timedelta(days=days)
+    stats: dict[str, dict[str, int]] = {}
+    with db.SessionLocal() as s:
+        for ap in (s.query(db.Approval)
+                   .filter(db.Approval.created_at >= since,
+                           db.Approval.status.in_(["executed", "approved", "denied"]))
+                   .all()):
+            bucket = (ap.payload or {}).get("bucket", "unknown")
+            d = stats.setdefault(bucket, {"approved": 0, "denied": 0})
+            d["approved" if ap.status in ("executed", "approved") else "denied"] += 1
+    for d in stats.values():
+        total = d["approved"] + d["denied"]
+        d["approval_rate"] = round(100 * d["approved"] / total) if total else 0
+    return stats
 
 
 def pending_count() -> int:

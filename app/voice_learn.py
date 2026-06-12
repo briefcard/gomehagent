@@ -26,6 +26,22 @@ EMAILS:
 {emails}"""
 
 
+def add_rule(alias: str, rule: str) -> str:
+    """Append a learned rule (from Gomeh's denial feedback) to an inbox's
+    voice profile. Triage reads profiles fresh, so this applies immediately."""
+    with db.SessionLocal() as s:
+        vp = s.get(db.VoiceProfile, alias)
+        if vp is None:
+            vp = db.VoiceProfile(alias=alias, rules="")
+            s.add(vp)
+        marker = "\n\nLEARNED RULES (from Gomeh's feedback — highest priority):"
+        if marker not in (vp.rules or ""):
+            vp.rules = (vp.rules or "") + marker
+        vp.rules += f"\n- {rule.strip()}"
+        s.commit()
+    return f"Learned for [{alias}]: {rule.strip()}"
+
+
 def ensure_profiles() -> None:
     for alias in config.GMAIL_ACCOUNTS:
         with db.SessionLocal() as s:

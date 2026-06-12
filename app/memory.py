@@ -75,6 +75,24 @@ def memory_block() -> str:
             + "\n".join(lines))
 
 
+def shipments_block() -> str:
+    """Open shipment records — injected into triage and chat prompts."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Shipment)
+                .filter(db.Shipment.status != "closed")
+                .order_by(db.Shipment.updated_at.desc()).limit(15).all())
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        missing = [k for k, v in (r.docs or {}).items() if v == "missing"]
+        lines.append(f"- {r.name}: {r.status}, ETA {r.eta or '?'}, "
+                     f"counterparty {r.counterparty or '?'}"
+                     + (f", missing docs: {', '.join(missing)}" if missing else "")
+                     + (f" — {r.notes[:120]}" if r.notes else ""))
+    return "\n\nOPEN SHIPMENTS (structured records — current truth):\n" + "\n".join(lines)
+
+
 def sender_history(sender_email: str, limit: int = 3) -> str:
     """What we previously did with this sender — for email triage context."""
     with db.SessionLocal() as s:

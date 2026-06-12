@@ -118,6 +118,15 @@ def test_whatsapp(key: str = "") -> dict:
             "phone_id": config.WHATSAPP_PHONE_ID, "meta_response": body}
 
 
+@app.get("/admin/stats")
+def stats(key: str = "") -> dict:
+    """Approve/deny rates per bucket (last 30 days) — flip AUTO_SEND for a
+    bucket once its approval_rate holds ~95%."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    return approvals.autonomy_stats()
+
+
 @app.get("/admin/ask", response_class=PlainTextResponse)
 def ask(key: str = "", q: str = "") -> str:
     """The conversational agent over HTTP, until WhatsApp is live:

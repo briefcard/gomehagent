@@ -70,6 +70,7 @@ def fetch_unread(alias: str, max_results: int = 20) -> list[dict]:
                 "subject": headers.get("subject", ""),
                 "date": headers.get("date", ""),
                 "body": _extract_text(msg["payload"]),
+                "attachments": _extract_attachments(msg["payload"]),
             }
         )
     return out

@@ -43,7 +43,12 @@ RULES:
   SAVE it. Update the same topic as it progresses; forget it when done.
   Your working memory is shown below and is shared with the email triage
   agent, so what you record changes how emails get handled too.
-- Today's date: {today} (America/New_York).{memory_block}"""
+- SHIPMENTS: use upsert_shipment to keep structured records current as you
+  learn things (booked, ETA changes, docs received, costs). These records are
+  the source of truth shown to the email triage agent too.
+- FEEDBACK: when Gomeh critiques a draft or sets a writing preference, call
+  add_voice_rule for that inbox so every future draft obeys it.
+- Today's date: {today} (America/New_York).{memory_block}{shipments_block}"""
 
 ACTION_TOOLS = [
     {"name": "run_job",
@@ -75,6 +80,27 @@ ACTION_TOOLS = [
          "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
          "start": {"type": "string"}, "end": {"type": "string"}},
          "required": ["account", "start", "end"]}},
+    {"name": "add_voice_rule",
+     "description": "When Gomeh gives feedback about a draft or how replies "
+                    "should be written ('too formal', 'never offer refunds "
+                    "before photos'), save it as a permanent writing rule for "
+                    "that inbox. Applies to all future drafts immediately.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+         "rule": {"type": "string"}}, "required": ["account", "rule"]}},
+    {"name": "upsert_shipment",
+     "description": "Create or update a structured shipment record. Only pass "
+                    "fields that changed. docs example: {\"BOL\": \"missing\", "
+                    "\"packing list\": \"have\"}. status: quoting|booked|"
+                    "in_transit|customs|arrived|received|closed.",
+     "input_schema": {"type": "object", "properties": {
+         "name": {"type": "string"}, "status": {"type": "string"},
+         "eta": {"type": "string"}, "counterparty": {"type": "string"},
+         "docs": {"type": "object"}, "costs": {"type": "object"},
+         "notes": {"type": "string"}}, "required": ["name"]}},
+    {"name": "list_shipments",
+     "description": "All open shipment records with status, ETA, docs, costs.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "save_memory",
      "description": "Save/update a durable note in shared working memory "
                     "(ongoing tasks, decisions, standing instructions). Same "
@@ -125,6 +151,34 @@ def _dispatch(name: str, args: dict) -> str:
             return memory.remember(args["topic"], args["content"])
         if name == "forget_memory":
             return memory.forget(args["topic"])
+        if name == "add_voice_rule":
+            from . import voice_learn
+            return voice_learn.add_rule(args["account"], args["rule"])
+        if name == "upsert_shipment":
+            with db.SessionLocal() as s:
+                sh = (s.query(db.Shipment)
+                      .filter(db.Shipment.name == args["name"]).first())
+                if sh is None:
+                    sh = db.Shipment(name=args["name"])
+                    s.add(sh)
+                for field in ("status", "eta", "counterparty", "notes"):
+                    if args.get(field) is not None:
+                        setattr(sh, field, args[field])
+                if args.get("docs"):
+                    sh.docs = {**(sh.docs or {}), **args["docs"]}
+                if args.get("costs"):
+                    sh.costs = {**(sh.costs or {}), **args["costs"]}
+                sh.updated_at = db.utcnow()
+                s.commit()
+            return f"Shipment '{args['name']}' saved."
+        if name == "list_shipments":
+            with db.SessionLocal() as s:
+                rows = (s.query(db.Shipment)
+                        .filter(db.Shipment.status != "closed").all())
+            return json.dumps([
+                {"name": r.name, "status": r.status, "eta": r.eta,
+                 "counterparty": r.counterparty, "docs": r.docs,
+                 "costs": r.costs, "notes": r.notes} for r in rows]) or "none"
         if name == "get_digest":
             return digest.build_digest()
         if name == "list_deadlines":
@@ -171,7 +225,8 @@ def _dispatch(name: str, args: dict) -> str:
 def handle(text: str) -> str:
     """Process one free-text command with full conversational continuity."""
     system = SYSTEM.format(today=dt.datetime.now().strftime("%A %Y-%m-%d"),
-                           memory_block=memory.memory_block())
+                           memory_block=memory.memory_block(),
+                           shipments_block=memory.shipments_block())
     tools = data_tools.TOOLS + ACTION_TOOLS
     messages = memory.load_chat_history()
     messages.append({"role": "user", "content": text})

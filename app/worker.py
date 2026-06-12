@@ -46,6 +46,18 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             )
         except Exception:  # noqa: BLE001 — context is best-effort
             email["thread_context"] = ""
+        # Read PDF attachments (up to 2, <5MB each) so triage sees their content
+        email["pdfs"] = []
+        for att in (email.get("attachments") or [])[:4]:
+            if not att["filename"].lower().endswith(".pdf") or len(email["pdfs"]) >= 2:
+                continue
+            try:
+                data = gmail_client.download_attachment(alias, email["id"],
+                                                        att["attachment_id"])
+                if len(data) < 5_000_000:
+                    email["pdfs"].append({"filename": att["filename"], "data": data})
+            except Exception:  # noqa: BLE001
+                log.exception("pdf download failed: %s", att["filename"])
         trusted = is_trusted(email["from"])
         result = triage.triage_email(email, alias, trusted)
         action = result["action"]
@@ -57,6 +69,14 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             gmail_client.add_label(alias, email["id"], config.BUCKET_LABELS[bucket])
         except Exception:  # noqa: BLE001 — labeling is best-effort
             log.exception("labeling failed")
+
+        # A reply arrived: close any follow-up timers on this thread
+        with db.SessionLocal() as s:
+            s.query(db.FollowUp).filter(
+                db.FollowUp.thread_id == email["threadId"],
+                db.FollowUp.status.in_(["waiting", "chased"]),
+            ).update({"status": "closed"}, synchronize_session=False)
+            s.commit()
 
         # Money ledger: record any extracted deadline
         dl = result.get("deadline")
@@ -99,6 +119,8 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     "inbound_from": email["from"],
                     "inbound_snippet": email["body"][:600],
                     "reason": detail,
+                    "bucket": bucket,
+                    "expect_reply": bucket in ("logistics", "sales_leads", "client_comms"),
                 },
                 notify=False,  # announced on the APPROVAL_BATCH_MINUTES schedule
             )
@@ -214,6 +236,80 @@ def backlog_sweep() -> None:
         )
 
 
+def follow_up_chase() -> None:
+    """Daily: chase overdue follow-ups once; escalate after second silence."""
+    import datetime as dt
+    today = dt.date.today().isoformat()
+    with db.SessionLocal() as s:
+        due = (s.query(db.FollowUp)
+               .filter(db.FollowUp.due_date <= today,
+                       db.FollowUp.status.in_(["waiting", "chased"]))
+               .all())
+        items = [(f.id, f.status, f.account, f.to, f.subject, f.thread_id) for f in due]
+    for fid, status, account, to, subject, thread_id in items:
+        if status == "waiting":
+            approvals.request_approval(
+                "send_email",
+                f"[Follow-up] No reply from {to}: {subject}",
+                {"account": account, "to": to,
+                 "subject": subject if subject.lower().startswith("re:") else f"Re: {subject}",
+                 "body": ("Hi,\n\nJust following up on my note below — could you "
+                          "give me an update when you have a moment?\n\nThank you,\n\n"
+                          + ("Baci Milano Customer Care" if account == "baci"
+                             else "Eien Health Customer Care" if account == "eien"
+                             else "Gomeh")),
+                 "thread_id": thread_id, "inbound_from": to,
+                 "inbound_snippet": "(no reply received in 3 days)",
+                 "reason": "Automatic follow-up: counterparty silent 3 days",
+                 "bucket": "logistics", "expect_reply": False},
+                notify=False,
+            )
+            with db.SessionLocal() as s:
+                f = s.get(db.FollowUp, fid)
+                f.status = "chased"
+                f.due_date = (dt.date.today() + dt.timedelta(days=3)).isoformat()
+                s.commit()
+        else:  # already chased once -> escalate to Gomeh
+            whatsapp.send_text(f"⚠️ Still no reply from {to} after a chase: "
+                               f"\"{subject}\" [{account}]. Wants your call.")
+            with db.SessionLocal() as s:
+                f = s.get(db.FollowUp, fid)
+                f.status = "escalated"
+                s.commit()
+
+
+_last_alert: dict[str, float] = {}
+
+
+def alert_error(context: str, exc: Exception) -> None:
+    """Tell Gomeh when something breaks — max once per hour per context."""
+    import time as _t
+    now = _t.time()
+    if now - _last_alert.get(context, 0) < 3600:
+        return
+    _last_alert[context] = now
+    note = (f"⚙️ Heads up — my {context} hit an error "
+            f"({exc.__class__.__name__}: {str(exc)[:150]}). I'll keep retrying; "
+            "if you see this repeatedly, something needs fixing.")
+    try:
+        whatsapp.send_text(note)
+        if not config.WHATSAPP_ENABLED:
+            gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                                    "Assistant error: " + context, note)
+    except Exception:  # noqa: BLE001
+        log.exception("alert delivery failed")
+
+
+def _safe(fn, context: str):
+    def wrapped() -> None:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("%s failed", context)
+            alert_error(context, exc)
+    return wrapped
+
+
 def main() -> None:
     db.init_db()
     log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
@@ -223,12 +319,16 @@ def main() -> None:
     bucket_backfill()  # one-time: organize recent mail into bucket labels
     backlog_sweep()  # idempotent: EmailLog dedup skips already-processed messages
     sched = BackgroundScheduler(timezone="America/New_York")
-    sched.add_job(poll_all, "interval", minutes=config.POLL_INTERVAL_MIN)
-    sched.add_job(approvals.notify_pending, "interval",
-                  minutes=config.APPROVAL_BATCH_MINUTES)
-    sched.add_job(deadline_alerts, "cron", hour=9, minute=0)
+    sched.add_job(_safe(poll_all, "inbox polling"), "interval",
+                  minutes=config.POLL_INTERVAL_MIN)
+    sched.add_job(_safe(approvals.notify_pending, "approval batching"),
+                  "interval", minutes=config.APPROVAL_BATCH_MINUTES)
+    sched.add_job(_safe(deadline_alerts, "deadline alerts"), "cron", hour=9, minute=0)
+    sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
+                  hour=9, minute=30)
     for hour in config.DIGEST_HOURS:
-        sched.add_job(digest.send_digest, "cron", hour=hour, minute=0)
+        sched.add_job(_safe(digest.send_digest, "digest"), "cron",
+                      hour=hour, minute=0)
     sched.start()
     while True:
         time.sleep(60)
