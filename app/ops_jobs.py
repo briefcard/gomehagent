@@ -407,11 +407,14 @@ shipment it belongs to):
 {chat}
 
 Document: filename="{filename}", caption="{caption}"
+The document itself is included above when readable — ITS CONTENTS ARE THE
+PRIMARY EVIDENCE: read the counterparty, PO/order numbers, dates, and document
+type straight from it. Conversation context is secondary; filename is the
+weakest signal.
 
 Decide where it belongs. Prefer existing folders; if naming a new one, be
-specific (counterparty + PO/shipment), consistent with the structure. If the
-conversation names a counterparty (e.g. an order with Primorous), file under
-that counterparty's order/shipment folder. Respond JSON only:
+specific (counterparty + PO/shipment), consistent with the structure.
+Old revisions/drafts -> file under the parent's 'OLD VERSIONS'. Respond JSON only:
 {{"target_path": "<folder path under B2B>",
  "rename_to": "<better filename or ''>",
  "note": "<one line: what this doc is>"}}"""
@@ -427,12 +430,27 @@ def file_whatsapp_document(media_id: str, filename: str, mime: str,
     if not b2b:
         return "I couldn't find the B2B folder in Drive — document not filed."
     tree = "\n".join(sorted(drive_io.folder_tree(alias, b2b, depth=3)))[:6000]
+    # The file itself is the primary context: pass PDFs/images into the
+    # classification call so the model reads counterparty, PO numbers, dates.
+    import base64 as _b64
+    blocks: list = []
+    eff_mime = (mime or real_mime or "").lower()
+    if len(data) < 5_000_000:
+        if "pdf" in eff_mime or filename.lower().endswith(".pdf"):
+            blocks.append({"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf",
+                "data": _b64.standard_b64encode(data).decode()}})
+        elif eff_mime.startswith("image/"):
+            blocks.append({"type": "image", "source": {
+                "type": "base64", "media_type": eff_mime,
+                "data": _b64.standard_b64encode(data).decode()}})
+    blocks.append({"type": "text", "text": WHATSAPP_FILE_PROMPT.format(
+        tree=tree or "(empty)", chat=chat_context[:3000],
+        filename=filename, caption=caption or "(none)")})
     try:
         msg = client.messages.create(
             model=config.CLAUDE_MODEL, max_tokens=300,
-            messages=[{"role": "user", "content": WHATSAPP_FILE_PROMPT.format(
-                tree=tree or "(empty)", chat=chat_context[:3000],
-                filename=filename, caption=caption or "(none)")}],
+            messages=[{"role": "user", "content": blocks}],
         )
         meta = _json_extract(msg.content[0].text)
     except Exception:  # noqa: BLE001
