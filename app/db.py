@@ -82,6 +82,30 @@ class Deadline(Base):
     status = Column(String, default="open")  # open | alerted | done | dismissed
 
 
+class ChatMessage(Base):
+    """WhatsApp conversation history — gives the command agent continuity."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    role = Column(String, nullable=False)  # user | assistant
+    content = Column(Text, nullable=False)
+
+
+class Memory(Base):
+    """Durable working memory: ongoing tasks, decisions, standing instructions.
+    Written by the agent itself; injected into every prompt (chat + triage)."""
+
+    __tablename__ = "memories"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    topic = Column(String, nullable=False)  # e.g. 'Turkey shipment', 'standing rule'
+    content = Column(Text, nullable=False)
+    status = Column(String, default="active")  # active | archived
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

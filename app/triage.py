@@ -151,6 +151,11 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             "replies — match this style and follow these handling rules):\n" + voice
         )
 
+    # Shared working memory (written by the WhatsApp command agent + Gomeh's
+    # standing instructions) — keeps email handling consistent with ongoing tasks.
+    from . import memory
+    system += memory.memory_block()
+
     thread_context = email.get("thread_context", "")
     user_content = (
         f"Inbox: {account_alias}\n"
@@ -161,6 +166,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     )
     if thread_context:
         user_content += f"\n\nEARLIER MESSAGES IN THIS THREAD (context):\n{thread_context[:8000]}"
+    sender_addr = email["from"].split("<")[-1].rstrip(">").strip()
+    user_content += memory.sender_history(sender_addr)
 
     # Agentic loop: Claude may call data tools (Shopify, Drive, email history)
     # before producing its final JSON verdict.
