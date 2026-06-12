@@ -59,7 +59,8 @@ ACTION_TOOLS = [
                     "quotes + follow-up drafts), recategorize (re-bucket inboxes).",
      "input_schema": {"type": "object", "properties": {
          "job": {"type": "string", "enum": ["doc_sweep", "refile_intake",
-                                            "shipment_audit", "recategorize"]}},
+                                            "shipment_audit", "recategorize",
+                                            "build_onboarding_packet"]}},
          "required": ["job"]}},
     {"name": "job_status",
      "description": "Live progress of running/finished jobs (doc sweep, "

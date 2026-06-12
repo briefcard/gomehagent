@@ -287,5 +287,117 @@ def refile_intake() -> str:
     return f"refile_intake complete: {len(moved)} moved, {kept} kept"
 
 
+PACKET_SEARCHES = {
+    "Power of Attorney": ["power of attorney", "POA"],
+    "FDA": ["FDA"],
+    "Commercial Invoice": ["commercial invoice"],
+    "Packing List": ["packing list"],
+    "Product Specs": ["product spec", "catalog", "line sheet"],
+}
+
+PICK_PROMPT = """Pick the single best candidate file to serve as the standing
+'{doc_type}' in a freight-forwarder onboarding packet for Baci Milano USA
+(an importer of Italian homeware). Prefer: most recent, final (not draft/old
+version), company-level documents over one-off variants. Candidates:
+{candidates}
+Respond with ONLY the id of the best file, or NONE if none fit."""
+
+
+def build_onboarding_packet() -> str:
+    """Populate B2B/Forwarder Onboarding Packet from existing Drive files and
+    email attachments; Gomeh reviews the emailed report and adjusts."""
+    from . import data_tools, emailfmt
+    alias = DOC_SWEEP_ALIAS
+    b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
+    if not b2b:
+        return "FAILED: B2B folder not found"
+    packet = drive_io.ensure_subfolder(alias, b2b, data_tools.PACKET_FOLDER)
+    placed, missing, ambiguous = [], [], []
+
+    for doc_type, keywords in PACKET_SEARCHES.items():
+        _status("build_onboarding_packet", state=f"searching: {doc_type}")
+        if any(doc_type.lower() in f["name"].lower()
+               for f in drive_io.list_files(alias, packet)):
+            placed.append(f"{doc_type}: already in packet")
+            continue
+        # 1) Drive by filename
+        candidates = []
+        for kw in keywords:
+            candidates += drive_io.name_search(alias, kw)
+        seen, uniq = set(), []
+        for c in candidates:
+            if c["id"] not in seen:
+                seen.add(c["id"])
+                uniq.append(c)
+        chosen = None
+        if uniq:
+            try:
+                msg = client.messages.create(
+                    model=config.CLAUDE_MODEL, max_tokens=50,
+                    messages=[{"role": "user", "content": PICK_PROMPT.format(
+                        doc_type=doc_type,
+                        candidates="\n".join(f"- id={c['id']} name={c['name']} "
+                                             f"modified={c['modifiedTime']}"
+                                             for c in uniq[:10]))}],
+                )
+                pick = msg.content[0].text.strip()
+                chosen = next((c for c in uniq if c["id"] in pick), None)
+            except Exception:  # noqa: BLE001
+                log.exception("pick failed")
+        if chosen:
+            link = drive_io.copy_file(alias, chosen["id"], packet,
+                                      f"{doc_type} - {chosen['name']}")
+            placed.append(f"{doc_type}: copied '{chosen['name']}' ({link})")
+            if len(uniq) > 1:
+                ambiguous.append(f"{doc_type}: also considered "
+                                 + ", ".join(c["name"] for c in uniq[:4]
+                                             if c["id"] != chosen["id"]))
+            continue
+        # 2) Email attachments fallback
+        found = False
+        try:
+            svc = gmail_client.service_for(alias)
+            resp = svc.users().messages().list(
+                userId="me", q=f'has:attachment "{keywords[0]}"', maxResults=5,
+            ).execute()
+            for ref in resp.get("messages", []):
+                full = svc.users().messages().get(userId="me", id=ref["id"],
+                                                  format="full").execute()
+                for att in gmail_client._extract_attachments(full["payload"]):
+                    if att["filename"].lower().endswith((".pdf", ".docx", ".xlsx")):
+                        data = gmail_client.download_attachment(alias, ref["id"],
+                                                                att["attachment_id"])
+                        drive_io.upload(alias, packet,
+                                        f"{doc_type} - {att['filename']}", data,
+                                        att["mime"] or "application/pdf")
+                        placed.append(f"{doc_type}: pulled '{att['filename']}' "
+                                      "from email")
+                        found = True
+                        break
+                if found:
+                    break
+        except Exception:  # noqa: BLE001
+            log.exception("email fallback failed for %s", doc_type)
+        if not found:
+            missing.append(doc_type)
+
+    _status("build_onboarding_packet", state="done")
+    report = ("Forwarder onboarding packet assembled — please review.\n\n"
+              "PLACED:\n" + "\n".join(f"  • {p}" for p in placed))
+    if ambiguous:
+        report += ("\n\nOTHER CANDIDATES I CONSIDERED (swap if I picked wrong):\n"
+                   + "\n".join(f"  • {a}" for a in ambiguous))
+    if missing:
+        report += ("\n\nSTILL MISSING — needs you:\n"
+                   + "\n".join(f"  • {m}" for m in missing)
+                   + "\n\nDrop these into B2B/" + data_tools.PACKET_FOLDER
+                   + " (or tell me where they are) and the packet is complete.")
+    gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                            "Onboarding packet ready for your review",
+                            report, html=emailfmt.text_to_html(report))
+    return (f"packet build complete: {len(placed)} placed, {len(missing)} missing")
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
-        "shipment_audit": shipment_audit, "refile_intake": refile_intake}
+        "shipment_audit": shipment_audit, "refile_intake": refile_intake,
+        "build_onboarding_packet": build_onboarding_packet}

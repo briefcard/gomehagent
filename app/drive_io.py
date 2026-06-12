@@ -116,6 +116,29 @@ def ensure_path(alias: str, root_id: str, path: str) -> str:
     return parent
 
 
+def name_search(alias: str, keyword: str, limit: int = 8) -> list[dict]:
+    """Files whose NAME contains the keyword (any folder, all drives)."""
+    safe = keyword.replace("'", " ")
+    resp = svc(alias).files().list(
+        q=f"name contains '{safe}' and mimeType != '{FOLDER}' and trashed = false",
+        fields="files(id,name,webViewLink,modifiedTime)",
+        includeItemsFromAllDrives=True, supportsAllDrives=True,
+        pageSize=limit, orderBy="modifiedTime desc",
+    ).execute()
+    return resp.get("files", [])
+
+
+def copy_file(alias: str, file_id: str, dest_folder_id: str,
+              new_name: str | None = None) -> str:
+    body = {"parents": [dest_folder_id]}
+    if new_name:
+        body["name"] = new_name
+    created = svc(alias).files().copy(
+        fileId=file_id, body=body, fields="webViewLink", supportsAllDrives=True,
+    ).execute()
+    return created.get("webViewLink", "copied")
+
+
 def file_exists(alias: str, folder_id: str, filename: str) -> bool:
     safe = filename.replace("'", " ")
     resp = svc(alias).files().list(
