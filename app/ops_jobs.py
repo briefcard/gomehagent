@@ -247,11 +247,35 @@ staging area belongs in the Baci Milano USA B2B Drive. EXISTING STRUCTURE:
 
 File's current intake path: {path}
 The file's CONTENTS are included above when readable — they are the primary
-evidence (counterparty, PO/order numbers, dates, doc type). Prefer existing
-folders; propose a new specific path only when nothing fits. Old revisions ->
-parent's 'OLD VERSIONS'. If genuinely unsure, answer keep.
+evidence (counterparty, PO/order numbers, dates, doc type).
+You MUST pick an EXISTING folder from the structure above unless absolutely
+nothing fits — new folders are a last resort (folder sprawl is a failure
+mode). Old revisions -> parent's 'OLD VERSIONS'. If genuinely unsure, keep.
 Respond JSON only: {{"target_path": "<path under B2B or 'keep'>",
-"why": "<one line>"}}"""
+"anchor": "<the entity that ties this file to others: counterparty + PO/"
+"shipment id, e.g. 'Primorous PO-2241'>"}}"""
+
+CONSOLIDATE_PROMPT = """You are finalizing a Drive reorganization plan.
+EXISTING FOLDER STRUCTURE (paths under B2B):
+{tree}
+
+PROPOSED MOVES (file -> proposed target, with the anchor entity each file
+belongs to):
+{proposals}
+
+Consolidate into a TETHER MAP: groups of files that belong together because
+they share an anchor (same counterparty/PO/shipment). Rules:
+1. REUSE EXISTING FOLDERS aggressively — remap proposals into existing
+   folders wherever reasonable. A new folder is justified only when a group
+   of 2+ related files has no sensible existing home. Never create a new
+   folder for a single stray file — keep it in intake instead.
+2. Merge near-duplicate targets (e.g. 'Orders/Primorous' and
+   'Primorous Order') into ONE folder, preferring the existing one.
+3. One short rationale PER GROUP, not per file.
+Respond JSON only:
+{{"groups": [{{"target_path": "<folder under B2B>", "existing": true/false,
+  "why": "<one line for the whole group>", "file_ids": ["..."]}}],
+ "keep_in_intake": ["<file_id>", ...]}}"""
 
 
 def refile_intake() -> str:
@@ -295,32 +319,72 @@ def refile_intake() -> str:
             target = (verdict.get("target_path") or "keep").strip().strip("/")
         except Exception:  # noqa: BLE001
             log.exception("refile decision failed for %s", f["path"])
-            target = "keep"
+            verdict, target = {}, "keep"
         if target.lower() == "keep":
             kept += 1
         else:
             plan.append({"file_id": f["id"], "from": f["path"], "to": target,
-                         "why": verdict.get("why", "")})
+                         "anchor": verdict.get("anchor", "")})
 
-    _status("refile_intake", state="plan ready", planned=len(plan), kept=kept)
+    _status("refile_intake", state="consolidating", proposals=len(plan))
     if not plan:
         return f"refile_intake: nothing to move ({kept} files stay in intake)"
 
-    plan_text = "\n".join(f"• {m['from']}  →  {m['to']}   ({m['why']})"
-                          for m in plan)
+    # Consolidation pass: tether map — group related files, collapse targets
+    # into existing folders, never spawn a folder for a single stray.
+    by_id = {m["file_id"]: m for m in plan}
+    proposals = "\n".join(f"- id={m['file_id']} file='{m['from']}' -> "
+                          f"'{m['to']}' anchor='{m['anchor']}'" for m in plan)
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=2500,
+            messages=[{"role": "user", "content": CONSOLIDATE_PROMPT.format(
+                tree=tree_text or "(empty)", proposals=proposals)}],
+        )
+        result = _json_extract(msg.content[0].text)
+        groups = result.get("groups", [])
+        kept += len(result.get("keep_in_intake", []))
+    except Exception:  # noqa: BLE001
+        log.exception("consolidation failed — falling back to raw proposals")
+        groups = [{"target_path": m["to"], "existing": False,
+                   "why": m["anchor"], "file_ids": [m["file_id"]]} for m in plan]
+
+    moves, map_lines, new_folders = [], [], 0
+    for g in groups:
+        ids = [i for i in g.get("file_ids", []) if i in by_id]
+        if not ids:
+            continue
+        if not g.get("existing", True):
+            new_folders += 1
+        map_lines.append(f"\n📂 {g['target_path']}"
+                         + ("  (new folder)" if not g.get("existing", True) else "")
+                         + f"\n   Why: {g.get('why', '')}")
+        for i in ids:
+            map_lines.append(f"   – {by_id[i]['from']}")
+            moves.append({"file_id": i, "from": by_id[i]["from"],
+                          "to": g["target_path"]})
+
+    _status("refile_intake", state="plan ready", planned=len(moves), kept=kept)
+    if not moves:
+        return f"refile_intake: nothing to move ({kept} stay in intake)"
+    plan_text = ("TETHER MAP — files grouped by what binds them together:"
+                 + "".join(map_lines)
+                 + f"\n\n{kept} files stay in intake; "
+                   f"{new_folders} new folder(s) proposed.")
     approvals.request_approval(
         "refile_moves",
-        f"Move {len(plan)} intake files into the B2B structure "
-        f"({kept} stay put)",
-        {"account": alias, "moves": plan,
-         "subject": f"Refile plan: {len(plan)} moves",
+        f"Refile plan: {len(moves)} files into {len(groups)} groups "
+        f"({new_folders} new folders, {kept} stay put)",
+        {"account": alias, "moves": moves,
+         "subject": f"Refile plan: {len(moves)} files, {len(groups)} groups",
          "inbound_from": "Drive intake review",
          "inbound_snippet": "Content-based reorganization of _Agent Intake",
-         "reason": "Each decision was made by reading the file's contents.",
+         "reason": "Grouped by shared counterparty/PO/shipment; existing "
+                   "folders reused wherever possible.",
          "body": plan_text, "bucket": "logistics"},
     )
-    return (f"refile plan queued for approval: {len(plan)} proposed moves, "
-            f"{kept} keeps — approve it from the batch email/WhatsApp")
+    return (f"refile plan queued: {len(moves)} files in {len(groups)} groups, "
+            f"{new_folders} new folders — approve from the batch")
 
 
 PACKET_SEARCHES = {
