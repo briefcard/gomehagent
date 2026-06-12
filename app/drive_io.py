@@ -102,6 +102,11 @@ def list_all_files_recursive(alias: str, folder_id: str, _prefix: str = "",
     return out
 
 
+def download(alias: str, file_id: str) -> bytes:
+    return svc(alias).files().get_media(fileId=file_id,
+                                        supportsAllDrives=True).execute()
+
+
 def move(alias: str, file_id: str, new_parent_id: str) -> None:
     meta = svc(alias).files().get(fileId=file_id, fields="parents",
                                   supportsAllDrives=True).execute()
@@ -176,5 +181,5 @@ def _serialize(fn):
 
 for _name in ("find_folder", "ensure_subfolder", "folder_tree", "list_files",
               "list_all_files_recursive", "move", "ensure_path", "name_search",
-              "copy_file", "file_exists", "upload"):
+              "copy_file", "file_exists", "upload", "download"):
     globals()[_name] = _serialize(globals()[_name])

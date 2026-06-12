@@ -114,6 +114,21 @@ def _execute(ap: db.Approval) -> None:
                     due_date=(dt.date.today() + dt.timedelta(days=3)).isoformat(),
                 ))
                 s.commit()
+    elif ap.kind == "refile_moves":
+        from . import drive_io, whatsapp
+        p = ap.payload
+        alias = p.get("account", "baci")
+        b2b = drive_io.find_folder(alias, "B2B")
+        done, failed = 0, 0
+        for m in p.get("moves", []):
+            try:
+                folder_id = drive_io.ensure_path(alias, b2b, m["to"])
+                drive_io.move(alias, m["file_id"], folder_id)
+                done += 1
+            except Exception:  # noqa: BLE001
+                failed += 1
+        whatsapp.send_text(f"📁 Refile executed: {done} files moved"
+                           + (f", {failed} failed (left in place)" if failed else "") + ".")
     # Future kinds: buy_label (Phase 4), pay (never auto), book_freight (Phase 5)
 
 

@@ -86,12 +86,31 @@ def doc_sweep() -> str:
     for idx, em in enumerate(emails, 1):
         _status("doc_sweep", progress=f"{idx}/{len(emails)} emails", filed=len(filed))
         try:
-            msg = client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=400, system=system,
-                messages=[{"role": "user", "content":
+            # Read the first PDF's contents — the document is the evidence.
+            import base64 as _b64
+            blocks: list = []
+            for att in em["attachments"]:
+                if att["filename"].lower().endswith(".pdf"):
+                    try:
+                        pdf = gmail_client.download_attachment(
+                            alias, em["id"], att["attachment_id"])
+                        if len(pdf) < 4_000_000:
+                            blocks.append({"type": "document", "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": _b64.standard_b64encode(pdf).decode()}})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
+            blocks.append({"type": "text", "text":
                            f"From: {em['from']}\nSubject: {em['subject']}\n"
                            f"Thread snippet: {em['snippet']}\n"
-                           f"Files: {[a['filename'] for a in em['attachments']]}"}],
+                           f"Files: {[a['filename'] for a in em['attachments']]}\n"
+                           "(First PDF included above when readable — its "
+                           "contents are the primary evidence for filing.)"})
+            msg = client.messages.create(
+                model=config.CLAUDE_MODEL, max_tokens=400, system=system,
+                messages=[{"role": "user", "content": blocks}],
             )
             meta = _json_extract(msg.content[0].text)
         except Exception:  # noqa: BLE001
@@ -222,69 +241,86 @@ def shipment_audit() -> str:
     return f"shipment_audit complete: {drafts_made} drafts, {len(escalations)} escalations"
 
 
-REFILE_PROMPT = """You are reorganizing a messy '_Agent Intake' staging area
-inside the Baci Milano USA B2B Drive. EXISTING FOLDER STRUCTURE:
+REFILE_PROMPT = """You are deciding where ONE file from the '_Agent Intake'
+staging area belongs in the Baci Milano USA B2B Drive. EXISTING STRUCTURE:
 {tree}
 
-For each file below (shown with its current intake path, which hints at its
-origin), decide its proper home. Prefer existing folders; propose new
-descriptive paths only when nothing fits (counterparty + PO/shipment —
-never vague). Mark obvious old revisions to go into 'OLD VERSIONS' under
-their parent. Respond JSON only:
-{{"moves": {{"<file_id>": "<target path under B2B, or 'keep'>"}}}}"""
+File's current intake path: {path}
+The file's CONTENTS are included above when readable — they are the primary
+evidence (counterparty, PO/order numbers, dates, doc type). Prefer existing
+folders; propose a new specific path only when nothing fits. Old revisions ->
+parent's 'OLD VERSIONS'. If genuinely unsure, answer keep.
+Respond JSON only: {{"target_path": "<path under B2B or 'keep'>",
+"why": "<one line>"}}"""
 
 
 def refile_intake() -> str:
-    """Reorganize everything in _Agent Intake into the real B2B structure."""
+    """Read every intake file's contents, build a move plan, and queue it for
+    Gomeh's approval. NOTHING MOVES until he approves the plan."""
+    import base64 as _b64
+
     alias = DOC_SWEEP_ALIAS
     b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
     if not b2b:
         return "FAILED: B2B folder not found"
     intake = drive_io.ensure_subfolder(alias, b2b, INTAKE_NAME)
     _status("refile_intake", state="listing intake")
-    files = drive_io.list_all_files_recursive(alias, intake)
+    files = drive_io.list_all_files_recursive(alias, intake)[:150]
     if not files:
         return "refile_intake: intake is empty"
     tree_text = "\n".join(sorted(drive_io.folder_tree(alias, b2b, depth=3)))[:6000]
-    system = REFILE_PROMPT.format(tree=tree_text or "(B2B is empty)")
 
-    moved, kept = [], 0
-    _status("refile_intake", state="refiling", total=len(files), moved=0)
-    for i in range(0, len(files), 20):
-        batch = files[i:i + 20]
-        listing = "\n".join(f"- id={f['id']} path={f['path']}" for f in batch)
+    plan, kept = [], 0
+    _status("refile_intake", state="reading files", total=len(files))
+    for idx, f in enumerate(files, 1):
+        _status("refile_intake", progress=f"{idx}/{len(files)}", planned=len(plan))
+        blocks: list = []
+        if f["name"].lower().endswith(".pdf"):
+            try:
+                data = drive_io.download(alias, f["id"])
+                if len(data) < 4_000_000:
+                    blocks.append({"type": "document", "source": {
+                        "type": "base64", "media_type": "application/pdf",
+                        "data": _b64.standard_b64encode(data).decode()}})
+            except Exception:  # noqa: BLE001
+                pass
+        blocks.append({"type": "text", "text": REFILE_PROMPT.format(
+            tree=tree_text or "(empty)", path=f["path"])})
         try:
             msg = client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=1500, system=system,
-                messages=[{"role": "user", "content": listing}],
+                model=config.CLAUDE_MODEL, max_tokens=200,
+                messages=[{"role": "user", "content": blocks}],
             )
-            moves = _json_extract(msg.content[0].text).get("moves", {})
+            verdict = _json_extract(msg.content[0].text)
+            target = (verdict.get("target_path") or "keep").strip().strip("/")
         except Exception:  # noqa: BLE001
-            log.exception("refile decision failed")
-            continue
-        for f in batch:
-            target = (moves.get(f["id"]) or "keep").strip().strip("/")
-            if target.lower() == "keep":
-                kept += 1
-                continue
-            try:
-                folder_id = drive_io.ensure_path(alias, b2b, target)
-                drive_io.move(alias, f["id"], folder_id)
-                moved.append(f"{f['path']} -> {target}")
-            except Exception:  # noqa: BLE001
-                log.exception("move failed: %s", f["path"])
-        _status("refile_intake", progress=f"{min(i + 20, len(files))}/{len(files)}",
-                moved=len(moved))
+            log.exception("refile decision failed for %s", f["path"])
+            target = "keep"
+        if target.lower() == "keep":
+            kept += 1
+        else:
+            plan.append({"file_id": f["id"], "from": f["path"], "to": target,
+                         "why": verdict.get("why", "")})
 
-    _status("refile_intake", state="done", moved=len(moved))
-    from . import emailfmt
-    report = (f"Intake reorganization complete.\n\nMoved {len(moved)} files into "
-              f"the proper B2B structure ({kept} left in intake for your call):\n\n"
-              + "\n".join(f"  • {m}" for m in moved[:120]))
-    gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
-                            f"Intake reorganized — {len(moved)} files refiled",
-                            report, html=emailfmt.text_to_html(report))
-    return f"refile_intake complete: {len(moved)} moved, {kept} kept"
+    _status("refile_intake", state="plan ready", planned=len(plan), kept=kept)
+    if not plan:
+        return f"refile_intake: nothing to move ({kept} files stay in intake)"
+
+    plan_text = "\n".join(f"• {m['from']}  →  {m['to']}   ({m['why']})"
+                          for m in plan)
+    approvals.request_approval(
+        "refile_moves",
+        f"Move {len(plan)} intake files into the B2B structure "
+        f"({kept} stay put)",
+        {"account": alias, "moves": plan,
+         "subject": f"Refile plan: {len(plan)} moves",
+         "inbound_from": "Drive intake review",
+         "inbound_snippet": "Content-based reorganization of _Agent Intake",
+         "reason": "Each decision was made by reading the file's contents.",
+         "body": plan_text, "bucket": "logistics"},
+    )
+    return (f"refile plan queued for approval: {len(plan)} proposed moves, "
+            f"{kept} keeps — approve it from the batch email/WhatsApp")
 
 
 PACKET_SEARCHES = {
