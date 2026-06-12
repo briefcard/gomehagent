@@ -141,6 +141,9 @@ async def whatsapp_incoming(request: Request) -> dict:
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
                 for msg in change.get("value", {}).get("messages", []):
+                    # Only Gomeh may approve or command — ignore all others.
+                    if config._norm_phone(msg.get("from", "")) != config.WHATSAPP_APPROVER_NUMBER:
+                        continue
                     if msg.get("type") == "interactive":
                         reply_id = msg["interactive"]["button_reply"]["id"]
                         action, ap_id = reply_id.split(":", 1)

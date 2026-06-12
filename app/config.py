@@ -113,7 +113,18 @@ THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
 # WhatsApp Cloud API (optional — agent falls back to email until these are set)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
-WHATSAPP_APPROVER_NUMBER = os.environ.get("WHATSAPP_APPROVER_NUMBER", "")
+
+
+def _norm_phone(raw: str) -> str:
+    """Accepts '7869237857', '+1 786-923-7857', '17869237857' etc.
+    Returns Cloud-API format: country code + number, digits only."""
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) == 10:  # bare US number -> add country code
+        digits = "1" + digits
+    return digits
+
+
+WHATSAPP_APPROVER_NUMBER = _norm_phone(os.environ.get("WHATSAPP_APPROVER_NUMBER", ""))
 WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
 
 WHATSAPP_ENABLED = bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_ID and WHATSAPP_APPROVER_NUMBER)
