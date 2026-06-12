@@ -284,3 +284,30 @@ def _mime(to: str, subject: str, body: str, html: str | None = None) -> str:
     if html:
         msg.add_alternative(html, subtype="html")
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+# ---------------------------------------------------------------------------
+# THREAD SAFETY: googleapiclient/httplib2 is NOT thread-safe. All public
+# functions are serialized behind one lock so concurrent webhook handlers,
+# approval clicks, and scheduled jobs can't corrupt a shared connection
+# (which segfaults the whole process — Render exit 139).
+# ---------------------------------------------------------------------------
+import threading as _threading
+
+_google_lock = _threading.RLock()
+
+
+def _serialize(fn):
+    def wrapped(*args, **kwargs):
+        with _google_lock:
+            return fn(*args, **kwargs)
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
+for _name in ("fetch_unread", "fetch_unanswered", "get_thread_context",
+              "fetch_sent", "fetch_recent", "fetch_with_attachments",
+              "download_attachment", "ensure_label", "add_label", "mark_read",
+              "create_draft", "send_email"):
+    globals()[_name] = _serialize(globals()[_name])

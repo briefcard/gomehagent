@@ -146,40 +146,59 @@ def ask(key: str = "", q: str = "") -> str:
         return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
 
 
-def _handle_voice(media_id: str) -> None:
-    """Voice note -> download -> transcribe -> same command agent."""
+# ---------------------------------------------------------------------------
+# Ordered command queue: ONE consumer thread processes Gomeh's messages
+# sequentially. Thread-per-message caused concurrent Google API access
+# (segfault / exit 139) and memory spikes under bursts.
+# ---------------------------------------------------------------------------
+import queue
+from collections import deque
+
+_commands: "queue.Queue[tuple[str, str]]" = queue.Queue()
+_consumer_started = False
+_seen_wamids: deque = deque(maxlen=500)
+
+
+def _consume() -> None:
     from . import command_agent, whatsapp
 
-    def _run() -> None:
+    while True:
+        kind, payload = _commands.get()
         try:
-            audio, mime = whatsapp.download_media(media_id)
-            transcript = whatsapp.transcribe(audio, mime)
-            if not transcript:
-                whatsapp.send_text("I couldn't make out that voice note — try again?")
-                return
-            whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
-            whatsapp.send_text(command_agent.handle(transcript))
+            if kind == "voice":
+                audio, mime = whatsapp.download_media(payload)
+                transcript = whatsapp.transcribe(audio, mime)
+                if not transcript:
+                    whatsapp.send_text("I couldn't make out that voice note — try again?")
+                    continue
+                whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
+                whatsapp.send_text(command_agent.handle(transcript))
+            else:
+                whatsapp.send_text(command_agent.handle(payload))
         except RuntimeError:
             whatsapp.send_text("Voice notes need a transcription key — add "
                                "OPENAI_API_KEY in Render and I'll handle audio.")
         except Exception as exc:  # noqa: BLE001
-            whatsapp.send_text(f"Couldn't process that voice note: {exc.__class__.__name__}")
+            from . import whatsapp as wa
+            wa.send_text(f"Something broke handling that: {exc.__class__.__name__}")
+        finally:
+            _commands.task_done()
 
-    threading.Thread(target=_run, daemon=True).start()
+
+def _enqueue(kind: str, payload: str) -> None:
+    global _consumer_started
+    if not _consumer_started:
+        threading.Thread(target=_consume, daemon=True).start()
+        _consumer_started = True
+    _commands.put((kind, payload))
+
+
+def _handle_voice(media_id: str) -> None:
+    _enqueue("voice", media_id)
 
 
 def _handle_command(text: str) -> None:
-    """Free-text WhatsApp messages from Gomeh -> conversational agent with
-    the full toolset (email, Drive, Shopify, Calendar, jobs, deadlines)."""
-    from . import command_agent, whatsapp
-
-    def _run() -> None:
-        try:
-            whatsapp.send_text(command_agent.handle(text))
-        except Exception as exc:  # noqa: BLE001
-            whatsapp.send_text(f"Something broke handling that: {exc.__class__.__name__}")
-
-    threading.Thread(target=_run, daemon=True).start()
+    _enqueue("text", text)
 
 
 # ---- WhatsApp Cloud API webhook (active once Meta app is configured) ----
@@ -205,6 +224,11 @@ async def whatsapp_incoming(request: Request) -> dict:
                     # Only Gomeh may approve or command — ignore all others.
                     if config._norm_phone(msg.get("from", "")) != config.WHATSAPP_APPROVER_NUMBER:
                         continue
+                    # Meta redelivers on webhook hiccups — process each once.
+                    wamid = msg.get("id", "")
+                    if wamid in _seen_wamids:
+                        continue
+                    _seen_wamids.append(wamid)
                     if msg.get("type") == "interactive":
                         reply_id = msg["interactive"]["button_reply"]["id"]
                         action, ap_id = reply_id.split(":", 1)

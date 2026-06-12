@@ -8,6 +8,10 @@ FOLDER = "application/vnd.google-apps.folder"
 _svc_cache: dict = {}
 _folder_cache: dict = {}
 
+# Share the Gmail module's lock: one serialized lane for ALL Google API calls
+# in this process (httplib2 is not thread-safe; concurrency segfaults).
+from .gmail_client import _google_lock  # noqa: E402
+
 
 def svc(alias: str):
     if alias not in _svc_cache:
@@ -160,3 +164,17 @@ def upload(alias: str, folder_id: str, filename: str, data: bytes,
         fields="webViewLink", supportsAllDrives=True,
     ).execute()
     return created.get("webViewLink", "uploaded")
+
+
+def _serialize(fn):
+    def wrapped(*args, **kwargs):
+        with _google_lock:
+            return fn(*args, **kwargs)
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
+for _name in ("find_folder", "ensure_subfolder", "folder_tree", "list_files",
+              "list_all_files_recursive", "move", "ensure_path", "name_search",
+              "copy_file", "file_exists", "upload"):
+    globals()[_name] = _serialize(globals()[_name])
