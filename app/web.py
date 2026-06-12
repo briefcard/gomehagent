@@ -134,6 +134,28 @@ def ask(key: str = "", q: str = "") -> str:
         return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
 
 
+def _handle_voice(media_id: str) -> None:
+    """Voice note -> download -> transcribe -> same command agent."""
+    from . import command_agent, whatsapp
+
+    def _run() -> None:
+        try:
+            audio, mime = whatsapp.download_media(media_id)
+            transcript = whatsapp.transcribe(audio, mime)
+            if not transcript:
+                whatsapp.send_text("I couldn't make out that voice note — try again?")
+                return
+            whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
+            whatsapp.send_text(command_agent.handle(transcript))
+        except RuntimeError:
+            whatsapp.send_text("Voice notes need a transcription key — add "
+                               "OPENAI_API_KEY in Render and I'll handle audio.")
+        except Exception as exc:  # noqa: BLE001
+            whatsapp.send_text(f"Couldn't process that voice note: {exc.__class__.__name__}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _handle_command(text: str) -> None:
     """Free-text WhatsApp messages from Gomeh -> conversational agent with
     the full toolset (email, Drive, Shopify, Calendar, jobs, deadlines)."""
@@ -178,6 +200,8 @@ async def whatsapp_incoming(request: Request) -> dict:
                         approvals.apply_decision(ap_id, decision)
                     elif msg.get("type") == "text":
                         _handle_command(msg["text"]["body"])
+                    elif msg.get("type") == "audio":
+                        _handle_voice(msg["audio"]["id"])
     except Exception:  # noqa: BLE001 — always 200 so Meta doesn't retry-storm
         pass
     return {"status": "received"}

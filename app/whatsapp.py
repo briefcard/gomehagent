@@ -49,6 +49,40 @@ def _email_fallback(body: str) -> None:
         pass
 
 
+def download_media(media_id: str) -> tuple[bytes, str]:
+    """Download a received media file (voice note, image, doc) from Meta."""
+    meta = httpx.get(
+        f"{API}/{media_id}",
+        headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
+        timeout=30,
+    ).json()
+    data = httpx.get(
+        meta["url"],
+        headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
+        timeout=60,
+    )
+    data.raise_for_status()
+    return data.content, meta.get("mime_type", "audio/ogg")
+
+
+def transcribe(audio: bytes, mime: str) -> str:
+    """Speech-to-text via OpenAI Whisper. Needs OPENAI_API_KEY env var."""
+    import os
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    ext = "ogg" if "ogg" in mime else "m4a" if "mp4" in mime else "mp3"
+    r = httpx.post(
+        "https://api.openai.com/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {key}"},
+        data={"model": "whisper-1"},
+        files={"file": (f"note.{ext}", audio, mime)},
+        timeout=120,
+    )
+    r.raise_for_status()
+    return r.json().get("text", "").strip()
+
+
 def send_approval(approval_id: str, summary: str) -> None:
     """Interactive Approve/Deny buttons; replies handled in web.py webhook."""
     _post({
