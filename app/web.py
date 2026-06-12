@@ -91,6 +91,33 @@ def job_status(key: str = "") -> dict:
     return _job_status or {"status": "no jobs run yet"}
 
 
+@app.get("/admin/test_whatsapp")
+def test_whatsapp(key: str = "") -> dict:
+    """Send a test WhatsApp message and surface Meta's raw response."""
+    import httpx
+
+    from . import whatsapp as wa
+
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    if not config.WHATSAPP_ENABLED:
+        return {"error": "whatsapp env vars incomplete"}
+    r = httpx.post(
+        f"{wa.API}/{config.WHATSAPP_PHONE_ID}/messages",
+        headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
+        json={"messaging_product": "whatsapp",
+              "to": config.WHATSAPP_APPROVER_NUMBER,
+              "type": "text", "text": {"body": "Test ping from your assistant ✅"}},
+        timeout=30,
+    )
+    try:
+        body = r.json()
+    except Exception:  # noqa: BLE001
+        body = {"raw": r.text[:500]}
+    return {"status_code": r.status_code, "to": config.WHATSAPP_APPROVER_NUMBER,
+            "phone_id": config.WHATSAPP_PHONE_ID, "meta_response": body}
+
+
 @app.get("/admin/ask", response_class=PlainTextResponse)
 def ask(key: str = "", q: str = "") -> str:
     """The conversational agent over HTTP, until WhatsApp is live:
