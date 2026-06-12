@@ -20,6 +20,11 @@ def _post(payload: dict) -> None:
     ).raise_for_status()
 
 
+import os
+
+WHATSAPP_TEMPLATE_NAME = os.environ.get("WHATSAPP_TEMPLATE_NAME", "")
+
+
 def send_text(body: str) -> None:
     if not config.WHATSAPP_ENABLED:
         return
@@ -30,20 +35,46 @@ def send_text(body: str) -> None:
             "type": "text",
             "text": {"body": body[:4096]},
         })
+        return
     except Exception:  # noqa: BLE001 — 24h window closed or API hiccup
-        _email_fallback(body)
+        pass
+    # 24h window closed: try an approved template message (reopens nothing,
+    # but reaches the phone). Falls back to email if no template configured.
+    if WHATSAPP_TEMPLATE_NAME:
+        try:
+            # Template parameters may not contain newlines.
+            flat = " | ".join(line.strip() for line in body.splitlines()
+                              if line.strip())[:900]
+            _post({
+                "messaging_product": "whatsapp",
+                "to": config.WHATSAPP_APPROVER_NUMBER,
+                "type": "template",
+                "template": {"name": WHATSAPP_TEMPLATE_NAME,
+                             "language": {"code": "en_US"},
+                             "components": [{"type": "body", "parameters": [
+                                 {"type": "text", "text": flat}]}]},
+            })
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    _email_fallback(body)
 
 
 def _email_fallback(body: str) -> None:
-    from . import gmail_client  # local import avoids circular dependency
+    from . import emailfmt, gmail_client  # local import avoids circular dependency
 
     try:
+        first_line = next((ln for ln in body.splitlines() if ln.strip()), "update")
         gmail_client.send_email(
             config.NOTIFY_FROM_ALIAS,
             config.APPROVER_EMAIL,
-            "[Assistant] (WhatsApp unavailable) " + body.splitlines()[0][:80],
-            body + "\n\nSent by email because the WhatsApp 24h window was "
-                   "closed — message the agent on WhatsApp to reopen it.",
+            "Assistant update: " + first_line[:70],
+            body + "\n\nDelivered by email because the WhatsApp 24-hour window "
+                   "was closed. Send the agent any WhatsApp message to reopen it.",
+            html=emailfmt.text_to_html(
+                body + "\n\nDelivered by email because the WhatsApp 24-hour "
+                       "window was closed. Send the agent any WhatsApp message "
+                       "to reopen it."),
         )
     except Exception:  # noqa: BLE001
         pass

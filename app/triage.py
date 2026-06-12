@@ -143,6 +143,20 @@ def _voice_rules(alias: str) -> str:
         return vp.rules if vp else ""
 
 
+def _parse_verdict(text: str) -> dict | None:
+    """Extract the JSON object from model output, tolerant of prose/fences."""
+    if not text:
+        return None
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        out = json.loads(text[start:end + 1])
+        return out if isinstance(out, dict) and "action" in out else None
+    except json.JSONDecodeError:
+        return None
+
+
 def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     system = SYSTEM
     system += (
@@ -205,7 +219,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
     for _ in range(8):
         msg = client.messages.create(
             model=model,
-            max_tokens=2000,
+            max_tokens=3000,  # headroom so long replies don't truncate the JSON
             system=system,
             tools=data_tools.TOOLS,
             messages=messages,
@@ -224,13 +238,25 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             continue
         text = next((b.text for b in msg.content if b.type == "text"), "").strip()
         break
-    # tolerate code fences
-    if text.startswith("```"):
-        text = text.strip("`").lstrip("json").strip()
-    try:
-        result = json.loads(text)
-    except json.JSONDecodeError:
-        result = {"category": "other", "action": "escalate", "reason": "triage parse failure",
+    result = _parse_verdict(text)
+    if result is None:
+        # One repair attempt: ask the model to re-emit clean JSON only.
+        try:
+            fix = client.messages.create(
+                model=config.CLAUDE_MODEL, max_tokens=2500,
+                messages=[{"role": "user", "content":
+                           "Convert this triage verdict into the required JSON "
+                           "object ONLY (keys: category, action, reason, "
+                           "reply_subject, reply_body, deadline). No prose, no "
+                           "code fences. If truncated, complete it sensibly:\n\n"
+                           + text[:4000]}],
+            )
+            result = _parse_verdict(fix.content[0].text)
+        except Exception:  # noqa: BLE001
+            result = None
+    if result is None:
+        result = {"category": "other", "action": "escalate",
+                  "reason": "triage parse failure (after retry)",
                   "reply_subject": "", "reply_body": ""}
     # Hard guardrails, regardless of model output:
     # auto_reply is allowed only for trusted senders OR auto-send-eligible
