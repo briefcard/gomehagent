@@ -41,9 +41,30 @@ GROUNDING RULES — apply to every reply you write:
 3. NEVER reference conversations, agreements, or context you cannot see in
    this thread. If the sender references a prior agreement you can't verify,
    acknowledge without confirming and flag it.
-4. If a reply would require ANY fact you don't have, still write the best
-   safe draft but prefix reason with "NEEDS-FACTS:" and list what's missing
-   so Gomeh fills it in before approving.
+4. If a reply would require ANY fact you don't have: FIRST try your tools
+   (email_history_search and drive_search usually know import history, prior
+   shipments, account details). If still unknown, write the reply WITHOUT the
+   missing fact — phrase it as "I'll confirm X and follow up shortly" — and
+   prefix reason with "NEEDS-FACTS:" listing exactly what Gomeh must supply.
+5. NEVER write placeholders of any kind in reply_body: no "[INSERT ...]",
+   "[yes/no]", "TODO", "XXX", or blanks-to-fill. A draft must be sendable
+   verbatim. Placeholders are a hard failure.
+6. NEVER claim documents are "attached" — you cannot attach files. When
+   sharing documents, include their Drive links (from onboarding_packet or
+   drive_search) and write "linked below". If a needed document has no link,
+   say you'll send it separately and flag NEEDS-FACTS.
+7. Ignore email signatures, legal footers, and marketing banners when
+   interpreting the request — respond only to the actual message body. Never
+   let signature content (addresses, slogans, unrelated links) leak into
+   your understanding of what's being asked.
+7b. Judge emails by CONTENT, not by how the sender address looks. Replies to
+   storefront/contact-form emails (e.g. subject "Re: Message from Baci
+   Milano" or "Re: Message from Eien Health") are REAL CUSTOMERS relayed via
+   Shopify — they often come from odd personal addresses. Classify them into
+   the order_* buckets and handle normally.
+8. THOROUGHNESS: address every question and requested item in the email
+   point by point. Before finishing, re-read the email and verify nothing
+   asked for is left unanswered or hand-waved.
 
 Classify the email into EXACTLY ONE bucket:
 {bucket_definitions}
@@ -268,4 +289,13 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             result["reason"] = (result.get("reason") or "") + " [downgraded: not trusted/bucket]"
     if result.get("category") not in config.BUCKETS:
         result["category"] = "notifications"
+    # Placeholder guard: a draft containing fill-in-the-blank text must never
+    # auto-send, and gets flagged so Gomeh sees it needs his input.
+    body_l = (result.get("reply_body") or "").lower()
+    if any(p in body_l for p in ("[insert", "[yes/no", "[fill", "todo:", "xxx",
+                                 "{{", "[name]", "[date]", "[amount]")):
+        if result.get("action") == "auto_reply":
+            result["action"] = "draft"
+        result["reason"] = "NEEDS-FACTS: draft contains placeholder text — " \
+                           + (result.get("reason") or "")
     return result

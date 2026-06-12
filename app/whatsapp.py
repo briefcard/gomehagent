@@ -11,13 +11,27 @@ from . import config
 API = "https://graph.facebook.com/v21.0"
 
 
+class MetaSendError(Exception):
+    def __init__(self, code: int, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(f"{code}: {message}")
+
+
 def _post(payload: dict) -> None:
-    httpx.post(
+    r = httpx.post(
         f"{API}/{config.WHATSAPP_PHONE_ID}/messages",
         headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
         json=payload,
         timeout=30,
-    ).raise_for_status()
+    )
+    if r.status_code >= 400:
+        try:
+            err = r.json().get("error", {})
+        except Exception:  # noqa: BLE001
+            err = {}
+        raise MetaSendError(err.get("code", r.status_code),
+                            err.get("message", r.text[:200]))
 
 
 import os
@@ -28,6 +42,7 @@ WHATSAPP_TEMPLATE_NAME = os.environ.get("WHATSAPP_TEMPLATE_NAME", "")
 def send_text(body: str) -> None:
     if not config.WHATSAPP_ENABLED:
         return
+    err: MetaSendError | None = None
     try:
         _post({
             "messaging_product": "whatsapp",
@@ -36,10 +51,19 @@ def send_text(body: str) -> None:
             "text": {"body": body[:4096]},
         })
         return
-    except Exception:  # noqa: BLE001 — 24h window closed or API hiccup
+    except MetaSendError as exc:
+        err = exc
+    except Exception:  # noqa: BLE001
         pass
-    # 24h window closed: try an approved template message (reopens nothing,
-    # but reaches the phone). Falls back to email if no template configured.
+    # Diagnose honestly instead of blaming the 24h window for everything.
+    if err and err.code == 190:
+        _email_fallback("⚠️ My WhatsApp access token is invalid or expired "
+                        f"(Meta error 190: {err.message}). Update WHATSAPP_TOKEN "
+                        "in Render with a fresh system-user token.\n\n"
+                        "Original message:\n" + body)
+        return
+    window_closed = bool(err and err.code in (131047, 131026))
+    # Closed window (or unknown failure): try an approved template message.
     if WHATSAPP_TEMPLATE_NAME:
         try:
             # Template parameters may not contain newlines.
@@ -57,24 +81,26 @@ def send_text(body: str) -> None:
             return
         except Exception:  # noqa: BLE001
             pass
-    _email_fallback(body)
+    if window_closed:
+        _email_fallback(body, "the WhatsApp 24-hour window was closed — any "
+                              "WhatsApp message from you reopens it")
+    else:
+        _email_fallback(body, "WhatsApp send failed"
+                        + (f" (Meta error {err.code}: {err.message})" if err else ""))
 
 
-def _email_fallback(body: str) -> None:
+def _email_fallback(body: str, reason: str = "WhatsApp was unavailable") -> None:
     from . import emailfmt, gmail_client  # local import avoids circular dependency
 
     try:
         first_line = next((ln for ln in body.splitlines() if ln.strip()), "update")
+        full = body + f"\n\nDelivered by email because {reason}."
         gmail_client.send_email(
             config.NOTIFY_FROM_ALIAS,
             config.APPROVER_EMAIL,
             "Assistant update: " + first_line[:70],
-            body + "\n\nDelivered by email because the WhatsApp 24-hour window "
-                   "was closed. Send the agent any WhatsApp message to reopen it.",
-            html=emailfmt.text_to_html(
-                body + "\n\nDelivered by email because the WhatsApp 24-hour "
-                       "window was closed. Send the agent any WhatsApp message "
-                       "to reopen it."),
+            full,
+            html=emailfmt.text_to_html(full),
         )
     except Exception:  # noqa: BLE001
         pass
