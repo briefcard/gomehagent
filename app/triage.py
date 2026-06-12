@@ -62,6 +62,14 @@ Then decide ONE action, following per-bucket policy:
 - order_routine   -> "auto_reply" ONLY if you verified the answer with Shopify
                      tools; otherwise "draft".
 - logistics       -> HIGH-STAKES, work thoroughly before drafting:
+                     0. RFQ flow: if the email contains a freight quote, call
+                        rfq_get to find the matching open RFQ and
+                        rfq_record_quote to log the all-in figure (note any
+                        exclusions). If a forwarder requests company documents
+                        (POA, FDA, prior invoices), call onboarding_packet and
+                        include the Drive links for what exists; if the POA or
+                        anything needing signature is requested or MISSING ->
+                        "escalate" with "SIGNATURE NEEDED:".
                      1. Use email_history_search to find the shipment's prior
                         thread(s) and drive_search to locate referenced documents
                         (commercial invoice, packing list, BOL, arrival notice).

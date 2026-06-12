@@ -170,7 +170,77 @@ def email_history_search(account: str, query: str) -> str:
         return f"Email search failed: {exc.__class__.__name__}"
 
 
-# ---------- Dispatch ----------
+# ---------- RFQ & forwarder onboarding ----------
+
+PACKET_FOLDER = "Forwarder Onboarding Packet"
+PACKET_REQUIRED = ["Power of Attorney", "FDA", "Commercial Invoice",
+                   "Packing List", "Product Specs"]
+
+
+def onboarding_packet() -> str:
+    """Locate the standing forwarder-onboarding documents in the B2B Drive.
+    Returns each required doc with its link, or 'MISSING'."""
+    from . import drive_io
+    alias = "baci"
+    b2b = drive_io.find_folder(alias, "B2B")
+    if not b2b:
+        return "B2B folder not found in Drive."
+    folder = drive_io.ensure_subfolder(alias, b2b, PACKET_FOLDER)
+    files = drive_io.list_files(alias, folder)
+    detail = drive_io.svc(alias).files().list(
+        q=f"'{folder}' in parents and trashed = false",
+        fields="files(id,name,webViewLink)", includeItemsFromAllDrives=True,
+        supportsAllDrives=True, pageSize=100,
+    ).execute().get("files", [])
+    by_name = {f["name"]: f.get("webViewLink", "") for f in detail}
+    out = {}
+    for req in PACKET_REQUIRED:
+        match = next((n for n in by_name if req.lower() in n.lower()), None)
+        out[req] = {"file": match, "link": by_name.get(match, "")} if match else "MISSING"
+    out["_other_files"] = [n for n in by_name
+                           if not any(r.lower() in n.lower() for r in PACKET_REQUIRED)]
+    out["_folder"] = f"B2B/{PACKET_FOLDER}"
+    return json.dumps(out)
+
+
+def rfq_get(shipment_name: str) -> str:
+    from . import db
+    with db.SessionLocal() as s:
+        r = s.query(db.RFQ).filter(db.RFQ.shipment_name == shipment_name).first()
+        if not r:
+            names = [x.shipment_name for x in s.query(db.RFQ).all()]
+            return f"No RFQ named '{shipment_name}'. Existing: {names}"
+        return json.dumps({"shipment": r.shipment_name, "status": r.status,
+                           "details": r.details, "sent_to": r.forwarders,
+                           "quotes": r.quotes})
+
+
+def rfq_record_quote(shipment_name: str, forwarder_email: str, total: str,
+                     breakdown: str = "", notes: str = "") -> str:
+    """Record a quote received from a forwarder. Pings Gomeh when all
+    forwarders have answered."""
+    import datetime as dt
+
+    from . import db, whatsapp
+    with db.SessionLocal() as s:
+        r = s.query(db.RFQ).filter(db.RFQ.shipment_name == shipment_name).first()
+        if not r:
+            return f"No RFQ named '{shipment_name}' — create it first."
+        r.quotes = {**(r.quotes or {}), forwarder_email.lower(): {
+            "total": total, "breakdown": breakdown, "notes": notes,
+            "received": dt.date.today().isoformat()}}
+        answered = set(r.quotes)
+        expected = {f.lower() for f in (r.forwarders or [])}
+        complete = expected and expected <= answered
+        if complete:
+            r.status = "complete"
+        s.commit()
+    if complete:
+        whatsapp.send_text(f"📋 All quotes are in for '{shipment_name}'. "
+                           f"Say 'compare quotes for {shipment_name}' and I'll "
+                           "lay them out with a recommendation.")
+    return f"Quote recorded for {shipment_name} from {forwarder_email}." + \
+           (" ALL QUOTES NOW IN." if complete else "")
 
 TOOLS = [
     {
@@ -216,11 +286,38 @@ TOOLS = [
     },
 ]
 
+TOOLS += [
+    {"name": "onboarding_packet",
+     "description": "The standing forwarder-onboarding documents (Power of "
+                    "Attorney, FDA docs, sample commercial invoice/packing "
+                    "list) with Drive links. USE THIS whenever a freight "
+                    "forwarder or customs broker requests company documents — "
+                    "include the links in the reply. Anything MISSING or "
+                    "needing signature -> escalate.",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "rfq_get",
+     "description": "Status of an RFQ round: details, who was asked, quotes in.",
+     "input_schema": {"type": "object", "properties": {
+         "shipment_name": {"type": "string"}}, "required": ["shipment_name"]}},
+    {"name": "rfq_record_quote",
+     "description": "Record a freight quote received from a forwarder (use "
+                    "when an email contains pricing for an open RFQ). Total "
+                    "should be the all-in figure; note exclusions in notes.",
+     "input_schema": {"type": "object", "properties": {
+         "shipment_name": {"type": "string"}, "forwarder_email": {"type": "string"},
+         "total": {"type": "string"}, "breakdown": {"type": "string"},
+         "notes": {"type": "string"}},
+         "required": ["shipment_name", "forwarder_email", "total"]}},
+]
+
 _HANDLERS = {
     "shopify_find_orders": shopify_find_orders,
     "shopify_order_details": shopify_order_details,
     "drive_search": drive_search,
     "email_history_search": email_history_search,
+    "onboarding_packet": onboarding_packet,
+    "rfq_get": rfq_get,
+    "rfq_record_quote": rfq_record_quote,
 }
 
 

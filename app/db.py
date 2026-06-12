@@ -138,6 +138,20 @@ class Shipment(Base):
     notes = Column(Text, default="")
 
 
+class RFQ(Base):
+    """A request-for-quote round for one shipment, across multiple forwarders."""
+
+    __tablename__ = "rfqs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    shipment_name = Column(String, unique=True, nullable=False)
+    status = Column(String, default="quoting")  # quoting | complete | decided | closed
+    details = Column(JSON, default=dict)  # cargo, origin, incoterm, ready date...
+    forwarders = Column(JSON, default=list)  # emails the RFQ went to
+    quotes = Column(JSON, default=dict)  # {forwarder_email: {total, breakdown, notes, received}}
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

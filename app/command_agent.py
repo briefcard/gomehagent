@@ -86,6 +86,22 @@ ACTION_TOOLS = [
          "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
          "start": {"type": "string"}, "end": {"type": "string"}},
          "required": ["account", "start", "end"]}},
+    {"name": "rfq_start",
+     "description": "Launch an RFQ round: creates the RFQ + shipment records "
+                    "and queues a quote-request email to each forwarder (all "
+                    "go to Gomeh's approval first). Gather the cargo details "
+                    "from Gomeh before calling: what/volume/weight/pallets, "
+                    "pickup origin, incoterm, ready date, destination "
+                    "(default: 4360 NW 135th St, Opa-locka, FL 33054).",
+     "input_schema": {"type": "object", "properties": {
+         "shipment_name": {"type": "string", "description": "e.g. 'Italy-Jun2026'"},
+         "cargo": {"type": "string", "description": "full cargo description"},
+         "origin": {"type": "string"}, "incoterm": {"type": "string"},
+         "ready_date": {"type": "string"},
+         "forwarder_emails": {"type": "array", "items": {"type": "string"}},
+         "include_onboarding_packet": {"type": "boolean",
+                                       "description": "true for NEW forwarders"}},
+         "required": ["shipment_name", "cargo", "origin", "forwarder_emails"]}},
     {"name": "add_voice_rule",
      "description": "When Gomeh gives feedback about a draft or how replies "
                     "should be written ('too formal', 'never offer refunds "
@@ -128,6 +144,83 @@ ACTION_TOOLS = [
 ]
 
 
+RFQ_TEMPLATE = """Hello,
+
+We'd like to request a quote for an upcoming shipment for Baci Milano USA:
+
+Cargo: {cargo}
+Pickup / origin: {origin}
+Incoterm: {incoterm}
+Ready date: {ready_date}
+Delivery to: 4360 NW 135th St, Opa-locka, FL 33054
+
+Please provide ALL-IN pricing covering: freight, origin charges, destination
+charges, customs clearance, ISF (if ocean), chassis/drayage to our warehouse,
+and an estimated duties figure. Please state explicitly anything excluded.
+{packet_line}
+We're collecting quotes this week and will confirm promptly.
+
+Best,
+
+Baci Milano Customer Care"""
+
+
+def _rfq_start(args: dict) -> str:
+    import datetime as dt
+
+    shipment = args["shipment_name"]
+    details = {"cargo": args["cargo"], "origin": args["origin"],
+               "incoterm": args.get("incoterm", "to be advised"),
+               "ready_date": args.get("ready_date", "as soon as possible")}
+    emails = [e.strip().lower() for e in args["forwarder_emails"]]
+
+    packet_line = ""
+    if args.get("include_onboarding_packet"):
+        packet = json.loads(data_tools.onboarding_packet())
+        links = [f"- {k}: {v['link']}" for k, v in packet.items()
+                 if isinstance(v, dict) and v.get("link")]
+        missing = [k for k, v in packet.items() if v == "MISSING"]
+        if links:
+            packet_line = ("\nFor your files, our standing documentation:\n"
+                           + "\n".join(links) + "\n")
+        if missing:
+            packet_line += (f"\n[NOTE TO GOMEH — not sent: packet is missing "
+                            f"{', '.join(missing)}; add them to B2B/"
+                            f"{data_tools.PACKET_FOLDER} and I'll include them "
+                            f"in follow-ups.]\n")
+
+    with db.SessionLocal() as s:
+        if s.query(db.RFQ).filter(db.RFQ.shipment_name == shipment).first():
+            return f"RFQ '{shipment}' already exists — use rfq_get."
+        s.add(db.RFQ(shipment_name=shipment, details=details, forwarders=emails))
+        if not s.query(db.Shipment).filter(db.Shipment.name == shipment).first():
+            s.add(db.Shipment(name=shipment, status="quoting",
+                              notes=f"RFQ sent {dt.date.today().isoformat()}"))
+        s.commit()
+
+    body = RFQ_TEMPLATE.format(**details, packet_line=packet_line)
+    for to in emails:
+        approvals.request_approval(
+            "send_email",
+            f"[RFQ {shipment}] quote request to {to}",
+            {"account": "baci", "to": to,
+             "subject": f"Quote request — {shipment} ({details['origin']} to Miami)",
+             "body": body, "inbound_from": to,
+             "inbound_snippet": f"RFQ round for {shipment}",
+             "reason": "RFQ launched by Gomeh", "bucket": "logistics",
+             "expect_reply": True},
+            notify=False,
+        )
+    approvals.notify_pending(title=f"RFQ '{shipment}': {len(emails)} quote "
+                                   "requests ready to send")
+    memory.remember(f"RFQ {shipment}",
+                    f"Sent to {len(emails)} forwarders {dt.date.today().isoformat()}; "
+                    "awaiting quotes; chase via follow-up engine")
+    return (f"RFQ '{shipment}' created. {len(emails)} quote-request drafts are "
+            "in the approval queue. Replies will be recorded automatically and "
+            "non-responders chased after 3 days.")
+
+
 def _cal(alias: str):
     return build("calendar", "v3", credentials=gmail_client.creds_for(alias),
                  cache_discovery=False)
@@ -159,6 +252,8 @@ def _dispatch(name: str, args: dict) -> str:
             return memory.remember(args["topic"], args["content"])
         if name == "forget_memory":
             return memory.forget(args["topic"])
+        if name == "rfq_start":
+            return _rfq_start(args)
         if name == "add_voice_rule":
             from . import voice_learn
             return voice_learn.add_rule(args["account"], args["rule"])
