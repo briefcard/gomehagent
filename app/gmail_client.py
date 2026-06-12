@@ -266,17 +266,20 @@ def create_draft(alias: str, to: str, subject: str, body: str, thread_id: str | 
     return draft["id"]
 
 
-def send_email(alias: str, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
-    payload = {"raw": _mime(to, subject, body)}
+def send_email(alias: str, to: str, subject: str, body: str,
+               thread_id: str | None = None, html: str | None = None) -> str:
+    payload = {"raw": _mime(to, subject, body, html)}
     if thread_id:
         payload["threadId"] = thread_id
     sent = service_for(alias).users().messages().send(userId="me", body=payload).execute()
     return sent["id"]
 
 
-def _mime(to: str, subject: str, body: str) -> str:
+def _mime(to: str, subject: str, body: str, html: str | None = None) -> str:
     msg = EmailMessage()
     msg["To"] = to
     msg["Subject"] = subject
-    msg.set_content(body)
+    msg.set_content(body)  # plain-text part (fallback + WhatsApp parity)
+    if html:
+        msg.add_alternative(html, subtype="html")
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()

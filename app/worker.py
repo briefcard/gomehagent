@@ -175,12 +175,14 @@ def deadline_alerts() -> None:
         for d in due:
             d.status = "alerted"
         s.commit()
-    note = "💸 MONEY DEADLINES within 3 days:\n" + "\n".join(lines)
-    whatsapp.send_text(note)
+    note = "Money deadlines within 3 days:\n" + "\n".join(lines)
+    whatsapp.send_text("💸 " + note)
     if not config.WHATSAPP_ENABLED:
+        from . import emailfmt
         gmail_client.send_email(
             config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
-            "[URGENT] Money deadlines approaching", note,
+            "Heads up — money deadlines in the next 3 days", note,
+            html=emailfmt.text_to_html(note),
         )
 
 

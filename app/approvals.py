@@ -50,35 +50,24 @@ def notify_pending(title: str | None = None) -> int:
             whatsapp.send_approval(ap_id, summary)
         return len(items)
 
-    blocks = []
+    from . import emailfmt
+
+    rich, plain = [], []
     for i, (ap_id, summary, p) in enumerate(items, 1):
         approve = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'approved'])}"
         deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'denied'])}"
-        blocks.append(
-            f"\n{'=' * 58}\n"
-            f"#{i} · [{p.get('account', '?')}] {p.get('inbound_from', p.get('to', '?'))}\n"
-            f"Subject: {p.get('subject', '')}\n"
-            f"{'=' * 58}\n\n"
-            f"THEY WROTE:\n{_quote(p.get('inbound_snippet', '(not captured)'))}\n\n"
-            f"AI UNDERSTOOD: {p.get('reason', '—')}\n\n"
-            f"PROPOSED REPLY (to {p.get('to', '?')}):\n"
-            f"{'-' * 40}\n{p.get('body', '')[:2000]}\n{'-' * 40}\n\n"
-            f"✅ APPROVE & SEND:\n{approve}\n\n"
-            f"❌ DENY:\n{deny}\n"
-        )
-    subject = title or f"[Assistant] {len(items)} draft repl{'y' if len(items) == 1 else 'ies'} awaiting review"
+        rich.append({**p, "approve_url": approve, "deny_url": deny})
+        plain.append(f"{i}. {summary}\n   Approve: {approve}\n   Deny: {deny}\n")
+
+    n = len(items)
+    subject = title or (f"{n} draft repl{'y' if n == 1 else 'ies'} ready for "
+                        f"your review")
     gmail_client.send_email(
         config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL, subject,
-        "Each item shows the incoming email, what the AI understood, and its "
-        "proposed reply. Click a link to act; or edit the draft in that "
-        "inbox's Drafts folder, send manually, and click DENY here.\n"
-        + "".join(blocks) + "\n— Your assistant",
+        "Replies awaiting your approval:\n\n" + "\n".join(plain),
+        html=emailfmt.approval_email(rich, intro=title),
     )
     return len(items)
-
-
-def _quote(text: str) -> str:
-    return "\n".join("> " + line for line in text[:600].splitlines() if line.strip())
 
 
 def decide(token: str) -> str:

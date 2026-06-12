@@ -87,8 +87,10 @@ def doc_sweep() -> str:
           "anything should live differently — nothing in your existing B2B "
           "structure was touched."
     )
+    from . import emailfmt
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
-                            f"[Assistant] Doc sweep: {len(filed)} files filed", report)
+                            f"Document sweep done — {len(filed)} files organized",
+                            report, html=emailfmt.text_to_html(report))
     return f"doc_sweep complete: {len(filed)} filed"
 
 
@@ -170,9 +172,12 @@ def shipment_audit() -> str:
           "approval batch — one click each)\n\nNEEDS YOU PERSONALLY:\n"
         + ("\n".join(escalations) if escalations else "  • nothing")
     )
+    from . import emailfmt
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
-                            "[Assistant] Shipment & quote audit", report)
-    approvals.notify_pending(title=f"[AUDIT] {drafts_made} follow-up drafts ready")
+                            "Shipment & quote audit — Baci Milano",
+                            report, html=emailfmt.text_to_html(report))
+    approvals.notify_pending(
+        title=f"From the shipment audit: {drafts_made} follow-up drafts ready")
     return f"shipment_audit complete: {drafts_made} drafts, {len(escalations)} escalations"
 
 

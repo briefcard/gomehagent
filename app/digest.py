@@ -66,8 +66,31 @@ def build_digest(hours_back: int = 12) -> str:
 
 
 def send_digest() -> None:
-    body = build_digest()
+    from . import emailfmt
+
+    body = build_digest()  # plain text — used for WhatsApp and as fallback
+
+    # Structured pull for the HTML version
+    since = db.utcnow() - dt.timedelta(hours=12)
+    week_ahead = (dt.date.today() + dt.timedelta(days=7)).isoformat()
+    with db.SessionLocal() as s:
+        emails = (s.query(db.EmailLog).filter(db.EmailLog.seen_at >= since)
+                  .order_by(db.EmailLog.seen_at.desc()).all())
+        pending = s.query(db.Approval).filter(db.Approval.status == "pending").all()
+        deadlines = (s.query(db.Deadline)
+                     .filter(db.Deadline.status.in_(["open", "alerted"]),
+                             db.Deadline.due_date <= week_ahead)
+                     .order_by(db.Deadline.due_date).all())
+    sections: dict[str, list] = {}
+    for e in emails:
+        sections.setdefault(e.action or "other", []).append(e)
+
+    now = dt.datetime.now()
+    when = now.strftime("%p")
+    subject = (f"{'Morning' if when == 'AM' else 'Evening'} briefing — "
+               f"{now.strftime('%a %b %d')}")
     gmail_client.send_email(
-        config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL, "Daily assistant digest", body
+        config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL, subject, body,
+        html=emailfmt.digest_email(deadlines, pending, sections, when),
     )
     whatsapp.send_text(body)  # no-op until WhatsApp is enabled
