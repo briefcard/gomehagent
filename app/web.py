@@ -168,16 +168,16 @@ def _consume() -> None:
         kind, payload = _commands.get()
         try:
             if kind == "file":
-                from . import memory, ops_jobs
                 meta = json.loads(payload)
-                memory.save_turn("user", f"[sent document: {meta['filename']}"
-                                 + (f" — \"{meta['caption']}\"" if meta["caption"] else "") + "]")
-                chat = "\n".join(f"{m['role']}: {m['content'][:300]}"
-                                 for m in memory.load_chat_history()[-8:])
-                reply = ops_jobs.file_whatsapp_document(
-                    meta["media_id"], meta["filename"], meta["mime"],
-                    meta["caption"], chat)
-                memory.save_turn("assistant", reply)
+                data, real_mime = whatsapp.download_media(meta["media_id"])
+                text = (meta["caption"] or
+                        f"[I'm sending you a file: {meta['filename']}] — "
+                        "handle it appropriately given our conversation.")
+                reply = command_agent.handle(
+                    text,
+                    attachments=[{"filename": meta["filename"], "data": data,
+                                  "mime": meta["mime"] or real_mime}],
+                )
                 whatsapp.send_text(reply)
             elif kind == "voice":
                 audio, mime = whatsapp.download_media(payload)

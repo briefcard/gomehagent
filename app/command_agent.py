@@ -62,6 +62,14 @@ RULES:
 - SHIPMENTS: use upsert_shipment to keep structured records current as you
   learn things (booked, ETA changes, docs received, costs). These records are
   the source of truth shown to the email triage agent too.
+- DOCUMENTS Gomeh sends on WhatsApp appear inline in the conversation — READ
+  them (contents are the primary evidence: counterparty, PO numbers, dates).
+  Decide from the conversation what he wants: usually save_file_to_drive into
+  the right B2B folder (content-derived path and a clean descriptive name),
+  but he may instead want data extracted, a quote recorded, or a question
+  answered. Confirm what you did with path + link. If his text implies a file
+  that hasn't arrived in the conversation yet, say you're ready for it —
+  never claim "nothing was sent."
 - FEEDBACK: when Gomeh critiques a draft or sets a writing preference, call
   add_voice_rule for that inbox so every future draft obeys it.
 - Today's date: {today} (America/New_York).{memory_block}{shipments_block}"""
@@ -103,6 +111,16 @@ ACTION_TOOLS = [
          "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
          "start": {"type": "string"}, "end": {"type": "string"}},
          "required": ["account", "start", "end"]}},
+    {"name": "save_file_to_drive",
+     "description": "Save a document Gomeh just sent in this conversation "
+                    "into the B2B Drive. filename must match the attachment; "
+                    "target_path is the folder under B2B (prefer existing "
+                    "folders; specific names: counterparty + PO/shipment); "
+                    "rename_to optional for a cleaner descriptive name.",
+     "input_schema": {"type": "object", "properties": {
+         "filename": {"type": "string"}, "target_path": {"type": "string"},
+         "rename_to": {"type": "string"}},
+         "required": ["filename", "target_path"]}},
     {"name": "rfq_start",
      "description": "Launch an RFQ round: creates the RFQ + shipment records "
                     "and queues a quote-request email to each forwarder (all "
@@ -269,6 +287,23 @@ def _dispatch(name: str, args: dict) -> str:
             return memory.remember(args["topic"], args["content"])
         if name == "forget_memory":
             return memory.forget(args["topic"])
+        if name == "save_file_to_drive":
+            from . import drive_io
+            f = _session_files.get(args["filename"])
+            if f is None:
+                return (f"No attachment named '{args['filename']}' in this "
+                        f"conversation. Available: {list(_session_files)}")
+            b2b = drive_io.find_folder("baci", "B2B")
+            if not b2b:
+                return "B2B folder not found in Drive."
+            folder_id = drive_io.ensure_path("baci", b2b,
+                                             args["target_path"].strip("/"))
+            name_final = args.get("rename_to") or args["filename"]
+            link = drive_io.upload("baci", folder_id, name_final,
+                                   f["data"], f["mime"])
+            if link == "exists":
+                return f"'{name_final}' already exists in B2B/{args['target_path']} — skipped."
+            return f"Saved to B2B/{args['target_path']}/{name_final} — {link}"
         if name == "rfq_start":
             return _rfq_start(args)
         if name == "add_voice_rule":
@@ -342,14 +377,40 @@ def _dispatch(name: str, args: dict) -> str:
         return f"Tool error ({exc.__class__.__name__}): {str(exc)[:200]}"
 
 
-def handle(text: str) -> str:
-    """Process one free-text command with full conversational continuity."""
+# Attachments from the current WhatsApp exchange, readable by tools.
+_session_files: dict[str, dict] = {}
+
+
+def handle(text: str, attachments: list[dict] | None = None) -> str:
+    """Process one message (optionally with documents/images) with full
+    conversational continuity. attachments: [{filename, data, mime}]."""
+    import base64 as _b64
+
     system = SYSTEM.format(today=dt.datetime.now().strftime("%A %Y-%m-%d"),
                            memory_block=memory.memory_block(),
                            shipments_block=memory.shipments_block())
     tools = data_tools.TOOLS + ACTION_TOOLS
     messages = memory.load_chat_history()
-    messages.append({"role": "user", "content": text})
+
+    _session_files.clear()
+    if attachments:
+        blocks: list = []
+        for att in attachments:
+            _session_files[att["filename"]] = att
+            mime = (att.get("mime") or "").lower()
+            if len(att["data"]) < 5_000_000:
+                if "pdf" in mime or att["filename"].lower().endswith(".pdf"):
+                    blocks.append({"type": "document", "source": {
+                        "type": "base64", "media_type": "application/pdf",
+                        "data": _b64.standard_b64encode(att["data"]).decode()}})
+                elif mime.startswith("image/"):
+                    blocks.append({"type": "image", "source": {
+                        "type": "base64", "media_type": mime,
+                        "data": _b64.standard_b64encode(att["data"]).decode()}})
+        blocks.append({"type": "text", "text": text})
+        messages.append({"role": "user", "content": blocks})
+    else:
+        messages.append({"role": "user", "content": text})
     memory.save_turn("user", text)
     reply = "I hit my step limit on that one — try breaking it into smaller asks."
     for _ in range(10):
