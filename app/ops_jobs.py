@@ -981,4 +981,5 @@ JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "business_pulse": _skill_job("business_pulse"),
         "contract_expiry_watch": _skill_job("contract_expiry_watch"),
         "duplicate_cleanup": _skill_job("duplicate_cleanup"),
-        "spend_flags": _skill_job("spend_flags")}
+        "spend_flags": _skill_job("spend_flags"),
+        "meeting_scan": _skill_job("meeting_scan")}

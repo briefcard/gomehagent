@@ -173,6 +173,12 @@ ACTION_TOOLS = [
                     "shipments, order issues, money due, pending approvals, and "
                     "the top 3 to-dos this week.",
      "input_schema": {"type": "object", "properties": {}}},
+    {"name": "meeting_scan",
+     "description": "Scan recent email across all inboxes for proposed meetings/"
+                    "calls not yet on the calendar (firm and tentative) and "
+                    "surface new ones to schedule. Runs 3x daily automatically; "
+                    "this triggers it on demand.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "spend_flags",
      "description": "Surface possible duplicate charges and recurring-vendor "
                     "spend patterns from the expense ledger.",
@@ -462,6 +468,9 @@ def _dispatch(name: str, args: dict) -> str:
         if name == "business_pulse":
             from . import skills
             return skills.business_pulse()
+        if name == "meeting_scan":
+            from . import skills
+            return skills.meeting_scan()
         if name == "spend_flags":
             from . import skills
             return skills.spend_flags(int(args.get("days", 90)))

@@ -370,6 +370,10 @@ def main() -> None:
                   "cron", day_of_week="mon", hour=7, minute=30)
     sched.add_job(_safe(ops_jobs.JOBS["contract_expiry_watch"], "expiry watch"),
                   "cron", day_of_week="mon", hour=7, minute=0)
+    # Meeting scans 3x daily: morning, afternoon, evening (EST)
+    for h in (8, 13, 18):
+        sched.add_job(_safe(ops_jobs.JOBS["meeting_scan"], "meeting scan"),
+                      "cron", hour=h, minute=15)
     for hour in config.DIGEST_HOURS:
         sched.add_job(_safe(digest.send_digest, "digest"), "cron",
                       hour=hour, minute=0)

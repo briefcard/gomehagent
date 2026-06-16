@@ -249,6 +249,111 @@ def duplicate_cleanup(account: str = "baci", destination: str = "B2B") -> str:
     return f"duplicate_cleanup: {len(dups)} duplicate groups flagged (emailed)."
 
 
+# ---------------- Meeting Scan (3x daily) ----------------
+
+MEETING_PROMPT = """You scan recent emails for MEETINGS/CALLS that have been
+proposed but are NOT yet on the calendar. Today is {today} (America/New_York).
+
+UPCOMING CALENDAR EVENTS (already scheduled — do NOT re-suggest these):
+{events}
+
+RECENT EMAILS (tagged by inbox):
+{emails}
+
+Find proposed meetings/calls. Include a clear one with a specific date/time,
+AND flag soft ones ("we should connect next week") separately. For each, give
+the suggested calendar details and who to invite. Respond JSON only:
+{{"meetings": [{{"title": "...", "date": "YYYY-MM-DD", "time": "HH:MM or ''",
+  "invite": ["email"], "from_inbox": "baci|eien|personal", "firm": true/false,
+  "key": "<short stable id: counterparty+date>", "why": "one line"}}]}}"""
+
+
+def _seen_meetings() -> set:
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, "seen_meetings")
+        return set(json.loads(row.value)) if row and row.value else set()
+
+
+def _mark_seen(keys: list) -> None:
+    cur = _seen_meetings() | set(keys)
+    cur = set(list(cur)[-300:])  # cap
+    with db.SessionLocal() as s:
+        s.merge(db.Setting(key="seen_meetings", value=json.dumps(list(cur))))
+        s.commit()
+
+
+def meeting_scan() -> str:
+    """Scan recent email (all inboxes) for unscheduled meetings; surface only
+    NEW proposals not already on the calendar or previously flagged."""
+    from . import whatsapp
+
+    # Recent email across all inboxes
+    snips = []
+    for acct in config.GMAIL_ACCOUNTS:
+        try:
+            svc = gmail_client.service_for(acct)
+            resp = svc.users().messages().list(userId="me",
+                q="newer_than:3d -in:sent in:inbox", maxResults=20).execute()
+            for ref in resp.get("messages", [])[:20]:
+                m = svc.users().messages().get(userId="me", id=ref["id"],
+                    format="metadata",
+                    metadataHeaders=["From", "Subject", "Date"]).execute()
+                h = {x["name"].lower(): x["value"] for x in m["payload"].get("headers", [])}
+                snips.append(f"[{acct}] From {h.get('from','')[:40]} | "
+                             f"{h.get('subject','')[:70]} — {m.get('snippet','')[:140]}")
+        except Exception:  # noqa: BLE001
+            pass
+    if not snips:
+        return "meeting_scan: no recent email"
+
+    # Upcoming calendar events (next 14d) across inboxes — to avoid dupes
+    from .command_agent import _cal
+    now = dt.datetime.now(dt.timezone.utc)
+    end = now + dt.timedelta(days=14)
+    events = []
+    for acct in config.GMAIL_ACCOUNTS:
+        try:
+            r = _cal(acct).events().list(calendarId="primary",
+                timeMin=now.isoformat(), timeMax=end.isoformat(),
+                singleEvents=True, orderBy="startTime", maxResults=40).execute()
+            for e in r.get("items", []):
+                events.append(f"{e.get('summary','')} @ "
+                              f"{e['start'].get('dateTime', e['start'].get('date'))}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=1200,
+            messages=[{"role": "user", "content": MEETING_PROMPT.format(
+                today=dt.datetime.now().strftime("%A %Y-%m-%d"),
+                events="\n".join(events) or "none",
+                emails="\n".join(snips))}])
+        found = json.loads(msg.content[0].text[msg.content[0].text.find("{"):
+                                               msg.content[0].text.rfind("}") + 1])
+        meetings = found.get("meetings", [])
+    except Exception:  # noqa: BLE001
+        log.exception("meeting_scan parse failed")
+        return "meeting_scan: parse failed"
+
+    seen = _seen_meetings()
+    new = [m for m in meetings if m.get("key") and m["key"] not in seen]
+    if not new:
+        return "meeting_scan: no new meetings"
+    _mark_seen([m["key"] for m in new])
+
+    lines = ["📅 Possible meetings to schedule:"]
+    for m in new:
+        when = f"{m.get('date','?')} {m.get('time','')}".strip()
+        soft = "" if m.get("firm") else " (tentative)"
+        invite = (" · invite " + ", ".join(m["invite"])) if m.get("invite") else ""
+        lines.append(f"  • {m.get('title','(call)')} — {when}{soft} "
+                     f"[{m.get('from_inbox','')}]{invite}\n    {m.get('why','')}")
+    lines.append("\nReply 'add the [name] meeting' and I'll put it on your "
+                 "calendar with invites.")
+    whatsapp.send_text("\n".join(lines)[:3500])
+    return f"meeting_scan: surfaced {len(new)} new meeting(s)"
+
+
 # ---------------- Spend Pattern Flags ----------------
 
 def spend_flags(days: int = 90) -> str:
