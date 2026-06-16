@@ -189,8 +189,20 @@ def _consume() -> None:
                     orig = (ap.payload or {}).get("body", "") if ap else ""
                 if fb["mode"] == "deny":
                     voice_learn.add_rule(account, fb["text"])
-                    whatsapp.send_text(f"Learned for [{account}]: \"{fb['text']}\" "
-                                       "— future drafts there will follow it.")
+                    # If the lesson is generalizable, also share it with ALL
+                    # agents (cross-agent learning), not just this inbox.
+                    from . import memory
+                    low = fb["text"].lower()
+                    generalizable = any(k in low for k in (
+                        "always", "never", "don't ", "do not", "make sure",
+                        "verify", "confirm", "every"))
+                    if generalizable:
+                        memory.add_lesson(fb["text"], scope="global", origin="admin")
+                    whatsapp.send_text(
+                        f"Learned for [{account}]: \"{fb['text']}\""
+                        + (" — and shared as a lesson for all agents."
+                           if generalizable else
+                           " — future drafts there will follow it."))
                 else:  # edit -> requeue a revised draft
                     whatsapp.send_text(command_agent.handle(
                         f"Revise this draft per my instruction and queue it for "

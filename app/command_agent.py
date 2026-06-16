@@ -545,8 +545,8 @@ def handle(text: str, attachments: list[dict] | None = None) -> str:
     # Dynamic context (date, memory, shipments, recent recap) kept OUT of the
     # cached static block so the big rules prefix caches cleanly.
     dynamic = (f"\n\nToday: {dt.datetime.now().strftime('%A %Y-%m-%d')} "
-               "(America/New_York)." + memory.memory_block()
-               + memory.shipments_block())
+               "(America/New_York)." + memory.lessons_block("admin")
+               + memory.memory_block() + memory.shipments_block())
     if history:
         recent = history[-4:]
         recap = "\n".join(f"  {m['role']}: "

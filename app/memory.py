@@ -95,6 +95,33 @@ def shipments_block() -> str:
     return "\n\nOPEN SHIPMENTS (structured records — current truth):\n" + "\n".join(lines)
 
 
+def add_lesson(lesson: str, scope: str = "global", origin: str = "") -> str:
+    """Record a generalizable lesson read by ALL agents (or scope to a role)."""
+    txt = lesson.strip()
+    with db.SessionLocal() as s:
+        existing = (s.query(db.Lesson)
+                    .filter(db.Lesson.lesson.ilike(txt)).first())
+        if existing:
+            existing.hits = str(int(existing.hits or "0") + 1)
+        else:
+            s.add(db.Lesson(lesson=txt, scope=scope, origin=origin))
+        s.commit()
+    return f"Lesson recorded ({scope}): {txt[:80]}"
+
+
+def lessons_block(role: str = "") -> str:
+    """Global lessons + this role's lessons — injected into every agent."""
+    with db.SessionLocal() as s:
+        q = s.query(db.Lesson).filter(
+            (db.Lesson.scope == "global") | (db.Lesson.scope == role))
+        rows = q.order_by(db.Lesson.created_at.desc()).limit(30).all()
+    if not rows:
+        return ""
+    return ("\n\nLESSONS LEARNED (hard-won corrections — these apply across "
+            "tasks and were learned from real mistakes; obey them):\n"
+            + "\n".join(f"- {r.lesson}" for r in rows))
+
+
 def sender_history(sender_email: str, limit: int = 3) -> str:
     """What we previously did with this sender — for email triage context."""
     with db.SessionLocal() as s:

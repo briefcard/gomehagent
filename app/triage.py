@@ -233,7 +233,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             "replies — match this style and follow these handling rules):\n" + voice
         )
     from . import memory
-    dynamic += memory.memory_block()
+    dynamic += memory.lessons_block("admin") + memory.memory_block()
     system = [
         {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": dynamic},

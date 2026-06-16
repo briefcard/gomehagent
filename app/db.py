@@ -211,6 +211,22 @@ class WaMessage(Base):
     approval_id = Column(String, default="")  # set if this was an approval msg
 
 
+class Lesson(Base):
+    """Cross-agent learning. A correction that is GENERALIZABLE (applies
+    beyond one inbox/role) is stored here and read by EVERY agent, so a
+    mistake one agent makes teaches all of them. Role-specific corrections
+    stay as VoiceProfile rules; universal ones become Lessons."""
+
+    __tablename__ = "lessons"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    scope = Column(String, default="global")  # global | <role name>
+    lesson = Column(Text, nullable=False)
+    origin = Column(String, default="")  # which agent/role learned it
+    hits = Column(String, default="0")  # times reinforced
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 
