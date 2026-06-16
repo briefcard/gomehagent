@@ -965,7 +965,20 @@ def sync_catalog(account: str = "baci", destination: str = "B2B") -> str:
     return f"Catalog synced: {len(records)} documents → {link}"
 
 
+def _skill_job(fn_name: str):
+    def run() -> str:
+        from . import skills
+        return getattr(skills, fn_name)()
+    return run
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet, "organize": organize,
-        "daily_review": daily_review, "sync_catalog": sync_catalog}
+        "daily_review": daily_review, "sync_catalog": sync_catalog,
+        "tax_receipt_export": _skill_job("tax_receipt_export"),
+        "invoice_chase": _skill_job("invoice_chase"),
+        "business_pulse": _skill_job("business_pulse"),
+        "contract_expiry_watch": _skill_job("contract_expiry_watch"),
+        "duplicate_cleanup": _skill_job("duplicate_cleanup"),
+        "spend_flags": _skill_job("spend_flags")}

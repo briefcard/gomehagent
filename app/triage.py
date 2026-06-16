@@ -132,6 +132,13 @@ DEADLINES: whenever the email implies money tied to a date (invoice due date,
 late-fee date, renewal/charge date, dispute response window, customs/storage
 deadline), extract it.
 
+WATCH SIGNALS (add to "suggestion" when present):
+- VIP / relationship: first contact or re-engagement from a high-value sender
+  (big client, key supplier, press) -> note it and the relationship history.
+- Review/feedback request -> flag for a response and note sentiment.
+- Repeat issue: if this mirrors recent order_issue emails (same product,
+  same defect, same delay), say so — it may be systemic, not a one-off.
+
 FORESIGHT: be proactive and data-backed. Before drafting, gather what the
 reply needs (look up the order in Shopify, the docs in the registry, the
 shipment record). Then put the most useful NEXT ACTION in the "suggestion"

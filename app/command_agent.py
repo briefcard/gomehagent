@@ -155,6 +155,58 @@ ACTION_TOOLS = [
          "save_emails": {"type": "boolean", "description": "true to also save "
                          "attachment-less emails (receipts in the body) as Docs"}},
          "required": ["account", "query", "destination", "scheme"]}},
+    {"name": "export_tax_receipts",
+     "description": "Compile the expense ledger into an accountant-ready XLSX "
+                    "in Drive for a given year. Returns the link + total.",
+     "input_schema": {"type": "object", "properties": {
+         "year": {"type": "string"}, "account": {"type": "string"},
+         "destination": {"type": "string"}}}},
+    {"name": "chase_invoices",
+     "description": "Find invoices the owner sent that have no reply/payment and "
+                    "queue tone-matched reminders for approval. account default "
+                    "personal (Saias client invoices).",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+         "days": {"type": "integer"}}}},
+    {"name": "business_pulse",
+     "description": "One-page state of the business: 7-day sales per store, open "
+                    "shipments, order issues, money due, pending approvals, and "
+                    "the top 3 to-dos this week.",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "spend_flags",
+     "description": "Surface possible duplicate charges and recurring-vendor "
+                    "spend patterns from the expense ledger.",
+     "input_schema": {"type": "object", "properties": {
+         "days": {"type": "integer"}}}},
+    {"name": "schedule_brief",
+     "description": "Summarize a day or range of calendar events for an account, "
+                    "flagging conflicts and prep needed.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+         "start": {"type": "string"}, "end": {"type": "string"}},
+         "required": ["account", "start", "end"]}},
+    {"name": "reschedule_event",
+     "description": "Move an existing calendar event to a new time (and notify "
+                    "guests). Use calendar_events first to get the event id.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+         "event_id": {"type": "string"}, "start": {"type": "string"},
+         "end": {"type": "string"}},
+         "required": ["account", "event_id", "start", "end"]}},
+    {"name": "log_inbound_inventory",
+     "description": "Record an inbound shipment's quantities against a Shopify "
+                    "store's inventory (adds stock at a location on arrival). "
+                    "store: baci|eien.",
+     "input_schema": {"type": "object", "properties": {
+         "store": {"type": "string", "enum": ["baci", "eien"]},
+         "items": {"type": "array", "items": {"type": "object", "properties": {
+             "sku": {"type": "string"}, "quantity": {"type": "integer"}}}}},
+         "required": ["store", "items"]}},
+    {"name": "find_unsubscribes",
+     "description": "Identify recurring promotional/newsletter senders in an "
+                    "inbox and propose bulk unsubscribe/filter rules.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]}}}},
     {"name": "sync_catalog",
      "description": "Refresh the master 'AI Document Catalog' Google Sheet — a "
                     "clean, labeled index of every filed document (type, order/"
@@ -399,6 +451,70 @@ def _dispatch(name: str, args: dict) -> str:
             return (f"Organizing {args['account']} '{args['query']}' by "
                     f"{args.get('scheme')} into {args['destination']} — running "
                     "now, emailed report when done.")
+        if name == "export_tax_receipts":
+            from . import skills
+            return skills.tax_receipt_export(args.get("year", ""),
+                args.get("account", "baci"), args.get("destination", "B2B"))
+        if name == "chase_invoices":
+            from . import skills
+            return skills.invoice_chase(args.get("account", "personal"),
+                                        int(args.get("days", 120)))
+        if name == "business_pulse":
+            from . import skills
+            return skills.business_pulse()
+        if name == "spend_flags":
+            from . import skills
+            return skills.spend_flags(int(args.get("days", 90)))
+        if name == "schedule_brief":
+            resp = _cal(args["account"]).events().list(
+                calendarId="primary", timeMin=args["start"], timeMax=args["end"],
+                singleEvents=True, orderBy="startTime", maxResults=50).execute()
+            evs = [{"title": e.get("summary"), "start": e["start"].get("dateTime", e["start"].get("date")),
+                    "end": e["end"].get("dateTime", e["end"].get("date")),
+                    "where": e.get("location", ""),
+                    "guests": [a.get("email") for a in e.get("attendees", [])]}
+                   for e in resp.get("items", [])]
+            return json.dumps(evs) or "no events in range"
+        if name == "reschedule_event":
+            cal = _cal(args["account"])
+            ev = cal.events().get(calendarId="primary", eventId=args["event_id"]).execute()
+            ev["start"] = {"dateTime": args["start"], "timeZone": "America/New_York"}
+            ev["end"] = {"dateTime": args["end"], "timeZone": "America/New_York"}
+            out = cal.events().update(calendarId="primary", eventId=args["event_id"],
+                body=ev, sendUpdates="all").execute()
+            return f"Rescheduled — {out.get('htmlLink', 'ok')}"
+        if name == "log_inbound_inventory":
+            items = ", ".join(f"{it.get('sku')}: +{it.get('quantity')}"
+                              for it in args.get("items", []))
+            # Recorded against the shipment; the actual Shopify stock write
+            # goes through approval (it changes sellable inventory).
+            approvals.request_approval(
+                "send_email",  # generic approval surface for now
+                f"[Inventory] Add stock for {args['store']}: {items}",
+                {"account": "baci", "to": "(internal)", "subject": "Inbound inventory",
+                 "body": f"Add to {args['store']} inventory:\n{items}",
+                 "inbound_from": "inventory", "inbound_snippet": items,
+                 "reason": "Inbound inventory from a received shipment",
+                 "bucket": "logistics"})
+            return (f"Inbound inventory for {args['store']} queued for your "
+                    f"approval: {items}")
+        if name == "find_unsubscribes":
+            acct = args.get("account", "personal")
+            svc = gmail_client.service_for(acct)
+            resp = svc.users().messages().list(userId="me",
+                q="category:promotions newer_than:60d", maxResults=100).execute()
+            from collections import Counter
+            senders: Counter = Counter()
+            for ref in resp.get("messages", [])[:100]:
+                m = svc.users().messages().get(userId="me", id=ref["id"],
+                    format="metadata", metadataHeaders=["From"]).execute()
+                frm = next((h["value"] for h in m["payload"].get("headers", [])
+                            if h["name"].lower() == "from"), "")
+                addr = frm.split("<")[-1].rstrip(">").strip().lower()
+                if addr:
+                    senders[addr] += 1
+            top = senders.most_common(15)
+            return json.dumps([{"sender": a, "promo_emails_60d": n} for a, n in top])
         if name == "sync_catalog":
             return ops_jobs.sync_catalog(args.get("account", "baci"),
                                          args.get("destination", "B2B"))

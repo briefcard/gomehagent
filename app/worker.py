@@ -366,6 +366,10 @@ def main() -> None:
                   hour=8, minute=30)  # the 'expert second look'
     sched.add_job(_safe(weekly_cost_report, "cost report"), "cron",
                   day_of_week="mon", hour=8, minute=0)
+    sched.add_job(_safe(ops_jobs.JOBS["business_pulse"], "business pulse"),
+                  "cron", day_of_week="mon", hour=7, minute=30)
+    sched.add_job(_safe(ops_jobs.JOBS["contract_expiry_watch"], "expiry watch"),
+                  "cron", day_of_week="mon", hour=7, minute=0)
     for hour in config.DIGEST_HOURS:
         sched.add_job(_safe(digest.send_digest, "digest"), "cron",
                       hour=hour, minute=0)
