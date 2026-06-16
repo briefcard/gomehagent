@@ -155,6 +155,14 @@ ACTION_TOOLS = [
          "save_emails": {"type": "boolean", "description": "true to also save "
                          "attachment-less emails (receipts in the body) as Docs"}},
          "required": ["account", "query", "destination", "scheme"]}},
+    {"name": "sync_catalog",
+     "description": "Refresh the master 'AI Document Catalog' Google Sheet — a "
+                    "clean, labeled index of every filed document (type, order/"
+                    "anchor, folder, link) usable by any AI agent or human. "
+                    "Returns the sheet link.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["baci", "eien", "personal"]},
+         "destination": {"type": "string"}}}},
     {"name": "job_status",
      "description": "Live progress of running/finished jobs (doc sweep, "
                     "refiling, audits) — use when Gomeh asks how a task is going.",
@@ -386,6 +394,9 @@ def _dispatch(name: str, args: dict) -> str:
             return (f"Organizing {args['account']} '{args['query']}' by "
                     f"{args.get('scheme')} into {args['destination']} — running "
                     "now, emailed report when done.")
+        if name == "sync_catalog":
+            return ops_jobs.sync_catalog(args.get("account", "baci"),
+                                         args.get("destination", "B2B"))
         if name == "job_status":
             return json.dumps(ops_jobs.STATUS) or "no jobs have run yet"
         if name == "save_memory":

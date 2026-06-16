@@ -206,6 +206,10 @@ def doc_sweep() -> str:
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
                             f"Document sweep — {len(docs)} docs, {len(groups)} orders",
                             report, html=emailfmt.text_to_html(report))
+    try:
+        sync_catalog(alias, B2B_FOLDER_NAME)
+    except Exception:  # noqa: BLE001
+        log.exception("catalog sync after sweep failed")
     return (f"doc_sweep complete: {len(docs)} unique docs, {len(groups)} orders, "
             f"{dup_in_run + dup_filed} dupes skipped")
 
@@ -784,6 +788,10 @@ def organize(account: str = "baci", query: str = "", destination: str = "B2B",
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
                             f"Organized {len(docs)} items by {scheme}",
                             report, html=emailfmt.text_to_html(report))
+    try:
+        sync_catalog(account, destination)
+    except Exception:  # noqa: BLE001
+        log.exception("catalog sync after organize failed")
     return f"organize complete: {len(docs)} items, {len(groups)} groups, {dup} dupes"
 
 
@@ -910,7 +918,54 @@ def daily_review() -> str:
            f"{len(r.get('stalled',[]))} stalled, {len(r.get('doesnt_make_sense',[]))} flags"
 
 
+def sync_catalog(account: str = "baci", destination: str = "B2B") -> str:
+    """Write/refresh a master Google Sheet cataloguing every filed document —
+    richly labeled so ANY AI agent (or human) can locate and identify files.
+    Mirrors the document registry; safe to re-run (overwrites in place)."""
+    import csv
+    import io
+
+    from . import db
+    root = drive_io.find_folder(account, destination)
+    if not root:
+        return f"Destination '{destination}' not found in {account} Drive."
+
+    with db.SessionLocal() as s:
+        rows = s.query(db.DocIndex).order_by(db.DocIndex.anchor,
+                                             db.DocIndex.doc_type).all()
+        records = [{
+            "Filename": r.filename, "Type": r.doc_type or "",
+            "Order/Anchor": r.anchor or "", "Folder": f"{destination}/{r.path}",
+            "Drive Link": r.link or "", "Source": r.source or "",
+            "Content Hash": (r.content_hash or "")[:16],
+            "Filed": r.created_at.strftime("%Y-%m-%d") if r.created_at else "",
+        } for r in rows]
+
+    buf = io.StringIO()
+    cols = ["Filename", "Type", "Order/Anchor", "Folder", "Drive Link",
+            "Source", "Content Hash", "Filed"]
+    w = csv.DictWriter(buf, fieldnames=cols)
+    w.writeheader()
+    for rec in records:
+        w.writerow(rec)
+
+    with db.SessionLocal() as s:
+        marker = s.get(db.Setting, f"catalog_sheet_id:{account}")
+        existing_id = marker.value if marker else None
+    try:
+        sheet_id, link = drive_io.create_or_update_sheet(
+            account, "AI Document Catalog", buf.getvalue(),
+            parent_id=root, existing_id=existing_id)
+    except Exception:  # noqa: BLE001 — stale id (deleted) -> recreate
+        sheet_id, link = drive_io.create_or_update_sheet(
+            account, "AI Document Catalog", buf.getvalue(), parent_id=root)
+    with db.SessionLocal() as s:
+        s.merge(db.Setting(key=f"catalog_sheet_id:{account}", value=sheet_id))
+        s.commit()
+    return f"Catalog synced: {len(records)} documents → {link}"
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet, "organize": organize,
-        "daily_review": daily_review}
+        "daily_review": daily_review, "sync_catalog": sync_catalog}

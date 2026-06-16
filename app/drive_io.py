@@ -117,6 +117,28 @@ def upload_html_as_doc(alias: str, folder_id: str, name: str, html: str) -> str:
     return created.get("webViewLink", "uploaded")
 
 
+def create_or_update_sheet(alias: str, name: str, csv_text: str,
+                           parent_id: str | None = None,
+                           existing_id: str | None = None) -> tuple[str, str]:
+    """Create (or replace contents of) a Google Sheet from CSV. Returns
+    (file_id, webViewLink). Uses Drive's CSV->Sheet conversion (no extra scope)."""
+    from googleapiclient.http import MediaInMemoryUpload
+    media = MediaInMemoryUpload(csv_text.encode("utf-8"), mimetype="text/csv",
+                                resumable=False)
+    if existing_id:
+        f = svc(alias).files().update(
+            fileId=existing_id, media_body=media,
+            fields="id,webViewLink", supportsAllDrives=True).execute()
+        return f["id"], f.get("webViewLink", "")
+    body = {"name": name, "mimeType": "application/vnd.google-apps.spreadsheet"}
+    if parent_id:
+        body["parents"] = [parent_id]
+    f = svc(alias).files().create(
+        body=body, media_body=media, fields="id,webViewLink",
+        supportsAllDrives=True).execute()
+    return f["id"], f.get("webViewLink", "")
+
+
 def download(alias: str, file_id: str) -> bytes:
     return svc(alias).files().get_media(fileId=file_id,
                                         supportsAllDrives=True).execute()
@@ -197,5 +219,5 @@ def _serialize(fn):
 for _name in ("find_folder", "ensure_subfolder", "folder_tree", "list_files",
               "list_all_files_recursive", "move", "ensure_path", "name_search",
               "copy_file", "file_exists", "upload", "download",
-              "upload_html_as_doc"):
+              "upload_html_as_doc", "create_or_update_sheet"):
     globals()[_name] = _serialize(globals()[_name])
