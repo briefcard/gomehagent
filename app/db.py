@@ -246,5 +246,40 @@ class VoiceProfile(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+def _auto_migrate() -> None:
+    """Add any model columns missing from existing tables. create_all() makes
+    NEW tables but never alters existing ones, so adding a column to a model
+    would otherwise break queries with ProgrammingError. This reconciles them
+    automatically on startup — so future field additions just work."""
+    from sqlalchemy import inspect as sa_inspect, text
+
+    insp = sa_inspect(engine)
+    existing_tables = set(insp.get_table_names())
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue  # create_all already handled brand-new tables
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = col.type.compile(dialect=engine.dialect)
+                default = ""
+                if col.default is not None and getattr(col.default, "arg", None) is not None \
+                        and not callable(col.default.arg):
+                    val = col.default.arg
+                    default = f" DEFAULT '{val}'" if isinstance(val, str) else f" DEFAULT {val}"
+                try:
+                    conn.execute(text(
+                        f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{default}'))
+                except Exception:  # noqa: BLE001 — already exists / dialect quirk
+                    pass
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    try:
+        _auto_migrate()
+    except Exception:  # noqa: BLE001 — never block startup on migration
+        import logging
+        logging.getLogger("db").exception("auto-migrate failed")
