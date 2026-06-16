@@ -167,7 +167,26 @@ def _consume() -> None:
     while True:
         kind, payload = _commands.get()
         try:
-            if kind == "file":
+            if kind == "feedback":
+                from . import db, voice_learn
+                fb = json.loads(payload)
+                if fb["text"].strip().lower() in ("skip", "no", "nvm", "nm"):
+                    whatsapp.send_text("Okay, nothing learned from that one.")
+                    continue
+                with db.SessionLocal() as s:
+                    ap = s.get(db.Approval, fb["approval_id"])
+                    account = (ap.payload or {}).get("account", "baci") if ap else "baci"
+                    orig = (ap.payload or {}).get("body", "") if ap else ""
+                if fb["mode"] == "deny":
+                    voice_learn.add_rule(account, fb["text"])
+                    whatsapp.send_text(f"Learned for [{account}]: \"{fb['text']}\" "
+                                       "— future drafts there will follow it.")
+                else:  # edit -> requeue a revised draft
+                    whatsapp.send_text(command_agent.handle(
+                        f"Revise this draft per my instruction and queue it for "
+                        f"approval (account {account}).\n\nDRAFT:\n{orig}\n\n"
+                        f"MY EDIT:\n{fb['text']}"))
+            elif kind == "file":
                 meta = json.loads(payload)
                 data, real_mime = whatsapp.download_media(meta["media_id"])
                 text = (meta["caption"] or
@@ -207,11 +226,38 @@ def _enqueue(kind: str, payload: str) -> None:
     _commands.put((kind, payload))
 
 
+# When Gomeh taps Deny or Edit, we await his next text as feedback/edit and
+# tie it to that approval — this is how button taps become learning.
+_pending_feedback: dict = {"mode": None, "approval_id": None}
+
+
+def _handle_button(action: str, ap_id: str) -> None:
+    from . import approvals, whatsapp
+    if action == "approve":
+        whatsapp.send_text(approvals.apply_decision(ap_id, "approved"))
+    elif action == "deny":
+        approvals.apply_decision(ap_id, "denied")
+        _pending_feedback.update(mode="deny", approval_id=ap_id)
+        whatsapp.send_text("Denied. Tell me what was wrong (one line) and I'll "
+                           "make it a permanent rule for that inbox — or reply "
+                           "'skip'.")
+    elif action == "edit":
+        _pending_feedback.update(mode="edit", approval_id=ap_id)
+        whatsapp.send_text("Send me your edited version (or the change you "
+                           "want) and I'll queue the revised draft.")
+
+
 def _handle_voice(media_id: str) -> None:
     _enqueue("voice", media_id)
 
 
 def _handle_command(text: str) -> None:
+    # Intercept deny-reason / edit replies tied to a recent button tap.
+    if _pending_feedback["mode"]:
+        _enqueue("feedback", json.dumps(
+            {**_pending_feedback, "text": text}))
+        _pending_feedback.update(mode=None, approval_id=None)
+        return
     _enqueue("text", text)
 
 
@@ -246,8 +292,7 @@ async def whatsapp_incoming(request: Request) -> dict:
                     if msg.get("type") == "interactive":
                         reply_id = msg["interactive"]["button_reply"]["id"]
                         action, ap_id = reply_id.split(":", 1)
-                        decision = "approved" if action == "approve" else "denied"
-                        approvals.apply_decision(ap_id, decision)
+                        _handle_button(action, ap_id)
                     elif msg.get("type") == "text":
                         _handle_command(msg["text"]["body"])
                     elif msg.get("type") == "audio":

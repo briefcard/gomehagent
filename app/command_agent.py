@@ -206,11 +206,15 @@ ACTION_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "topic": {"type": "string"}}, "required": ["topic"]}},
     {"name": "calendar_create_event",
-     "description": "Create a calendar event (primary calendar).",
+     "description": "Create a calendar event and optionally invite guests "
+                    "(they get a Google Calendar invitation email).",
      "input_schema": {"type": "object", "properties": {
          "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
          "title": {"type": "string"}, "start": {"type": "string"},
-         "end": {"type": "string"}, "description": {"type": "string"}},
+         "end": {"type": "string"}, "description": {"type": "string"},
+         "guests": {"type": "array", "items": {"type": "string"},
+                    "description": "Attendee email addresses to invite"},
+         "location": {"type": "string"}},
          "required": ["account", "title", "start", "end"]}},
 ]
 
@@ -410,13 +414,23 @@ def _dispatch(name: str, args: dict) -> str:
                 for e in resp.get("items", [])
             ]) or "no events"
         if name == "calendar_create_event":
-            ev = _cal(args["account"]).events().insert(calendarId="primary", body={
+            ev_body = {
                 "summary": args["title"],
                 "description": args.get("description", "Created by assistant"),
                 "start": {"dateTime": args["start"], "timeZone": "America/New_York"},
                 "end": {"dateTime": args["end"], "timeZone": "America/New_York"},
-            }).execute()
-            return f"created: {ev.get('htmlLink', 'ok')}"
+            }
+            if args.get("location"):
+                ev_body["location"] = args["location"]
+            guests = args.get("guests") or []
+            if guests:
+                ev_body["attendees"] = [{"email": g} for g in guests]
+            ev = _cal(args["account"]).events().insert(
+                calendarId="primary", body=ev_body,
+                sendUpdates="all" if guests else "none",  # actually email invites
+            ).execute()
+            who = f" — invited {', '.join(guests)}" if guests else ""
+            return f"created: {ev.get('htmlLink', 'ok')}{who}"
         return data_tools.dispatch(name, args)  # falls through to data tools
     except Exception as exc:  # noqa: BLE001
         return f"Tool error ({exc.__class__.__name__}): {str(exc)[:200]}"

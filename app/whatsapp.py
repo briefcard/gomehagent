@@ -140,19 +140,28 @@ def transcribe(audio: bytes, mime: str) -> str:
     return r.json().get("text", "").strip()
 
 
-def send_approval(approval_id: str, summary: str) -> None:
-    """Interactive Approve/Deny buttons; replies handled in web.py webhook."""
+def send_approval(approval_id: str, summary: str, detail: dict | None = None) -> None:
+    """Interactive Approve/Deny/Edit buttons WITH the full draft inline, so
+    Gomeh can decide from WhatsApp without opening email."""
+    detail = detail or {}
+    parts = [summary[:300]]
+    if detail.get("inbound_snippet"):
+        parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:400]}")
+    if detail.get("body"):
+        parts.append(f"\n— Proposed reply —\n{detail['body'][:2600]}")
+    text = "\n".join(parts)[:3900]  # WhatsApp interactive body cap is 4096
     _post({
         "messaging_product": "whatsapp",
         "to": config.WHATSAPP_APPROVER_NUMBER,
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": f"Approval needed:\n{summary[:900]}"},
+            "body": {"text": text},
             "action": {
                 "buttons": [
-                    {"type": "reply", "reply": {"id": f"approve:{approval_id}", "title": "Approve"}},
-                    {"type": "reply", "reply": {"id": f"deny:{approval_id}", "title": "Deny"}},
+                    {"type": "reply", "reply": {"id": f"approve:{approval_id}", "title": "✅ Approve"}},
+                    {"type": "reply", "reply": {"id": f"deny:{approval_id}", "title": "❌ Deny"}},
+                    {"type": "reply", "reply": {"id": f"edit:{approval_id}", "title": "✏️ Edit"}},
                 ]
             },
         },

@@ -46,8 +46,8 @@ def notify_pending(title: str | None = None) -> int:
         items = [(ap.id, ap.summary, dict(ap.payload)) for ap in fresh]
 
     if config.WHATSAPP_ENABLED:
-        for ap_id, summary, _ in items:
-            whatsapp.send_approval(ap_id, summary)
+        for ap_id, summary, payload in items:
+            whatsapp.send_approval(ap_id, summary, payload)
         return len(items)
 
     from . import emailfmt
