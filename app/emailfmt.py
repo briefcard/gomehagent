@@ -78,6 +78,7 @@ def approval_email(items: list[dict], intro: str | None = None) -> str:
   <blockquote style="margin:0 0 12px;padding:8px 14px;border-left:3px solid #dadce0;{MUTED}">
     {nl2br(p.get('inbound_snippet', '')[:400])}</blockquote>
   <p style="margin:0 0 6px;{MUTED}">My read: {esc(p.get('reason', ''))}</p>
+  {f'<p style="margin:0 0 6px;color:#1a73e8;">💡 {esc(p.get("suggestion"))}</p>' if p.get('suggestion') else ''}
   <p style="margin:14px 0 6px;font-weight:bold;">Proposed reply:</p>
   <div style="background:#f8f9fa;border-radius:6px;padding:12px 16px;margin-bottom:14px;">
     {nl2br(p.get('body', '')[:2500])}</div>

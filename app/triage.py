@@ -132,6 +132,14 @@ DEADLINES: whenever the email implies money tied to a date (invoice due date,
 late-fee date, renewal/charge date, dispute response window, customs/storage
 deadline), extract it.
 
+FORESIGHT: be proactive and data-backed. Before drafting, gather what the
+reply needs (look up the order in Shopify, the docs in the registry, the
+shipment record). Then put the most useful NEXT ACTION in the "suggestion"
+field for Gomeh — e.g. "this email proposes a call Thu 2pm — add to calendar?",
+"customer wants a refund; order #1042 is 6 days late — approve a reship?",
+"forwarder needs the POA — it's in the onboarding packet, linked in the draft".
+Leave suggestion null only when there genuinely is no next step.
+
 Respond with JSON only:
 {{"category": "<bucket key>",
  "action": "auto_reply|draft|escalate|ignore",
@@ -141,7 +149,8 @@ Respond with JSON only:
  "deadline": null OR {{"due_date": "YYYY-MM-DD", "amount": "<$ or 'unknown'>",
                       "what": "<one line>"}},
  "expense": null OR {{"vendor": "<company>", "amount": "<$>",
-                     "date": "YYYY-MM-DD or ''"}}}}"""
+                     "date": "YYYY-MM-DD or ''"}},
+ "suggestion": null OR "<the most useful next action, phrased as an offer>"}}"""
 
 SYSTEM = SYSTEM.format(
     bucket_definitions="\n".join(

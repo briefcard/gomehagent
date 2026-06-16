@@ -129,6 +129,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     "inbound_from": email["from"],
                     "inbound_snippet": email["body"][:600],
                     "reason": detail,
+                    "suggestion": result.get("suggestion") or "",
                     "bucket": bucket,
                     "expect_reply": bucket in ("logistics", "sales_leads", "client_comms"),
                 },
@@ -137,7 +138,9 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             new_approvals.append(ap_id)
             logged = "drafted"
         elif action == "escalate":
-            note = (f"🚨 [{alias}] {email['from']} — {email['subject']}\n{detail}")
+            sugg = result.get("suggestion")
+            note = (f"🚨 [{alias}] {email['from']} — {email['subject']}\n{detail}"
+                    + (f"\n💡 {sugg}" if sugg else ""))
             whatsapp.send_text(note)
             if not config.WHATSAPP_ENABLED:
                 gmail_client.send_email(

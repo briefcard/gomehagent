@@ -148,7 +148,9 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
     if detail.get("inbound_snippet"):
         parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:400]}")
     if detail.get("body"):
-        parts.append(f"\n— Proposed reply —\n{detail['body'][:2600]}")
+        parts.append(f"\n— Proposed reply —\n{detail['body'][:2400]}")
+    if detail.get("suggestion"):
+        parts.append(f"\n💡 {detail['suggestion']}")
     text = "\n".join(parts)[:3900]  # WhatsApp interactive body cap is 4096
     _post({
         "messaging_product": "whatsapp",

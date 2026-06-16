@@ -170,6 +170,38 @@ def email_history_search(account: str, query: str) -> str:
         return f"Email search failed: {exc.__class__.__name__}"
 
 
+# ---------- Contacts (derived from real correspondence) ----------
+
+def find_contacts(account: str, who: str) -> str:
+    """Find email addresses for a person/company from actual mail history —
+    powers invitee suggestions and 'who do I email about X'. No extra scope:
+    derived from who Gomeh has corresponded with."""
+    if account not in config.GMAIL_ACCOUNTS:
+        return f"Account '{account}' unknown."
+    try:
+        svc = gmail_client.service_for(account)
+        resp = svc.users().messages().list(
+            userId="me", q=f"({who}) (in:sent OR in:inbox)", maxResults=15,
+        ).execute()
+        seen: dict[str, str] = {}
+        import re
+        for ref in resp.get("messages", []):
+            msg = svc.users().messages().get(
+                userId="me", id=ref["id"], format="metadata",
+                metadataHeaders=["From", "To"]).execute()
+            for h in msg["payload"].get("headers", []):
+                for m in re.finditer(r"([\w.+-]+@[\w.-]+\.\w+)", h["value"]):
+                    addr = m.group(1).lower()
+                    if addr not in config.GMAIL_ACCOUNTS and addr not in seen:
+                        name = h["value"].split("<")[0].strip(' "') if "<" in h["value"] else ""
+                        seen[addr] = name
+        if not seen:
+            return f"No contacts found matching '{who}'."
+        return json.dumps([{"email": a, "name": n} for a, n in list(seen.items())[:10]])
+    except Exception as exc:  # noqa: BLE001
+        return f"Contact lookup failed: {exc.__class__.__name__}"
+
+
 # ---------- Document registry ----------
 
 def index_document(filename: str, path: str, link: str = "", doc_type: str = "",
@@ -330,6 +362,14 @@ TOOLS = [
 ]
 
 TOOLS += [
+    {"name": "find_contacts",
+     "description": "Find email addresses for a person or company from "
+                    "correspondence history. Use to suggest calendar invitees "
+                    "or to know who to email about something. account: "
+                    "personal|baci|eien.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+         "who": {"type": "string"}}, "required": ["account", "who"]}},
     {"name": "find_documents",
      "description": "Search the document registry — every file the agent has "
                     "filed, indexed by counterparty, PO/shipment anchor, doc "
@@ -367,6 +407,7 @@ _HANDLERS = {
     "shopify_order_details": shopify_order_details,
     "drive_search": drive_search,
     "email_history_search": email_history_search,
+    "find_contacts": find_contacts,
     "find_documents": find_documents,
     "onboarding_packet": onboarding_packet,
     "rfq_get": rfq_get,
