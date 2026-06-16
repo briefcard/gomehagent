@@ -341,6 +341,9 @@ def main() -> None:
     sched.add_job(_safe(deadline_alerts, "deadline alerts"), "cron", hour=9, minute=0)
     sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
                   hour=9, minute=30)
+    from . import ops_jobs
+    sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
+                  hour=8, minute=30)  # the 'expert second look'
     for hour in config.DIGEST_HOURS:
         sched.add_job(_safe(digest.send_digest, "digest"), "cron",
                       hour=hour, minute=0)

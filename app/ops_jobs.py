@@ -787,6 +787,121 @@ def organize(account: str = "baci", query: str = "", destination: str = "B2B",
     return f"organize complete: {len(docs)} items, {len(groups)} groups, {dup} dupes"
 
 
+REVIEW_PROMPT = """You are a meticulous operations manager doing your periodic
+"does this still make sense?" review for Baci Milano USA. You think a step
+beyond the surface. Below is the current state.
+
+OPEN SHIPMENTS:
+{shipments}
+
+OPEN RFQs (and whether all quotes are in):
+{rfqs}
+
+OPEN MONEY DEADLINES (and whether they're on the calendar):
+{deadlines}
+
+RECENT IMPORTANT EMAILS (last 7 days, logistics/leads/clients):
+{emails}
+
+Surface what a sharp human would NOTICE but a checklist would miss. For each
+finding give a concrete next action. Look especially for:
+- Deadlines mentioned in emails (trade shows, customs, payments, deliverables)
+  that are NOT yet tracked or on the calendar — list each with its date.
+- Things stalled that shouldn't be (RFQ sent but no quotes after days; shipment
+  "quoting" for weeks; a reply we owe).
+- Data that doesn't add up (a shipment with no documents; an order referenced
+  in email with no folder; quotes missing key fees).
+- Anything that suggests we've dropped or are about to drop a ball.
+Respond JSON only:
+{{"calendar_suggestions": [{{"title": "...", "date": "YYYY-MM-DD",
+   "why": "..."}}],
+ "stalled": ["<one line each with the chase/action>"],
+ "doesnt_make_sense": ["<one line each: what's off + how to approach it>"],
+ "headline": "<the single most important thing to handle today>"}}"""
+
+
+def daily_review() -> str:
+    """The 'expert second look' — runs scheduled. Reasons across all open
+    state + recent email, surfaces what's being dropped, and offers actions."""
+    from . import emailfmt, memory, whatsapp
+    alias = "baci"
+
+    with db.SessionLocal() as s:
+        ships = s.query(db.Shipment).filter(db.Shipment.status != "closed").all()
+        rfqs = s.query(db.RFQ).filter(db.RFQ.status.in_(["quoting", "complete"])).all()
+        deads = s.query(db.Deadline).filter(db.Deadline.status.in_(["open", "alerted"])).all()
+        ship_t = "\n".join(f"- {x.name}: {x.status}, ETA {x.eta or '?'}, docs "
+                           f"{x.docs or {}}, notes: {x.notes[:120]}" for x in ships) or "none"
+        rfq_t = "\n".join(f"- {x.shipment_name}: {x.status}, asked "
+                          f"{len(x.forwarders or [])}, quotes in {len(x.quotes or {})}"
+                          for x in rfqs) or "none"
+        dead_t = "\n".join(f"- {x.due_date}: {x.description} ({x.amount})" for x in deads) or "none"
+
+    try:
+        svc = gmail_client.service_for(alias)
+        resp = svc.users().messages().list(
+            userId="me", q="newer_than:7d -in:sent", maxResults=25).execute()
+        snips = []
+        for ref in resp.get("messages", [])[:25]:
+            m = svc.users().messages().get(userId="me", id=ref["id"], format="metadata",
+                metadataHeaders=["From", "Subject", "Date"]).execute()
+            h = {x["name"].lower(): x["value"] for x in m["payload"].get("headers", [])}
+            snips.append(f"- {h.get('date','')[:16]} {h.get('from','')[:30]}: "
+                         f"{h.get('subject','')[:80]} — {m.get('snippet','')[:120]}")
+        email_t = "\n".join(snips) or "none"
+    except Exception:  # noqa: BLE001
+        email_t = "none"
+
+    try:
+        msg = client.messages.create(
+            model=config.BUCKET_MODELS.get("logistics", config.CLAUDE_MODEL),
+            max_tokens=2000,
+            messages=[{"role": "user", "content": REVIEW_PROMPT.format(
+                shipments=ship_t, rfqs=rfq_t, deadlines=dead_t, emails=email_t)}])
+        r = _json_extract(msg.content[0].text)
+    except Exception:  # noqa: BLE001
+        log.exception("daily_review reasoning failed")
+        return "daily_review failed"
+
+    # Newly-found deadlines -> ledger + offered for calendar
+    for c in r.get("calendar_suggestions", []):
+        if c.get("date"):
+            with db.SessionLocal() as s:
+                exists = s.query(db.Deadline).filter(
+                    db.Deadline.description == c["title"]).first()
+                if not exists:
+                    s.add(db.Deadline(account=alias, description=c["title"],
+                                      amount="", due_date=c["date"],
+                                      source_subject="daily review"))
+                    s.commit()
+
+    lines = []
+    if r.get("headline"):
+        lines.append(f"🎯 {r['headline']}")
+    if r.get("calendar_suggestions"):
+        lines.append("\n📅 Dates I caught (added to your deadline list — say "
+                     "'add these to my calendar' to schedule):")
+        lines += [f"  • {c['date']} — {c['title']} ({c.get('why','')})"
+                  for c in r["calendar_suggestions"]]
+    if r.get("stalled"):
+        lines.append("\n⏳ Stalled / needs a nudge:")
+        lines += [f"  • {x}" for x in r["stalled"]]
+    if r.get("doesnt_make_sense"):
+        lines.append("\n🤔 Doesn't add up — worth a look:")
+        lines += [f"  • {x}" for x in r["doesnt_make_sense"]]
+    body = "\n".join(lines) or "All clear — nothing slipping that I can see."
+
+    memory.remember("last daily review",
+                    (r.get("headline", "") + " | " + "; ".join(r.get("stalled", []))[:300]))
+    whatsapp.send_text("🔎 Daily review\n\n" + body[:3500])
+    gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                            "Daily review — what might be slipping",
+                            body, html=emailfmt.text_to_html(body))
+    return f"daily_review: {len(r.get('calendar_suggestions',[]))} dates, " \
+           f"{len(r.get('stalled',[]))} stalled, {len(r.get('doesnt_make_sense',[]))} flags"
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
-        "build_onboarding_packet": build_onboarding_packet, "organize": organize}
+        "build_onboarding_packet": build_onboarding_packet, "organize": organize,
+        "daily_review": daily_review}
