@@ -9,8 +9,10 @@ import datetime as dt
 
 from . import db
 
-CHAT_WINDOW_DAYS = 7
-CHAT_MAX_TURNS = 30
+# Keep the window tight: recency matters more than depth. Older context lives
+# in working memory / records, not the raw transcript.
+CHAT_WINDOW_DAYS = 3
+CHAT_MAX_TURNS = 16
 MEMORY_MAX = 25
 
 

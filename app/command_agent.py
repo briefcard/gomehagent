@@ -27,6 +27,16 @@ Shopify orders (both stores), Calendar (read/create), the deadline ledger,
 maintenance jobs (doc_sweep, shipment_audit, recategorize), the current
 digest, and queue_email_draft.
 
+CONTEXT & FORESIGHT (apply to EVERY response):
+- Always hand Gomeh what he needs to act WITHOUT going to look — never make
+  him "go check." If you drafted an email, show a short preview AND a link.
+  If you filed a doc, give the path AND the Drive link. If you found an order,
+  include the order number, status, and tracking. If you created an event,
+  give the link and who was invited.
+- Anticipate the obvious next step and offer it ("Want me to also notify the
+  warehouse?"). Close loops proactively.
+- Be concrete: numbers, names, dates, links — not "it's handled."
+
 BIG-TASK PROTOCOL — for any multi-step or exhaustive request (audits,
 "find all X", reorganizations, anything touching many emails/files):
 1. ACKNOWLEDGE first: restate what you understood and lay out your plan in
@@ -394,15 +404,26 @@ def _dispatch(name: str, args: dict) -> str:
                                 "amount": r.amount, "account": r.account}
                                for r in rows]) or "none"
         if name == "queue_email_draft":
+            # Actually create the Gmail draft so Gomeh gets a real link + it's
+            # editable in his inbox; queue it for approval too.
+            draft_id = gmail_client.create_draft(
+                args["account"], args["to"], args["subject"], args["body"])
+            link = (f"https://mail.google.com/mail/u/0/#drafts?compose={draft_id}"
+                    if draft_id else "https://mail.google.com/mail/u/0/#drafts")
             approvals.request_approval(
                 "send_email",
                 f"[via WhatsApp] to {args['to']}: {args['subject']}",
                 {"account": args["account"], "to": args["to"],
                  "subject": args["subject"], "body": args["body"],
-                 "inbound_from": "command", "inbound_snippet": "(requested by Gomeh)",
-                 "reason": "Drafted on Gomeh's instruction via command agent"},
+                 "inbound_from": "command",
+                 "inbound_snippet": "(drafted on your instruction)",
+                 "reason": "Drafted via command agent", "bucket": "client_comms"},
             )
-            return "Draft queued for approval."
+            preview = args["body"][:300] + ("…" if len(args["body"]) > 300 else "")
+            return (f"Draft queued for your approval.\nTo: {args['to']}\n"
+                    f"Subject: {args['subject']}\n\nPreview:\n{preview}\n\n"
+                    f"Edit/view in Gmail: {link}\n"
+                    "(Approve/Deny buttons are on the approval message.)")
         if name == "calendar_events":
             resp = _cal(args["account"]).events().list(
                 calendarId="primary", timeMin=args["start"], timeMax=args["end"],
@@ -449,7 +470,18 @@ def handle(text: str, attachments: list[dict] | None = None) -> str:
                            memory_block=memory.memory_block(),
                            shipments_block=memory.shipments_block())
     tools = data_tools.TOOLS + ACTION_TOOLS
-    messages = memory.load_chat_history()
+    history = memory.load_chat_history()
+    # Anchor recency: in long threads the model can drift to older topics.
+    # Make the latest exchange explicit in the system prompt.
+    if history:
+        recent = history[-4:]
+        recap = "\n".join(f"  {m['role']}: "
+                          + (m['content'] if isinstance(m['content'], str)
+                             else '[attachment/tool]')[:300]
+                          for m in recent)
+        system += ("\n\nMOST RECENT EXCHANGE (this is the live thread — the new "
+                   "message below continues THIS, not older topics):\n" + recap)
+    messages = history
 
     _session_files.clear()
     if attachments:
