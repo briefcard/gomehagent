@@ -350,9 +350,10 @@ def main() -> None:
     log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
              list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED,
              config.AUTO_SEND_ENABLED)
-    voice_learn.ensure_profiles()  # learn Gomeh's voice per inbox (first run only)
-    bucket_backfill()  # one-time: organize recent mail into bucket labels
-    backlog_sweep()  # idempotent: EmailLog dedup skips already-processed messages
+    # Startup jobs are wrapped so a failure can NEVER crash the worker (exit 1).
+    _safe(voice_learn.ensure_profiles, "voice profiles")()
+    _safe(bucket_backfill, "bucket backfill")()
+    _safe(backlog_sweep, "backlog sweep")()
     sched = BackgroundScheduler(timezone="America/New_York")
     sched.add_job(_safe(poll_all, "inbox polling"), "interval",
                   minutes=config.POLL_INTERVAL_MIN)
