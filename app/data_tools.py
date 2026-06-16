@@ -205,7 +205,7 @@ def find_contacts(account: str, who: str) -> str:
 # ---------- Document registry ----------
 
 def index_document(filename: str, path: str, link: str = "", doc_type: str = "",
-                   anchor: str = "", source: str = "") -> None:
+                   anchor: str = "", source: str = "", content_hash: str = "") -> None:
     """Record a filed document for instant recall. Updates on re-file."""
     from . import db
     with db.SessionLocal() as s:
@@ -219,10 +219,24 @@ def index_document(filename: str, path: str, link: str = "", doc_type: str = "",
                 row.anchor = anchor
             if doc_type:
                 row.doc_type = doc_type
+            if content_hash:
+                row.content_hash = content_hash
         else:
             s.add(db.DocIndex(filename=filename, path=path, link=link,
-                              doc_type=doc_type, anchor=anchor, source=source))
+                              doc_type=doc_type, anchor=anchor, source=source,
+                              content_hash=content_hash))
         s.commit()
+
+
+def hash_already_filed(content_hash: str) -> str | None:
+    """If a document with this exact content is already filed, return its path."""
+    from . import db
+    if not content_hash:
+        return None
+    with db.SessionLocal() as s:
+        row = (s.query(db.DocIndex)
+               .filter(db.DocIndex.content_hash == content_hash).first())
+        return f"B2B/{row.path}/{row.filename}" if row else None
 
 
 def find_documents(query: str) -> str:

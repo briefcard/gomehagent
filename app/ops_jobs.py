@@ -35,27 +35,43 @@ def _json_extract(text: str) -> dict:
     return json.loads(text[text.find("{"):text.rfind("}") + 1])
 
 
-FILE_PROMPT = """You are filing business documents into the Baci Milano USA
-B2B Drive. EXISTING FOLDER STRUCTURE (paths relative to B2B):
+# Phase 1: read ONE document, extract its key data points.
+EXTRACT_PROMPT = """Read this business document (included above) and extract its
+key identifying data. Email context — From: {sender} | Subject: {subject}.
+Respond JSON only:
+{{"doc_type": "<commercial invoice|packing list|bill of lading|purchase order|"
+ "quote|arrival notice|customs entry|other>",
+ "counterparty": "<the company this involves, e.g. 'Primorous', 'Four Seasons "
+ "Naples', 'ECU Worldwide' — the supplier/client/forwarder>",
+ "order_ref": "<the strongest order/PO/shipment reference number on the doc, "
+ "or '' if none>",
+ "all_refs": ["<every reference number visible: PO, order#, invoice#, BOL#, "
+ "container#>"],
+ "date": "<YYYY-MM-DD or ''>",
+ "is_old_version": false,
+ "summary": "<one line: what this document is>"}}"""
+
+# Phase 2: cluster ALL extracted docs into orders and assign folders ONCE.
+CLUSTER_PROMPT = """You are organizing {n} business documents into the Baci
+Milano USA B2B Drive. EXISTING FOLDERS (reuse these aggressively):
 {tree}
 
-Given an email and its attachments, decide where each file belongs.
-RULES:
-1. STRONGLY prefer an existing folder whose purpose matches. Only propose a
-   new path when nothing fits, and name it consistently with the existing
-   structure, descriptive and specific (counterparty + PO/shipment/project,
-   e.g. 'Purchase Orders/Four Seasons Naples' — NEVER vague names like
-   'Baci Milano USA', 'Documents', 'Files').
-2. Use the email thread context (sender, subject, conversation) to identify
-   the PO / shipment / project the files belong to.
-3. Superseded drafts/old revisions (filename or thread implies a newer
-   version exists, e.g. v1 when v2 is attached, 'draft', struck quotes):
-   mark "old_version" — they will be filed in an OLD VERSIONS subfolder of
-   the same parent.
+Here is the extracted data for every document:
+{docs}
+
+Group them into ORDERS/SHIPMENTS. Critical rules:
+1. Documents belong to the SAME order if they share a counterparty AND any
+   reference number, OR clearly describe the same shipment (same parties,
+   dates, goods). A single order has many docs (invoice + packing list + BOL)
+   and many ref numbers — they are ONE group, ONE folder.
+2. Map each group to an EXISTING folder when one fits. Create a new folder
+   only when a group has no home; name it 'Orders/<Counterparty> <ref-or-date>'
+   in plain English. Aim for a SMALL number of folders.
+3. Never put one order's docs in two folders. Never make a folder per file.
+4. Mark is_old_version docs to land in the group folder's 'OLD VERSIONS'.
 Respond JSON only:
-{{"target_path": "<folder path under B2B>",
- "files": {{"<filename>": "current|old_version|skip"}},
- "why": "<one line>"}}"""
+{{"groups": [{{"folder": "<path under B2B>", "existing": true/false,
+  "anchor": "<counterparty + primary ref>", "doc_ids": [<int>, ...]}}]}}"""
 
 
 def recategorize() -> str:
@@ -70,92 +86,128 @@ def recategorize() -> str:
 
 
 def doc_sweep() -> str:
+    """Three-phase pipeline:
+    1. EXTRACT — pull every attachment, hash for dedup, read each PDF's key
+       data points (counterparty, refs, doc type, date) ONCE.
+    2. CLUSTER — group ALL docs into orders globally and assign each group one
+       folder (reusing existing folders), so one order never splits.
+    3. FILE — upload unique docs to their group folder; index with hash.
+    """
+    import base64 as _b64
+    import hashlib
+
+    from . import data_tools, emailfmt
     alias = DOC_SWEEP_ALIAS
     b2b = drive_io.find_folder(alias, B2B_FOLDER_NAME)
     if not b2b:
         return f"FAILED: no folder named '{B2B_FOLDER_NAME}' found in {alias} Drive"
 
-    _status("doc_sweep", state="mapping drive structure")
-    tree = drive_io.folder_tree(alias, b2b, depth=3)
-    tree_text = "\n".join(sorted(tree)) [:6000] or "(B2B is empty)"
-    system = FILE_PROMPT.format(tree=tree_text)
-
+    # ---------- Phase 1: EXTRACT ----------
+    _status("doc_sweep", state="extracting")
     emails = gmail_client.fetch_with_attachments(alias, DOC_SWEEP_DAYS)
-    _status("doc_sweep", state="filing", total_emails=len(emails), filed=0)
-    filed, skipped = [], 0
-    for idx, em in enumerate(emails, 1):
-        _status("doc_sweep", progress=f"{idx}/{len(emails)} emails", filed=len(filed))
-        try:
-            # Read the first PDF's contents — the document is the evidence.
-            import base64 as _b64
-            blocks: list = []
-            for att in em["attachments"]:
-                if att["filename"].lower().endswith(".pdf"):
-                    try:
-                        pdf = gmail_client.download_attachment(
-                            alias, em["id"], att["attachment_id"])
-                        if len(pdf) < 4_000_000:
-                            blocks.append({"type": "document", "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": _b64.standard_b64encode(pdf).decode()}})
-                    except Exception:  # noqa: BLE001
-                        pass
-                    break
-            blocks.append({"type": "text", "text":
-                           f"From: {em['from']}\nSubject: {em['subject']}\n"
-                           f"Thread snippet: {em['snippet']}\n"
-                           f"Files: {[a['filename'] for a in em['attachments']]}\n"
-                           "(First PDF included above when readable — its "
-                           "contents are the primary evidence for filing.)"})
-            msg = client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=400, system=system,
-                messages=[{"role": "user", "content": blocks}],
-            )
-            meta = _json_extract(msg.content[0].text)
-        except Exception:  # noqa: BLE001
-            log.exception("filing decision failed")
-            continue
-        decisions = meta.get("files", {})
-        target = (meta.get("target_path") or "").strip().strip("/")
-        if not target:
-            skipped += len(em["attachments"])
-            continue
+    docs: list[dict] = []          # one entry per UNIQUE attachment
+    seen_hashes: set[str] = set()
+    dup_in_run = dup_filed = 0
+    for ei, em in enumerate(emails, 1):
+        _status("doc_sweep", state="extracting", progress=f"{ei}/{len(emails)} emails",
+                unique_docs=len(docs))
         for att in em["attachments"]:
-            verdict = decisions.get(att["filename"], "current")
-            if verdict == "skip":
-                skipped += 1
+            if not att["filename"].lower().endswith((".pdf", ".xlsx", ".xls", ".docx")):
                 continue
-            path = target + ("/OLD VERSIONS" if verdict == "old_version" else "")
+            try:
+                data = gmail_client.download_attachment(alias, em["id"], att["attachment_id"])
+            except Exception:  # noqa: BLE001
+                continue
+            h = hashlib.sha256(data).hexdigest()
+            if h in seen_hashes:
+                dup_in_run += 1
+                continue
+            if data_tools.hash_already_filed(h):
+                dup_filed += 1
+                seen_hashes.add(h)
+                continue
+            seen_hashes.add(h)
+            # read key data points from the document itself
+            meta = {"doc_type": "other", "counterparty": "", "order_ref": "",
+                    "all_refs": [], "date": "", "is_old_version": False,
+                    "summary": att["filename"]}
+            if att["filename"].lower().endswith(".pdf") and len(data) < 4_500_000:
+                try:
+                    msg = client.messages.create(
+                        model=config.CLAUDE_MODEL, max_tokens=400,
+                        messages=[{"role": "user", "content": [
+                            {"type": "document", "source": {
+                                "type": "base64", "media_type": "application/pdf",
+                                "data": _b64.standard_b64encode(data).decode()}},
+                            {"type": "text", "text": EXTRACT_PROMPT.format(
+                                sender=em["from"][:60], subject=em["subject"][:120])},
+                        ]}],
+                    )
+                    meta.update(_json_extract(msg.content[0].text))
+                except Exception:  # noqa: BLE001
+                    log.exception("extract failed: %s", att["filename"])
+            docs.append({"i": len(docs), "filename": att["filename"], "data": data,
+                         "mime": att["mime"], "hash": h, "from": em["from"], **meta})
+
+    if not docs:
+        return f"doc_sweep: no new documents ({dup_in_run + dup_filed} duplicates skipped)"
+
+    # ---------- Phase 2: CLUSTER ----------
+    _status("doc_sweep", state="clustering", unique_docs=len(docs))
+    tree_text = "\n".join(sorted(drive_io.folder_tree(alias, b2b, depth=3)))[:6000]
+    doc_lines = "\n".join(
+        f"id={d['i']}: type={d['doc_type']}, counterparty='{d['counterparty']}', "
+        f"order_ref='{d['order_ref']}', refs={d['all_refs']}, date={d['date']}, "
+        f"old={d['is_old_version']}, file='{d['filename']}'" for d in docs)
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=3000,
+            messages=[{"role": "user", "content": CLUSTER_PROMPT.format(
+                n=len(docs), tree=tree_text or "(empty)", docs=doc_lines)}],
+        )
+        groups = _json_extract(msg.content[0].text).get("groups", [])
+    except Exception:  # noqa: BLE001
+        log.exception("clustering failed")
+        return "doc_sweep: clustering step failed — nothing filed"
+
+    # ---------- Phase 3: FILE ----------
+    _status("doc_sweep", state="filing", groups=len(groups))
+    by_id = {d["i"]: d for d in docs}
+    filed, new_folders = [], 0
+    for g in groups:
+        folder = (g.get("folder") or "_Agent Intake/_REVIEW").strip("/")
+        if not g.get("existing", True):
+            new_folders += 1
+        for did in g.get("doc_ids", []):
+            d = by_id.get(did)
+            if not d:
+                continue
+            path = folder + ("/OLD VERSIONS" if d.get("is_old_version") else "")
             try:
                 folder_id = drive_io.ensure_path(alias, b2b, path)
-                data = gmail_client.download_attachment(alias, em["id"], att["attachment_id"])
-                result = drive_io.upload(alias, folder_id, att["filename"], data,
-                                         att["mime"] or "application/octet-stream")
-                if result != "exists":
-                    filed.append(f"{path}/{att['filename']} (from {em['from'][:40]})")
-                    from . import data_tools
-                    data_tools.index_document(
-                        att["filename"], path, result if result.startswith("http") else "",
-                        anchor=target.rsplit("/", 1)[-1], source="sweep")
+                link = drive_io.upload(alias, folder_id, d["filename"], d["data"],
+                                       d["mime"] or "application/octet-stream")
+                data_tools.index_document(
+                    d["filename"], path, link if link.startswith("http") else "",
+                    d["doc_type"], g.get("anchor", ""), "sweep", d["hash"])
+                filed.append(f"{path}/{d['filename']}")
             except Exception:  # noqa: BLE001
-                log.exception("upload failed: %s", att["filename"])
+                log.exception("upload failed: %s", d["filename"])
 
     _status("doc_sweep", state="done", filed=len(filed))
     report = (
-        f"Document sweep of [{alias}] — last {DOC_SWEEP_DAYS} days\n\n"
-        f"Filed {len(filed)} documents into the existing B2B structure "
-        f"(old revisions in OLD VERSIONS subfolders; exact duplicates and "
-        f"{skipped} irrelevant attachments skipped):\n\n"
-        + "\n".join(f"  • {f}" for f in filed[:120])
-        + "\n\nIf anything landed in the wrong place, tell the assistant on "
-          "WhatsApp — corrections become filing rules."
+        f"Document sweep — last {DOC_SWEEP_DAYS} days\n\n"
+        f"{len(docs)} unique documents organized into {len(groups)} orders "
+        f"({new_folders} new folders; {dup_in_run} in-batch duplicates and "
+        f"{dup_filed} already-filed duplicates skipped).\n\n"
+        + "\n".join(f"  • {f}" for f in filed[:150])
+        + "\n\nWrong placement? Tell me on WhatsApp and the correction sticks."
     )
-    from . import emailfmt
     gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
-                            f"Document sweep done — {len(filed)} files organized",
+                            f"Document sweep — {len(docs)} docs, {len(groups)} orders",
                             report, html=emailfmt.text_to_html(report))
-    return f"doc_sweep complete: {len(filed)} filed"
+    return (f"doc_sweep complete: {len(docs)} unique docs, {len(groups)} orders, "
+            f"{dup_in_run + dup_filed} dupes skipped")
 
 
 AUDIT_PROMPT = """You are auditing the Baci Milano USA import/logistics pipeline.

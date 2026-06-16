@@ -180,6 +180,7 @@ class DocIndex(Base):
     doc_type = Column(String, default="")  # BOL, commercial invoice, PO...
     anchor = Column(String, default="")  # 'Primorous PO-2241', 'Turkey-Mar2026'
     source = Column(String, default="")  # email | whatsapp | sweep | refile
+    content_hash = Column(String, default="", index=True)  # sha256 — dedup across runs
 
 
 class Setting(Base):
