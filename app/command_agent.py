@@ -12,7 +12,7 @@ import logging
 import anthropic
 from googleapiclient.discovery import build
 
-from . import approvals, config, data_tools, db, digest, gmail_client, memory, ops_jobs
+from . import approvals, config, data_tools, db, digest, gmail_client, memory, ops_jobs, triage
 
 log = logging.getLogger("cmd")
 client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
@@ -123,7 +123,7 @@ RULES:
   never claim "nothing was sent."
 - FEEDBACK: when Gomeh critiques a draft or sets a writing preference, call
   add_voice_rule for that inbox so every future draft obeys it.
-- Today's date: {today} (America/New_York).{memory_block}{shipments_block}"""
+Today's date and current context are appended below."""
 
 ACTION_TOOLS = [
     {"name": "run_job",
@@ -532,21 +532,25 @@ def handle(text: str, attachments: list[dict] | None = None) -> str:
     conversational continuity. attachments: [{filename, data, mime}]."""
     import base64 as _b64
 
-    system = SYSTEM.format(today=dt.datetime.now().strftime("%A %Y-%m-%d"),
-                           memory_block=memory.memory_block(),
-                           shipments_block=memory.shipments_block())
     tools = data_tools.TOOLS + ACTION_TOOLS
     history = memory.load_chat_history()
-    # Anchor recency: in long threads the model can drift to older topics.
-    # Make the latest exchange explicit in the system prompt.
+    # Dynamic context (date, memory, shipments, recent recap) kept OUT of the
+    # cached static block so the big rules prefix caches cleanly.
+    dynamic = (f"\n\nToday: {dt.datetime.now().strftime('%A %Y-%m-%d')} "
+               "(America/New_York)." + memory.memory_block()
+               + memory.shipments_block())
     if history:
         recent = history[-4:]
         recap = "\n".join(f"  {m['role']}: "
                           + (m['content'] if isinstance(m['content'], str)
                              else '[attachment/tool]')[:300]
                           for m in recent)
-        system += ("\n\nMOST RECENT EXCHANGE (this is the live thread — the new "
-                   "message below continues THIS, not older topics):\n" + recap)
+        dynamic += ("\n\nMOST RECENT EXCHANGE (this is the live thread — the new "
+                    "message below continues THIS, not older topics):\n" + recap)
+    system = [
+        {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": dynamic},
+    ]
     messages = history
 
     _session_files.clear()
@@ -573,7 +577,7 @@ def handle(text: str, attachments: list[dict] | None = None) -> str:
     for _ in range(10):
         msg = client.messages.create(
             model=config.CLAUDE_MODEL, max_tokens=2000,
-            system=system, tools=tools, messages=messages,
+            system=system, tools=triage._cached_tools(tools), messages=messages,
         )
         if msg.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": msg.content})

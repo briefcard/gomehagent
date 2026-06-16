@@ -194,6 +194,16 @@ def _voice_rules(alias: str) -> str:
         return vp.rules if vp else ""
 
 
+def _cached_tools(tools: list) -> list:
+    """Mark the tools array for prompt caching (cache_control on the last tool
+    caches the whole tools prefix — identical across calls)."""
+    if not tools:
+        return tools
+    out = [dict(t) for t in tools]
+    out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+    return out
+
+
 def _parse_verdict(text: str) -> dict | None:
     """Extract the JSON object from model output, tolerant of prose/fences."""
     if not text:
@@ -209,22 +219,23 @@ def _parse_verdict(text: str) -> dict | None:
 
 
 def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
-    system = SYSTEM
-    system += (
+    # Static prefix (identical every call) is cached; dynamic suffix is not.
+    dynamic = (
         f"\n\nSIGNATURE — end every reply for this inbox EXACTLY with:\n"
         f"{SIGNATURES.get(account_alias, SIGNATURES['personal'])}"
     )
     voice = _voice_rules(account_alias)
     if voice:
-        system += (
+        dynamic += (
             "\n\nVOICE PROFILE for this inbox (distilled from the owner's past "
             "replies — match this style and follow these handling rules):\n" + voice
         )
-
-    # Shared working memory (written by the WhatsApp command agent + Gomeh's
-    # standing instructions) — keeps email handling consistent with ongoing tasks.
     from . import memory
-    system += memory.memory_block()
+    dynamic += memory.memory_block()
+    system = [
+        {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": dynamic},
+    ]
 
     thread_context = email.get("thread_context", "")
     user_content = (
@@ -272,7 +283,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             model=model,
             max_tokens=3000,  # headroom so long replies don't truncate the JSON
             system=system,
-            tools=data_tools.TOOLS,
+            tools=_cached_tools(data_tools.TOOLS),
             messages=messages,
         )
         if msg.stop_reason == "tool_use":
