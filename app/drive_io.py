@@ -102,6 +102,21 @@ def list_all_files_recursive(alias: str, folder_id: str, _prefix: str = "",
     return out
 
 
+def upload_html_as_doc(alias: str, folder_id: str, name: str, html: str) -> str:
+    """Save an email body as a readable Google Doc (for receipts/notices that
+    have no attachment — the email IS the record)."""
+    from googleapiclient.http import MediaInMemoryUpload
+    if file_exists(alias, folder_id, name):
+        return "exists"
+    created = svc(alias).files().create(
+        body={"name": name, "parents": [folder_id],
+              "mimeType": "application/vnd.google-apps.document"},
+        media_body=MediaInMemoryUpload(html.encode("utf-8"), mimetype="text/html"),
+        fields="webViewLink", supportsAllDrives=True,
+    ).execute()
+    return created.get("webViewLink", "uploaded")
+
+
 def download(alias: str, file_id: str) -> bytes:
     return svc(alias).files().get_media(fileId=file_id,
                                         supportsAllDrives=True).execute()
@@ -181,5 +196,6 @@ def _serialize(fn):
 
 for _name in ("find_folder", "ensure_subfolder", "folder_tree", "list_files",
               "list_all_files_recursive", "move", "ensure_path", "name_search",
-              "copy_file", "file_exists", "upload", "download"):
+              "copy_file", "file_exists", "upload", "download",
+              "upload_html_as_doc"):
     globals()[_name] = _serialize(globals()[_name])

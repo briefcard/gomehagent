@@ -127,6 +127,24 @@ ACTION_TOOLS = [
                                             "shipment_audit", "recategorize",
                                             "build_onboarding_packet"]}},
          "required": ["job"]}},
+    {"name": "organize_emails",
+     "description": "Organize ANY category of emails/attachments into Drive — "
+                    "not just imports. Pull matching emails, dedup by content, "
+                    "read each item, group, and file. Examples: receipts for "
+                    "taxes (query 'receipt OR invoice OR payment', scheme "
+                    "'vendor' or 'month', save_emails true), subscriptions "
+                    "(query 'subscription OR renewal'), import docs (scheme "
+                    "'orders'). Runs async; emails a report.",
+     "input_schema": {"type": "object", "properties": {
+         "account": {"type": "string", "enum": ["baci", "eien", "personal"]},
+         "query": {"type": "string", "description": "Gmail search (e.g. "
+                   "'receipt OR invoice OR \"payment confirmation\"')"},
+         "destination": {"type": "string", "description": "Drive folder name, "
+                         "e.g. 'B2B', 'Tax Receipts 2026', 'Subscriptions'"},
+         "scheme": {"type": "string", "enum": ["orders", "vendor", "month"]},
+         "save_emails": {"type": "boolean", "description": "true to also save "
+                         "attachment-less emails (receipts in the body) as Docs"}},
+         "required": ["account", "query", "destination", "scheme"]}},
     {"name": "job_status",
      "description": "Live progress of running/finished jobs (doc sweep, "
                     "refiling, audits) — use when Gomeh asks how a task is going.",
@@ -341,6 +359,23 @@ def _dispatch(name: str, args: dict) -> str:
     try:
         if name == "run_job":
             return _run_job_async(args["job"])
+        if name == "organize_emails":
+            import threading
+
+            from . import whatsapp
+            def _run():
+                try:
+                    r = ops_jobs.organize(
+                        account=args.get("account", "baci"), query=args["query"],
+                        destination=args["destination"], scheme=args.get("scheme", "vendor"),
+                        save_emails=args.get("save_emails", False))
+                    whatsapp.send_text(f"✅ {r}")
+                except Exception as exc:  # noqa: BLE001
+                    whatsapp.send_text(f"❌ organize failed: {exc.__class__.__name__}")
+            threading.Thread(target=_run, daemon=True).start()
+            return (f"Organizing {args['account']} '{args['query']}' by "
+                    f"{args.get('scheme')} into {args['destination']} — running "
+                    "now, emailed report when done.")
         if name == "job_status":
             return json.dumps(ops_jobs.STATUS) or "no jobs have run yet"
         if name == "save_memory":

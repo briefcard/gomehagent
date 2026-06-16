@@ -628,6 +628,165 @@ def file_whatsapp_document(media_id: str, filename: str, mime: str,
     return (f"Filed ✓ {meta.get('note', name)}\n→ B2B/{target}/{name}\n{link}")
 
 
+# ------------------------------------------------------------------ #
+# Generalized organizer — works for ANY category, not just imports.   #
+# ------------------------------------------------------------------ #
+
+ORGANIZE_SCHEMES = {
+    "orders": "Group by order/shipment: same counterparty + any shared "
+              "reference number = one folder (invoice+packing list+BOL together).",
+    "vendor": "Group by vendor/company: one folder per vendor "
+              "(e.g. 'Anthropic', 'Render').",
+    "month": "Group by calendar month of the document: folders like "
+             "'2026-04', '2026-05'.",
+}
+
+ORGANIZE_EXTRACT = """Read this item (document above if attached, else the email
+text). Email: From {sender} | Subject: {subject} | Date: {date}.
+Respond JSON only:
+{{"counterparty": "<company/vendor>", "doc_type": "<receipt|invoice|order|"
+ "subscription notice|statement|contract|other>", "ref": "<order/invoice # or ''>",
+ "amount": "<$ total if a receipt/invoice, else ''>", "date": "<YYYY-MM-DD or ''>",
+ "month": "<YYYY-MM>", "is_old_version": false, "summary": "<one line>"}}"""
+
+ORGANIZE_CLUSTER = """Organize {n} items into the '{dest}' folder of the {acct}
+Drive. SCHEME: {scheme}
+EXISTING FOLDERS (reuse aggressively):
+{tree}
+ITEMS:
+{docs}
+Group per the scheme. Reuse existing folders; new folders only when needed,
+named in plain English, few in number. Never split one logical group across
+folders; never one folder per item. Respond JSON only:
+{{"groups": [{{"folder": "<path under {dest}>", "existing": true/false,
+  "anchor": "<label>", "doc_ids": [<int>]}}]}}"""
+
+
+def organize(account: str = "baci", query: str = "", destination: str = "B2B",
+             scheme: str = "orders", days: int = 180, save_emails: bool = False) -> str:
+    """ONE engine for any organize request. Pulls matching emails + attachments,
+    dedups, extracts key data, clusters per the chosen scheme, files.
+    save_emails: also save attachment-less emails (receipts/notices) as Docs."""
+    import base64 as _b64
+    import hashlib
+
+    from . import data_tools, emailfmt
+    if account not in config.GMAIL_ACCOUNTS:
+        return f"Unknown account '{account}'."
+    root = drive_io.find_folder(account, destination)
+    if not root:
+        root = drive_io.ensure_subfolder(account, "root", destination)
+    scheme_desc = ORGANIZE_SCHEMES.get(scheme, ORGANIZE_SCHEMES["orders"])
+    jobkey = f"organize:{account}:{scheme}"
+
+    _status(jobkey, state="gathering")
+    svc = gmail_client.service_for(account)
+    q = (query or "has:attachment") + f" newer_than:{days}d"
+    resp = svc.users().messages().list(userId="me", q=q, maxResults=200).execute()
+    refs = resp.get("messages", [])
+
+    docs: list[dict] = []
+    seen: set[str] = set()
+    dup = 0
+    for ri, ref in enumerate(refs, 1):
+        _status(jobkey, state="extracting", progress=f"{ri}/{len(refs)}", items=len(docs))
+        full = svc.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+        headers = {h["name"].lower(): h["value"] for h in full["payload"].get("headers", [])}
+        atts = [a for a in gmail_client._extract_attachments(full["payload"])
+                if a["filename"].lower().endswith((".pdf", ".xlsx", ".xls", ".docx", ".png", ".jpg"))]
+        units = []
+        for a in atts:
+            try:
+                data = gmail_client.download_attachment(account, ref["id"], a["attachment_id"])
+                units.append((a["filename"], data, a["mime"], False))
+            except Exception:  # noqa: BLE001
+                continue
+        if not units and save_emails:
+            body = gmail_client._extract_text(full["payload"])
+            html = f"<h3>{headers.get('subject','')}</h3><p>From: {headers.get('from','')}</p><pre>{body[:20000]}</pre>"
+            units.append((f"{headers.get('subject','email')[:60]}.gdoc",
+                          html.encode("utf-8"), "text/html", True))
+        for fname, data, mime, is_email in units:
+            h = hashlib.sha256(data).hexdigest()
+            if h in seen or data_tools.hash_already_filed(h):
+                dup += 1
+                continue
+            seen.add(h)
+            meta = {"counterparty": "", "doc_type": "other", "ref": "", "amount": "",
+                    "date": headers.get("date", ""), "month": "", "is_old_version": False,
+                    "summary": fname}
+            blocks: list = []
+            if not is_email and fname.lower().endswith(".pdf") and len(data) < 4_500_000:
+                blocks.append({"type": "document", "source": {
+                    "type": "base64", "media_type": "application/pdf",
+                    "data": _b64.standard_b64encode(data).decode()}})
+            blocks.append({"type": "text", "text": ORGANIZE_EXTRACT.format(
+                sender=headers.get("from", "")[:60], subject=headers.get("subject", "")[:120],
+                date=headers.get("date", "")[:30])})
+            try:
+                msg = client.messages.create(model=config.CLAUDE_MODEL,
+                                             max_tokens=400, messages=[{"role": "user", "content": blocks}])
+                meta.update(_json_extract(msg.content[0].text))
+            except Exception:  # noqa: BLE001
+                pass
+            docs.append({"i": len(docs), "filename": fname, "data": data, "mime": mime,
+                         "hash": h, "is_email": is_email, **meta})
+
+    if not docs:
+        return f"organize: no new items ({dup} duplicates skipped)"
+
+    _status(jobkey, state="clustering", items=len(docs))
+    tree_text = "\n".join(sorted(drive_io.folder_tree(account, root, depth=3)))[:6000]
+    doc_lines = "\n".join(
+        f"id={d['i']}: type={d['doc_type']}, who='{d['counterparty']}', ref='{d['ref']}', "
+        f"amount='{d['amount']}', month={d['month']}, file='{d['filename']}'" for d in docs)
+    try:
+        msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=3000,
+            messages=[{"role": "user", "content": ORGANIZE_CLUSTER.format(
+                n=len(docs), dest=destination, acct=account, scheme=scheme_desc,
+                tree=tree_text or "(empty)", docs=doc_lines)}])
+        groups = _json_extract(msg.content[0].text).get("groups", [])
+    except Exception:  # noqa: BLE001
+        log.exception("organize clustering failed")
+        return "organize: clustering failed"
+
+    _status(jobkey, state="filing", groups=len(groups))
+    by_id = {d["i"]: d for d in docs}
+    filed = []
+    for g in groups:
+        folder = (g.get("folder") or "_REVIEW").strip("/")
+        for did in g.get("doc_ids", []):
+            d = by_id.get(did)
+            if not d:
+                continue
+            path = folder + ("/OLD VERSIONS" if d.get("is_old_version") else "")
+            try:
+                fid = drive_io.ensure_path(account, root, path)
+                if d["is_email"]:
+                    link = drive_io.upload_html_as_doc(account, fid,
+                                                       d["filename"].replace(".gdoc", ""),
+                                                       d["data"].decode("utf-8", "replace"))
+                else:
+                    link = drive_io.upload(account, fid, d["filename"], d["data"],
+                                           d["mime"] or "application/octet-stream")
+                data_tools.index_document(d["filename"], path,
+                                          link if str(link).startswith("http") else "",
+                                          d["doc_type"], g.get("anchor", ""), "organize", d["hash"])
+                filed.append(f"{path}/{d['filename']}")
+            except Exception:  # noqa: BLE001
+                log.exception("organize upload failed: %s", d["filename"])
+
+    _status(jobkey, state="done", filed=len(filed))
+    report = (f"Organized [{account}] '{query or 'attachments'}' by {scheme} → "
+              f"{destination}\n\n{len(docs)} items into {len(groups)} groups "
+              f"({dup} duplicates skipped):\n\n"
+              + "\n".join(f"  • {f}" for f in filed[:150]))
+    gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                            f"Organized {len(docs)} items by {scheme}",
+                            report, html=emailfmt.text_to_html(report))
+    return f"organize complete: {len(docs)} items, {len(groups)} groups, {dup} dupes"
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
-        "build_onboarding_packet": build_onboarding_packet}
+        "build_onboarding_packet": build_onboarding_packet, "organize": organize}
