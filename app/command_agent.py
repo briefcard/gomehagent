@@ -171,6 +171,11 @@ ACTION_TOOLS = [
      "description": "Current status digest: pending approvals, recent email "
                     "actions, money deadlines.",
      "input_schema": {"type": "object", "properties": {}}},
+    {"name": "usage_report",
+     "description": "API cost + cache-hit-rate audit for the last N days "
+                    "(spend, cache savings, projected monthly, by purpose).",
+     "input_schema": {"type": "object", "properties": {
+         "days": {"type": "integer"}}}},
     {"name": "list_deadlines",
      "description": "Open money deadlines from the ledger.",
      "input_schema": {"type": "object", "properties": {}}},
@@ -461,6 +466,9 @@ def _dispatch(name: str, args: dict) -> str:
                  "costs": r.costs, "notes": r.notes} for r in rows]) or "none"
         if name == "get_digest":
             return digest.build_digest()
+        if name == "usage_report":
+            from . import usage
+            return json.dumps(usage.report(int(args.get("days", 7))))
         if name == "list_deadlines":
             with db.SessionLocal() as s:
                 rows = (s.query(db.Deadline)
@@ -579,6 +587,8 @@ def handle(text: str, attachments: list[dict] | None = None) -> str:
             model=config.CLAUDE_MODEL, max_tokens=2000,
             system=system, tools=triage._cached_tools(tools), messages=messages,
         )
+        from . import usage
+        usage.log_usage("command", config.CLAUDE_MODEL, msg)
         if msg.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": msg.content})
             results = []

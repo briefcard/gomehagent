@@ -183,6 +183,21 @@ class DocIndex(Base):
     content_hash = Column(String, default="", index=True)  # sha256 — dedup across runs
 
 
+class Usage(Base):
+    """Token usage per Claude call — powers cache-hit + cost auditing."""
+
+    __tablename__ = "usage"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    purpose = Column(String)  # triage | command | classify | job
+    model = Column(String)
+    input_tokens = Column(String, default="0")
+    output_tokens = Column(String, default="0")
+    cache_read = Column(String, default="0")
+    cache_write = Column(String, default="0")
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

@@ -132,6 +132,16 @@ def stats(key: str = "") -> dict:
     return approvals.autonomy_stats()
 
 
+@app.get("/admin/usage")
+def usage_report(key: str = "", days: int = 7) -> dict:
+    """Cost + cache-hit audit. Open in a browser:
+    /admin/usage?key=SECRET&days=7"""
+    from . import usage
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    return usage.report(days)
+
+
 @app.get("/admin/ask", response_class=PlainTextResponse)
 def ask(key: str = "", q: str = "") -> str:
     """The conversational agent over HTTP, until WhatsApp is live:

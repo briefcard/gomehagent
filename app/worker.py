@@ -325,6 +325,26 @@ def _safe(fn, context: str):
     return wrapped
 
 
+def weekly_cost_report() -> None:
+    from . import usage
+    r = usage.report(7)
+    body = (f"Weekly API cost report (last 7 days)\n\n"
+            f"Spend: ${r['est_cost_usd']}  |  Projected monthly: "
+            f"${r['projected_monthly_usd']}\n"
+            f"Cache hit rate: {r['cache_hit_rate_pct']}%  "
+            f"(saved ~${r['est_saved_by_cache_usd']} via caching)\n"
+            f"Calls: {r['calls']}\n\nBy purpose:\n"
+            + "\n".join(f"  • {k}: {v['calls']} calls, ${v['cost_usd']}, "
+                        f"{v['cache_hit_pct']}% cached"
+                        for k, v in r["by_purpose"].items()))
+    whatsapp.send_text("💵 " + body)
+    if not config.WHATSAPP_ENABLED:
+        from . import emailfmt
+        gmail_client.send_email(config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                                "Weekly API cost report", body,
+                                html=emailfmt.text_to_html(body))
+
+
 def main() -> None:
     db.init_db()
     log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
@@ -344,6 +364,8 @@ def main() -> None:
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'
+    sched.add_job(_safe(weekly_cost_report, "cost report"), "cron",
+                  day_of_week="mon", hour=8, minute=0)
     for hour in config.DIGEST_HOURS:
         sched.add_job(_safe(digest.send_digest, "digest"), "cron",
                       hour=hour, minute=0)

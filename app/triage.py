@@ -175,6 +175,8 @@ def classify_only(email: dict, account_alias: str) -> str:
                    f"Inbox: {account_alias}\nFrom: {email['from']}\n"
                    f"Subject: {email['subject']}\n\n{email['body'][:1200]}"}],
     )
+    from . import usage
+    usage.log_usage("classify", config.CLASSIFY_MODEL, msg)
     cat = msg.content[0].text.strip().lower()
     return cat if cat in config.BUCKETS else "notifications"
 
@@ -286,6 +288,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             tools=_cached_tools(data_tools.TOOLS),
             messages=messages,
         )
+        from . import usage
+        usage.log_usage("triage", model, msg)
         if msg.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": msg.content})
             results = []
