@@ -198,6 +198,19 @@ class Usage(Base):
     cache_write = Column(String, default="0")
 
 
+class WaMessage(Base):
+    """Map WhatsApp message IDs -> their content, so when Gomeh uses the reply
+    feature we can show the agent exactly which prior message he quoted."""
+
+    __tablename__ = "wa_messages"
+
+    wamid = Column(String, primary_key=True)
+    at = Column(DateTime(timezone=True), default=utcnow)
+    role = Column(String)  # assistant | user
+    content = Column(Text)
+    approval_id = Column(String, default="")  # set if this was an approval msg
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

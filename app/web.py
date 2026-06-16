@@ -216,8 +216,13 @@ def _consume() -> None:
                     continue
                 whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
                 whatsapp.send_text(command_agent.handle(transcript))
-            else:
-                whatsapp.send_text(command_agent.handle(payload))
+            else:  # text command — may carry a quoted message
+                text = payload
+                if payload.startswith("{") and '"_quoted"' in payload:
+                    q = json.loads(payload)
+                    text = (f"[Replying to your earlier message, which said:\n"
+                            f"\"{q['_quoted']}\"]\n\nMy reply: {q['text']}")
+                whatsapp.send_text(command_agent.handle(text))
         except RuntimeError:
             whatsapp.send_text("Voice notes need a transcription key — add "
                                "OPENAI_API_KEY in Render and I'll handle audio.")
@@ -261,13 +266,27 @@ def _handle_voice(media_id: str) -> None:
     _enqueue("voice", media_id)
 
 
-def _handle_command(text: str) -> None:
+def _handle_command(text: str, quoted_id: str = "") -> None:
     # Intercept deny-reason / edit replies tied to a recent button tap.
     if _pending_feedback["mode"]:
         _enqueue("feedback", json.dumps(
             {**_pending_feedback, "text": text}))
         _pending_feedback.update(mode=None, approval_id=None)
         return
+    # If Gomeh replied to a specific agent message, resolve what he quoted.
+    if quoted_id:
+        from . import db
+        with db.SessionLocal() as s:
+            q = s.get(db.WaMessage, quoted_id)
+        if q and q.approval_id:
+            # Reply to an approval card = an edit instruction for that draft.
+            _enqueue("feedback", json.dumps(
+                {"mode": "edit", "approval_id": q.approval_id, "text": text}))
+            return
+        if q:
+            _enqueue("text", json.dumps(
+                {"_quoted": q.content[:2000], "text": text}))
+            return
     _enqueue("text", text)
 
 
@@ -299,12 +318,15 @@ async def whatsapp_incoming(request: Request) -> dict:
                     if wamid in _seen_wamids:
                         continue
                     _seen_wamids.append(wamid)
+                    # If Gomeh used WhatsApp's reply feature, capture which
+                    # message he quoted so the agent has exact context.
+                    quoted_id = (msg.get("context") or {}).get("id", "")
                     if msg.get("type") == "interactive":
                         reply_id = msg["interactive"]["button_reply"]["id"]
                         action, ap_id = reply_id.split(":", 1)
                         _handle_button(action, ap_id)
                     elif msg.get("type") == "text":
-                        _handle_command(msg["text"]["body"])
+                        _handle_command(msg["text"]["body"], quoted_id)
                     elif msg.get("type") == "audio":
                         _handle_voice(msg["audio"]["id"])
                     elif msg.get("type") in ("document", "image"):

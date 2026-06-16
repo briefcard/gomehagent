@@ -18,7 +18,7 @@ class MetaSendError(Exception):
         super().__init__(f"{code}: {message}")
 
 
-def _post(payload: dict) -> None:
+def _post(payload: dict) -> str:
     r = httpx.post(
         f"{API}/{config.WHATSAPP_PHONE_ID}/messages",
         headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
@@ -32,6 +32,23 @@ def _post(payload: dict) -> None:
             err = {}
         raise MetaSendError(err.get("code", r.status_code),
                             err.get("message", r.text[:200]))
+    try:
+        return r.json()["messages"][0]["id"]  # wamid of the sent message
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _remember_sent(wamid: str, content: str, approval_id: str = "") -> None:
+    if not wamid:
+        return
+    from . import db
+    try:
+        with db.SessionLocal() as s:
+            s.merge(db.WaMessage(wamid=wamid, role="assistant",
+                                 content=content[:6000], approval_id=approval_id))
+            s.commit()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 import os
@@ -44,12 +61,13 @@ def send_text(body: str) -> None:
         return
     err: MetaSendError | None = None
     try:
-        _post({
+        wamid = _post({
             "messaging_product": "whatsapp",
             "to": config.WHATSAPP_APPROVER_NUMBER,
             "type": "text",
             "text": {"body": body[:4096]},
         })
+        _remember_sent(wamid, body)
         return
     except MetaSendError as exc:
         err = exc
@@ -152,7 +170,7 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
     if detail.get("suggestion"):
         parts.append(f"\n💡 {detail['suggestion']}")
     text = "\n".join(parts)[:3900]  # WhatsApp interactive body cap is 4096
-    _post({
+    wamid = _post({
         "messaging_product": "whatsapp",
         "to": config.WHATSAPP_APPROVER_NUMBER,
         "type": "interactive",
@@ -168,3 +186,4 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
             },
         },
     })
+    _remember_sent(wamid, text, approval_id=approval_id)
