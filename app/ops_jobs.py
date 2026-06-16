@@ -788,8 +788,11 @@ def organize(account: str = "baci", query: str = "", destination: str = "B2B",
 
 
 REVIEW_PROMPT = """You are a meticulous operations manager doing your periodic
-"does this still make sense?" review for Baci Milano USA. You think a step
-beyond the surface. Below is the current state.
+"does this still make sense?" review across ALL of Gomeh's businesses (Baci
+Milano USA imports, Eien Health e-commerce, Saias Consulting client work).
+You think a step beyond the surface. Recent email below is tagged by inbox
+[baci]/[eien]/[personal]; shipments/RFQs are Baci's; deadlines span all.
+Below is the current state.
 
 OPEN SHIPMENTS:
 {shipments}
@@ -821,10 +824,10 @@ Respond JSON only:
 
 
 def daily_review() -> str:
-    """The 'expert second look' — runs scheduled. Reasons across all open
-    state + recent email, surfaces what's being dropped, and offers actions."""
+    """The 'expert second look' — runs scheduled across ALL inboxes. Reasons
+    over every account's recent email plus the shared records (shipments,
+    RFQs, deadlines span accounts), surfaces what's being dropped."""
     from . import emailfmt, memory, whatsapp
-    alias = "baci"
 
     with db.SessionLocal() as s:
         ships = s.query(db.Shipment).filter(db.Shipment.status != "closed").all()
@@ -835,22 +838,28 @@ def daily_review() -> str:
         rfq_t = "\n".join(f"- {x.shipment_name}: {x.status}, asked "
                           f"{len(x.forwarders or [])}, quotes in {len(x.quotes or {})}"
                           for x in rfqs) or "none"
-        dead_t = "\n".join(f"- {x.due_date}: {x.description} ({x.amount})" for x in deads) or "none"
+        dead_t = "\n".join(f"- {x.due_date}: {x.description} ({x.amount}) [{x.account}]"
+                           for x in deads) or "none"
 
-    try:
-        svc = gmail_client.service_for(alias)
-        resp = svc.users().messages().list(
-            userId="me", q="newer_than:7d -in:sent", maxResults=25).execute()
-        snips = []
-        for ref in resp.get("messages", [])[:25]:
-            m = svc.users().messages().get(userId="me", id=ref["id"], format="metadata",
-                metadataHeaders=["From", "Subject", "Date"]).execute()
-            h = {x["name"].lower(): x["value"] for x in m["payload"].get("headers", [])}
-            snips.append(f"- {h.get('date','')[:16]} {h.get('from','')[:30]}: "
-                         f"{h.get('subject','')[:80]} — {m.get('snippet','')[:120]}")
-        email_t = "\n".join(snips) or "none"
-    except Exception:  # noqa: BLE001
-        email_t = "none"
+    # Scan EVERY inbox, not just Baci.
+    snips = []
+    for acct in config.GMAIL_ACCOUNTS:
+        try:
+            svc = gmail_client.service_for(acct)
+            resp = svc.users().messages().list(
+                userId="me", q="newer_than:7d -in:sent in:inbox",
+                maxResults=20).execute()
+            for ref in resp.get("messages", [])[:20]:
+                m = svc.users().messages().get(userId="me", id=ref["id"],
+                    format="metadata",
+                    metadataHeaders=["From", "Subject", "Date"]).execute()
+                h = {x["name"].lower(): x["value"] for x in m["payload"].get("headers", [])}
+                snips.append(f"- [{acct}] {h.get('date','')[:16]} "
+                             f"{h.get('from','')[:30]}: {h.get('subject','')[:80]} "
+                             f"— {m.get('snippet','')[:110]}")
+        except Exception:  # noqa: BLE001
+            log.exception("review email scan failed for %s", acct)
+    email_t = "\n".join(snips) or "none"
 
     try:
         msg = client.messages.create(
