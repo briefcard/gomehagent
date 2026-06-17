@@ -83,12 +83,16 @@ class Deadline(Base):
 
 
 class ChatMessage(Base):
-    """WhatsApp conversation history — gives the command agent continuity."""
+    """Conversation history — one separate thread per agent (and optional
+    sub-thread), so each agent keeps its own context with no bleed between them."""
 
     __tablename__ = "chat_messages"
 
     id = Column(String, primary_key=True, default=_uuid)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    # Conversation thread: 'admin', 'seo', or a sub-thread like 'seo:eien'.
+    # Defaults to 'admin' so all pre-existing history stays on the admin thread.
+    thread = Column(String, default="admin", index=True)
     role = Column(String, nullable=False)  # user | assistant
     content = Column(Text, nullable=False)
 
@@ -104,6 +108,9 @@ class Memory(Base):
     topic = Column(String, nullable=False)  # e.g. 'Turkey shipment', 'standing rule'
     content = Column(Text, nullable=False)
     status = Column(String, default="active")  # active | archived
+    # Which agent a note belongs to: 'global' (all agents) or a role name
+    # ('admin', 'seo'). Each agent sees global + its own — no cross-agent noise.
+    scope = Column(String, default="global", index=True)
 
 
 class FollowUp(Base):

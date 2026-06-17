@@ -97,6 +97,10 @@ class Role:
     model: str                      # default model for this role's loop
     usage_purpose: str = "command"  # tag for cost logging
     use_data_tools: bool = True     # include the shared data_tools pack
+    # Per-role depth caps: analysis/content-heavy roles (SEO) need more tool
+    # rounds and longer output than the admin email loop.
+    max_tokens: int = 2000
+    max_steps: int = 10
     # Optional callable returning extra dynamic context (e.g. open shipments for
     # admin). Kept OUT of the cached prefix so the static block caches cleanly.
     extra_context: Callable[[], str] | None = None
@@ -106,18 +110,24 @@ class Role:
 # The agentic loop — generalized from the original command agent. Parameterized
 # by Role; the body is identical for every agent.
 # ---------------------------------------------------------------------------
-def run(role: Role, text: str, attachments: list[dict] | None = None) -> str:
+def run(role: Role, text: str, attachments: list[dict] | None = None,
+        thread: str | None = None) -> str:
     """Process one message (optionally with documents/images) for ``role`` with
-    full conversational continuity. attachments: [{filename, data, mime}]."""
+    full conversational continuity. attachments: [{filename, data, mime}].
+
+    ``thread`` is the conversation thread — each agent gets its OWN thread
+    (defaults to the role name) so admin and seo never share context; pass a
+    distinct thread (e.g. 'seo:eien') to run independent parallel conversations."""
     import base64 as _b64
 
+    thread = thread or role.name
     tools = (data_tools.TOOLS if role.use_data_tools else []) + role.action_tools
-    history = memory.load_chat_history()
+    history = memory.load_chat_history(thread)
     # Dynamic context (date, lessons, memory, role extras, recent recap) kept
     # OUT of the cached static block so the big rules prefix caches cleanly.
     dynamic = (f"\n\nToday: {dt.datetime.now().strftime('%A %Y-%m-%d')} "
                "(America/New_York)." + memory.lessons_block(role.name)
-               + memory.memory_block())
+               + memory.memory_block(role.name))
     if role.extra_context:
         dynamic += role.extra_context()
     if history:
@@ -155,12 +165,12 @@ def run(role: Role, text: str, attachments: list[dict] | None = None) -> str:
         messages.append({"role": "user", "content": blocks})
     else:
         messages.append({"role": "user", "content": text})
-    memory.save_turn("user", text)
+    memory.save_turn(thread, "user", text)
 
     reply = "I hit my step limit on that one — try breaking it into smaller asks."
-    for _ in range(10):
+    for _ in range(role.max_steps):
         msg = client.messages.create(
-            model=role.model, max_tokens=2000,
+            model=role.model, max_tokens=role.max_tokens,
             system=system, tools=triage._cached_tools(tools), messages=messages,
         )
         usage.log_usage(role.usage_purpose, role.model, msg)
@@ -178,5 +188,5 @@ def run(role: Role, text: str, attachments: list[dict] | None = None) -> str:
         reply = next((b.text for b in msg.content if b.type == "text"),
                      "Done (no further output).").strip()
         break
-    memory.save_turn("assistant", reply)
+    memory.save_turn(thread, "assistant", reply)
     return reply

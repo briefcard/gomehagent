@@ -132,32 +132,41 @@ SEO_DATABASE = os.environ.get("SEO_DATABASE", "us")  # Semrush regional database
 # approval-gated. Baci Milano USA's store.
 SEO_STORE = os.environ.get("SEO_STORE", "baci")
 # Compliance guardrail: keyword substrings the opportunity finder must NEVER
-# recommend as targets. Baci Milano is an Italian DESIGN brand, but its products
-# are NOT manufactured in Italy — so "made in Italy"-style origin claims are
-# off-limits (false country-of-origin = legal/advertising risk). We still rank
-# for "Italian <product>" (style/design/brand); we never claim Italian MANUFACTURE.
-# Comma-separated, case-insensitive substring match.
+# recommend as targets. Baci Milano is an Italian DESIGN brand, mass-manufactured
+# — NOT made in Italy, NOT handmade, NOT artisanal — so origin claims ("made in
+# Italy") AND handcraft/craftsmanship claims ("handmade", "artisan",
+# "craftsmanship") are all off-limits (false claims = legal/advertising risk). We
+# still rank for "Italian <product>" (style/design); we never claim Italian
+# manufacture or handcraft. Comma-separated, case-insensitive substring match.
 SEO_EXCLUDE_TERMS = [t.strip().lower() for t in os.environ.get(
     "SEO_EXCLUDE_TERMS",
-    "made in italy,from italy,italian made,made italy,imported from italy"
+    "made in italy,from italy,italian made,made italy,imported from italy,"
+    "handmade,hand-made,hand made,handcrafted,hand-crafted,hand crafted,"
+    "craftsmanship,artisan,artisanal,hand-painted,handpainted,hand painted"
 ).split(",") if t.strip()]
-# Conversational loop model for the SEO role. Defaults to the standard model;
-# set to claude-opus-4-8 if you want heavier analysis per the role's mandate.
-SEO_MODEL = os.environ.get("SEO_MODEL", CLAUDE_MODEL)
+# Conversational loop model for the SEO role. Defaults to Opus — the role's
+# work (strategy, GSC-vs-Semrush judgment, content quality) rewards the stronger
+# model. Override with a cheaper model via SEO_MODEL if cost matters more.
+SEO_MODEL = os.environ.get("SEO_MODEL", "claude-opus-4-8")
 
 # ---- SEO multi-site / multi-platform ----
-# The SEO agent serves multiple client properties across platforms. The vars
-# above (SEO_DOMAIN/SEO_DATABASE/SEO_STORE/SEO_EXCLUDE_TERMS) define the PRIMARY
-# site; SEO_PLATFORM picks its implementation backend; SEO_SITES_JSON adds more.
-SEO_PLATFORM = os.environ.get("SEO_PLATFORM", "shopify")  # shopify | wordpress
-SEO_PRIMARY_SITE = os.environ.get("SEO_PRIMARY_SITE", "baci")
-SEO_VOICE = os.environ.get("SEO_VOICE", "")  # optional brand-voice line, primary site
-# Extra site profiles beyond the primary. Each: domain, database (Semrush market),
-# platform (shopify|wordpress), creds_key (key in SHOPIFY_STORES or WORDPRESS_SITES),
-# optional exclude_terms[] and voice. Example:
-# {"eien": {"domain":"eienhealth.com","database":"us","platform":"shopify","creds_key":"eien"},
-#  "mtw": {"domain":"marketingthatworks.co","database":"us","platform":"wordpress",
-#          "creds_key":"mtw","voice":"Confident, plain-English B2B marketing voice."}}
+# RECOMMENDED: define EVERY client (the primary included) in SEO_SITES_JSON below
+# — one uniform structure. The flat SEO_* vars above (SEO_DOMAIN/SEO_DATABASE/
+# SEO_STORE/SEO_PLATFORM/SEO_EXCLUDE_TERMS/SEO_GUARDRAIL/SEO_VOICE) are a FALLBACK
+# used only when SEO_PRIMARY_SITE is NOT present in SEO_SITES_JSON (sites._all
+# setdefaults the flat-var primary if the JSON doesn't define it).
+SEO_PLATFORM = os.environ.get("SEO_PLATFORM", "shopify")  # shopify | wordpress (primary fallback)
+SEO_PRIMARY_SITE = os.environ.get("SEO_PRIMARY_SITE", "baci")  # default site key
+SEO_VOICE = os.environ.get("SEO_VOICE", "")  # primary fallback brand-voice line
+# Primary fallback compliance/brand guardrail (e.g. a health brand: no medical claims).
+SEO_GUARDRAIL = os.environ.get("SEO_GUARDRAIL", "")
+# Every client profile. Each entry: domain, database (Semrush market), platform
+# (shopify|wordpress), creds_key (key in SHOPIFY_STORES / WORDPRESS_SITES), optional
+# exclude_terms[], guardrail (compliance rule), voice. GSC/GA4 auto-discover by
+# domain. Write guardrail/voice WITHOUT double quotes so the JSON stays valid. E.g.
+# {"baci":{"domain":"bacimilanousa.com","platform":"shopify","creds_key":"baci",...},
+#  "eien":{"domain":"eienhealth.com","platform":"shopify","creds_key":"eien",...},
+#  "mtw":{"domain":"marketingthatworks.co","platform":"wordpress","creds_key":"mtw",...}}
 SEO_SITES_JSON = os.environ.get("SEO_SITES_JSON", "{}")
 # WordPress credentials per creds_key (Application Passwords — WP user profile):
 # {"mtw": {"base_url":"https://marketingthatworks.co","user":"editor","app_password":"xxxx xxxx ..."}}

@@ -209,14 +209,16 @@ ACTION_TOOLS = [
      "description": "All open shipment records with status, ETA, docs, costs.",
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "save_memory",
-     "description": "Save/update a durable note in shared working memory "
-                    "(ongoing tasks, decisions, standing instructions). Same "
-                    "topic overwrites — use it to track task progress.",
+     "description": "Save/update a durable note in YOUR working memory (ongoing "
+                    "tasks, decisions, standing instructions). Same topic "
+                    "overwrites. Set shared=true ONLY for a cross-cutting fact "
+                    "every agent should see; otherwise it stays with this agent.",
      "input_schema": {"type": "object", "properties": {
-         "topic": {"type": "string"}, "content": {"type": "string"}},
+         "topic": {"type": "string"}, "content": {"type": "string"},
+         "shared": {"type": "boolean"}},
          "required": ["topic", "content"]}},
     {"name": "forget_memory",
-     "description": "Archive a working-memory topic once it's resolved.",
+     "description": "Archive one of your working-memory topics once it's resolved.",
      "input_schema": {"type": "object", "properties": {
          "topic": {"type": "string"}}, "required": ["topic"]}},
     {"name": "calendar_create_event",
@@ -427,9 +429,10 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
         if name == "job_status":
             return json.dumps(ops_jobs.STATUS) or "no jobs have run yet"
         if name == "save_memory":
-            return memory.remember(args["topic"], args["content"])
+            return memory.remember(args["topic"], args["content"],
+                                   scope="global" if args.get("shared") else "admin")
         if name == "forget_memory":
-            return memory.forget(args["topic"])
+            return memory.forget(args["topic"], scope="admin")
         if name == "save_file_to_drive":
             from . import drive_io
             f = session_files.get(args["filename"])
@@ -553,11 +556,69 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
         return f"Tool error ({exc.__class__.__name__}): {str(exc)[:200]}"
 
 
-def handle(text: str, attachments: list[dict] | None = None) -> str:
-    """Public entrypoint, preserved for every existing caller (web.py routes
-    WhatsApp text/voice/files/feedback here). Runs the admin role through the
-    shared kernel; the loop, prompt composition and caching now live there."""
-    from . import kernel
-    from .roles import admin
+# ---------------------------------------------------------------------------
+# One WhatsApp number, every agent. handle() is a ROUTER: a slash command like
+# /seo or /admin switches the active agent (persisted), and your messages route
+# to it on its own thread — no extra phone numbers, same chat experience.
+# ---------------------------------------------------------------------------
+def _active() -> tuple[str, str]:
+    """(role, thread) the WhatsApp number is currently talking to. Defaults to
+    admin so existing behavior is unchanged until you switch."""
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, "wa_active")
+        val = row.value if row else ""
+    role, _, thread = val.partition("|")
+    return (role or "admin"), (thread or role or "admin")
 
-    return kernel.run(admin.ROLE, text, attachments)
+
+def _set_active(role: str, thread: str) -> None:
+    with db.SessionLocal() as s:
+        s.merge(db.Setting(key="wa_active", value=f"{role}|{thread}"))
+        s.commit()
+
+
+def _agents_help() -> str:
+    from . import roles as roles_pkg
+
+    role_name, thread = _active()
+    cur = role_name + (f" · {thread.split(':', 1)[1]}" if ":" in thread else "")
+    switches = "  ".join("/" + r for r in roles_pkg.ROLES)
+    return ("Agents on this number — switch anytime, no extra numbers:\n"
+            "• /admin — ops: email, orders, docs, logistics\n"
+            "• /seo — SEO/GEO: Semrush, GSC/GA4, on-site changes. Target a client: "
+            "/seo baci · /seo eien · /seo mtw\n\n"
+            f"Now talking to: {cur}\n"
+            f"Switch: {switches}   ·   /agents to see this again")
+
+
+def handle(text: str, attachments: list[dict] | None = None,
+           force_role: str | None = None) -> str:
+    """WhatsApp entrypoint + router. A leading /<agent> switches the active agent
+    (e.g. /seo, /seo eien, /admin); everything else routes to the active agent on
+    its own thread. force_role bypasses the router for internal admin-only calls
+    (e.g. revising an admin draft) so they never leak to another agent."""
+    from . import kernel
+    from . import roles as roles_pkg
+
+    if force_role:
+        return kernel.run(roles_pkg.get(force_role), text, attachments,
+                          thread=force_role)
+
+    stripped = (text or "").strip()
+    low = stripped.lower()
+    if low in ("/agents", "/agent", "/help", "/menu", "/who", "/current"):
+        return _agents_help()
+    if low.startswith("/"):
+        parts = stripped[1:].split(None, 1)
+        cmd = parts[0].lower()
+        if cmd in roles_pkg.ROLES:  # a known agent -> switch to it
+            sub = parts[1].strip().lower() if len(parts) > 1 else ""
+            thread = f"{cmd}:{sub}" if sub else cmd
+            _set_active(cmd, thread)
+            label = cmd.upper() + (f" · {sub}" if sub else "")
+            return (f"✅ Switched to the {label} agent — your messages now go here. "
+                    "/agents to see all, /admin to switch back.")
+        # not a known agent: fall through and let the active agent handle it
+
+    role_name, thread = _active()
+    return kernel.run(roles_pkg.get(role_name), text, attachments, thread=thread)

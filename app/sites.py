@@ -23,7 +23,8 @@ def _primary() -> dict:
     return {"key": config.SEO_PRIMARY_SITE, "domain": config.SEO_DOMAIN,
             "database": config.SEO_DATABASE, "platform": config.SEO_PLATFORM,
             "creds_key": config.SEO_STORE, "exclude_terms": config.SEO_EXCLUDE_TERMS,
-            "voice": config.SEO_VOICE, "google_alias": config.SEO_GOOGLE_ALIAS,
+            "voice": config.SEO_VOICE, "guardrail": config.SEO_GUARDRAIL,
+            "google_alias": config.SEO_GOOGLE_ALIAS,
             "gsc_site": config.SEO_GSC_SITE, "ga4_property": config.SEO_GA4_PROPERTY}
 
 
@@ -43,6 +44,7 @@ def all_profiles() -> dict:
             "exclude_terms": [t.strip().lower() for t in v.get("exclude_terms", [])
                               if t.strip()],
             "voice": v.get("voice", ""),
+            "guardrail": v.get("guardrail", ""),
             "google_alias": v.get("google_alias", config.SEO_GOOGLE_ALIAS),
             "gsc_site": v.get("gsc_site", ""),
             "ga4_property": v.get("ga4_property", "")}
@@ -72,16 +74,17 @@ def block() -> str:
     sites = all_profiles()
     lines = []
     for p in sites.values():
-        extra = []
+        lines.append(f"- {p['key']}: {p['domain']} [{p['platform']}]")
+        if p.get("guardrail"):
+            lines.append(f"    ⚠ GUARDRAIL (obey strictly): {p['guardrail']}")
         if p.get("exclude_terms"):
-            extra.append("never claim: " + ", ".join(p["exclude_terms"]))
+            lines.append("    never target/claim: " + ", ".join(p["exclude_terms"]))
         if p.get("voice"):
-            extra.append("voice: " + p["voice"])
-        lines.append(f"- {p['key']}: {p['domain']} [{p['platform']}]"
-                     + (" — " + "; ".join(extra) if extra else ""))
+            lines.append("    voice: " + p["voice"])
     return ("\n\nSITES YOU MANAGE (default = " + config.SEO_PRIMARY_SITE
-            + "; pass site=<key> to target another). Use each site's platform "
-            "and brand rules; never mix clients:\n" + "\n".join(lines))
+            + "; pass site=<key> to target another). Use each site's platform and "
+            "brand/compliance rules; obey every GUARDRAIL strictly; never mix "
+            "clients' data, links, voice or rules:\n" + "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

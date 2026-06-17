@@ -545,13 +545,17 @@ TOOLS = [
                     "approval.",
      "input_schema": _t({})},
     {"name": "save_memory",
-     "description": "Save/update a durable note in shared working memory (a "
-                    "content plan, a decision). Same topic overwrites.",
+     "description": "Save/update a durable note in YOUR (SEO) working memory — the "
+                    "live project plan, target keywords, what shipped, what's next. "
+                    "Same topic overwrites. SAVE your plan/state after each session "
+                    "so long-horizon work survives the short conversation window. "
+                    "shared=true only for a cross-cutting fact all agents need.",
      "input_schema": {"type": "object", "properties": {
-         "topic": {"type": "string"}, "content": {"type": "string"}},
+         "topic": {"type": "string"}, "content": {"type": "string"},
+         "shared": {"type": "boolean"}},
          "required": ["topic", "content"]}},
     {"name": "forget_memory",
-     "description": "Archive a working-memory topic once resolved.",
+     "description": "Archive one of your SEO working-memory topics once resolved.",
      "input_schema": {"type": "object", "properties": {
          "topic": {"type": "string"}}, "required": ["topic"]}},
 ]
@@ -578,9 +582,10 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
         profile = sites.get(site)
 
         if name == "save_memory":
-            return memory.remember(args["topic"], args["content"])
+            return memory.remember(args["topic"], args["content"],
+                                   scope="global" if args.get("shared") else "seo")
         if name == "forget_memory":
-            return memory.forget(args["topic"])
+            return memory.forget(args["topic"], scope="seo")
         if name == "verify_links":
             return json.dumps(sites.verify_links(profile, args.get("html", "")))
         if name in ("list_collections", "find_items", "get_seo"):

@@ -55,8 +55,11 @@ forwarded files). Built on the Claude API. State in Postgres.
   audit, daily_review, sync_catalog…).
 - `skills.py` — playbook skills (tax export, invoice chase, business pulse,
   meeting_scan, contract expiry, duplicate cleanup, spend flags).
-- `memory.py` — conversation history, working memory, shared LESSONS, doc
-  recall, shipments block.
+- `memory.py` — conversation history (PER-THREAD: each agent has its own chat
+  thread via `ChatMessage.thread`, so admin and seo never share context; pass a
+  sub-thread like `seo:eien` for independent parallel convos), working memory,
+  shared LESSONS, doc recall, shipments block. Working memory + lessons stay
+  shared across agents by design; only the raw conversation is isolated.
 - `approvals.py` — approval queue + execution + autonomy stats.
 - `whatsapp.py` — Cloud API send/receive, template fallback, reply-quote map.
 - `data_tools.py` — Shopify, Drive search, email/contact search, RFQ, registry.
@@ -121,11 +124,28 @@ command queue, webhook dedup, auto-migration, usage logging.
   re-run `scripts/google_oauth.py` (delete accounts.json first to re-consent) and
   update GMAIL_ACCOUNTS_JSON. The role now leads with GSC/GA4 truth and uses
   Semrush for the wider opportunity.
+- **Quality hardening (Jun 2026).** (1) Working memory is now SCOPED per agent —
+  `Memory.scope` ('global' | role); `memory_block(role)` = global + own, so agents
+  don't contaminate each other (conversation already isolated per thread; lessons
+  already scoped). save_memory takes `shared` for cross-cutting facts. (2) GSC/GA4
+  auto-binding is CONFIDENT-ONLY — exact/unique match required (GA4 by web-stream
+  URL), ambiguity refuses to bind and surfaces candidates to pin (no silent
+  wrong-property data). (3) Role gains per-role `max_tokens`/`max_steps`; SEO runs
+  on Opus (4000 tok / 16 steps) and is told to save project state to survive the
+  short window. (4) Site profiles gain a `guardrail` field (e.g. Eien = no medical
+  claims) injected prominently and obeyed strictly.
 - **SEO agent — next:** gated search-ads execution; the Insight Bus
   (Search↔Social); a dedicated WhatsApp number. See docs_Search-Ads-Agent-Plan.md.
 - Financial spine (QuickBooks/Wave/Stripe/PayPal) deferred per Gomeh — unlocks
   tax export, invoice chasing, landed cost, business pulse depth.
 
-## WhatsApp multi-agent
-Webhook payload has `value.metadata.phone_number_id` → route to the right agent
-by number. One number per agent (test number runs one). Self-hosted per agent.
+## WhatsApp multi-agent — ONE number, every agent (Jun 2026)
+No per-agent phone numbers. `command_agent.handle()` is a ROUTER: a slash command
+`/<agent>` (`/seo`, `/admin`, or `/seo <client>` for a sub-thread) switches the
+active agent, persisted in `Setting["wa_active"]`; all other messages route to the
+active agent on its own conversation thread. `/agents` shows the menu + current.
+`force_role=` bypasses the router for internal admin-only calls (draft-edit).
+Per-thread isolation (`ChatMessage.thread`) means agents never share context.
+HTTP `/admin/ask?role=&thread=` is the equivalent explicit selector. (The
+phone_number_id-per-agent path from the plan is still available later if a number
+is ever provisioned, but isn't needed.)

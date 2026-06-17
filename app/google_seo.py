@@ -135,19 +135,29 @@ def gsc_list_sites(profile: dict) -> str:
     return json.dumps(rows) if rows else "This Google account has no GSC properties."
 
 
+def _gsc_candidates(entries: list, host: str) -> list:
+    urls = [e["siteUrl"] for e in entries
+            if e.get("permissionLevel") != "siteUnverifiedUser"]
+    return [u for u in urls if host in u]
+
+
 def _match_gsc_site(entries: list, host: str):
+    """CONFIDENT match only — never guess. Exact domain property, else exactly
+    one URL-prefix property, else exactly one host-containing property. If two or
+    more could match (e.g. staging + prod, www + apex, or another client's
+    property), return None so it must be pinned with seo_link_google rather than
+    silently binding the wrong site's data."""
     urls = [e["siteUrl"] for e in entries
             if e.get("permissionLevel") != "siteUnverifiedUser"]
     if f"sc-domain:{host}" in urls:
         return f"sc-domain:{host}"
-    for u in urls:  # url-prefix property
-        if u.rstrip("/") in (f"https://{host}", f"http://{host}",
-                             f"https://www.{host}", f"http://www.{host}"):
-            return u
-    for u in urls:  # any property containing the host
-        if host in u:
-            return u
-    return None
+    prefix = [u for u in urls if u.rstrip("/") in (
+        f"https://{host}", f"http://{host}",
+        f"https://www.{host}", f"http://www.{host}")]
+    if len(prefix) == 1:
+        return prefix[0]
+    candidates = _gsc_candidates(entries, host)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _resolve_gsc_site(profile: dict):
@@ -167,10 +177,18 @@ def _resolve_gsc_site(profile: dict):
 
 
 def _no_gsc(profile: dict) -> str:
-    return ("No Search Console property is linked to " + profile["domain"]
-            + " yet, and none auto-matched. Call gsc_list_sites to see what this "
-            "Google account can access, then seo_link_google to pin the right one "
-            "(it's saved to the DB after).")
+    try:
+        cands = _gsc_candidates(_gsc_site_entries(profile), _host(profile))
+    except Exception:  # noqa: BLE001
+        cands = []
+    if len(cands) > 1:
+        tail = (" Multiple properties could match — I won't guess. Candidates: "
+                + ", ".join(cands) + ". Pin the right one with seo_link_google.")
+    else:
+        tail = (" Call gsc_list_sites to see what this Google account can access, "
+                "then seo_link_google to pin it (saved to the DB after).")
+    return ("No Search Console property is confidently linked to "
+            + profile["domain"] + " yet." + tail)
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +216,17 @@ def ga4_list_properties(profile: dict) -> str:
 
 
 def _discover_ga4(profile: dict, host: str):
+    """CONFIDENT match only: the property whose web-stream URL is the site's
+    domain. Name-token similarity alone is NOT enough to auto-bind (too easy to
+    grab the wrong client's analytics). Returns the property ONLY when exactly one
+    stream-URL matches; 0 or >=2 -> None, so it must be pinned with seo_link_google."""
     props = _ga4_summaries(profile)
     token = host.split(".")[0].lower()
-    named = [p for p in props if token in (p["name"] or "").lower()]
-    for p in (named or props)[:30]:  # confirm by the web stream's URL
+    # Check name-matches first (cheaper hit), but still require URL confirmation.
+    ordered = ([p for p in props if token in (p["name"] or "").lower()]
+               + [p for p in props if token not in (p["name"] or "").lower()])
+    url_matches: list = []
+    for p in ordered[:40]:
         try:
             svc = _admin(_alias(profile))
             with gmail_client._google_lock:
@@ -212,8 +237,11 @@ def _discover_ga4(profile: dict, host: str):
         for stx in streams.get("dataStreams", []):
             uri = (stx.get("webStreamData", {}) or {}).get("defaultUri", "")
             if host in uri.replace("www.", ""):
-                return p["property"]
-    return named[0]["property"] if len(named) == 1 else None
+                url_matches.append(p["property"])
+                break
+        if len(url_matches) >= 2:
+            break  # already ambiguous — stop and force a manual pin
+    return url_matches[0] if len(url_matches) == 1 else None
 
 
 def _resolve_ga4(profile: dict):
