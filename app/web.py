@@ -143,17 +143,20 @@ def usage_report(key: str = "", days: int = 7) -> dict:
 
 
 @app.get("/admin/ask", response_class=PlainTextResponse)
-def ask(key: str = "", q: str = "") -> str:
-    """The conversational agent over HTTP, until WhatsApp is live:
-    /admin/ask?key=SECRET&q=pending subscriptions that need cancelling"""
-    from . import command_agent
-
+def ask(key: str = "", q: str = "", role: str = "admin") -> str:
+    """The conversational agents over HTTP, until each has its own WhatsApp
+    number. Pick the agent with &role=admin|seo:
+    /admin/ask?key=SECRET&q=pending subscriptions that need cancelling
+    /admin/ask?key=SECRET&role=seo&q=where are our quick-win keywords?"""
     if key != config.APPROVAL_SECRET:
         return "bad key"
     if not q:
         return "add &q=your question"
     try:
-        return command_agent.handle(q)
+        from . import kernel
+        from .roles import get as get_role
+
+        return kernel.run(get_role(role), q)
     except Exception as exc:  # noqa: BLE001
         return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
 

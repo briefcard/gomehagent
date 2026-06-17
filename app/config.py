@@ -120,6 +120,60 @@ SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
 
+# ---------------- SEO agent (role: seo) ----------------
+# Semrush Analytics API key (Semrush -> Subscription -> API). The deployed agent
+# calls api.semrush.com natively, the same pattern as Shopify/Gmail.
+SEMRUSH_API_KEY = os.environ.get("SEMRUSH_API_KEY", "")
+# First target property + market for the SEO agent. Baci Milano USA.
+SEO_DOMAIN = os.environ.get("SEO_DOMAIN", "bacimilanousa.com")
+SEO_DATABASE = os.environ.get("SEO_DATABASE", "us")  # Semrush regional database
+# Shopify store key (a key in SHOPIFY_STORES) the SEO agent implements on —
+# create collections, rewrite copy, set SEO title/meta tags. Writes are
+# approval-gated. Baci Milano USA's store.
+SEO_STORE = os.environ.get("SEO_STORE", "baci")
+# Compliance guardrail: keyword substrings the opportunity finder must NEVER
+# recommend as targets. Baci Milano is an Italian DESIGN brand, but its products
+# are NOT manufactured in Italy — so "made in Italy"-style origin claims are
+# off-limits (false country-of-origin = legal/advertising risk). We still rank
+# for "Italian <product>" (style/design/brand); we never claim Italian MANUFACTURE.
+# Comma-separated, case-insensitive substring match.
+SEO_EXCLUDE_TERMS = [t.strip().lower() for t in os.environ.get(
+    "SEO_EXCLUDE_TERMS",
+    "made in italy,from italy,italian made,made italy,imported from italy"
+).split(",") if t.strip()]
+# Conversational loop model for the SEO role. Defaults to the standard model;
+# set to claude-opus-4-8 if you want heavier analysis per the role's mandate.
+SEO_MODEL = os.environ.get("SEO_MODEL", CLAUDE_MODEL)
+
+# ---- SEO multi-site / multi-platform ----
+# The SEO agent serves multiple client properties across platforms. The vars
+# above (SEO_DOMAIN/SEO_DATABASE/SEO_STORE/SEO_EXCLUDE_TERMS) define the PRIMARY
+# site; SEO_PLATFORM picks its implementation backend; SEO_SITES_JSON adds more.
+SEO_PLATFORM = os.environ.get("SEO_PLATFORM", "shopify")  # shopify | wordpress
+SEO_PRIMARY_SITE = os.environ.get("SEO_PRIMARY_SITE", "baci")
+SEO_VOICE = os.environ.get("SEO_VOICE", "")  # optional brand-voice line, primary site
+# Extra site profiles beyond the primary. Each: domain, database (Semrush market),
+# platform (shopify|wordpress), creds_key (key in SHOPIFY_STORES or WORDPRESS_SITES),
+# optional exclude_terms[] and voice. Example:
+# {"eien": {"domain":"eienhealth.com","database":"us","platform":"shopify","creds_key":"eien"},
+#  "mtw": {"domain":"marketingthatworks.co","database":"us","platform":"wordpress",
+#          "creds_key":"mtw","voice":"Confident, plain-English B2B marketing voice."}}
+SEO_SITES_JSON = os.environ.get("SEO_SITES_JSON", "{}")
+# WordPress credentials per creds_key (Application Passwords — WP user profile):
+# {"mtw": {"base_url":"https://marketingthatworks.co","user":"editor","app_password":"xxxx xxxx ..."}}
+WORDPRESS_SITES = json.loads(os.environ.get("WORDPRESS_SITES_JSON", "{}"))
+
+# ---- GSC + GA4 (real ranking/click + traffic/conversion truth) ----
+# ONE Google account (alias in GMAIL_ACCOUNTS) used for all sites — grant it into
+# each client's Search Console + GA4 property. Default: personal. Needs the
+# webmasters.readonly + analytics.readonly scopes — re-run scripts/google_oauth.py.
+SEO_GOOGLE_ALIAS = os.environ.get("SEO_GOOGLE_ALIAS", "personal")
+# GSC property / GA4 property are OPTIONAL overrides — leave blank and the agent
+# auto-discovers the one matching each site's domain and saves it in the DB
+# (SeoSiteConfig). Set these only to force a specific property for the primary site.
+SEO_GSC_SITE = os.environ.get("SEO_GSC_SITE", "")
+SEO_GA4_PROPERTY = os.environ.get("SEO_GA4_PROPERTY", "")
+
 # WhatsApp Cloud API (optional — agent falls back to email until these are set)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")

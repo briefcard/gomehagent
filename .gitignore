@@ -1,4 +1,5 @@
 .env
+accounts.json
 local.db
 __pycache__/
 *.pyc

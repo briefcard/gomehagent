@@ -370,6 +370,12 @@ def main() -> None:
                   "cron", day_of_week="mon", hour=7, minute=30)
     sched.add_job(_safe(ops_jobs.JOBS["contract_expiry_watch"], "expiry watch"),
                   "cron", day_of_week="mon", hour=7, minute=0)
+    # SEO self-analysis loop: weekly snapshot of the target domain so seo_progress
+    # can measure growth/decline. Only scheduled when Semrush is configured.
+    if config.SEMRUSH_API_KEY:
+        from . import seo_tools
+        sched.add_job(_safe(seo_tools.capture_snapshot, "seo snapshot"),
+                      "cron", day_of_week="mon", hour=6, minute=0)
     # Meeting scans 3x daily: morning, afternoon, evening (EST)
     for h in (8, 13, 18):
         sched.add_job(_safe(ops_jobs.JOBS["meeting_scan"], "meeting scan"),

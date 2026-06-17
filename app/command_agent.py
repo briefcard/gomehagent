@@ -9,121 +9,16 @@ import datetime as dt
 import json
 import logging
 
-import anthropic
 from googleapiclient.discovery import build
 
-from . import approvals, config, data_tools, db, digest, gmail_client, memory, ops_jobs, triage
+from . import approvals, config, data_tools, db, digest, gmail_client, memory, ops_jobs
 
 log = logging.getLogger("cmd")
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-SYSTEM = """You are Gomeh Saias's operations assistant for Baci Milano USA,
-Eien Distributions (Eien Health), and Saias Consulting. He messages you on the
-go; answer like a sharp chief of staff: concise, concrete, mobile-friendly
-(no markdown tables, short lines).
-
-You have tools: email search across all 3 inboxes, Google Drive search,
-Shopify orders (both stores), Calendar (read/create), the deadline ledger,
-maintenance jobs (doc_sweep, shipment_audit, recategorize), the current
-digest, and queue_email_draft.
-
-CONTEXT & FORESIGHT — a DATA-ORIENTED posture on EVERY task. The loop is:
-GATHER the relevant data with tools → ACT/REPORT with it → SUGGEST the
-obvious next step → OFFER to do it. Never report a bare outcome; never make
-Gomeh "go check." Worked examples (this is the standard, not a fixed list):
-- Customer complains about an order → look it up in Shopify FIRST, then
-  report status/tracking AND propose the fix ("Order #1042 shipped 6 days
-  ago, stuck in transit — want me to draft an apology + reship offer?").
-- An email proposes a meeting/call → offer to put it on the calendar, and
-  use find_contacts to SUGGEST invitees from the thread/history
-  ("Looks like a call Thu 2pm — add it and invite hana@cargohansa.com?").
-- A forwarder asks for documents → find them in the registry and include the
-  links; flag anything missing or needing signature.
-- A quote arrives → record it against the RFQ and, if all are in, offer the
-  comparison.
-- You drafted an email → preview + Gmail link. Filed a doc → path + Drive
-  link. Created an event → link + who was invited.
-- Always be concrete: order numbers, names, dates, amounts, links — and end
-  with the single most useful next action as an offer, not a question left
-  hanging.
-
-CLARIFY BEFORE BULK ACTIONS — for organize/refile/sweep or anything that
-files or moves many items: if a KEY parameter is missing or ambiguous —
-which account/inbox, the destination folder, the grouping scheme, the date
-range, or which orders — ASK before running. Don't silently default.
-Confirm in one short message: "I'll organize <what> from <account> into
-<destination>, grouped by <scheme>, last <N> days — go?" and wait for yes.
-Only skip the question when every key parameter is unambiguous from the
-request or our recent conversation. A wrong guess on a bulk job is expensive;
-one question is cheap.
-
-BIG-TASK PROTOCOL — for any multi-step or exhaustive request (audits,
-"find all X", reorganizations, anything touching many emails/files):
-1. ACKNOWLEDGE first: restate what you understood and lay out your plan in
-   2-4 short lines (what you'll search, where, how you'll know you're done)
-   BEFORE diving in. If the request is ambiguous, ask one sharp question.
-2. BE EXHAUSTIVE: one search query is never enough. Enumerate variants —
-   for subscriptions: 'receipt', 'invoice', 'payment confirmation', 'renewal',
-   'subscription', 'billed', plus known vendor names — across ALL relevant
-   inboxes, and paginate. Deduplicate before presenting.
-3. REPORT COVERAGE: state what you actually searched ("6 query patterns
-   across 3 inboxes, 12 months") and what you might have missed. NEVER
-   present partial results as complete — say "found 14; areas I couldn't
-   cover: X" rather than implying totality.
-4. CLOSE LOOPS: end with what happens next — drafts queued, memory saved,
-   follow-ups armed, or what you need from Gomeh.
-
-HARD RULES (set by Gomeh Jun 12, 2026 — non-negotiable):
-- ACTION CONFIRMATION: never state an action is completed unless a tool
-  result explicitly confirmed it. Otherwise say "queued" or "pending".
-  Applies to filing, refunds, cancellations, emails, payments — everything.
-- TETHERING: one shipment/order may carry several reference numbers (client
-  PO, supplier order #, forwarder ref, invoice #). They are ONE entity: one
-  folder, one shipment record listing ALL refs in its notes. Never split a
-  shipment across folders because a ref looks different.
-- FILING DISCIPLINE: subfolders are plain-English per ORDER (e.g. "FS Amaala
-  Sept 2026"). Group files by order — a healthy B2B tree has ~8-15 order
-  subfolders, never one folder per file. Unmatched files -> '_Agent
-  Intake/_REVIEW', flagged to Gomeh. Old revisions -> 'OLD VERSIONS'; never
-  delete anything. Filing reports state: X filed to Y orders, X to OLD
-  VERSIONS, X flagged for review.
-- THREE ACCOUNTS, NEVER MIXED: personal / baci / eien each have their own
-  inbox and Drive. Never cross-file documents between accounts.
-- REFUNDS & CANCELLATIONS: push back first — understand the issue, offer a
-  fix (replacement, exchange, troubleshooting, discount). If unresolvable,
-  look up the order in Shopify and queue the refund/cancellation for Gomeh's
-  approval. NEVER tell a customer it is processed before it actually is.
-
-RULES:
-- NEVER send email directly — queue_email_draft puts it in his approval queue.
-- Money never moves on your say-so. Cancelling subscriptions, paying, booking:
-  gather the facts, list what HE must do or queue drafts for counterparties.
-- Facts only from tools or the conversation. If you can't verify, say so.
-- For requests like "pending subscriptions to cancel": search email history
-  for renewal/receipt patterns, cross-check the deadline ledger, and present
-  a clean list with amounts and dates.
-- For "organize my calendar": read events first, propose, then create blocks.
-- Long jobs (doc_sweep etc.) run async — tell him the report comes by email.
-- MEMORY: you carry the recent conversation, and you have save_memory /
-  forget_memory tools. Whenever a task spans time (a shipment being chased,
-  a quote pending, an instruction Gomeh gives like "always cc Jeff on X"),
-  SAVE it. Update the same topic as it progresses; forget it when done.
-  Your working memory is shown below and is shared with the email triage
-  agent, so what you record changes how emails get handled too.
-- SHIPMENTS: use upsert_shipment to keep structured records current as you
-  learn things (booked, ETA changes, docs received, costs). These records are
-  the source of truth shown to the email triage agent too.
-- DOCUMENTS Gomeh sends on WhatsApp appear inline in the conversation — READ
-  them (contents are the primary evidence: counterparty, PO numbers, dates).
-  Decide from the conversation what he wants: usually save_file_to_drive into
-  the right B2B folder (content-derived path and a clean descriptive name),
-  but he may instead want data extracted, a quote recorded, or a question
-  answered. Confirm what you did with path + link. If his text implies a file
-  that hasn't arrived in the conversation yet, say you're ready for it —
-  never claim "nothing was sent."
-- FEEDBACK: when Gomeh critiques a draft or sets a writing preference, call
-  add_voice_rule for that inbox so every future draft obeys it.
-Today's date and current context are appended below."""
+# The admin agent's behavioral DNA now lives in app/kernel.py (shared by every
+# agent); its role-specific identity lives in app/roles/admin.py. This module is
+# the admin TOOL PACK: the schemas below plus admin_dispatch(). handle() at the
+# bottom is a thin shim that runs this role through the kernel.
 
 ACTION_TOOLS = [
     {"name": "run_job",
@@ -436,7 +331,9 @@ def _run_job_async(job: str) -> str:
     return f"{job} started in background; emailed report on completion."
 
 
-def _dispatch(name: str, args: dict) -> str:
+def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
+    """Execute one admin tool call. ``session_files`` carries any attachments
+    from the current exchange (the kernel passes them in)."""
     try:
         if name == "run_job":
             return _run_job_async(args["job"])
@@ -535,10 +432,10 @@ def _dispatch(name: str, args: dict) -> str:
             return memory.forget(args["topic"])
         if name == "save_file_to_drive":
             from . import drive_io
-            f = _session_files.get(args["filename"])
+            f = session_files.get(args["filename"])
             if f is None:
                 return (f"No attachment named '{args['filename']}' in this "
-                        f"conversation. Available: {list(_session_files)}")
+                        f"conversation. Available: {list(session_files)}")
             account = args.get("account", "baci")
             if account == "baci":
                 root = drive_io.find_folder("baci", "B2B")
@@ -656,75 +553,11 @@ def _dispatch(name: str, args: dict) -> str:
         return f"Tool error ({exc.__class__.__name__}): {str(exc)[:200]}"
 
 
-# Attachments from the current WhatsApp exchange, readable by tools.
-_session_files: dict[str, dict] = {}
-
-
 def handle(text: str, attachments: list[dict] | None = None) -> str:
-    """Process one message (optionally with documents/images) with full
-    conversational continuity. attachments: [{filename, data, mime}]."""
-    import base64 as _b64
+    """Public entrypoint, preserved for every existing caller (web.py routes
+    WhatsApp text/voice/files/feedback here). Runs the admin role through the
+    shared kernel; the loop, prompt composition and caching now live there."""
+    from . import kernel
+    from .roles import admin
 
-    tools = data_tools.TOOLS + ACTION_TOOLS
-    history = memory.load_chat_history()
-    # Dynamic context (date, memory, shipments, recent recap) kept OUT of the
-    # cached static block so the big rules prefix caches cleanly.
-    dynamic = (f"\n\nToday: {dt.datetime.now().strftime('%A %Y-%m-%d')} "
-               "(America/New_York)." + memory.lessons_block("admin")
-               + memory.memory_block() + memory.shipments_block())
-    if history:
-        recent = history[-4:]
-        recap = "\n".join(f"  {m['role']}: "
-                          + (m['content'] if isinstance(m['content'], str)
-                             else '[attachment/tool]')[:300]
-                          for m in recent)
-        dynamic += ("\n\nMOST RECENT EXCHANGE (this is the live thread — the new "
-                    "message below continues THIS, not older topics):\n" + recap)
-    system = [
-        {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": dynamic},
-    ]
-    messages = history
-
-    _session_files.clear()
-    if attachments:
-        blocks: list = []
-        for att in attachments:
-            _session_files[att["filename"]] = att
-            mime = (att.get("mime") or "").lower()
-            if len(att["data"]) < 5_000_000:
-                if "pdf" in mime or att["filename"].lower().endswith(".pdf"):
-                    blocks.append({"type": "document", "source": {
-                        "type": "base64", "media_type": "application/pdf",
-                        "data": _b64.standard_b64encode(att["data"]).decode()}})
-                elif mime.startswith("image/"):
-                    blocks.append({"type": "image", "source": {
-                        "type": "base64", "media_type": mime,
-                        "data": _b64.standard_b64encode(att["data"]).decode()}})
-        blocks.append({"type": "text", "text": text})
-        messages.append({"role": "user", "content": blocks})
-    else:
-        messages.append({"role": "user", "content": text})
-    memory.save_turn("user", text)
-    reply = "I hit my step limit on that one — try breaking it into smaller asks."
-    for _ in range(10):
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=2000,
-            system=system, tools=triage._cached_tools(tools), messages=messages,
-        )
-        from . import usage
-        usage.log_usage("command", config.CLAUDE_MODEL, msg)
-        if msg.stop_reason == "tool_use":
-            messages.append({"role": "assistant", "content": msg.content})
-            results = []
-            for block in msg.content:
-                if block.type == "tool_use":
-                    results.append({"type": "tool_result", "tool_use_id": block.id,
-                                    "content": _dispatch(block.name, dict(block.input))[:8000]})
-            messages.append({"role": "user", "content": results})
-            continue
-        reply = next((b.text for b in msg.content if b.type == "text"),
-                     "Done (no further output).").strip()
-        break
-    memory.save_turn("assistant", reply)
-    return reply
+    return kernel.run(admin.ROLE, text, attachments)

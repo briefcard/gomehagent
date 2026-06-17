@@ -25,7 +25,32 @@ forwarded files). Built on the Claude API. State in Postgres.
   one lock** (httplib2 isn't thread-safe → segfaults otherwise).
 - `drive_io.py` — Drive read/write/move/sheets (shares the Google lock).
 - `triage.py` — email triage agent (buckets, drafts, grounding, foresight).
-- `command_agent.py` — conversational WhatsApp agent + tool dispatch.
+- `kernel.py` — **the agent kernel**: behavioral DNA (shared, identical for
+  every agent), the `Role` schema, and the agentic tool-use loop + prompt
+  caching. New agents = a Role config + a tool pack, never a fork.
+- `roles/` — one Role object per agent. `roles/admin.py` (agent #1) and
+  `roles/seo.py` (agent #2); `roles/__init__.py` is the registry (`get(name)`).
+- `command_agent.py` — the **admin tool pack**: ACTION_TOOLS + `admin_dispatch`.
+  `handle()` is now a thin shim that runs the admin role through the kernel.
+- `seo_tools.py` — the **SEO tool pack** (role: seo): native Semrush Analytics
+  client (overview, top keywords, competitors, keyword/related/questions metrics,
+  opportunity finder) + the snapshot/progress self-analysis loop + the Shopify
+  propose_* implementation tools + dispatch.
+- `sites.py` — **multi-client/multi-platform layer for the SEO role**: site
+  profiles (primary from SEO_* + `SEO_SITES_JSON`), `backend()` resolver
+  (shopify_seo | wordpress_seo), shared structured-snippet builders (faq_html /
+  compose_jsonld / jsonld_script), and `verify_links()` — the grounding check
+  that HTTP-validates every link resolves on the real site before publishing.
+- `shopify_seo.py` / `wordpress_seo.py` — the two **platform backends** (same
+  function surface: list_collections, find_items, get_seo, update_seo,
+  create_collection, create_page, install_schema_renderer). Shopify: JSON-LD via
+  the `seo.structured_data` metafield + a one-time theme snippet (INLINE_JSONLD
+  False). WordPress: WP REST API + native Application Passwords, JSON-LD inlined
+  in content (INLINE_JSONLD True), SEO handled with NATIVE fields (title tag from
+  the post title, meta description from the excerpt) — NO SEO plugin required;
+  Yoast/RankMath meta set only as a best-effort bonus if REST-exposed. Writes run
+  only from the approval executor (`seo_update` / `seo_new_collection` /
+  `seo_new_page` / `shopify_theme_asset` kinds).
 - `ops_jobs.py` — on-demand/scheduled jobs (doc_sweep, organize, refile,
   audit, daily_review, sync_catalog…).
 - `skills.py` — playbook skills (tax export, invoice chase, business pulse,
@@ -69,9 +94,35 @@ command queue, webhook dedup, auto-migration, usage logging.
 - **Admin-Agent-Skills-Catalog.md** — built vs proposed admin skills (all built).
 - **Search-Ads-Agent-Plan.md** — next agent (SEO/GEO/search ads), skills, kernel
   inheritance, Insight Bus for cross-agent collaboration.
-- **NEXT MAJOR STEP: kernel extraction** — pull DNA + memory + channels into a
-  `kernel` module; make the admin agent the first Role config; then new agents
-  are config + tool pack, never a fork. Do this before building agent #2.
+- **Kernel extraction — DONE (Jun 2026).** DNA + the agentic loop live in
+  `kernel.py`; admin is the first Role (`roles/admin.py`); `command_agent.py` is
+  now just the admin tool pack + a `handle()` shim. Admin behavior unchanged
+  (composed prompt = kernel DNA + admin identity, a superset of the old one).
+- **SEO agent v1 — DONE (Jun 2026).** Agent #2 stood up as pure config + tool
+  pack (no fork): `roles/seo.py` + `seo_tools.py` (native Semrush) + `SeoSnapshot`
+  + a weekly snapshot job in `worker.py`. Reachable now via
+  `/admin/ask?key=…&role=seo&q=…`; target = Baci Milano USA. Needs `SEMRUSH_API_KEY`.
+  Validated against live Semrush: Baci ~104 organic kw, ~16 traffic/mo — near
+  greenfield, with page-2/3 quick-win keywords the opportunity finder surfaces.
+  The agent also IMPLEMENTS (approval-gated): reads the live site and proposes
+  SEO edits, new collections/landing pages, and content pages with structured
+  snippets (FAQ HTML + JSON-LD) — nothing publishes until Gomeh approves, and
+  every link is HTTP-verified against the real site first (no hallucinated URLs).
+- **SEO agent is multi-client / multi-platform.** One role serves many sites via
+  site profiles (sites.py): Baci + Eien on Shopify, MarketingThatWorks on
+  WordPress, more via SEO_SITES_JSON. Research (Semrush) is shared; implementation
+  routes to a per-platform backend. Per-site brand guardrails (e.g. Baci =
+  Italian-DESIGNED, never "made in Italy") live in each profile, never mixed.
+- **SEO agent — GSC + GA4 ground truth — DONE (Jun 2026).** `google_seo.py` adds
+  Search Console (gsc_top_queries/top_pages/page_queries/trend/inspect_url) and
+  GA4 (ga4_overview/landing_pages) read tools through the **locked Google layer**
+  (gmail_client._google_lock). Per-site config: google_alias / gsc_site /
+  ga4_property. Needs the `webmasters.readonly` + `analytics.readonly` scopes —
+  re-run `scripts/google_oauth.py` (delete accounts.json first to re-consent) and
+  update GMAIL_ACCOUNTS_JSON. The role now leads with GSC/GA4 truth and uses
+  Semrush for the wider opportunity.
+- **SEO agent — next:** gated search-ads execution; the Insight Bus
+  (Search↔Social); a dedicated WhatsApp number. See docs_Search-Ads-Agent-Plan.md.
 - Financial spine (QuickBooks/Wave/Stripe/PayPal) deferred per Gomeh — unlocks
   tax export, invoice chasing, landed cost, business pulse depth.
 

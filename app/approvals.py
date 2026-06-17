@@ -133,6 +133,32 @@ def _execute(ap: db.Approval) -> None:
                 failed += 1
         whatsapp.send_text(f"📁 Refile executed: {done} files moved"
                            + (f", {failed} failed (left in place)" if failed else "") + ".")
+    elif ap.kind == "seo_update":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        url = sites.backend(profile).update_seo(
+            profile, p["resource"], p["resource_id"], p["fields"])
+        whatsapp.send_text(f"🔎 SEO updated ({p.get('site')}): {url}")
+    elif ap.kind == "seo_new_collection":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        url = sites.backend(profile).create_collection(
+            profile, p["fields"], p.get("item_ids"))
+        whatsapp.send_text(f"🆕 Created ({p.get('site')}): {url}")
+    elif ap.kind == "seo_new_page":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        url = sites.backend(profile).create_page(profile, p["fields"])
+        whatsapp.send_text(f"📄 Page created ({p.get('site')}): {url}")
+    elif ap.kind == "shopify_theme_asset":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        msg = sites.backend(profile).install_schema_renderer(profile)
+        whatsapp.send_text(f"🧩 {msg}")
     # Future kinds: buy_label (Phase 4), pay (never auto), book_freight (Phase 5)
 
 

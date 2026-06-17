@@ -23,6 +23,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",     # send approved replies
     "https://www.googleapis.com/auth/drive",          # read + organize files (Phase 3 doc filing); also covers Sheets
     "https://www.googleapis.com/auth/calendar",       # scheduling, shipment ETAs as events
+    "https://www.googleapis.com/auth/webmasters.readonly",  # SEO agent: Search Console (real rankings/clicks)
+    "https://www.googleapis.com/auth/analytics.readonly",   # SEO agent: GA4 (real traffic/conversions)
 ]
 
 ACCOUNTS = [
