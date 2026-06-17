@@ -1,11 +1,13 @@
 """Web service: health check, approval links, WhatsApp webhook."""
 import json
+import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from . import approvals, config, db
 
+log = logging.getLogger("web")
 app = FastAPI(title="Saias Operations Assistant")
 
 
@@ -245,8 +247,10 @@ def _consume() -> None:
             whatsapp.send_text("Voice notes need a transcription key — add "
                                "OPENAI_API_KEY in Render and I'll handle audio.")
         except Exception as exc:  # noqa: BLE001
+            log.exception("command handler error")  # full traceback -> Render logs
             from . import whatsapp as wa
-            wa.send_text(f"Something broke handling that: {exc.__class__.__name__}")
+            wa.send_text(f"Something broke handling that: {exc.__class__.__name__}: "
+                         f"{str(exc)[:400]}")
         finally:
             _commands.task_done()
 
