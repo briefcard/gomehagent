@@ -578,17 +578,19 @@ def _set_active(role: str, thread: str) -> None:
 
 
 def _agents_help() -> str:
-    from . import roles as roles_pkg
+    from . import sites as sites_mod
 
     role_name, thread = _active()
     cur = role_name + (f" · {thread.split(':', 1)[1]}" if ":" in thread else "")
-    switches = "  ".join("/" + r for r in roles_pkg.ROLES)
+    client_cmds = "  ".join("/" + k for k in sites_mod.all_profiles())
     return ("Agents on this number — switch anytime, no extra numbers:\n"
             "• /admin — ops: email, orders, docs, logistics\n"
-            "• /seo — SEO/GEO: Semrush, GSC/GA4, on-site changes. Target a client: "
-            "/seo baci · /seo eien · /seo mtw\n\n"
+            "• /seo — SEO/GEO: Semrush, GSC/GA4, on-site changes\n"
+            "• per client (SEO): " + client_cmds + "\n\n"
             f"Now talking to: {cur}\n"
-            f"Switch: {switches}   ·   /agents to see this again")
+            "Switch: /admin  /seo  " + client_cmds + "   ·   /agents to repeat\n"
+            "(Admin keeps sending its own alerts/approvals regardless of who "
+            "you're chatting with.)")
 
 
 def handle(text: str, attachments: list[dict] | None = None,
@@ -611,14 +613,20 @@ def handle(text: str, attachments: list[dict] | None = None,
     if low.startswith("/"):
         parts = stripped[1:].split(None, 1)
         cmd = parts[0].lower()
-        if cmd in roles_pkg.ROLES:  # a known agent -> switch to it
+        if cmd in roles_pkg.ROLES:  # /admin, /seo  -> switch agent (+ opt sub-thread)
             sub = parts[1].strip().lower() if len(parts) > 1 else ""
             thread = f"{cmd}:{sub}" if sub else cmd
             _set_active(cmd, thread)
             label = cmd.upper() + (f" · {sub}" if sub else "")
             return (f"✅ Switched to the {label} agent — your messages now go here. "
                     "/agents to see all, /admin to switch back.")
-        # not a known agent: fall through and let the active agent handle it
+        from . import sites as sites_mod
+        if cmd in sites_mod.all_profiles():  # /baci, /eien, /mtw -> SEO on that client
+            _set_active("seo", f"seo:{cmd}")
+            dom = sites_mod.get(cmd).get("domain", cmd)
+            return (f"✅ Now on the SEO agent for {cmd} ({dom}). Ask away. "
+                    "/admin for ops · /agents for all.")
+        # unrecognized slash: fall through and let the active agent handle it
 
     role_name, thread = _active()
     return kernel.run(roles_pkg.get(role_name), text, attachments, thread=thread)
