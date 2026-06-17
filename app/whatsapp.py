@@ -162,21 +162,25 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
     """Interactive Approve/Deny/Edit buttons WITH the full draft inline, so
     Gomeh can decide from WhatsApp without opening email."""
     detail = detail or {}
-    parts = [summary[:300]]
+    parts = [summary[:400]]
     if detail.get("inbound_snippet"):
-        parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:400]}")
+        parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:500]}")
     if detail.get("body"):
-        parts.append(f"\n— Proposed reply —\n{detail['body'][:2400]}")
+        parts.append(f"\n— Proposed reply —\n{detail['body'][:2800]}")
     if detail.get("suggestion"):
         parts.append(f"\n💡 {detail['suggestion']}")
-    text = "\n".join(parts)[:3900]  # WhatsApp interactive body cap is 4096
+    full = "\n".join(parts)
+    # 1) Full draft as a normal text message (4096 cap), recorded for reply-quote.
+    send_text(full)
+    # 2) Short interactive with the buttons — interactive BODY caps at 1024,
+    #    so this MUST stay short or Meta returns 131009.
     wamid = _post({
         "messaging_product": "whatsapp",
         "to": config.WHATSAPP_APPROVER_NUMBER,
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": text},
+            "body": {"text": f"☝️ {summary[:900]}"},
             "action": {
                 "buttons": [
                     {"type": "reply", "reply": {"id": f"approve:{approval_id}", "title": "✅ Approve"}},
@@ -186,4 +190,4 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
             },
         },
     })
-    _remember_sent(wamid, text, approval_id=approval_id)
+    _remember_sent(wamid, full, approval_id=approval_id)
