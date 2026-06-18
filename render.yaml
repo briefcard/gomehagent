@@ -48,6 +48,22 @@ envVarGroups:
         generateValue: true
       - key: TZ
         value: America/New_York
+      # --- SEO agent (declared here so values persist across deploys; secret
+      #     values + the long SEO_SITES_JSON are set in the dashboard) ---
+      - key: SEMRUSH_API_KEY
+        sync: false
+      - key: SHOPIFY_STORES_JSON
+        sync: false
+      - key: WORDPRESS_SITES_JSON
+        sync: false
+      - key: SEO_SITES_JSON
+        sync: false
+      - key: SEO_GOOGLE_ALIAS
+        value: personal
+      - key: SEO_PRIMARY_SITE
+        value: baci
+      - key: SEO_MODEL
+        value: claude-sonnet-4-6
       # WhatsApp Cloud API — leave blank until Meta verification completes
       - key: WHATSAPP_TOKEN
         sync: false

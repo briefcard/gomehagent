@@ -49,6 +49,41 @@ def health_connections() -> dict:
     return report
 
 
+@app.get("/health/seo")
+def health_seo(key: str = "") -> dict:
+    """Exactly what the DEPLOYED service sees for the SEO agent (no secrets) —
+    so setup can be verified without guessing. /health/seo?key=APPROVAL_SECRET"""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    from . import sites
+    from .roles import ROLES
+
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, "wa_active")
+    active = row.value if row else "(unset -> admin)"
+    out = {
+        "roles_registered": list(ROLES),        # must include 'seo'
+        "whatsapp_active_agent": active,         # which agent the number is on
+        "seo_model": config.SEO_MODEL,
+        "google_alias": config.SEO_GOOGLE_ALIAS,
+        "semrush_key_set": bool(config.SEMRUSH_API_KEY),
+        "shopify_stores": list(config.SHOPIFY_STORES),
+        "wordpress_sites": list(config.WORDPRESS_SITES),
+        "sites": [{"key": p["key"], "domain": p["domain"], "platform": p["platform"],
+                   "creds_key": p["creds_key"], "has_guardrail": bool(p.get("guardrail"))}
+                  for p in sites.all_profiles().values()],
+    }
+    if config.SEMRUSH_API_KEY:
+        try:
+            from . import seo_tools
+            primary = sites.get("")
+            r = seo_tools.semrush_domain_overview(primary["domain"], primary["database"])
+            out["semrush_probe"] = "ok" if r.startswith("{") and r != "{}" else r[:180]
+        except Exception as exc:  # noqa: BLE001
+            out["semrush_probe"] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:160]}"
+    return out
+
+
 @app.get("/decide/{token}", response_class=HTMLResponse)
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
