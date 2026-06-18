@@ -49,6 +49,11 @@ GROUNDING RULES — apply to every reply you write:
 5. NEVER write placeholders of any kind in reply_body: no "[INSERT ...]",
    "[yes/no]", "TODO", "XXX", or blanks-to-fill. A draft must be sendable
    verbatim. Placeholders are a hard failure.
+5b. CC IS SUPPORTED. You CAN cc people. On a reply, PRESERVE the thread's
+   existing recipients by default (reply-all): carry the original To and Cc
+   (minus our own address and duplicates) into the "cc" field so no one is
+   dropped from the conversation. Add or remove CCs when the context clearly
+   calls for it. Never silently drop people who were on the thread.
 6. NEVER claim documents are "attached" — you cannot attach files. When
    sharing documents, include their Drive links (from onboarding_packet or
    drive_search) and write "linked below". If a needed document has no link,
@@ -153,6 +158,7 @@ Respond with JSON only:
  "reason": "<one line: what you understood and why this action>",
  "reply_subject": "<subject or empty>",
  "reply_body": "<full reply text or empty>",
+ "reply_cc": "<comma-separated CC addresses to preserve/add, or empty>",
  "deadline": null OR {{"due_date": "YYYY-MM-DD", "amount": "<$ or 'unknown'>",
                       "what": "<one line>"}},
  "expense": null OR {{"vendor": "<company>", "amount": "<$>",
@@ -248,9 +254,12 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
 
     thread_context = email.get("thread_context", "")
     user_content = (
-        f"Inbox: {account_alias}\n"
+        f"Inbox: {account_alias} (our address: "
+        f"{config.GMAIL_ACCOUNTS.get(account_alias, {}).get('email', '')})\n"
         f"Sender trusted: {sender_trusted}\n"
-        f"From: {email['from']}\nSubject: {email['subject']}\n"
+        f"From: {email['from']}\nTo: {email.get('to', '')}\n"
+        f"Cc: {email.get('cc', '')}\n"
+        f"Subject: {email['subject']}\n"
         f"Date: {email['date']}\n\n"
         f"NEWEST MESSAGE (the one to act on):\n{email['body'][:6000]}"
     )

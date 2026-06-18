@@ -114,9 +114,10 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             gmail_client.mark_read(alias, email["id"])
             logged = "auto_replied"
         elif action == "draft":
+            reply_cc = result.get("reply_cc", "")  # reply-all: preserve original CCs
             gmail_client.create_draft(
                 alias, email["from"], result["reply_subject"] or f"Re: {email['subject']}",
-                result["reply_body"], email["threadId"],
+                result["reply_body"], email["threadId"], cc=reply_cc,
             )
             ap_id = approvals.request_approval(
                 "send_email",
@@ -126,6 +127,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     "account": alias, "to": email["from"],
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
                     "body": result["reply_body"], "thread_id": email["threadId"],
+                    "cc": reply_cc,
                     "inbound_from": email["from"],
                     "inbound_snippet": email["body"][:600],
                     "reason": detail,

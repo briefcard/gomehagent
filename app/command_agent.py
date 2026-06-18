@@ -138,7 +138,9 @@ ACTION_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
          "to": {"type": "string"}, "subject": {"type": "string"},
-         "body": {"type": "string"}}, "required": ["account", "to", "subject", "body"]}},
+         "body": {"type": "string"},
+         "cc": {"type": "string", "description": "comma-separated CC addresses"}},
+         "required": ["account", "to", "subject", "body"]}},
     {"name": "calendar_events",
      "description": "List calendar events for an account between two ISO "
                     "datetimes (America/New_York).",
@@ -506,7 +508,8 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
             # Actually create the Gmail draft so Gomeh gets a real link + it's
             # editable in his inbox; queue it for approval too.
             draft_id = gmail_client.create_draft(
-                args["account"], args["to"], args["subject"], args["body"])
+                args["account"], args["to"], args["subject"], args["body"],
+                cc=args.get("cc", ""))
             link = (f"https://mail.google.com/mail/u/0/#drafts?compose={draft_id}"
                     if draft_id else "https://mail.google.com/mail/u/0/#drafts")
             approvals.request_approval(
@@ -514,6 +517,7 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
                 f"[via WhatsApp] to {args['to']}: {args['subject']}",
                 {"account": args["account"], "to": args["to"],
                  "subject": args["subject"], "body": args["body"],
+                 "cc": args.get("cc", ""),
                  "inbound_from": "command",
                  "inbound_snippet": "(drafted on your instruction)",
                  "reason": "Drafted via command agent", "bucket": "client_comms"},

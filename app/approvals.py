@@ -104,7 +104,7 @@ def _execute(ap: db.Approval) -> None:
     if ap.kind == "send_email":
         p = ap.payload
         gmail_client.send_email(p["account"], p["to"], p["subject"], p["body"],
-                                p.get("thread_id"))
+                                p.get("thread_id"), cc=p.get("cc", ""))
         if p.get("expect_reply"):
             import datetime as dt
             with db.SessionLocal() as s:
