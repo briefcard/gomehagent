@@ -67,6 +67,7 @@ def fetch_unread(alias: str, max_results: int = 20) -> list[dict]:
                 "threadId": msg["threadId"],
                 "from": headers.get("from", ""),
                 "to": headers.get("to", ""),
+                "cc": headers.get("cc", ""),
                 "subject": headers.get("subject", ""),
                 "date": headers.get("date", ""),
                 "body": _extract_text(msg["payload"]),
@@ -113,6 +114,7 @@ def fetch_unanswered(alias: str, days: int = 14, max_threads: int = 50) -> list[
                 "threadId": thread["id"],
                 "from": headers.get("from", ""),
                 "to": headers.get("to", ""),
+                "cc": headers.get("cc", ""),
                 "subject": headers.get("subject", ""),
                 "date": headers.get("date", ""),
                 "body": _extract_text(last["payload"]),
@@ -258,8 +260,9 @@ def mark_read(alias: str, message_id: str) -> None:
     ).execute()
 
 
-def create_draft(alias: str, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
-    msg = _mime(to, subject, body)
+def create_draft(alias: str, to: str, subject: str, body: str,
+                 thread_id: str | None = None, cc: str = "") -> str:
+    msg = _mime(to, subject, body, cc=cc)
     draft_body = {"message": {"raw": msg}}
     if thread_id:
         draft_body["message"]["threadId"] = thread_id
@@ -268,17 +271,21 @@ def create_draft(alias: str, to: str, subject: str, body: str, thread_id: str | 
 
 
 def send_email(alias: str, to: str, subject: str, body: str,
-               thread_id: str | None = None, html: str | None = None) -> str:
-    payload = {"raw": _mime(to, subject, body, html)}
+               thread_id: str | None = None, html: str | None = None,
+               cc: str = "") -> str:
+    payload = {"raw": _mime(to, subject, body, html, cc=cc)}
     if thread_id:
         payload["threadId"] = thread_id
     sent = service_for(alias).users().messages().send(userId="me", body=payload).execute()
     return sent["id"]
 
 
-def _mime(to: str, subject: str, body: str, html: str | None = None) -> str:
+def _mime(to: str, subject: str, body: str, html: str | None = None,
+          cc: str = "") -> str:
     msg = EmailMessage()
     msg["To"] = to
+    if cc:
+        msg["Cc"] = cc  # carbon-copy recipients (comma-separated)
     msg["Subject"] = subject
     msg.set_content(body)  # plain-text part (fallback + WhatsApp parity)
     if html:

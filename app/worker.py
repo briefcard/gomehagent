@@ -114,9 +114,10 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             gmail_client.mark_read(alias, email["id"])
             logged = "auto_replied"
         elif action == "draft":
+            reply_cc = result.get("reply_cc", "")
             gmail_client.create_draft(
                 alias, email["from"], result["reply_subject"] or f"Re: {email['subject']}",
-                result["reply_body"], email["threadId"],
+                result["reply_body"], email["threadId"], cc=reply_cc,
             )
             ap_id = approvals.request_approval(
                 "send_email",
@@ -126,6 +127,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     "account": alias, "to": email["from"],
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
                     "body": result["reply_body"], "thread_id": email["threadId"],
+                    "cc": reply_cc,
                     "inbound_from": email["from"],
                     "inbound_snippet": email["body"][:600],
                     "reason": detail,
@@ -371,12 +373,6 @@ def main() -> None:
                   "cron", day_of_week="mon", hour=7, minute=30)
     sched.add_job(_safe(ops_jobs.JOBS["contract_expiry_watch"], "expiry watch"),
                   "cron", day_of_week="mon", hour=7, minute=0)
-    # SEO self-analysis loop: weekly snapshot of the target domain so seo_progress
-    # can measure growth/decline. Only scheduled when Semrush is configured.
-    if config.SEMRUSH_API_KEY:
-        from . import seo_tools
-        sched.add_job(_safe(seo_tools.capture_snapshot, "seo snapshot"),
-                      "cron", day_of_week="mon", hour=6, minute=0)
     # Meeting scans 3x daily: morning, afternoon, evening (EST)
     for h in (8, 13, 18):
         sched.add_job(_safe(ops_jobs.JOBS["meeting_scan"], "meeting scan"),

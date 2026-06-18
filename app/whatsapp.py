@@ -163,6 +163,8 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
     Gomeh can decide from WhatsApp without opening email."""
     detail = detail or {}
     parts = [summary[:400]]
+    if detail.get("cc"):
+        parts.append(f"Cc: {detail['cc']}")
     if detail.get("inbound_snippet"):
         parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:500]}")
     if detail.get("body"):

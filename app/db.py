@@ -83,16 +83,12 @@ class Deadline(Base):
 
 
 class ChatMessage(Base):
-    """Conversation history — one separate thread per agent (and optional
-    sub-thread), so each agent keeps its own context with no bleed between them."""
+    """WhatsApp conversation history — gives the command agent continuity."""
 
     __tablename__ = "chat_messages"
 
     id = Column(String, primary_key=True, default=_uuid)
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    # Conversation thread: 'admin', 'seo', or a sub-thread like 'seo:eien'.
-    # Defaults to 'admin' so all pre-existing history stays on the admin thread.
-    thread = Column(String, default="admin", index=True)
     role = Column(String, nullable=False)  # user | assistant
     content = Column(Text, nullable=False)
 
@@ -108,9 +104,6 @@ class Memory(Base):
     topic = Column(String, nullable=False)  # e.g. 'Turkey shipment', 'standing rule'
     content = Column(Text, nullable=False)
     status = Column(String, default="active")  # active | archived
-    # Which agent a note belongs to: 'global' (all agents) or a role name
-    # ('admin', 'seo'). Each agent sees global + its own — no cross-agent noise.
-    scope = Column(String, default="global", index=True)
 
 
 class FollowUp(Base):
@@ -232,40 +225,6 @@ class Lesson(Base):
     lesson = Column(Text, nullable=False)
     origin = Column(String, default="")  # which agent/role learned it
     hits = Column(String, default="0")  # times reinforced
-
-
-class SeoSnapshot(Base):
-    """Point-in-time SEO snapshot for the self-analysis loop — a baseline plus
-    recurring captures so the SEO agent can measure growth/decline per domain
-    over time and adjust the plan from real data (never a guess)."""
-
-    __tablename__ = "seo_snapshots"
-
-    id = Column(String, primary_key=True, default=_uuid)
-    at = Column(DateTime(timezone=True), default=utcnow, index=True)
-    domain = Column(String, nullable=False, index=True)
-    database = Column(String, default="us")
-    source = Column(String, default="semrush")  # semrush | gsc
-    rank = Column(String, default="")            # Semrush authority rank
-    organic_keywords = Column(String, default="0")
-    organic_traffic = Column(String, default="0")
-    organic_cost = Column(String, default="0")
-    top_keywords = Column(JSON, default=list)    # [{keyword, position, volume, url, traffic_pct}]
-    notes = Column(Text, default="")
-
-
-class SeoSiteConfig(Base):
-    """Resolved Google property mapping per SEO site — discovered ONCE (the GSC
-    site URL + GA4 property id that belong to the site's domain) then persisted,
-    so the agent never re-discovers and nothing has to be set in env in advance."""
-
-    __tablename__ = "seo_site_config"
-
-    site = Column(String, primary_key=True)   # site profile key (baci, eien, mtw)
-    domain = Column(String, default="")
-    gsc_site = Column(String, default="")     # e.g. sc-domain:bacimilanousa.com
-    ga4_property = Column(String, default="")  # numeric GA4 property id
-    updated_at = Column(DateTime(timezone=True), default=utcnow)
 
 
 class Setting(Base):

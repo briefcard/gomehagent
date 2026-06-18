@@ -143,23 +143,17 @@ def usage_report(key: str = "", days: int = 7) -> dict:
 
 
 @app.get("/admin/ask", response_class=PlainTextResponse)
-def ask(key: str = "", q: str = "", role: str = "admin", thread: str = "") -> str:
-    """The conversational agents over HTTP, until each has its own WhatsApp
-    number. Pick the agent with &role=admin|seo. Each agent has its OWN
-    conversation thread (no context bleed); add &thread=<name> to run independent
-    parallel conversations (e.g. one per client):
-    /admin/ask?key=SECRET&role=seo&q=where are our quick-win keywords?
-    /admin/ask?key=SECRET&role=seo&thread=eien&q=baseline for Eien"""
+def ask(key: str = "", q: str = "") -> str:
+    """The conversational agent over HTTP, until WhatsApp is live:
+    /admin/ask?key=SECRET&q=pending subscriptions that need cancelling"""
+    from . import command_agent
+
     if key != config.APPROVAL_SECRET:
         return "bad key"
     if not q:
         return "add &q=your question"
     try:
-        from . import kernel
-        from .roles import get as get_role
-
-        thread_key = f"{role}:{thread}" if thread else role
-        return kernel.run(get_role(role), q, thread=thread_key)
+        return command_agent.handle(q)
     except Exception as exc:  # noqa: BLE001
         return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
 
@@ -209,11 +203,11 @@ def _consume() -> None:
                         + (" — and shared as a lesson for all agents."
                            if generalizable else
                            " — future drafts there will follow it."))
-                else:  # edit -> requeue a revised draft (always the admin agent)
+                else:  # edit -> requeue a revised draft
                     whatsapp.send_text(command_agent.handle(
                         f"Revise this draft per my instruction and queue it for "
                         f"approval (account {account}).\n\nDRAFT:\n{orig}\n\n"
-                        f"MY EDIT:\n{fb['text']}", force_role="admin"))
+                        f"MY EDIT:\n{fb['text']}"))
             elif kind == "file":
                 meta = json.loads(payload)
                 data, real_mime = whatsapp.download_media(meta["media_id"])

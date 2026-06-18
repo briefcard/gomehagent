@@ -16,14 +16,12 @@ CHAT_MAX_TURNS = 16
 MEMORY_MAX = 25
 
 
-def load_chat_history(thread: str = "admin") -> list[dict]:
-    """Recent turns for ONE conversation thread as Anthropic messages. Each agent
-    (and sub-thread) has its own thread, so contexts never bleed between agents."""
+def load_chat_history() -> list[dict]:
+    """Recent WhatsApp turns as Anthropic messages (alternating roles)."""
     since = db.utcnow() - dt.timedelta(days=CHAT_WINDOW_DAYS)
     with db.SessionLocal() as s:
         rows = (s.query(db.ChatMessage)
-                .filter(db.ChatMessage.created_at >= since,
-                        db.ChatMessage.thread == thread)
+                .filter(db.ChatMessage.created_at >= since)
                 .order_by(db.ChatMessage.created_at)
                 .all())[-CHAT_MAX_TURNS:]
     messages: list[dict] = []
@@ -37,49 +35,39 @@ def load_chat_history(thread: str = "admin") -> list[dict]:
     return messages
 
 
-def save_turn(thread: str, role: str, content: str) -> None:
+def save_turn(role: str, content: str) -> None:
     with db.SessionLocal() as s:
-        s.add(db.ChatMessage(thread=thread, role=role, content=content[:8000]))
+        s.add(db.ChatMessage(role=role, content=content[:8000]))
         s.commit()
 
 
-def remember(topic: str, content: str, scope: str = "global") -> str:
-    """Save/update a working-memory note. scope = 'global' (all agents) or a role
-    name ('admin', 'seo') so an agent's notes don't pollute the others."""
+def remember(topic: str, content: str) -> str:
     with db.SessionLocal() as s:
         existing = (s.query(db.Memory)
-                    .filter(db.Memory.topic == topic, db.Memory.scope == scope,
-                            db.Memory.status == "active")
+                    .filter(db.Memory.topic == topic, db.Memory.status == "active")
                     .first())
         if existing:
             existing.content = content
             existing.created_at = db.utcnow()
         else:
-            s.add(db.Memory(topic=topic, content=content, scope=scope))
+            s.add(db.Memory(topic=topic, content=content))
         s.commit()
-    return f"Remembered under '{topic}'" + ("" if scope == "global" else f" ({scope})") + "."
+    return f"Remembered under '{topic}'."
 
 
-def forget(topic: str, scope: str | None = None) -> str:
-    """Archive a note by topic. If scope is given, only that scope's note (an
-    agent can't archive another agent's or a global note)."""
+def forget(topic: str) -> str:
     with db.SessionLocal() as s:
-        q = s.query(db.Memory).filter(db.Memory.topic == topic,
-                                      db.Memory.status == "active")
-        if scope is not None:
-            q = q.filter(db.Memory.scope == scope)
-        n = q.update({"status": "archived"})
+        n = (s.query(db.Memory)
+             .filter(db.Memory.topic == topic, db.Memory.status == "active")
+             .update({"status": "archived"}))
         s.commit()
     return f"Archived {n} note(s) on '{topic}'."
 
 
-def memory_block(role: str = "") -> str:
-    """Active memory for injection: GLOBAL notes + this role's own notes only, so
-    one agent's working memory never contaminates another's context."""
+def memory_block() -> str:
+    """Active memory rendered for injection into system prompts."""
     with db.SessionLocal() as s:
-        rows = (s.query(db.Memory)
-                .filter(db.Memory.status == "active",
-                        (db.Memory.scope == "global") | (db.Memory.scope == role))
+        rows = (s.query(db.Memory).filter(db.Memory.status == "active")
                 .order_by(db.Memory.created_at.desc()).limit(MEMORY_MAX).all())
     if not rows:
         return ""

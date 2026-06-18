@@ -120,69 +120,6 @@ SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
 
-# ---------------- SEO agent (role: seo) ----------------
-# Semrush Analytics API key (Semrush -> Subscription -> API). The deployed agent
-# calls api.semrush.com natively, the same pattern as Shopify/Gmail.
-SEMRUSH_API_KEY = os.environ.get("SEMRUSH_API_KEY", "")
-# First target property + market for the SEO agent. Baci Milano USA.
-SEO_DOMAIN = os.environ.get("SEO_DOMAIN", "bacimilanousa.com")
-SEO_DATABASE = os.environ.get("SEO_DATABASE", "us")  # Semrush regional database
-# Shopify store key (a key in SHOPIFY_STORES) the SEO agent implements on —
-# create collections, rewrite copy, set SEO title/meta tags. Writes are
-# approval-gated. Baci Milano USA's store.
-SEO_STORE = os.environ.get("SEO_STORE", "baci")
-# Compliance guardrail: keyword substrings the opportunity finder must NEVER
-# recommend as targets. Baci Milano is an Italian DESIGN brand, mass-manufactured
-# — NOT made in Italy, NOT handmade, NOT artisanal — so origin claims ("made in
-# Italy") AND handcraft/craftsmanship claims ("handmade", "artisan",
-# "craftsmanship") are all off-limits (false claims = legal/advertising risk). We
-# still rank for "Italian <product>" (style/design); we never claim Italian
-# manufacture or handcraft. Comma-separated, case-insensitive substring match.
-SEO_EXCLUDE_TERMS = [t.strip().lower() for t in os.environ.get(
-    "SEO_EXCLUDE_TERMS",
-    "made in italy,from italy,italian made,made italy,imported from italy,"
-    "handmade,hand-made,hand made,handcrafted,hand-crafted,hand crafted,"
-    "craftsmanship,artisan,artisanal,hand-painted,handpainted,hand painted"
-).split(",") if t.strip()]
-# Conversational loop model for the SEO role. Defaults to Opus — the role's
-# work (strategy, GSC-vs-Semrush judgment, content quality) rewards the stronger
-# model. Override with a cheaper model via SEO_MODEL if cost matters more.
-SEO_MODEL = os.environ.get("SEO_MODEL", "claude-opus-4-8")
-
-# ---- SEO multi-site / multi-platform ----
-# RECOMMENDED: define EVERY client (the primary included) in SEO_SITES_JSON below
-# — one uniform structure. The flat SEO_* vars above (SEO_DOMAIN/SEO_DATABASE/
-# SEO_STORE/SEO_PLATFORM/SEO_EXCLUDE_TERMS/SEO_GUARDRAIL/SEO_VOICE) are a FALLBACK
-# used only when SEO_PRIMARY_SITE is NOT present in SEO_SITES_JSON (sites._all
-# setdefaults the flat-var primary if the JSON doesn't define it).
-SEO_PLATFORM = os.environ.get("SEO_PLATFORM", "shopify")  # shopify | wordpress (primary fallback)
-SEO_PRIMARY_SITE = os.environ.get("SEO_PRIMARY_SITE", "baci")  # default site key
-SEO_VOICE = os.environ.get("SEO_VOICE", "")  # primary fallback brand-voice line
-# Primary fallback compliance/brand guardrail (e.g. a health brand: no medical claims).
-SEO_GUARDRAIL = os.environ.get("SEO_GUARDRAIL", "")
-# Every client profile. Each entry: domain, database (Semrush market), platform
-# (shopify|wordpress), creds_key (key in SHOPIFY_STORES / WORDPRESS_SITES), optional
-# exclude_terms[], guardrail (compliance rule), voice. GSC/GA4 auto-discover by
-# domain. Write guardrail/voice WITHOUT double quotes so the JSON stays valid. E.g.
-# {"baci":{"domain":"bacimilanousa.com","platform":"shopify","creds_key":"baci",...},
-#  "eien":{"domain":"eienhealth.com","platform":"shopify","creds_key":"eien",...},
-#  "mtw":{"domain":"marketingthatworks.co","platform":"wordpress","creds_key":"mtw",...}}
-SEO_SITES_JSON = os.environ.get("SEO_SITES_JSON", "{}")
-# WordPress credentials per creds_key (Application Passwords — WP user profile):
-# {"mtw": {"base_url":"https://marketingthatworks.co","user":"editor","app_password":"xxxx xxxx ..."}}
-WORDPRESS_SITES = json.loads(os.environ.get("WORDPRESS_SITES_JSON", "{}"))
-
-# ---- GSC + GA4 (real ranking/click + traffic/conversion truth) ----
-# ONE Google account (alias in GMAIL_ACCOUNTS) used for all sites — grant it into
-# each client's Search Console + GA4 property. Default: personal. Needs the
-# webmasters.readonly + analytics.readonly scopes — re-run scripts/google_oauth.py.
-SEO_GOOGLE_ALIAS = os.environ.get("SEO_GOOGLE_ALIAS", "personal")
-# GSC property / GA4 property are OPTIONAL overrides — leave blank and the agent
-# auto-discovers the one matching each site's domain and saves it in the DB
-# (SeoSiteConfig). Set these only to force a specific property for the primary site.
-SEO_GSC_SITE = os.environ.get("SEO_GSC_SITE", "")
-SEO_GA4_PROPERTY = os.environ.get("SEO_GA4_PROPERTY", "")
-
 # WhatsApp Cloud API (optional — agent falls back to email until these are set)
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
