@@ -410,19 +410,23 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
                     f"approval: {items}")
         if name == "find_unsubscribes":
             acct = args.get("account", "personal")
-            svc = gmail_client.service_for(acct)
-            resp = svc.users().messages().list(userId="me",
-                q="category:promotions newer_than:60d", maxResults=100).execute()
             from collections import Counter
             senders: Counter = Counter()
-            for ref in resp.get("messages", [])[:100]:
-                m = svc.users().messages().get(userId="me", id=ref["id"],
-                    format="metadata", metadataHeaders=["From"]).execute()
-                frm = next((h["value"] for h in m["payload"].get("headers", [])
-                            if h["name"].lower() == "from"), "")
-                addr = frm.split("<")[-1].rstrip(">").strip().lower()
-                if addr:
-                    senders[addr] += 1
+            # service_for() returns a process-wide CACHED Gmail client; touching it
+            # outside _google_lock races the locked gmail_client.* funcs on the same
+            # shared httplib2 connection (segfault / Render exit 139). Serialize it.
+            with gmail_client._google_lock:
+                svc = gmail_client.service_for(acct)
+                resp = svc.users().messages().list(userId="me",
+                    q="category:promotions newer_than:60d", maxResults=100).execute()
+                for ref in resp.get("messages", [])[:100]:
+                    m = svc.users().messages().get(userId="me", id=ref["id"],
+                        format="metadata", metadataHeaders=["From"]).execute()
+                    frm = next((h["value"] for h in m["payload"].get("headers", [])
+                                if h["name"].lower() == "from"), "")
+                    addr = frm.split("<")[-1].rstrip(">").strip().lower()
+                    if addr:
+                        senders[addr] += 1
             top = senders.most_common(15)
             return json.dumps([{"sender": a, "promo_emails_60d": n} for a, n in top])
         if name == "sync_catalog":

@@ -38,7 +38,10 @@ def health_connections() -> dict:
         report["shopify"] = "SHOPIFY_STORES_JSON not set"
     for alias in config.GMAIL_ACCOUNTS:
         try:
-            gmail_client.service_for(alias).users().getProfile(userId="me").execute()
+            # Cached Gmail service is shared process-wide — go through the lock so
+            # this health probe can't race a concurrent locked gmail call (exit 139).
+            with gmail_client._google_lock:
+                gmail_client.service_for(alias).users().getProfile(userId="me").execute()
             gmail_ok = "gmail ok"
         except Exception as exc:  # noqa: BLE001
             gmail_ok = f"gmail ERROR: {exc.__class__.__name__}"
