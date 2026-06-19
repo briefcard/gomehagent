@@ -19,13 +19,24 @@ operational config**, not code.
 - New tables (`seo_snapshots`, `seo_site_config`) + columns (`chat_messages.thread`,
   `memories.scope`) **auto-create on startup** (db `_auto_migrate`). No migration.
 
-### Push access (a fresh thread CAN push)
-A dedicated SSH **deploy key** is set up so pushes work non-interactively (the macOS
-keychain blocks headless HTTPS auth). `origin` →
-`git@github-gomehagent:briefcard/gomehagent.git` (host alias in `~/.ssh/config` →
-`~/.ssh/gomehagent_deploy`). Local `git config user.email/name` is set. To deploy:
-`git push origin seo-agent/kernel-extraction:main`. ALWAYS `git fetch` first —
-`main` has been pushed to by other clones mid-session.
+### Push access — a fresh thread CAN push changes live (deploy = push to main)
+A dedicated SSH **deploy key** (write-enabled, added to the repo's Deploy keys on
+GitHub) lets this environment push non-interactively — the macOS keychain blocks
+headless HTTPS auth, so HTTPS pushes fail with "could not read Username". Already
+wired:
+- `origin` in THIS clone = `git@github-gomehagent:briefcard/gomehagent.git`
+  (use this clone, `/Users/gomehsaias/Documents/gomehagent`; a fresh clone would be
+  HTTPS — re-point it with `git remote set-url origin git@github-gomehagent:briefcard/gomehagent.git`).
+- `~/.ssh/config` has a `Host github-gomehagent` alias → `IdentityFile ~/.ssh/gomehagent_deploy`.
+- Local `git config user.email/name` is set (commits need it).
+- In Claude Code, run git network commands with **sandbox disabled**
+  (`dangerouslyDisableSandbox: true`) so the SSH key is reachable — otherwise SSH
+  returns "Permission denied (publickey)".
+
+Deploy: `git fetch origin` (ALWAYS first — `main` gets pushed by other clones), then
+`git push origin seo-agent/kernel-extraction:main` (fast-forwards `main` → Render
+auto-deploys). If `main` diverged, integrate before pushing. Verify auth anytime:
+`ssh -T git@github-gomehagent` → "Hi briefcard! You've successfully authenticated".
 
 ### OPEN operational issues to resolve (in order)
 1. **Wrong/suspended Render URL.** `assistant-web.onrender.com` serves "This service
