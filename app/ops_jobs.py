@@ -887,7 +887,10 @@ def daily_review() -> str:
                 exists = s.query(db.Deadline).filter(
                     db.Deadline.description == c["title"]).first()
                 if not exists:
-                    s.add(db.Deadline(account=alias, description=c["title"],
+                    # daily_review spans all inboxes — no single alias; attribute
+                    # the discovered deadline to the notification account.
+                    s.add(db.Deadline(account=config.NOTIFY_FROM_ALIAS,
+                                      description=c["title"],
                                       amount="", due_date=c["date"],
                                       source_subject="daily review"))
                     s.commit()
