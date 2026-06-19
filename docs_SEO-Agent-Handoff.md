@@ -6,32 +6,65 @@
 
 ---
 
-## 0. STATUS & FIRST ACTION (read this first)
+## 0. STATUS & OPEN ISSUES (read this first)
 
-The SEO agent (agent #2) is **built, compiles, structurally verified, and partly
-deployed**.
+The SEO agent (agent #2) is **built, verified, merged, and pushed to `main`**.
+All code is live on `main = 05740d7` (a merge that keeps BOTH the full SEO agent
+AND the email-CC feature — see the incident note below). What remains is **Render
+operational config**, not code.
 
-- Repo: `briefcard/gomehagent` (main auto-deploys to Render).
-- Local clone used for the build: `/Users/gomehsaias/Documents/gomehagent`,
-  branch `seo-agent/kernel-extraction`.
-- **`main` (deployed) is at `8d4295a`** — SEO agent v1 + GSC/GA4 + multi-platform
-  (Shopify/WordPress) + structured snippets + link grounding are LIVE.
-- **One commit pending: `2af971e`** — per-thread conversation isolation, the
-  WhatsApp multi-agent router, quality hardening (#1–4 below), per-site guardrails,
-  unified site config, and this doc. It **fast-forwards `main` cleanly.**
+- Repo: `briefcard/gomehagent` (main auto-deploys to Render). Local clone:
+  `/Users/gomehsaias/Documents/gomehagent`, branch `seo-agent/kernel-extraction`
+  (its tip == `main`).
+- New tables (`seo_snapshots`, `seo_site_config`) + columns (`chat_messages.thread`,
+  `memories.scope`) **auto-create on startup** (db `_auto_migrate`). No migration.
 
-**To deploy the pending commit** (from an authenticated terminal — GitHub needs a
-**PAT** as the password or SSH, not an account password; zsh: paste WITHOUT inline
-`# comments`):
-```
-git push origin seo-agent/kernel-extraction:main
-```
-Render auto-deploys. New tables (`seo_snapshots`, `seo_site_config`) + columns
-(`chat_messages.thread`, `memories.scope`) **auto-create on startup** (db
-`_auto_migrate`). No migration step.
+### Push access (a fresh thread CAN push)
+A dedicated SSH **deploy key** is set up so pushes work non-interactively (the macOS
+keychain blocks headless HTTPS auth). `origin` →
+`git@github-gomehagent:briefcard/gomehagent.git` (host alias in `~/.ssh/config` →
+`~/.ssh/gomehagent_deploy`). Local `git config user.email/name` is set. To deploy:
+`git push origin seo-agent/kernel-extraction:main`. ALWAYS `git fetch` first —
+`main` has been pushed to by other clones mid-session.
 
-> If Render shows "Service Suspended", that's an account/billing state — resume
-> `assistant-web` (and `assistant-worker`) in the Render dashboard.
+### OPEN operational issues to resolve (in order)
+1. **Wrong/suspended Render URL.** `assistant-web.onrender.com` serves "This service
+   has been suspended by its owner" — it's a **stale/duplicate** service. The ACTIVE
+   service is at a DIFFERENT URL (WhatsApp gets replies, so the live one is real).
+   FIX: in the Render dashboard open the active `assistant-web`, copy its real
+   `.onrender.com` URL, delete the suspended duplicate, and update **`PUBLIC_BASE_URL`**
+   to the real URL (approval links use it — they're currently pointing at the dead one).
+2. **SEO env values likely pruned.** `render.yaml` now DECLARES the SEO vars in the
+   `assistant-env` group, but the secret ones are `sync:false` (values live in the
+   dashboard) and were probably wiped when the SEO work got reverted (issue below).
+   RE-SET in the dashboard from the unified block in `.env.example`: `SEMRUSH_API_KEY`,
+   `SHOPIFY_STORES_JSON` (baci+eien), `SEO_SITES_JSON` (baci/eien/mtw), `WORDPRESS_SITES_JSON`.
+   (`SEO_MODEL`/`SEO_GOOGLE_ALIAS`/`SEO_PRIMARY_SITE` are auto-set by render.yaml.)
+3. **Verify with the diagnostic:** `https://<REAL-URL>/health/seo?key=APPROVAL_SECRET`
+   — shows exactly what the deployed service sees: registered roles (must include
+   `seo`), `whatsapp_active_agent`, `semrush_key_set` + live `semrush_probe`, loaded
+   `sites`, Shopify/WP store keys. This removes all guesswork — run it FIRST.
+4. **Google (GSC/GA4) setup:** delete `accounts.json`, re-run `scripts/google_oauth.py`
+   to re-consent `personal` (now requests `webmasters.readonly` + `analytics.readonly`),
+   paste new `GMAIL_ACCOUNTS_JSON`; **enable 3 GCP APIs** (Search Console, Analytics
+   Data, Analytics Admin); add `gomehsaias@gmail.com` as a user on each site's GSC +
+   GA4 property. Then GSC/GA4 tools auto-discover the property by domain.
+5. **`SEO_MODEL` is pinned to `claude-sonnet-4-6`** (render.yaml) because
+   `claude-opus-4-8` returned a 400 `BadRequestError` on this API key — if Opus is
+   wanted, confirm the exact model id available to the key, then override `SEO_MODEL`.
+
+### ⚠ INCIDENT to be aware of (don't repeat)
+A CC-support commit (`44302aa`) was pushed to `main` from a **pre-SEO base**, which
+**reverted** the entire SEO integration (config, db schema, memory scoping, OAuth
+scopes, the router) while adding CC. It was reconciled in `05740d7` (kept both). 
+LESSON: any new work MUST branch from current `main` and `git fetch` before pushing,
+or it can silently revert the other agent's work. The deployed agent showing "no SEO
+tools / send a CSV" was a symptom of this revert, not a code bug.
+
+### How to test once Render config is fixed
+On WhatsApp: `/agents` (confirm router live) → `/seo` (or `/baci`) → a Semrush-only
+ask like "for baci, show our page-2/3 quick-win keywords from Semrush." GSC/GA4
+stay dark until step 4 is done.
 
 ---
 
@@ -151,11 +184,16 @@ or it breaks (a broken value drops all sites → validate before pasting).
 
 ## 6. How to operate
 
-- **WhatsApp (one number):** text `/agents` for the menu, `/seo` to switch (or
-  `/seo eien`), then chat normally; `/admin` to switch back. Talk in plain English
-  ("take a look at Eien, where are our quick wins?") — never name tools; the agent
-  picks them. Brand guardrails are automatic per site.
+- **WhatsApp (one number):** `/agents` shows the menu + current agent. `/admin`
+  and `/seo` switch agents; **`/baci` `/eien` `/mtw`** (any SEO site key) switch to
+  the SEO agent on that client; `/seo <client>` also works. Then chat normally in
+  plain English ("take a look at Eien, where are our quick wins?") — never name
+  tools; the agent picks them. Brand guardrails are automatic per site. Admin keeps
+  sending its own alerts/approvals regardless of which agent you're chatting with
+  (they come from the worker process). The switch persists (Setting `wa_active`).
 - **HTTP:** `GET /admin/ask?key=APPROVAL_SECRET&role=seo&thread=<client>&q=<question>`.
+- **Diagnostics:** `/health/seo?key=APPROVAL_SECRET` (effective SEO config the live
+  service sees) and `/health/connections` (Shopify/Google live tests).
 - **Approvals:** every change the agent proposes lands in the approval queue
   (email/WhatsApp). Approve to publish. One-time per Shopify store: approve
   "install the structured-data theme renderer" so JSON-LD renders.
