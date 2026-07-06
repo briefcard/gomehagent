@@ -253,6 +253,21 @@ ACTION_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "title": {"type": "string"}, "problem": {"type": "string"},
          "proposal": {"type": "string"}}, "required": ["title", "problem"]}},
+    {"name": "email_gomeh",
+     "description": "Send an email DIRECTLY TO GOMEH (and only Gomeh — the "
+                    "recipient is fixed) with a report, list, or document "
+                    "summary. Sends immediately, no approval needed (it's an "
+                    "internal notification, not outbound mail). USE THIS the "
+                    "moment you tell Gomeh something is coming by email — "
+                    "never promise a future email without calling this in the "
+                    "same turn. Counterparty email still goes through "
+                    "queue_email_draft.",
+     "input_schema": {"type": "object", "properties": {
+         "subject": {"type": "string"},
+         "body": {"type": "string",
+                  "description": "Plain text; keep structure with short lines "
+                                 "and simple lists"}},
+         "required": ["subject", "body"]}},
     {"name": "calendar_create_event",
      "description": "Create a calendar event and optionally invite guests "
                     "(they get a Google Calendar invitation email).",
@@ -362,7 +377,11 @@ def _run_job_async(job: str) -> str:
             whatsapp.send_text(f"❌ {job} failed: {exc.__class__.__name__}")
 
     threading.Thread(target=_run, daemon=True).start()
-    return f"{job} started in background; emailed report on completion."
+    # Honest promise only: results come back as a WhatsApp message (✅/❌ above)
+    # — some jobs ALSO email a report, but never promise email generically.
+    return (f"{job} started in background — the result will arrive here as a "
+            "WhatsApp message when it finishes. Tell Gomeh exactly that; do "
+            "not promise an email.")
 
 
 def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
@@ -486,6 +505,16 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
             return systems_map.request_feature("admin", args["title"],
                                                args["problem"],
                                                args.get("proposal", ""))
+        if name == "email_gomeh":
+            # Recipient is HARDCODED to Gomeh — internal notification lane, so
+            # no approval gate (jobs/digests already email him server-side).
+            from . import emailfmt
+            gmail_client.send_email(
+                config.NOTIFY_FROM_ALIAS, config.APPROVER_EMAIL,
+                args["subject"], args["body"],
+                html=emailfmt.text_to_html(args["body"]))
+            return (f"Sent to {config.APPROVER_EMAIL}: '{args['subject']}' — "
+                    "confirmed, you can tell Gomeh it's in his inbox.")
         if name == "save_file_to_drive":
             from . import drive_io
             f = session_files.get(args["filename"])
