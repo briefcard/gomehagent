@@ -182,6 +182,61 @@ def usage_report(key: str = "", days: int = 7) -> dict:
     return usage.report(days)
 
 
+@app.get("/admin/whatsapp_diag")
+def whatsapp_diag(key: str = "") -> dict:
+    """Delivery truth for WhatsApp: recent Meta status callbacks (delivered /
+    read / FAILED + error codes) and the sending number's live standing.
+    Empty statuses right after a test send = Meta's webhook callback URL is
+    not pointing at this service."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    import httpx
+
+    from . import whatsapp as wa
+    out: dict = {"recent_statuses": list(_wa_statuses)[-30:]}
+    try:
+        r = httpx.get(
+            f"{wa.API}/{config.WHATSAPP_PHONE_ID}",
+            params={"fields": "verified_name,display_phone_number,"
+                              "quality_rating,code_verification_status"},
+            headers={"Authorization": f"Bearer {config.WHATSAPP_TOKEN}"},
+            timeout=30)
+        out["phone_number"] = r.json()
+    except Exception as exc:  # noqa: BLE001
+        out["phone_number"] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:150]}"
+    return out
+
+
+@app.get("/admin/pending", response_class=HTMLResponse)
+def pending_page(key: str = "") -> str:
+    """Browser fallback for the whole approval queue: every pending approval
+    with working Approve/Deny links (relative URLs, so they work no matter
+    what PUBLIC_BASE_URL says)."""
+    if key != config.APPROVAL_SECRET:
+        return "<h3>bad key</h3>"
+    from . import approvals as ap_mod
+    with db.SessionLocal() as s:
+        aps = (s.query(db.Approval).filter(db.Approval.status == "pending")
+               .order_by(db.Approval.created_at.desc()).all())
+        rows = []
+        for ap in aps:
+            approve = "/decide/" + ap_mod._signer.dumps([ap.id, "approved"])
+            deny = "/decide/" + ap_mod._signer.dumps([ap.id, "denied"])
+            body = (ap.payload or {}).get("body") or (ap.payload or {}).get("content", "")
+            rows.append(
+                f"<li style='margin:0 0 14px'><b>{ap.created_at:%b %d}</b> — "
+                f"{ap.summary}"
+                + (f"<details><summary>details</summary><pre style='white-space:"
+                   f"pre-wrap;background:#f6f6f6;padding:8px'>{body[:1500]}</pre>"
+                   f"</details>" if body else "")
+                + f" &nbsp;<a href='{approve}'>✅ Approve</a> · "
+                  f"<a href='{deny}'>❌ Deny</a></li>")
+    return ("<html><body style='font-family:sans-serif;max-width:760px;"
+            "margin:2em auto'><h2>Pending approvals ("
+            f"{len(rows)})</h2><ul style='list-style:none;padding:0'>"
+            + "".join(rows) + "</ul></body></html>")
+
+
 @app.get("/admin/renotify")
 def renotify(key: str = "") -> dict:
     """Re-send notifications for ALL pending approvals (e.g. after a WhatsApp
@@ -247,6 +302,9 @@ from collections import deque
 _commands: "queue.Queue[tuple[str, str]]" = queue.Queue()
 _consumer_started = False
 _seen_wamids: deque = deque(maxlen=500)
+# Meta delivery receipts (sent/delivered/read/failed + error codes). Failures
+# like the 131056 pair-rate storm are ONLY visible here — never at send time.
+_wa_statuses: deque = deque(maxlen=100)
 
 
 def _consume() -> None:
@@ -401,6 +459,14 @@ async def whatsapp_incoming(request: Request) -> dict:
     try:
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
+                for st in change.get("value", {}).get("statuses", []):
+                    _wa_statuses.append({
+                        "at": st.get("timestamp"), "status": st.get("status"),
+                        "wamid_tail": st.get("id", "")[-14:],
+                        "errors": [{"code": e.get("code"),
+                                    "detail": e.get("title", "")[:120]}
+                                   for e in st.get("errors", [])],
+                    })
                 for msg in change.get("value", {}).get("messages", []):
                     # Only Gomeh may approve or command — ignore all others.
                     if config._norm_phone(msg.get("from", "")) != config.WHATSAPP_APPROVER_NUMBER:

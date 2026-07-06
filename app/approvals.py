@@ -28,6 +28,8 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
 
 
 MAX_WA_NOTIFY_ATTEMPTS = 3  # then fall back to approve-by-email-link
+WA_SENDS_PER_CYCLE = 12     # Meta pair-rate protection: never storm one user
+STALE_APPROVAL_DAYS = 3     # older drafts skip WhatsApp -> straight to the digest
 
 
 def _set_payload_flags(ap_id: str, **flags) -> None:
@@ -73,14 +75,28 @@ def notify_pending(title: str | None = None) -> int:
             .order_by(db.Approval.created_at)
             .all()
         )
-        items = [(ap.id, ap.summary, dict(ap.payload))
+        items = [(ap.id, ap.summary, dict(ap.payload), ap.created_at)
                  for ap in aps if not ap.payload.get("_notified")]
     if not items:
         return 0
 
     if config.WHATSAPP_ENABLED:
-        sent, fallback = 0, []
-        for ap_id, summary, payload in items:
+        import datetime as _dt
+
+        def _aware(ts):  # sqlite naive vs Postgres aware
+            return ts.replace(tzinfo=_dt.timezone.utc) if ts and ts.tzinfo is None else ts
+
+        stale_cutoff = db.utcnow() - _dt.timedelta(days=STALE_APPROVAL_DAYS)
+        sent, fallback, attempted = 0, [], 0
+        for ap_id, summary, payload, created in items:
+            # Stale drafts don't deserve 3 WhatsApp attempts each — one links
+            # digest covers the whole backlog without hammering the pair limit.
+            if _aware(created) and _aware(created) < stale_cutoff:
+                fallback.append((ap_id, summary, payload))
+                continue
+            if attempted >= WA_SENDS_PER_CYCLE:
+                continue  # untouched — next cycle picks it up
+            attempted += 1
             if whatsapp.send_approval(ap_id, summary, payload):
                 _set_payload_flags(ap_id, _notified=True)
                 sent += 1
@@ -92,8 +108,8 @@ def notify_pending(title: str | None = None) -> int:
                     _set_payload_flags(ap_id, _notify_attempts=attempts)
         if fallback:
             try:
-                _email_approvals(fallback, "WhatsApp unreachable — approve "
-                                           "these by link instead")
+                _email_approvals(fallback, f"{len(fallback)} approvals waiting "
+                                           "— approve by link")
                 for ap_id, _, _ in fallback:
                     _set_payload_flags(ap_id, _notified=True)
                 sent += len(fallback)
@@ -101,9 +117,9 @@ def notify_pending(title: str | None = None) -> int:
                 pass
         return sent
 
-    _email_approvals(items, title)
-    for ap_id, _, _ in items:  # only after the send call succeeded
-        _set_payload_flags(ap_id, _notified=True)
+    _email_approvals([i[:3] for i in items], title)
+    for it in items:  # only after the send call succeeded
+        _set_payload_flags(it[0], _notified=True)
     return len(items)
 
 

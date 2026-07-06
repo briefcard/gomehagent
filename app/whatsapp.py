@@ -56,7 +56,10 @@ import os
 WHATSAPP_TEMPLATE_NAME = os.environ.get("WHATSAPP_TEMPLATE_NAME", "")
 
 
-def send_text(body: str) -> None:
+def send_text(body: str, email_fallback: bool = True) -> None:
+    """email_fallback=False for callers with their OWN fallback (send_approval:
+    the approval ladder emails ONE links digest — per-message fallback there
+    spammed 200 'Assistant update' emails in a minute, Jul 2026)."""
     if not config.WHATSAPP_ENABLED:
         return
     err: MetaSendError | None = None
@@ -80,6 +83,8 @@ def send_text(body: str) -> None:
                         "in Render with a fresh system-user token.\n\n"
                         "Original message:\n" + body)
         return
+    if not email_fallback:
+        return  # caller handles its own fallback — never per-message email
     window_closed = bool(err and err.code in (131047, 131026))
     # Closed window (or unknown failure): try an approved template message.
     if WHATSAPP_TEMPLATE_NAME:
@@ -107,9 +112,29 @@ def send_text(body: str) -> None:
                         + (f" (Meta error {err.code}: {err.message})" if err else ""))
 
 
+import hashlib as _hashlib
+import time as _time2
+
+_fallback_recent: dict[str, float] = {}   # body-hash -> last email epoch
+_fallback_times: list[float] = []          # rolling send timestamps
+_FALLBACK_DEDUPE_S = 6 * 3600
+_FALLBACK_MAX_PER_HOUR = 12                # beyond this it's a storm, not news
+
+
 def _email_fallback(body: str, reason: str = "WhatsApp was unavailable") -> None:
     from . import emailfmt, gmail_client  # local import avoids circular dependency
 
+    # Storm guard (Jul 2026: a notify burst emailed 200 'Assistant update's in
+    # a minute): drop duplicates of a recent body, cap the hourly rate.
+    now = _time2.time()
+    h = _hashlib.sha256(body[:2000].encode()).hexdigest()
+    if now - _fallback_recent.get(h, 0) < _FALLBACK_DEDUPE_S:
+        return
+    _fallback_times[:] = [t for t in _fallback_times if now - t < 3600]
+    if len(_fallback_times) >= _FALLBACK_MAX_PER_HOUR:
+        return
+    _fallback_recent[h] = now
+    _fallback_times.append(now)
     try:
         first_line = next((ln for ln in body.splitlines() if ln.strip()), "update")
         full = body + f"\n\nDelivered by email because {reason}."
@@ -175,7 +200,8 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
         parts.append(f"\n💡 {detail['suggestion']}")
     full = "\n".join(parts)
     # 1) Full draft as a normal text message (4096 cap), recorded for reply-quote.
-    send_text(full)
+    #    No per-message email fallback: the approval ladder sends ONE links email.
+    send_text(full, email_fallback=False)
     # 2) Short interactive with the buttons — interactive BODY caps at 1024,
     #    so this MUST stay short or Meta returns 131009.
     try:
