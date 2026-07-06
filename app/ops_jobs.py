@@ -968,6 +968,47 @@ def sync_catalog(account: str = "baci", destination: str = "B2B") -> str:
     return f"Catalog synced: {len(records)} documents → {link}"
 
 
+def map_drive() -> str:
+    """Inventory each account's REAL Drive folder tree into a proposed Systems
+    Map doc ('drive:<alias>') and queue adoption for Gomeh's approval. Once
+    adopted, filing reads the map first and conforms — structure is decided
+    once, never improvised per task."""
+    import datetime as _dt
+    results = []
+    for alias in config.GMAIL_ACCOUNTS:
+        try:
+            if alias == "baci":
+                root = drive_io.find_folder(alias, B2B_FOLDER_NAME)
+                root_label = "B2B (shared drive)"
+                if not root:
+                    results.append(f"{alias}: B2B folder not found — skipped")
+                    continue
+            else:
+                root, root_label = "root", "My Drive"
+            tree = drive_io.folder_tree(alias, root, depth=3)
+            paths = sorted(tree)[:150]
+            content = (
+                f"DRIVE TAXONOMY — {alias} (inventoried {_dt.date.today()}; "
+                f"root: {root_label}; {len(tree)} folders"
+                + (", first 150 shown" if len(tree) > 150 else "") + ")\n"
+                + "\n".join(f"- {p}" for p in paths)
+                + "\n\nRULES: file into the EXISTING folder that matches "
+                "(see conventions:filing). A new folder = propose for approval "
+                "first, then systems_update this doc so the map stays true.")
+            approvals.request_approval(
+                "systems_update",
+                f"[SystemsMap] Adopt Drive taxonomy for {alias} "
+                f"({len(tree)} folders) as the filing ground truth",
+                {"key": f"drive:{alias}", "title": f"Drive taxonomy — {alias}",
+                 "content": content, "bucket": "systems"},
+                notify=False)
+            results.append(f"{alias}: {len(tree)} folders mapped, approval queued")
+        except Exception as exc:  # noqa: BLE001
+            results.append(f"{alias}: FAILED {exc.__class__.__name__}: {str(exc)[:120]}")
+    approvals.notify_pending("Drive taxonomy maps ready to adopt")
+    return "map_drive: " + "; ".join(results)
+
+
 def _skill_job(fn_name: str):
     def run() -> str:
         from . import skills
@@ -979,6 +1020,7 @@ JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet, "organize": organize,
         "daily_review": daily_review, "sync_catalog": sync_catalog,
+        "map_drive": map_drive,
         "tax_receipt_export": _skill_job("tax_receipt_export"),
         "invoice_chase": _skill_job("invoice_chase"),
         "business_pulse": _skill_job("business_pulse"),

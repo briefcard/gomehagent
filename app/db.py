@@ -234,6 +234,40 @@ class Lesson(Base):
     hits = Column(String, default="0")  # times reinforced
 
 
+class SystemDoc(Base):
+    """The Systems Map — durable, structured knowledge of HOW Gomeh's world is
+    organized: Drive folder taxonomies, filing conventions, registries, active
+    projects. Agents READ these before organizational work (read-before-write)
+    and UPDATE them after, so structure is never re-invented per task."""
+
+    __tablename__ = "system_docs"
+
+    key = Column(String, primary_key=True)  # e.g. 'drive:baci', 'conventions:filing'
+    title = Column(String, default="")
+    content = Column(Text, default="")
+    pinned = Column(String, default="")  # 'true' -> inject full content every turn
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_by = Column(String, default="")  # role/job that last wrote it
+
+
+class FeatureRequest(Base):
+    """Agent-filed feature requests: when an agent hits a limitation (missing
+    tool, a cap that cut results, repeated friction) it records the problem and
+    a concrete proposal here instead of silently working around it. Gomeh
+    reviews (/admin/features) and ships upgrades in a dev session."""
+
+    __tablename__ = "feature_requests"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    role = Column(String, default="")  # which agent filed it
+    title = Column(String, nullable=False)
+    problem = Column(Text, default="")
+    proposal = Column(Text, default="")
+    status = Column(String, default="open")  # open | planned | built | rejected
+    hits = Column(String, default="1")  # times this friction was re-hit
+
+
 class SeoSnapshot(Base):
     """Point-in-time SEO snapshot for the self-analysis loop — a baseline plus
     recurring captures so the SEO agent can measure growth/decline per domain

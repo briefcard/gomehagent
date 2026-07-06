@@ -354,6 +354,8 @@ def main() -> None:
              config.AUTO_SEND_ENABLED)
     # Startup jobs are wrapped so a failure can NEVER crash the worker (exit 1).
     _safe(voice_learn.ensure_profiles, "voice profiles")()
+    from . import systems_map
+    _safe(systems_map.ensure_seeds, "systems map seeds")()
     _safe(bucket_backfill, "bucket backfill")()
     _safe(backlog_sweep, "backlog sweep")()
     sched = BackgroundScheduler(timezone="America/New_York")
@@ -373,6 +375,10 @@ def main() -> None:
                   "cron", day_of_week="mon", hour=7, minute=30)
     sched.add_job(_safe(ops_jobs.JOBS["contract_expiry_watch"], "expiry watch"),
                   "cron", day_of_week="mon", hour=7, minute=0)
+    # Weekly systems review: stale Systems Map docs + the agents' open feature
+    # requests — the self-improvement loop's heartbeat.
+    sched.add_job(_safe(systems_map.systems_review, "systems review"),
+                  "cron", day_of_week="mon", hour=8, minute=45)
     # SEO self-analysis loop: weekly snapshot of the target domain so seo_progress
     # can measure growth/decline. Only scheduled when Semrush is configured.
     if config.SEMRUSH_API_KEY:

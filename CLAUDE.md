@@ -62,7 +62,19 @@ forwarded files). Built on the Claude API. State in Postgres.
   shared across agents by design; only the raw conversation is isolated.
 - `approvals.py` — approval queue + execution + autonomy stats.
 - `whatsapp.py` — Cloud API send/receive, template fallback, reply-quote map.
-- `data_tools.py` — Shopify, Drive search, email/contact search, RFQ, registry.
+- `data_tools.py` — Shopify, Drive search, TIERED email search (Jul 2026:
+  count→metadata→relevance-filter→bounded deep read, coverage receipts, honors
+  window_days scope), read_email / read_email_attachment (on-demand PDF text
+  via pypdf), contacts, RFQ, registry.
+- `systems_map.py` — the SYSTEMS MAP (Jul 2026): durable docs on how Gomeh's
+  world is organized (SystemDoc: 'drive:<account>' taxonomies from the
+  map_drive job, 'conventions:filing', 'project:<name>'). Injected compactly
+  every turn by the kernel (pinned docs full, rest as index); agents READ
+  BEFORE WRITE for any organizing and systems_update after. Also the
+  FeatureRequest queue (request_feature tool, /admin/features endpoint, weekly
+  systems_review cron) — agents file their own limitations; implement the top
+  ones in a dev session. Adoption of new structure = approval kind
+  'systems_update'.
 - `emailfmt.py` — HTML email formatting. `usage.py` — token/cost logging.
 
 ## Behavioral DNA (the "trainings" — NEVER drop these; they belong in the kernel)

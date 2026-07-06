@@ -57,6 +57,13 @@ ADMIN HARD RULES (set by Gomeh Jun 12, 2026 — non-negotiable):
   X flagged for review.
 - THREE ACCOUNTS, NEVER MIXED: personal / baci / eien each have their own inbox
   and Drive. Never cross-file documents between accounts.
+- READ THE MAP BEFORE FILING (Jul 2026, after the mis-organized Italy-shipments
+  folder): before any filing/organizing/bulk move, systems_get the account's
+  'drive:<account>' taxonomy + 'conventions:filing' and CONFORM to them. Import
+  -shipment documents (BOL, commercial invoice, packing list, arrival notice —
+  from forwarders/brokers/suppliers) are NOT customer-order documents; they file
+  under their shipment's folder, matched via the shipment registry. If no map
+  doc exists yet, run map_drive first or flag it — don't improvise a structure.
 - REFUNDS & CANCELLATIONS: push back first — understand the issue, offer a fix
   (replacement, exchange, troubleshooting, discount). If unresolvable, look up
   the order in Shopify and queue the refund/cancellation for Gomeh's approval.

@@ -558,6 +558,30 @@ TOOLS = [
      "description": "Archive one of your SEO working-memory topics once resolved.",
      "input_schema": {"type": "object", "properties": {
          "topic": {"type": "string"}}, "required": ["topic"]}},
+    {"name": "systems_list",
+     "description": "Index of the Systems Map — durable docs on how Gomeh's "
+                    "world is organized (projects, conventions, registries).",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "systems_get",
+     "description": "Read one Systems Map doc in full (e.g. 'project:<name>') — "
+                    "consult before restructuring anything a prior task set up.",
+     "input_schema": {"type": "object", "properties": {
+         "key": {"type": "string"}}, "required": ["key"]}},
+    {"name": "systems_update",
+     "description": "Create/update a Systems Map doc when a project advanced or "
+                    "structure changed (keys: 'project:<name>', "
+                    "'conventions:<topic>') — the next session inherits the map.",
+     "input_schema": {"type": "object", "properties": {
+         "key": {"type": "string"}, "content": {"type": "string"},
+         "title": {"type": "string"}, "pinned": {"type": "boolean"}},
+         "required": ["key", "content"]}},
+    {"name": "request_feature",
+     "description": "File a feature request when you hit a real limitation "
+                    "(missing tool/data source, cap that cut results). Concrete "
+                    "problem + proposed fix; then continue with what you have.",
+     "input_schema": {"type": "object", "properties": {
+         "title": {"type": "string"}, "problem": {"type": "string"},
+         "proposal": {"type": "string"}}, "required": ["title", "problem"]}},
 ]
 
 _HANDLERS = {
@@ -586,6 +610,23 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
                                    scope="global" if args.get("shared") else "seo")
         if name == "forget_memory":
             return memory.forget(args["topic"], scope="seo")
+        if name == "systems_list":
+            from . import systems_map
+            return systems_map.list_docs()
+        if name == "systems_get":
+            from . import systems_map
+            return systems_map.get_doc(args["key"])
+        if name == "systems_update":
+            from . import systems_map
+            return systems_map.set_doc(args["key"], args["content"],
+                                       title=args.get("title", ""),
+                                       updated_by="seo",
+                                       pinned=args.get("pinned"))
+        if name == "request_feature":
+            from . import systems_map
+            return systems_map.request_feature("seo", args["title"],
+                                               args["problem"],
+                                               args.get("proposal", ""))
         if name == "verify_links":
             return json.dumps(sites.verify_links(profile, args.get("html", "")))
         if name in ("list_collections", "find_items", "get_seo"):

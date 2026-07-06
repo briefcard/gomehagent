@@ -182,6 +182,17 @@ def usage_report(key: str = "", days: int = 7) -> dict:
     return usage.report(days)
 
 
+@app.get("/admin/features")
+def feature_requests(key: str = "", status: str = "open") -> dict:
+    """The agents' own upgrade queue — limitations they hit, with proposals.
+    Feed the top ones to a dev session to implement. status=open|planned|built|
+    rejected|all."""
+    from . import systems_map
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    return {"status": status, "requests": systems_map.features_list(status)}
+
+
 @app.get("/admin/ask", response_class=PlainTextResponse)
 def ask(key: str = "", q: str = "", role: str = "admin", thread: str = "") -> str:
     """The conversational agents over HTTP, until each has its own WhatsApp

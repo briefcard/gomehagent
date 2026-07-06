@@ -146,28 +146,214 @@ def drive_search(account: str, query: str) -> str:
                 "Likely needs re-authorization with Drive scope.")
 
 
-# ---------- Email history ----------
+# ---------- Email history: TIERED retrieval ----------
+# Spend tokens proportional to the question (Gomeh, Jul 2026): honor the asked
+# scope; scan cheap metadata wide; deep-read ONLY what a relevance pass keeps;
+# always report coverage so partial results can never masquerade as complete.
 
-def email_history_search(account: str, query: str) -> str:
+_SEARCH_MAX_IDS = 500     # id-scan ceiling per search (tier 0)
+_SEARCH_MAX_META = 150    # metadata fetches per search (tier 1)
+_SEARCH_MAX_DEEP = 25     # full-body reads per search (tier 3)
+_SEARCH_OUT_BUDGET = 7200  # chars — the kernel truncates tool results at 8000
+
+
+def _relevance_filter(intent: str, metas: list[dict]) -> list[int] | None:
+    """Tier 2: one cheap classify call — which matches plausibly serve the
+    intent? Returns indexes, or None on any failure (caller keeps everything:
+    fail OPEN, never silently drop matches)."""
+    try:
+        import anthropic
+
+        from . import usage
+        lines = "\n".join(
+            f"{i}|{m['date'][:16]}|{m['from'][:40]}|{m['subject'][:60]}|{m['snippet'][:60]}"
+            for i, m in enumerate(metas))
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLASSIFY_MODEL, max_tokens=400,
+            system="You filter email search results. Reply with ONLY a JSON "
+                   "array of the line numbers plausibly relevant to the goal. "
+                   "Keep borderline cases (recall over precision).",
+            messages=[{"role": "user",
+                       "content": f"GOAL: {intent}\n\nLINES (idx|date|from|subject|snippet):\n{lines}"}])
+        usage.log_usage("search_filter", config.CLASSIFY_MODEL, msg)
+        text = next((b.text for b in msg.content if b.type == "text"), "")
+        arr = json.loads(text[text.index("["):text.rindex("]") + 1])
+        keep = sorted({int(i) for i in arr if 0 <= int(i) < len(metas)})
+        return keep or None
+    except Exception:  # noqa: BLE001 — fail open
+        return None
+
+
+def email_history_search(account: str, query: str, window_days: int = 0,
+                         intent: str = "") -> str:
+    """Tiered Gmail search. window_days bounds the scope EXACTLY as asked
+    (0 = no time bound). intent triggers the relevance filter + full-body reads
+    of the survivors; without intent you get metadata only (cheap recon)."""
+    if account not in config.GMAIL_ACCOUNTS:
+        return f"Account '{account}' unknown."
+    q = query.strip()
+    if window_days:
+        q += f" newer_than:{int(window_days)}d"
+    try:
+        # Tier 0+1 under the Google lock (shared cached client — never race it)
+        with gmail_client._google_lock:
+            svc = gmail_client.service_for(account)
+            ids: list[str] = []
+            page = None
+            while True:
+                resp = svc.users().messages().list(
+                    userId="me", q=q, maxResults=100, pageToken=page).execute()
+                ids += [m["id"] for m in resp.get("messages", [])]
+                page = resp.get("nextPageToken")
+                if not page or len(ids) >= _SEARCH_MAX_IDS:
+                    break
+            matched, beyond_scan = len(ids), bool(page)
+            metas = []
+            for mid in ids[:_SEARCH_MAX_META]:
+                m = svc.users().messages().get(
+                    userId="me", id=mid, format="metadata",
+                    metadataHeaders=["From", "To", "Subject", "Date"]).execute()
+                h = {x["name"].lower(): x["value"]
+                     for x in m["payload"].get("headers", [])}
+                metas.append({"id": mid, "date": h.get("date", "")[:22],
+                              "from": h.get("from", ""), "subject": h.get("subject", ""),
+                              "snippet": m.get("snippet", "")[:100]})
+        if not metas:
+            return (f"COVERAGE: query='{q}' -> 0 matches. Complete within scope"
+                    + (f" (last {window_days}d)." if window_days else "."))
+
+        # Tier 2 (outside the lock — it's an Anthropic call, not Google)
+        keep = list(range(len(metas)))
+        filtered = False
+        if intent and len(metas) > 12:
+            f = _relevance_filter(intent, metas)
+            if f is not None:
+                keep, filtered = f, True
+
+        # Tier 3: deep-read only the survivors, bounded
+        deep: dict[int, str] = {}
+        if intent:
+            with gmail_client._google_lock:
+                svc = gmail_client.service_for(account)
+                for i in keep[:_SEARCH_MAX_DEEP]:
+                    m = svc.users().messages().get(
+                        userId="me", id=metas[i]["id"], format="full").execute()
+                    body = gmail_client._extract_text(m["payload"])
+                    atts = [p.get("filename") for p in
+                            m["payload"].get("parts", []) if p.get("filename")]
+                    deep[i] = body[:700] + (f" [attachments: {', '.join(atts)}]"
+                                            if atts else "")
+
+        receipt = (f"COVERAGE: query='{q}' -> matched {matched}"
+                   f"{'+' if beyond_scan else ''}; metadata scanned {len(metas)}"
+                   + (f"; relevance-kept {len(keep)}" if filtered else "")
+                   + (f"; read {len(deep)} in full" if deep else
+                      "; metadata only — pass intent= to read bodies"))
+        if beyond_scan or matched > len(metas):
+            receipt += (f". ⚠ INCOMPLETE: matches beyond the scan ceiling — "
+                        f"narrow window_days or refine the query, then re-run.")
+        else:
+            receipt += (f". Complete within scope"
+                        + (f" (last {window_days}d)." if window_days else "."))
+
+        # Assemble within the output budget — announce anything cut, never hide it
+        kept_set = set(keep)
+        items = []
+        for i, meta in enumerate(metas):
+            if filtered and i not in kept_set:
+                continue
+            it = dict(meta)
+            if i in deep:
+                it["body"] = deep[i]
+            items.append(it)
+        out, shown = receipt + "\n", 0
+        for it in items:
+            s = json.dumps(it)
+            if len(out) + len(s) > _SEARCH_OUT_BUDGET:
+                out += (f"…output budget reached: {len(items) - shown} more "
+                        "matches not shown — narrow the scope and re-run.")
+                break
+            out += s + "\n"
+            shown += 1
+        if filtered and len(keep) < len(metas):
+            dropped = [metas[i]["subject"][:50] for i in range(len(metas))
+                       if i not in kept_set][:15]
+            out += f"(filtered out as off-goal: {'; '.join(dropped)})"
+        return out
+    except Exception as exc:  # noqa: BLE001
+        return f"Email search failed: {exc.__class__.__name__}: {str(exc)[:150]}"
+
+
+def read_email(account: str, message_id: str) -> str:
+    """Full body + headers of ONE email by id (ids come from
+    email_history_search). The precision tool after a wide scan."""
     if account not in config.GMAIL_ACCOUNTS:
         return f"Account '{account}' unknown."
     try:
-        svc = gmail_client.service_for(account)
-        resp = svc.users().messages().list(userId="me", q=query, maxResults=8).execute()
-        out = []
-        for ref in resp.get("messages", []):
-            msg = svc.users().messages().get(
-                userId="me", id=ref["id"], format="metadata",
-                metadataHeaders=["From", "To", "Subject", "Date"],
-            ).execute()
-            headers = {h["name"].lower(): h["value"]
-                       for h in msg["payload"].get("headers", [])}
-            out.append({"from": headers.get("from"), "to": headers.get("to"),
-                        "subject": headers.get("subject"), "date": headers.get("date"),
-                        "snippet": msg.get("snippet", "")})
-        return json.dumps(out) if out else "No matching emails."
+        with gmail_client._google_lock:
+            svc = gmail_client.service_for(account)
+            m = svc.users().messages().get(
+                userId="me", id=message_id, format="full").execute()
+        h = {x["name"].lower(): x["value"]
+             for x in m["payload"].get("headers", [])}
+        atts = [p.get("filename") for p in m["payload"].get("parts", [])
+                if p.get("filename")]
+        return json.dumps({
+            "from": h.get("from"), "to": h.get("to"), "cc": h.get("cc", ""),
+            "date": h.get("date"), "subject": h.get("subject"),
+            "thread_id": m.get("threadId"),
+            "body": gmail_client._extract_text(m["payload"])[:6000],
+            "attachments": atts or "none — use read_email_attachment if listed"})
     except Exception as exc:  # noqa: BLE001
-        return f"Email search failed: {exc.__class__.__name__}"
+        return f"read_email failed: {exc.__class__.__name__}: {str(exc)[:150]}"
+
+
+def _pdf_text(data: bytes) -> str:
+    import io
+
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(data))
+    return "\n".join((p.extract_text() or "") for p in reader.pages[:25]).strip()
+
+
+def read_email_attachment(account: str, message_id: str, filename: str = "") -> str:
+    """Read a PDF/text attachment's CONTENT from one email — the on-demand
+    counterpart of triage's automatic PDF reading, so interactive asks about a
+    document never rely on the snippet."""
+    if account not in config.GMAIL_ACCOUNTS:
+        return f"Account '{account}' unknown."
+    try:
+        with gmail_client._google_lock:
+            svc = gmail_client.service_for(account)
+            m = svc.users().messages().get(
+                userId="me", id=message_id, format="full").execute()
+        parts = [p for p in m["payload"].get("parts", []) if p.get("filename")]
+        if not parts:
+            return "That email has no attachments."
+        want = filename.strip().lower()
+        part = next((p for p in parts if want and want in p["filename"].lower()),
+                    parts[0] if not want else None)
+        if part is None:
+            return f"No attachment matching '{filename}'. Available: " \
+                   f"{[p['filename'] for p in parts]}"
+        att_id = part["body"].get("attachmentId")
+        if not att_id:
+            return f"'{part['filename']}' has no downloadable body."
+        data = gmail_client.download_attachment(account, message_id, att_id)
+        name = part["filename"]
+        if name.lower().endswith(".pdf"):
+            text = _pdf_text(data)
+            if not text:
+                return (f"'{name}' has no text layer (likely a scanned image "
+                        "PDF) — I can't read it here; flag it to Gomeh.")
+            return f"[{name}, {len(data)} bytes]\n{text[:6500]}"
+        if name.lower().endswith((".txt", ".csv")):
+            return f"[{name}]\n{data.decode(errors='replace')[:6500]}"
+        return (f"'{name}' ({part.get('mimeType', '?')}) — I can read pdf/txt/csv "
+                "here. Others: save to Drive and open there.")
+    except Exception as exc:  # noqa: BLE001
+        return f"read_email_attachment failed: {exc.__class__.__name__}: {str(exc)[:150]}"
 
 
 # ---------- Contacts (derived from real correspondence) ----------
@@ -179,16 +365,19 @@ def find_contacts(account: str, who: str) -> str:
     if account not in config.GMAIL_ACCOUNTS:
         return f"Account '{account}' unknown."
     try:
-        svc = gmail_client.service_for(account)
-        resp = svc.users().messages().list(
-            userId="me", q=f"({who}) (in:sent OR in:inbox)", maxResults=15,
-        ).execute()
+        # Shared cached Gmail client — always under the Google lock.
+        with gmail_client._google_lock:
+            svc = gmail_client.service_for(account)
+            resp = svc.users().messages().list(
+                userId="me", q=f"({who}) (in:sent OR in:inbox)", maxResults=15,
+            ).execute()
+            msgs = [svc.users().messages().get(
+                        userId="me", id=ref["id"], format="metadata",
+                        metadataHeaders=["From", "To"]).execute()
+                    for ref in resp.get("messages", [])]
         seen: dict[str, str] = {}
         import re
-        for ref in resp.get("messages", []):
-            msg = svc.users().messages().get(
-                userId="me", id=ref["id"], format="metadata",
-                metadataHeaders=["From", "To"]).execute()
+        for msg in msgs:
             for h in msg["payload"].get("headers", []):
                 for m in re.finditer(r"([\w.+-]+@[\w.-]+\.\w+)", h["value"]):
                     addr = m.group(1).lower()
@@ -276,11 +465,12 @@ def onboarding_packet() -> str:
         return "B2B folder not found in Drive."
     folder = drive_io.ensure_subfolder(alias, b2b, PACKET_FOLDER)
     files = drive_io.list_files(alias, folder)
-    detail = drive_io.svc(alias).files().list(
-        q=f"'{folder}' in parents and trashed = false",
-        fields="files(id,name,webViewLink)", includeItemsFromAllDrives=True,
-        supportsAllDrives=True, pageSize=100,
-    ).execute().get("files", [])
+    with gmail_client._google_lock:  # cached drive client — serialized lane
+        detail = drive_io.svc(alias).files().list(
+            q=f"'{folder}' in parents and trashed = false",
+            fields="files(id,name,webViewLink)", includeItemsFromAllDrives=True,
+            supportsAllDrives=True, pageSize=100,
+        ).execute().get("files", [])
     by_name = {f["name"]: f.get("webViewLink", "") for f in detail}
     out = {}
     for req in PACKET_REQUIRED:
@@ -365,13 +555,49 @@ TOOLS = [
     },
     {
         "name": "email_history_search",
-        "description": "Search past emails in an inbox using Gmail query syntax "
-                       "(e.g. 'from:hana@cargohansa.com', 'subject:quote newer_than:90d'). "
-                       "Use to find prior conversations, agreements, quotes.",
+        "description": "TIERED email search (Gmail query syntax, e.g. "
+                       "'from:hana@cargohansa.com', 'subject:invoice'). Honors "
+                       "scope EXACTLY: window_days=30 when Gomeh says 'past "
+                       "month' — don't sweep all history unless he asked. Pass "
+                       "intent (what you're actually after) to relevance-filter "
+                       "the matches and read the survivors in full; omit it for "
+                       "a cheap metadata recon. ALWAYS repeat the returned "
+                       "COVERAGE line to Gomeh — never present a ⚠ INCOMPLETE "
+                       "result as complete.",
         "input_schema": {"type": "object", "properties": {
             "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
             "query": {"type": "string"},
+            "window_days": {"type": "integer",
+                            "description": "Time scope in days; 0/omit = no bound"},
+            "intent": {"type": "string",
+                       "description": "The goal, e.g. 'recurring monthly "
+                                      "charges we still pay' — enables filter + "
+                                      "full-body reads"},
         }, "required": ["account", "query"]},
+    },
+    {
+        "name": "read_email",
+        "description": "Full body + headers + attachment list of ONE email by "
+                       "message id (ids come from email_history_search). Use "
+                       "for precision after a wide scan.",
+        "input_schema": {"type": "object", "properties": {
+            "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+            "message_id": {"type": "string"},
+        }, "required": ["account", "message_id"]},
+    },
+    {
+        "name": "read_email_attachment",
+        "description": "Read the CONTENT of a pdf/txt/csv attachment on an "
+                       "email (message id from email_history_search or "
+                       "read_email). Use whenever a document's contents matter "
+                       "— never answer about a PDF from the snippet.",
+        "input_schema": {"type": "object", "properties": {
+            "account": {"type": "string", "enum": ["personal", "baci", "eien"]},
+            "message_id": {"type": "string"},
+            "filename": {"type": "string",
+                         "description": "Which attachment (substring match); "
+                                        "omit if there's only one"},
+        }, "required": ["account", "message_id"]},
     },
 ]
 
@@ -421,6 +647,8 @@ _HANDLERS = {
     "shopify_order_details": shopify_order_details,
     "drive_search": drive_search,
     "email_history_search": email_history_search,
+    "read_email": read_email,
+    "read_email_attachment": read_email_attachment,
     "find_contacts": find_contacts,
     "find_documents": find_documents,
     "onboarding_packet": onboarding_packet,

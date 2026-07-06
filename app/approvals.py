@@ -159,6 +159,13 @@ def _execute(ap: db.Approval) -> None:
         profile = sites.get(p.get("site"))
         msg = sites.backend(profile).install_schema_renderer(profile)
         whatsapp.send_text(f"🧩 {msg}")
+    elif ap.kind == "systems_update":
+        from . import systems_map, whatsapp
+        p = ap.payload
+        systems_map.set_doc(p["key"], p["content"], title=p.get("title", ""),
+                            updated_by="approval", pinned=p.get("pinned"))
+        whatsapp.send_text(f"🗺 Systems Map adopted: {p['key']} — filing and "
+                           "organizing now conform to it.")
     # Future kinds: buy_label (Phase 4), pay (never auto), book_freight (Phase 5)
 
 

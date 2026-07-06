@@ -223,6 +223,36 @@ ACTION_TOOLS = [
      "description": "Archive one of your working-memory topics once it's resolved.",
      "input_schema": {"type": "object", "properties": {
          "topic": {"type": "string"}}, "required": ["topic"]}},
+    {"name": "systems_list",
+     "description": "Index of the Systems Map — the durable docs describing how "
+                    "Gomeh's world is organized (Drive taxonomies, filing "
+                    "conventions, registries, projects).",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "systems_get",
+     "description": "Read one Systems Map doc in full. READ the relevant doc "
+                    "BEFORE any filing/organizing/bulk move and conform to it "
+                    "(e.g. 'drive:baci', 'conventions:filing', 'project:<name>').",
+     "input_schema": {"type": "object", "properties": {
+         "key": {"type": "string"}}, "required": ["key"]}},
+    {"name": "systems_update",
+     "description": "Create/update a Systems Map doc after structure changed or "
+                    "a project advanced — the next agent inherits the map, not "
+                    "your memory. Keys: 'drive:<account>', 'conventions:<topic>', "
+                    "'project:<name>'. pinned=true only for docs every turn "
+                    "must see (keep those short).",
+     "input_schema": {"type": "object", "properties": {
+         "key": {"type": "string"}, "content": {"type": "string"},
+         "title": {"type": "string"}, "pinned": {"type": "boolean"}},
+         "required": ["key", "content"]}},
+    {"name": "request_feature",
+     "description": "File a feature request when you hit a real limitation "
+                    "(missing tool, a cap that cut results, work you had to "
+                    "fudge). State the concrete problem + proposed fix, then "
+                    "continue with what you have. Refiling the same title "
+                    "raises its priority count.",
+     "input_schema": {"type": "object", "properties": {
+         "title": {"type": "string"}, "problem": {"type": "string"},
+         "proposal": {"type": "string"}}, "required": ["title", "problem"]}},
     {"name": "calendar_create_event",
      "description": "Create a calendar event and optionally invite guests "
                     "(they get a Google Calendar invitation email).",
@@ -439,6 +469,23 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
                                    scope="global" if args.get("shared") else "admin")
         if name == "forget_memory":
             return memory.forget(args["topic"], scope="admin")
+        if name == "systems_list":
+            from . import systems_map
+            return systems_map.list_docs()
+        if name == "systems_get":
+            from . import systems_map
+            return systems_map.get_doc(args["key"])
+        if name == "systems_update":
+            from . import systems_map
+            return systems_map.set_doc(args["key"], args["content"],
+                                       title=args.get("title", ""),
+                                       updated_by="admin",
+                                       pinned=args.get("pinned"))
+        if name == "request_feature":
+            from . import systems_map
+            return systems_map.request_feature("admin", args["title"],
+                                               args["problem"],
+                                               args.get("proposal", ""))
         if name == "save_file_to_drive":
             from . import drive_io
             f = session_files.get(args["filename"])
