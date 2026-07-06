@@ -27,29 +27,20 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
     return ap_id
 
 
-def notify_pending(title: str | None = None) -> int:
-    """Send ONE email covering every pending approval not yet announced.
-    Called on a schedule (APPROVAL_BATCH_MINUTES), not per item. Returns count."""
+MAX_WA_NOTIFY_ATTEMPTS = 3  # then fall back to approve-by-email-link
+
+
+def _set_payload_flags(ap_id: str, **flags) -> None:
+    """Merge bookkeeping flags into an approval's payload (short transaction)."""
     with db.SessionLocal() as s:
-        aps = (
-            s.query(db.Approval)
-            .filter(db.Approval.status == "pending")
-            .order_by(db.Approval.created_at)
-            .all()
-        )
-        fresh = [ap for ap in aps if not ap.payload.get("_notified")]
-        if not fresh:
-            return 0
-        for ap in fresh:
-            ap.payload = {**ap.payload, "_notified": True}
-        s.commit()
-        items = [(ap.id, ap.summary, dict(ap.payload)) for ap in fresh]
+        ap = s.get(db.Approval, ap_id)
+        if ap:
+            ap.payload = {**ap.payload, **flags}
+            s.commit()
 
-    if config.WHATSAPP_ENABLED:
-        for ap_id, summary, payload in items:
-            whatsapp.send_approval(ap_id, summary, payload)
-        return len(items)
 
+def _email_approvals(items: list, title: str | None = None) -> None:
+    """ONE email with real Approve/Deny links for these approvals."""
     from . import emailfmt
 
     rich, plain = [], []
@@ -58,7 +49,6 @@ def notify_pending(title: str | None = None) -> int:
         deny = f"{config.PUBLIC_BASE_URL}/decide/{_signer.dumps([ap_id, 'denied'])}"
         rich.append({**p, "approve_url": approve, "deny_url": deny})
         plain.append(f"{i}. {summary}\n   Approve: {approve}\n   Deny: {deny}\n")
-
     n = len(items)
     subject = title or (f"{n} draft repl{'y' if n == 1 else 'ies'} ready for "
                         f"your review")
@@ -67,6 +57,53 @@ def notify_pending(title: str | None = None) -> int:
         "Replies awaiting your approval:\n\n" + "\n".join(plain),
         html=emailfmt.approval_email(rich, intro=title),
     )
+
+
+def notify_pending(title: str | None = None) -> int:
+    """Notify Gomeh of every pending approval not yet announced. DURABLE
+    (Jul 2026): an approval is marked _notified only AFTER a send succeeds —
+    failures retry on the next batch cycle (APPROVAL_BATCH_MINUTES), and after
+    MAX_WA_NOTIFY_ATTEMPTS WhatsApp failures it falls back to an email with
+    real Approve/Deny links. An approval must never be silently lost (the old
+    mark-before-send silenced the Drive-taxonomy cards forever)."""
+    with db.SessionLocal() as s:
+        aps = (
+            s.query(db.Approval)
+            .filter(db.Approval.status == "pending")
+            .order_by(db.Approval.created_at)
+            .all()
+        )
+        items = [(ap.id, ap.summary, dict(ap.payload))
+                 for ap in aps if not ap.payload.get("_notified")]
+    if not items:
+        return 0
+
+    if config.WHATSAPP_ENABLED:
+        sent, fallback = 0, []
+        for ap_id, summary, payload in items:
+            if whatsapp.send_approval(ap_id, summary, payload):
+                _set_payload_flags(ap_id, _notified=True)
+                sent += 1
+            else:
+                attempts = int(payload.get("_notify_attempts", 0)) + 1
+                if attempts >= MAX_WA_NOTIFY_ATTEMPTS:
+                    fallback.append((ap_id, summary, payload))
+                else:
+                    _set_payload_flags(ap_id, _notify_attempts=attempts)
+        if fallback:
+            try:
+                _email_approvals(fallback, "WhatsApp unreachable — approve "
+                                           "these by link instead")
+                for ap_id, _, _ in fallback:
+                    _set_payload_flags(ap_id, _notified=True)
+                sent += len(fallback)
+            except Exception:  # noqa: BLE001 — stays pending; next cycle retries
+                pass
+        return sent
+
+    _email_approvals(items, title)
+    for ap_id, _, _ in items:  # only after the send call succeeded
+        _set_payload_flags(ap_id, _notified=True)
     return len(items)
 
 

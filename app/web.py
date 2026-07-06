@@ -182,6 +182,27 @@ def usage_report(key: str = "", days: int = 7) -> dict:
     return usage.report(days)
 
 
+@app.get("/admin/renotify")
+def renotify(key: str = "") -> dict:
+    """Re-send notifications for ALL pending approvals (e.g. after a WhatsApp
+    outage swallowed the cards): clears the notified/attempt flags and runs a
+    notify cycle right now."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    with db.SessionLocal() as s:
+        aps = s.query(db.Approval).filter(db.Approval.status == "pending").all()
+        reset = 0
+        for ap in aps:
+            if "_notified" in ap.payload or "_notify_attempts" in ap.payload:
+                ap.payload = {k: v for k, v in ap.payload.items()
+                              if k not in ("_notified", "_notify_attempts")}
+                reset += 1
+        s.commit()
+        pending = len(aps)
+    sent = approvals.notify_pending("Pending approvals (re-sent)")
+    return {"pending": pending, "flags_reset": reset, "resent": sent}
+
+
 @app.get("/admin/features")
 def feature_requests(key: str = "", status: str = "open") -> dict:
     """The agents' own upgrade queue — limitations they hit, with proposals.

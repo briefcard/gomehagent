@@ -158,9 +158,11 @@ def transcribe(audio: bytes, mime: str) -> str:
     return r.json().get("text", "").strip()
 
 
-def send_approval(approval_id: str, summary: str, detail: dict | None = None) -> None:
+def send_approval(approval_id: str, summary: str, detail: dict | None = None) -> bool:
     """Interactive Approve/Deny/Edit buttons WITH the full draft inline, so
-    Gomeh can decide from WhatsApp without opening email."""
+    Gomeh can decide from WhatsApp without opening email. Returns True only if
+    the BUTTON message was accepted by Meta — the caller retries or falls back
+    to approve-by-email-link otherwise (an approval must never be lost)."""
     detail = detail or {}
     parts = [summary[:400]]
     if detail.get("cc"):
@@ -176,20 +178,24 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
     send_text(full)
     # 2) Short interactive with the buttons — interactive BODY caps at 1024,
     #    so this MUST stay short or Meta returns 131009.
-    wamid = _post({
-        "messaging_product": "whatsapp",
-        "to": config.WHATSAPP_APPROVER_NUMBER,
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": f"☝️ {summary[:900]}"},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": f"approve:{approval_id}", "title": "✅ Approve"}},
-                    {"type": "reply", "reply": {"id": f"deny:{approval_id}", "title": "❌ Deny"}},
-                    {"type": "reply", "reply": {"id": f"edit:{approval_id}", "title": "✏️ Edit"}},
-                ]
+    try:
+        wamid = _post({
+            "messaging_product": "whatsapp",
+            "to": config.WHATSAPP_APPROVER_NUMBER,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": f"☝️ {summary[:900]}"},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"approve:{approval_id}", "title": "✅ Approve"}},
+                        {"type": "reply", "reply": {"id": f"deny:{approval_id}", "title": "❌ Deny"}},
+                        {"type": "reply", "reply": {"id": f"edit:{approval_id}", "title": "✏️ Edit"}},
+                    ]
+                },
             },
-        },
-    })
+        })
+    except Exception:  # noqa: BLE001 — MetaSendError / network: report, don't lose
+        return False
     _remember_sent(wamid, full, approval_id=approval_id)
+    return True
