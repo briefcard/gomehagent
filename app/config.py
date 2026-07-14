@@ -120,6 +120,14 @@ SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
 
+# ---------------- Baci Backoffice (inbound-logistics API) ----------------
+# The rep/backoffice PWA (repo briefcard/baci-backoffice) is the source of truth
+# for inbound shipments + their customs/freight documents. This agent logs
+# shipments/docs there over the agent API. BACI_AGENT_TOKEN must equal the
+# AGENT_API_TOKEN set on that service. Unset = the logistics tools stay disabled.
+BACI_BACKOFFICE_URL = os.environ.get("BACI_BACKOFFICE_URL", "https://baci-backoffice.onrender.com")
+BACI_AGENT_TOKEN = os.environ.get("BACI_AGENT_TOKEN", "")
+
 # ---------------- SEO agent (role: seo) ----------------
 # Semrush Analytics API key (Semrush -> Subscription -> API). The deployed agent
 # calls api.semrush.com natively, the same pattern as Shopify/Gmail.

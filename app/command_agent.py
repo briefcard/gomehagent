@@ -279,6 +279,93 @@ ACTION_TOOLS = [
                     "description": "Attendee email addresses to invite"},
          "location": {"type": "string"}},
          "required": ["account", "title", "start", "end"]}},
+
+    # ---- Baci Backoffice: inbound-shipment logistics + customs/freight documents.
+    # The backoffice PWA is the source of truth; these tools are the WhatsApp
+    # front-end. Reference examples: "131/2026", "ORD 113-2026", a container or
+    # BL number. ALWAYS resolve a shipment with shipment_status before writing a
+    # document, and let the backoffice's duplicate guard decide on create.
+    {"name": "shipment_status",
+     "description": "Look up inbound shipment(s) in the Baci Backoffice. With a "
+                    "'query' (reference like 131/2026, container, or tracking #) "
+                    "it resolves the matching shipment(s) with status, ETA, days "
+                    "late, payment, and the customs-doc checklist (what's still "
+                    "missing). With NO query it lists all live shipments + their "
+                    "document gaps — use that for 'what's the status of everything' "
+                    "or a daily logistics digest.",
+     "input_schema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "Shipment reference / "
+                   "container / tracking number. Omit to list all live shipments."}}}},
+    {"name": "file_shipment_document",
+     "description": "File a customs/freight document (Commercial Invoice, Packing "
+                    "List, Bill of Lading, CBP 7501, Arrival Notice, ISF, Delivery "
+                    "Order, Freight Invoice) that was forwarded as an ATTACHMENT: "
+                    "uploads it to Google Drive (B2B/Inbound/<year>/<ref>) AND "
+                    "registers it against the shipment in the backoffice. Give the "
+                    "attachment filename plus the shipment reference. The shipment "
+                    "is resolved by reference; if it can't be found, say so — do "
+                    "not guess.",
+     "input_schema": {"type": "object", "properties": {
+         "filename": {"type": "string", "description": "Name of the attachment in "
+                      "this conversation."},
+         "reference": {"type": "string", "description": "Shipment reference the "
+                       "doc belongs to (e.g. 131/2026)."},
+         "doc_type": {"type": "string", "description": "commercial_invoice | "
+                      "packing_list | bill_of_lading | 7501 | arrival_notice | "
+                      "isf | delivery_order | freight_invoice (aliases like 'BL' ok)."}},
+         "required": ["filename", "reference", "doc_type"]}},
+    {"name": "set_document_status",
+     "description": "Advance a shipment document's status: received -> approved -> "
+                    "filed. Use when Gomeh approves a document ('approve the BL for "
+                    "131') — sets it approved; 'file' also moves the Drive file to "
+                    "the shipment's Filed subfolder.",
+     "input_schema": {"type": "object", "properties": {
+         "reference": {"type": "string", "description": "Shipment reference."},
+         "doc_type": {"type": "string", "description": "Which document (e.g. "
+                      "bill_of_lading, 7501)."},
+         "status": {"type": "string", "enum": ["approved", "filed", "received"]}},
+         "required": ["reference", "doc_type", "status"]}},
+    {"name": "create_inbound_shipment",
+     "description": "Create an inbound shipment in the backoffice (e.g. from a "
+                    "supplier pro-forma / order confirmation). The backoffice "
+                    "REJECTS duplicates by canonical reference — if it already "
+                    "exists you'll be told to update it instead. status: ordered "
+                    "(pro-forma) | in_transit (shipped/packing list).",
+     "input_schema": {"type": "object", "properties": {
+         "reference": {"type": "string"},
+         "origin": {"type": "string", "description": "Supplier/origin, e.g. "
+                    "'BACI MILANO S.R.L. (Italy)'."},
+         "status": {"type": "string", "enum": ["ordered", "in_transit", "arrived"]},
+         "eta": {"type": "string", "description": "YYYY-MM-DD, if known."},
+         "carrier": {"type": "string"}, "tracking": {"type": "string"},
+         "notes": {"type": "string"},
+         "allow_duplicate": {"type": "boolean", "description": "Only set true if "
+                             "Gomeh confirms it's genuinely a new shipment sharing "
+                             "a reference with an existing one."}},
+         "required": ["reference"]}},
+    {"name": "update_inbound_shipment",
+     "description": "Update a shipment's status / ETA / notes / payment (e.g. "
+                    "'mark 131 arrived', 'set ETA for 168 to Aug 4', 'BL fee "
+                    "paid'). Resolves the shipment by reference.",
+     "input_schema": {"type": "object", "properties": {
+         "reference": {"type": "string"},
+         "status": {"type": "string", "enum": ["ordered", "in_transit", "arrived",
+                                               "receiving", "received", "cancelled"]},
+         "eta": {"type": "string", "description": "YYYY-MM-DD"},
+         "note": {"type": "string", "description": "Timeline note."},
+         "payment_status": {"type": "string", "enum": ["unpaid", "deposit_paid", "paid"]}},
+         "required": ["reference"]}},
+    {"name": "company_document",
+     "description": "Register or update a STANDING company document not tied to one "
+                    "shipment — chiefly the customs-broker Power of Attorney (POA), "
+                    "with an optional expiry date. Attach the file to also upload it "
+                    "to Drive.",
+     "input_schema": {"type": "object", "properties": {
+         "doc_type": {"type": "string", "description": "poa (default) | bond | "
+                      "other."},
+         "filename": {"type": "string", "description": "Attachment name, if uploading."},
+         "expires_at": {"type": "string", "description": "YYYY-MM-DD expiry."},
+         "notes": {"type": "string"}}}},
 ]
 
 
@@ -384,12 +471,229 @@ def _run_job_async(job: str) -> str:
             "not promise an email.")
 
 
+import re as _re
+
+
+def _bo_safe_ref(reference: str) -> str:
+    """Filesystem-safe shipment reference for a Drive folder name (131/2026 -> 131-2026)."""
+    return _re.sub(r"[^A-Za-z0-9._-]+", "-", (reference or "").strip()).strip("-") or "unfiled"
+
+
+def _bo_drive_id_from_link(link: str) -> str | None:
+    m = _re.search(r"/d/([A-Za-z0-9_-]+)", link or "")
+    return m.group(1) if m else None
+
+
+def _bo_resolve(reference: str):
+    """Resolve a shipment reference to exactly one backoffice shipment.
+    Returns (shipment | None, message). message is set when 0 or >1 matched."""
+    from . import baci_backoffice as bo
+
+    matches = bo.match(reference)
+    if not matches:
+        return None, (f"No shipment matches '{reference}' in the backoffice. "
+                      "Create it first with create_inbound_shipment, or check the "
+                      "reference.")
+    if len(matches) > 1:
+        opts = "; ".join(f"{m.get('reference') or '(no ref)'} [{m.get('status')}]"
+                         for m in matches[:6])
+        return None, (f"'{reference}' matches {len(matches)} shipments: {opts}. "
+                      "Ask Gomeh which one.")
+    return matches[0], ""
+
+
+def _bo_docline(sh: dict) -> str:
+    docs = (sh.get("docs") or {})
+    missing = docs.get("missing") or []
+    if docs.get("complete"):
+        return "docs: ✅ complete"
+    return f"docs missing: {', '.join(missing) if missing else '—'}"
+
+
+def _bo_fmt(sh: dict) -> str:
+    bits = [f"*{sh.get('reference') or '(no ref)'}* — {sh.get('status')}"]
+    if sh.get("origin"):
+        bits.append(sh["origin"])
+    if sh.get("eta"):
+        late = sh.get("daysLate") or 0
+        bits.append(f"ETA {sh['eta']}" + (f" (+{late}d late)" if late else ""))
+    pay = sh.get("paymentStatus")
+    if pay and pay != "unpaid":
+        bits.append(pay.replace("_", " "))
+    units = sh.get("units")
+    if units:
+        bits.append(f"{units}u")
+    return " · ".join(bits) + "\n  " + _bo_docline(sh)
+
+
+def _bo_inbound_folder(reference: str, year: str):
+    """Get-or-create B2B/Inbound/<year>/<ref> in the Baci Drive; returns (folder_id | None, path)."""
+    from . import drive_io
+
+    root = drive_io.find_folder("baci", "B2B")
+    if not root:
+        return None, "B2B"
+    path = f"Inbound/{year}/{_bo_safe_ref(reference)}"
+    return drive_io.ensure_path("baci", root, path), f"B2B/{path}"
+
+
+def _bo_file_document(args: dict, session_files: dict) -> str:
+    from . import baci_backoffice as bo, drive_io
+
+    f = session_files.get(args["filename"])
+    if f is None:
+        return (f"No attachment named '{args['filename']}' here. "
+                f"Available: {list(session_files) or 'none'}")
+    sh, msg = _bo_resolve(args["reference"])
+    if not sh:
+        return msg
+    year = (sh.get("eta") or sh.get("createdAt") or dt.date.today().isoformat())[:4]
+    folder_id, path = _bo_inbound_folder(sh["reference"], year)
+    if not folder_id:
+        return "Couldn't locate the B2B folder in the Baci Drive."
+    link = drive_io.upload("baci", folder_id, args["filename"], f["data"], f["mime"])
+    if link == "exists":
+        link = ""  # already uploaded on a prior turn; still (re)register the metadata
+    drive_id = _bo_drive_id_from_link(link)
+    reg = bo.register_document(
+        sh["id"], doc_type=args["doc_type"], status="received",
+        drive_url=link or None, drive_file_id=drive_id, filename=args["filename"])
+    # Also index it in the cross-agent AI Document Catalog.
+    if link:
+        try:
+            data_tools.index_document(args["filename"], path.replace("B2B/", ""),
+                                      link, args["doc_type"], sh["reference"], "whatsapp")
+        except Exception:  # noqa: BLE001
+            log.warning("doc catalog index failed", exc_info=True)
+    checklist = reg.get("checklist") or {}
+    tail = ("all customs docs now in ✅" if checklist.get("complete")
+            else f"still missing: {', '.join(checklist.get('missing') or []) or '—'}")
+    where = f" → {path}/{args['filename']}" if link else " (already in Drive)"
+    return (f"Filed {args['doc_type']} on shipment {sh['reference']}{where}. {tail}")
+
+
+def _bo_set_doc_status(args: dict) -> str:
+    from . import baci_backoffice as bo, drive_io
+
+    sh, msg = _bo_resolve(args["reference"])
+    if not sh:
+        return msg
+    detail = bo.get_shipment(sh["id"])
+    want = _re.sub(r"[^a-z0-9]+", "_", args["doc_type"].lower()).strip("_")
+    doc = next((d for d in detail.get("documents", [])
+                if _re.sub(r"[^a-z0-9]+", "_", (d.get("docType") or "").lower()).strip("_") == want),
+               None)
+    if not doc:
+        have = ", ".join(d.get("docType") for d in detail.get("documents", [])) or "none"
+        return (f"No '{args['doc_type']}' document on {sh['reference']} yet "
+                f"(has: {have}). File it first.")
+    bo.update_document(sh["id"], doc["id"], status=args["status"])
+    moved = ""
+    if args["status"] == "filed" and doc.get("driveFileId"):
+        try:
+            year = (sh.get("eta") or sh.get("createdAt") or dt.date.today().isoformat())[:4]
+            folder_id, _ = _bo_inbound_folder(sh["reference"], year)
+            if folder_id:
+                from . import drive_io as _d
+                filed = _d.ensure_subfolder("baci", folder_id, "Filed")
+                drive_io.move("baci", doc["driveFileId"], filed)
+                moved = " and moved the file to the Filed folder"
+        except Exception:  # noqa: BLE001
+            log.warning("drive move on file failed", exc_info=True)
+    return f"{doc.get('label') or args['doc_type']} on {sh['reference']} → {args['status']}{moved}."
+
+
+def _bo_create_shipment(args: dict) -> str:
+    from . import baci_backoffice as bo
+
+    try:
+        sh = bo.create_shipment(
+            reference=args["reference"], origin=args.get("origin"),
+            status=args.get("status", "ordered"), eta=args.get("eta"),
+            carrier=args.get("carrier"), tracking=args.get("tracking"),
+            notes=args.get("notes"), allow_duplicate=args.get("allow_duplicate", False))
+    except bo.DuplicateShipment as dup:
+        ex = dup.existing
+        return (f"A shipment with reference '{ex.get('reference')}' already exists "
+                f"(status: {ex.get('status')}). I did NOT create a duplicate — "
+                "update it with update_inbound_shipment, or confirm it's genuinely "
+                "new and I'll retry with allow_duplicate.")
+    return f"Created shipment {sh.get('reference')} [{sh.get('status')}] in the backoffice."
+
+
+def _bo_update_shipment(args: dict) -> str:
+    from . import baci_backoffice as bo
+
+    sh, msg = _bo_resolve(args["reference"])
+    if not sh:
+        return msg
+    updated = bo.update_shipment(
+        sh["id"], status=args.get("status"), eta=args.get("eta"),
+        status_note=args.get("note"), payment_status=args.get("payment_status"))
+    return f"Updated {updated.get('reference') or sh['reference']} → {updated.get('status')}."
+
+
+def _bo_company_document(args: dict, session_files: dict) -> str:
+    from . import baci_backoffice as bo, drive_io
+
+    drive_url = drive_id = None
+    if args.get("filename"):
+        f = session_files.get(args["filename"])
+        if f is None:
+            return (f"No attachment named '{args['filename']}' here. "
+                    f"Available: {list(session_files) or 'none'}")
+        root = drive_io.find_folder("baci", "B2B")
+        if root:
+            folder = drive_io.ensure_path("baci", root, "Company Documents")
+            link = drive_io.upload("baci", folder, args["filename"], f["data"], f["mime"])
+            drive_url = link if link != "exists" else None
+            drive_id = _bo_drive_id_from_link(drive_url or "")
+    doc = bo.create_company_document(
+        doc_type=args.get("doc_type", "poa"), status="filed",
+        expires_at=args.get("expires_at"), drive_url=drive_url,
+        drive_file_id=drive_id, filename=args.get("filename"), notes=args.get("notes"))
+    exp = f", expires {doc.get('expiresAt')}" if doc.get("expiresAt") else ""
+    return f"Registered company document: {doc.get('label') or doc.get('docType')}{exp}."
+
+
+def _bo_status(args: dict) -> str:
+    from . import baci_backoffice as bo
+
+    query = (args.get("query") or "").strip()
+    if query:
+        matches = bo.match(query)
+        if not matches:
+            return f"No shipment matches '{query}'."
+        return "\n\n".join(_bo_fmt(m) for m in matches[:6])
+    ctx = bo.context()
+    ships = ctx.get("shipments") or []
+    if not ships:
+        return "No live inbound shipments in the backoffice."
+    lines = [_bo_fmt(s) for s in ships[:15]]
+    gaps = sum(1 for s in ships if not (s.get("docs") or {}).get("complete"))
+    head = f"{len(ships)} live shipment(s), {gaps} with missing docs:\n"
+    return head + "\n\n".join(lines)
+
+
 def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
     """Execute one admin tool call. ``session_files`` carries any attachments
     from the current exchange (the kernel passes them in)."""
     try:
         if name == "run_job":
             return _run_job_async(args["job"])
+        # ---- Baci Backoffice inbound-logistics tools ----
+        if name == "shipment_status":
+            return _bo_status(args)
+        if name == "file_shipment_document":
+            return _bo_file_document(args, session_files)
+        if name == "set_document_status":
+            return _bo_set_doc_status(args)
+        if name == "create_inbound_shipment":
+            return _bo_create_shipment(args)
+        if name == "update_inbound_shipment":
+            return _bo_update_shipment(args)
+        if name == "company_document":
+            return _bo_company_document(args, session_files)
         if name == "organize_emails":
             import threading
 
