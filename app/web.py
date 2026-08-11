@@ -688,3 +688,63 @@ def tenant_set(key: str = "", tenant: str = "", field: str = "",
             setattr(t, field, value)
         s.commit()
     return {"ok": True, **tenants.resolve(tenant)}
+
+
+@app.get("/admin/tenant_add")
+def tenant_add(key: str = "", tenant: str = "", name: str = "",
+               kind: str = "client", domain: str = "") -> dict:
+    """Create a new account. Seeding only covers the original five.
+
+    /admin/tenant_add?key=SECRET&tenant=acme&name=Acme+Co&domain=acme.com
+    Connections are attached afterwards with /admin/tenant_set.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    tenant = (tenant or "").strip().lower()
+    if not tenant or not tenant.replace("_", "").replace("-", "").isalnum():
+        return {"error": "tenant must be a short alphanumeric key, e.g. 'acme'"}
+    if not name:
+        return {"error": "name required"}
+    from . import tenants
+    with db.SessionLocal() as s:
+        if s.get(db.Tenant, tenant):
+            return {"error": f"{tenant!r} already exists — use /admin/tenant_set"}
+        s.add(db.Tenant(key=tenant, name=name, kind=kind, domain=domain,
+                        systems=[], notes="created via /admin/tenant_add"))
+        s.commit()
+    return {"ok": True, "created": tenant, **tenants.resolve(tenant),
+            "next": "attach connections with /admin/tenant_set, then seed its KB"}
+
+
+@app.get("/admin/user_add")
+def user_add(key: str = "", chat_id: str = "", name: str = "",
+             role: str = "client", tenant: str = "") -> dict:
+    """Give someone access to the bot, scoped to one account.
+
+    /admin/user_add?key=SECRET&chat_id=123&name=Ellis&role=client&tenant=coverings
+
+    role=client     their own account: reports, approvals
+    role=freelancer their own account, no reporting
+    role=owner      every account, may switch freely
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if role not in ("owner", "client", "freelancer"):
+        return {"error": "role must be owner | client | freelancer"}
+    if role != "owner" and not tenant:
+        return {"error": "a non-owner must be pinned to a tenant"}
+    if not chat_id:
+        return {"error": "chat_id required — have them message the bot first"}
+    with db.SessionLocal() as s:
+        if tenant and not s.get(db.Tenant, tenant):
+            return {"error": f"unknown tenant {tenant!r}"}
+        u = s.query(db.User).filter(db.User.telegram_chat_id == str(chat_id)).first()
+        if u:
+            u.name, u.role, u.tenant_key = name or u.name, role, tenant or None
+        else:
+            s.add(db.User(name=name, telegram_chat_id=str(chat_id), role=role,
+                          tenant_key=tenant or None,
+                          active_tenant=tenant or "agency"))
+        s.commit()
+    return {"ok": True, "name": name, "role": role,
+            "scoped_to": tenant or "all accounts"}
