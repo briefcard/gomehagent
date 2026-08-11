@@ -15,9 +15,28 @@ Security: bot tokens are bearer credentials and bot usernames are discoverable,
 so every inbound update is checked against TELEGRAM_ALLOWED_CHAT_IDS and
 silently dropped otherwise. This bot can write to the KB — it is not public.
 """
+import hashlib
+
 import httpx
 
 from . import config
+
+
+def wire_secret() -> str:
+    """The value actually sent to Telegram as `secret_token`.
+
+    Telegram only accepts [A-Za-z0-9_-] there, but Render's `generateValue`
+    can emit characters outside that set (which is how this first failed with
+    "secret token contains unallowed characters"). So we send a sha256 digest
+    of the configured secret rather than the secret itself: always hex, always
+    valid, always under the 256-char limit, deterministic on both ends — and
+    the raw secret never leaves our own infrastructure.
+
+    The webhook handler compares against this same derived value, so the two
+    halves can never drift.
+    """
+    raw = config.TELEGRAM_WEBHOOK_SECRET or ""
+    return hashlib.sha256(raw.encode()).hexdigest() if raw else ""
 
 API = "https://api.telegram.org"
 
@@ -245,6 +264,6 @@ def set_webhook(base_url: str) -> dict:
     """
     return _call("setWebhook", {
         "url": f"{base_url.rstrip('/')}/telegram/webhook",
-        "secret_token": config.TELEGRAM_WEBHOOK_SECRET,
+        "secret_token": wire_secret(),
         "allowed_updates": ["message", "callback_query"],
     })

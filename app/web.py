@@ -1,4 +1,5 @@
 """Web service: health check, approval links, WhatsApp webhook."""
+import hmac
 import json
 import logging
 
@@ -533,9 +534,10 @@ async def telegram_webhook(request: Request) -> dict:
 
     # 1) Authenticate the CALLER. Telegram echoes the secret we set via
     #    setWebhook; anything without it is not Telegram and is dropped.
-    if config.TELEGRAM_WEBHOOK_SECRET:
+    expected = telegram.wire_secret()
+    if expected:
         sent = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if sent != config.TELEGRAM_WEBHOOK_SECRET:
+        if not hmac.compare_digest(sent, expected):
             log.warning("telegram webhook: bad or missing secret token")
             return {"status": "forbidden"}
     try:
