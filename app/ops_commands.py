@@ -20,6 +20,7 @@ HELP = """*Ops commands*
 `/use baci` — switch context (also: "switch to baci")
 `/whoami` — who you are and what you're working on
 `/kb` — knowledge-base completeness for the current account
+`/systems` — pipelines for this account: state, rung, what's blocking each
 
 `add claim: <claim> | <evidence> | <tags>`
    e.g. `add claim: Cut CPA 60% for a venue | $180 → $72 in 3 months | local_venue ads_not_working`
@@ -79,6 +80,11 @@ def handle(text: str, chat_id: str = "") -> str | None:
         return (f"*{cur}* KB not ready.\nMissing: {', '.join(c['missing'])}\n"
                 f"Have: {c['counts']}")
 
+    if low in ("/systems", "/pipelines", "systems"):
+        if not user:
+            return _unregistered(chat_id)
+        return _systems_for(tenants.active(user))
+
     # --- capture ---------------------------------------------------------
     if low.startswith("add claim:"):
         if not user:
@@ -86,6 +92,27 @@ def handle(text: str, chat_id: str = "") -> str | None:
         return _add_claim(raw[len("add claim:"):].strip(), tenants.active(user))
 
     return None  # not an ops command — fall through to the agent
+
+
+def _systems_for(tenant: str) -> str:
+    """The board for one account, told honestly: what's on, and what's stopping
+    the rest. A blocked system names its gap here rather than looking idle."""
+    from . import systems
+    rows = systems.for_tenant(tenant)
+    if not rows:
+        return (f"No systems installed for *{tenant}* yet.\n"
+                f"Install them from the console: /admin/ui?tab=systems")
+    out = []
+    for r in rows:
+        state = systems.ready(r)
+        st = systems.stats(r.id)
+        head = f"{'▸' if r.status == 'live' else '·'} *{r.name}* — {r.status} / {r.autonomy}"
+        if state["ready"]:
+            body = f"   ready · {st['total']} runs, {st['approved']} approved"
+        else:
+            body = "   blocked: " + "; ".join(state["blockers"])
+        out.append(f"{head}\n{body}")
+    return "\n".join(out)
 
 
 def _unregistered(chat_id: str) -> str:

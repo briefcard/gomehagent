@@ -13,7 +13,7 @@ from __future__ import annotations
 import html
 import json
 
-from . import config, db, tenants
+from . import config, db, systems, tenants
 
 # The instructions that used to live in a separate manual. Kept beside the
 # fields so a value is never entered from memory.
@@ -110,7 +110,44 @@ padding:.1em .35em;border-radius:3px}
 .cur{background:var(--accs);border-left:3px solid var(--acc)}
 .note{background:var(--gaps);border-left:3px solid var(--gap);padding:10px 14px;
 border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
+.ok{background:var(--oks);border-left:3px solid var(--ok);padding:10px 14px;
+border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.tabs a{text-decoration:none;font-size:.85rem;font-weight:600;color:var(--mut);
+padding:8px 15px;border:1px solid transparent;border-bottom:none;border-radius:5px 5px 0 0;
+position:relative;bottom:-1px}
+.tabs a.on{color:var(--acc);background:var(--panel);border-color:var(--rule);
+border-bottom:1px solid var(--panel)}
+textarea{font:inherit;font-size:.85rem;padding:6px 8px;border:1px solid var(--rule);
+border-radius:4px;background:var(--panel);color:var(--ink);width:100%;resize:vertical}
+.sysgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.stat{display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem;color:var(--mut)}
+.stat b{color:var(--ink);font-weight:600}
+.thread{display:flex;flex-direction:column;gap:7px}
+.msg{border-left:2px solid var(--rule);padding:3px 0 3px 11px;font-size:.85rem}
+.msg .when{font-size:.72rem;color:var(--mut)}
+.rung{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:.8rem}
+.rung .step{padding:.15em .5em;border-radius:3px;border:1px solid var(--rule);color:var(--mut);font-size:.72rem}
+.rung .step.at{background:var(--accs);border-color:var(--acc);color:var(--acc);font-weight:700}
+.rung .step.done{color:var(--ok);border-color:var(--ok)}
+ul.bl{margin:0;padding-left:18px;font-size:.85rem;color:var(--ink2)}
+ul.bl li{margin:2px 0}
 """
+
+_TABS = (("accounts", "Accounts"), ("systems", "Systems"))
+
+
+def _shell(key: str, tab: str, title: str, body: str) -> str:
+    nav = "".join(
+        f'<a class="{"on" if t == tab else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}">{label}</a>'
+        for t, label in _TABS)
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_esc(title)} — Saias Ops</title><style>{_CSS}</style></head><body><div class="w">
+<div class="tabs">{nav}</div>
+{body}
+</div></body></html>"""
 
 
 def _esc(v) -> str:
@@ -169,10 +206,7 @@ def render(key: str) -> str:
               <div class="grid">{fields}</div>
             </div>"""
 
-    return f"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Accounts — Saias Ops</title><style>{_CSS}</style></head><body><div class="w">
-
+    return _shell(key, "accounts", "Accounts", f"""
 <div>
   <h1>Accounts</h1>
   <p class="mut">Values here are <strong>keys into</strong> credential dictionaries or
@@ -230,4 +264,218 @@ def render(key: str) -> str:
 
 <p class="mut">Saving reloads to a JSON response — hit back to return here.
 Changes take effect immediately; no redeploy.</p>
-</div></body></html>"""
+""")
+
+
+# ---------------------------------------------------------------------------
+# Systems tab
+# ---------------------------------------------------------------------------
+
+def _rung(current: str) -> str:
+    at = systems.AUTONOMY.index(current if current in systems.AUTONOMY else "shadow")
+    steps = "".join(
+        f'<span class="step {"at" if i == at else ("done" if i < at else "")}">'
+        f'{r.replace("_", " ")}</span>'
+        for i, r in enumerate(systems.AUTONOMY))
+    return (f'<div class="rung">{steps}</div>'
+            f'<div class="mut">{_esc(systems.AUTONOMY_MEANING.get(current, ""))}</div>')
+
+
+def _contract_form(key: str, row) -> str:
+    fields = "".join(f"""
+      <div class="f"><label>{label}</label>
+        <div class="what">{_esc(hint)}</div>
+        <textarea name="{f}" rows="2" placeholder="empty">{_esc(getattr(row, f, "") or "")}</textarea>
+      </div>""" for f, label, hint in systems.CONTRACT)
+    return f"""
+    <details><summary>The contract — 8 questions a system answers before it runs</summary>
+      <form method="get" action="/admin/system_set" style="margin-top:10px">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="id" value="{_esc(row.id)}">
+        <div class="sysgrid">{fields}</div>
+        <div class="row" style="margin-top:10px"><button>Save contract</button>
+        <span class="mut">A system can't go live until every one is filled.</span></div>
+      </form>
+    </details>"""
+
+
+def _thread(key: str, row) -> str:
+    msgs = systems.notes(row.tenant, row.key)
+    if msgs:
+        body = "".join(f"""
+        <div class="msg"><div>{_esc(m.content)}</div>
+          <div class="when">{m.created_at:%b %d, %H:%M} ·
+            <a href="/admin/system_note?key={_esc(key)}&amp;drop={_esc(m.id)}">archive</a></div>
+        </div>""" for m in msgs)
+    else:
+        body = ('<p class="mut">Nothing yet. Corrections you write here are injected '
+                'into this system\'s drafting prompt — and only this one.</p>')
+    return f"""
+    <details><summary>Thread — guidance and corrections ({len(msgs)})</summary>
+      <div class="thread" style="margin-top:10px">{body}</div>
+      <form method="get" action="/admin/system_note" style="margin-top:12px">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="id" value="{_esc(row.id)}">
+        <div class="f"><label>guidance</label>
+          <div class="what">Prose. Shapes how this system drafts — it does not enforce.</div>
+          <textarea name="text" rows="2" placeholder="Lead with the number, not the greeting."></textarea>
+          <div class="row"><button>Add to thread</button></div>
+        </div>
+      </form>
+      <form method="get" action="/admin/system_rule" style="margin-top:8px">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="id" value="{_esc(row.id)}">
+        <div class="f"><label>hard rule</label>
+          <div class="what">A phrase that must never appear. Enforced by the validator,
+          which is code and fails closed — use this for anything that must ALWAYS hold.</div>
+          <input name="phrase" placeholder="handcrafted">
+          <div class="row"><button>Make it a rule</button></div>
+        </div>
+      </form>
+    </details>"""
+
+
+def _runs(row, total: int) -> str:
+    rows = systems.runs(row.id, limit=8)
+    if not rows:
+        return ('<details><summary>Runs (0)</summary>'
+                '<p class="mut" style="margin-top:10px">Nothing has run yet.</p></details>')
+    lines = "".join(f"""
+      <div class="msg"><div><code>{_esc(r.stage)}</code>
+        {_esc(r.decision or "")} {_esc((r.blocked_on or [""])[0] if r.stage == "blocked" else "")}</div>
+        <div class="when">{r.created_at:%b %d, %H:%M} · {_esc(r.trigger or "")}</div></div>"""
+        for r in rows)
+    more = f" — showing the last {len(rows)}" if total > len(rows) else ""
+    return (f'<details><summary>Runs ({total}){more}</summary>'
+            f'<div class="thread" style="margin-top:10px">{lines}</div></details>')
+
+
+def _system_card(key: str, row) -> str:
+    r = systems.ready(row)
+    st = systems.stats(row.id)
+    nxt = systems.can_promote(row)
+
+    if r["ready"]:
+        gate = '<div class="ok">Ready. Everything it needs is connected and the contract is complete.</div>'
+    else:
+        gate = ('<div class="note"><strong>Blocked.</strong><ul class="bl">'
+                + "".join(f"<li>{_esc(b)}</li>" for b in r["blockers"])
+                + "</ul></div>")
+
+    if nxt["can"]:
+        promo = (f'<a href="/admin/system_promote?key={_esc(key)}&amp;id={_esc(row.id)}">'
+                 f'<button type="button">Promote to {_esc(nxt["target"].replace("_", " "))}</button></a>')
+    elif nxt["target"]:
+        promo = f'<span class="mut">Next rung ({_esc(nxt["target"].replace("_", " "))}): {_esc(nxt["why"])}</span>'
+    else:
+        promo = '<span class="mut">Top of the ladder.</span>'
+
+    live = ""
+    if row.status != "live" and r["ready"]:
+        live = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}&amp;status=live">'
+                f'<button type="button">Switch on</button></a>')
+    elif row.status == "live":
+        live = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}&amp;status=paused">'
+                f'<button class="sec" type="button">Pause</button></a>')
+
+    return f"""
+    <div class="card">
+      <div class="head">
+        <h3>{_esc(row.name)}</h3>
+        <code>{_esc(row.key)}</code>
+        <span class="chips">
+          <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
+          <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+        </span>
+      </div>
+      <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
+      {gate}
+      {_rung(row.autonomy or "shadow")}
+      <div class="stat">
+        <span><b>{st['total']}</b> runs</span>
+        <span><b>{st['approved']}</b> approved</span>
+        <span><b>{st['edited']}</b> edited</span>
+        <span><b>{st['denied']}</b> denied</span>
+        <span><b>{st['blocked']}</b> blocked</span>
+      </div>
+      <div class="row">{live}{promo}</div>
+      {_contract_form(key, row)}
+      {_thread(key, row)}
+      {_runs(row, st['total'])}
+    </div>"""
+
+
+def render_systems(key: str) -> str:
+    rows = systems.all_systems()
+
+    if not rows:
+        body = ('<div class="note">No systems yet. '
+                '<a href="/admin/systems_seed?key=' + _esc(key) + '">Adopt the ones already '
+                'named on each account</a> — it reads <code>Tenant.systems</code> and '
+                'creates a row for each, with an empty contract.</div>')
+    else:
+        by_tenant: dict[str, list] = {}
+        for r in rows:
+            by_tenant.setdefault(r.tenant, []).append(r)
+        body = ""
+        for tkey, group in by_tenant.items():
+            t = tenants.get(tkey)
+            cards = "".join(_system_card(key, r) for r in group)
+            live = sum(1 for r in group if r.status == "live")
+            body += f"""
+            <div>
+              <div class="head" style="margin-bottom:12px">
+                <h2>{_esc(t.name if t else tkey)}</h2>
+                <code>{_esc(tkey)}</code>
+                <span class="mut">{live} of {len(group)} live</span>
+              </div>
+              {cards}
+            </div>"""
+
+    backlog = systems.blocked_reasons()
+    backlog_html = ""
+    if backlog:
+        items = "".join(f"<li><b>{n}×</b> {_esc(reason)}</li>" for reason, n in backlog[:10])
+        backlog_html = f"""
+        <div class="card">
+          <div class="head"><h2>What the systems refused on</h2></div>
+          <p class="mut">Last 30 days, most frequent first. This is the knowledge-base
+          backlog ranked by how often each gap actually cost an output — fix from the top.</p>
+          <ul class="bl">{items}</ul>
+        </div>"""
+
+    opts = "".join(f'<option value="{k}">{v["name"]}</option>'
+                   for k, v in systems.CATALOG.items())
+    tenant_opts = "".join(f'<option value="{_esc(t.key)}">{_esc(t.name)}</option>'
+                          for t in tenants.all_tenants(include_paused=True))
+
+    return _shell(key, "systems", "Systems", f"""
+<div>
+  <h1>Systems</h1>
+  <p class="mut">One row per installed pipeline. A system is not on because it has a
+  name — it is on when its contract is answered, its connections work, and the
+  knowledge base can ground it. Everything below refuses in public rather than
+  guessing in private.</p>
+</div>
+
+{backlog_html}
+
+<div class="card">
+  <div class="head"><h2>Install a system</h2></div>
+  <form method="get" action="/admin/system_add" class="grid">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <div class="f"><label>account</label>
+      <div class="what">Who it runs for</div>
+      <select name="tenant">{tenant_opts}</select></div>
+    <div class="f"><label>system</label>
+      <div class="what">Starts as designed / shadow — it records but sends nothing</div>
+      <select name="system">{opts}</select>
+      <div class="row"><button>Install</button></div></div>
+  </form>
+</div>
+
+{body}
+
+<p class="mut">Guidance shapes drafting. Rules are enforced by code. When a correction
+matters every single time, make it a rule — a prompt that usually obeys is not a control.</p>
+""")

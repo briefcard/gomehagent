@@ -489,6 +489,88 @@ class KbEntity(Base):
     status = Column(String, default="active")
 
 
+# ---------------------------------------------------------------------------
+# Systems — an installed pipeline for one tenant, and the ledger of what it did.
+#
+# Before this, a "system" was a string in Tenant.systems: a label with no state,
+# no contract, no owner and no history. There was no way to ask whether a system
+# was safe to switch on, what it had produced, or whether it was working — which
+# is the question the whole platform exists to answer.
+# ---------------------------------------------------------------------------
+
+class System(Base):
+    """One pipeline installed for one tenant.
+
+    Carries the 8-part contract as columns rather than prose, because the rule
+    is that a system without one doesn't get built — and a rule that can't be
+    evaluated isn't enforced. `ready()` in systems.py is that evaluation.
+
+    `autonomy` is the earned ladder as a state machine: shadow -> approve_all
+    -> approve_exceptions -> auto. Nothing starts autonomous, and promotion is
+    an explicit act with the run history sitting next to the button.
+    """
+
+    __tablename__ = "systems"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False)      # lead_responder | campaign_email | ...
+    name = Column(String, nullable=False)
+
+    status = Column(String, default="designed")   # designed | live | paused | retired
+    autonomy = Column(String, default="shadow")   # shadow | approve_all | approve_exceptions | auto
+
+    # --- the 8-part contract (locked decision #8) ---
+    job_replaced = Column(Text)      # the human task this removes
+    owner = Column(String)           # who is accountable when it misbehaves
+    baseline = Column(Text)          # the number before it existed
+    primary_metric = Column(Text)    # the one number that says it works
+    counterfactual = Column(Text)    # how we'd know it wasn't just seasonality
+    kill_criteria = Column(Text)     # what makes us switch it off
+    failure_mode = Column(Text)      # how it breaks, and who notices
+    weekly_artifact = Column(Text)   # what lands in the client's inbox on Friday
+
+    config = Column(JSON, default=dict)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    went_live_at = Column(DateTime(timezone=True))
+
+
+class SystemRun(Base):
+    """One execution. The ledger that makes 'is it working?' a query.
+
+    Blocked runs are recorded, not discarded: `blocked_on` is the named missing
+    field the pipeline refused on. A month of those is the KB backlog, sorted by
+    how often each gap actually cost an output.
+
+    `edit_diff` is the highest-value column here — what a human changed before
+    approving is the only honest signal of where the generator is wrong, and it
+    is what the voice layer learns from.
+    """
+
+    __tablename__ = "system_runs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    system_id = Column(String, nullable=False, index=True)
+    tenant = Column(String, nullable=False, index=True)  # denormalised: per-client queries stay cheap
+
+    trigger = Column(String)          # inbound_email | schedule | manual
+    ref = Column(String)              # source identifier, e.g. a gmail message id
+    stage = Column(String, default="brief")  # brief | draft | validated | approved | sent | blocked | failed
+    blocked_on = Column(JSON, default=list)  # named missing fields — refuse-don't-invent, recorded
+
+    brief = Column(JSON, default=dict)
+    output = Column(Text)
+    approval_id = Column(String)
+    decision = Column(String)         # approved | denied | edited | auto
+    edit_diff = Column(Text)
+    outcome = Column(JSON, default=dict)   # measured after the fact
+    error = Column(Text)
+    finished_at = Column(DateTime(timezone=True))
+
+
 def _auto_migrate() -> None:
     """Add any model columns missing from existing tables. create_all() makes
     NEW tables but never alters existing ones, so adding a column to a model

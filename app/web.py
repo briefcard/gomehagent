@@ -751,12 +751,127 @@ def user_add(key: str = "", chat_id: str = "", name: str = "",
 
 
 @app.get("/admin/ui", response_class=HTMLResponse)
-def admin_ui(key: str = "") -> str:
-    """Single console for wiring accounts, with per-field instructions inline."""
+def admin_ui(key: str = "", tab: str = "accounts") -> str:
+    """The console. Accounts wires connections; Systems runs the pipelines."""
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
     from . import admin_ui as ui
+    if tab == "systems":
+        return ui.render_systems(key)
     return ui.render(key)
+
+
+# ---------------------------------------------------------------------------
+# Systems — the registry behind the Systems tab.
+#
+# These redirect back to the tab rather than returning JSON: a contract is
+# edited in a loop, and bouncing to a JSON body and back loses your place. The
+# older tenant routes keep their JSON responses.
+# ---------------------------------------------------------------------------
+
+def _back_to_systems(key: str, msg: str = ""):
+    from fastapi.responses import RedirectResponse
+    url = f"/admin/ui?key={key}&tab=systems"
+    if msg:
+        from urllib.parse import quote
+        url += f"&msg={quote(msg)}"
+    return RedirectResponse(url, status_code=303)
+
+
+@app.get("/admin/systems")
+def list_systems(key: str = "") -> dict:
+    """The board as JSON — same data the tab renders, for the bot and for MCP."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    return {"systems": systems.board()}
+
+
+@app.get("/admin/systems_seed")
+def systems_seed(key: str = ""):
+    """Adopt every pipeline already named in Tenant.systems as a real row."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    systems.seed_from_tenants()
+    return _back_to_systems(key)
+
+
+@app.get("/admin/system_add")
+def system_add(key: str = "", tenant: str = "", system: str = ""):
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    if not tenant or not system:
+        return {"error": "tenant and system are both required"}
+    systems.create(tenant, system)
+    return _back_to_systems(key)
+
+
+@app.get("/admin/system_set")
+def system_set(request: Request, key: str = "", id: str = ""):
+    """Update contract fields, status or autonomy on one system.
+
+    Fields are read off the query string rather than declared one by one, so
+    adding a contract field to the model doesn't need a signature change here.
+    Empty values are dropped rather than written, so a form that only fills two
+    contract boxes doesn't blank the other six.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    settable = set(systems.CONTRACT_FIELDS) | {"name", "status", "autonomy", "notes"}
+    clean = {k: v for k, v in request.query_params.items()
+             if k in settable and v not in ("", None)}
+    if not clean:
+        return _back_to_systems(key)
+    out = systems.update(id, **clean)
+    if out.get("error"):
+        return out  # a refused promotion should be read, not silently swallowed
+    return _back_to_systems(key)
+
+
+@app.get("/admin/system_promote")
+def system_promote(key: str = "", id: str = ""):
+    """Move one rung up the autonomy ladder, if the run history has earned it."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    out = systems.promote(id)
+    if out.get("error"):
+        return out
+    return _back_to_systems(key)
+
+
+@app.get("/admin/system_note")
+def system_note(key: str = "", id: str = "", text: str = "", drop: str = ""):
+    """Add or archive a piece of standing guidance for one system."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    if drop:
+        systems.drop_note(drop)
+        return _back_to_systems(key)
+    row = systems.get(id)
+    if not row:
+        return {"error": "unknown system"}
+    systems.note(row.tenant, row.key, text)
+    return _back_to_systems(key)
+
+
+@app.get("/admin/system_rule")
+def system_rule(key: str = "", id: str = "", phrase: str = ""):
+    """Promote a correction into a banned claim the validator enforces."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    row = systems.get(id)
+    if not row:
+        return {"error": "unknown system"}
+    result = systems.promote_rule(row.tenant, phrase)
+    if result.startswith("No KB brand row"):
+        return {"error": result}
+    return _back_to_systems(key)
 
 
 @app.get("/admin/verify")

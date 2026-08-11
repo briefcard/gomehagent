@@ -34,6 +34,8 @@ and six reference artifacts (§11).
 | Knowledge base (5 tables) | Deployed, agency tenant seeded |
 | Brief assembler (decision layer) | Deployed, tested offline |
 | Admin console + live verification | Deployed |
+| Systems registry + run ledger | Built, tested offline — **not yet pushed** |
+| Systems tab (console) + per-system threads | Built, rendered — **not yet pushed** |
 | Generator → validator → send | **Not built — next slice** |
 | Reports (ads, business health) | Not started |
 | Canva | Not connected (OAuth, needs auth layer) |
@@ -95,12 +97,42 @@ New this session:
 | `app/ops_commands.py` | Telegram fast-path commands, handled before the agent |
 | `app/admin_ui.py` | Server-rendered console with per-field setup instructions |
 | `scripts/test_brief.py` | Offline test harness for the assembler |
+| `app/systems.py` | Systems registry: catalogue, `ready()` blockers, autonomy ladder + gates, run ledger, per-system feedback threads, `board()` |
+| `scripts/test_systems.py` | Offline harness for the registry — 22 checks, no network |
 
-Modified: `app/db.py` (7 new models), `app/web.py` (Telegram webhook, admin
-routes, ops-command interception, `tg_voice` consumer branch), `render.yaml`.
+Modified: `app/db.py` (9 new models), `app/web.py` (Telegram webhook, admin
+routes, ops-command interception, `tg_voice` consumer branch, seven
+`/admin/system*` routes), `app/admin_ui.py` (tabbed shell + Systems tab),
+`app/ops_commands.py` (`/systems`), `render.yaml`.
 
 **Database models added:** `Tenant`, `User`, `KbBrand`, `KbClaim`,
-`KbAudience`, `KbObjection`, `KbEntity`. All KB rows carry `tenant`.
+`KbAudience`, `KbObjection`, `KbEntity`, `System`, `SystemRun`. All KB rows
+carry `tenant`.
+
+**The systems spine (Aug 2026).** A system used to be a string in
+`Tenant.systems` — a label with no state, contract, history or owner. It is now
+a row:
+
+- The **8-part contract** (decision #8) is eight columns, and `update(status=
+  "live")` refuses while any is blank. A rule that can't be evaluated isn't
+  enforced.
+- **`ready()`** returns named blockers from three independent causes: an
+  incomplete contract, an unwired capability, an ungroundable KB. Same
+  refuse-and-name discipline as the assembler.
+- **Autonomy is a state machine with gates** (`shadow → approve_all →
+  approve_exceptions → auto`). Promotion needs run history — 20 decided runs at
+  ≥90% for the third rung, 50 at ≥95% for the fourth, and a single denial in the
+  recent tail closes the gate. Demotion is always ungated.
+- **`SystemRun`** records blocked and failed runs, not just successes.
+  `blocked_reasons()` aggregates them into the KB backlog ranked by how often
+  each gap actually cost an output. `edit_diff` is the voice-learning signal.
+- **Feedback has two channels, deliberately.** `note()` writes a Memory scoped
+  to `system:<tenant>:<key>`, injected into that system's drafting prompt via
+  `feedback_block()`. `promote_rule()` writes into `KbBrand.banned_claims`,
+  where the deterministic validator enforces it. A prompt mostly obeys; a
+  validator always blocks — anything phrased never/always belongs in the second.
+- Conversation reuses `ChatMessage.thread`, which already isolates per agent;
+  the key just gets more specific.
 
 ---
 
@@ -165,7 +197,19 @@ setting them web-only makes cron approvals silently fall back to email.
 **Slice 3 — generator + validator + send.** Closes the loop on the agency
 lead responder: brief → draft → validate → Gmail draft → Telegram ping.
 `gmail_client.py` and `approvals.py` already exist and `approvals` already
-routes through `channel.py`, so this is four new pieces on running infrastructure.
+routes through `channel.py`.
+
+It now lands into the systems spine rather than beside it: open a run with
+`systems.start_run()`, close it with `finish_run()`, block with the named
+field in `blocked_on`, and pull standing guidance with
+`systems.feedback_block(tenant, key)` at drafting time. Respect
+`system.autonomy` — `shadow` records without sending.
+
+Caveat that shapes this slice: `Approval` has **no tenant or system column**,
+so approvals can't yet be filtered per client or tied back to a run. Add
+`tenant` + `system_id` + `run_id` to `Approval` as part of this slice; the
+auto-migration handles the columns, and the alternative is retrofitting the
+join after there's live data in it.
 
 The validator must check: every factual sentence carries a `claim_id`; no
 `banned_claims` string present; referenced entities available; media rights
@@ -189,9 +233,28 @@ Eien reorder engine.
 
 ## 9. Known gaps and traps
 
+**The codebase is two halves that don't meet yet.** The *knowledge* half
+(`tenants`, `kb`, `brief`, `systems`, `ops_commands`, `admin_ui`) is genuinely
+multi-tenant: every row carries `tenant` and scope is enforced server-side from
+the user row. The *execution* half predates it and is **tenant-blind** —
+`approvals.py`, `worker.py` and `kernel.py` contain zero references to tenants,
+and `Approval` has no tenant column. `ChatMessage.thread` and `Memory.scope`
+isolate by agent role, not by client. Nearly all remaining work is on that seam,
+which is why "four new files on running infrastructure" understates slice 3:
+the infrastructure it lands on is single-tenant.
+
 **Blocking client access:** ops commands are correctly scoped (verified: a
 client pinned to `coverings` is refused `baci`), but unrecognised text falls
 through to an unscoped agent. Do not invite clients until slice 4 lands.
+
+**The console key travels in URLs.** Every form embeds `APPROVAL_SECRET` as a
+query param, so it lands in browser history and any proxy log. Acceptable while
+the only user is the owner; it must not be the same credential the moment
+clients get a login.
+
+**The Systems tab is query-heavy** — roughly 100 queries per render at 11
+systems, because `ready()` calls `kb.completeness()` per system. Fine for an
+admin page on Postgres; revisit if the tenant count grows.
 
 **Scope narrowness is invisible.** `verify()` catches a dead token but not a
 token with insufficient scopes. Grant the full read set when creating each

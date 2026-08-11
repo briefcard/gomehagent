@@ -1,0 +1,481 @@
+"""Systems registry — an installed pipeline as an object rather than a label.
+
+Until now a "system" was a string in `Tenant.systems`: `["campaign_email",
+"reports"]`. That is enough to render a chip and nothing else. It could not
+answer whether the system was safe to switch on, what it had produced, whether
+a human kept rewriting its output, or whether it should be killed.
+
+This module makes it answerable. Three things live here:
+
+  1. READINESS  — a system is not "on" because someone typed its name. It is on
+     when its contract is complete, its tenant's capabilities are wired, and
+     (if it writes) the KB can ground it. `ready()` returns the named blockers,
+     in the same refuse-and-name style as the brief assembler.
+
+  2. AUTONOMY   — the earned ladder as a state machine with gates, not a
+     principle in a document. Promotion requires run history, so "it's been
+     fine" has to be a number before it becomes a permission.
+
+  3. FEEDBACK   — the per-system thread. Prose guidance becomes a scoped Memory
+     injected into that system's drafting prompt. A *rule* gets promoted into
+     the KB where the deterministic validator enforces it. The distinction is
+     the whole point: a prompt mostly obeys, a validator always blocks.
+"""
+from __future__ import annotations
+
+import datetime as dt
+
+from . import db, kb, tenants
+
+# The lifecycle of the system itself, distinct from how much rope it has.
+STATUSES = ("designed", "live", "paused", "retired")
+
+# The earned-autonomy ladder (locked decision #7). Order is meaningful — the
+# index is the rung, and promotion may only ever move up by one.
+AUTONOMY = ("shadow", "approve_all", "approve_exceptions", "auto")
+
+AUTONOMY_MEANING = {
+    "shadow": "Runs and records, sends nothing. You compare against what you'd have done.",
+    "approve_all": "Every output waits for your tap before it leaves.",
+    "approve_exceptions": "Routine output sends itself; anything the rules flag waits for you.",
+    "auto": "Sends without asking. Alerts on anomaly. Kill criteria are armed.",
+}
+
+# The 8-part contract. A system without these does not get built — decision #8.
+CONTRACT = (
+    ("job_replaced", "Job replaced", "The human task this removes. If nobody was doing it, this is a feature, not a system."),
+    ("owner", "Owner", "Who is accountable when it misbehaves. A name, not a team."),
+    ("baseline", "Baseline", "The number before it existed. Without this nothing can be proven later."),
+    ("primary_metric", "Primary metric", "The one number that says it works. One."),
+    ("counterfactual", "Counterfactual", "How you'd know the change wasn't seasonality or something else you did."),
+    ("kill_criteria", "Kill criteria", "What makes you switch it off. Decided now, while it's cheap to be honest."),
+    ("failure_mode", "Failure mode", "How it breaks, and who notices first."),
+    ("weekly_artifact", "Weekly artifact", "What lands in the client's inbox on Friday."),
+)
+CONTRACT_FIELDS = tuple(f for f, _, _ in CONTRACT)
+
+# Promotion gates. A rung is earned with evidence, so these are thresholds
+# rather than judgement. Tunable, but never zero.
+GATES = {
+    "approve_exceptions": {"min_runs": 20, "min_approval_rate": 0.90, "clean_tail": 10},
+    "auto": {"min_runs": 50, "min_approval_rate": 0.95, "clean_tail": 20},
+}
+
+
+# ---------------------------------------------------------------------------
+# Catalogue — what kinds of system exist, and what each one needs to function.
+#
+# `requires` is an AND: every capability must be wired. `requires_any` is an OR:
+# at least one. Reports needs *some* data source but doesn't care which, and
+# collapsing that into a single AND list would either block it wrongly or wave
+# through a report with nothing behind it.
+# ---------------------------------------------------------------------------
+
+CATALOG = {
+    "lead_responder": dict(
+        name="Lead responder",
+        does="Answers an inbound enquiry with a grounded, approved draft.",
+        requires=("inbox",), requires_any=(), needs_kb=True),
+    "campaign_email": dict(
+        name="Campaign email",
+        does="Builds and schedules campaign sends from the catalogue and calendar.",
+        requires=("esp",), requires_any=(), needs_kb=True),
+    "blog": dict(
+        name="Blog / content",
+        does="Publishes grounded articles against the keyword map.",
+        requires=("cms",), requires_any=(), needs_kb=True),
+    "reorder_engine": dict(
+        name="Reorder engine",
+        does="Triggers replenishment prompts off purchase cadence.",
+        requires=("commerce", "esp"), requires_any=(), needs_kb=False),
+    "service_desk": dict(
+        name="Service desk",
+        does="Handles routine inbound support with a drafted, checked reply.",
+        requires=("inbox",), requires_any=(), needs_kb=True),
+    "reports": dict(
+        name="Reports",
+        does="The weekly number, assembled from whatever is connected.",
+        requires=(), requires_any=("analytics", "ads", "commerce"), needs_kb=False),
+}
+
+
+def spec(key: str) -> dict:
+    return CATALOG.get(key, dict(name=key.replace("_", " ").title(),
+                                 does="", requires=(), requires_any=(),
+                                 needs_kb=False))
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+def get(system_id: str) -> db.System | None:
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if row:
+            s.expunge(row)
+        return row
+
+
+def find(tenant: str, key: str) -> db.System | None:
+    with db.SessionLocal() as s:
+        row = s.query(db.System).filter(db.System.tenant == tenant,
+                                        db.System.key == key).first()
+        if row:
+            s.expunge(row)
+        return row
+
+
+def for_tenant(tenant: str) -> list[db.System]:
+    with db.SessionLocal() as s:
+        rows = (s.query(db.System).filter(db.System.tenant == tenant)
+                .order_by(db.System.key).all())
+        s.expunge_all()
+        return rows
+
+
+def all_systems() -> list[db.System]:
+    with db.SessionLocal() as s:
+        rows = (s.query(db.System)
+                .order_by(db.System.tenant, db.System.key).all())
+        s.expunge_all()
+        return rows
+
+
+def create(tenant: str, key: str, name: str = "") -> db.System:
+    existing = find(tenant, key)
+    if existing:
+        return existing
+    with db.SessionLocal() as s:
+        row = db.System(tenant=tenant, key=key,
+                        name=name or spec(key)["name"])
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        s.expunge(row)
+        return row
+
+
+def update(system_id: str, **fields) -> dict:
+    """Set contract fields, status or autonomy. Refuses anything it doesn't know."""
+    allowed = set(CONTRACT_FIELDS) | {"name", "status", "autonomy", "notes"}
+    bad = set(fields) - allowed
+    if bad:
+        return {"error": f"unknown field(s): {sorted(bad)}"}
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if not row:
+            return {"error": "unknown system"}
+        if "status" in fields and fields["status"] not in STATUSES:
+            return {"error": f"status must be one of {STATUSES}"}
+        if "autonomy" in fields and fields["autonomy"] not in AUTONOMY:
+            return {"error": f"autonomy must be one of {AUTONOMY}"}
+        # Going live is gated on readiness — the whole point of the contract is
+        # that it can't be skipped by editing a dropdown.
+        if fields.get("status") == "live" and row.status != "live":
+            r = ready(row)
+            if not r["ready"]:
+                return {"error": "not ready to go live", "blockers": r["blockers"]}
+            row.went_live_at = db.utcnow()
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.commit()
+        return {"ok": True, "system": row.id}
+
+
+# ---------------------------------------------------------------------------
+# Readiness — named blockers, never a bare boolean
+# ---------------------------------------------------------------------------
+
+def ready(system: db.System) -> dict:
+    """Can this system safely run? If not, exactly what is absent."""
+    sp = spec(system.key)
+    blockers: list[str] = []
+
+    missing_contract = [label for f, label, _ in CONTRACT
+                        if not (getattr(system, f, "") or "").strip()]
+    if missing_contract:
+        blockers.append("contract: " + ", ".join(missing_contract))
+
+    caps = tenants.capabilities(system.tenant)
+    absent = [c for c in sp["requires"] if not caps.get(c)]
+    if absent:
+        blockers.append("not connected: " + ", ".join(absent))
+    if sp["requires_any"] and not any(caps.get(c) for c in sp["requires_any"]):
+        blockers.append("needs at least one of: " + ", ".join(sp["requires_any"]))
+
+    if sp["needs_kb"]:
+        c = kb.completeness(system.tenant)
+        if not c["ready"]:
+            blockers.append("knowledge base: " + ", ".join(c["missing"]))
+
+    return {"ready": not blockers, "blockers": blockers,
+            "contract_complete": not missing_contract}
+
+
+# ---------------------------------------------------------------------------
+# Autonomy — evidence, then permission
+# ---------------------------------------------------------------------------
+
+def stats(system_id: str) -> dict:
+    """Run history, reduced to the numbers a promotion decision needs."""
+    rows = runs(system_id, limit=0)
+    decided = [r for r in rows if r.decision in ("approved", "denied", "edited", "auto")]
+    approved = [r for r in decided if r.decision in ("approved", "auto")]
+    edited = [r for r in decided if r.decision == "edited"]
+    denied = [r for r in decided if r.decision == "denied"]
+    blocked = [r for r in rows if r.stage == "blocked"]
+    rate = (len(approved) / len(decided)) if decided else 0.0
+    return {"total": len(rows), "decided": len(decided),
+            "approved": len(approved), "edited": len(edited),
+            "denied": len(denied), "blocked": len(blocked),
+            "approval_rate": round(rate, 3)}
+
+
+def can_promote(system: db.System) -> dict:
+    """Is the next rung earned? Returns the target and why not, if not."""
+    try:
+        i = AUTONOMY.index(system.autonomy or "shadow")
+    except ValueError:
+        i = 0
+    if i >= len(AUTONOMY) - 1:
+        return {"can": False, "target": "", "why": "already fully autonomous"}
+    target = AUTONOMY[i + 1]
+
+    r = ready(system)
+    if not r["ready"]:
+        return {"can": False, "target": target,
+                "why": "not ready: " + "; ".join(r["blockers"])}
+
+    gate = GATES.get(target)
+    if not gate:  # shadow -> approve_all needs readiness only; nothing has run yet
+        return {"can": True, "target": target, "why": ""}
+
+    st = stats(system.id)
+    if st["decided"] < gate["min_runs"]:
+        return {"can": False, "target": target,
+                "why": f"{st['decided']} decided runs, needs {gate['min_runs']}"}
+    if st["approval_rate"] < gate["min_approval_rate"]:
+        return {"can": False, "target": target,
+                "why": f"approval rate {st['approval_rate']:.0%}, "
+                       f"needs {gate['min_approval_rate']:.0%}"}
+    tail = [r for r in runs(system.id, limit=gate["clean_tail"])
+            if r.decision == "denied"]
+    if tail:
+        return {"can": False, "target": target,
+                "why": f"a denial inside the last {gate['clean_tail']} runs"}
+    return {"can": True, "target": target, "why": ""}
+
+
+def promote(system_id: str) -> dict:
+    """Move up exactly one rung, and only if the gate is met."""
+    sysrow = get(system_id)
+    if not sysrow:
+        return {"error": "unknown system"}
+    verdict = can_promote(sysrow)
+    if not verdict["can"]:
+        return {"error": verdict["why"] or "cannot promote",
+                "autonomy": sysrow.autonomy}
+    return {**update(system_id, autonomy=verdict["target"]),
+            "autonomy": verdict["target"]}
+
+
+def demote(system_id: str, reason: str = "") -> dict:
+    """Drop a rung. Always allowed — pulling rope back never needs a gate."""
+    sysrow = get(system_id)
+    if not sysrow:
+        return {"error": "unknown system"}
+    i = max(0, AUTONOMY.index(sysrow.autonomy or "shadow") - 1)
+    out = update(system_id, autonomy=AUTONOMY[i])
+    if reason:
+        note(sysrow.tenant, sysrow.key, f"Demoted to {AUTONOMY[i]}: {reason}")
+    return {**out, "autonomy": AUTONOMY[i]}
+
+
+# ---------------------------------------------------------------------------
+# Runs — the ledger
+# ---------------------------------------------------------------------------
+
+def start_run(system_id: str, tenant: str, trigger: str = "manual",
+              ref: str = "") -> str:
+    with db.SessionLocal() as s:
+        row = db.SystemRun(system_id=system_id, tenant=tenant,
+                           trigger=trigger, ref=ref, stage="brief")
+        s.add(row)
+        s.commit()
+        return row.id
+
+
+def finish_run(run_id: str, stage: str, **fields) -> None:
+    """Close a run out. `blocked` and `failed` are outcomes too — recorded, not
+    dropped, because the pattern in what a system refuses is the KB backlog."""
+    allowed = {"blocked_on", "brief", "output", "approval_id", "decision",
+               "edit_diff", "outcome", "error"}
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if not row:
+            return
+        row.stage = stage
+        for k, v in fields.items():
+            if k in allowed:
+                setattr(row, k, v)
+        if stage in ("sent", "blocked", "failed", "approved"):
+            row.finished_at = db.utcnow()
+        s.commit()
+
+
+def runs(system_id: str, limit: int = 10) -> list[db.SystemRun]:
+    with db.SessionLocal() as s:
+        q = (s.query(db.SystemRun).filter(db.SystemRun.system_id == system_id)
+             .order_by(db.SystemRun.created_at.desc()))
+        if limit:
+            q = q.limit(limit)
+        rows = q.all()
+        s.expunge_all()
+        return rows
+
+
+def blocked_reasons(tenant: str = "", days: int = 30) -> list[tuple[str, int]]:
+    """What the pipelines refused on, most frequent first — the KB backlog,
+    ordered by how often each gap actually cost an output."""
+    since = db.utcnow() - dt.timedelta(days=days)
+    with db.SessionLocal() as s:
+        q = s.query(db.SystemRun).filter(db.SystemRun.stage == "blocked",
+                                         db.SystemRun.created_at >= since)
+        if tenant:
+            q = q.filter(db.SystemRun.tenant == tenant)
+        rows = q.all()
+    counts: dict[str, int] = {}
+    for r in rows:
+        for reason in (r.blocked_on or []):
+            counts[reason] = counts.get(reason, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+# ---------------------------------------------------------------------------
+# The per-system thread
+#
+# Conversation reuses ChatMessage.thread, which already isolates cleanly per
+# agent; the key just gets more specific. Durable guidance is a scoped Memory,
+# because a note that only exists in a transcript stops affecting output the
+# moment it scrolls out of the window.
+# ---------------------------------------------------------------------------
+
+def thread_key(tenant: str, key: str) -> str:
+    return f"system:{tenant}:{key}"
+
+
+def note(tenant: str, key: str, text: str) -> str:
+    """Durable guidance for one system. Injected into its drafting prompt.
+
+    This is the soft channel. Anything that must ALWAYS hold belongs in
+    `promote_rule` instead — see the docstring there.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "Nothing to note."
+    scope = thread_key(tenant, key)
+    stamp = db.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    with db.SessionLocal() as s:
+        s.add(db.Memory(topic=f"{key} · {stamp}", content=text, scope=scope))
+        s.commit()
+    return f"Noted on {tenant}/{key}."
+
+
+def notes(tenant: str, key: str, limit: int = 25) -> list[db.Memory]:
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Memory)
+                .filter(db.Memory.scope == thread_key(tenant, key),
+                        db.Memory.status == "active")
+                .order_by(db.Memory.created_at.desc()).limit(limit).all())
+        s.expunge_all()
+        return rows
+
+
+def drop_note(note_id: str) -> str:
+    with db.SessionLocal() as s:
+        row = s.get(db.Memory, note_id)
+        if not row:
+            return "No such note."
+        row.status = "archived"
+        s.commit()
+    return "Archived."
+
+
+def feedback_block(tenant: str, key: str) -> str:
+    """The system's own guidance, formatted for injection at drafting time.
+
+    Generators call this. It is deliberately separate from the tenant's voice:
+    voice is how the brand sounds everywhere, this is what you learned about
+    THIS pipeline — and mixing them makes a lesson from one system quietly
+    change the output of another.
+    """
+    rows = notes(tenant, key)
+    if not rows:
+        return ""
+    lines = [f"- {r.content} ({r.created_at:%b %d})" for r in rows]
+    return ("\n\nSTANDING GUIDANCE for this system (corrections you were given; "
+            "treat as current instruction):\n" + "\n".join(lines))
+
+
+def promote_rule(tenant: str, phrase: str) -> str:
+    """Turn a piece of feedback into a hard rule the validator enforces.
+
+    The distinction this exists for: "stop saying handcrafted" as a note is a
+    prompt nudge that usually works. As a banned claim it is a deterministic
+    check that fails closed. Anything phrased as never/always belongs here —
+    a model must never be the thing standing between a rule and an output.
+    """
+    phrase = (phrase or "").strip()
+    if not phrase:
+        return "A rule needs a phrase to match on."
+    with db.SessionLocal() as s:
+        brand = s.get(db.KbBrand, tenant)
+        if not brand:
+            return (f"No KB brand row for {tenant} — create the brand record "
+                    f"before adding rules, or the validator has nothing to read.")
+        current = list(brand.banned_claims or [])
+        if phrase.lower() in [c.lower() for c in current]:
+            return f"Already a rule for {tenant}."
+        brand.banned_claims = current + [phrase]
+        s.commit()
+    return (f"Hard rule added for {tenant}: any draft containing "
+            f"“{phrase}” is now rejected by the validator.")
+
+
+# ---------------------------------------------------------------------------
+# Seed — adopt the pipelines already named on each tenant
+# ---------------------------------------------------------------------------
+
+def seed_from_tenants() -> dict:
+    """Turn every string in Tenant.systems into a real row.
+
+    Idempotent. Everything lands as designed/shadow with an empty contract,
+    which is the honest starting state: naming a pipeline was never the same
+    as having decided how you'd know it worked.
+    """
+    added, existing = [], []
+    for t in tenants.all_tenants(include_paused=True):
+        for key in (t.systems or []):
+            if find(t.key, key):
+                existing.append(f"{t.key}/{key}")
+                continue
+            create(t.key, key)
+            added.append(f"{t.key}/{key}")
+    return {"added": added, "existing": existing}
+
+
+def board() -> list[dict]:
+    """Everything, flattened — what the Systems tab and `/systems` both read."""
+    out = []
+    for row in all_systems():
+        r = ready(row)
+        out.append({
+            "id": row.id, "tenant": row.tenant, "key": row.key,
+            "name": row.name, "status": row.status, "autonomy": row.autonomy,
+            "does": spec(row.key)["does"],
+            "ready": r["ready"], "blockers": r["blockers"],
+            "stats": stats(row.id),
+            "next_rung": can_promote(row),
+        })
+    return out
