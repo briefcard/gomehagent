@@ -372,14 +372,23 @@ def _consume() -> None:
                 # Same shape as "voice", but Telegram's two-hop getFile flow.
                 # Transcription runs here rather than in the webhook so the
                 # handler can 200 immediately and avoid Telegram's retries.
-                from . import channel, telegram
-                audio, mime = telegram.download_media(payload)
+                from . import channel, ops_commands, telegram
+                try:
+                    meta = json.loads(payload)
+                except ValueError:
+                    meta = {"file_id": payload, "chat_id": ""}
+                audio, mime = telegram.download_media(meta["file_id"])
                 transcript = telegram.transcribe(audio, mime)
                 if not transcript:
                     channel.send_text("I couldn't make out that voice note — try again?")
                     continue
                 channel.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
-                channel.send_text(command_agent.handle(transcript))
+                # Spoken ops commands must take the same fast path as typed
+                # ones — otherwise "add claim: ..." dictated from the car goes
+                # to the general agent and quietly does nothing.
+                spoken = ops_commands.handle(transcript, meta.get("chat_id", ""))
+                channel.send_text(spoken if spoken is not None
+                                  else command_agent.handle(transcript))
             else:  # text command — may carry a quoted message
                 from . import channel
                 text = payload
@@ -596,7 +605,8 @@ async def telegram_webhook(request: Request) -> dict:
 
         if msg.get("voice") or msg.get("audio"):
             media = msg.get("voice") or msg.get("audio")
-            _enqueue("tg_voice", media["file_id"])
+            _enqueue("tg_voice", json.dumps({"file_id": media["file_id"],
+                                             "chat_id": str(chat_id)}))
         elif msg.get("text"):
             _handle_command(msg["text"], quoted_id, str(chat_id))
     except Exception:  # noqa: BLE001 — always 200 so Telegram doesn't retry-storm

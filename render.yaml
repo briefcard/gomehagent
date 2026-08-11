@@ -73,6 +73,11 @@ envVarGroups:
         sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
+      # Whisper transcription for voice notes on BOTH channels. Without this
+      # a voice note fails with 'OPENAI_API_KEY not set' — transport works but
+      # there is nothing to turn audio into text.
+      - key: OPENAI_API_KEY
+        sync: false
       # --- Telegram ops channel (Aug 2026) ---
       # Must live in the GROUP, not on one service: the webhook + consumer run
       # on assistant-web, but scheduled approvals are sent from assistant-worker.
