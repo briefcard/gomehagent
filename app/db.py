@@ -321,6 +321,65 @@ class VoiceProfile(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class Tenant(Base):
+    """The registry. One row per business, the agency included.
+
+    This is what "switch to Baci" switches TO. Before this table, the wiring
+    for a client was scattered across SHOPIFY_STORES_JSON, GMAIL_ACCOUNTS_JSON,
+    SEO_SITES_JSON and the KB, with nothing joining them — so there was no
+    single answer to "which inbox, store and ad account is this client?".
+
+    Connection columns hold KEYS into the existing credential dicts, never
+    secrets. Adding a client is a row here plus its KB rows; never new code.
+    """
+
+    __tablename__ = "tenants"
+
+    key = Column(String, primary_key=True)   # agency | baci | eien | coverings | ironside
+    name = Column(String, nullable=False)
+    kind = Column(String, default="client")  # client | own — 'own' = Gomeh's own P&L
+    status = Column(String, default="active")  # active | paused | offboarded
+    domain = Column(String)
+    timezone = Column(String, default="America/New_York")
+
+    # --- connections: keys into config dicts / vault refs, not credentials ---
+    gmail_alias = Column(String)        # key in GMAIL_ACCOUNTS — inbox monitoring
+    shopify_store = Column(String)      # key in SHOPIFY_STORES
+    cms = Column(JSON, default=dict)    # {platform, creds_key}
+    esp = Column(JSON, default=dict)    # {provider, credential_ref, from_name, reply_to}
+    ads = Column(JSON, default=dict)    # {meta_account_id, google_customer_id}
+    analytics = Column(JSON, default=dict)  # {ga4_property, gsc_site, semrush_db}
+    design = Column(JSON, default=dict)     # {canva_brand_id, drive_folder}
+    crm = Column(JSON, default=dict)        # {provider, creds_key}
+
+    # --- governance ---
+    systems = Column(JSON, default=list)    # which pipelines are switched on
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class User(Base):
+    """Who may talk to the system, and on whose behalf.
+
+    Roles: owner sees every tenant and can switch freely; client is pinned to
+    one tenant and a narrow surface (reports, approvals); freelancer is pinned
+    to one tenant with no reporting access. Scope is enforced server-side from
+    this row — never from a parameter the caller supplies.
+    """
+
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    name = Column(String)
+    email = Column(String)
+    telegram_chat_id = Column(String, index=True)  # how the ops channel knows them
+    role = Column(String, default="client")        # owner | client | freelancer
+    tenant_key = Column(String)                    # null for owner = all tenants
+    active_tenant = Column(String)                 # current context, per user
+    status = Column(String, default="active")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Knowledge Base — multi-tenant. Every row carries `tenant`; nothing is ever
 # read without one. Customisation lives HERE as data, never as forked code.
