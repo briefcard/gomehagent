@@ -435,7 +435,16 @@ def _handle_voice(media_id: str) -> None:
     _enqueue("voice", media_id)
 
 
-def _handle_command(text: str, quoted_id: str = "") -> None:
+def _handle_command(text: str, quoted_id: str = "", chat_id: str = "") -> None:
+    # Ops commands (switch tenant, list accounts, capture a claim) are instant
+    # DB reads — answer them here rather than letting a model decide whether
+    # "switch to baci" was a switch. Falls through when it isn't one.
+    if chat_id:
+        from . import channel, ops_commands
+        reply = ops_commands.handle(text, chat_id)
+        if reply is not None:
+            channel.send_text(reply)
+            return
     # Intercept deny-reason / edit replies tied to a recent button tap.
     if _pending_feedback["mode"]:
         _enqueue("feedback", json.dumps(
@@ -589,7 +598,7 @@ async def telegram_webhook(request: Request) -> dict:
             media = msg.get("voice") or msg.get("audio")
             _enqueue("tg_voice", media["file_id"])
         elif msg.get("text"):
-            _handle_command(msg["text"], quoted_id)
+            _handle_command(msg["text"], quoted_id, str(chat_id))
     except Exception:  # noqa: BLE001 — always 200 so Telegram doesn't retry-storm
         log.exception("telegram webhook")
     return {"status": "received"}
@@ -612,3 +621,60 @@ def telegram_setup(key: str = "") -> dict:
         return {"ok": True, "result": telegram.set_webhook(base)}
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{exc.__class__.__name__}: {exc}"}
+
+
+@app.get("/admin/register_owner")
+def register_owner(key: str = "", chat_id: str = "", name: str = "Gomeh") -> dict:
+    """Claim a Telegram chat as the owner. Run once."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not chat_id:
+        return {"error": "chat_id required — message the bot, it will tell you yours"}
+    from . import tenants
+    tenants.seed()  # idempotent
+    return {"ok": True, **tenants.seed_owner(chat_id, name),
+            "tenants": [tenants.summary_line(t.key) for t in tenants.all_tenants()]}
+
+
+@app.get("/admin/tenants")
+def list_tenants(key: str = "") -> dict:
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import tenants
+    return {"tenants": [tenants.resolve(t.key) for t in tenants.all_tenants()]}
+
+
+@app.get("/admin/tenant_set")
+def tenant_set(key: str = "", tenant: str = "", field: str = "",
+               value: str = "") -> dict:
+    """Update one connection field on a tenant, without a redeploy.
+
+    /admin/tenant_set?key=SECRET&tenant=baci&field=gmail_alias&value=baci
+    /admin/tenant_set?key=SECRET&tenant=coverings&field=esp&value={"provider":"klaviyo"}
+
+    JSON fields (esp, ads, cms, analytics, design, crm, systems) take a JSON
+    literal; the rest take a plain string. Values are keys into credential
+    dicts or vault references — never secrets themselves.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import tenants
+    JSON_FIELDS = {"esp", "ads", "cms", "analytics", "design", "crm", "systems"}
+    SCALAR = {"name", "kind", "status", "domain", "timezone",
+              "gmail_alias", "shopify_store", "notes"}
+    if field not in JSON_FIELDS | SCALAR:
+        return {"error": f"unknown field; allowed: {sorted(JSON_FIELDS | SCALAR)}"}
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, tenant)
+        if not t:
+            return {"error": f"unknown tenant {tenant!r}"}
+        if field in JSON_FIELDS:
+            try:
+                parsed = json.loads(value)
+            except ValueError as exc:
+                return {"error": f"field {field} needs JSON: {exc}"}
+            setattr(t, field, parsed)
+        else:
+            setattr(t, field, value)
+        s.commit()
+    return {"ok": True, **tenants.resolve(tenant)}
