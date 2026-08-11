@@ -364,13 +364,26 @@ def _consume() -> None:
                     continue
                 whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
                 whatsapp.send_text(command_agent.handle(transcript))
+            elif kind == "tg_voice":
+                # Same shape as "voice", but Telegram's two-hop getFile flow.
+                # Transcription runs here rather than in the webhook so the
+                # handler can 200 immediately and avoid Telegram's retries.
+                from . import channel, telegram
+                audio, mime = telegram.download_media(payload)
+                transcript = telegram.transcribe(audio, mime)
+                if not transcript:
+                    channel.send_text("I couldn't make out that voice note — try again?")
+                    continue
+                channel.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
+                channel.send_text(command_agent.handle(transcript))
             else:  # text command — may carry a quoted message
+                from . import channel
                 text = payload
                 if payload.startswith("{") and '"_quoted"' in payload:
                     q = json.loads(payload)
                     text = (f"[Replying to your earlier message, which said:\n"
                             f"\"{q['_quoted']}\"]\n\nMy reply: {q['text']}")
-                whatsapp.send_text(command_agent.handle(text))
+                channel.send_text(command_agent.handle(text))
         except RuntimeError:
             whatsapp.send_text("Voice notes need a transcription key — add "
                                "OPENAI_API_KEY in Render and I'll handle audio.")
@@ -397,19 +410,21 @@ _pending_feedback: dict = {"mode": None, "approval_id": None}
 
 
 def _handle_button(action: str, ap_id: str) -> None:
-    from . import approvals, whatsapp
+    # channel.* routes to Telegram when configured, WhatsApp otherwise — so a
+    # tap made in Telegram is answered in Telegram, not on the other surface.
+    from . import approvals, channel
     if action == "approve":
-        whatsapp.send_text(approvals.apply_decision(ap_id, "approved"))
+        channel.send_text(approvals.apply_decision(ap_id, "approved"))
     elif action == "deny":
         approvals.apply_decision(ap_id, "denied")
         _pending_feedback.update(mode="deny", approval_id=ap_id)
-        whatsapp.send_text("Denied. Tell me what was wrong (one line) and I'll "
-                           "make it a permanent rule for that inbox — or reply "
-                           "'skip'.")
+        channel.send_text("Denied. Tell me what was wrong (one line) and I'll "
+                          "make it a permanent rule for that inbox — or reply "
+                          "'skip'.")
     elif action == "edit":
         _pending_feedback.update(mode="edit", approval_id=ap_id)
-        whatsapp.send_text("Send me your edited version (or the change you "
-                           "want) and I'll queue the revised draft.")
+        channel.send_text("Send me your edited version (or the change you "
+                          "want) and I'll queue the revised draft.")
 
 
 def _handle_voice(media_id: str) -> None:
@@ -499,3 +514,96 @@ async def whatsapp_incoming(request: Request) -> dict:
     except Exception:  # noqa: BLE001 — always 200 so Meta doesn't retry-storm
         pass
     return {"status": "received"}
+
+
+# ---------------------------------------------------------------------------
+# Telegram — the ops channel (Aug 2026). Shares the SAME ordered command queue
+# and button handlers as WhatsApp; only the transport differs. Chosen for ops
+# because business-initiated messages need no 24h window and no template review.
+# ---------------------------------------------------------------------------
+_seen_tg_updates: deque = deque(maxlen=500)
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request) -> dict:
+    from . import telegram
+
+    # 1) Authenticate the CALLER. Telegram echoes the secret we set via
+    #    setWebhook; anything without it is not Telegram and is dropped.
+    if config.TELEGRAM_WEBHOOK_SECRET:
+        sent = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if sent != config.TELEGRAM_WEBHOOK_SECRET:
+            log.warning("telegram webhook: bad or missing secret token")
+            return {"status": "forbidden"}
+    try:
+        update = await request.json()
+    except Exception:  # noqa: BLE001
+        return {"status": "received"}
+
+    try:
+        # 2) Dedupe — Telegram redelivers until it gets a 200.
+        uid = update.get("update_id")
+        if uid is not None:
+            if uid in _seen_tg_updates:
+                return {"status": "duplicate"}
+            _seen_tg_updates.append(uid)
+
+        cq = update.get("callback_query")
+        msg = update.get("message") or {}
+
+        # 3) Authorise the SENDER. Fails closed — see config.TELEGRAM_ALLOWED_CHAT_IDS.
+        chat_id = ((cq or {}).get("message", {}).get("chat", {}).get("id")
+                   or msg.get("chat", {}).get("id"))
+        if not telegram.is_allowed(chat_id):
+            log.warning("telegram webhook: chat %s not in allowlist", chat_id)
+            return {"status": "ignored"}
+
+        if cq:
+            # Always ack first or the client spins for ~30s.
+            telegram.ack(cq.get("id", ""))
+            data = cq.get("data", "") or ""
+            if ":" in data:
+                action, ref = data.split(":", 1)
+                if action in ("approve", "deny", "edit"):
+                    _handle_button(action, ref)
+                    # Rewrite the prompt in place so the chat reads as a ledger
+                    # rather than a scroll of stale buttons.
+                    mark = {"approve": "✅ Approved",
+                            "deny": "❌ Denied",
+                            "edit": "✏️ Editing"}[action]
+                    original = (cq.get("message") or {}).get("text", "")
+                    telegram.resolve((cq.get("message") or {}).get("message_id"),
+                                     f"{mark}\n\n{original[:3900]}")
+            return {"status": "received"}
+
+        # A reply to one of our messages carries the context the agent needs.
+        quoted = msg.get("reply_to_message") or {}
+        quoted_id = f"tg:{quoted['message_id']}" if quoted.get("message_id") else ""
+
+        if msg.get("voice") or msg.get("audio"):
+            media = msg.get("voice") or msg.get("audio")
+            _enqueue("tg_voice", media["file_id"])
+        elif msg.get("text"):
+            _handle_command(msg["text"], quoted_id)
+    except Exception:  # noqa: BLE001 — always 200 so Telegram doesn't retry-storm
+        log.exception("telegram webhook")
+    return {"status": "received"}
+
+
+@app.get("/admin/telegram_setup")
+def telegram_setup(key: str = "") -> dict:
+    """Register the webhook with Telegram. Run once per deploy target."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not config.TELEGRAM_ENABLED:
+        return {"error": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set"}
+    from . import telegram
+    base = config.PUBLIC_BASE_URL
+    if not base.startswith("https://"):
+        # Telegram only delivers webhooks over HTTPS — a localhost default here
+        # would register a URL it can never reach and fail silently later.
+        return {"error": f"PUBLIC_BASE_URL must be https, got {base!r}"}
+    try:
+        return {"ok": True, "result": telegram.set_webhook(base)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {exc}"}

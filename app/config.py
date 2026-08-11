@@ -209,3 +209,27 @@ WHATSAPP_APPROVER_NUMBER = _norm_phone(os.environ.get("WHATSAPP_APPROVER_NUMBER"
 WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
 
 WHATSAPP_ENABLED = bool(WHATSAPP_TOKEN and WHATSAPP_PHONE_ID and WHATSAPP_APPROVER_NUMBER)
+
+# --- Telegram: the ops channel (Aug 2026) -----------------------------------
+# Preferred over WhatsApp for blocked-pipeline pings and approvals: no 24-hour
+# window, no template review, real inline buttons, and editable messages.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Verifies the X-Telegram-Bot-Api-Secret-Token header on every inbound update.
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+
+
+def _chat_ids(raw: str, primary: str) -> set[str]:
+    """Allowlist of chat ids permitted to command the bot. Fails CLOSED: with
+    nothing configured only the approver's own chat is authorised, because this
+    bot can write to the knowledge base and bot usernames are discoverable."""
+    ids = {c.strip() for c in raw.split(",") if c.strip()}
+    if primary:
+        ids.add(primary.strip())
+    return ids
+
+
+TELEGRAM_ALLOWED_CHAT_IDS = _chat_ids(
+    os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", ""), TELEGRAM_CHAT_ID)
+
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)

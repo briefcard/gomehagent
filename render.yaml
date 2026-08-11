@@ -73,3 +73,19 @@ envVarGroups:
         sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
+      # --- Telegram ops channel (Aug 2026) ---
+      # Must live in the GROUP, not on one service: the webhook + consumer run
+      # on assistant-web, but scheduled approvals are sent from assistant-worker.
+      # Setting these web-only makes cron approvals silently fall back to email.
+      # channel.py routes to Telegram only when TOKEN and CHAT_ID are both set,
+      # so leaving these blank keeps the existing WhatsApp/email behaviour.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      # Optional: extra chat ids (comma-separated) for freelancers. The primary
+      # TELEGRAM_CHAT_ID is always allowed; everything else is rejected.
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
