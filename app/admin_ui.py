@@ -162,6 +162,10 @@ def render(key: str) -> str:
               </div>
               <div class="chips">{_chips(caps)}</div>
               <div class="mut">Missing: {', '.join(missing) or 'nothing — fully wired'}</div>
+              <div class="row">
+                <a href="/admin/verify?key={_esc(key)}&amp;tenant={_esc(t.key)}"><button class="sec" type="button">Test connections</button></a>
+                <span class="mut">chips show what is <em>configured</em>; this calls each one to see if it <em>works</em></span>
+              </div>
               <div class="grid">{fields}</div>
             </div>"""
 

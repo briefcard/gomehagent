@@ -96,6 +96,86 @@ def requires(key: str, *needed: str) -> tuple[bool, list[str]]:
     return (not absent), absent
 
 
+def verify(key: str) -> dict:
+    """Actually CALL each wired integration and report what came back.
+
+    capabilities() answers "is it configured" — a cheap dictionary lookup that
+    cannot tell a working token from a revoked one, or full scopes from
+    read_products only. This answers "does it work", which is the question that
+    matters before you trust a report built on it.
+
+    Each probe is the lightest authenticated call the provider offers.
+    Anything with no adapter yet is reported as configured-but-unverified
+    rather than quietly counted as working.
+    """
+    t = get(key)
+    if not t:
+        return {"error": f"unknown tenant {key!r}"}
+    caps = capabilities(key)
+    out: dict = {}
+
+    # --- commerce -------------------------------------------------------
+    if caps["commerce"]:
+        try:
+            from . import data_tools
+            shop = data_tools._shopify(t.shopify_store, "shop.json")["shop"]
+            out["commerce"] = {"status": "ok", "detail": shop.get("name", "")}
+        except Exception as exc:  # noqa: BLE001
+            out["commerce"] = {"status": "FAIL",
+                               "detail": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+    else:
+        out["commerce"] = {"status": "not configured", "detail": ""}
+
+    # --- inbox ----------------------------------------------------------
+    if caps["inbox"]:
+        try:
+            from . import gmail_client
+            with gmail_client._google_lock:
+                p = (gmail_client.service_for(t.gmail_alias)
+                     .users().getProfile(userId="me").execute())
+            out["inbox"] = {"status": "ok",
+                            "detail": p.get("emailAddress", t.gmail_alias)}
+        except Exception as exc:  # noqa: BLE001
+            out["inbox"] = {"status": "FAIL",
+                            "detail": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+    else:
+        out["inbox"] = {"status": "not configured", "detail": ""}
+
+    # --- analytics (Semrush is the only one with a live client today) ----
+    domain = t.domain or ""
+    if caps["analytics"] and domain and config.SEMRUSH_API_KEY:
+        try:
+            from . import seo_tools
+            raw = (seo_tools.semrush_domain_overview(
+                domain, (t.analytics or {}).get("semrush_db", "us")) or "").strip()
+            ok = raw.startswith("{") and raw != "{}"
+            out["analytics"] = {"status": "ok" if ok else "FAIL",
+                                "detail": raw[:120]}
+        except Exception as exc:  # noqa: BLE001
+            out["analytics"] = {"status": "FAIL",
+                                "detail": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+    elif caps["analytics"]:
+        out["analytics"] = {"status": "unverified",
+                            "detail": "no SEMRUSH_API_KEY or no domain"}
+    else:
+        out["analytics"] = {"status": "not configured", "detail": ""}
+
+    # --- no adapter yet: say so rather than imply it works ---------------
+    for cap, why in (("esp", "no ESP adapter built yet"),
+                     ("cms", "no CMS adapter built yet"),
+                     ("ads", "no ads adapter built yet"),
+                     ("crm", "no CRM adapter built yet"),
+                     ("design", "Canva not connected")):
+        out[cap] = ({"status": "unverified", "detail": why} if caps[cap]
+                    else {"status": "not configured", "detail": ""})
+
+    tested = [c for c, r in out.items() if r["status"] in ("ok", "FAIL")]
+    failed = [c for c, r in out.items() if r["status"] == "FAIL"]
+    return {"tenant": key, "name": t.name, "results": out,
+            "tested": tested, "failed": failed,
+            "healthy": bool(tested) and not failed}
+
+
 # ---------------------------------------------------------------------------
 # Users + active context
 # ---------------------------------------------------------------------------

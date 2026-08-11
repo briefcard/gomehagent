@@ -757,3 +757,15 @@ def admin_ui(key: str = "") -> str:
         return "<h3>bad key</h3>"
     from . import admin_ui as ui
     return ui.render(key)
+
+
+@app.get("/admin/verify")
+def verify_tenant(key: str = "", tenant: str = "") -> dict:
+    """Live-test a tenant's integrations. 'Configured' and 'working' are
+    different questions — a revoked token still looks configured."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import tenants
+    if not tenant:
+        return {"tenants": [tenants.verify(t.key) for t in tenants.all_tenants()]}
+    return tenants.verify(tenant)
