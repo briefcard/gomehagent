@@ -321,6 +321,115 @@ class VoiceProfile(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+# ---------------------------------------------------------------------------
+# Knowledge Base — multi-tenant. Every row carries `tenant`; nothing is ever
+# read without one. Customisation lives HERE as data, never as forked code.
+# Consumed by the brief assembler (deterministic) and enforced by the
+# validator (also deterministic). Models are generated FROM these rows and
+# never allowed to assert anything that isn't in them.
+# ---------------------------------------------------------------------------
+
+class KbBrand(Base):
+    """One row per tenant: who they are, how they sound, what they may not say."""
+
+    __tablename__ = "kb_brand"
+
+    tenant = Column(String, primary_key=True)  # agency | baci | eien | coverings | ironside
+    display_name = Column(String, nullable=False)
+    positioning = Column(Text)
+    elevator = Column(JSON, default=dict)      # {sentence, paragraph, page}
+    voice = Column(JSON, default=dict)         # {tone[], do_say[], never_say[], examples[]}
+    # Hard compliance boundary. The validator rejects any draft containing one
+    # of these strings — see Baci's origin/handcraft rules. Never advisory.
+    banned_claims = Column(JSON, default=list)
+    approval_policy = Column(JSON, default=dict)  # {auto_publish[], requires_signoff[]}
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class KbClaim(Base):
+    """A fact the brand is allowed to assert, with its proof and when to use it.
+
+    `situations` is what makes selection deterministic: the assembler filters
+    claims by the prospect's situation rather than letting a model pick a
+    flattering number. Every factual sentence a generator writes must cite one
+    of these ids, or the validator rejects the draft.
+    """
+
+    __tablename__ = "kb_claims"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    claim = Column(Text, nullable=False)        # the assertion, in plain words
+    evidence = Column(Text)                     # the number: "$6M -> $20M in 18 months"
+    proof_type = Column(String)                 # data | case_study | certification | testimonial | spec
+    source = Column(Text)                       # where it came from — required for spec claims
+    situations = Column(JSON, default=list)     # tags the assembler matches on
+    strength = Column(String, default="strong") # strong | supporting — caps how many per asset
+    verified_at = Column(DateTime(timezone=True))
+    expires_at = Column(DateTime(timezone=True))  # stale claims stop being selectable
+    status = Column(String, default="active")   # active | retired | conflicted
+
+
+class KbAudience(Base):
+    """A buyer segment, in their vocabulary rather than yours."""
+
+    __tablename__ = "kb_audiences"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False)        # ecom_inventory | b2b_spec | local_venue | digital_products
+    name = Column(String, nullable=False)
+    pains = Column(JSON, default=list)
+    vocabulary = Column(JSON, default=list)     # words THEY use — not your category terms
+    buying_trigger = Column(Text)
+    decision_timeline = Column(String)
+    notes = Column(Text)
+
+
+class KbObjection(Base):
+    """Why a deal stalls, and the approved answer.
+
+    Empty across all four client accounts at audit time. Cannot be machine-
+    populated — this is human-authored, and it's half of the paid intake.
+    """
+
+    __tablename__ = "kb_objections"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    objection = Column(Text, nullable=False)
+    response = Column(Text, nullable=False)
+    claim_id = Column(String)                   # optional proof to pair with it
+    audience_key = Column(String)               # blank = applies to everyone
+    escalate = Column(String, default="no")     # yes -> hand to a human, don't answer
+
+
+class KbEntity(Base):
+    """The polymorphic thing being sold.
+
+    One table absorbs agency offers, Baci products, Ironside spaces and
+    Coverings slabs. `attributes` is the typed bag; `source`/`verified_at`
+    exist because B2B spec sales needs provenance (a wrong dimension loses
+    the job) even though the other tenants never populate them.
+    """
+
+    __tablename__ = "kb_entities"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    type = Column(String, nullable=False)       # offer | product | space | service | program
+    key = Column(String, nullable=False)        # stable slug / SKU
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    attributes = Column(JSON, default=dict)     # capacity, material, seats, deliverables...
+    price = Column(String)                      # string: ranges and "from $X" are common
+    availability = Column(String, default="available")  # available | oos | unbookable | draft
+    source = Column(String)                     # where the attribute data came from
+    verified_at = Column(DateTime(timezone=True))
+    freshness_days = Column(String)             # past this, the assembler blocks rather than warns
+    status = Column(String, default="active")
+
+
 def _auto_migrate() -> None:
     """Add any model columns missing from existing tables. create_all() makes
     NEW tables but never alters existing ones, so adding a column to a model
