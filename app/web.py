@@ -748,3 +748,12 @@ def user_add(key: str = "", chat_id: str = "", name: str = "",
         s.commit()
     return {"ok": True, "name": name, "role": role,
             "scoped_to": tenant or "all accounts"}
+
+
+@app.get("/admin/ui", response_class=HTMLResponse)
+def admin_ui(key: str = "") -> str:
+    """Single console for wiring accounts, with per-field instructions inline."""
+    if key != config.APPROVAL_SECRET:
+        return "<h3>bad key</h3>"
+    from . import admin_ui as ui
+    return ui.render(key)
