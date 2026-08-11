@@ -27,6 +27,7 @@ HELP = """*Ops commands*
 *Filling the knowledge base*
 `/next` — the single most useful question right now. Just reply to answer.
 `/gaps` — everything still missing for this account
+`/unknowns` — facts the catalogue couldn't answer, worst first. Reply to fill one.
 `/kb` — completeness summary
 `/skip` — skip the current question
 
@@ -62,10 +63,12 @@ def _pending_get(chat_id: str) -> dict:
             return {}
 
 
-def _pending_set(chat_id: str, tenant: str, step_id: str) -> None:
+def _pending_set(chat_id: str, tenant: str, step_id: str,
+                 unknown_id: str = "") -> None:
     with db.SessionLocal() as s:
         row = s.get(db.Setting, _pending_key(chat_id))
-        payload = json.dumps({"tenant": tenant, "step": step_id})
+        payload = json.dumps({"tenant": tenant, "step": step_id,
+                              "unknown": unknown_id})
         if row:
             row.value = payload
         else:
@@ -99,6 +102,30 @@ def _ask_next(tenant: str, chat_id: str, skip: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+
+def _ask_unknown(tenant: str, chat_id: str) -> str:
+    """Pose the costliest thing the catalogue could not answer.
+
+    These are ranked by how often the gap actually blocked an answer, so the
+    first question is the one that has cost the most enquiries — not the one
+    that happens to be alphabetically first.
+    """
+    rows = kb.unknowns(tenant)
+    if not rows:
+        return (f"Nothing outstanding for *{tenant}*.\n"
+                f"Gaps appear here when a real enquiry asks for something the "
+                f"catalogue has no data for.")
+    u = rows[0]
+    _pending_set(chat_id, tenant, "unknown", u.id)
+    hits = int(u.hits or "1")
+    asked = f"\nLast asked: _{u.asked_for}_" if u.asked_for else ""
+    more = (f"\n\n{len(rows) - 1} more after this." if len(rows) > 1 else "")
+    return (f"*{u.entity_name or u.entity_key}* has no "
+            f"*{u.attribute.replace('_', ' ')}* recorded.\n"
+            f"It has blocked {hits} enquir{'ies' if hits != 1 else 'y'}.{asked}\n\n"
+            f"What is it? Reply with the value, or `n/a` if it genuinely "
+            f"doesn't apply.{more}")
+
 
 def handle(text: str, chat_id: str = "") -> str | None:
     raw = (text or "").strip()
@@ -183,6 +210,11 @@ def handle(text: str, chat_id: str = "") -> str | None:
         return (f"*{cur}* — {len(g)} missing, most useful first:\n\n"
                 + "\n".join(lines) + "\n\nSend `/next` to answer them one at a time.")
 
+    if low in ("/unknowns", "/gaps2", "unknowns"):
+        if not user:
+            return _unregistered(chat_id)
+        return _ask_unknown(tenants.active(user), chat_id)
+
     # --- direct capture --------------------------------------------------
     if low.startswith("ban:"):
         if not user:
@@ -203,6 +235,18 @@ def handle(text: str, chat_id: str = "") -> str | None:
     # Last, so no command is ever swallowed as an answer. A leading slash is
     # never an answer either — that is a mistyped command, not knowledge.
     pending = _pending_get(chat_id)
+
+    # Answering an unknown writes onto the entity, so the next enquiry that
+    # asks the same question gets a real answer instead of the same shrug.
+    if pending.get("unknown") and user and not raw.startswith("/"):
+        tenant = pending.get("tenant", "")
+        _pending_clear(chat_id)
+        result = kb.resolve_unknown(pending["unknown"], raw)
+        if result.startswith("Needs a value"):
+            _pending_set(chat_id, tenant, "unknown", pending["unknown"])
+            return result
+        return result + "\n\n" + _ask_unknown(tenant, chat_id)
+
     if pending.get("step") and user and not raw.startswith("/"):
         tenant, step = pending.get("tenant", ""), pending["step"]
         _pending_clear(chat_id)

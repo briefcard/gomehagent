@@ -20,6 +20,19 @@ def utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def as_utc(value):
+    """Normalise a stored datetime to timezone-aware UTC.
+
+    SQLite drops the timezone even on a DateTime(timezone=True) column, while
+    Postgres preserves it — so any comparison against utcnow() works in
+    production and raises "can't compare offset-naive and offset-aware" the
+    moment it runs locally. Always compare through this.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=dt.timezone.utc)
+
+
 class Approval(Base):
     """Any action that needs Gomeh's sign-off before execution."""
 
@@ -402,6 +415,22 @@ class KbBrand(Base):
     # of these strings — see Baci's origin/handcraft rules. Never advisory.
     banned_claims = Column(JSON, default=list)
     approval_policy = Column(JSON, default=dict)  # {auto_publish[], requires_signoff[]}
+
+    # How selection reaches the thing this tenant actually sells. Without it the
+    # assembler could only ever look at claims and objections, so a venue
+    # enquiry naming a headcount never touched the capacity data sitting one
+    # table over. Shape:
+    #   {"primary_type": "space",
+    #    "modes": [{"mode": "capacity_fit", "requirement": "headcount",
+    #               "attributes": {"seated": "seated_capacity",
+    #                              "default": "standing_capacity"}}]}
+    selection = Column(JSON, default=dict)
+
+    # What to propose at each stage, per tenant. Replaces hardcoded agency offer
+    # keys in the decision layer. Shape:
+    #   {"first_contact": {"entity_key": "diagnostic", "ask": "the paid diagnostic"}}
+    next_steps = Column(JSON, default=dict)
+
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
@@ -461,6 +490,82 @@ class KbObjection(Base):
     claim_id = Column(String)                   # optional proof to pair with it
     audience_key = Column(String)               # blank = applies to everyone
     escalate = Column(String, default="no")     # yes -> hand to a human, don't answer
+
+
+class KbSituation(Base):
+    """One tenant's diagnostic vocabulary, as data.
+
+    The situation tags were a module constant shared by every tenant, written
+    for the agency selling B2B services. A tableware brand's proof had nowhere
+    to live in it, and a venue enquiry saying "220 guests seated" matched none
+    of its patterns — so nothing was diagnosed and selection had nothing to
+    filter on. A shared constant is also exactly the customisation-in-code that
+    decision #3 forbids.
+
+    `patterns` is a list of lists: the inner list is a set of substrings that
+    must ALL appear for the tag to fire. Roots rather than whole phrases,
+    because real people write "raising prices" not "raise prices".
+    """
+
+    __tablename__ = "kb_situations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    tag = Column(String, nullable=False)
+    kind = Column(String, default="problem")  # who_they_are | problem | doubt
+    description = Column(Text)
+    patterns = Column(JSON, default=list)
+
+
+class IntakeLink(Base):
+    """A scoped, expiring link that lets a CLIENT fill their own knowledge base.
+
+    Filling a KB is the one job that does not scale by the owner typing faster.
+    This is the surface a client gets: one tenant, no secret key, no access to
+    anything else, and answers parsed by exactly the same code as the console
+    and the bot — so a fact entered by a client and one entered by Gomeh land
+    identically. Claims they submit land as `pending` and stay invisible to
+    selection until reviewed, because a client will always over-claim.
+    """
+
+    __tablename__ = "intake_links"
+
+    token = Column(String, primary_key=True)
+    tenant = Column(String, nullable=False, index=True)
+    label = Column(String)                 # who it was sent to
+    status = Column(String, default="active")   # active | revoked
+    answered = Column(String, default="0")      # how many questions they filled
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    expires_at = Column(DateTime(timezone=True))
+    last_used_at = Column(DateTime(timezone=True))
+
+
+class KbUnknown(Base):
+    """A question the catalogue could not answer, and how often it mattered.
+
+    When selection is asked for 220 seated and a space has no seated capacity
+    recorded, the honest answer is "cannot be judged" — but saying that forever
+    is a system with no way to learn. Each occurrence is counted here, so the
+    gaps that actually cost answers rise to the top and can be filled in one
+    reply. Resolving a row writes the value onto the entity and closes it.
+
+    Aggregated by (tenant, entity_key, attribute): one row per real gap, not
+    one per enquiry.
+    """
+
+    __tablename__ = "kb_unknowns"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    entity_key = Column(String, nullable=False)
+    entity_name = Column(String)
+    attribute = Column(String, nullable=False)   # e.g. seated_capacity
+    asked_for = Column(Text)                     # what was being matched, verbatim
+    hits = Column(String, default="1")           # how often this gap blocked an answer
+    status = Column(String, default="open")      # open | answered | not_applicable
+    answer = Column(Text)
+    first_seen = Column(DateTime(timezone=True), default=utcnow)
+    last_seen = Column(DateTime(timezone=True), default=utcnow)
 
 
 class KbEntity(Base):

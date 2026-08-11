@@ -779,6 +779,108 @@ def kb_add(key: str = "", tenant: str = "", step: str = "", text: str = ""):
                             status_code=303)
 
 
+@app.get("/admin/intake_new")
+def intake_new(key: str = "", tenant: str = "", label: str = "", days: int = 30):
+    """Mint a private intake link for one client."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    import datetime as _dt
+    import secrets
+    from . import tenants as tn
+    if not tn.get(tenant):
+        return {"error": f"unknown tenant {tenant!r}"}
+    token = secrets.token_urlsafe(24)
+    with db.SessionLocal() as s:
+        s.add(db.IntakeLink(
+            token=token, tenant=tenant, label=label,
+            expires_at=db.utcnow() + _dt.timedelta(days=max(1, days))))
+        s.commit()
+    return {"ok": True, "tenant": tenant,
+            "url": f"{config.PUBLIC_BASE_URL}/intake/{token}",
+            "expires_in_days": days,
+            "note": "Send this to the client. It reaches one account and nothing else."}
+
+
+@app.get("/admin/intake_links")
+def intake_links(key: str = "", tenant: str = "") -> dict:
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    with db.SessionLocal() as s:
+        q = s.query(db.IntakeLink)
+        if tenant:
+            q = q.filter(db.IntakeLink.tenant == tenant)
+        rows = q.order_by(db.IntakeLink.created_at.desc()).all()
+        return {"links": [
+            {"tenant": r.tenant, "label": r.label, "status": r.status,
+             "answered": r.answered, "expires_at": str(r.expires_at),
+             "url": f"{config.PUBLIC_BASE_URL}/intake/{r.token}"} for r in rows]}
+
+
+@app.get("/admin/intake_revoke")
+def intake_revoke(key: str = "", token: str = "") -> dict:
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    with db.SessionLocal() as s:
+        row = s.get(db.IntakeLink, token)
+        if not row:
+            return {"error": "no such link"}
+        row.status = "revoked"
+        s.commit()
+    return {"ok": True, "revoked": token}
+
+
+@app.get("/intake/{token}", response_class=HTMLResponse)
+def intake(token: str, answer: str = "", skip: str = "") -> str:
+    """The client's own surface. Public by token, scoped to one tenant.
+
+    Deliberately has no way to read anything back — a client fills their
+    knowledge base here, they do not browse it. Everything they submit lands
+    through the same parser the console and the bot use.
+    """
+    from . import admin_ui as ui, kb as kbm, systems as sysm
+    with db.SessionLocal() as s:
+        link = s.get(db.IntakeLink, token)
+        if link:
+            s.expunge(link)
+    if not link or link.status != "active":
+        return "<h3>This link is no longer active.</h3>"
+    if link.expires_at and db.as_utc(link.expires_at) < db.utcnow():
+        return "<h3>This link has expired. Ask for a new one.</h3>"
+
+    tenant = link.tenant
+    saved = ""
+    if answer.strip():
+        step = kbm.next_step(tenant)
+        if step:
+            saved = kbm.apply_answer(tenant, step["id"], answer,
+                                     source=link.label or "client")
+            with db.SessionLocal() as s:
+                row = s.get(db.IntakeLink, token)
+                row.answered = str(int(row.answered or "0") + 1)
+                row.last_used_at = db.utcnow()
+                s.commit()
+
+    gaps = kbm.gaps(tenant)
+    # Skipping moves past a question for this visit without recording an answer,
+    # so it is asked again next time rather than being silently accepted.
+    step = next((g for g in gaps if g["id"] != skip), None) if skip else \
+        (gaps[0] if gaps else None)
+    waiting = sysm.waiting_on(tenant).get(step["id"], []) if step else []
+    total = max(len(gaps), 1)
+    done = int(link.answered or "0")
+    return ui.render_intake(link, tenant, step, min(done, total - 1) if step else total,
+                            total, waiting, saved)
+
+
+@app.get("/admin/claim_review")
+def claim_review(key: str = "", claim_id: str = "", approve: str = "yes"):
+    """Approve or reject a client-submitted claim."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    return {"result": kbm.review_claim(claim_id, approve == "yes")}
+
+
 @app.get("/admin/kb")
 def kb_json(key: str = "", tenant: str = "") -> dict:
     """The whole knowledge base for one account, as data."""

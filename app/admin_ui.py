@@ -654,3 +654,78 @@ def render_kb(key: str, tenant: str = "") -> str:
 <p class="mut">The same captures work from Telegram — <code>/next</code> asks these
 one at a time and reads your reply as the answer.</p>
 """, suffix=f"&amp;tenant={tenant}")
+
+
+# ---------------------------------------------------------------------------
+# Client intake — the one surface a client ever sees.
+#
+# Scoped to a single tenant by an unguessable token. No secret key, no other
+# account reachable, no schema on display: one question at a time in the words
+# the client already uses. Answers go through the SAME parser as the console and
+# the bot, so a fact entered here and one entered by Gomeh land identically —
+# which is the property that makes onboarding client #6 cost days, not weeks.
+# ---------------------------------------------------------------------------
+
+_INTAKE_CSS = _CSS + """
+.w{max-width:680px}
+.prog{display:flex;gap:4px;margin-bottom:4px}
+.prog i{flex:1;height:4px;border-radius:2px;background:var(--rule)}
+.prog i.on{background:var(--ok)}
+.q{font:600 1.35rem/1.3 Georgia,serif;margin:0}
+.why{font-size:.83rem;color:var(--acc);font-weight:600}
+.done{text-align:center;padding:30px 0}
+"""
+
+
+def render_intake(link, tenant, step, done: int, total: int,
+                  waiting: list[str], saved: str = "") -> str:
+    """One question. No navigation, no schema, no way to reach anything else."""
+    t = tenants.get(tenant)
+    name = _esc(t.name if t else tenant)
+
+    if step is None:
+        body = f"""
+        <div class="card done">
+          <h1>That's everything — thank you.</h1>
+          <p class="mut">We have what we need to start writing for {name}.
+          Nothing you sent goes out without being reviewed first.</p>
+        </div>"""
+    else:
+        bars = "".join(f'<i class="{"on" if i < done else ""}"></i>'
+                       for i in range(max(total, 1)))
+        why = ""
+        if waiting:
+            why = (f'<div class="why">Needed by: {_esc(", ".join(waiting))}</div>')
+        body = f"""
+        <div class="card">
+          <div class="prog">{bars}</div>
+          <div class="mut">Question {done + 1} of {total}</div>
+          <h2 class="q">{_esc(step['q'])}</h2>
+          <p class="mut">{_esc(step['hint'])}</p>
+          {why}
+          <form method="get" action="/intake/{_esc(link.token)}">
+            <textarea name="answer" rows="3" autofocus
+              placeholder="{_esc(step['hint'])}"></textarea>
+            <div class="row" style="margin-top:10px">
+              <button>Save and continue</button>
+              <a href="/intake/{_esc(link.token)}?skip={_esc(step['id'])}"
+                 class="mut">skip this one</a>
+            </div>
+          </form>
+        </div>"""
+
+    note = f'<div class="ok">{_esc(saved)}</div>' if saved else ""
+
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{name} — setup</title><style>{_INTAKE_CSS}</style></head><body><div class="w">
+<div>
+  <h1>{name}</h1>
+  <p class="mut">A few questions so we can write in your voice and never say
+  anything you wouldn't. Answer what you can — anything you skip, we'll ask
+  again later rather than guess.</p>
+</div>
+{note}
+{body}
+<p class="mut">This link is private to {name}. Nothing here is published.</p>
+</div></body></html>"""

@@ -25,6 +25,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import db, kb  # noqa: E402
 
 
+def _claim(tenant: str, *args, **kw) -> None:
+    """Add a claim and refuse to continue if it did not land.
+
+    The first run of this seed lost three claims silently: they carried tags
+    from the shared vocabulary that the tenants' own vocabularies do not
+    contain, `add_claim` correctly refused them, and the return value went
+    nowhere. A seed that drops rows quietly is worse than one that crashes.
+    """
+    before = len(kb.claims(tenant))
+    msg = kb.add_claim(tenant, *args, **kw)
+    if len(kb.claims(tenant)) == before:
+        raise SystemExit(f"seed: claim REJECTED for {tenant} — {msg}")
+
+
 # ---------------------------------------------------------------------------
 # BACI MILANO USA
 # Sources: brand-origin memory (2026-06-16/17), no-customization memory,
@@ -39,7 +53,34 @@ def seed_baci() -> None:
         positioning="The Italian design house Baci Milano, brought to the US "
                     "market — colourful, pattern-led tableware and glassware for "
                     "people who host.",
+        # Selection reaches the catalogue by matching what they said against
+        # the product's own words. No numeric requirement applies to tableware.
+        selection={"primary_type": "product", "modes": [{"mode": "keyword"}]},
+        next_steps={
+            "first_contact": {"ask": "point them at the piece that fits the occasion"},
+            "follow_up": {"ask": "one specific piece, not the catalogue"},
+            "default": {"ask": "answer the question, then name one piece"},
+        },
     )
+
+    # Baci's own diagnostic vocabulary. The shared set is agency-B2B language;
+    # none of it fires on "wedding gift, something colourful".
+    for tag, pats, desc in [
+        ("gifting", [["gift"], ["present"], ["for my"], ["for her"], ["for a friend"]],
+         "buying for someone else — the piece has to say something about them"),
+        ("occasion_hosting", [["wedding"], ["dinner party"], ["hosting"],
+                              ["housewarming"], ["holiday"], ["entertaining"]],
+         "buying for an event they are hosting"),
+        ("collector", [["collection"], ["add to"], ["complete the set"], ["matching"]],
+         "already owns pieces and is extending the set"),
+        ("replacement_reorder", [["broke"], ["broken"], ["replace"], ["chipped"],
+                                 ["another one"]],
+         "replacing something they already had"),
+        ("quality_doubt", [["quality"], ["worth it"], ["durable"], ["dishwasher"],
+                           ["chip"], ["how well"]],
+         "wants reassurance the piece is worth the price"),
+    ]:
+        kb.add_situation("baci", tag, pats, desc, kind="who_they_are")
 
     # Hard compliance boundary. Every phrase below is a real, established rule
     # with a documented reason — origin and production-method claims are an
@@ -84,21 +125,21 @@ def seed_baci() -> None:
         buying_trigger="A sale, or a first apartment",
         decision_timeline="same day")
 
-    kb.add_claim(
+    _claim(
         "baci",
         "Designed in Milan by the Italian design house Baci Milano",
         "Italian design brand, Milan",
         ["gifting", "collector"],
         proof_type="certification",
         source="Brand origin — Italian DESIGN, not Italian manufacture")
-    kb.add_claim(
+    _claim(
         "baci",
         "Specified by Four Seasons and the Ritz-Carlton Yacht Collection",
         "Placements at Four Seasons and Ritz-Carlton Yacht Collection",
-        ["trade_specification", "collector"],
+        ["quality_doubt", "collector"],
         proof_type="case_study",
         source="US market entry, established 2026")
-    kb.add_claim(
+    _claim(
         "baci",
         "The Zodiac Vibe cup is sold by sign — the piece is chosen for the person",
         "Best-selling line; Cancer, Leo and Gemini reached 100/100/91% sell-through in season",
@@ -154,7 +195,38 @@ def seed_ironside() -> None:
         positioning="A design-district campus of eight event spaces in Miami, "
                     "from a 60-person lounge to a 10,000 sq ft hall, with "
                     "production, catering and parking on site.",
+        # A venue enquiry states a headcount. Which capacity it is measured
+        # against depends on whether they said seated or standing — those are
+        # different rooms, and answering with the wrong one loses the booking.
+        selection={
+            "primary_type": "space",
+            "modes": [{"mode": "capacity_fit", "requirement": "headcount",
+                       "attributes": {"seated": "seated_capacity",
+                                      "default": "standing_capacity"}},
+                      {"mode": "keyword"}],
+        },
+        next_steps={
+            "first_contact": {"ask": "a walkthrough — the room decides it, not the deck"},
+            "follow_up": {"ask": "hold the date while they decide"},
+            "default": {"ask": "a walkthrough"},
+        },
     )
+
+    for tag, pats, desc in [
+        ("venue_enquiry", [["venue"], ["space"], ["room"], ["book"], ["host"],
+                           ["event"], ["guests"]],
+         "looking for a room for a specific event"),
+        ("capacity_fit", [["guests"], ["people"], ["headcount"], ["pax"],
+                          ["attendees"], ["seated"], ["standing"]],
+         "the headcount decides which spaces are even possible"),
+        ("production_need", [["av"], ["stage"], ["led"], ["production"],
+                             ["load-in"], ["load in"], ["rigging"]],
+         "the technical requirement will decide the space"),
+        ("date_pressure", [["march"], ["next month"], ["asap"], ["short notice"],
+                           ["available on"]],
+         "a date is set and the venue is the last unbooked piece"),
+    ]:
+        kb.add_situation("ironside", tag, pats, desc, kind="problem")
 
     # The system must keep refusing to quote until a rate card exists. These
     # phrases are how an invented quote would actually surface in a draft.
@@ -181,11 +253,11 @@ def seed_ironside() -> None:
         buying_trigger="A date is set and the venue is the last unbooked piece",
         decision_timeline="2–8 weeks")
 
-    kb.add_claim(
+    _claim(
         "ironside",
         "Eight distinct spaces on one campus, from 60 to 400 guests",
         "Lounge 60 · Glassbox 250 · Gallery 62 300 · Event Space and Ironsbend 400",
-        ["venue_enquiry", "capacity_fit", "local_venue"],
+        ["venue_enquiry", "capacity_fit"],
         proof_type="spec",
         source="Live venue pages, read 2026-06-18")
 
@@ -201,7 +273,21 @@ def seed_eien() -> None:
         "eien",
         display_name="Eien Health",
         positioning="",  # never established — intake will ask
+        selection={"primary_type": "product", "modes": [{"mode": "keyword"}]},
+        next_steps={"default": {"ask": "the product that matches what they described"}},
     )
+    for tag, pats, desc in [
+        ("wellness_routine", [["daily"], ["routine"], ["stack"], ["regimen"],
+                              ["take it with"]],
+         "fitting a product into an existing routine"),
+        ("subscription_lapse", [["cancel"], ["pause"], ["ran out"], ["reorder"],
+                                ["subscription"]],
+         "an existing customer at the point of lapsing"),
+        ("ingredient_question", [["ingredient"], ["dosage"], ["how much"],
+                                 ["contains"], ["allergen"]],
+         "wants a factual answer about what is in it"),
+    ]:
+        kb.add_situation("eien", tag, pats, desc, kind="problem")
     for phrase in [
         # disease claims — the line between a supplement and an unapproved drug
         "cure", "cures", "treat", "treats", "prevent", "prevents",
@@ -226,7 +312,23 @@ def seed_coverings() -> None:
         display_name="Coverings Etc",
         positioning="B2B surfacing and materials sold into architecture, design "
                     "and construction — specification sales, not retail.",
+        selection={"primary_type": "product", "modes": [{"mode": "keyword"}]},
+        next_steps={
+            "first_contact": {"ask": "a sample to the studio"},
+            "default": {"ask": "the spec sheet and a sample"},
+        },
     )
+    for tag, pats, desc in [
+        ("trade_specification", [["spec"], ["specify"], ["submittal"], ["a&d"],
+                                 ["architect"], ["designer"]],
+         "a project reaching material selection"),
+        ("sample_request", [["sample"], ["swatch"], ["send me"], ["chip"]],
+         "wants material in hand before specifying"),
+        ("dimension_check", [["size"], ["dimension"], ["thickness"], ["slab"],
+                             ["square feet"], ["sq ft"]],
+         "a dimension decides whether it works — a wrong number loses the job"),
+    ]:
+        kb.add_situation("coverings", tag, pats, desc, kind="problem")
     kb.add_audience(
         "coverings", "specifier", "Architect, designer or specifier",
         ["a wrong dimension loses the job",
@@ -235,6 +337,34 @@ def seed_coverings() -> None:
         ["spec", "A&D", "sample", "slab", "finish", "submittal", "project"],
         buying_trigger="A project reaching material selection",
         decision_timeline="1–3 months")
+
+
+def backfill() -> None:
+    """Fill columns that did not exist when a tenant was first seeded.
+
+    Auto-migration adds `selection` and `next_steps` to the table but cannot
+    know their values, so a brand row seeded earlier comes back with both
+    empty. For the agency that means the decision layer has nothing to propose
+    and every brief returns a blank ask — a silent regression that only shows
+    up in the output, which is the worst place to find one.
+    """
+    b = kb.brand("agency")
+    if b and not (b.next_steps or {}):
+        kb.set_brand(
+            "agency",
+            selection={"primary_type": "offer", "modes": [{"mode": "keyword"}]},
+            next_steps={
+                "referral_intro": {"entity_key": "fractional_cmo",
+                                   "ask": "a 25-minute call this week"},
+                "follow_up": {"entity_key": "diagnostic",
+                              "ask": "pick the thread back up with one specific next step"},
+                "dormant": {"entity_key": "diagnostic",
+                            "ask": "pick the thread back up with one specific next step"},
+                "first_contact": {"entity_key": "diagnostic",
+                                  "ask": "the paid diagnostic"},
+                "default": {"entity_key": "diagnostic", "ask": "the paid diagnostic"},
+            })
+        print("backfilled agency selection + next_steps")
 
 
 def report() -> None:
@@ -252,6 +382,7 @@ def main() -> int:
     if "--report" in sys.argv:
         report()
         return 0
+    backfill()
     for name, fn in (("baci", seed_baci), ("ironside", seed_ironside),
                      ("eien", seed_eien), ("coverings", seed_coverings)):
         fn()

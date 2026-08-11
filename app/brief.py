@@ -26,7 +26,8 @@ from . import config, kb
 
 log = logging.getLogger("brief")
 
-MAX_CLAIMS = 2  # never stack proof — two is persuasive, four is a pitch deck
+MAX_CLAIMS = 2   # never stack proof — two is persuasive, four is a pitch deck
+MAX_MATCHES = 3  # options, not a catalogue dump
 
 
 @dataclass
@@ -44,6 +45,7 @@ class Brief:
     audience_key: str = ""
     verbatim_ask: str = ""
     voiced_objection: str = ""
+    requirements: dict = field(default_factory=dict)  # hard facts they stated
 
     # 2 enrich
     enrichment: dict = field(default_factory=dict)
@@ -57,6 +59,8 @@ class Brief:
     # 4 select
     claims: list[dict] = field(default_factory=list)
     objection: dict = field(default_factory=dict)
+    matches: list[dict] = field(default_factory=list)  # what they sell that fits
+    unmet: list[str] = field(default_factory=list)     # nothing fits, and why
 
     # 5 decide
     offer: dict = field(default_factory=dict)
@@ -81,8 +85,19 @@ Return ONLY a JSON object:
   "audience_key": "ecom_inventory|digital_products|local_venue|b2b_spec|unknown",
   "verbatim_ask": "one sentence, their words where possible",
   "voiced_objection": "an objection they actually raised, else ''",
-  "keywords": ["salient nouns/phrases they used"]
+  "keywords": ["salient nouns/phrases they used"],
+  "requirements": {}
 }
+
+requirements: hard facts they STATED, as a flat object. Extract only what is
+written — never estimate, round or infer. Use these keys when they apply:
+  headcount   integer, number of people
+  seated      true only if they said seated/dinner/banquet
+  standing    true only if they said standing/reception/cocktail
+  date        their words for when, e.g. "March", "Sept 14"
+  budget      their words for money, e.g. "under $10k"
+  quantity    integer, units of a product
+Omit any key they did not state. An empty object is correct and expected.
 
 audience_key guidance — pick "unknown" rather than guessing:
   ecom_inventory   sells physical product it stocks
@@ -104,6 +119,8 @@ def classify(text: str, sender: str = "", model_fn=None) -> dict:
         log.warning("classify: unparseable model output")
         out = {}
     out.setdefault("keywords", [])
+    reqs = out.get("requirements")
+    out["requirements"] = reqs if isinstance(reqs, dict) else {}
     if out.get("audience_key") == "unknown":
         out["audience_key"] = ""
     if not out.get("domain") and "@" in sender:
@@ -236,7 +253,11 @@ def _matches(blob: str, patterns: list[tuple]) -> bool:
 
 
 def diagnose(classified: dict, enriched: dict,
-             sources_ok: list[str] | None = None) -> tuple[list[str], str]:
+             sources_ok: list[str] | None = None,
+             tenant: str = "") -> tuple[list[str], str]:
+    """Which situations apply. Patterns come from the tenant's own vocabulary
+    when it has authored one — the shared set below was written for the agency
+    selling B2B services, and a venue enquiry matched none of it."""
     sits: set[str] = set()
     sources_ok = sources_ok or []
 
@@ -245,7 +266,9 @@ def diagnose(classified: dict, enriched: dict,
 
     blob = " ".join([classified.get("verbatim_ask", ""),
                      *classified.get("keywords", [])]).lower()
-    for sit, patterns in _KEYWORD_SITUATIONS.items():
+    patterns_by_tag = (kb.situation_patterns(tenant) if tenant else {}) \
+        or _KEYWORD_SITUATIONS
+    for sit, patterns in patterns_by_tag.items():
         if _matches(blob, patterns):
             sits.add(sit)
 
@@ -269,7 +292,17 @@ def diagnose(classified: dict, enriched: dict,
                 enriched.get("has_email_capture") is False:
             sits.add("new_channel")
 
-    # The single headline constraint, most-specific first.
+    # The headline constraint. A tenant with its own vocabulary states what each
+    # situation means; the ladder below only applies to the shared default set,
+    # whose tags a venue or a product brand will never carry.
+    if tenant and patterns_by_tag is not _KEYWORD_SITUATIONS:
+        descs = kb.situation_desc(tenant)
+        for tag in sorted(sits):
+            if descs.get(tag):
+                return sorted(sits), descs[tag]
+        return sorted(sits), ("unclear from available signals" if not sits
+                              else f"stated: {', '.join(sorted(sits))}")
+
     if "margin_problem" in sits or "pricing_fear" in sits:
         constraint = "converting but margin is thin"
     elif "ads_not_working" in sits:
@@ -315,18 +348,28 @@ def _select(tenant: str, situations: list[str], audience_key: str,
     return picked, chosen
 
 
-def _decide(tenant: str, stage: str, enriched: bool) -> tuple[dict, str]:
-    offers = {e.key: e for e in kb.entities(tenant, "offer")}
-    if stage == "referral_intro":
-        o = offers.get("fractional_cmo")
-        return _offer_dict(o), "a 25-minute call this week"
-    if stage in ("follow_up", "dormant"):
-        o = offers.get("diagnostic")
-        return _offer_dict(o), "pick the thread back up with one specific next step"
-    if not enriched:
-        return {}, "one qualifying question — not a pitch"
-    o = offers.get("diagnostic")
-    return _offer_dict(o), "the paid diagnostic"
+def _decide(tenant: str, stage: str, has_signal: bool) -> tuple[dict, str]:
+    """What to propose. Driven by the tenant's own next_steps, not by offer keys
+    that only ever existed in the agency's catalogue.
+
+    `has_signal` is true when we learned anything at all — enrichment succeeded
+    or they stated a hard requirement. With nothing, a first contact gets a
+    question rather than a pitch, which is the one piece of the old hardcoded
+    logic worth keeping.
+    """
+    if stage == "first_contact" and not has_signal:
+        step = kb.next_step_for(tenant, "cold")
+        return {}, (step.get("ask") or "one qualifying question — not a pitch")
+
+    step = kb.next_step_for(tenant, stage)
+    if step:
+        by_key = {e.key: e for e in kb.entities(tenant)}
+        return _offer_dict(by_key.get(step.get("entity_key", ""))), \
+            step.get("ask", "")
+
+    # No configured next step. Say so rather than reaching for a key that
+    # happens to exist in another tenant's catalogue.
+    return {}, ""
 
 
 def _offer_dict(o) -> dict:
@@ -359,11 +402,35 @@ def assemble(tenant: str, text: str, sender: str = "", model_fn=None) -> Brief:
         voiced_objection=c.get("voiced_objection", ""),
     )
 
+    b.requirements = c.get("requirements", {})
     b.enrichment, b.sources_ok, b.sources_failed = enrich(b.domain)
-    b.situations, b.constraint = diagnose(c, b.enrichment, b.sources_ok)
+    b.situations, b.constraint = diagnose(c, b.enrichment, b.sources_ok, tenant)
     b.claims, b.objection = _select(tenant, b.situations, b.audience_key,
                                     b.voiced_objection)
-    b.offer, b.ask = _decide(tenant, b.stage, bool(b.enrichment))
+
+    # What they asked for, matched against what this tenant actually sells.
+    reqs = dict(b.requirements)
+    reqs.setdefault("keywords", c.get("keywords", []))
+    # Ranked over the WHOLE catalogue, then trimmed for the brief. Judging the
+    # gaps on the trimmed list would miss any unknown that fell below the cut.
+    ranked = kb.match_entities(tenant, reqs, limit=0)
+    b.matches = ranked[:MAX_MATCHES]
+
+    # `fits` is tri-state. Nothing satisfying a stated requirement is a real
+    # answer worth surfacing — but only when something was actually checked;
+    # a set of unknowns is not evidence that nothing fits.
+    checked = [m for m in ranked if m.get("basis") == "requirement"]
+    if checked and not any(m["fits"] is True for m in checked):
+        b.unmet = [m["why"] for m in checked if m["fits"] is False]
+
+    # Record the gaps only when they actually cost an answer. If four rooms
+    # already fit, a fifth with no capacity recorded blocked nothing, and
+    # counting it would bury the gaps that genuinely lose enquiries.
+    if ranked and not any(m["fits"] is True for m in ranked):
+        kb.record_unknowns(tenant, ranked, b.verbatim_ask)
+
+    b.offer, b.ask = _decide(tenant, b.stage,
+                             bool(b.enrichment or b.requirements))
 
     # A brief with no proof is a generic email waiting to happen — block it.
     if not b.claims:

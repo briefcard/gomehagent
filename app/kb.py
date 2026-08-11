@@ -72,7 +72,7 @@ def claims(tenant: str, situations: list[str] | None = None,
         ).all()
         scored = []
         for r in rows:
-            if r.expires_at and r.expires_at < now:
+            if r.expires_at and db.as_utc(r.expires_at) < now:
                 continue  # stale proof is not selectable
             overlap = len(set(r.situations or []) & want)
             if want and not overlap:
@@ -115,6 +115,54 @@ def objections(tenant: str, audience_key: str = "") -> list[db.KbObjection]:
         return rows
 
 
+def situations(tenant: str) -> set[str]:
+    """The valid situation tags for one tenant.
+
+    Falls back to the shared default set only when a tenant has authored none,
+    so existing behaviour is preserved while new tenants get their own words.
+    """
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbSituation).filter(
+            db.KbSituation.tenant == tenant).all()
+        tags = {r.tag for r in rows}
+    return tags or set(SITUATIONS)
+
+
+def situation_patterns(tenant: str) -> dict[str, list[tuple]]:
+    """Tag -> match patterns, for the diagnosis step."""
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbSituation).filter(
+            db.KbSituation.tenant == tenant).all()
+        out = {r.tag: [tuple(p) for p in (r.patterns or []) if p] for r in rows}
+    return {k: v for k, v in out.items() if v}
+
+
+def situation_desc(tenant: str) -> dict[str, str]:
+    """Tag -> the headline constraint it implies, in the tenant's own words."""
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbSituation).filter(
+            db.KbSituation.tenant == tenant).all()
+        return {r.tag: (r.description or "") for r in rows if r.description}
+
+
+def add_situation(tenant: str, tag: str, patterns: list[list[str]],
+                  description: str = "", kind: str = "problem") -> str:
+    tag = (tag or "").strip().lower().replace(" ", "_")
+    if not tag:
+        return "A situation needs a tag."
+    with db.SessionLocal() as s:
+        existing = s.query(db.KbSituation).filter(
+            db.KbSituation.tenant == tenant, db.KbSituation.tag == tag).first()
+        row = existing or db.KbSituation(tenant=tenant, tag=tag)
+        row.patterns = [list(p) for p in patterns]
+        row.description = description or row.description
+        row.kind = kind
+        if not existing:
+            s.add(row)
+        s.commit()
+    return f"{'Updated' if existing else 'Added'} situation {tag} for {tenant}."
+
+
 def entities(tenant: str, type: str = "", available_only: bool = True
              ) -> list[db.KbEntity]:
     with db.SessionLocal() as s:
@@ -127,6 +175,259 @@ def entities(tenant: str, type: str = "", available_only: bool = True
             rows = [r for r in rows if r.availability == "available"]
         s.expunge_all()
         return rows
+
+
+# --------------------------------------------------------------------------
+# Entity selection — reaching the thing actually being sold.
+#
+# Selection used to query claims and objections only. Entities were reachable
+# solely through a hardcoded agency offer key, so an enquiry that named a
+# headcount never touched the capacity data one table over. That is the defect
+# this section closes: the buyer states a requirement, and code finds what
+# satisfies it.
+# --------------------------------------------------------------------------
+
+def _num(value) -> float | None:
+    """Coerce an attribute to a number. '4,000 sq ft' -> 4000.0, '' -> None."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    import re as _re
+    m = _re.search(r"[\d,]+(?:\.\d+)?", str(value))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def selection_config(tenant: str) -> dict:
+    b = brand(tenant)
+    return dict((b.selection or {}) if b else {})
+
+
+def match_entities(tenant: str, requirements: dict | None = None,
+                   limit: int = 3) -> list[dict]:
+    """Rank what this tenant sells against what the buyer actually asked for.
+
+    Returns dicts rather than rows because the *reason* a thing matched is part
+    of the answer — a draft that names a venue must be able to say it seats the
+    headcount, and a generator can only say that if selection hands it over.
+
+    Entities that do NOT satisfy a stated requirement are returned too, marked
+    `fits: False`. "Nothing you have fits 600 seated" is a real answer, and
+    silently returning the closest thing would invent a fit that isn't there.
+    """
+    requirements = requirements or {}
+    cfg = selection_config(tenant)
+    etype = cfg.get("primary_type", "")
+    rows = entities(tenant, etype) if etype else entities(tenant)
+    if not rows:
+        return []
+
+    modes = cfg.get("modes") or [{"mode": "keyword"}]
+
+    def _base(r: db.KbEntity) -> dict:
+        return {"key": r.key, "name": r.name, "type": r.type, "price": r.price,
+                "description": r.description, "attributes": r.attributes or {}}
+
+    # --- what a word is worth -------------------------------------------
+    # Keyword hits search the entity's WORDS — name, description and attribute
+    # VALUES — never attribute names. A room that merely has a
+    # `seated_capacity` field would otherwise "match" the word seated.
+    def _blob(r: db.KbEntity) -> str:
+        return " ".join([r.name or "", r.description or "",
+                         *[str(v) for v in (r.attributes or {}).values()]]).lower()
+
+    # Attributes explicitly ruled out for an entity. An open-air garden has no
+    # seated capacity and never will; once that is said, it stops being
+    # reported as a gap AND stops appearing as an unknown in every result.
+    with db.SessionLocal() as _s:
+        ruled_out = {
+            (u.entity_key, u.attribute) for u in _s.query(db.KbUnknown).filter(
+                db.KbUnknown.tenant == tenant,
+                db.KbUnknown.status == "not_applicable").all()}
+
+    raw_words = [w.lower() for w in (requirements.get("keywords") or [])
+                 if len(w) > 2]
+    blobs = {r.key: _blob(r) for r in rows}
+
+    # A word that appears in almost everything carries no information — "white"
+    # in a tile catalogue, "gift" in a gift brand, "space" in a venue list.
+    # Document frequency decides this per catalogue, so it works for any client
+    # and any vocabulary without a hand-maintained stoplist anywhere.
+    words = raw_words
+    if len(rows) >= 4:
+        words = [w for w in raw_words
+                 if sum(1 for b in blobs.values() if w in b) <= 0.6 * len(rows)]
+
+    def _hits(r: db.KbEntity) -> list[str]:
+        return [w for w in words if w in blobs[r.key]]
+
+    # --- a stated requirement is authoritative ---------------------------
+    # `fits` is deliberately tri-state:
+    #   True  — a stated requirement was checked and satisfied
+    #   False — checked and NOT satisfied
+    #   None  — could not be checked, because the entity has no such data
+    # Anything that collapses None into either of the others is inventing: an
+    # entity with no seated capacity recorded is not "unsuitable", and a
+    # keyword match is relevance, never satisfaction.
+    for mode in [m for m in modes if m.get("mode") == "capacity_fit"]:
+        need = _num(requirements.get(mode.get("requirement", "headcount")))
+        if need is None:
+            continue
+        attrs = mode.get("attributes", {})
+        # Which attribute the requirement is measured against can itself depend
+        # on a stated fact — seated and standing are different rooms.
+        attr = attrs.get("default", "")
+        for flag, alt in attrs.items():
+            if flag != "default" and requirements.get(flag):
+                attr = alt
+                break
+        label = attr.replace("_", " ")
+
+        scored = []
+        for r in rows:
+            if (r.key, attr) in ruled_out:
+                continue  # said to be inapplicable — not an option, not a gap
+            have = _num((r.attributes or {}).get(attr))
+            if have is None:
+                # Surfaced, not dropped. Silently removing it would imply the
+                # option was ruled out, when in fact it was never measured.
+                scored.append({
+                    **_base(r), "fits": None, "basis": "unknown",
+                    "attribute": attr,  # so the gap can be recorded and answered
+                    "why": f"no {label} recorded — cannot be judged against {int(need)}",
+                    "_rank": (1, 0, -len(_hits(r))),
+                })
+                continue
+            fits = have >= need
+            scored.append({
+                **_base(r), "fits": fits, "basis": "requirement",
+                "why": (f"{label} {int(have)} "
+                        f"{'covers' if fits else 'is short of'} {int(need)}"),
+                # Satisfied first, then unknown, then known-short. Within the
+                # satisfied group, the smallest that still works (least waste);
+                # keyword relevance only ever breaks a tie.
+                "_rank": (0 if fits else 2, abs(have - need), -len(_hits(r))),
+            })
+        if scored:
+            out = [dict(d) for d in sorted(scored, key=lambda d: d["_rank"])]
+            for d in out:
+                d.pop("_rank", None)
+            return out[:limit] if limit else out
+
+    # --- no requirement to check: relevance only -------------------------
+    scored = []
+    for r in rows:
+        hits = _hits(r)
+        if words and not hits:
+            continue
+        scored.append({
+            **_base(r),
+            # Never True. Nothing was verified, so nothing may be asserted.
+            "fits": None,
+            "basis": "keyword" if hits else "unranked",
+            "why": (f"mentions {', '.join(hits)}" if hits
+                    else "no stated requirement to match on"),
+            "_rank": (-len(hits), r.name or ""),
+        })
+    out = [dict(d) for d in sorted(scored, key=lambda d: d["_rank"])]
+    for d in out:
+        d.pop("_rank", None)
+    return out[:limit] if limit else out
+
+
+# --------------------------------------------------------------------------
+# Unknowns — the attribute-level backlog.
+#
+# `match_entities` stays pure: it reports what it could not judge and the
+# caller decides whether this occurrence is worth remembering. Writing on a
+# read would make every speculative match mutate the backlog.
+# --------------------------------------------------------------------------
+
+def record_unknowns(tenant: str, matches: list[dict], asked_for: str = "") -> int:
+    """Count the gaps a real enquiry just ran into. Returns rows touched."""
+    n = 0
+    with db.SessionLocal() as s:
+        for m in matches:
+            if m.get("basis") != "unknown":
+                continue
+            attr = m.get("attribute") or ""
+            if not attr:
+                continue
+            row = s.query(db.KbUnknown).filter(
+                db.KbUnknown.tenant == tenant,
+                db.KbUnknown.entity_key == m.get("key", ""),
+                db.KbUnknown.attribute == attr,
+                db.KbUnknown.status == "open").first()
+            if row:
+                row.hits = str(int(row.hits or "0") + 1)
+                row.last_seen = db.utcnow()
+                if asked_for:
+                    row.asked_for = asked_for
+            else:
+                s.add(db.KbUnknown(tenant=tenant, entity_key=m.get("key", ""),
+                                   entity_name=m.get("name", ""), attribute=attr,
+                                   asked_for=asked_for))
+            n += 1
+        s.commit()
+    return n
+
+
+def unknowns(tenant: str = "", status: str = "open") -> list[db.KbUnknown]:
+    """Open gaps, most costly first — ranked by how often each blocked an answer."""
+    with db.SessionLocal() as s:
+        q = s.query(db.KbUnknown).filter(db.KbUnknown.status == status)
+        if tenant:
+            q = q.filter(db.KbUnknown.tenant == tenant)
+        rows = q.all()
+        s.expunge_all()
+    return sorted(rows, key=lambda r: -int(r.hits or "0"))
+
+
+def resolve_unknown(unknown_id: str, value: str) -> str:
+    """Answer a gap: write the value onto the entity and close the row.
+
+    `not applicable` is a real answer and is recorded as one — an outdoor
+    garden may genuinely have no seated capacity, and re-asking forever is
+    what makes a system feel broken.
+    """
+    value = (value or "").strip()
+    if not value:
+        return "Needs a value, or say 'n/a'."
+    with db.SessionLocal() as s:
+        row = s.get(db.KbUnknown, unknown_id)
+        if not row:
+            return "No such gap."
+        if value.lower() in ("n/a", "na", "none", "not applicable"):
+            row.status, row.answer = "not_applicable", value
+            s.commit()
+            return (f"Marked not applicable — {row.entity_name} will stop being "
+                    f"offered against {row.attribute.replace('_', ' ')}.")
+        ent = s.query(db.KbEntity).filter(
+            db.KbEntity.tenant == row.tenant,
+            db.KbEntity.key == row.entity_key).first()
+        if not ent:
+            return f"{row.entity_key} is no longer in the catalogue."
+        attrs = dict(ent.attributes or {})
+        num = _num(value)
+        attrs[row.attribute] = int(num) if num is not None and num == int(num) else value
+        ent.attributes = attrs
+        ent.verified_at = db.utcnow()
+        row.status, row.answer = "answered", value
+        s.commit()
+        name, attr = ent.name, row.attribute.replace("_", " ")
+    return f"{name}: {attr} = {value}. It can now be matched against that."
+
+
+def next_step_for(tenant: str, stage: str) -> dict:
+    """What this tenant proposes at this stage. Data, not hardcoded offer keys."""
+    b = brand(tenant)
+    steps = (b.next_steps or {}) if b else {}
+    return dict(steps.get(stage) or steps.get("default") or {})
 
 
 # --------------------------------------------------------------------------
@@ -193,7 +494,7 @@ def ensure_brand(tenant: str, display_name: str = "") -> db.KbBrand:
 def set_brand(tenant: str, **fields) -> str:
     """Update brand-level fields. `tone` is a convenience into voice.tone."""
     allowed = {"display_name", "positioning", "elevator", "voice",
-               "banned_claims", "approval_policy"}
+               "banned_claims", "approval_policy", "selection", "next_steps"}
     tone = fields.pop("tone", None)
     bad = set(fields) - allowed
     if bad:
@@ -230,21 +531,55 @@ def add_banned(tenant: str, phrase: str) -> str:
 
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
-              strength: str = "strong") -> str:
-    unknown = [t for t in tags if t not in SITUATIONS]
+              strength: str = "strong", status: str = "active") -> str:
+    valid = situations(tenant)
+    unknown = [t for t in tags if t not in valid]
     if unknown:
-        return (f"Unknown tags: {', '.join(unknown)}\n"
-                f"Valid: {', '.join(sorted(SITUATIONS))}")
+        return (f"Unknown tags for {tenant}: {', '.join(unknown)}\n"
+                f"Valid: {', '.join(sorted(valid))}")
     if not tags:
         return "Needs at least one situation tag, or it can never be selected."
     with db.SessionLocal() as s:
         s.add(db.KbClaim(tenant=tenant, claim=claim, evidence=evidence,
                          proof_type=proof_type, source=source or "captured",
-                         situations=tags, strength=strength,
+                         situations=tags, strength=strength, status=status,
                          verified_at=db.utcnow()))
         s.commit()
+    if status != "active":
+        # claims() filters on active, so a pending claim is invisible to
+        # selection until a human has looked at it. That is the point.
+        return (f"Submitted for review — it will not be used until approved.\n"
+                f"{claim}")
     return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
             f"{claim}\n{evidence}\ntags: {', '.join(tags)}")
+
+
+def pending_claims(tenant: str = "") -> list[db.KbClaim]:
+    """Claims awaiting review — client-submitted proof, not yet selectable."""
+    with db.SessionLocal() as s:
+        q = s.query(db.KbClaim).filter(db.KbClaim.status == "pending")
+        if tenant:
+            q = q.filter(db.KbClaim.tenant == tenant)
+        rows = q.order_by(db.KbClaim.verified_at.desc()).all()
+        s.expunge_all()
+        return rows
+
+
+def review_claim(claim_id: str, approve: bool) -> str:
+    with db.SessionLocal() as s:
+        row = s.get(db.KbClaim, claim_id)
+        if not row:
+            return "No such claim."
+        row.status = "active" if approve else "retired"
+        s.commit()
+        text = row.claim
+    return (f"Approved — now selectable.\n{text}" if approve
+            else f"Rejected.\n{text}")
+
+
+def retire_claim(claim_id: str) -> str:
+    """Take a claim out of selection without deleting the record of it."""
+    return review_claim(claim_id, approve=False)
 
 
 def add_audience(tenant: str, key: str, name: str, pains: list[str],
@@ -338,6 +673,9 @@ INTAKE_STEPS = [
     dict(id="claim", asks="claim",
          q="One thing this brand can prove, with the number.",
          hint="claim | evidence | situation tags (spaces)"),
+    dict(id="next_steps", asks="brand",
+         q="What do you want them asked to do on a first reply?",
+         hint="just the ask, e.g. 'a walkthrough' or 'a sample to the studio'"),
 ]
 
 _STEP = {s["id"]: s for s in INTAKE_STEPS}
@@ -356,6 +694,10 @@ def gaps(tenant: str) -> list[dict]:
         "objection": len(objections(tenant)) > 0,
         "entity": len(entities(tenant, available_only=False)) > 0,
         "claim": len(claims(tenant)) > 0,
+        # Without this the decision layer has nothing to propose and the ask
+        # comes back empty — which is exactly what happened to the agency when
+        # its hardcoded offer keys were removed and nothing replaced them.
+        "next_steps": bool(b and (b.next_steps or {})),
     }
     return [s for s in INTAKE_STEPS if not have.get(s["id"])]
 
@@ -365,7 +707,8 @@ def next_step(tenant: str) -> dict | None:
     return g[0] if g else None
 
 
-def apply_answer(tenant: str, step_id: str, text: str) -> str:
+def apply_answer(tenant: str, step_id: str, text: str,
+                 source: str = "owner") -> str:
     """Route a free-text answer into the right table. Deterministic parsing —
     a model guessing which field a sentence belongs to is a silent-corruption
     machine, and the KB is the one place nothing may be silently wrong."""
@@ -380,7 +723,11 @@ def apply_answer(tenant: str, step_id: str, text: str) -> str:
     # different question lands as plausible-looking garbage — a pipe-formatted
     # objection became a four-word "voice" in testing. A pipe is never valid in
     # these, so treat it as a misrouted answer and say so.
-    if step_id in ("display_name", "positioning", "tone") and "|" in text:
+    # banned_claims belongs here too: a misrouted answer stored as a banned
+    # phrase would silently reject legitimate drafts forever. Fail-closed in
+    # the wrong direction is still wrong.
+    if step_id in ("display_name", "positioning", "tone", "banned_claims",
+                   "next_steps") and "|" in text:
         return (f"That looks like an answer to a different question — "
                 f"{_STEP[step_id]['hint']}. Send /next to see the current one.")
 
@@ -394,6 +741,12 @@ def apply_answer(tenant: str, step_id: str, text: str) -> str:
             return ("Tone is three or four words, not a sentence — "
                     "e.g. direct, warm, unhurried.")
         return set_brand(tenant, tone=text)
+    if step_id == "next_steps":
+        b = brand(tenant)
+        steps = dict((b.next_steps or {}) if b else {})
+        steps["default"] = {"ask": text}
+        steps.setdefault("first_contact", {"ask": text})
+        return set_brand(tenant, next_steps=steps)
     if step_id == "banned_claims":
         phrases = _split(text.replace("\n", ";"))
         return "\n".join(add_banned(tenant, p) for p in phrases) or "Nothing captured."
@@ -419,7 +772,11 @@ def apply_answer(tenant: str, step_id: str, text: str) -> str:
             return f"Format: {step['hint']}"
         import re as _re
         tags = [t.strip().lower() for t in _re.split(r"[\s,]+", parts[2]) if t.strip()]
-        return add_claim(tenant, parts[0], parts[1], tags)
+        # A client will always over-claim. Their proof waits for review; the
+        # owner's does not.
+        return add_claim(tenant, parts[0], parts[1], tags,
+                         source=f"submitted by {source}" if source != "owner" else "",
+                         status="pending" if source != "owner" else "active")
     return "Unrecognised step."
 
 
@@ -615,6 +972,21 @@ def seed_agency(force: bool = False) -> dict:
             ],
             approval_policy={"auto_publish": [],
                              "requires_signoff": ["outbound_email", "proposal"]},
+            selection={"primary_type": "offer", "modes": [{"mode": "keyword"}]},
+            # Previously hardcoded in brief._decide as agency offer keys. Now
+            # data, so a tenant selling spaces or products is not routed to a
+            # "diagnostic" that exists only in this catalogue.
+            next_steps={
+                "referral_intro": {"entity_key": "fractional_cmo",
+                                   "ask": "a 25-minute call this week"},
+                "follow_up": {"entity_key": "diagnostic",
+                              "ask": "pick the thread back up with one specific next step"},
+                "dormant": {"entity_key": "diagnostic",
+                            "ask": "pick the thread back up with one specific next step"},
+                "first_contact": {"entity_key": "diagnostic",
+                                  "ask": "the paid diagnostic"},
+                "default": {"entity_key": "diagnostic", "ask": "the paid diagnostic"},
+            },
         ))
 
         for claim, ev, ptype, src, sits, strength in _AGENCY_CLAIMS:

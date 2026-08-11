@@ -75,34 +75,61 @@ CATALOG = {
     "lead_responder": dict(
         name="Lead responder",
         does="Answers an inbound enquiry with a grounded, approved draft.",
-        requires=("inbox",), requires_any=(), needs_kb=True),
+        requires=("inbox",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "audience", "objection", "claim",
+                  "next_steps")),
     "campaign_email": dict(
         name="Campaign email",
         does="Builds and schedules campaign sends from the catalogue and calendar.",
-        requires=("esp",), requires_any=(), needs_kb=True),
+        requires=("esp",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "entity", "claim")),
     "blog": dict(
         name="Blog / content",
         does="Publishes grounded articles against the keyword map.",
-        requires=("cms",), requires_any=(), needs_kb=True),
+        requires=("cms",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "audience", "claim")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",
-        requires=("commerce", "esp"), requires_any=(), needs_kb=False),
+        requires=("commerce", "esp"), requires_any=(), needs_kb=False,
+        kb_needs=("entity",)),
     "service_desk": dict(
         name="Service desk",
         does="Handles routine inbound support with a drafted, checked reply.",
-        requires=("inbox",), requires_any=(), needs_kb=True),
+        requires=("inbox",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "objection", "entity")),
     "reports": dict(
         name="Reports",
         does="The weekly number, assembled from whatever is connected.",
-        requires=(), requires_any=("analytics", "ads", "commerce"), needs_kb=False),
+        requires=(), requires_any=("analytics", "ads", "commerce"), needs_kb=False,
+        kb_needs=()),
 }
 
 
 def spec(key: str) -> dict:
     return CATALOG.get(key, dict(name=key.replace("_", " ").title(),
                                  does="", requires=(), requires_any=(),
-                                 needs_kb=False))
+                                 needs_kb=False, kb_needs=()))
+
+
+def waiting_on(tenant: str) -> dict[str, list[str]]:
+    """Which installed systems are blocked on each outstanding KB answer.
+
+    This is what makes intake scale: a system declares the knowledge it needs,
+    and the questions a client is asked are generated from the systems actually
+    switched on for them. Adding a system later adds its questions automatically
+    — nobody has to remember to update an onboarding form.
+    """
+    from . import kb
+    open_steps = {g["id"] for g in kb.gaps(tenant)}
+    out: dict[str, list[str]] = {}
+    for row in for_tenant(tenant):
+        if row.status == "retired":
+            continue
+        for step in spec(row.key).get("kb_needs", ()):
+            if step in open_steps:
+                out.setdefault(step, []).append(row.name)
+    return out
 
 
 # ---------------------------------------------------------------------------

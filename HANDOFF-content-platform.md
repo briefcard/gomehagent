@@ -39,11 +39,20 @@ and six reference artifacts (§11).
 | KB write layer + guided intake (`/next`) | Built, tested — **not yet pushed** |
 | Knowledge tab (console) | Built, rendered — **not yet pushed** |
 | KB seeded for baci / ironside / eien / coverings | Script written, **not yet run against prod** |
-| Generator → validator → send | **Not built — next slice** |
+| Tenant-shaped selection (rec 1) | Built, tested — **not yet pushed** |
+| Unknowns feedback loop (`KbUnknown`, `/unknowns`) | Built, tested — **not yet pushed** |
+| Client intake links (`/intake/<token>`) | Built, tested — **not yet pushed** |
+| Readiness bar means something (rec 2) | **Not built** |
+| Ledger + guidance wired into the path (rec 3) | **Not built** |
+| Generator / validator / send (rec 4) | **Not built** |
+
 | Reports (ads, business health) | Not started |
 | Canva | Not connected (OAuth, needs auth layer) |
-| Client web login / approval inbox | Not started |
 | Agent scoping for non-owners | **Not started — blocks client access** |
+
+**Read `DEFECTS.md` before touching `kb.py`, `brief.py` or `systems.py`** — it
+records every defect found so far, the six patterns they share, and what is
+still broken.
 
 Live service: `https://assistant-web-zm2d.onrender.com`
 Bot: `@Gomehadmin_bot`
@@ -102,7 +111,48 @@ New this session:
 | `scripts/test_brief.py` | Offline test harness for the assembler |
 | `app/systems.py` | Systems registry: catalogue, `ready()` blockers, autonomy ladder + gates, run ledger, per-system feedback threads, `board()` |
 | `scripts/test_systems.py` | Offline harness for the registry — 22 checks, no network |
-| `scripts/seed_kb.py` | Seeds baci/ironside/eien/coverings from established facts only; `--report` shows remaining gaps |
+| `scripts/seed_kb.py` | Seeds baci/ironside/eien/coverings from established facts only; `--report` shows remaining gaps; `backfill()` fills columns added after a tenant was first seeded |
+| `scripts/test_selection.py` | Tenant-shaped selection + the unknowns loop |
+
+**Tenant-shaped selection (Aug 2026) — recommendation 1 of 4.** Proven broken
+by running a real Ironside enquiry: "220 guests seated in March" produced
+`situations: []`, an empty offer, and never consulted the eight venues whose
+capacities answer the question. Three causes, all fixed:
+
+- **`KbSituation`** — the diagnostic vocabulary is per tenant, as data. The
+  shared module constant was agency-B2B language that no venue or product
+  enquiry could ever match. `SITUATIONS` remains only as the fallback for a
+  tenant that has authored none.
+- **`kb.match_entities()`** — selection reaches what the tenant actually sells.
+  A stated requirement is checked against entity attributes; keyword relevance
+  only ever breaks a tie.
+- **`KbBrand.next_steps` / `.selection`** — the decision layer no longer
+  hardcodes `diagnostic` and `fractional_cmo`, which existed only in the
+  agency's catalogue.
+
+Three general defects found while testing, each of which would have hit any
+client with any vocabulary:
+
+1. A keyword match on the word "seated" — present only in the ATTRIBUTE NAME
+   `seated_capacity` — ranked a 200-seat room first for a party of 220. The
+   blob now searches values, never keys.
+2. A keyword match asserted `fits: True`. Relevance is not satisfaction.
+   `fits` is now tri-state: `True` checked and satisfied, `False` checked and
+   not, `None` could not be checked. Keyword matches are always `None`.
+3. Entities *lacking* the attribute were silently dropped, implying they had
+   been ruled out. They now surface as unknown, ranked between fits and
+   known-short.
+
+A word that appears in more than 60% of a catalogue is discarded as
+uninformative — computed per catalogue from document frequency, so it works
+for any client with no hand-maintained stoplist anywhere.
+
+**`KbUnknown` — the attribute-level feedback loop.** When an enquiry finds
+nothing that fits, every option that could not be judged is logged and counted.
+`/unknowns` poses the costliest gap; the reply writes the value onto the entity
+and it becomes matchable immediately. `n/a` marks the attribute inapplicable —
+it stops being asked about *and* stops appearing in results. Gaps that blocked
+nothing are never logged, so the queue stays ranked by real cost.
 | `scripts/test_kb.py` | Offline harness for the KB write layer + guided intake |
 
 **KB write layer + guided intake (Aug 2026).** `kb.py` gained a write half and
