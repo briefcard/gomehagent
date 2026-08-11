@@ -108,7 +108,8 @@ def classify(text: str, sender: str = "", model_fn=None) -> dict:
         out["audience_key"] = ""
     if not out.get("domain") and "@" in sender:
         dom = sender.split("@")[-1].strip("> ").lower()
-        if dom not in ("gmail.com", "outlook.com", "yahoo.com", "hotmail.com", "icloud.com"):
+        if dom not in ("gmail.com", "outlook.com", "yahoo.com", "hotmail.com",
+                       "icloud.com", "example.com", "example.org", "test.com"):
             out["domain"] = dom
     return out
 
@@ -200,44 +201,72 @@ def enrich(domain: str) -> tuple[dict, list[str], list[str]]:
 # ---------------------------------------------------------------------------
 
 # Things they said -> situations. Their words are evidence.
+#
+# Each entry is a list of PATTERNS; a pattern is a tuple of substrings that
+# must ALL appear. Roots rather than whole phrases, because real prospects
+# write "raising prices" not "raise prices" and "landing in spam" not
+# "spam folder" — literal phrases silently missed both in testing.
 _KEYWORD_SITUATIONS = {
-    "margin_problem": ("margin", "profitability", "profit", "cogs", "landed cost"),
-    "pricing_fear": ("price increase", "raise prices", "pricing", "too expensive"),
-    "ads_not_working": ("ads stopped", "roas", "cac", "ads aren't", "ads are not",
-                        "performance dropped", "cpa"),
-    "no_traffic": ("traffic", "seo", "not ranking", "visibility", "nobody finds"),
-    "email_problems": ("deliverability", "spam folder", "open rate", "email list"),
-    "new_channel": ("affiliate", "new channel", "wholesale", "expand into"),
-    "us_market_entry": ("us market", "launch in the us", "enter the us"),
-    "scaling": ("scale", "grow", "growth", "next level"),
-    "team_exists": ("our team", "my team", "our marketing manager", "in-house"),
-    "wants_operator": ("hands on", "someone who's done it", "operator"),
+    "margin_problem": [("margin",), ("profitab",), ("cogs",), ("landed cost",),
+                       ("cost of goods",)],
+    "pricing_fear": [("rais", "price"), ("pricing",), ("underpriced",),
+                     ("too expensive",), ("price increas",), ("charge more",)],
+    "ads_not_working": [("ads", "stopped"), ("roas",), ("cac",), ("cpa",),
+                        ("ads", "not work"), ("ads", "aren't work"),
+                        ("performance", "drop"), ("ads", "dying"),
+                        ("acquisition", "cost")],
+    "no_traffic": [("traffic",), ("seo",), ("rank",), ("visibilit",),
+                   ("nobody finds",), ("not showing up",), ("invisible",)],
+    "email_problems": [("spam",), ("deliverab",), ("open rate",), ("email list",),
+                       ("inbox",), ("unsubscrib",)],
+    "new_channel": [("affiliate",), ("new channel",), ("wholesale",),
+                    ("expand into",), ("another channel",)],
+    "us_market_entry": [("us market",), ("launch in the us",), ("enter the us",),
+                        ("american market",)],
+    "scaling": [("scale",), ("scaling",), ("grow",), ("next level",)],
+    "team_exists": [("our team",), ("my team",), ("in-house",),
+                    ("marketing manager",), ("our marketer",)],
+    "wants_operator": [("hands on",), ("hands-on",), ("actually done it",),
+                       ("operator",), ("run it yourself",)],
 }
 
 
-def diagnose(classified: dict, enriched: dict) -> tuple[list[str], str]:
+def _matches(blob: str, patterns: list[tuple]) -> bool:
+    return any(all(part in blob for part in pat) for pat in patterns)
+
+
+def diagnose(classified: dict, enriched: dict,
+             sources_ok: list[str] | None = None) -> tuple[list[str], str]:
     sits: set[str] = set()
+    sources_ok = sources_ok or []
 
     if classified.get("audience_key"):
         sits.add(classified["audience_key"])
 
     blob = " ".join([classified.get("verbatim_ask", ""),
                      *classified.get("keywords", [])]).lower()
-    for sit, needles in _KEYWORD_SITUATIONS.items():
-        if any(n in blob for n in needles):
+    for sit, patterns in _KEYWORD_SITUATIONS.items():
+        if _matches(blob, patterns):
             sits.add(sit)
 
     if classified.get("voiced_objection"):
         sits.add("solo_operator_doubt")
 
-    # Signals from their own data outrank anything they told us.
-    if enriched:
-        if enriched.get("visible") is False:
-            sits.add("no_traffic")
+    # Signals from their own data outrank anything they told us — but ONLY
+    # from a source that actually answered. A page fetch that returned a
+    # parking page or an error looks identical to a real site with no signup
+    # form, and inferring "they have no owned channel" from that is a
+    # fabricated diagnosis, not a thin one.
+    if "semrush" in sources_ok and enriched.get("visible") is False:
+        sits.add("no_traffic")
+    if "site" in sources_ok:
         if enriched.get("platform") == "shopify" and \
                 classified.get("audience_key") in ("", "ecom_inventory"):
             sits.add("ecom_dtc")
-        if enriched.get("has_email_capture") is False:
+        # Requires a recognised platform: on an unidentifiable page the
+        # absence of a signup form tells us nothing.
+        if enriched.get("platform") != "unknown" and \
+                enriched.get("has_email_capture") is False:
             sits.add("new_channel")
 
     # The single headline constraint, most-specific first.
@@ -331,7 +360,7 @@ def assemble(tenant: str, text: str, sender: str = "", model_fn=None) -> Brief:
     )
 
     b.enrichment, b.sources_ok, b.sources_failed = enrich(b.domain)
-    b.situations, b.constraint = diagnose(c, b.enrichment)
+    b.situations, b.constraint = diagnose(c, b.enrichment, b.sources_ok)
     b.claims, b.objection = _select(tenant, b.situations, b.audience_key,
                                     b.voiced_objection)
     b.offer, b.ask = _decide(tenant, b.stage, bool(b.enrichment))
