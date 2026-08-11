@@ -18,7 +18,10 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
+    from . import channel
     return {"ok": True, "whatsapp": config.WHATSAPP_ENABLED,
+            "telegram": config.TELEGRAM_ENABLED,
+            "ops_channel": channel.active(),
             "inboxes": list(config.GMAIL_ACCOUNTS)}
 
 
