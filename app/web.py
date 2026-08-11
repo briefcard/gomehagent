@@ -1030,3 +1030,22 @@ def verify_tenant(key: str = "", tenant: str = "") -> dict:
     if not tenant:
         return {"tenants": [tenants.verify(t.key) for t in tenants.all_tenants()]}
     return tenants.verify(tenant)
+
+
+@app.get("/admin/seed_kb")
+def seed_kb(key: str = "", report_only: str = "") -> dict:
+    """Seed the knowledge base for baci / ironside / eien / coverings.
+
+    The data lives in app/kb_seed.py and was previously only runnable from a
+    laptop with DATABASE_URL pointed at production — which meant it had never
+    been run at all. Idempotent: individual seeds no-op when rows exist.
+
+    /admin/seed_kb?key=SECRET&report_only=1   show gaps, change nothing
+    /admin/seed_kb?key=SECRET                 seed, then show gaps
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb_seed
+    if report_only:
+        return {"status": kb_seed.status()}
+    return kb_seed.seed_all()
