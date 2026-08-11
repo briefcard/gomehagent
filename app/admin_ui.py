@@ -13,7 +13,7 @@ from __future__ import annotations
 import html
 import json
 
-from . import config, db, systems, tenants
+from . import config, db, kb, systems, tenants
 
 # The instructions that used to live in a separate manual. Kept beside the
 # fields so a value is never entered from memory.
@@ -134,13 +134,13 @@ ul.bl{margin:0;padding-left:18px;font-size:.85rem;color:var(--ink2)}
 ul.bl li{margin:2px 0}
 """
 
-_TABS = (("accounts", "Accounts"), ("systems", "Systems"))
+_TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"))
 
 
-def _shell(key: str, tab: str, title: str, body: str) -> str:
+def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}">{label}</a>'
+        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}{suffix if t == tab else ""}">{label}</a>'
         for t, label in _TABS)
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -479,3 +479,178 @@ def render_systems(key: str) -> str:
 <p class="mut">Guidance shapes drafting. Rules are enforced by code. When a correction
 matters every single time, make it a rule — a prompt that usually obeys is not a control.</p>
 """)
+
+
+# ---------------------------------------------------------------------------
+# Knowledge tab
+#
+# The KB had no read surface at all — `/kb` returned four counts, which tells
+# you a claim exists but never which one, or whether it is any good. Everything
+# the generators will be grounded in is shown here in full, because proof you
+# cannot read is proof you cannot trust.
+# ---------------------------------------------------------------------------
+
+def _kb_add_form(key: str, tenant: str, step_id: str, label: str,
+                 hint: str, rows: int = 2) -> str:
+    return f"""
+    <form class="f" method="get" action="/admin/kb_add">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="step" value="{step_id}">
+      <label>{_esc(label)}</label>
+      <div class="what">{_esc(hint)}</div>
+      <textarea name="text" rows="{rows}" placeholder="{_esc(hint)}"></textarea>
+      <div class="row"><button>Add</button></div>
+    </form>"""
+
+
+def _kb_list(title: str, items: list[str], empty: str) -> str:
+    if not items:
+        return (f'<details><summary>{_esc(title)} (0)</summary>'
+                f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
+    body = "".join(f'<div class="msg">{i}</div>' for i in items)
+    return (f'<details><summary>{_esc(title)} ({len(items)})</summary>'
+            f'<div class="thread" style="margin-top:10px">{body}</div></details>')
+
+
+def render_kb(key: str, tenant: str = "") -> str:
+    rows = tenants.all_tenants(include_paused=True)
+    tenant = tenant or (rows[0].key if rows else "")
+    t = tenants.get(tenant)
+
+    picker = "".join(
+        f'<a class="{"on" if r.key == tenant else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;tenant={_esc(r.key)}">'
+        f'{_esc(r.name)}</a>' for r in rows)
+
+    if not t:
+        return _shell(key, "kb", "Knowledge",
+                      '<div class="note">No accounts yet. Run '
+                      '<code>/admin/register_owner</code> first.</div>')
+
+    c = kb.completeness(tenant)
+    gaps = kb.gaps(tenant)
+    b = kb.brand(tenant)
+    voice = (b.voice or {}) if b else {}
+
+    if gaps:
+        nxt = gaps[0]
+        ask = f"""
+        <div class="card">
+          <div class="head"><h2>Next most useful question</h2>
+            <span class="chip off">{len(gaps)} missing</span></div>
+          <p><strong>{_esc(nxt['q'])}</strong></p>
+          <p class="mut">{_esc(nxt['hint'])}</p>
+          <form class="f" method="get" action="/admin/kb_add">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="step" value="{nxt['id']}">
+            <textarea name="text" rows="2" placeholder="{_esc(nxt['hint'])}"></textarea>
+            <div class="row"><button>Answer</button>
+            <span class="mut">or send <code>/next</code> to the bot and reply there</span></div>
+          </form>
+        </div>"""
+    else:
+        ask = ('<div class="card"><div class="head"><h2>Complete</h2>'
+               '<span class="chip on">ready</span></div>'
+               '<p class="mut">Everything the pipeline requires is present. More proof '
+               'is still better than less — keep adding claims as they are earned.</p></div>')
+
+    banned = (b.banned_claims or []) if b else []
+    banned_html = "".join(f'<span class="chip off">{_esc(p)}</span>' for p in banned) \
+        or '<span class="mut">None — the validator has nothing to enforce.</span>'
+
+    claims_html = _kb_list("Claims", [
+        f"<div>{_esc(r.claim)}</div>"
+        f"<div class='when'>{_esc(r.evidence or '')}</div>"
+        f"<div class='when'><code>{_esc(' '.join(r.situations or []))}</code> · "
+        f"{_esc(r.strength or '')} · {_esc(r.source or '')}</div>"
+        for r in kb.claims(tenant)],
+        "No proof. Any draft that needs a number will be blocked.")
+
+    aud_html = _kb_list("Audiences", [
+        f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.key)}</code></div>"
+        f"<div class='when'>pains: {_esc('; '.join(r.pains or []))}</div>"
+        f"<div class='when'>their words: {_esc(', '.join(r.vocabulary or []))}</div>"
+        for r in kb.audiences(tenant)],
+        "No segments. Selection cannot narrow to a buyer.")
+
+    obj_html = _kb_list("Objections", [
+        f"<div><strong>{_esc(r.objection)}</strong></div>"
+        f"<div class='when'>{_esc(r.response)}</div>"
+        for r in kb.objections(tenant)],
+        "None. This is human-authored and it is half of the intake.")
+
+    ent_html = _kb_list("Things they sell", [
+        f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.type)}</code> "
+        f"{_esc(r.price or '')}</div>"
+        f"<div class='when'>{_esc(r.description or '')}</div>"
+        + (f"<div class='when'><code>{_esc(str(r.attributes))}</code></div>"
+           if r.attributes else "")
+        for r in kb.entities(tenant, available_only=False)],
+        "Nothing catalogued.")
+
+    forms = (
+        _kb_add_form(key, tenant, "claim", "Add a claim",
+                     "claim | evidence | situation tags (spaces)")
+        + _kb_add_form(key, tenant, "objection", "Add an objection",
+                       "objection | your approved answer")
+        + _kb_add_form(key, tenant, "audience", "Add an audience",
+                       "key | name | pains (semicolons) | their words (semicolons)")
+        + _kb_add_form(key, tenant, "entity", "Add something they sell",
+                       "type | key | name | price | description")
+        + _kb_add_form(key, tenant, "banned_claims", "Add a hard rule",
+                       "phrases the validator must reject, separated by semicolons", 1)
+        + _kb_add_form(key, tenant, "positioning", "Set positioning",
+                       "one sentence: what they do, and for whom")
+        + _kb_add_form(key, tenant, "tone", "Set voice",
+                       "three or four words, comma separated", 1))
+
+    return _shell(key, "kb", "Knowledge", f"""
+<div>
+  <h1>Knowledge</h1>
+  <p class="mut">Everything the generators are allowed to say, per account. A draft
+  may assert nothing that is not on this page — which is why an empty section here
+  is a blocked pipeline there, not a cosmetic gap.</p>
+</div>
+
+<div class="tabs">{picker}</div>
+
+<div class="card">
+  <div class="head">
+    <h2>{_esc(t.name)}</h2><code>{_esc(tenant)}</code>
+    <span class="chips">
+      <span class="chip {'on' if c['ready'] else 'off'}">{'ready' if c['ready'] else 'not ready'}</span>
+    </span>
+  </div>
+  <div class="stat">
+    <span><b>{c['counts'].get('claims', 0)}</b> claims</span>
+    <span><b>{c['counts'].get('audiences', 0)}</b> audiences</span>
+    <span><b>{c['counts'].get('objections', 0)}</b> objections</span>
+    <span><b>{c['counts'].get('entities', 0)}</b> entities</span>
+    <span><b>{len(banned)}</b> hard rules</span>
+  </div>
+  <div><span class="mut">Positioning:</span> {_esc(b.positioning if b else '') or '<span class="mut">not set</span>'}</div>
+  <div><span class="mut">Voice:</span> {_esc(', '.join(voice.get('tone', []))) or '<span class="mut">not set</span>'}</div>
+  <div><span class="mut">Never say:</span></div>
+  <div class="chips">{banned_html}</div>
+</div>
+
+{ask}
+
+<div class="card">
+  <div class="head"><h2>What is in there</h2></div>
+  {claims_html}
+  {aud_html}
+  {obj_html}
+  {ent_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Add to {_esc(t.name)}</h2></div>
+  <div class="grid">{forms}</div>
+</div>
+
+<p class="mut">The same captures work from Telegram — <code>/next</code> asks these
+one at a time and reads your reply as the answer.</p>
+""", suffix=f"&amp;tenant={tenant}")

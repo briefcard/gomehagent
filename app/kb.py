@@ -25,6 +25,17 @@ SITUATIONS = {
     "pricing_fear", "email_problems", "new_channel", "us_market_entry",
     # what they doubt about you
     "team_exists", "solo_operator_doubt", "big_spender", "wants_operator",
+
+    # Consumer- and trade-side situations. The set above was written for the
+    # agency selling B2B services; a tableware brand's claims have nowhere to
+    # live in it. These let product tenants tag proof at all.
+    #
+    # NOTE: the proper fix is a per-tenant vocabulary stored as data — a module
+    # constant shared by every tenant is exactly the kind of customisation that
+    # decision #3 says must not live in code. Tracked, not yet built.
+    "gifting", "occasion_hosting", "collector", "replacement_reorder",
+    "trade_specification", "wellness_routine", "subscription_lapse",
+    "venue_enquiry", "capacity_fit",
 }
 
 
@@ -145,6 +156,271 @@ def completeness(tenant: str) -> dict:
             missing.append(f"kb_{name} (none)")
     return {"tenant": tenant, "ready": not missing,
             "missing": missing, "counts": counts}
+
+
+# --------------------------------------------------------------------------
+# Write side.
+#
+# Kept here rather than in a separate module so there is exactly one place that
+# knows the shape of a KB row. Every writer normalises and validates before it
+# commits — a claim with an unknown situation tag can never be selected, and an
+# audience with no vocabulary is a row that makes the output worse, so both are
+# refused at the door rather than stored and puzzled over later.
+# --------------------------------------------------------------------------
+
+def _split(text: str, sep: str = ";") -> list[str]:
+    return [p.strip() for p in (text or "").split(sep) if p.strip()]
+
+
+def ensure_brand(tenant: str, display_name: str = "") -> db.KbBrand:
+    """Get the brand row, creating a bare one if this tenant has none yet.
+
+    Without this every write to a fresh tenant would fail on a missing parent
+    row, which is how a knowledge base ends up with claims and no voice.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        if not row:
+            row = db.KbBrand(tenant=tenant,
+                             display_name=display_name or tenant.title())
+            s.add(row)
+            s.commit()
+        s.refresh(row)
+        s.expunge(row)
+        return row
+
+
+def set_brand(tenant: str, **fields) -> str:
+    """Update brand-level fields. `tone` is a convenience into voice.tone."""
+    allowed = {"display_name", "positioning", "elevator", "voice",
+               "banned_claims", "approval_policy"}
+    tone = fields.pop("tone", None)
+    bad = set(fields) - allowed
+    if bad:
+        return f"Unknown field(s): {sorted(bad)}"
+    ensure_brand(tenant)
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        for k, v in fields.items():
+            setattr(row, k, v)
+        if tone is not None:
+            voice = dict(row.voice or {})
+            voice["tone"] = _split(tone, ",") or _split(tone, " ")
+            row.voice = voice
+        s.commit()
+    return f"Updated {tenant} brand."
+
+
+def add_banned(tenant: str, phrase: str) -> str:
+    """Add a phrase the validator will reject. Creates the brand row if needed."""
+    phrase = (phrase or "").strip()
+    if not phrase:
+        return "A rule needs a phrase."
+    ensure_brand(tenant)
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        current = list(row.banned_claims or [])
+        if phrase.lower() in [c.lower() for c in current]:
+            return f"Already banned for {tenant}."
+        row.banned_claims = current + [phrase]
+        s.commit()
+        n = len(row.banned_claims)
+    return f"Banned for {tenant} ({n} rules): “{phrase}”"
+
+
+def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
+              proof_type: str = "case_study", source: str = "",
+              strength: str = "strong") -> str:
+    unknown = [t for t in tags if t not in SITUATIONS]
+    if unknown:
+        return (f"Unknown tags: {', '.join(unknown)}\n"
+                f"Valid: {', '.join(sorted(SITUATIONS))}")
+    if not tags:
+        return "Needs at least one situation tag, or it can never be selected."
+    with db.SessionLocal() as s:
+        s.add(db.KbClaim(tenant=tenant, claim=claim, evidence=evidence,
+                         proof_type=proof_type, source=source or "captured",
+                         situations=tags, strength=strength,
+                         verified_at=db.utcnow()))
+        s.commit()
+    return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
+            f"{claim}\n{evidence}\ntags: {', '.join(tags)}")
+
+
+def add_audience(tenant: str, key: str, name: str, pains: list[str],
+                 vocabulary: list[str], buying_trigger: str = "",
+                 decision_timeline: str = "") -> str:
+    key = (key or "").strip().lower().replace(" ", "_")
+    if not key or not name:
+        return "An audience needs a key and a name."
+    with db.SessionLocal() as s:
+        existing = s.query(db.KbAudience).filter(
+            db.KbAudience.tenant == tenant, db.KbAudience.key == key).first()
+        row = existing or db.KbAudience(tenant=tenant, key=key)
+        row.name, row.pains, row.vocabulary = name, pains, vocabulary
+        if buying_trigger:
+            row.buying_trigger = buying_trigger
+        if decision_timeline:
+            row.decision_timeline = decision_timeline
+        if not existing:
+            s.add(row)
+        s.commit()
+    return f"{'Updated' if existing else 'Added'} audience {key} for {tenant}."
+
+
+def add_objection(tenant: str, objection: str, response: str,
+                  audience_key: str = "", escalate: str = "no") -> str:
+    if not objection or not response:
+        return "An objection needs both the objection and the approved answer."
+    with db.SessionLocal() as s:
+        s.add(db.KbObjection(tenant=tenant, objection=objection,
+                             response=response, audience_key=audience_key,
+                             escalate=escalate))
+        s.commit()
+    return f"Added objection for {tenant} ({len(objections(tenant))} total)."
+
+
+def add_entity(tenant: str, type: str, key: str, name: str,
+               description: str = "", price: str = "",
+               attributes: dict | None = None, source: str = "") -> str:
+    key = (key or "").strip().lower().replace(" ", "-")
+    if not key or not name:
+        return "An entity needs a key and a name."
+    with db.SessionLocal() as s:
+        existing = s.query(db.KbEntity).filter(
+            db.KbEntity.tenant == tenant, db.KbEntity.key == key).first()
+        row = existing or db.KbEntity(tenant=tenant, key=key)
+        row.type, row.name = type, name
+        row.description = description or row.description
+        row.price = price or row.price
+        row.attributes = attributes if attributes is not None else (row.attributes or {})
+        row.source = source or row.source or "captured"
+        row.verified_at = db.utcnow()
+        if not existing:
+            s.add(row)
+        s.commit()
+    return f"{'Updated' if existing else 'Added'} {type} {key} for {tenant}."
+
+
+# --------------------------------------------------------------------------
+# Guided intake.
+#
+# The reason a knowledge base stays empty is never that writing to it is hard —
+# it's that nobody remembers what's missing. These steps are ordered by what
+# unblocks the most: a brand with no voice blocks every generator, while a
+# fourth audience segment blocks nothing. `next_step` asks one question; the
+# answer comes back as ordinary text and is parsed by code, not a model.
+# --------------------------------------------------------------------------
+
+INTAKE_STEPS = [
+    dict(id="display_name", asks="brand",
+         q="What is this brand called, exactly as it should appear in writing?",
+         hint="Just the name."),
+    dict(id="positioning", asks="brand",
+         q="One sentence: what do they do, and for whom?",
+         hint="Plain words, no tagline."),
+    dict(id="tone", asks="brand",
+         q="Three or four words for how they sound.",
+         hint="e.g. direct, warm, unhurried, no hype"),
+    dict(id="banned_claims", asks="brand",
+         q="What must this brand NEVER claim? One per line or separated by semicolons.",
+         hint="Origin, production method, guarantees, medical claims — anything "
+              "that is a legal or brand risk. This becomes a hard rule."),
+    dict(id="audience", asks="audience",
+         q="Describe one buyer segment.",
+         hint="key | name | pains (semicolons) | words they use (semicolons)"),
+    dict(id="objection", asks="objection",
+         q="What is one reason a deal stalls, and how do you answer it?",
+         hint="objection | your approved answer"),
+    dict(id="entity", asks="entity",
+         q="Name one thing they sell.",
+         hint="type | key | name | price | description   (type = offer|product|space|service)"),
+    dict(id="claim", asks="claim",
+         q="One thing this brand can prove, with the number.",
+         hint="claim | evidence | situation tags (spaces)"),
+]
+
+_STEP = {s["id"]: s for s in INTAKE_STEPS}
+
+
+def gaps(tenant: str) -> list[dict]:
+    """Every intake step still unmet, in the order they should be answered."""
+    b = brand(tenant)
+    voice = (b.voice or {}) if b else {}
+    have = {
+        "display_name": bool(b and b.display_name and b.display_name != tenant.title()),
+        "positioning": bool(b and b.positioning),
+        "tone": bool(voice.get("tone")),
+        "banned_claims": bool(b and b.banned_claims),
+        "audience": len(audiences(tenant)) > 0,
+        "objection": len(objections(tenant)) > 0,
+        "entity": len(entities(tenant, available_only=False)) > 0,
+        "claim": len(claims(tenant)) > 0,
+    }
+    return [s for s in INTAKE_STEPS if not have.get(s["id"])]
+
+
+def next_step(tenant: str) -> dict | None:
+    g = gaps(tenant)
+    return g[0] if g else None
+
+
+def apply_answer(tenant: str, step_id: str, text: str) -> str:
+    """Route a free-text answer into the right table. Deterministic parsing —
+    a model guessing which field a sentence belongs to is a silent-corruption
+    machine, and the KB is the one place nothing may be silently wrong."""
+    step = _STEP.get(step_id)
+    text = (text or "").strip()
+    if not step:
+        return "That question expired — send /next for the current one."
+    if not text:
+        return "Nothing captured."
+
+    # The scalar brand fields accept anything, which means an answer typed for a
+    # different question lands as plausible-looking garbage — a pipe-formatted
+    # objection became a four-word "voice" in testing. A pipe is never valid in
+    # these, so treat it as a misrouted answer and say so.
+    if step_id in ("display_name", "positioning", "tone") and "|" in text:
+        return (f"That looks like an answer to a different question — "
+                f"{_STEP[step_id]['hint']}. Send /next to see the current one.")
+
+    if step_id == "display_name":
+        return set_brand(tenant, display_name=text)
+    if step_id == "positioning":
+        return set_brand(tenant, positioning=text)
+    if step_id == "tone":
+        words = _split(text, ",") or _split(text, " ")
+        if len(words) > 8:
+            return ("Tone is three or four words, not a sentence — "
+                    "e.g. direct, warm, unhurried.")
+        return set_brand(tenant, tone=text)
+    if step_id == "banned_claims":
+        phrases = _split(text.replace("\n", ";"))
+        return "\n".join(add_banned(tenant, p) for p in phrases) or "Nothing captured."
+
+    parts = [p.strip() for p in text.split("|")]
+    if step_id == "audience":
+        if len(parts) < 4:
+            return f"Format: {step['hint']}"
+        return add_audience(tenant, parts[0], parts[1],
+                            _split(parts[2]), _split(parts[3]))
+    if step_id == "objection":
+        if len(parts) < 2:
+            return f"Format: {step['hint']}"
+        return add_objection(tenant, parts[0], parts[1])
+    if step_id == "entity":
+        if len(parts) < 3:
+            return f"Format: {step['hint']}"
+        return add_entity(tenant, parts[0], parts[1], parts[2],
+                          description=parts[4] if len(parts) > 4 else "",
+                          price=parts[3] if len(parts) > 3 else "")
+    if step_id == "claim":
+        if len(parts) < 3:
+            return f"Format: {step['hint']}"
+        import re as _re
+        tags = [t.strip().lower() for t in _re.split(r"[\s,]+", parts[2]) if t.strip()]
+        return add_claim(tenant, parts[0], parts[1], tags)
+    return "Unrecognised step."
 
 
 # --------------------------------------------------------------------------

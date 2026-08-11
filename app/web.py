@@ -751,14 +751,58 @@ def user_add(key: str = "", chat_id: str = "", name: str = "",
 
 
 @app.get("/admin/ui", response_class=HTMLResponse)
-def admin_ui(key: str = "", tab: str = "accounts") -> str:
+def admin_ui(key: str = "", tab: str = "accounts", tenant: str = "") -> str:
     """The console. Accounts wires connections; Systems runs the pipelines."""
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
     from . import admin_ui as ui
     if tab == "systems":
         return ui.render_systems(key)
+    if tab == "kb":
+        return ui.render_kb(key, tenant)
     return ui.render(key)
+
+
+@app.get("/admin/kb_add")
+def kb_add(key: str = "", tenant: str = "", step: str = "", text: str = ""):
+    """Capture one KB answer. Same parser the Telegram intake uses, so a fact
+    entered on a phone and one entered in the console land identically."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    result = kbm.apply_answer(tenant, step, text)
+    # Same test as the Telegram path: the data decides whether it took.
+    if any(g["id"] == step for g in kbm.gaps(tenant)):
+        return {"error": result, "step": step}
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
+                            status_code=303)
+
+
+@app.get("/admin/kb")
+def kb_json(key: str = "", tenant: str = "") -> dict:
+    """The whole knowledge base for one account, as data."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    b = kbm.brand(tenant)
+    return {
+        "tenant": tenant,
+        "completeness": kbm.completeness(tenant),
+        "gaps": [g["q"] for g in kbm.gaps(tenant)],
+        "brand": ({"display_name": b.display_name, "positioning": b.positioning,
+                   "voice": b.voice, "banned_claims": b.banned_claims} if b else None),
+        "claims": [{"claim": r.claim, "evidence": r.evidence,
+                    "situations": r.situations, "source": r.source}
+                   for r in kbm.claims(tenant)],
+        "audiences": [{"key": r.key, "name": r.name, "pains": r.pains,
+                       "vocabulary": r.vocabulary} for r in kbm.audiences(tenant)],
+        "objections": [{"objection": r.objection, "response": r.response}
+                       for r in kbm.objections(tenant)],
+        "entities": [{"type": r.type, "key": r.key, "name": r.name,
+                      "price": r.price, "attributes": r.attributes}
+                     for r in kbm.entities(tenant, available_only=False)],
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,9 @@ and six reference artifacts (§11).
 | Admin console + live verification | Deployed |
 | Systems registry + run ledger | Built, tested offline — **not yet pushed** |
 | Systems tab (console) + per-system threads | Built, rendered — **not yet pushed** |
+| KB write layer + guided intake (`/next`) | Built, tested — **not yet pushed** |
+| Knowledge tab (console) | Built, rendered — **not yet pushed** |
+| KB seeded for baci / ironside / eien / coverings | Script written, **not yet run against prod** |
 | Generator → validator → send | **Not built — next slice** |
 | Reports (ads, business health) | Not started |
 | Canva | Not connected (OAuth, needs auth layer) |
@@ -99,6 +102,22 @@ New this session:
 | `scripts/test_brief.py` | Offline test harness for the assembler |
 | `app/systems.py` | Systems registry: catalogue, `ready()` blockers, autonomy ladder + gates, run ledger, per-system feedback threads, `board()` |
 | `scripts/test_systems.py` | Offline harness for the registry — 22 checks, no network |
+| `scripts/seed_kb.py` | Seeds baci/ironside/eien/coverings from established facts only; `--report` shows remaining gaps |
+| `scripts/test_kb.py` | Offline harness for the KB write layer + guided intake |
+
+**KB write layer + guided intake (Aug 2026).** `kb.py` gained a write half and
+an intake half. `INTAKE_STEPS` is an ordered list of what unblocks the most;
+`gaps()` reports what is unmet, `next_step()` poses one question, and
+`apply_answer()` parses the reply **in code** — a model deciding which field a
+sentence belongs to is a silent-corruption machine, and the KB is the one place
+nothing may be quietly wrong. Telegram `/next` opens a question, stores the
+pending step in `Setting`, and reads the next plain message as the answer.
+Whether an answer took is decided by re-checking `gaps()`, not by pattern-
+matching the reply — so a rejected answer re-opens its own question.
+
+Guards that exist because testing produced the bug: a pipe in a scalar brand
+field is a misrouted answer and is refused; a tone longer than eight words is
+refused. Both wrote garbage before the guard.
 
 Modified: `app/db.py` (9 new models), `app/web.py` (Telegram webhook, admin
 routes, ops-command interception, `tg_voice` consumer branch, seven
