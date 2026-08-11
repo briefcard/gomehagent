@@ -44,26 +44,31 @@ def banned_claims(tenant: str) -> list[str]:
 
 def claims(tenant: str, situations: list[str] | None = None,
            limit: int = 0) -> list[db.KbClaim]:
-    """Active, unexpired claims, optionally filtered to a situation.
+    """Active, unexpired claims, ranked by how well they fit the situation.
 
-    Ranked strong-first so the assembler can take the top N and get the
-    hardest proof rather than whatever the database returned first.
+    Ranking is SPECIFICITY first, strength second. Sorting on strength alone
+    ties every "strong" claim and breaks on insertion order — which had a
+    prospect complaining about email deliverability being answered with a
+    Shopify exit story. A claim matching two of the buyer's situations beats
+    one matching a single situation, however impressive its number.
     """
     now = dt.datetime.now(dt.timezone.utc)
+    want = set(situations or [])
     with db.SessionLocal() as s:
         rows = s.query(db.KbClaim).filter(
             db.KbClaim.tenant == tenant,
             db.KbClaim.status == "active",
         ).all()
-        out = []
+        scored = []
         for r in rows:
             if r.expires_at and r.expires_at < now:
                 continue  # stale proof is not selectable
-            if situations:
-                if not set(r.situations or []) & set(situations):
-                    continue
-            out.append(r)
-        out.sort(key=lambda r: 0 if r.strength == "strong" else 1)
+            overlap = len(set(r.situations or []) & want)
+            if want and not overlap:
+                continue
+            scored.append((-overlap, 0 if r.strength == "strong" else 1, r))
+        scored.sort(key=lambda t: (t[0], t[1]))
+        out = [r for _, _, r in scored]
         s.expunge_all()
         return out[:limit] if limit else out
 
