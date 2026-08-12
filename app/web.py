@@ -1289,6 +1289,78 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
+@app.get("/admin/schema_check")
+def schema_check(key: str = Depends(admin_key)) -> dict:
+    """Did the migration actually land on THIS database?
+
+    `_auto_migrate` adds columns and `_migrate_constraints` regrades the global
+    uniques to per-client ones, but neither path can be exercised against
+    Postgres from a laptop — SQLite cannot drop a constraint, so every local
+    test covers the column half only. This asks the live database directly.
+
+    Also reports which database the service is connected to, because
+    `config.DATABASE_URL` falls back to a local SQLite file when the env var is
+    missing: a service with no DATABASE_URL does not fail, it quietly serves an
+    empty database that is wiped on every deploy.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from sqlalchemy import inspect as sa_inspect
+
+    from . import tenant_scope
+
+    # Where are we actually pointed? Host and database name only — never the
+    # credentials that are in the same string.
+    url = db.engine.url
+    where = {"dialect": url.get_backend_name(),
+             "host": url.host or "(local file)",
+             "database": url.database or ""}
+    if url.get_backend_name() != "postgresql":
+        where["WARNING"] = ("not Postgres — if this is the deployed service, "
+                            "DATABASE_URL is missing and this is a throwaway "
+                            "file that resets on every deploy")
+
+    insp = sa_inspect(db.engine)
+    tables = set(insp.get_table_names())
+
+    uniques = {}
+    for table, old_col, new_name, _cols in db._REGRADED_UNIQUES:
+        if table not in tables:
+            uniques[table] = "table does not exist yet"
+            continue
+        found = {u["name"]: (u.get("column_names") or [])
+                 for u in insp.get_unique_constraints(table)}
+        has_new = new_name in found
+        # SQLite reports an inline column constraint with no name; Postgres
+        # names it (contacts_email_key). Either way it is the stale one.
+        stale = [n or f"(unnamed unique on {old_col})"
+                 for n, c in found.items() if c == [old_col] and n != new_name]
+        uniques[table] = {
+            "per_client_constraint": new_name if has_new else "MISSING",
+            "old_global_constraint": stale or "gone",
+            "ok": has_new and not stale,
+            "constraints_found": found,
+        }
+
+    missing_col = []
+    for model in tenant_scope._SCOPED:
+        t = model.__tablename__
+        if t in tables and "tenant" not in {c["name"] for c in insp.get_columns(t)}:
+            missing_col.append(t)
+
+    all_ok = (where["dialect"] == "postgresql"
+              and all(isinstance(v, dict) and v.get("ok") for v in uniques.values())
+              and not missing_col)
+    return {
+        "ok": all_ok,
+        "connected_to": where,
+        "tenant_column_missing_from": missing_col or "none",
+        "uniqueness": uniques,
+        "note": ("ok=true means the migration landed: every scoped table has a "
+                 "tenant column, and uniqueness is per client rather than global."),
+    }
+
+
 @app.get("/admin/tenant_scope")
 def tenant_scope_admin(key: str = Depends(admin_key), report_only: str = "") -> dict:
     """Attribute the operational tables to a client.
