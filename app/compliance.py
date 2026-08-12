@@ -26,6 +26,16 @@ import re
 
 from . import db, kb, tenants
 
+# Identify ourselves honestly on every fetch. The default `python-httpx/…`
+# agent is 403'd by ordinary WAF rules — marketingthatworks.co returns 403 to
+# it and 200 to a named agent — so a site the owner controls looked unreadable
+# when it was only unlabelled. This says who is asking and why rather than
+# pretending to be a browser.
+UA = ("SaiasOpsBot/1.0 (+content-compliance; first-party check of a site we "
+      "operate; contact gomehsaias@gmail.com)")
+HEADERS = {"User-Agent": UA}
+
+
 _TAG = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S | re.I)
 _HTML = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
@@ -66,7 +76,7 @@ def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
         absence-collapsed-into-a-value pattern in a diagnostic.
         """
         try:
-            r = httpx.get(url, timeout=25, follow_redirects=True)
+            r = httpx.get(url, timeout=25, follow_redirects=True, headers=HEADERS)
             return r.text if r.status_code == 200 else ""
         except Exception as exc:  # noqa: BLE001
             name = exc.__class__.__name__
@@ -138,16 +148,132 @@ def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
     return out
 
 
-def check_page(tenant: str, url: str) -> dict:
-    """Fetch one page and check its visible text against the account's rules."""
+def _hosts(base: str) -> list[str]:
+    base = base.rstrip("/")
+    if not base.startswith("http"):
+        base = "https://" + base
+    host = base.split("://", 1)[1]
+    alt = host[4:] if host.startswith("www.") else "www." + host
+    return [base, base.split("://", 1)[0] + "://" + alt]
+
+
+def _wp_json_urls(base: str, limit: int = 300) -> list[dict]:
+    """Pages and posts from the WordPress REST API.
+
+    WordPress exposes published content over wp-json without authentication, so
+    a site with sitemaps switched off is still fully enumerable — which
+    marketingthatworks.co is, despite /sitemap.xml redirecting to a
+    /wp-sitemap.xml that 404s.
+    """
     import httpx
-    try:
-        r = httpx.get(url, timeout=25, follow_redirects=True)
-        if r.status_code != 200:
-            return {"url": url, "status": f"HTTP {r.status_code}", "phrases": []}
-        text = _clean(r.text)
-    except Exception as exc:  # noqa: BLE001
-        return {"url": url, "status": exc.__class__.__name__, "phrases": []}
+    out: list[dict] = []
+    for host in _hosts(base):
+        for kind in ("pages", "posts"):
+            try:
+                r = httpx.get(
+                    f"{host}/wp-json/wp/v2/{kind}",
+                    params={"per_page": 50,
+                            "_fields": "link,modified,title,content"},
+                    timeout=40, follow_redirects=True, headers=HEADERS)
+                if r.status_code != 200:
+                    continue
+                for item in r.json():
+                    link = item.get("link") or ""
+                    if not link or any(s in link.lower() for s in _SKIP):
+                        continue
+                    # Take the CONTENT here too. marketingthatworks.co answers
+                    # the API with 200 and every HTML page with 403 — a WAF
+                    # being stricter about page views than about its own API.
+                    # Reading what the site publishes beats working around what
+                    # it blocks, and it is one request instead of fifty.
+                    body = (item.get("content") or {}).get("rendered", "")
+                    title = (item.get("title") or {}).get("rendered", "")
+                    out.append({"url": link,
+                                "lastmod": (item.get("modified") or "")[:10],
+                                "html": f"<h1>{title}</h1>{body}"[:400_000]})
+            except Exception:  # noqa: BLE001 — not a WordPress site, or blocked
+                continue
+        if out:
+            break
+    seen, uniq = set(), []
+    for u in out:
+        if u["url"] not in seen:
+            seen.add(u["url"])
+            uniq.append(u)
+    return uniq[:limit]
+
+
+def _crawl_urls(base: str, limit: int = 60) -> list[dict]:
+    """Last resort: internal links from the homepage.
+
+    Not a complete picture of a site and does not pretend to be — but "some of
+    the pages" beats "we could not look", and the pages linked from a homepage
+    are the ones carrying brand copy anyway.
+    """
+    import httpx
+    for host in _hosts(base):
+        try:
+            r = httpx.get(host, timeout=25, follow_redirects=True,
+                          headers=HEADERS)
+            if r.status_code != 200:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        root = str(r.url).rstrip("/")
+        found, seen = [], set()
+        for href in re.findall(r'href=["\']([^"\'#?]+)', r.text):
+            if href.startswith("//") or href.startswith("mailto:"):
+                continue
+            url = (root + href if href.startswith("/")
+                   else href if href.startswith(root) else "")
+            if not url or url in seen or any(s in url.lower() for s in _SKIP):
+                continue
+            seen.add(url)
+            found.append({"url": url, "lastmod": ""})
+            if len(found) >= limit:
+                break
+        if found:
+            return found
+    return []
+
+
+def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
+    """Every public page, by whichever method this site supports.
+
+    Sitemap first — it is complete and carries lastmod, which is what makes a
+    repeat scan cheap. Then the WordPress API. Then the homepage. Returns the
+    source alongside the pages, because "40 pages via homepage crawl" and "400
+    pages via sitemap" are very different levels of confidence in a clean scan.
+    """
+    pages = _sitemap_urls(base, limit=limit)
+    if pages:
+        return pages, "sitemap"
+    problems = list(getattr(_sitemap_urls, "last_problems", []))
+    pages = _wp_json_urls(base, limit=limit)
+    if pages:
+        return pages, "wordpress api"
+    pages = _crawl_urls(base, limit=min(limit, 60))
+    if pages:
+        return pages, "homepage crawl"
+    discover_pages.last_problems = problems
+    return [], ""
+
+
+def check_page(tenant: str, url: str, html: str = "") -> dict:
+    """Check one page. Uses `html` when discovery already supplied it."""
+    import httpx
+    if html:
+        text = _clean(html)
+    else:
+        try:
+            r = httpx.get(url, timeout=25, follow_redirects=True, headers=HEADERS)
+            if r.status_code != 200:
+                return {"url": url, "status": f"HTTP {r.status_code}",
+                        "phrases": [], "questions": []}
+            text = _clean(r.text)
+        except Exception as exc:  # noqa: BLE001
+            return {"url": url, "status": exc.__class__.__name__,
+                    "phrases": [], "questions": []}
 
     hits, questions = _match(tenant, text)
     return {"url": url, "status": "ok", "phrases": hits,
@@ -217,23 +343,23 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         return {"error": f"{tenant} has no banned_claims — nothing to check "
                          f"against. Add them before scanning."}
 
-    pages = _sitemap_urls(t.domain, limit=max(limit * 4, 200))
+    pages, source = discover_pages(t.domain, limit=max(limit * 4, 200))
     if not pages:
-        why = getattr(_sitemap_urls, "last_problems", [])
+        why = getattr(discover_pages, "last_problems", [])
         if why:
             return {"error": f"could not reach {t.domain}", "detail": why,
                     "note": "This is a connection problem, not a missing "
                             "sitemap. Fix the site before reading anything "
                             "into a clean scan."}
-        return {"error": f"no sitemap found at {t.domain} — the site publishes "
-                         f"none at robots.txt, /sitemap.xml, /wp-sitemap.xml or "
-                         f"their www variants"}
+        return {"error": f"could not enumerate any pages at {t.domain} — no "
+                         f"sitemap, no WordPress API, and no links found on the "
+                         f"homepage"}
 
     considered = [p for p in pages
                   if not since or not p["lastmod"] or p["lastmod"][:10] >= since]
     checked, violations, errors, to_review = [], [], [], []
     for p in considered[:limit]:
-        res = check_page(tenant, p["url"])
+        res = check_page(tenant, p["url"], html=p.get("html", ""))
         if res["status"] != "ok":
             errors.append({"url": res["url"], "status": res["status"]})
             continue
@@ -251,7 +377,7 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
             by_phrase[h["phrase"]] = by_phrase.get(h["phrase"], 0) + 1
 
     return {
-        "tenant": tenant, "domain": t.domain,
+        "tenant": tenant, "domain": t.domain, "page_source": source,
         "rules_checked": len(rules),
         "pages_in_sitemap": len(pages),
         "pages_checked": len(checked),

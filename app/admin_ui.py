@@ -981,6 +981,14 @@ def render_intake(link, tenant, step, done: int, total: int,
 # invisible to selection.
 # ---------------------------------------------------------------------------
 
+_STARTED = {
+    "scan": "Scan started. It reads the live site, so give it a minute — "
+            "refresh this page and the result will be below.",
+    "harvest": "Harvest started. Proposals will appear above when it finishes.",
+    "sync": "Catalogue sync started. Refresh in a moment.",
+}
+
+
 def _act(key: str, action: str, label: str, tenant: str = "",
          extra: dict | None = None, small: bool = False) -> str:
     """A one-click button that runs something and comes back to this tab."""
@@ -993,7 +1001,7 @@ def _act(key: str, action: str, label: str, tenant: str = "",
             f'{hidden}<button{cls}>{_esc(label)}</button></form>')
 
 
-def render_content(key: str, tenant: str = "") -> str:
+def render_content(key: str, tenant: str = "", started: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     rows = tenants.all_tenants(include_paused=True)
@@ -1084,7 +1092,11 @@ def render_content(key: str, tenant: str = "") -> str:
         cat += ('<p class="mut">No store connected, so there is nothing to sync. '
                 'Products can still be added by hand on the Knowledge tab.</p>')
 
+    banner = (f'<div class="ok">{_esc(_STARTED.get(started, ""))}</div>'
+              if started in _STARTED else "")
+
     return _shell(key, "content", "Content", f"""
+{banner}
 <div>
   <h1>Content</h1>
   <p class="mut">What this account's site actually says, what its catalogue holds,

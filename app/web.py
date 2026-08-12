@@ -856,7 +856,8 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
 
 @app.get("/admin/ui", response_class=HTMLResponse)
 def admin_ui(request: Request, key: str = Depends(admin_key),
-             tab: str = "accounts", tenant: str = "") -> str:
+             tab: str = "accounts", tenant: str = "",
+             started: str = "") -> str:
     """The console. Accounts wires connections; Systems runs the pipelines."""
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
@@ -871,7 +872,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "kb":
         return ui.render_kb(link_key, tenant)
     if tab == "content":
-        return ui.render_content(link_key, tenant)
+        return ui.render_content(link_key, tenant, started=started)
     return ui.render(link_key)
 
 
@@ -1120,7 +1121,7 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
         return {"error": "unauthorized"}
     from . import kb as kbm
     res = kbm.review_claim(claim_id, approve == "yes")
-    return _back_to_content(tenant, key) if ui else {"result": res}
+    return _back_to_content(tenant) if ui else {"result": res}
 
 
 @app.get("/admin/kb")
@@ -1293,10 +1294,33 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
-def _back_to_content(tenant: str, key: str):
+def _back_to_content(tenant: str, started: str = ""):
+    """Return to the Content tab. No key in the URL: by the time an action has
+    run, the session cookie is already set (the middleware sets it on any
+    request carrying a valid key), so putting the secret back into the address
+    bar would undo the session for nothing."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(
-        f"/admin/ui?key={key}&tab=content&tenant={tenant}", status_code=303)
+    q = f"/admin/ui?tab=content&tenant={tenant}"
+    return RedirectResponse(q + (f"&started={started}" if started else ""),
+                            status_code=303)
+
+
+def _run_bg(label: str, fn, *args, **kw) -> None:
+    """Run a slow action off the request.
+
+    A 40-page compliance scan takes 16s locally and longer on a cold container,
+    and a GET that blocks that long with no feedback is indistinguishable from a
+    broken button — which is exactly how it was reported. The work continues;
+    the page comes straight back and the result appears in the tab when it
+    lands."""
+    import threading
+
+    def _go():
+        try:
+            fn(*args, **kw)
+        except Exception:  # noqa: BLE001
+            log.exception("%s failed", label)
+    threading.Thread(target=_go, daemon=True).start()
 
 
 @app.get("/admin/harvest")
@@ -1316,9 +1340,13 @@ def harvest_route(key: str = Depends(admin_key), tenant: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import harvest as hv
-    out = (hv.harvest(tenant, limit=limit, apply=bool(apply)) if tenant
-           else hv.harvest_all(limit=limit, apply=bool(apply)))
-    return _back_to_content(tenant, key) if ui else out
+    if ui:
+        _run_bg("harvest", hv.harvest if tenant else hv.harvest_all,
+                *( (tenant,) if tenant else () ),
+                limit=limit, apply=bool(apply))
+        return _back_to_content(tenant, "harvest")
+    return (hv.harvest(tenant, limit=limit, apply=bool(apply)) if tenant
+            else hv.harvest_all(limit=limit, apply=bool(apply)))
 
 
 @app.get("/admin/compliance_scan")
@@ -1338,9 +1366,15 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
     from . import compliance
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
+    def _scan_and_record():
+        compliance.record_scan(tenant, compliance.scan(
+            tenant, limit=limit, since=since))
+    if ui:
+        _run_bg("compliance scan", _scan_and_record)
+        return _back_to_content(tenant, "scan")
     result = compliance.scan(tenant, limit=limit, since=since)
     compliance.record_scan(tenant, result)
-    return _back_to_content(tenant, key) if ui else result
+    return result
 
 
 @app.get("/admin/catalog_sync")
@@ -1360,8 +1394,11 @@ def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
     from . import catalog_sync as cs
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
-    out = cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
-    return _back_to_content(tenant, key) if ui else out
+    if ui:
+        _run_bg("catalog sync", cs.sync_shopify, tenant, limit=limit,
+                dry_run=bool(report_only))
+        return _back_to_content(tenant, "sync")
+    return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
 
 
 @app.get("/admin/schema_check")

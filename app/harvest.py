@@ -136,9 +136,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
 
     banned = [b.lower() for b in kb.banned_claims(tenant) if b]
     vocab = kb.situation_patterns(tenant)
-    pages = compliance._sitemap_urls(t.domain, limit=max(limit * 3, 90))
+    pages, source = compliance.discover_pages(t.domain, limit=max(limit * 3, 90))
     if not pages:
-        return {"error": f"no sitemap found at {t.domain}"}
+        return {"error": f"could not enumerate any pages at {t.domain}"}
 
     # Claims already on file, so a repeat run does not re-propose the same line.
     known = {(c.claim or "").strip().lower()
@@ -149,13 +149,16 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
     import httpx
     for p in pages[:limit]:
         url = p["url"]
-        try:
-            r = httpx.get(url, timeout=25, follow_redirects=True)
-            if r.status_code != 200:
+        html = p.get("html", "")
+        if not html:
+            try:
+                r = httpx.get(url, timeout=25, follow_redirects=True,
+                              headers=compliance.HEADERS)
+                if r.status_code != 200:
+                    continue
+                html = r.text
+            except Exception:  # noqa: BLE001
                 continue
-            html = r.text
-        except Exception:  # noqa: BLE001
-            continue
         text = compliance._clean(html)
         for cand in _reviews_from(html, url) + _claims_from(text, url):
             body = cand["text"].strip()
@@ -183,6 +186,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
 
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
+        "page_source": source,
         "pages_read": min(len(pages), limit),
         "vocabulary_tags": len(vocab),
         "proposed": proposed,
