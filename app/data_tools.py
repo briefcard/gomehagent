@@ -26,8 +26,16 @@ import time as _time
 _shopify_tokens: dict[str, tuple[str, float]] = {}  # store -> (token, expires_at)
 
 
+def _store_cfg(store: str) -> dict:
+    """Shopify config for one store, preferring a credential the client
+    connected over the one pasted into the env group. Falls through to the env
+    blob so accounts that never connect anything keep working unchanged."""
+    from . import credentials
+    return credentials.shopify_config(store) or config.SHOPIFY_STORES[store]
+
+
 def _shopify_token(store: str) -> str:
-    cfg = config.SHOPIFY_STORES[store]
+    cfg = _store_cfg(store)
     if cfg.get("token"):
         return cfg["token"]
     cached = _shopify_tokens.get(store)
@@ -50,7 +58,7 @@ def _shopify_token(store: str) -> str:
 
 
 def _shopify(store: str, path: str, params: dict | None = None) -> dict:
-    cfg = config.SHOPIFY_STORES[store]
+    cfg = _store_cfg(store)
     r = httpx.get(
         f"https://{cfg['domain']}/admin/api/{API_VERSION}/{path}",
         headers={"X-Shopify-Access-Token": _shopify_token(store)},
@@ -657,7 +665,35 @@ _HANDLERS = {
 }
 
 
-def dispatch(name: str, args: dict) -> str:
+# ---------------------------------------------------------------------------
+# Client gating.
+#
+# Seven of these eleven tools took the account as a MODEL-SUPPLIED argument
+# (`store`, `account`). In a conversation about one client the model could pass
+# another client's key and read their mail — the account was a suggestion, not a
+# boundary.
+#
+# So: while an account is active, the model is not asked which account. The
+# parameter is removed from the schema it sees, and the resolved value is
+# injected here at dispatch. Code decides membership; the model decides
+# phrasing. It also cuts what is sent every turn — a venue with no store is not
+# offered Shopify tools at all, which is fewer schemas and fewer wrong calls.
+# ---------------------------------------------------------------------------
+
+def tools_for(tenant: str) -> list[dict]:
+    """The shared schemas an account may use. The rules live in `tool_scope`,
+    which covers every role's tools — keeping a second copy here is how the two
+    drift and one of them stops being a boundary."""
+    from . import tool_scope
+    return tool_scope.filter_tools(TOOLS, tenant)
+
+
+def dispatch(name: str, args: dict, tenant: str = "") -> str:
+    if tenant:
+        from . import tool_scope
+        args, refusal = tool_scope.guard(name, args, tenant)
+        if refusal:
+            return refusal
     try:
         return _HANDLERS[name](**args)[:8000]
     except Exception as exc:  # noqa: BLE001

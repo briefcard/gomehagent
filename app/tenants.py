@@ -56,11 +56,20 @@ def capabilities(key: str) -> dict:
     t = get(key)
     if not t:
         return {c: False for c in CAPABILITIES}
+    # A credential the client connected themselves counts exactly as much as one
+    # Gomeh pasted into the env group. Without this, connecting Shopify through
+    # the connect page left the account reading "not wired" and the agent was
+    # never offered its tools — the connection worked and nothing could use it.
+    from . import credentials as _cred
+    connected = _cred.connected_providers(key)
     return {
-        "inbox": bool(t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS),
-        "commerce": bool(t.shopify_store and t.shopify_store in config.SHOPIFY_STORES),
-        "esp": bool((t.esp or {}).get("provider")),
-        "cms": bool((t.cms or {}).get("platform")),
+        "inbox": bool(t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS)
+        or "google" in connected,
+        "commerce": bool(t.shopify_store and t.shopify_store in config.SHOPIFY_STORES)
+        or "shopify" in connected,
+        "esp": bool((t.esp or {}).get("provider"))
+        or bool({"omnisend", "klaviyo"} & connected),
+        "cms": bool((t.cms or {}).get("platform")) or "wordpress" in connected,
         "ads": bool((t.ads or {}).get("meta_account_id")
                     or (t.ads or {}).get("google_customer_id")),
         "analytics": bool((t.analytics or {}).get("ga4_property")
@@ -229,6 +238,69 @@ def switch(user: db.User | None, key: str) -> str:
     caps = capabilities(key)
     on = ", ".join(c for c, ok in caps.items() if ok) or "nothing wired yet"
     return f"Now working on {t.name}. Connected: {on}."
+
+
+def for_alias(alias: str) -> str:
+    """Which client owns this inbox, or "".
+
+    The unattended half of the system is addressed by inbox alias, not by
+    tenant: the worker polls `GMAIL_ACCOUNTS` and triage is handed an alias.
+    This is the one place that turns the one into the other, so the scoping the
+    agent gets is available to the code that runs with nobody watching.
+    """
+    if not alias:
+        return ""
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.gmail_alias == alias).first()
+        return t.key if t else ""
+
+
+def agent_block(key: str) -> str:
+    """Who the agent is working for, injected into every turn.
+
+    The agent had no concept of a client at all — `command_agent`, `kernel` and
+    `triage` contained zero references to tenants — so it could not tell which
+    store a question was about, and had no access to the rules the knowledge
+    base already held for that account. This is the bridge.
+
+    Deliberately compact: identity, what is reachable, and the constraints that
+    must never be violated. Detail is available through tools; what belongs in
+    every turn is the part that changes the answer.
+    """
+    from . import kb
+    t = get(key)
+    if not t:
+        return ("\n\nACCOUNT: none selected. Say which client this is about "
+                "before acting — do not assume.")
+    caps = capabilities(key)
+    wired = [c for c, ok in caps.items() if ok]
+    lines = [f"\n\nACTIVE ACCOUNT: {t.name} (`{t.key}`)"
+             f"{' — ' + t.domain if t.domain else ''}",
+             f"Connected: {', '.join(wired) if wired else 'nothing yet'}."
+             f" Not connected: {', '.join(c for c in CAPABILITIES if c not in wired) or '—'}.",
+             "Every tool call and every statement you make is about THIS account. "
+             "If a question is about a different client, say so rather than "
+             "answering from the wrong one."]
+
+    b = kb.brand(key)
+    if b:
+        if b.positioning:
+            lines.append(f"What they do: {b.positioning}")
+        tone = (b.voice or {}).get("tone") or []
+        if tone:
+            lines.append(f"Voice: {', '.join(tone)}.")
+        banned = b.banned_claims or []
+        if banned:
+            lines.append(
+                "NEVER say, in any draft or summary for this account: "
+                + "; ".join(banned)
+                + ". These are enforced rules, not preferences.")
+    ents = kb.entities(key, available_only=False)
+    if ents:
+        names = ", ".join(e.name for e in ents[:12])
+        lines.append(f"They sell ({len(ents)}): {names}"
+                     + (" …" if len(ents) > 12 else ""))
+    return "\n".join(lines)
 
 
 def summary_line(key: str) -> str:
