@@ -870,6 +870,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_systems(link_key)
     if tab == "kb":
         return ui.render_kb(link_key, tenant)
+    if tab == "content":
+        return ui.render_content(link_key, tenant)
     return ui.render(link_key)
 
 
@@ -1111,12 +1113,14 @@ def intake(token: str, answer: str = "", skip: str = "") -> str:
 
 
 @app.get("/admin/claim_review")
-def claim_review(key: str = Depends(admin_key), claim_id: str = "", approve: str = "yes"):
+def claim_review(key: str = Depends(admin_key), claim_id: str = "",
+                 approve: str = "yes", tenant: str = "", ui: str = ""):
     """Approve or reject a client-submitted claim."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import kb as kbm
-    return {"result": kbm.review_claim(claim_id, approve == "yes")}
+    res = kbm.review_claim(claim_id, approve == "yes")
+    return _back_to_content(tenant, key) if ui else {"result": res}
 
 
 @app.get("/admin/kb")
@@ -1289,9 +1293,15 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
+def _back_to_content(tenant: str, key: str):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(
+        f"/admin/ui?key={key}&tab=content&tenant={tenant}", status_code=303)
+
+
 @app.get("/admin/harvest")
 def harvest_route(key: str = Depends(admin_key), tenant: str = "",
-                  limit: int = 25, apply: str = "") -> dict:
+                  limit: int = 25, apply: str = "", ui: str = ""):
     """Propose claims from a client's own site. Reads by default.
 
     /admin/harvest?tenant=baci            what it would propose
@@ -1306,14 +1316,14 @@ def harvest_route(key: str = Depends(admin_key), tenant: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import harvest as hv
-    if tenant:
-        return hv.harvest(tenant, limit=limit, apply=bool(apply))
-    return hv.harvest_all(limit=limit, apply=bool(apply))
+    out = (hv.harvest(tenant, limit=limit, apply=bool(apply)) if tenant
+           else hv.harvest_all(limit=limit, apply=bool(apply)))
+    return _back_to_content(tenant, key) if ui else out
 
 
 @app.get("/admin/compliance_scan")
 def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
-                    limit: int = 40, since: str = "") -> dict:
+                    limit: int = 40, since: str = "", ui: str = ""):
     """Check a client's live website against its own banned claims.
 
     /admin/compliance_scan?tenant=baci             first full pass
@@ -1330,12 +1340,12 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "name a tenant, e.g. ?tenant=baci"}
     result = compliance.scan(tenant, limit=limit, since=since)
     compliance.record_scan(tenant, result)
-    return result
+    return _back_to_content(tenant, key) if ui else result
 
 
 @app.get("/admin/catalog_sync")
 def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
-                 report_only: str = "", limit: int = 250) -> dict:
+                 report_only: str = "", limit: int = 250, ui: str = ""):
     """Pull a client's Shopify catalogue into the knowledge base.
 
     /admin/catalog_sync?tenant=baci&report_only=1   what it would change
@@ -1350,7 +1360,8 @@ def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
     from . import catalog_sync as cs
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
-    return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
+    out = cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
+    return _back_to_content(tenant, key) if ui else out
 
 
 @app.get("/admin/schema_check")

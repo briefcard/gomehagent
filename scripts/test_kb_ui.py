@@ -150,6 +150,42 @@ def main() -> int:
     ck("empty account warns about inherited vocabulary",
        "silently inherits" in page)
 
+    # ---- 6. the Content tab surfaces what the JSON routes produce --------
+    # These three were built as JSON routes and nothing else, which is §2.13
+    # again: a compliance report that lives only in the response that triggered
+    # it has to be re-run to be read twice.
+    print("\n— the Content tab —")
+    from app import compliance, systems
+    systems.seed_from_tenants()
+    systems.create("baci", "content_compliance")
+    compliance.record_scan("baci", {
+        "pages_checked": 12,
+        "violations": [{"url": "https://bacimilanousa.com/pages/about",
+                        "lastmod": "", "hits": [
+                            {"phrase": "handmade",
+                             "context": "Every piece is handmade in Italy."}]}],
+        "by_phrase": [("handmade", 1)]})
+    kb.add_claim("baci", "PROPOSED CLAIM AWAITING REVIEW", "some evidence",
+                 ["gifting"], proof_type="testimonial",
+                 source="review on /products/x", status="pending")
+
+    page = admin_ui.render_content(KEY, "baci")
+    ck("the Content tab renders", "Content" in page and len(page) > 800)
+    ck("a pending proposal is shown", has(page, "PROPOSED CLAIM AWAITING REVIEW"))
+    ck("with its provenance", has(page, "review on /products/x"))
+    ck("and can be approved without leaving the page",
+       "/admin/claim_review" in page and "Approve" in page and "Reject" in page)
+    ck("the compliance finding names the live URL",
+       has(page, "https://bacimilanousa.com/pages/about"))
+    ck("and quotes the sentence, so it is fixable without opening the page",
+       has(page, "Every piece is handmade in Italy."))
+    ck("the phrase is ranked", has(page, "handmade"))
+    ck("each action can be run from the tab",
+       all(r in page for r in ("/admin/harvest", "/admin/compliance_scan",
+                               "/admin/catalog_sync")))
+    ck("an account never scanned says so rather than looking clean",
+       "Never scanned" in admin_ui.render_content(KEY, "coverings"))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

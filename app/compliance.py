@@ -180,9 +180,32 @@ def record_scan(tenant: str, result: dict) -> str:
     if result.get("error"):
         systems.finish_run(run_id, "blocked", blocked_on=[result["error"]])
     else:
+        # The findings themselves, not just the count. A scan whose detail only
+        # existed in the response that triggered it would have to be re-run to
+        # be read twice — and a list of URLs nobody can look at again is not a
+        # report. Capped so one bad site cannot bloat the ledger row.
         systems.finish_run(run_id, "sent", outcome={
             "pages_checked": result["pages_checked"],
             "violations": len(result["violations"]),
             "by_phrase": dict(result["by_phrase"]),
+            "detail": [{"url": v["url"],
+                        "phrases": [h["phrase"] for h in v["hits"]],
+                        "context": (v["hits"][0]["context"] if v["hits"] else "")[:220]}
+                       for v in result["violations"][:40]],
+            "truncated": max(0, len(result["violations"]) - 40),
         })
     return run_id
+
+
+def last_scan(tenant: str) -> dict:
+    """The most recent scan for this account, or {}."""
+    from . import db as _db, systems
+    row = systems.find(tenant, "content_compliance")
+    if not row:
+        return {}
+    runs = systems.runs(row.id, limit=1)
+    if not runs:
+        return {}
+    r = runs[0]
+    return {"at": _db.as_utc(r.created_at), "stage": r.stage,
+            "blocked_on": r.blocked_on or [], **(r.outcome or {})}

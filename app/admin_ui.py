@@ -145,7 +145,8 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 .msg.esc{border-left-color:var(--gap)}
 """
 
-_TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"))
+_TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
+         ("content", "Content"))
 
 
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
@@ -966,6 +967,157 @@ def render_intake(link, tenant, step, done: int, total: int,
 {body}
 <p class="mut">This link is private to {name}. Nothing here is published.</p>
 </div></body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# Content tab — what the site says, what the catalogue holds, what is proposed.
+#
+# The three things behind this tab were built as JSON routes and nothing else,
+# which is §2.13 committed again: a compliance report that lives only in the
+# response that triggered it has to be re-run to be read twice. The queue of
+# proposals matters most — approving one meant finding its id in JSON and
+# hand-writing a URL, which nobody does thirty times, and an unreviewed queue
+# is worse than no queue because `pending` rows look like progress while being
+# invisible to selection.
+# ---------------------------------------------------------------------------
+
+def _act(key: str, action: str, label: str, tenant: str = "",
+         extra: dict | None = None, small: bool = False) -> str:
+    """A one-click button that runs something and comes back to this tab."""
+    hidden = "".join(
+        f'<input type="hidden" name="{_esc(k)}" value="{_esc(v)}">'
+        for k, v in {"key": key, "tenant": tenant, "ui": "1",
+                     **(extra or {})}.items() if v != "")
+    cls = ' class="sec"' if small else ""
+    return (f'<form method="get" action="{_esc(action)}" style="display:inline">'
+            f'{hidden}<button{cls}>{_esc(label)}</button></form>')
+
+
+def render_content(key: str, tenant: str = "") -> str:
+    from . import compliance, credentials as cred, kb as kbm
+
+    rows = tenants.all_tenants(include_paused=True)
+    tenant = tenant or (rows[0].key if rows else "")
+    t = tenants.get(tenant)
+    if not t:
+        return _shell(key, "content", "Content",
+                      '<div class="note">No accounts yet.</div>')
+
+    picker = "".join(
+        f'<a class="{"on" if r.key == tenant else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;tenant={_esc(r.key)}">'
+        f'{_esc(r.name)}</a>' for r in rows)
+
+    # --- proposals ---------------------------------------------------------
+    pending = kbm.pending_claims(tenant)
+    if pending:
+        items = "".join(
+            f'<div class="msg">'
+            f'<div>{_esc(p.claim)}</div>'
+            f'<div class="when">{_esc(p.evidence or "no evidence recorded")}</div>'
+            f'<div class="when"><code>{_esc(" ".join(p.situations or []))}</code> · '
+            f'{_esc(p.proof_type or "")} · {_esc(p.source or "")}</div>'
+            f'<div class="row" style="margin-top:6px">'
+            + _act(key, "/admin/claim_review", "Approve", tenant,
+                   {"claim_id": p.id, "approve": "yes"}, small=True)
+            + _act(key, "/admin/claim_review", "Reject", tenant,
+                   {"claim_id": p.id, "approve": "no"}, small=True)
+            + "</div></div>" for p in pending)
+        proposals = f'<div class="thread">{items}</div>'
+    else:
+        proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
+                     'own site and files what it finds here — as proposals, never '
+                     'as facts.</p>')
+
+    # --- compliance --------------------------------------------------------
+    scan = compliance.last_scan(tenant)
+    if not scan:
+        comp = ('<p class="mut">Never scanned. This checks every public page '
+                'against this account\'s banned claims and lists the ones that '
+                'break them.</p>')
+    elif scan.get("stage") == "blocked":
+        comp = ('<div class="note">Could not scan: '
+                + _esc("; ".join(scan.get("blocked_on") or [])) + "</div>")
+    else:
+        n = scan.get("violations", 0)
+        head = (f'<div class="stat"><span><b>{scan.get("pages_checked", 0)}</b> '
+                f'pages checked</span><span><b>{n}</b> with a violation</span>'
+                f'<span>{_esc(scan["at"].strftime("%b %d, %H:%M")) if scan.get("at") else ""}</span></div>')
+        if not n:
+            comp = head + '<p class="mut">Nothing on the live site breaks the rules.</p>'
+        else:
+            ranked = "".join(
+                f'<span class="chip off">{_esc(p)} ×{c}</span>'
+                for p, c in sorted((scan.get("by_phrase") or {}).items(),
+                                   key=lambda kv: -kv[1]))
+            items = "".join(
+                f'<div class="msg esc">'
+                f'<div><a href="{_esc(d["url"])}" target="_blank" rel="noopener">'
+                f'{_esc(d["url"])}</a></div>'
+                f'<div class="when">{_esc(", ".join(d["phrases"]))}</div>'
+                f'<div class="when">“{_esc(d.get("context", ""))}”</div></div>'
+                for d in (scan.get("detail") or []))
+            more = (f'<p class="mut">+{scan["truncated"]} more not shown.</p>'
+                    if scan.get("truncated") else "")
+            comp = (head + f'<div class="chips">{ranked}</div>'
+                    + f'<div class="thread">{items}</div>' + more)
+
+    # --- catalogue ---------------------------------------------------------
+    ents = kbm.entities(tenant, available_only=False)
+    oos = [e for e in ents if (e.availability or "available") != "available"]
+    flagged = [e for e in ents if (e.attributes or {}).get("_compliance")]
+    synced = [e for e in ents if e.source == "shopify"]
+    last = max((e.verified_at for e in synced if e.verified_at), default=None)
+    has_store = cred.status(tenant) and tenants.capabilities(tenant).get("commerce")
+    cat = (f'<div class="stat"><span><b>{len(ents)}</b> catalogued</span>'
+           f'<span><b>{len(synced)}</b> from the store</span>'
+           f'<span><b>{len(oos)}</b> out of stock</span>'
+           f'<span><b>{len(flagged)}</b> with flagged copy</span>'
+           + (f'<span>synced {_esc(db.as_utc(last).strftime("%b %d, %H:%M"))}</span>'
+              if last else "") + "</div>")
+    if flagged:
+        cat += ('<div class="chips">' + "".join(
+            f'<span class="chip off">{_esc(e.name)}</span>' for e in flagged[:10])
+            + "</div><p class=\"mut\">Their storefront copy uses a banned phrase, "
+              "so it was not imported. Fix the product page to clear the flag.</p>")
+    if not has_store:
+        cat += ('<p class="mut">No store connected, so there is nothing to sync. '
+                'Products can still be added by hand on the Knowledge tab.</p>')
+
+    return _shell(key, "content", "Content", f"""
+<div>
+  <h1>Content</h1>
+  <p class="mut">What this account's site actually says, what its catalogue holds,
+  and what has been proposed but not yet approved. Nothing here is published —
+  it is the difference between what the brand allows and what is live.</p>
+</div>
+
+<div class="tabs">{picker}</div>
+
+<div class="card">
+  <div class="head"><h2>Proposed, awaiting you</h2>
+    <span class="chip {'off' if pending else 'on'}">{len(pending)} pending</span></div>
+  <p class="mut">Found on {_esc(t.name)}'s own site. Invisible to every generator
+  until approved. Anything using a banned phrase was dropped, not queued.</p>
+  {proposals}
+  <div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}
+    <span class="mut">reads the site and files what it finds</span></div>
+</div>
+
+<div class="card">
+  <div class="head"><h2>Live site compliance</h2></div>
+  {comp}
+  <div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}
+    <span class="mut">checks every public page against this account's rules</span></div>
+</div>
+
+<div class="card">
+  <div class="head"><h2>Catalogue</h2></div>
+  {cat}
+  <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
+    <span class="mut">names, prices and live stock — the store owns those</span></div>
+</div>
+""", suffix=f"&amp;tenant={tenant}")
 
 
 # ---------------------------------------------------------------------------
