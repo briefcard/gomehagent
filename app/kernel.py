@@ -133,25 +133,58 @@ class Role:
 # The agentic loop — generalized from the original command agent. Parameterized
 # by Role; the body is identical for every agent.
 # ---------------------------------------------------------------------------
+def _dispatch(role: Role, name: str, args: dict, session_files: dict,
+              tenant: str) -> str:
+    """Route one tool call, enforcing the account boundary on the way through.
+
+    The boundary is applied here, before anything is routed, so it covers every
+    tool in every role rather than only the shared pack. Gating one dispatcher
+    and not the others is not a boundary — the admin pack alone had twelve tools
+    taking an account, including one that drafts mail as it.
+    """
+    from . import tool_scope
+    args, refusal = tool_scope.guard(name, args, tenant)
+    if refusal:
+        return refusal
+    if name in data_tools._HANDLERS:
+        return data_tools.dispatch(name, args)
+    return role.dispatch(name, args, session_files)
+
+
 def run(role: Role, text: str, attachments: list[dict] | None = None,
-        thread: str | None = None) -> str:
+        thread: str | None = None, tenant: str = "") -> str:
     """Process one message (optionally with documents/images) for ``role`` with
     full conversational continuity. attachments: [{filename, data, mime}].
 
     ``thread`` is the conversation thread — each agent gets its OWN thread
     (defaults to the role name) so admin and seo never share context; pass a
-    distinct thread (e.g. 'seo:eien') to run independent parallel conversations."""
+    distinct thread (e.g. 'seo:eien') to run independent parallel conversations.
+
+    ``tenant`` is which client this turn is about. When given, the thread is
+    qualified by it, working memory and lessons are filtered to it, and the
+    account's identity, connections and hard rules are injected. Without it the
+    agent answers about no client in particular, which is how a question about
+    one store gets answered from another's data.
+    """
     import base64 as _b64
 
-    thread = thread or role.name
-    tools = (data_tools.TOOLS if role.use_data_tools else []) + role.action_tools
+    thread = thread or (f"{role.name}:{tenant}" if tenant else role.name)
+    # Only the tools this account can actually reach, with the account
+    # parameter stripped — the model is never asked which client it is on.
+    from . import tool_scope
+    tools = tool_scope.filter_tools(
+        (data_tools.TOOLS if role.use_data_tools else []) + role.action_tools,
+        tenant)
     history = memory.load_chat_history(thread)
     # Dynamic context (date, lessons, memory, role extras, recent recap) kept
     # OUT of the cached static block so the big rules prefix caches cleanly.
-    from . import systems_map
+    from . import systems_map, tenants
     dynamic = (f"\n\nToday: {dt.datetime.now().strftime('%A %Y-%m-%d')} "
-               "(America/New_York)." + memory.lessons_block(role.name)
-               + memory.memory_block(role.name) + systems_map.block(role.name))
+               "(America/New_York)." + memory.lessons_block(role.name, tenant)
+               + memory.memory_block(role.name, tenant)
+               + systems_map.block(role.name))
+    if tenant:
+        dynamic += tenants.agent_block(tenant)
     if role.extra_context:
         dynamic += role.extra_context()
     if history:
@@ -204,9 +237,9 @@ def run(role: Role, text: str, attachments: list[dict] | None = None,
             for block in msg.content:
                 if block.type == "tool_use":
                     results.append({"type": "tool_result", "tool_use_id": block.id,
-                                    "content": role.dispatch(
-                                        block.name, dict(block.input),
-                                        session_files)[:8000]})
+                                    "content": _dispatch(
+                                        role, block.name, dict(block.input),
+                                        session_files, tenant)[:8000]})
             messages.append({"role": "user", "content": results})
             continue
         reply = next((b.text for b in msg.content if b.type == "text"),

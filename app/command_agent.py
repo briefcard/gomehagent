@@ -982,17 +982,23 @@ def _agents_help() -> str:
 
 
 def handle(text: str, attachments: list[dict] | None = None,
-           force_role: str | None = None) -> str:
-    """WhatsApp entrypoint + router. A leading /<agent> switches the active agent
-    (e.g. /seo, /seo eien, /admin); everything else routes to the active agent on
-    its own thread. force_role bypasses the router for internal admin-only calls
-    (e.g. revising an admin draft) so they never leak to another agent."""
+           force_role: str | None = None, tenant: str = "") -> str:
+    """WhatsApp/Telegram entrypoint + router. A leading /<agent> switches the
+    active agent (e.g. /seo, /seo eien, /admin); everything else routes to the
+    active agent on its own thread. force_role bypasses the router for internal
+    admin-only calls (e.g. revising an admin draft) so they never leak to
+    another agent.
+
+    ``tenant`` is the caller's active account. It qualifies the thread and is
+    injected as context, so the agent knows which client it is answering about
+    instead of inferring it from whatever was said last.
+    """
     from . import kernel
     from . import roles as roles_pkg
 
     if force_role:
         return kernel.run(roles_pkg.get(force_role), text, attachments,
-                          thread=force_role)
+                          thread=force_role, tenant=tenant)
 
     stripped = (text or "").strip()
     low = stripped.lower()
@@ -1017,4 +1023,9 @@ def handle(text: str, attachments: list[dict] | None = None,
         # unrecognized slash: fall through and let the active agent handle it
 
     role_name, thread = _active()
-    return kernel.run(roles_pkg.get(role_name), text, attachments, thread=thread)
+    # The thread is per agent; qualify it by account so two clients never share
+    # one conversation history.
+    if tenant and not thread.endswith(f":{tenant}"):
+        thread = f"{thread}:{tenant}"
+    return kernel.run(roles_pkg.get(role_name), text, attachments,
+                      thread=thread, tenant=tenant)

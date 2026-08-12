@@ -233,12 +233,73 @@ def _parse_verdict(text: str) -> dict | None:
         return None
 
 
-def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
+def _apply_guards(result: dict, tenant: str, sender_trusted: bool) -> dict:
+    """The deterministic checks a model verdict must survive before it can send.
+
+    Extracted from the triage loop so they are testable on their own and
+    reusable by the generator when it lands. Every one of these is code rather
+    than a prompt instruction, for the reason locked decision #2 gives: a prompt
+    mostly obeys, a check always blocks, and a model may never validate a model.
+    """
+    # Hard guardrails, regardless of model output:
+    # auto_reply is allowed only for trusted senders OR auto-send-eligible
+    # buckets (e.g. tool-verified order_routine). Everything else -> draft.
+    if result.get("action") == "auto_reply":
+        bucket_ok = result.get("category") in config.AUTO_SEND_BUCKETS
+        if not (sender_trusted or bucket_ok):
+            result["action"] = "draft"
+            result["reason"] = (result.get("reason") or "") + " [downgraded: not trusted/bucket]"
+    if result.get("category") not in config.BUCKETS:
+        result["category"] = "notifications"
+    # Brand guard: a phrase the client has banned must never leave the building.
+    # The KB has held these rules since the knowledge layer was built and the
+    # unattended half of the system could not see them — Baci's "made in Italy"
+    # ban was enforced nowhere in the code that actually sends mail.
+    #
+    # This is code, not a prompt instruction, and it fails closed: the rule is
+    # in the prompt too (via agent_block), but a prompt mostly obeys and a check
+    # always blocks. Locked decision #2 — a model may never validate a model.
+    if tenant:
+        from . import kb
+        draft = f"{result.get('reply_subject', '')} {result.get('reply_body', '')}".lower()
+        hits = [p for p in kb.banned_claims(tenant) if p and p.lower() in draft]
+        if hits:
+            result["action"] = "escalate" if result.get("action") == "auto_reply" \
+                else result.get("action", "draft")
+            result["reason"] = (f"BANNED CLAIM: the draft says {', '.join(hits)} "
+                                f"— barred for {tenant}. " + (result.get("reason") or ""))
+
+    # Placeholder guard: a draft containing fill-in-the-blank text must never
+    # auto-send, and gets flagged so Gomeh sees it needs his input.
+    body_l = (result.get("reply_body") or "").lower()
+    if any(p in body_l for p in ("[insert", "[yes/no", "[fill", "todo:", "xxx",
+                                 "{{", "[name]", "[date]", "[amount]")):
+        if result.get("action") == "auto_reply":
+            result["action"] = "draft"
+        result["reason"] = "NEEDS-FACTS: draft contains placeholder text — " \
+                           + (result.get("reason") or "")
+    return result
+
+
+def triage_email(email: dict, account_alias: str, sender_trusted: bool,
+                 tenant: str = "") -> dict:
+    """Categorise one email and draft a reply.
+
+    ``tenant`` is which client this inbox belongs to. It scopes the tools the
+    loop may call, filters working memory to that client, and supplies the brand
+    rules the draft must not violate. Without it this function drafts and can
+    auto-send with no idea whose voice it is writing in — which is the same hole
+    the agent had, in the half that runs unattended.
+    """
+    from . import tenants
+    tenant = tenant or tenants.for_alias(account_alias)
     # Static prefix (identical every call) is cached; dynamic suffix is not.
     dynamic = (
         f"\n\nSIGNATURE — end every reply for this inbox EXACTLY with:\n"
         f"{SIGNATURES.get(account_alias, SIGNATURES['personal'])}"
     )
+    if tenant:
+        dynamic += tenants.agent_block(tenant)
     voice = _voice_rules(account_alias)
     if voice:
         dynamic += (
@@ -246,7 +307,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             "replies — match this style and follow these handling rules):\n" + voice
         )
     from . import memory
-    dynamic += memory.lessons_block("admin") + memory.memory_block()
+    dynamic += (memory.lessons_block("admin", tenant)
+                + memory.memory_block("", tenant))
     system = [
         {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": dynamic},
@@ -301,7 +363,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
             model=model,
             max_tokens=3000,  # headroom so long replies don't truncate the JSON
             system=system,
-            tools=_cached_tools(data_tools.TOOLS),
+            tools=_cached_tools(data_tools.tools_for(tenant)),
             messages=messages,
         )
         from . import usage
@@ -314,7 +376,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
                     results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": data_tools.dispatch(block.name, dict(block.input)),
+                        "content": data_tools.dispatch(
+                            block.name, dict(block.input), tenant=tenant),
                     })
             messages.append({"role": "user", "content": results})
             continue
@@ -340,23 +403,4 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool) -> dict:
         result = {"category": "other", "action": "escalate",
                   "reason": "triage parse failure (after retry)",
                   "reply_subject": "", "reply_body": ""}
-    # Hard guardrails, regardless of model output:
-    # auto_reply is allowed only for trusted senders OR auto-send-eligible
-    # buckets (e.g. tool-verified order_routine). Everything else -> draft.
-    if result.get("action") == "auto_reply":
-        bucket_ok = result.get("category") in config.AUTO_SEND_BUCKETS
-        if not (sender_trusted or bucket_ok):
-            result["action"] = "draft"
-            result["reason"] = (result.get("reason") or "") + " [downgraded: not trusted/bucket]"
-    if result.get("category") not in config.BUCKETS:
-        result["category"] = "notifications"
-    # Placeholder guard: a draft containing fill-in-the-blank text must never
-    # auto-send, and gets flagged so Gomeh sees it needs his input.
-    body_l = (result.get("reply_body") or "").lower()
-    if any(p in body_l for p in ("[insert", "[yes/no", "[fill", "todo:", "xxx",
-                                 "{{", "[name]", "[date]", "[amount]")):
-        if result.get("action") == "auto_reply":
-            result["action"] = "draft"
-        result["reason"] = "NEEDS-FACTS: draft contains placeholder text — " \
-                           + (result.get("reason") or "")
-    return result
+    return _apply_guards(result, tenant, sender_trusted)

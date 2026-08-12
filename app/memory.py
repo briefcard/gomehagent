@@ -73,14 +73,22 @@ def forget(topic: str, scope: str | None = None) -> str:
     return f"Archived {n} note(s) on '{topic}'."
 
 
-def memory_block(role: str = "") -> str:
+def memory_block(role: str = "", tenant: str = "") -> str:
     """Active memory for injection: GLOBAL notes + this role's own notes only, so
-    one agent's working memory never contaminates another's context."""
+    one agent's working memory never contaminates another's context.
+
+    When a tenant is given, notes belonging to a *different* client are excluded
+    as well. Unattributed notes still appear — they are the pre-tenant ones, and
+    dropping them would silently empty the agent's memory — but one client's
+    working notes never reach a conversation about another.
+    """
     with db.SessionLocal() as s:
-        rows = (s.query(db.Memory)
-                .filter(db.Memory.status == "active",
-                        (db.Memory.scope == "global") | (db.Memory.scope == role))
-                .order_by(db.Memory.created_at.desc()).limit(MEMORY_MAX).all())
+        q = (s.query(db.Memory)
+             .filter(db.Memory.status == "active",
+                     (db.Memory.scope == "global") | (db.Memory.scope == role)))
+        if tenant:
+            q = q.filter(db.tenant_filter(db.Memory, tenant, include_unassigned=True))
+        rows = q.order_by(db.Memory.created_at.desc()).limit(MEMORY_MAX).all()
     if not rows:
         return ""
     lines = [f"- [{r.topic}] {r.content} (noted {r.created_at:%b %d})" for r in rows]
@@ -121,11 +129,19 @@ def add_lesson(lesson: str, scope: str = "global", origin: str = "") -> str:
     return f"Lesson recorded ({scope}): {txt[:80]}"
 
 
-def lessons_block(role: str = "") -> str:
-    """Global lessons + this role's lessons — injected into every agent."""
+def lessons_block(role: str = "", tenant: str = "") -> str:
+    """Global lessons + this role's lessons — injected into every agent.
+
+    A lesson learned on one account may be specific to it ("this client hates
+    exclamation marks"), so a tenant-tagged lesson only reaches that tenant's
+    conversations. Untagged lessons stay universal, which is what `Lesson` was
+    built for.
+    """
     with db.SessionLocal() as s:
         q = s.query(db.Lesson).filter(
             (db.Lesson.scope == "global") | (db.Lesson.scope == role))
+        if tenant:
+            q = q.filter(db.tenant_filter(db.Lesson, tenant, include_unassigned=True))
         rows = q.order_by(db.Lesson.created_at.desc()).limit(30).all()
     if not rows:
         return ""
