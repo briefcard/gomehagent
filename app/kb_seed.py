@@ -391,8 +391,13 @@ def seed_all() -> dict:
     rows already exist. Returns the resulting status rather than printing."""
     backfill()
     done = []
-    for name, fn in (("baci", seed_baci), ("ironside", seed_ironside),
-                     ("eien", seed_eien), ("coverings", seed_coverings)):
+    # The agency seed lives in kb.py and was called by no route — only by test
+    # scripts. Its knowledge base therefore never existed in production, and
+    # there was no way to load it from the console: the account whose lead
+    # responder is installed was the one account that could never be grounded.
+    for name, fn in (("agency", kb.seed_agency), ("baci", seed_baci),
+                     ("ironside", seed_ironside), ("eien", seed_eien),
+                     ("coverings", seed_coverings)):
         fn()
         done.append(name)
     return {"seeded": done, "status": status(),
