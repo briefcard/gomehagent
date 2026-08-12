@@ -98,6 +98,15 @@ CATALOG = {
         does="Handles routine inbound support with a drafted, checked reply.",
         requires=("inbox",), requires_any=(), needs_kb=True,
         kb_needs=("tone", "banned_claims", "objection", "entity")),
+    "content_compliance": dict(
+        name="Website content compliance",
+        does="Checks the live site against the brand's own banned claims and "
+             "reports the pages that break them.",
+        # Needs no connection: the site is public. It needs the RULES, which is
+        # the whole point — an account with no banned_claims has nothing to
+        # check against and the system says so rather than passing everything.
+        requires=(), requires_any=(), needs_kb=True,
+        kb_needs=("banned_claims",)),
     "reports": dict(
         name="Reports",
         does="The weekly number, assembled from whatever is connected.",

@@ -1289,6 +1289,28 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
+@app.get("/admin/compliance_scan")
+def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
+                    limit: int = 40, since: str = "") -> dict:
+    """Check a client's live website against its own banned claims.
+
+    /admin/compliance_scan?tenant=baci             first full pass
+    /admin/compliance_scan?tenant=baci&since=2026-08-01   only what changed
+
+    Pages come from sitemap.xml, which every platform publishes — including
+    Squarespace, which has no usable publishing API. Nothing is rewritten: the
+    URL and the surrounding sentence are what make a violation fixable.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import compliance
+    if not tenant:
+        return {"error": "name a tenant, e.g. ?tenant=baci"}
+    result = compliance.scan(tenant, limit=limit, since=since)
+    compliance.record_scan(tenant, result)
+    return result
+
+
 @app.get("/admin/catalog_sync")
 def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
                  report_only: str = "", limit: int = 250) -> dict:
