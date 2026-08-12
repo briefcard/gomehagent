@@ -39,6 +39,32 @@ SITUATIONS = {
 }
 
 
+# What each kind of proof MAY be used for. `proof_type` records where a claim
+# came from; this records what that origin permits, which is a different
+# question and the one a generator actually needs answered.
+#
+# The testimonial rule is the load-bearing one. A customer's review reworded as
+# brand copy is a fabrication however true the sentiment was — "the colours are
+# better in person" said BY the brand is an unevidenced claim, and said as a
+# quote from a named customer it is a fact about what someone said. The words
+# and the attribution are the evidence, so neither may be edited away.
+PROOF_USAGE = {
+    "testimonial": "Quote verbatim, with attribution. Never paraphrase, "
+                   "reword, or restate as the brand's own claim.",
+    "case_study": "May be summarised. Keep the numbers exact.",
+    "data": "May be restated. The figure may not change.",
+    "certification": "State exactly as certified. No embellishment.",
+    "spec": "State exactly. A spec restated loosely is a wrong spec.",
+}
+
+# Proof whose wording IS the evidence, so the text is immutable once captured.
+VERBATIM_ONLY = ("testimonial",)
+
+
+def usage_rule(proof_type: str) -> str:
+    return PROOF_USAGE.get((proof_type or "").strip().lower(), "")
+
+
 # --------------------------------------------------------------------------
 # Read accessors — the only way the pipeline touches the KB
 # --------------------------------------------------------------------------
@@ -178,6 +204,80 @@ def situation_patterns(tenant: str) -> dict[str, list[tuple]]:
             db.KbSituation.tenant == tenant).all()
         out = {r.tag: [tuple(p) for p in (r.patterns or []) if p] for r in rows}
     return {k: v for k, v in out.items() if v}
+
+
+def _tok(text: str) -> set[str]:
+    """Informative words. Short ones carry no signal and dominate any overlap."""
+    import re as _re
+    return {w for w in _re.findall(r"[a-z][a-z'-]{3,}", (text or "").lower())}
+
+
+def suggest_tags(tenant: str, text: str, limit: int = 2) -> dict:
+    """Best-guess situation tags for a candidate claim, and why.
+
+    Two sources, in order of authority:
+
+      1. **Patterns** — the tenant's own `KbSituation` triggers. An exact match
+         is a decision, not a guess.
+      2. **The claims already approved for this account.** Every active claim
+         carries tags a human chose, so the words in them are a worked example
+         of what each tag means here. A candidate is scored against that,
+         which means the tagging gets better every time you approve something
+         rather than staying as good as the day the patterns were written.
+
+    Retired claims are the negative signal: something close to what was
+    rejected before is flagged rather than suggested, because re-proposing what
+    was already turned down is how a review queue teaches you to stop reading it.
+
+    No model call — this is word overlap over the tenant's own rows, so it is
+    explainable and it cannot invent a tag that does not exist.
+    """
+    valid = situations(tenant)
+    words = _tok(text)
+    if not words:
+        return {"tags": [], "basis": "", "similar_to_rejected": ""}
+
+    # 1. patterns
+    hits = []
+    for tag, patterns in situation_patterns(tenant).items():
+        for pat in patterns:
+            if all(str(w).lower() in (text or "").lower() for w in pat):
+                hits.append(tag)
+                break
+    if hits:
+        return {"tags": hits[:limit], "basis": "pattern",
+                "similar_to_rejected": ""}
+
+    # 2. learned from what has already been approved here
+    inv = claim_inventory(tenant)
+    per_tag: dict[str, set[str]] = {}
+    for row in inv["selectable"]:
+        for tag in (row.situations or []):
+            if tag in valid:
+                per_tag.setdefault(tag, set()).update(
+                    _tok(f"{row.claim} {row.evidence or ''}"))
+    scored = []
+    for tag, vocab in per_tag.items():
+        shared = words & vocab
+        if shared:
+            # Normalise by the candidate's length so a long sentence does not
+            # out-score a precise one purely by having more words.
+            scored.append((len(shared) / (len(words) ** 0.5), tag, shared))
+    scored.sort(reverse=True)
+
+    rejected_like = ""
+    for row in inv["retired"]:
+        overlap = words & _tok(row.claim)
+        if len(overlap) >= max(3, len(words) // 3):
+            rejected_like = row.claim[:120]
+            break
+
+    if not scored:
+        return {"tags": [], "basis": "", "similar_to_rejected": rejected_like}
+    return {"tags": [t for _, t, _ in scored[:limit]],
+            "basis": "resembles approved claims tagged "
+                     + ", ".join(t for _, t, _ in scored[:limit]),
+            "similar_to_rejected": rejected_like}
 
 
 def situation_desc(tenant: str) -> dict[str, str]:
@@ -580,7 +680,14 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     if unknown:
         return (f"Unknown tags for {tenant}: {', '.join(unknown)}\n"
                 f"Valid: {', '.join(sorted(valid))}")
-    if not tags:
+    # A claim being REVIEWED may arrive untagged; a claim being USED may not.
+    # The requirement moved from write time to approve time so a derived
+    # candidate can be proposed and segmented by a human at the moment they
+    # look at it, rather than discarded for want of a tag a crawler could not
+    # infer. `claims()` only returns active rows, so an untagged pending claim
+    # is invisible to selection either way — and `review_claim` refuses to
+    # activate one.
+    if not tags and status == "active":
         return "Needs at least one situation tag, or it can never be selected."
     with db.SessionLocal() as s:
         s.add(db.KbClaim(tenant=tenant, claim=claim, evidence=evidence,
@@ -613,11 +720,55 @@ def review_claim(claim_id: str, approve: bool) -> str:
         row = s.get(db.KbClaim, claim_id)
         if not row:
             return "No such claim."
+        if approve and not (row.situations or []):
+            # This is where the tag requirement is actually enforced. Letting an
+            # untagged claim go active would make it permanently unselectable
+            # while looking approved — worse than refusing.
+            return ("Give it at least one situation tag before approving — "
+                    "an untagged claim can never be selected.")
         row.status = "active" if approve else "retired"
         s.commit()
         text = row.claim
     return (f"Approved — now selectable.\n{text}" if approve
             else f"Rejected.\n{text}")
+
+
+def update_claim(claim_id: str, claim: str = None, evidence: str = None,
+                 tags: list[str] | None = None, proof_type: str = None,
+                 source: str = None, strength: str = None) -> str:
+    """Edit a claim in place. The editing half of propose-then-approve.
+
+    Tags are validated against the tenant's vocabulary exactly as `add_claim`
+    does — a human correcting a proposal must not be able to invent a tag that
+    selection will never match either.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbClaim, claim_id)
+        if not row:
+            return "No such claim."
+        if tags is not None:
+            valid = situations(row.tenant)
+            unknown = [t for t in tags if t not in valid]
+            if unknown:
+                return (f"Unknown tags for {row.tenant}: {', '.join(unknown)}\n"
+                        f"Valid: {', '.join(sorted(valid))}")
+            row.situations = tags
+        # A testimonial's wording is its evidence. Editing it turns a record of
+        # what a customer said into something the brand asserts, which is the
+        # one edit that changes a true row into a false one.
+        if (claim is not None and str(claim).strip()
+                and (row.proof_type or "") in VERBATIM_ONLY
+                and str(claim).strip() != (row.claim or "").strip()):
+            return ("This is a customer's own words — quote it, do not rewrite "
+                    "it. Correct the tags or the attribution instead, or reject "
+                    "it if it should not be used at all.")
+        for field, value in (("claim", claim), ("evidence", evidence),
+                             ("proof_type", proof_type), ("source", source),
+                             ("strength", strength)):
+            if value is not None and str(value).strip():
+                setattr(row, field, str(value).strip())
+        s.commit()
+    return "Saved."
 
 
 def retire_claim(claim_id: str) -> str:

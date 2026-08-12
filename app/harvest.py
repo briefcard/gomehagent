@@ -172,12 +172,18 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
                 rejected.append({"text": body[:160], "banned_phrase": hit,
                                  "url": url})
                 continue
-            tags = _tags_for(tenant, body)
+            # Every candidate is proposed WITH its best-guess tags, and an
+            # untaggable one is proposed untagged rather than discarded — the
+            # segmentation happens when a human approves it, which is the only
+            # point at which anyone actually knows the answer.
+            guess = kb.suggest_tags(tenant, body)
+            tags = guess["tags"]
             if not tags:
                 untaggable.append({"text": body[:160], "url": url})
-                continue
             known.add(low)
-            entry = {**cand, "text": body, "tags": tags}
+            entry = {**cand, "text": body, "tags": tags,
+                     "tag_basis": guess["basis"],
+                     "similar_to_rejected": guess["similar_to_rejected"]}
             proposed.append(entry)
             if apply:
                 kb.add_claim(tenant, body, cand["evidence"], tags,
@@ -192,12 +198,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
         "proposed": proposed,
         "proposed_count": len(proposed),
         "rejected_for_banned_claim": rejected,
-        "found_but_untaggable": untaggable[:15],
-        "untaggable_count": len(untaggable),
+        "proposed_without_tags": untaggable[:15],
+        "untagged_count": len(untaggable),
         "note": ("Proposals land as PENDING claims — invisible to selection "
                  "until approved at /admin/ui?tab=kb. Anything using a banned "
-                 "phrase was dropped, not queued. Untaggable candidates are "
-                 "reported rather than stored with a guessed situation tag."),
+                 "phrase was dropped, not queued. Candidates the tagger could "
+                 "not place are proposed untagged — approval refuses until a "
+                 "tag is chosen, so they are segmented by a human rather than "
+                 "guessed at or thrown away."),
     }
 
 

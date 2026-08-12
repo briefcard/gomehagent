@@ -1323,6 +1323,39 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
+@app.post("/admin/claim_edit", response_class=HTMLResponse)
+async def claim_edit(request: Request, key: str = Depends(admin_key)):
+    """Edit a proposal, then save / approve / reject it.
+
+    POST rather than GET, like the connect form: a claim body is long free text
+    and belongs in a request body, not a query string that lands in the access
+    log. One form, three buttons — because the point of proposing is that the
+    thing gets corrected before it becomes something the generator may say.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse('<h3>unauthorized</h3>')
+    from . import kb as kbm
+    form = await request.form()
+    claim_id = str(form.get("claim_id", ""))
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", "save"))
+
+    if action == "reject":
+        kbm.review_claim(claim_id, approve=False)
+        return _back_to_content(tenant)
+
+    kbm.update_claim(
+        claim_id,
+        claim=str(form.get("claim", "")),
+        evidence=str(form.get("evidence", "")),
+        tags=[str(t) for t in form.getlist("tags")])
+    if action == "approve":
+        # May refuse — an untagged claim cannot be approved, and the tab will
+        # still show it with the reason.
+        kbm.review_claim(claim_id, approve=True)
+    return _back_to_content(tenant)
+
+
 @app.get("/admin/harvest")
 def harvest_route(key: str = Depends(admin_key), tenant: str = "",
                   limit: int = 25, apply: str = "", ui: str = ""):

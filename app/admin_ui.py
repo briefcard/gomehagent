@@ -142,7 +142,7 @@ details.sec{border:1px solid var(--rule);border-radius:5px;padding:9px 12px;back
 details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;color:var(--acc)}
 details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);padding-bottom:7px}
 .msg.gone{opacity:.62}
-.msg.esc{border-left-color:var(--gap)}
+.msg.esc{border-left-color:var(--gap)}\n.tags{display:flex;flex-wrap:wrap;gap:4px 10px}\n.tags .tag{font-size:.78rem;color:var(--ink2);display:flex;align-items:center;gap:4px;white-space:nowrap}\n.tags input{width:auto}
 """
 
 _TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
@@ -684,6 +684,8 @@ def render_kb(key: str, tenant: str = "") -> str:
                 + f'<div class="when"><code>{_esc(tags)}</code></div>'
                 + f'<div class="when">{meta}{" · " if meta else ""}'
                 f'{_esc(r.source or "source not recorded")}</div>'
+                + (f'<div class="when"><b>{_esc(kb.usage_rule(r.proof_type))}</b></div>'
+                   if kb.usage_rule(r.proof_type or "") else "")
                 + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
                 + "</div>")
 
@@ -1018,20 +1020,55 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
 
     # --- proposals ---------------------------------------------------------
     pending = kbm.pending_claims(tenant)
+    vocab = sorted(kbm.situations(tenant))
     if pending:
-        items = "".join(
-            f'<div class="msg">'
-            f'<div>{_esc(p.claim)}</div>'
-            f'<div class="when">{_esc(p.evidence or "no evidence recorded")}</div>'
-            f'<div class="when"><code>{_esc(" ".join(p.situations or []))}</code> · '
-            f'{_esc(p.proof_type or "")} · {_esc(p.source or "")}</div>'
-            f'<div class="row" style="margin-top:6px">'
-            + _act(key, "/admin/claim_review", "Approve", tenant,
-                   {"claim_id": p.id, "approve": "yes"}, small=True)
-            + _act(key, "/admin/claim_review", "Reject", tenant,
-                   {"claim_id": p.id, "approve": "no"}, small=True)
-            + "</div></div>" for p in pending)
-        proposals = f'<div class="thread">{items}</div>'
+        def _card(p) -> str:
+            chosen = set(p.situations or [])
+            # A testimonial's wording IS its evidence. The field is read-only
+            # rather than merely discouraged, because rewording a review turns a
+            # record of what a customer said into something the brand asserts.
+            verbatim = (p.proof_type or "") in kbm.VERBATIM_ONLY
+            usage = kbm.usage_rule(p.proof_type or "")
+            rule = (f'<div class="note">{_esc(usage)}</div>'
+                    if verbatim and usage else
+                    (f'<div class="when">{_esc(usage)}</div>' if usage else ""))
+            # The vocabulary as checkboxes: a tag can only ever be one the
+            # account actually has, so a correction cannot invent a tag that
+            # selection will never match.
+            tagbox = "".join(
+                f'<label class="tag"><input type="checkbox" name="tags" '
+                f'value="{_esc(t)}"{" checked" if t in chosen else ""}> '
+                f'{_esc(t)}</label>' for t in vocab)
+            warn = ""
+            if not chosen:
+                warn = ('<div class="note">No tag matched. Pick at least one — '
+                        'approval is refused without it, because an untagged '
+                        'claim can never be selected.</div>')
+            return f"""
+            <form class="f" method="post" action="/admin/claim_edit">
+              <input type="hidden" name="claim_id" value="{_esc(p.id)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <label>{"Quoted — a customer's own words"
+                      if verbatim else "Claim"}</label>
+              <textarea name="claim" rows="2"{" readonly" if verbatim else ""
+                        }>{_esc(p.claim)}</textarea>
+              {rule}
+              <label>{"Attribution" if verbatim
+                      else "Evidence — the number or the proof"}</label>
+              <input name="evidence" value="{_esc(p.evidence or '')}"
+                     placeholder="what makes this checkable">
+              <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>
+              {warn}
+              <label>Situations</label>
+              <div class="tags">{tagbox}</div>
+              <div class="row">
+                <button name="action" value="approve">Save &amp; approve</button>
+                <button class="sec" name="action" value="save">Save only</button>
+                <button class="sec" name="action" value="reject">Reject</button>
+              </div>
+            </form>"""
+        proposals = f'<div class="grid" style="grid-template-columns:1fr">' \
+                    + "".join(_card(p) for p in pending) + "</div>"
     else:
         proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
                      'own site and files what it finds here — as proposals, never '

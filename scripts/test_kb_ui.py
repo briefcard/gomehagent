@@ -173,8 +173,12 @@ def main() -> int:
     ck("the Content tab renders", "Content" in page and len(page) > 800)
     ck("a pending proposal is shown", has(page, "PROPOSED CLAIM AWAITING REVIEW"))
     ck("with its provenance", has(page, "review on /products/x"))
-    ck("and can be approved without leaving the page",
-       "/admin/claim_review" in page and "Approve" in page and "Reject" in page)
+    ck("and can be edited, tagged and approved without leaving the page",
+       all(x in page for x in ("/admin/claim_edit", 'name="claim"',
+                               'name="evidence"', 'name="tags"',
+                               "Save &amp; approve", "Reject")))
+    ck("the tag options are the account's own vocabulary",
+       all(f'value="{t}"' in page for t in list(kb.situations("baci"))[:3]))
     ck("the compliance finding names the live URL",
        has(page, "https://bacimilanousa.com/pages/about"))
     ck("and quotes the sentence, so it is fixable without opening the page",

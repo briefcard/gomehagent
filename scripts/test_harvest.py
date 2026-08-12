@@ -122,9 +122,8 @@ def main() -> int:
        and "Marta" in review["evidence"], str(review)[:120] if review else "")
     ck("every proposal cites where it came from",
        all(p["source"] for p in r["proposed"]))
-    ck("every proposal carries tags from the account's OWN vocabulary",
-       all(p["tags"] and set(p["tags"]) <= set(kb.situations("baci"))
-           for p in r["proposed"]),
+    ck("tags, where present, come from the account's OWN vocabulary",
+       all(set(p["tags"]) <= set(kb.situations("baci")) for p in r["proposed"]),
        str([(p["text"][:24], p["tags"]) for p in r["proposed"]]))
 
     # ---- noise ------------------------------------------------------------
@@ -138,8 +137,11 @@ def main() -> int:
 
     # ---- untaggable is reported, never guessed ---------------------------
     print("\n— what it cannot tag —")
-    ck("untaggable candidates are reported rather than stored",
-       isinstance(r["found_but_untaggable"], list))
+    ck("candidates it cannot tag are still proposed, not discarded",
+       isinstance(r["proposed_without_tags"], list))
+    ck("and they are counted", isinstance(r["untagged_count"], int))
+    ck("every proposal carries the basis for its tags",
+       all("tag_basis" in p for p in r["proposed"]))
 
     # ---- applying ---------------------------------------------------------
     print("\n— filing them —")
@@ -161,6 +163,72 @@ def main() -> int:
     ck("the same lines are not proposed twice", r3["proposed_count"] == 0,
        str(r3["proposed_count"]))
 
+    # ---- segmentation happens at approval, not at capture -----------------
+    print("\n— an untagged proposal is segmented by a human —")
+    untagged = kb.add_claim("baci", "A claim no pattern will ever match here.",
+                            "some number", [], proof_type="data",
+                            source="test", status="pending")
+    ck("an untagged claim CAN be proposed", "review" in untagged.lower(), untagged[:60])
+    row = [c for c in kb.pending_claims("baci")
+           if c.claim.startswith("A claim no pattern")][0]
+    msg = kb.review_claim(row.id, approve=True)
+    ck("but CANNOT be approved untagged", "tag before approving" in msg, msg[:70])
+    ck("and stays pending", kb.pending_claims("baci") and any(
+        c.id == row.id for c in kb.pending_claims("baci")))
+    tag = sorted(kb.situations("baci"))[0]
+    ck("editing it accepts a real tag",
+       kb.update_claim(row.id, tags=[tag]) == "Saved.")
+    ck("an invented tag is refused",
+       "Unknown tags" in kb.update_claim(row.id, tags=["not_a_real_tag"]))
+    ck("now it approves", "Approved" in kb.review_claim(row.id, approve=True))
+    ck("and is selectable", any(c.id == row.id for c in kb.claims("baci")))
+
+    # ---- the tagger learns from what was approved -------------------------
+    print("\n— the tagger learns —")
+    g = kb.suggest_tags("baci", "A claim no pattern will ever match, 5 of them.")
+    ck("a candidate resembling an approved claim inherits its tag",
+       tag in g["tags"], f"{g['tags']} via {g['basis'][:40]}")
+    ck("and says that is why", "resembles approved" in g["basis"] or
+       g["basis"] == "pattern", g["basis"][:50])
+
+    # ---- a customer's words are not the brand's ---------------------------
+    # A review reworded as brand copy is a fabrication however true the
+    # sentiment was: "the colours are better in person" said BY the brand is an
+    # unevidenced claim, and said as a quote from a named customer it is a fact
+    # about what someone said.
+    print("\n— a testimonial may be quoted, not rewritten —")
+    t_row = next((c for c in kb.pending_claims("baci") + kb.claims("baci")
+                  if c.proof_type == "testimonial"), None)
+    if t_row is None:
+        kb.add_claim("baci", "The colours are better in person, genuinely.",
+                     "5-star review from Dana", ["gifting"],
+                     proof_type="testimonial", source="review on /x",
+                     status="pending")
+        t_row = next(c for c in kb.pending_claims("baci")
+                     if c.proof_type == "testimonial")
+    original = t_row.claim
+    msg = kb.update_claim(t_row.id, claim="Our colours are better in person.")
+    ck("rewording a testimonial is refused", "do not rewrite" in msg, msg[:70])
+    ck("and the original survives untouched",
+       next(c for c in kb.pending_claims("baci") + kb.claims("baci")
+            if c.id == t_row.id).claim == original)
+    ck("its tags can still be corrected",
+       kb.update_claim(t_row.id, tags=["gifting"]) == "Saved.")
+    ck("and its attribution can still be fixed",
+       kb.update_claim(t_row.id, evidence="5-star review from Dana R.") == "Saved.")
+
+    ck("a data claim CAN be reworded",
+       kb.update_claim(
+           next(c.id for c in kb.claims("baci") if c.proof_type == "data"),
+           claim="Stocked in 4 Four Seasons properties.") == "Saved.")
+
+    ck("every proof type states how it may be used",
+       all(kb.usage_rule(t) for t in
+           ("testimonial", "case_study", "data", "certification", "spec")))
+    ck("the testimonial rule says quote, not paraphrase",
+       "verbatim" in kb.usage_rule("testimonial").lower()
+       and "never paraphrase" in kb.usage_rule("testimonial").lower())
+
     # ---- an account with no vocabulary ------------------------------------
     print("\n— an account that cannot tag anything —")
     with db.SessionLocal() as s:
@@ -168,10 +236,20 @@ def main() -> int:
         s.commit()
     kb.ensure_brand("bare", "Bare Co")
     rb = harvest.harvest("bare", limit=10, apply=True)
-    ck("nothing is filed without a vocabulary to tag against",
-       rb["proposed_count"] == 0 and not kb.pending_claims("bare"))
-    ck("but the candidates are reported so the gap is visible",
-       rb["untaggable_count"] > 0, str(rb["untaggable_count"]))
+    # The old behaviour discarded these. Proposing them untagged is the point:
+    # a brand-new account has no vocabulary yet, and its site is exactly where
+    # the vocabulary should come from — so the candidates wait for a human
+    # instead of being thrown away for want of a tag nobody has written.
+    ck("candidates are still proposed for an account with no vocabulary",
+       rb["proposed_count"] > 0, str(rb["proposed_count"]))
+    ck("they are filed untagged", rb["untagged_count"] > 0,
+       str(rb["untagged_count"]))
+    bare_pending = kb.pending_claims("bare")
+    ck("and land as pending, not active", bare_pending
+       and all(c.status == "pending" for c in bare_pending))
+    ck("none of them is selectable", not kb.claims("bare"))
+    ck("and none can be approved until it is tagged",
+       "tag before approving" in kb.review_claim(bare_pending[0].id, approve=True))
 
     # ---- every client ------------------------------------------------------
     print("\n— all accounts —")
