@@ -170,11 +170,34 @@ Activity Reporting and the AI VA run on (`EmailLog`, `Contact`, `DocIndex`,
 composite `(tenant, …)`; `db.tenant_filter()` as the single definition of "belongs
 to this client"; `app/tenant_scope.py` backfills what is derivable.
 
-Two decisions worth keeping:
+**I called two tables underivable that were not.** `Expense` has an `account`
+column written straight from the inbox alias, and `Approval.payload` carries
+`{"account": alias}` or `{"site": profile}` at every call site — roughly 620
+production rows written off as unrecoverable when the answer was on the row.
+The classification had been reasoned about rather than checked against the
+writers. *Rule: before declaring data unrecoverable, read the code that wrote
+it.* Both now derive; `doc_index` and `usage` genuinely do not, and the
+distinction is the useful part — see below.
+
+Four decisions worth keeping:
+
+- **The dry run predicts per row, not per table.** The first version of
+  `report()` returned `derivable: true` per table, which reads as "these 3,897
+  rows will be attributed" when it only means "a rule exists for this table" —
+  most chat threads are called `admin` and name no client at all. That is the
+  §1 *structural metadata mistaken for content* pattern, in a report someone
+  was about to act on before a 13,772-row write. `preview()` now counts real
+  rows and shares `_derive()` with `backfill()`, so the prediction cannot drift
+  from the write it predicts; `test_tenant_scope.py` asserts they are equal.
 
 - **Unassigned is not "everyone".** `db.UNASSIGNED` is excluded from per-client
   queries unless a caller asks for it by name. Folding unattributed rows into
   whoever is asking is how one client's shipment reaches another's report.
+- **"Unrecoverable" has two very different causes.** `usage` never knew its
+  client. `doc_index` *did* — Drive is looked up per inbox — and stored it
+  nowhere. The first is a data limit; the second is a missing column on the
+  writer, and no backfill will ever fix it. `tenant_scope.resolve()` exists so
+  writers attribute at capture time, which is the only point where it is cheap.
 - **The backfill derives, it does not guess.** An inbox belongs to one client
   (`account` → `Tenant.gmail_alias`), a site belongs to one client (`domain` →
   `Tenant.domain`), and `system:baci:blog` names its own. A shipment records
@@ -209,10 +232,15 @@ claim and one objection; one objection cannot cover what a planner asks. Worse,
 a hollow brief still passes: an enquiry that produces no situations, no matched
 entity and no offer returns `blocked=False` and would be handed to a generator.
 
-**Recommendation 3 — the ledger and guidance are not wired.** *Not built.*
-`systems.start_run`, `finish_run` and `feedback_block` have no callers outside
-their test script. Every run stat on the Systems tab is structurally zero, and
-every piece of guidance written into a system thread is stored and never read.
+**Recommendation 3 — half wired (2026-08-12).** `worker.systems_tick` now calls
+`start_run`/`finish_run` daily, so the Systems tab shows real runs and
+`blocked_reasons()` ranks the KB backlog by what actually costs an output. It
+sends nothing: a system that is not live is skipped, and one on the `shadow`
+rung records and stops.
+
+Still unwired: **`feedback_block` has no caller.** Guidance written into a
+system thread is stored and never reaches a drafting prompt — it will, when the
+generator lands, which is the same slice.
 
 **Recommendation 4 — nothing generates.** *Not built.* No generator, no
 validator, no send.
@@ -249,11 +277,95 @@ cannot be scraped, and half the paid intake.
 **Eien's banned claims are my conservative defaults, not Gomeh's.** A supplement
 brand with a GLP-1 product. Needs review.
 
-**Free text falls through to an unscoped agent.** No client may be given bot
-access until this is fixed.
+**~~Free text falls through to an unscoped agent.~~ Half fixed 2026-08-12.**
+`kernel.run` now takes a tenant: the thread is qualified by it, memory and
+lessons are filtered to it, and `tenants.agent_block()` injects the account's
+identity, connections and banned claims. With no account selected the agent
+refuses rather than assuming. Enforced by `scripts/test_tenant_isolation.py`.
 
-**The console key travels in every form URL.** Fine while the owner is the only
-user; must not be the same credential once clients have logins.
+**Tools are gated too (2026-08-12).** Seven of the eleven shared tools took the
+account as a MODEL-SUPPLIED argument (`store`, `account`), so which client the
+agent addressed was a suggestion rather than a boundary. Now, while an account
+is active: the parameter is stripped from the schema the model sees, the
+resolved value is injected at dispatch, a tool naming a *different* account is
+refused by name, and a tool whose connection is not wired is not offered at all.
+The last one also cuts context — a venue is sent 4 schemas instead of 11.
+
+**Gating one pack was not a boundary (2026-08-12).** The first pass covered the
+11 shared tools. An audit of the roles found **32 more taking an account** — 12
+in admin, 27 in seo, including `queue_email_draft` (drafts mail *as* an account),
+`calendar_create_event`, `save_file_to_drive`, and four `propose_*` tools that
+publish to a live storefront. All 81 tools now pass through
+`tool_scope.guard()` in `kernel._dispatch`, before anything is routed.
+
+`tool_scope.ACCOUNT_PARAMS` is the completeness guard: a tool whose schema
+exposes `store`, `account`, `alias` or `site` and is absent from `SCOPED` fails
+the isolation test by name. Verified by removing `queue_email_draft` from the
+registry and watching it fail. That is what stops tool 82 reopening this.
+
+Note the SEO resolver: a tenant with no `sites.py` profile gets **no** SEO
+tools, rather than the primary site by default — which is what the unscoped code
+did, and is how one client's content work would have been done against
+another's property.
+
+### 2.19 A joined string ranked ' ' and 'e' as the costliest gaps
+`SystemRun.blocked_on` is `Column(JSON, default=list)` and `blocked_reasons()`
+iterates it to rank the KB backlog. The first `systems_tick` passed
+`"; ".join(blockers)` instead of the list. SQLite accepted it, iterating a
+string yielded characters, and the backlog came back as
+`[(' ', 206), ('e', 195)]`.
+
+Every assertion passed — the test checked that reasons existed and were sorted,
+both true of characters. It was caught by reading the printed output, which is
+the §12 rule in the handoff working exactly as intended.
+**Fix:** pass the list. The test now asserts a reason is longer than three
+characters and reads like a missing thing, so the shape cannot regress silently.
+
+### 2.20 The unattended half could send a banned claim
+`worker.py` and `triage.py` run with nobody watching and can auto-send. They
+were addressed by inbox alias and had no idea which client that was:
+`triage.py` called `data_tools.dispatch()` with **no tenant**, so triage's own
+tool loop could read another client's mail while triaging this one; its working
+memory was unscoped; and it had never been able to see `banned_claims`. Baci's
+ban on "made in Italy" was enforced nowhere in the code that actually sends.
+
+**Fix:** `tenants.for_alias()` resolves the inbox to its client once in the
+worker and threads it through. Triage's tool loop is filtered and gated like the
+agent's, its memory is scoped, and `agent_block` supplies the account's rules.
+The post-verdict guardrails moved into `triage._apply_guards()` — testable on
+their own, reusable by the generator — and gained a **brand guard**: a draft
+containing a banned phrase can never auto-send. An `auto_reply` carrying one is
+downgraded to `escalate`, not to `draft`, because a rule violation is a signal
+the model misread the account, not a wording problem.
+
+The guard is code, and the same phrase is also in the prompt via `agent_block`.
+Both, deliberately: a prompt mostly obeys, a check always blocks (decision #2).
+An inbox with no tenant is **not** brand-checked and says so rather than
+claiming a clean pass.
+
+**`capabilities()` did not know about client-connected credentials.** Building
+the connect page created it: a client could connect Shopify successfully and the
+account still read "not wired", so the agent was never offered its tools — the
+connection worked and nothing could use it. Found by the tool-gating test
+failing on a correctly-connected account. `capabilities()` now counts a stored
+`Credential` exactly as much as an env-group entry.
+
+**Write operations are GET requests.** `/admin/kb_add`, `/admin/seed_kb` and
+`/admin/tenant_scope` all mutate on a GET, so anything that causes a URL to load
+— a browser prefetch, a link preview, a scanner walking history — can fire them.
+A prefetched `/admin/tenant_scope` would run a 13,000-row backfill. Converting
+the ten console forms to POST closes it; the session cookie already means the
+credential is no longer in those URLs.
+
+**~~The console key travels in every form URL.~~ Fixed 2026-08-12** — the key is
+accepted once (query string or `X-Admin-Key`) and exchanged for an httpOnly
+session cookie carrying an HMAC of the secret, never the secret itself, because
+`APPROVAL_SECRET` also signs approval decision links. Comparisons are constant
+time. What this is *not*: one shared credential remains, with no per-user
+identity and no revocation — real auth is still required before any client gets
+a login. See `scripts/test_console_auth.py`.
+
+It must still not be the same credential once clients have logins.
 
 **`kb.SITUATIONS` is still the fallback constant.** Per-tenant vocabularies now
 exist as data, but a tenant with none silently inherits agency-B2B language.
@@ -270,12 +382,16 @@ python3 scripts/test_intake.py      # client intake links, scoping, fail-closed 
 python3 scripts/test_kb_ui.py       # every KB field reaches the Knowledge tab
 python3 scripts/test_tenant_scope.py  # per-client uniqueness, backfill, trust boundary
 python3 scripts/test_migration.py     # the same migration over a database with rows
+python3 scripts/test_console_auth.py  # console session: key once, then a cookie
+python3 scripts/test_credentials.py    # client-connected credentials, encrypted
+python3 scripts/test_tenant_isolation.py  # MANDATORY: every feature is tenant-scoped
+python3 scripts/test_worker_systems.py    # the tick that fills the run ledger
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All seven suites pass as of 2026-08-12. None of them touch the network.
+All twelve suites pass as of 2026-08-12. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.

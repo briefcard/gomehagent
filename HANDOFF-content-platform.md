@@ -34,7 +34,7 @@ and six reference artifacts (§11).
 | Knowledge base (5 tables) | Deployed, agency tenant seeded |
 | Brief assembler (decision layer) | Deployed, tested offline |
 | Admin console + live verification | Deployed |
-| Systems registry + run ledger | Built, tested offline — **not yet pushed** |
+| Systems registry + run ledger | Built. `worker.systems_tick` is now its caller — runs daily, records blockers, sends nothing |
 | Systems tab (console) + per-system threads | Built, rendered — **not yet pushed** |
 | KB write layer + guided intake (`/next`) | Built, tested — **not yet pushed** |
 | Knowledge tab (console) | Built, rendered. Now shows **every** KB column per client, including the situation vocabulary, non-selectable claims, and the gap queue — **not yet pushed** |
@@ -43,7 +43,7 @@ and six reference artifacts (§11).
 | Unknowns feedback loop (`KbUnknown`, `/unknowns`) | Built, tested — **not yet pushed** |
 | Client intake links (`/intake/<token>`) | Built, tested — **not yet pushed** |
 | Readiness bar means something (rec 2) | **Not built** |
-| Ledger + guidance wired into the path (rec 3) | **Not built** |
+| Ledger + guidance wired into the path (rec 3) | Ledger wired via `worker.systems_tick`; `feedback_block` still has no caller |
 | Generator / validator / send (rec 4) | **Not built** |
 
 | Operational half tenant-scoped (schema) | **Built** — `tenant` on 18 models, per-client uniqueness, derivable backfill. Call sites still to follow |
@@ -326,7 +326,14 @@ the infrastructure it lands on is single-tenant.
 client pinned to `coverings` is refused `baci`), but unrecognised text falls
 through to an unscoped agent. Do not invite clients until slice 4 lands.
 
-**The console key travels in URLs.** Every form embeds `APPROVAL_SECRET` as a
+**The console key no longer travels in URLs (Aug 2026).** Supply it once —
+`?key=` or `-H "X-Admin-Key: …"` — and it is exchanged for an httpOnly session
+cookie holding an HMAC of the secret, not the secret. `/admin/logout` clears it.
+The console omits the key from its own links once the session exists. Still one
+shared credential with no per-user identity: this removed the leak surface, not
+the need for auth before clients get logins.
+
+The original note, still true in substance: every form embedded `APPROVAL_SECRET` as a
 query param, so it lands in browser history and any proxy log. Acceptable while
 the only user is the owner; it must not be the same credential the moment
 clients get a login.

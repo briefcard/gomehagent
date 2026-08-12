@@ -96,13 +96,67 @@ Infra inheritances: prompt caching (static system + tools cached), model
 routing (Haiku classify / Sonnet draft / Opus high-stakes), ordered single
 command queue, webhook dedup, auto-migration, usage logging.
 
+## MANDATORY: every feature is tenant-scoped
+
+This is not a preference and it is not aspirational — it is enforced by
+`scripts/test_tenant_isolation.py`, which fails the suite when it is broken.
+Twenty of the first thirty-one models were built before tenants existed and
+every one had to be retrofitted, at the cost of ~13,700 rows that can now never
+be attributed. The rule exists so the thirty-fifth model does not repeat it.
+
+**Four things every new feature must do:**
+
+1. **Any model holding client data carries `tenant`.** If it genuinely holds
+   none, add it to `PLATFORM_MODELS` in that test *with a reason*. Never delete
+   a check to make it pass.
+2. **Uniqueness is per client.** `UniqueConstraint("tenant", …)`, never a bare
+   `unique=True` on a per-client table. A global unique is an `IntegrityError`
+   on client #2. Provider-issued ids (a Gmail message id) are the exception.
+3. **Attribute at write time**, via `tenant_scope.resolve()`. A row written
+   without a tenant is history no later pass can recover — `usage` and
+   `doc_index` both knew their client and stored it nowhere.
+4. **Scope reads with `db.tenant_filter()`.** Unassigned is *not* "everyone":
+   it is excluded unless a caller asks for it by name, because folding
+   unattributed rows into whoever is asking is how one client's data reaches
+   another.
+
+Anything that reaches a model — agent context, prompts, reports, drafts — is
+scoped the same way. `kernel.run(..., tenant=…)` qualifies the thread, filters
+memory and lessons, and injects `tenants.agent_block()`. With no account
+selected the agent refuses rather than assuming.
+
+**A new tool that touches client data must be gated.** Add it to
+`tool_scope.SCOPED` with the parameter naming the account and the capability it
+needs. Then: the parameter is stripped from the schema the model sees, the
+resolved value is injected at dispatch, and the tool is not offered at all to an
+account without that connection. The model must never be the thing that decides
+which client a call is about — if it can pass an account key, it can pass
+someone else's.
+
+You do not have to remember this. Any tool exposing `store`, `account`, `alias`
+or `site` and missing from `SCOPED` fails `test_tenant_isolation.py` by name.
+
+**Unattended code is scoped the same way.** The worker and triage are addressed
+by inbox alias, so `tenants.for_alias()` turns that into a tenant once, at the
+top, and everything below inherits it — tool filtering, the tool gate, memory,
+the account's rules, and the tenant on every row written.
+
+**Anything that can send passes `triage._apply_guards()` or an equivalent.**
+Those checks are deterministic code, never prompt instructions, and they fail
+closed. A draft carrying a `banned_claims` phrase cannot auto-send.
+
 ## Conventions
 - Add a DB field → just add the column to the model; auto-migration applies it.
+  If the column has meaning, write the backfill in the same change — migration
+  adds columns, never values, and existing rows come back empty.
 - New capability → add a tool in command_agent + handler; or a job in ops_jobs;
   or a playbook in skills.py. Keep outputs concrete (numbers/links), proactive.
 - All Google API access must go through gmail_client/drive_io (the locked layer).
 - Every Claude call: log usage; cache static prefixes + tools.
 - Test: `python -m py_compile app/*.py` + a focused `python -c` assertion.
+- Before finishing any change, run the offline suites — all eleven, none touch
+  the network. `test_tenant_isolation.py` is the one that enforces the rule
+  above; if it fails, the feature is not done.
 
 ## Roadmap (see /outputs design docs)
 - **Multi-Agent-Architecture.md** — kernel+role split; cross-agent lessons.
