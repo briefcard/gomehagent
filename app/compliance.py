@@ -102,17 +102,55 @@ def check_page(tenant: str, url: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"url": url, "status": exc.__class__.__name__, "phrases": []}
 
-    low = text.lower()
-    hits = []
+    hits, questions = _match(tenant, text)
+    return {"url": url, "status": "ok", "phrases": hits,
+            "questions": questions, "words": len(text.split())}
+
+
+_SENT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _match(tenant: str, text: str) -> tuple[list[dict], list[dict]]:
+    """Find banned phrases, separating assertions from questions about them.
+
+    Run against Baci's live site, a naive substring match flagged 15 of 26
+    pages — and almost all of them were one FAQ entry reading *"Is it made in
+    Italy? Baci Milano is an Italian design house — this piece is …"*, which is
+    the compliant answer to the question, not a breach of it.
+
+    A checker with that false-positive rate is worse than none, because it stops
+    being read. So a phrase inside an interrogative sentence is reported
+    separately as something to eyeball rather than as a violation — and the
+    context is the whole sentence rather than a character window, because
+    "…t is shatterproof and suited to indoor & outdoor use. Is it made in…"
+    cannot be judged without opening the page, which defeats the point.
+    """
+    sentences = [s.strip() for s in _SENT.split(text or "") if s.strip()]
+    hits: list[dict] = []
+    questions: list[dict] = []
     for phrase in kb.banned_claims(tenant):
         if not phrase:
             continue
-        at = low.find(phrase.lower())
-        if at >= 0:
-            hits.append({"phrase": phrase,
-                         "context": text[max(0, at - 60):at + len(phrase) + 60].strip()})
-    return {"url": url, "status": "ok", "phrases": hits,
-            "words": len(text.split())}
+        low_p = phrase.lower()
+        for sent in sentences:
+            if low_p not in sent.lower():
+                continue
+            # Centre the window on the phrase. A care matrix renders as one
+            # 900-character "sentence", so taking the first 300 showed a table
+            # header and not the words that were flagged.
+            if len(sent) > 300:
+                at = sent.lower().find(low_p)
+                start = max(0, at - 120)
+                snip = ("…" if start else "") + sent[start:at + len(phrase) + 120] + "…"
+            else:
+                snip = sent
+            entry = {"phrase": phrase, "context": snip}
+            if sent.rstrip().endswith("?"):
+                questions.append(entry)
+            else:
+                hits.append(entry)
+            break          # one example per phrase is enough to act on
+    return hits, questions
 
 
 def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
@@ -139,7 +177,7 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
 
     considered = [p for p in pages
                   if not since or not p["lastmod"] or p["lastmod"][:10] >= since]
-    checked, violations, errors = [], [], []
+    checked, violations, errors, to_review = [], [], [], []
     for p in considered[:limit]:
         res = check_page(tenant, p["url"])
         if res["status"] != "ok":
@@ -149,6 +187,9 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         if res["phrases"]:
             violations.append({"url": res["url"], "lastmod": p["lastmod"],
                                "hits": res["phrases"]})
+        if res.get("questions"):
+            to_review.append({"url": res["url"],
+                              "hits": res["questions"]})
 
     by_phrase: dict[str, int] = {}
     for v in violations:
@@ -162,11 +203,15 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         "pages_checked": len(checked),
         "pages_skipped_unchanged": len(pages) - len(considered),
         "violations": violations,
+        "questions_to_review": to_review[:20],
+        "questions_count": len(to_review),
         "by_phrase": sorted(by_phrase.items(), key=lambda kv: -kv[1]),
         "fetch_errors": errors[:10],
         "note": ("Each violation is a live page using a phrase this brand has "
-                 "banned. Nothing is rewritten — the URL and the surrounding "
-                 "sentence are what make it fixable."),
+                 "banned, stated as a claim. `questions_to_review` are pages "
+                 "where the phrase appears inside a question — usually an FAQ "
+                 "answering it correctly — and are worth an eye, not a fix. "
+                 "Nothing is rewritten."),
     }
 
 

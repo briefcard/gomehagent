@@ -48,7 +48,9 @@ PAGES = {
         "<script>var x='handmade';</script>"
         "<p>Every piece is handmade in Italy by our artisans.</p></body></html>",
     "https://bacimilanousa.com/products/aqua": "<html><body>"
-        "<p>The Aqua set. Six pieces.</p></body></html>",
+        "<p>The Aqua set. Six pieces. Is it made in Italy? Baci Milano is an "
+        "Italian design house and this piece is produced to its designs.</p>"
+        "</body></html>",
 }
 
 
@@ -107,6 +109,23 @@ def main() -> int:
     ck("a banned word inside a <script> is not a violation",
        all("var x" not in h["context"] for h in v["hits"]),
        "stripping scripts stops false positives from analytics blobs")
+
+    # ---- the false positive that made this worth fixing -------------------
+    # Against the real site a naive substring match flagged 15 of 26 pages, and
+    # almost all of them were one FAQ reading "Is it made in Italy? Baci Milano
+    # is an Italian design house…" — the compliant ANSWER, not a breach.
+    print("\n— a question is not a claim —")
+    aqua = [v for v in r["violations"] if v["url"].endswith("/products/aqua")]
+    ck("an FAQ question is NOT reported as a violation", not aqua,
+       "a checker that cries wolf stops being read")
+    q = [x for x in r["questions_to_review"] if x["url"].endswith("/products/aqua")]
+    ck("but it IS surfaced separately for an eye", bool(q), str(q)[:90])
+    ck("and the count is reported", r["questions_count"] >= 1)
+
+    # ---- context is a sentence, not a character window --------------------
+    ctx = v["hits"][0]["context"]
+    ck("context is a whole sentence, judgeable without opening the page",
+       ctx.endswith(".") or ctx.endswith("…"), repr(ctx[-40:]))
 
     # ---- ranked -----------------------------------------------------------
     ck("phrases are ranked by how many pages use them", bool(r["by_phrase"]),
