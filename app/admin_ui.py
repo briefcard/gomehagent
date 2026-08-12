@@ -966,3 +966,89 @@ def render_intake(link, tenant, step, done: int, total: int,
 {body}
 <p class="mut">This link is private to {name}. Nothing here is published.</p>
 </div></body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# Client connect page — the other half of onboarding.
+#
+# Same guarantees as the intake link: one tenant, no admin key, nothing else
+# reachable. One difference that matters — this form POSTs. Every other form in
+# this console is a GET, which is fine for a step id and a sentence and very much
+# not fine for an API key: a query string lands in browser history, the Referer
+# header and every access log on the way.
+# ---------------------------------------------------------------------------
+
+_CONNECT_CSS = _CSS + """
+.w{max-width:720px}
+.prov{display:flex;flex-direction:column;gap:9px;border:1px solid var(--rule);
+border-radius:6px;padding:14px 16px;background:var(--panel)}
+.prov.done{background:var(--oks);border-color:var(--ok)}
+.prov h3{display:flex;align-items:baseline;gap:9px}
+.prov .how{font-size:.82rem;color:var(--ink2);border-left:2px solid var(--rule);
+padding-left:10px}
+.lock{font-size:.78rem;color:var(--mut)}
+"""
+
+
+def render_connect(link, tenant, rows: list[dict], msg: str = "",
+                   err: str = "") -> str:
+    """One row per provider this account needs. Secrets are never rendered back."""
+    from . import credentials as cred
+    t = tenants.get(tenant)
+    name = _esc(t.name if t else tenant)
+
+    blocks = []
+    for r in rows:
+        spec = cred.PROVIDERS[r["provider"]]
+        done = r["state"] == "connected"
+        chip = (f'<span class="chip on">connected</span>' if done else
+                f'<span class="chip off">{_esc(r["state"])}</span>')
+        if not r["self_serve"]:
+            blocks.append(f"""
+            <div class="prov">
+              <h3>{_esc(r['name'])} <span class="chip nb">on a call</span></h3>
+              <div class="how">{_esc(spec['howto'])}</div>
+            </div>""")
+            continue
+        extra = "".join(
+            f'<label>{_esc(hint)}</label>'
+            f'<input name="{_esc(f)}" placeholder="{_esc(hint)}" required>'
+            for f, hint in spec["also"].items())
+        detail = (f'<div class="mut">{_esc(r["detail"])}'
+                  + (f' · last checked {_esc(r["last_verified"])}'
+                     if r["last_verified"] else "") + "</div>") if done else ""
+        blocks.append(f"""
+        <div class="prov{' done' if done else ''}">
+          <h3>{_esc(r['name'])} {chip}</h3>
+          {detail}
+          <details class="how"><summary>Where do I find this?</summary>
+            <p>{_esc(spec['howto'])}</p></details>
+          <form class="f" method="post" action="/connect/{_esc(link.token)}">
+            <input type="hidden" name="provider" value="{_esc(r['provider'])}">
+            {extra}
+            <label>{_esc(spec['field'])}</label>
+            <input name="secret" type="password" autocomplete="off"
+                   placeholder="{_esc(spec['field'])}" required>
+            <div class="row"><button>{'Replace' if done else 'Connect'}</button></div>
+          </form>
+        </div>""")
+
+    note = f'<div class="ok">{_esc(msg)}</div>' if msg else ""
+    if err:
+        note += f'<div class="note">{_esc(err)}</div>'
+
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{name} — connect your accounts</title><style>{_CONNECT_CSS}</style></head>
+<body><div class="w">
+<div>
+  <h1>Connect {name}</h1>
+  <p class="mut">So we can work on your behalf without asking you for exports.
+  Each one is checked the moment you paste it, so you will know immediately if
+  it is right. You can disconnect any of them at any time.</p>
+</div>
+{note}
+<div class="grid" style="grid-template-columns:1fr">{''.join(blocks)}</div>
+<p class="lock">Keys are encrypted before they are stored and are never shown
+again — not on this page, and not to us. This link is private to {name}.</p>
+</div></body></html>"""
