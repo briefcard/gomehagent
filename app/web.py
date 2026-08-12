@@ -1289,6 +1289,26 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
+@app.get("/admin/catalog_sync")
+def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
+                 report_only: str = "", limit: int = 250) -> dict:
+    """Pull a client's Shopify catalogue into the knowledge base.
+
+    /admin/catalog_sync?tenant=baci&report_only=1   what it would change
+    /admin/catalog_sync?tenant=baci                 do it
+
+    Also reports which products carry a phrase the account has banned — a
+    brand's own copy is where its banned phrases live, and this is the list of
+    pages to fix.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import catalog_sync as cs
+    if not tenant:
+        return {"error": "name a tenant, e.g. ?tenant=baci"}
+    return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
+
+
 @app.get("/admin/schema_check")
 def schema_check(key: str = Depends(admin_key)) -> dict:
     """Did the migration actually land on THIS database?
