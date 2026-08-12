@@ -1,9 +1,11 @@
 """Web service: health check, approval links, WhatsApp webhook."""
+import hashlib
 import hmac
 import json
 import logging
+import secrets
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from . import approvals, config, db
@@ -15,6 +17,106 @@ app = FastAPI(title="Saias Operations Assistant")
 @app.on_event("startup")
 def startup() -> None:
     db.init_db()
+
+
+# ---------------------------------------------------------------------------
+# Console session.
+#
+# Every admin route used to require `?key=<APPROVAL_SECRET>` on every request,
+# so the credential rode in browser history, Referer headers and every access
+# log — and each of the ten console forms re-embedded it to keep navigation
+# working. The key is now accepted once, from the query string or an
+# `X-Admin-Key` header, and exchanged for a session cookie.
+#
+# This is a session, not an auth layer: still one shared credential, still no
+# per-user identity. It removes the leak surface, not the need for real auth
+# before any client gets a login.
+# ---------------------------------------------------------------------------
+
+ADMIN_COOKIE = "console"
+_COOKIE_MAX_AGE = 60 * 60 * 24 * 14        # 14 days
+_GATED_PREFIXES = ("/admin", "/health/seo")
+
+
+def _console_token() -> str:
+    """What the cookie carries — derived from the secret, never the secret.
+
+    APPROVAL_SECRET also signs approval decision links (`approvals.py`), so a
+    cookie holding it verbatim would turn a stolen console session into the
+    ability to forge approvals. This grants console access and nothing else,
+    and is stable across restarts so sessions survive a deploy.
+    """
+    return hmac.new((config.APPROVAL_SECRET or "").encode(),
+                    b"admin-console-v1", hashlib.sha256).hexdigest()
+
+
+def _matches(supplied: str, expected: str) -> bool:
+    """Constant-time compare. The old `key != SECRET` short-circuited on the
+    first wrong byte, which is a timing oracle on a credential reachable from
+    the open internet."""
+    if not (supplied and expected):
+        return False
+    return secrets.compare_digest(supplied, expected)
+
+
+def admin_key(request: Request, key: str = "") -> str:
+    """Resolve the console credential from query, header, or session cookie.
+
+    Returns the secret when authenticated, so every existing
+    `if key != config.APPROVAL_SECRET` check downstream is unchanged, and ""
+    when not — which those same checks already reject.
+    """
+    secret = config.APPROVAL_SECRET or ""
+    if (_matches(key, secret)
+            or _matches(request.headers.get("x-admin-key", ""), secret)
+            or _matches(request.cookies.get(ADMIN_COOKIE, ""), _console_token())):
+        return secret
+    return ""
+
+
+@app.middleware("http")
+async def _console_session(request: Request, call_next):
+    """Establish the cookie whenever a request arrives carrying a valid secret.
+
+    Done in middleware rather than the dependency because several routes return
+    a Response directly (the redirects after a form post), and FastAPI does not
+    merge a dependency's response headers into those.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith(_GATED_PREFIXES):
+        return response
+    supplied = (request.query_params.get("key", "")
+                or request.headers.get("x-admin-key", ""))
+    if _matches(supplied, config.APPROVAL_SECRET or "") and not _matches(
+            request.cookies.get(ADMIN_COOKIE, ""), _console_token()):
+        response.set_cookie(
+            ADMIN_COOKIE, _console_token(), max_age=_COOKIE_MAX_AGE,
+            httponly=True, samesite="lax",
+            secure=request.url.scheme == "https")
+    return response
+
+
+@app.get("/admin/logout")
+def admin_logout() -> dict:
+    """Drop the console session on this browser."""
+    r = Response(content='{"ok":true,"note":"console session cleared"}',
+                 media_type="application/json")
+    r.delete_cookie(ADMIN_COOKIE)
+    return r
+
+
+def _active_tenant(chat_id: str) -> str:
+    """Which account this sender is working on, for the agent's context.
+
+    `ops_commands` has always resolved this to scope its own answers; the agent
+    beside it never received it, so `/use baci` changed what `/kb` reported and
+    changed nothing about what the agent thought it was looking at.
+    """
+    from . import tenants as _tn
+    try:
+        return _tn.active(_tn.user_for_chat(chat_id)) if chat_id else ""
+    except Exception:  # noqa: BLE001 — context is an enhancement, never a blocker
+        return ""
 
 
 @app.get("/health")
@@ -57,7 +159,7 @@ def health_connections() -> dict:
 
 
 @app.get("/health/seo")
-def health_seo(key: str = "") -> dict:
+def health_seo(key: str = Depends(admin_key)) -> dict:
     """Exactly what the DEPLOYED service sees for the SEO agent (no secrets) —
     so setup can be verified without guessing. /health/seo?key=APPROVAL_SECRET"""
     if key != config.APPROVAL_SECRET:
@@ -106,7 +208,7 @@ _job_status: dict = {}
 
 
 @app.get("/admin/run/{job}")
-def run_job(job: str, key: str = "") -> dict:
+def run_job(job: str, key: str = Depends(admin_key)) -> dict:
     """Trigger a job: /admin/run/doc_sweep?key=<APPROVAL_SECRET>.
     Jobs: recategorize | doc_sweep | shipment_audit. Runs in background;
     check /admin/status?key=... for results. Reports are emailed to Gomeh."""
@@ -131,7 +233,7 @@ def run_job(job: str, key: str = "") -> dict:
 
 
 @app.get("/admin/status")
-def job_status(key: str = "") -> dict:
+def job_status(key: str = Depends(admin_key)) -> dict:
     from . import ops_jobs
 
     if key != config.APPROVAL_SECRET:
@@ -141,7 +243,7 @@ def job_status(key: str = "") -> dict:
 
 
 @app.get("/admin/test_whatsapp")
-def test_whatsapp(key: str = "") -> dict:
+def test_whatsapp(key: str = Depends(admin_key)) -> dict:
     """Send a test WhatsApp message and surface Meta's raw response."""
     import httpx
 
@@ -168,7 +270,7 @@ def test_whatsapp(key: str = "") -> dict:
 
 
 @app.get("/admin/stats")
-def stats(key: str = "") -> dict:
+def stats(key: str = Depends(admin_key)) -> dict:
     """Approve/deny rates per bucket (last 30 days) — flip AUTO_SEND for a
     bucket once its approval_rate holds ~95%."""
     if key != config.APPROVAL_SECRET:
@@ -177,7 +279,7 @@ def stats(key: str = "") -> dict:
 
 
 @app.get("/admin/usage")
-def usage_report(key: str = "", days: int = 7) -> dict:
+def usage_report(key: str = Depends(admin_key), days: int = 7) -> dict:
     """Cost + cache-hit audit. Open in a browser:
     /admin/usage?key=SECRET&days=7"""
     from . import usage
@@ -187,7 +289,7 @@ def usage_report(key: str = "", days: int = 7) -> dict:
 
 
 @app.get("/admin/whatsapp_diag")
-def whatsapp_diag(key: str = "") -> dict:
+def whatsapp_diag(key: str = Depends(admin_key)) -> dict:
     """Delivery truth for WhatsApp: recent Meta status callbacks (delivered /
     read / FAILED + error codes) and the sending number's live standing.
     Empty statuses right after a test send = Meta's webhook callback URL is
@@ -212,7 +314,7 @@ def whatsapp_diag(key: str = "") -> dict:
 
 
 @app.get("/admin/pending", response_class=HTMLResponse)
-def pending_page(key: str = "") -> str:
+def pending_page(key: str = Depends(admin_key)) -> str:
     """Browser fallback for the whole approval queue: every pending approval
     with working Approve/Deny links (relative URLs, so they work no matter
     what PUBLIC_BASE_URL says)."""
@@ -242,7 +344,7 @@ def pending_page(key: str = "") -> str:
 
 
 @app.get("/admin/renotify")
-def renotify(key: str = "") -> dict:
+def renotify(key: str = Depends(admin_key)) -> dict:
     """Re-send notifications for ALL pending approvals (e.g. after a WhatsApp
     outage swallowed the cards): clears the notified/attempt flags and runs a
     notify cycle right now."""
@@ -263,7 +365,7 @@ def renotify(key: str = "") -> dict:
 
 
 @app.get("/admin/features")
-def feature_requests(key: str = "", status: str = "open") -> dict:
+def feature_requests(key: str = Depends(admin_key), status: str = "open") -> dict:
     """The agents' own upgrade queue — limitations they hit, with proposals.
     Feed the top ones to a dev session to implement. status=open|planned|built|
     rejected|all."""
@@ -274,7 +376,7 @@ def feature_requests(key: str = "", status: str = "open") -> dict:
 
 
 @app.get("/admin/ask", response_class=PlainTextResponse)
-def ask(key: str = "", q: str = "", role: str = "admin", thread: str = "") -> str:
+def ask(key: str = Depends(admin_key), q: str = "", role: str = "admin", thread: str = "") -> str:
     """The conversational agents over HTTP, until each has its own WhatsApp
     number. Pick the agent with &role=admin|seo. Each agent has its OWN
     conversation thread (no context bleed); add &thread=<name> to run independent
@@ -388,7 +490,8 @@ def _consume() -> None:
                 # to the general agent and quietly does nothing.
                 spoken = ops_commands.handle(transcript, meta.get("chat_id", ""))
                 channel.send_text(spoken if spoken is not None
-                                  else command_agent.handle(transcript))
+                                  else command_agent.handle(
+                                      transcript, tenant=_active_tenant(meta.get("chat_id", ""))))
             else:  # text command — may carry a quoted message
                 from . import channel
                 text = payload
@@ -396,7 +499,8 @@ def _consume() -> None:
                     q = json.loads(payload)
                     text = (f"[Replying to your earlier message, which said:\n"
                             f"\"{q['_quoted']}\"]\n\nMy reply: {q['text']}")
-                channel.send_text(command_agent.handle(text))
+                channel.send_text(command_agent.handle(
+                    text, tenant=_active_tenant(meta.get("chat_id", ""))))
         except RuntimeError:
             whatsapp.send_text("Voice notes need a transcription key — add "
                                "OPENAI_API_KEY in Render and I'll handle audio.")
@@ -615,7 +719,7 @@ async def telegram_webhook(request: Request) -> dict:
 
 
 @app.get("/admin/telegram_setup")
-def telegram_setup(key: str = "") -> dict:
+def telegram_setup(key: str = Depends(admin_key)) -> dict:
     """Register the webhook with Telegram. Run once per deploy target."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -634,7 +738,7 @@ def telegram_setup(key: str = "") -> dict:
 
 
 @app.get("/admin/register_owner")
-def register_owner(key: str = "", chat_id: str = "", name: str = "Gomeh") -> dict:
+def register_owner(key: str = Depends(admin_key), chat_id: str = "", name: str = "Gomeh") -> dict:
     """Claim a Telegram chat as the owner. Run once."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -647,7 +751,7 @@ def register_owner(key: str = "", chat_id: str = "", name: str = "Gomeh") -> dic
 
 
 @app.get("/admin/tenants")
-def list_tenants(key: str = "") -> dict:
+def list_tenants(key: str = Depends(admin_key)) -> dict:
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import tenants
@@ -655,7 +759,7 @@ def list_tenants(key: str = "") -> dict:
 
 
 @app.get("/admin/tenant_set")
-def tenant_set(key: str = "", tenant: str = "", field: str = "",
+def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
                value: str = "") -> dict:
     """Update one connection field on a tenant, without a redeploy.
 
@@ -691,7 +795,7 @@ def tenant_set(key: str = "", tenant: str = "", field: str = "",
 
 
 @app.get("/admin/tenant_add")
-def tenant_add(key: str = "", tenant: str = "", name: str = "",
+def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
                kind: str = "client", domain: str = "") -> dict:
     """Create a new account. Seeding only covers the original five.
 
@@ -717,7 +821,7 @@ def tenant_add(key: str = "", tenant: str = "", name: str = "",
 
 
 @app.get("/admin/user_add")
-def user_add(key: str = "", chat_id: str = "", name: str = "",
+def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
              role: str = "client", tenant: str = "") -> dict:
     """Give someone access to the bot, scoped to one account.
 
@@ -751,20 +855,26 @@ def user_add(key: str = "", chat_id: str = "", name: str = "",
 
 
 @app.get("/admin/ui", response_class=HTMLResponse)
-def admin_ui(key: str = "", tab: str = "accounts", tenant: str = "") -> str:
+def admin_ui(request: Request, key: str = Depends(admin_key),
+             tab: str = "accounts", tenant: str = "") -> str:
     """The console. Accounts wires connections; Systems runs the pipelines."""
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
     from . import admin_ui as ui
+    # Once the session cookie carries the credential, stop threading it through
+    # every link and hidden field — that propagation is what put it in browser
+    # history in the first place. The forms still post `key=`, now empty, and
+    # the cookie authenticates them.
+    link_key = key if request.query_params.get("key") else ""
     if tab == "systems":
-        return ui.render_systems(key)
+        return ui.render_systems(link_key)
     if tab == "kb":
-        return ui.render_kb(key, tenant)
-    return ui.render(key)
+        return ui.render_kb(link_key, tenant)
+    return ui.render(link_key)
 
 
 @app.get("/admin/kb_add")
-def kb_add(key: str = "", tenant: str = "", step: str = "", text: str = ""):
+def kb_add(key: str = Depends(admin_key), tenant: str = "", step: str = "", text: str = ""):
     """Capture one KB answer. Same parser the Telegram intake uses, so a fact
     entered on a phone and one entered in the console land identically."""
     if key != config.APPROVAL_SECRET:
@@ -780,7 +890,7 @@ def kb_add(key: str = "", tenant: str = "", step: str = "", text: str = ""):
 
 
 @app.get("/admin/kb_unknown")
-def kb_unknown(key: str = "", tenant: str = "", id: str = "", value: str = ""):
+def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "", value: str = ""):
     """Close one gap from the console. Same writer as the Telegram `/unknowns`
     reply, so the value lands on the entity identically either way."""
     if key != config.APPROVAL_SECRET:
@@ -797,7 +907,7 @@ def kb_unknown(key: str = "", tenant: str = "", id: str = "", value: str = ""):
 
 
 @app.get("/admin/intake_new")
-def intake_new(key: str = "", tenant: str = "", label: str = "", days: int = 30):
+def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "", days: int = 30):
     """Mint a private intake link for one client."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -819,7 +929,7 @@ def intake_new(key: str = "", tenant: str = "", label: str = "", days: int = 30)
 
 
 @app.get("/admin/intake_links")
-def intake_links(key: str = "", tenant: str = "") -> dict:
+def intake_links(key: str = Depends(admin_key), tenant: str = "") -> dict:
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     with db.SessionLocal() as s:
@@ -834,7 +944,7 @@ def intake_links(key: str = "", tenant: str = "") -> dict:
 
 
 @app.get("/admin/intake_revoke")
-def intake_revoke(key: str = "", token: str = "") -> dict:
+def intake_revoke(key: str = Depends(admin_key), token: str = "") -> dict:
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     with db.SessionLocal() as s:
@@ -844,6 +954,117 @@ def intake_revoke(key: str = "", token: str = "") -> dict:
         row.status = "revoked"
         s.commit()
     return {"ok": True, "revoked": token}
+
+
+def _connect_link(token: str):
+    """Resolve a connect token, or a reason it is not usable."""
+    with db.SessionLocal() as s:
+        link = s.get(db.ConnectLink, token)
+        if link:
+            s.expunge(link)
+    if not link or link.status != "active":
+        return None, "<h3>This link is no longer active.</h3>"
+    if link.expires_at and db.as_utc(link.expires_at) < db.utcnow():
+        return None, "<h3>This link has expired. Ask for a new one.</h3>"
+    return link, ""
+
+
+@app.get("/connect/{token}", response_class=HTMLResponse)
+def connect_page(token: str, ok: str = "", err: str = "") -> str:
+    """The client's own surface for connecting their accounts.
+
+    Public by token, scoped to one tenant, and it reads nothing back — a
+    credential that has been stored is shown as connected and never as a value.
+    """
+    from . import admin_ui as ui, credentials as cred
+    link, problem = _connect_link(token)
+    if problem:
+        return problem
+    rows = [r for r in cred.status(link.tenant)
+            if r["provider"] in cred.needed_for(link.tenant)]
+    return ui.render_connect(link, link.tenant, rows, msg=ok, err=err)
+
+
+@app.post("/connect/{token}", response_class=HTMLResponse)
+async def connect_submit(token: str, request: Request):
+    """Take one credential, verify it live, store it encrypted.
+
+    POST rather than GET, unlike every other form in this console: an API key in
+    a query string lands in browser history, the Referer header and the access
+    log. The value is read from the body, used once, and never echoed back.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from . import credentials as cred
+    link, problem = _connect_link(token)
+    if problem:
+        return HTMLResponse(problem)
+
+    form = await request.form()
+    provider = str(form.get("provider", ""))
+    spec = cred.PROVIDERS.get(provider)
+    if not spec:
+        return RedirectResponse(f"/connect/{token}?err=Unknown+provider", 303)
+    meta = {f: str(form.get(f, "")) for f in spec["also"]}
+    result = cred.store(link.tenant, provider, str(form.get("secret", "")),
+                        meta=meta, granted_by=link.label or "")
+
+    with db.SessionLocal() as s:
+        row = s.get(db.ConnectLink, token)
+        if row:
+            row.last_used_at = db.utcnow()
+            s.commit()
+
+    from urllib.parse import quote
+    if result["ok"]:
+        detail = f" — {result['detail']}" if result.get("detail") else ""
+        return RedirectResponse(
+            f"/connect/{token}?ok={quote(spec['name'] + ' connected' + detail)}", 303)
+    return RedirectResponse(f"/connect/{token}?err={quote(result['error'])}", 303)
+
+
+@app.get("/admin/connect_new")
+def connect_new(key: str = Depends(admin_key), tenant: str = "",
+                label: str = "", days: int = 30) -> dict:
+    """Mint a private connect link for one client."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    import datetime as _dt
+    import secrets as _secrets
+
+    from . import tenants as tn
+    if not tn.get(tenant):
+        return {"error": f"unknown tenant {tenant!r}"}
+    token = _secrets.token_urlsafe(24)
+    with db.SessionLocal() as s:
+        s.add(db.ConnectLink(
+            token=token, tenant=tenant, label=label,
+            expires_at=db.utcnow() + _dt.timedelta(days=max(1, days))))
+        s.commit()
+    return {"ok": True, "tenant": tenant,
+            "url": f"{config.PUBLIC_BASE_URL}/connect/{token}",
+            "expires_in_days": days,
+            "note": "Send this to the client. It reaches one account and "
+                    "connects nothing else."}
+
+
+@app.get("/admin/connections")
+def connections(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Every client, every provider, connected or not. Never returns a secret."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import credentials as cred, tenants as tn
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants(include_paused=True)]
+    return {k: cred.status(k) for k in keys}
+
+
+@app.get("/admin/connect_revoke")
+def connect_revoke(key: str = Depends(admin_key), tenant: str = "",
+                   provider: str = "") -> dict:
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import credentials as cred
+    return {"result": cred.revoke(tenant, provider)}
 
 
 @app.get("/intake/{token}", response_class=HTMLResponse)
@@ -890,7 +1111,7 @@ def intake(token: str, answer: str = "", skip: str = "") -> str:
 
 
 @app.get("/admin/claim_review")
-def claim_review(key: str = "", claim_id: str = "", approve: str = "yes"):
+def claim_review(key: str = Depends(admin_key), claim_id: str = "", approve: str = "yes"):
     """Approve or reject a client-submitted claim."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -899,7 +1120,7 @@ def claim_review(key: str = "", claim_id: str = "", approve: str = "yes"):
 
 
 @app.get("/admin/kb")
-def kb_json(key: str = "", tenant: str = "") -> dict:
+def kb_json(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """The whole knowledge base for one account, as data."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -942,7 +1163,7 @@ def _back_to_systems(key: str, msg: str = ""):
 
 
 @app.get("/admin/systems")
-def list_systems(key: str = "") -> dict:
+def list_systems(key: str = Depends(admin_key)) -> dict:
     """The board as JSON — same data the tab renders, for the bot and for MCP."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -951,7 +1172,7 @@ def list_systems(key: str = "") -> dict:
 
 
 @app.get("/admin/systems_seed")
-def systems_seed(key: str = ""):
+def systems_seed(key: str = Depends(admin_key)):
     """Adopt every pipeline already named in Tenant.systems as a real row."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -961,7 +1182,7 @@ def systems_seed(key: str = ""):
 
 
 @app.get("/admin/system_add")
-def system_add(key: str = "", tenant: str = "", system: str = ""):
+def system_add(key: str = Depends(admin_key), tenant: str = "", system: str = ""):
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import systems
@@ -972,7 +1193,7 @@ def system_add(key: str = "", tenant: str = "", system: str = ""):
 
 
 @app.get("/admin/system_set")
-def system_set(request: Request, key: str = "", id: str = ""):
+def system_set(request: Request, key: str = Depends(admin_key), id: str = ""):
     """Update contract fields, status or autonomy on one system.
 
     Fields are read off the query string rather than declared one by one, so
@@ -995,7 +1216,7 @@ def system_set(request: Request, key: str = "", id: str = ""):
 
 
 @app.get("/admin/system_promote")
-def system_promote(key: str = "", id: str = ""):
+def system_promote(key: str = Depends(admin_key), id: str = ""):
     """Move one rung up the autonomy ladder, if the run history has earned it."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -1007,7 +1228,7 @@ def system_promote(key: str = "", id: str = ""):
 
 
 @app.get("/admin/system_note")
-def system_note(key: str = "", id: str = "", text: str = "", drop: str = ""):
+def system_note(key: str = Depends(admin_key), id: str = "", text: str = "", drop: str = ""):
     """Add or archive a piece of standing guidance for one system."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -1023,7 +1244,7 @@ def system_note(key: str = "", id: str = "", text: str = "", drop: str = ""):
 
 
 @app.get("/admin/system_rule")
-def system_rule(key: str = "", id: str = "", phrase: str = ""):
+def system_rule(key: str = Depends(admin_key), id: str = "", phrase: str = ""):
     """Promote a correction into a banned claim the validator enforces."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -1038,7 +1259,7 @@ def system_rule(key: str = "", id: str = "", phrase: str = ""):
 
 
 @app.get("/admin/verify")
-def verify_tenant(key: str = "", tenant: str = "") -> dict:
+def verify_tenant(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Live-test a tenant's integrations. 'Configured' and 'working' are
     different questions — a revoked token still looks configured."""
     if key != config.APPROVAL_SECRET:
@@ -1050,7 +1271,7 @@ def verify_tenant(key: str = "", tenant: str = "") -> dict:
 
 
 @app.get("/admin/seed_kb")
-def seed_kb(key: str = "", report_only: str = "") -> dict:
+def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     """Seed the knowledge base for baci / ironside / eien / coverings.
 
     The data lives in app/kb_seed.py and was previously only runnable from a
@@ -1069,21 +1290,27 @@ def seed_kb(key: str = "", report_only: str = "") -> dict:
 
 
 @app.get("/admin/tenant_scope")
-def tenant_scope_admin(key: str = "", report_only: str = "") -> dict:
+def tenant_scope_admin(key: str = Depends(admin_key), report_only: str = "") -> dict:
     """Attribute the operational tables to a client.
 
     Fills every tenant that a row's own fields can prove — its inbox, its
     domain, its scope key — and leaves the rest unassigned rather than guessing.
     Idempotent; never overwrites a tenant that is already set.
 
-    /admin/tenant_scope?key=SECRET&report_only=1   show what is unattributed
-    /admin/tenant_scope?key=SECRET                 attribute, then show
+    /admin/tenant_scope?key=SECRET&report_only=1   what it WOULD write
+    /admin/tenant_scope?key=SECRET                 write it, then show the result
+
+    The dry run predicts per row, not per table. "This table has a derivation
+    rule" and "these 3,897 rows will be attributed" are different claims, and
+    only the second one is worth acting on before a bulk write.
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import tenant_scope
     if report_only:
-        return {"report": tenant_scope.report()}
+        return {"preview": tenant_scope.preview(),
+                "report": tenant_scope.report(),
+                "note": "nothing was written — drop report_only to apply"}
     filled = tenant_scope.backfill()
     return {"filled": filled, "report": tenant_scope.report(),
             "note": "unassigned rows are excluded from per-client queries by "
