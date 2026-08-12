@@ -389,12 +389,13 @@ python3 scripts/test_tenant_isolation.py  # MANDATORY: every feature is tenant-s
 python3 scripts/test_worker_systems.py    # the tick that fills the run ledger
 python3 scripts/test_catalog_sync.py      # Shopify -> KbEntity, banned claims win
 python3 scripts/test_compliance.py        # the live site vs the brand's own rules
+python3 scripts/test_harvest.py           # site -> PENDING proposals, never facts
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All fourteen suites pass as of 2026-08-12. None of them touch the network.
+All fifteen suites pass as of 2026-08-12. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.

@@ -1289,6 +1289,28 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
+@app.get("/admin/harvest")
+def harvest_route(key: str = Depends(admin_key), tenant: str = "",
+                  limit: int = 25, apply: str = "") -> dict:
+    """Propose claims from a client's own site. Reads by default.
+
+    /admin/harvest?tenant=baci            what it would propose
+    /admin/harvest?tenant=baci&apply=1    file them as PENDING claims
+    /admin/harvest?apply=1                every account
+
+    Nothing becomes selectable here. Proposals are pending until approved on the
+    Knowledge tab, anything using a banned phrase is dropped rather than queued,
+    and a candidate that matches no situation tag is reported rather than stored
+    with a guessed one.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import harvest as hv
+    if tenant:
+        return hv.harvest(tenant, limit=limit, apply=bool(apply))
+    return hv.harvest_all(limit=limit, apply=bool(apply))
+
+
 @app.get("/admin/compliance_scan")
 def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
                     limit: int = 40, since: str = "") -> dict:
