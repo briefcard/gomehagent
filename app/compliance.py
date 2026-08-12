@@ -53,11 +53,28 @@ def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
     out: list[dict] = []
     seen: set[str] = set()
 
+    problems: list[str] = []
+
     def _fetch(url: str) -> str:
+        """Fetch, recording WHY a failure happened.
+
+        Swallowing every exception into "" made a TLS misconfiguration look
+        identical to a site with no sitemap — www.coveringsetc.com serves a
+        certificate without its intermediate, which curl tolerates via the
+        system store and most libraries do not. Reporting that as "no sitemap
+        found" sends you looking in the wrong place, and it is the
+        absence-collapsed-into-a-value pattern in a diagnostic.
+        """
         try:
             r = httpx.get(url, timeout=25, follow_redirects=True)
             return r.text if r.status_code == 200 else ""
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            name = exc.__class__.__name__
+            detail = str(exc)[:120]
+            if "CERTIFICATE_VERIFY_FAILED" in detail:
+                detail = ("TLS certificate chain is incomplete — the server is "
+                          "not sending its intermediate certificate")
+            problems.append(f"{url}: {name} — {detail}")
             return ""
 
     def _parse(xml: str) -> tuple[list[str], list[dict]]:
@@ -71,9 +88,39 @@ def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
                              "lastmod": (mod.group(1).strip() if mod else "")})
         return maps, urls
 
-    root = _fetch(f"{base}/sitemap.xml") or _fetch(f"{base}/sitemap_index.xml")
+    # Try both hosts. A tenant's domain is recorded without www, and plenty of
+    # sites canonicalise TO www and serve a plain 404 on the apex rather than
+    # redirecting — coveringsetc.com/sitemap.xml is a 404 while
+    # www.coveringsetc.com/sitemap.xml is a 200.
+    host = base.split("://", 1)[1]
+    hosts = [base]
+    alt = host[4:] if host.startswith("www.") else "www." + host
+    hosts.append(base.split("://", 1)[0] + "://" + alt)
+
+    # robots.txt is where a site DECLARES its sitemap, and it is the only
+    # discovery method that does not require knowing the platform. Guessing
+    # paths found Shopify and Squarespace and missed WordPress, which publishes
+    # /wp-sitemap.xml.
+    candidates: list[str] = []
+    for h in hosts:
+        for line in _fetch(f"{h}/robots.txt").splitlines():
+            if line.lower().startswith("sitemap:"):
+                loc = line.split(":", 1)[1].strip()
+                if loc:
+                    candidates.append(loc)
+    for h in hosts:
+        candidates += [f"{h}/sitemap.xml", f"{h}/sitemap_index.xml",
+                       f"{h}/wp-sitemap.xml", f"{h}/sitemap-index.xml"]
+
+    root = ""
+    for cand in candidates:
+        root = _fetch(cand)
+        if root and "<" in root:
+            break
     if not root:
+        _sitemap_urls.last_problems = problems[:4]
         return []
+    _sitemap_urls.last_problems = []
     children, urls = _parse(root)
     for child in children[:12]:            # a sitemap index, one level deep
         if len(out) + len(urls) >= limit:
@@ -172,8 +219,15 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
 
     pages = _sitemap_urls(t.domain, limit=max(limit * 4, 200))
     if not pages:
-        return {"error": f"no sitemap found at {t.domain} — cannot enumerate "
-                         f"pages for this platform yet"}
+        why = getattr(_sitemap_urls, "last_problems", [])
+        if why:
+            return {"error": f"could not reach {t.domain}", "detail": why,
+                    "note": "This is a connection problem, not a missing "
+                            "sitemap. Fix the site before reading anything "
+                            "into a clean scan."}
+        return {"error": f"no sitemap found at {t.domain} — the site publishes "
+                         f"none at robots.txt, /sitemap.xml, /wp-sitemap.xml or "
+                         f"their www variants"}
 
     considered = [p for p in pages
                   if not since or not p["lastmod"] or p["lastmod"][:10] >= since]
