@@ -253,12 +253,13 @@ right one — and a silent cross-client bug the moment a second client gets a
 shipment. Fix these when logistics becomes multi-client, not before; they are
 listed here so the trigger is written down rather than remembered.
 
-**The Postgres constraint regrade has not run against the live database.**
-`_migrate_constraints()` drops the old single-column uniques and adds the
-composite ones. SQLite cannot drop a constraint, so `test_migration.py` covers
-the column path only. Confirm on Render after deploy:
-`select conname from pg_constraint where conrelid = 'contacts'::regclass;`
-should show `uq_contact_tenant_email` and not `contacts_email_key`.
+**~~The Postgres constraint regrade has not run against the live database.~~
+Verified 2026-08-12.** `/admin/schema_check` on the deployed service reports
+`ok: true` — all three regrades landed (`uq_contact_tenant_email`,
+`uq_shipment_tenant_name`, `uq_rfq_tenant_shipment` present; the old global
+uniques gone) and every scoped table has its tenant column. That route is the
+permanent answer to "did the migration land", since no local test can exercise
+the Postgres-only path.
 
 **Approval now has `tenant`, `system_id` and `run_id`** — added while the table
 was still empty. Nothing writes them yet; `approvals.py`, `worker.py` and
