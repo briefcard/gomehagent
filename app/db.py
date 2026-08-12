@@ -2,7 +2,8 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, Column, DateTime, String, Text, create_engine
+from sqlalchemy import (JSON, Column, DateTime, String, Text, UniqueConstraint,
+                        create_engine)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from . import config
@@ -10,6 +11,12 @@ from . import config
 engine = create_engine(config.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+# A row whose client could not be determined. Deliberately NOT a synonym for
+# "belongs to everyone": an unattributed row is an open question, and treating
+# it as shared is how one client's shipment ends up in another client's report.
+# `tenant_filter` excludes it unless a caller asks for it by name.
+UNASSIGNED = ""
 
 
 def _uuid() -> str:
@@ -44,6 +51,11 @@ class Approval(Base):
     status = Column(String, default="pending")  # pending | approved | denied | executed | expired
     summary = Column(Text, nullable=False)  # one-line human description
     payload = Column(JSON, nullable=False)  # everything needed to execute on approval
+    tenant = Column(String, default="", index=True)  # which client this action belongs to
+    # Which pipeline asked, and which run it belongs to. Added while the table
+    # is empty; the alternative is retrofitting the join once it has live data.
+    system_id = Column(String, default="")
+    run_id = Column(String, default="")
     decided_at = Column(DateTime(timezone=True))
     executed_at = Column(DateTime(timezone=True))
     channel = Column(String, default="email")  # email | whatsapp
@@ -55,6 +67,7 @@ class EmailLog(Base):
     __tablename__ = "email_log"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `account`
     seen_at = Column(DateTime(timezone=True), default=utcnow)
     account = Column(String, nullable=False)  # alias: personal | baci | eien
     gmail_message_id = Column(String, unique=True, nullable=False)
@@ -70,13 +83,18 @@ class Contact(Base):
     """Known counterparties. 'trusted' contacts qualify for auto-send replies."""
 
     __tablename__ = "contacts"
+    # The same person is often a counterparty for more than one client, with a
+    # different role and a different trust level in each. A global unique on
+    # email made the second client an IntegrityError.
+    __table_args__ = (UniqueConstraint("tenant", "email", name="uq_contact_tenant_email"),)
 
     id = Column(String, primary_key=True, default=_uuid)
-    email = Column(String, unique=True, nullable=False)
+    tenant = Column(String, default="", index=True)  # replaces `entity`
+    email = Column(String, nullable=False)
     name = Column(String)
     company = Column(String)
     role = Column(String)  # forwarder | customs_broker | warehouse | client | vendor | other
-    entity = Column(String)  # baci | eien | saias | shared
+    entity = Column(String)  # DEPRECATED — superseded by `tenant`; read by nothing
     trusted = Column(String, default="no")  # yes -> routine replies may auto-send
 
 
@@ -86,6 +104,7 @@ class Deadline(Base):
     __tablename__ = "deadlines"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `account`
     created_at = Column(DateTime(timezone=True), default=utcnow)
     account = Column(String)
     description = Column(Text, nullable=False)  # what's due
@@ -102,6 +121,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `thread`
     created_at = Column(DateTime(timezone=True), default=utcnow)
     # Conversation thread: 'admin', 'seo', or a sub-thread like 'seo:eien'.
     # Defaults to 'admin' so all pre-existing history stays on the admin thread.
@@ -117,6 +137,7 @@ class Memory(Base):
     __tablename__ = "memories"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `scope`
     created_at = Column(DateTime(timezone=True), default=utcnow)
     topic = Column(String, nullable=False)  # e.g. 'Turkey shipment', 'standing rule'
     content = Column(Text, nullable=False)
@@ -132,6 +153,7 @@ class FollowUp(Base):
     __tablename__ = "follow_ups"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `account`
     created_at = Column(DateTime(timezone=True), default=utcnow)
     account = Column(String, nullable=False)
     thread_id = Column(String)
@@ -145,11 +167,14 @@ class Shipment(Base):
     """Structured record per import shipment — the spine of logistics."""
 
     __tablename__ = "shipments"
+    # Two clients importing in the same month both want 'Turkey-Mar2026'.
+    __table_args__ = (UniqueConstraint("tenant", "name", name="uq_shipment_tenant_name"),)
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # whose shipment this is
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow)
-    name = Column(String, unique=True, nullable=False)  # e.g. 'Turkey-Mar2026'
+    name = Column(String, nullable=False)  # e.g. 'Turkey-Mar2026'
     status = Column(String, default="quoting")  # quoting|booked|in_transit|customs|arrived|received|closed
     eta = Column(String)  # YYYY-MM-DD or ''
     counterparty = Column(String)  # forwarder/broker
@@ -162,10 +187,13 @@ class RFQ(Base):
     """A request-for-quote round for one shipment, across multiple forwarders."""
 
     __tablename__ = "rfqs"
+    __table_args__ = (UniqueConstraint("tenant", "shipment_name",
+                                       name="uq_rfq_tenant_shipment"),)
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # whose RFQ this is
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    shipment_name = Column(String, unique=True, nullable=False)
+    shipment_name = Column(String, nullable=False)
     status = Column(String, default="quoting")  # quoting | complete | decided | closed
     details = Column(JSON, default=dict)  # cargo, origin, incoterm, ready date...
     forwarders = Column(JSON, default=list)  # emails the RFQ went to
@@ -178,6 +206,7 @@ class Expense(Base):
     __tablename__ = "expenses"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # whose P&L this hits
     seen_at = Column(DateTime(timezone=True), default=utcnow)
     account = Column(String)
     vendor = Column(String)
@@ -193,6 +222,7 @@ class DocIndex(Base):
     __tablename__ = "doc_index"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # whose document this is
     created_at = Column(DateTime(timezone=True), default=utcnow)
     filename = Column(String, nullable=False)
     path = Column(Text, nullable=False)  # folder path under B2B
@@ -209,6 +239,7 @@ class Usage(Base):
     __tablename__ = "usage"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # per-client cost attribution
     at = Column(DateTime(timezone=True), default=utcnow, index=True)
     purpose = Column(String)  # triage | command | classify | job
     model = Column(String)
@@ -225,6 +256,7 @@ class WaMessage(Base):
     __tablename__ = "wa_messages"
 
     wamid = Column(String, primary_key=True)
+    tenant = Column(String, default="", index=True)  # whose conversation
     at = Column(DateTime(timezone=True), default=utcnow)
     role = Column(String)  # assistant | user
     content = Column(Text)
@@ -240,6 +272,7 @@ class Lesson(Base):
     __tablename__ = "lessons"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # blank = applies to every client
     created_at = Column(DateTime(timezone=True), default=utcnow)
     scope = Column(String, default="global")  # global | <role name>
     lesson = Column(Text, nullable=False)
@@ -256,6 +289,7 @@ class SystemDoc(Base):
     __tablename__ = "system_docs"
 
     key = Column(String, primary_key=True)  # e.g. 'drive:baci', 'conventions:filing'
+    tenant = Column(String, default="", index=True)  # derived from the key prefix
     title = Column(String, default="")
     content = Column(Text, default="")
     pinned = Column(String, default="")  # 'true' -> inject full content every turn
@@ -289,6 +323,7 @@ class SeoSnapshot(Base):
     __tablename__ = "seo_snapshots"
 
     id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)  # derived from `domain`
     at = Column(DateTime(timezone=True), default=utcnow, index=True)
     domain = Column(String, nullable=False, index=True)
     database = Column(String, default="us")
@@ -309,6 +344,7 @@ class SeoSiteConfig(Base):
     __tablename__ = "seo_site_config"
 
     site = Column(String, primary_key=True)   # site profile key (baci, eien, mtw)
+    tenant = Column(String, default="", index=True)  # derived from `site` / `domain`
     domain = Column(String, default="")
     gsc_site = Column(String, default="")     # e.g. sc-domain:bacimilanousa.com
     ga4_property = Column(String, default="")  # numeric GA4 property id
@@ -330,6 +366,7 @@ class VoiceProfile(Base):
     __tablename__ = "voice_profiles"
 
     alias = Column(String, primary_key=True)  # personal | baci | eien
+    tenant = Column(String, default="", index=True)  # derived from `alias`
     rules = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
@@ -676,6 +713,67 @@ class SystemRun(Base):
     finished_at = Column(DateTime(timezone=True))
 
 
+def tenant_filter(model, tenant: str, include_unassigned: bool = False):
+    """The scope clause for a per-client query.
+
+    One place decides what "belongs to this client" means, so a call site cannot
+    quietly get it wrong. Unassigned rows are EXCLUDED by default: a row whose
+    client was never determined is an open question, and folding it into whoever
+    happens to be asking is exactly how one client's data reaches another.
+    Callers that genuinely want the backlog pass `include_unassigned=True`.
+    """
+    col = model.tenant
+    if include_unassigned:
+        return col.in_([tenant, UNASSIGNED])
+    return col == tenant
+
+
+# Uniqueness that used to be global and is now per client. Each entry is
+# (table, old single column) -> the composite that replaces it.
+_REGRADED_UNIQUES = (
+    ("contacts", "email", "uq_contact_tenant_email", ("tenant", "email")),
+    ("shipments", "name", "uq_shipment_tenant_name", ("tenant", "name")),
+    ("rfqs", "shipment_name", "uq_rfq_tenant_shipment", ("tenant", "shipment_name")),
+)
+
+
+def _migrate_constraints() -> None:
+    """Replace the global unique constraints with per-tenant ones.
+
+    `_auto_migrate` adds columns but never touches constraints, so an existing
+    database keeps enforcing "one contact per email across every client" long
+    after the model says otherwise — and the failure appears as an
+    IntegrityError while onboarding, not here.
+
+    Postgres only. SQLite cannot drop a constraint without rebuilding the table,
+    and every SQLite database here is created fresh by `create_all`, which
+    builds the composite form from the start.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import inspect as sa_inspect, text
+
+    insp = sa_inspect(engine)
+    tables = set(insp.get_table_names())
+    with engine.begin() as conn:
+        for table, old_col, new_name, new_cols in _REGRADED_UNIQUES:
+            if table not in tables:
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            if not set(new_cols) <= have:
+                continue  # tenant column not added yet; next startup will catch it
+            existing = {u["name"]: u.get("column_names") or []
+                        for u in insp.get_unique_constraints(table)}
+            for name, cols in existing.items():
+                if cols == [old_col] and name != new_name:
+                    conn.execute(text(
+                        f'ALTER TABLE "{table}" DROP CONSTRAINT "{name}"'))
+            if new_name not in existing:
+                cols = ", ".join(f'"{c}"' for c in new_cols)
+                conn.execute(text(
+                    f'ALTER TABLE "{table}" ADD CONSTRAINT "{new_name}" UNIQUE ({cols})'))
+
+
 def _auto_migrate() -> None:
     """Add any model columns missing from existing tables. create_all() makes
     NEW tables but never alters existing ones, so adding a column to a model
@@ -710,6 +808,7 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     try:
         _auto_migrate()
+        _migrate_constraints()
     except Exception:  # noqa: BLE001 — never block startup on migration
         import logging
         logging.getLogger("db").exception("auto-migrate failed")

@@ -1066,3 +1066,25 @@ def seed_kb(key: str = "", report_only: str = "") -> dict:
     if report_only:
         return {"status": kb_seed.status()}
     return kb_seed.seed_all()
+
+
+@app.get("/admin/tenant_scope")
+def tenant_scope_admin(key: str = "", report_only: str = "") -> dict:
+    """Attribute the operational tables to a client.
+
+    Fills every tenant that a row's own fields can prove — its inbox, its
+    domain, its scope key — and leaves the rest unassigned rather than guessing.
+    Idempotent; never overwrites a tenant that is already set.
+
+    /admin/tenant_scope?key=SECRET&report_only=1   show what is unattributed
+    /admin/tenant_scope?key=SECRET                 attribute, then show
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import tenant_scope
+    if report_only:
+        return {"report": tenant_scope.report()}
+    filled = tenant_scope.backfill()
+    return {"filled": filled, "report": tenant_scope.report(),
+            "note": "unassigned rows are excluded from per-client queries by "
+                    "default — set them by hand or leave them out of reports"}

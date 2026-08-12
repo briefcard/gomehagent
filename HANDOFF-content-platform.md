@@ -46,6 +46,7 @@ and six reference artifacts (§11).
 | Ledger + guidance wired into the path (rec 3) | **Not built** |
 | Generator / validator / send (rec 4) | **Not built** |
 
+| Operational half tenant-scoped (schema) | **Built** — `tenant` on 18 models, per-client uniqueness, derivable backfill. Call sites still to follow |
 | Reports (ads, business health) | Not started |
 | Canva | Not connected (OAuth, needs auth layer) |
 | Agent scoping for non-owners | **Not started — blocks client access** |
@@ -302,6 +303,14 @@ Eien reorder engine.
 ---
 
 ## 9. Known gaps and traps
+
+**The seam now has a schema, but not yet call sites.** Every operational model
+carries `tenant`, uniqueness is per client, and `db.tenant_filter()` is the one
+definition of scope. What has *not* happened is rewriting the queries in
+`ops_jobs.py`, `command_agent.py`, `data_tools.py` and `worker.py` to use it —
+they still read across all clients. That is safe while Gomeh is the only
+operator and becomes wrong the moment a client's data lands in those tables.
+`worker.is_trusted` was scoped already because it gates auto-send.
 
 **The codebase is two halves that don't meet yet.** The *knowledge* half
 (`tenants`, `kb`, `brief`, `systems`, `ops_commands`, `admin_ui`) is genuinely

@@ -157,7 +157,41 @@ used to decide whether the system works was asserting something nobody had re-ru
 refactor that moves a module must be verified by running the suites, not by
 reasoning that the callers look fine.*
 
-### 2.16 Smaller ones
+### 2.16 The operational half enforced uniqueness globally
+`Contact.email`, `Shipment.name` and `RFQ.shipment_name` were `unique=True` —
+across every client at once. The same freight forwarder could not be a contact
+for two clients, and two clients could not both run a `Turkey-Mar2026`. Not a
+design debate: an `IntegrityError` on the second client, during onboarding.
+
+Twenty of thirty-one models had no `tenant` column at all, including every table
+Activity Reporting and the AI VA run on (`EmailLog`, `Contact`, `DocIndex`,
+`Usage`, `Deadline`, `FollowUp`, `Shipment`, `VoiceProfile`).
+**Fix:** `tenant` on 18 operational models; the three global uniques regraded to
+composite `(tenant, …)`; `db.tenant_filter()` as the single definition of "belongs
+to this client"; `app/tenant_scope.py` backfills what is derivable.
+
+Two decisions worth keeping:
+
+- **Unassigned is not "everyone".** `db.UNASSIGNED` is excluded from per-client
+  queries unless a caller asks for it by name. Folding unattributed rows into
+  whoever is asking is how one client's shipment reaches another's report.
+- **The backfill derives, it does not guess.** An inbox belongs to one client
+  (`account` → `Tenant.gmail_alias`), a site belongs to one client (`domain` →
+  `Tenant.domain`), and `system:baci:blog` names its own. A shipment records
+  nothing that says whose it is, so it stays unassigned and is counted in
+  `report()`. A wrongly attributed row is worse than an unattributed one,
+  because nothing downstream will ever question it.
+
+### 2.17 Allowing duplicates opened a cross-client trust path
+`worker.is_trusted(sender)` looked a contact up by email alone and returned the
+first match. Once the same email can exist for several clients, one client's
+`trusted=yes` would authorise auto-send on another client's inbox.
+**Fix:** scoped to the inbox's tenant, matching that tenant *or* unassigned —
+unassigned still counts, because dropping it would silently switch auto-send off
+for every pre-tenant contact (§2.8 again), but a *different* client's row never
+does. Verified in `test_tenant_scope.py`.
+
+### 2.18 Smaller ones
 - `admin_ui` reported "Runs (8)" when there were more — capped count shown as total.
 - FastAPI does not accept `**fields` for query params; read `request.query_params`.
 - Published artifact: SVG markers referenced across fragments, and HTML entities
@@ -183,9 +217,24 @@ every piece of guidance written into a system thread is stored and never read.
 **Recommendation 4 — nothing generates.** *Not built.* No generator, no
 validator, no send.
 
-**Approval has no tenant, system or run column.** The execution half
-(`approvals.py`, `worker.py`, `kernel.py`) has zero tenant awareness. Add the
-columns while that table is still empty.
+**Nine lookups still find a row by its old global key.** `Shipment.name` and
+`RFQ.shipment_name` are queried without a tenant in `command_agent.py:421,856`,
+`data_tools.py:488,505`, `ops_jobs.py:841-842` and `skills.py:148`. Correct
+*today* — only one client has logistics rows, so `.first()` can only return the
+right one — and a silent cross-client bug the moment a second client gets a
+shipment. Fix these when logistics becomes multi-client, not before; they are
+listed here so the trigger is written down rather than remembered.
+
+**The Postgres constraint regrade has not run against the live database.**
+`_migrate_constraints()` drops the old single-column uniques and adds the
+composite ones. SQLite cannot drop a constraint, so `test_migration.py` covers
+the column path only. Confirm on Render after deploy:
+`select conname from pg_constraint where conrelid = 'contacts'::regclass;`
+should show `uq_contact_tenant_email` and not `contacts_email_key`.
+
+**Approval now has `tenant`, `system_id` and `run_id`** — added while the table
+was still empty. Nothing writes them yet; `approvals.py`, `worker.py` and
+`kernel.py` remain tenant-blind at the call sites.
 
 **Idempotency on publish.** A worker restarting mid-publish double-sends.
 Must land before anything sends for real.
@@ -219,11 +268,14 @@ python3 scripts/test_systems.py     # registry, contract gate, autonomy ladder
 python3 scripts/test_kb.py          # KB writes + guided intake
 python3 scripts/test_intake.py      # client intake links, scoping, fail-closed guards
 python3 scripts/test_kb_ui.py       # every KB field reaches the Knowledge tab
+python3 scripts/test_tenant_scope.py  # per-client uniqueness, backfill, trust boundary
+python3 scripts/test_migration.py     # the same migration over a database with rows
 python3 scripts/test_brief.py --demo
-python3 scripts/seed_kb.py --report # what each account still needs
+python3 scripts/seed_kb.py --report      # what each account still needs
+python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All five suites pass as of 2026-08-12. None of them touch the network.
+All seven suites pass as of 2026-08-12. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.

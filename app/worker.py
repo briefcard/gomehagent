@@ -10,11 +10,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("worker")
 
 
-def is_trusted(sender: str) -> bool:
+def is_trusted(sender: str, alias: str = "") -> bool:
+    """Is this sender trusted enough for a routine reply to auto-send?
+
+    Scoped to the inbox's client. The same forwarder can now be a contact for
+    several clients with a different trust level in each, so an unscoped lookup
+    would let one client's `trusted=yes` authorise auto-send on another
+    client's mail. Unassigned contacts still count — they are the pre-tenant
+    rows and dropping them would silently switch auto-send off — but a contact
+    belonging to a *different* client never does.
+    """
     email = sender.split("<")[-1].rstrip(">").strip().lower()
+    tenant = ""
+    if alias:
+        with db.SessionLocal() as s:
+            row = s.query(db.Tenant).filter(db.Tenant.gmail_alias == alias).first()
+            tenant = row.key if row else ""
     with db.SessionLocal() as s:
-        c = s.query(db.Contact).filter(db.Contact.email == email).first()
-        return bool(c and c.trusted == "yes")
+        q = s.query(db.Contact).filter(db.Contact.email == email)
+        q = q.filter(db.tenant_filter(db.Contact, tenant, include_unassigned=True)
+                     if tenant else db.Contact.tenant == db.UNASSIGNED)
+        return any(c.trusted == "yes" for c in q.all())
 
 
 def already_seen(message_id: str) -> bool:
@@ -58,7 +74,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
                     email["pdfs"].append({"filename": att["filename"], "data": data})
             except Exception:  # noqa: BLE001
                 log.exception("pdf download failed: %s", att["filename"])
-        trusted = is_trusted(email["from"])
+        trusted = is_trusted(email["from"], alias)
         result = triage.triage_email(email, alias, trusted)
         action = result["action"]
         detail = result.get("reason", "")
