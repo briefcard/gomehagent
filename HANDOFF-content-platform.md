@@ -37,7 +37,7 @@ and six reference artifacts (§11).
 | Systems registry + run ledger | Built, tested offline — **not yet pushed** |
 | Systems tab (console) + per-system threads | Built, rendered — **not yet pushed** |
 | KB write layer + guided intake (`/next`) | Built, tested — **not yet pushed** |
-| Knowledge tab (console) | Built, rendered — **not yet pushed** |
+| Knowledge tab (console) | Built, rendered. Now shows **every** KB column per client, including the situation vocabulary, non-selectable claims, and the gap queue — **not yet pushed** |
 | KB seeded for baci / ironside / eien / coverings | Script written, **not yet run against prod** |
 | Tenant-shaped selection (rec 1) | Built, tested — **not yet pushed** |
 | Unknowns feedback loop (`KbUnknown`, `/unknowns`) | Built, tested — **not yet pushed** |
@@ -113,6 +113,7 @@ New this session:
 | `scripts/test_systems.py` | Offline harness for the registry — 22 checks, no network |
 | `scripts/seed_kb.py` | Seeds baci/ironside/eien/coverings from established facts only; `--report` shows remaining gaps; `backfill()` fills columns added after a tenant was first seeded |
 | `scripts/test_selection.py` | Tenant-shaped selection + the unknowns loop |
+| `scripts/test_kb_ui.py` | Asserts every seeded KB fact reaches the rendered Knowledge tab, per tenant. Catches the class of bug where a field exists, is used by the pipeline, and is invisible to the person meant to maintain it |
 
 **Tenant-shaped selection (Aug 2026) — recommendation 1 of 4.** Proven broken
 by running a real Ironside enquiry: "220 guests seated in March" produced

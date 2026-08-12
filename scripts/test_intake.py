@@ -7,21 +7,19 @@ wrong direction is still wrong).
 
     python3 scripts/test_intake.py
 """
-import os,sys,tempfile,importlib.util
+import os,sys,tempfile
 os.environ["DATABASE_URL"]=f"sqlite:///{os.path.join(tempfile.mkdtemp(),'i.db')}"
 os.environ["APPROVAL_SECRET"]="s3cret"; os.environ["PUBLIC_BASE_URL"]="https://x.test"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi.testclient import TestClient
-from app import db,kb,systems,tenants
+from app import db,kb,kb_seed,systems,tenants
 from app.web import app
 fails=[]
 def ck(l,c,d=""):
     print(f"[{'  ok  ' if c else ' FAIL '}] {l}"+(f"  — {d}" if d else ""));  fails.append(l) if not c else None
 with TestClient(app) as cl:
     tenants.seed(); kb.seed_agency(); systems.seed_from_tenants()
-    spec=importlib.util.spec_from_file_location("sk",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),"seed_kb.py"))
-    m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.seed_coverings()
+    kb_seed.seed_coverings()
 
     r=cl.get("/admin/intake_new",params={"key":"s3cret","tenant":"coverings","label":"Ellis"})
     url=r.json()["url"]; tok=url.rsplit("/",1)[1]

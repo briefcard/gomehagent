@@ -12,7 +12,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(),'kb.db
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi.testclient import TestClient
-from app import config, db, kb, ops_commands, systems, tenants
+from app import config, db, kb, kb_seed, ops_commands, systems, tenants
 from app.web import app
 config.GMAIL_ACCOUNTS.setdefault("personal", {"email":"t@e.com"})
 
@@ -23,11 +23,7 @@ def ck(l,c,d=""):
 
 with TestClient(app) as cl:
     tenants.seed(); kb.seed_agency(); systems.seed_from_tenants()
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("sk",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed_kb.py"))
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-    for fn in (m.seed_baci, m.seed_ironside, m.seed_eien, m.seed_coverings): fn()
+    kb_seed.seed_all()
 
     print("\n— seeded state —")
     for t in ("agency","baci","eien","coverings","ironside"):

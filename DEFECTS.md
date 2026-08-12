@@ -118,7 +118,46 @@ SQLite drops the timezone even on `DateTime(timezone=True)`; Postgres keeps it.
 Any comparison against `utcnow()` therefore works in production and raises
 locally. **Fix:** `db.as_utc()` — always compare through it.
 
-### 2.13 Smaller ones
+### 2.13 The Knowledge tab showed a third of the knowledge base
+The console rendered claims, audiences, objections and entities, and of those only
+the headline fields. Never rendered anywhere: the per-tenant **situation
+vocabulary** (the controlled list that decides whether a claim is accepted at
+all), `next_steps`, `selection`, `approval_policy`, `elevator`, `voice.do_say` /
+`never_say`, claim `proof_type` / `verified_at` / `expires_at`, audience
+`buying_trigger` / `decision_timeline`, objection `escalate` / `audience_key`,
+entity `availability` / `source` / `freshness_days`, and the whole `KbUnknown`
+queue.
+
+This is the same shape as §2.8 and it is why §2.8 took so long to see: the
+migration emptied `next_steps`, the tests passed, and the only place the damage
+showed was a rendered brief — because the console never displayed the field.
+A field nobody can read is a field nobody maintains.
+**Fix:** `render_kb` shows every column the KB stores, and
+`kb.claim_inventory()` / `kb.situation_rows()` were added so it can. Verified by
+`scripts/test_kb_ui.py`, which asserts against the rendered HTML per tenant using
+the real seed data — if a fact is in the KB and not on the page, it fails.
+
+### 2.14 Non-selectable proof was invisible rather than explained
+`claims()` correctly drops pending, retired and expired rows. The console called
+it directly, so an account whose proof expired last month looked identical to one
+that never had any — the §1 *unknown collapsed into a value* pattern, in the
+surface this time rather than the data.
+**Fix:** `claim_inventory()` splits every claim by *why* it is or isn't
+selectable and the page shows all four states, each labelled. Same for entities:
+an `oos` item is now marked rather than listed as if sellable.
+
+### 2.15 Three of the four verification suites had been broken since e9f3460
+`kb_seed` moved into `app/` so the web service could reach it, leaving
+`scripts/seed_kb.py` a thin CLI wrapper. `test_kb`, `test_selection` and
+`test_intake` loaded that file by path and called `m.seed_baci`, which no longer
+existed — all three died on `AttributeError` at import. DEFECTS.md meanwhile
+claimed all four suites passed, which is worse than the breakage: the document
+used to decide whether the system works was asserting something nobody had re-run.
+**Fix:** the three scripts import `app.kb_seed` and call `seed_all()`. *Rule: a
+refactor that moves a module must be verified by running the suites, not by
+reasoning that the callers look fine.*
+
+### 2.16 Smaller ones
 - `admin_ui` reported "Runs (8)" when there were more — capped count shown as total.
 - FastAPI does not accept `**fields` for query params; read `request.query_params`.
 - Published artifact: SVG markers referenced across fragments, and HTML entities
@@ -178,8 +217,13 @@ exist as data, but a tenant with none silently inherits agency-B2B language.
 python3 scripts/test_selection.py   # selection + the unknowns loop
 python3 scripts/test_systems.py     # registry, contract gate, autonomy ladder
 python3 scripts/test_kb.py          # KB writes + guided intake
+python3 scripts/test_intake.py      # client intake links, scoping, fail-closed guards
+python3 scripts/test_kb_ui.py       # every KB field reaches the Knowledge tab
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report # what each account still needs
 ```
 
-All four suites pass as of 2026-08-11. None of them touch the network.
+All five suites pass as of 2026-08-12. None of them touch the network.
+
+Re-run all five after any change to `kb.py` — §2.15 is what happens when the
+claim in this section is trusted instead of re-checked.

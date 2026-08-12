@@ -84,6 +84,33 @@ def claims(tenant: str, situations: list[str] | None = None,
         return out[:limit] if limit else out
 
 
+def claim_inventory(tenant: str) -> dict[str, list[db.KbClaim]]:
+    """Every claim on file, split by why it is or isn't selectable.
+
+    `claims()` drops pending, retired and expired rows silently, which is right
+    for selection and wrong for a reader: it makes an account with no proof look
+    identical to one whose proof went stale last month. Absence is a third state
+    and it has to survive to the surface, so the split is computed here — the one
+    place that knows the shape of a claim — rather than re-derived in a template.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    out: dict[str, list[db.KbClaim]] = {
+        "selectable": [], "pending": [], "expired": [], "retired": []}
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbClaim).filter(db.KbClaim.tenant == tenant).all()
+        s.expunge_all()
+    for r in rows:
+        if r.status == "pending":
+            out["pending"].append(r)
+        elif r.status != "active":
+            out["retired"].append(r)          # retired | conflicted
+        elif r.expires_at and db.as_utc(r.expires_at) < now:
+            out["expired"].append(r)
+        else:
+            out["selectable"].append(r)
+    return out
+
+
 def audiences(tenant: str) -> list[db.KbAudience]:
     with db.SessionLocal() as s:
         rows = s.query(db.KbAudience).filter(db.KbAudience.tenant == tenant).all()
@@ -126,6 +153,22 @@ def situations(tenant: str) -> set[str]:
             db.KbSituation.tenant == tenant).all()
         tags = {r.tag for r in rows}
     return tags or set(SITUATIONS)
+
+
+def situation_rows(tenant: str) -> list[db.KbSituation]:
+    """The tenant's diagnostic vocabulary in full, for reading rather than matching.
+
+    `situations()` returns bare tags for validation. This returns the rows, so
+    whoever is authoring a claim can see what each tag means and what phrasing
+    triggers it. `add_claim` refuses a tag outside this set — that refusal is
+    what silently cost Baci and Ironside four claims at seed time — so the
+    vocabulary has to be legible wherever claims are written.
+    """
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbSituation).filter(
+            db.KbSituation.tenant == tenant).order_by(db.KbSituation.tag).all()
+        s.expunge_all()
+        return rows
 
 
 def situation_patterns(tenant: str) -> dict[str, list[tuple]]:

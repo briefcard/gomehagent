@@ -9,7 +9,6 @@ capacity comparison. That is a wrong venue in a real email.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sys
@@ -18,7 +17,7 @@ import tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'sel.db')}"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import brief, db, kb, tenants  # noqa: E402
+from app import brief, db, kb, kb_seed, tenants  # noqa: E402
 
 _fail = []
 
@@ -37,12 +36,7 @@ def main() -> int:
     db.init_db()
     tenants.seed()
     kb.seed_agency()
-    spec = importlib.util.spec_from_file_location(
-        "sk", os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed_kb.py"))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    for fn in (m.seed_baci, m.seed_ironside, m.seed_eien, m.seed_coverings):
-        fn()
+    kb_seed.seed_all()
 
     print("\n— capacity is compared, not keyword-matched —")
     seated = kb.match_entities("ironside", {"headcount": 220, "seated": True,

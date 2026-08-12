@@ -132,6 +132,17 @@ border-radius:4px;background:var(--panel);color:var(--ink);width:100%;resize:ver
 .rung .step.done{color:var(--ok);border-color:var(--ok)}
 ul.bl{margin:0;padding-left:18px;font-size:.85rem;color:var(--ink2)}
 ul.bl li{margin:2px 0}
+.chip.nb{background:var(--rule2);color:var(--ink2);border:1px solid var(--rule)}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:5px 14px;margin:0;font-size:.85rem}
+.kv dt{color:var(--mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+font-weight:700;padding-top:2px}
+.kv dd{margin:0;color:var(--ink2);min-width:0;overflow-wrap:anywhere}
+@media(max-width:560px){.kv{grid-template-columns:1fr;gap:1px 0}.kv dd{margin-bottom:7px}}
+details.sec{border:1px solid var(--rule);border-radius:5px;padding:9px 12px;background:var(--rule2)}
+details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;color:var(--acc)}
+details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);padding-bottom:7px}
+.msg.gone{opacity:.62}
+.msg.esc{border-left-color:var(--gap)}
 """
 
 _TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"))
@@ -504,13 +515,107 @@ def _kb_add_form(key: str, tenant: str, step_id: str, label: str,
     </form>"""
 
 
-def _kb_list(title: str, items: list[str], empty: str) -> str:
+def _kb_list(title: str, items: list[str], empty: str, open: bool = False) -> str:
     if not items:
-        return (f'<details><summary>{_esc(title)} (0)</summary>'
+        return (f'<details class="sec"><summary>{_esc(title)} (0)</summary>'
                 f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
     body = "".join(f'<div class="msg">{i}</div>' for i in items)
-    return (f'<details><summary>{_esc(title)} ({len(items)})</summary>'
-            f'<div class="thread" style="margin-top:10px">{body}</div></details>')
+    return (f'<details class="sec"{" open" if open else ""}>'
+            f'<summary>{_esc(title)} ({len(items)})</summary>'
+            f'<div class="thread">{body}</div></details>')
+
+
+# --- value formatters -------------------------------------------------------
+#
+# Every one of these renders "not set" differently from "set to nothing useful",
+# because the whole premise of the KB is that a missing field blocks a pipeline.
+# A blank space where a value should be tells the reader nothing at all.
+
+def _mut(msg: str) -> str:
+    return f'<span class="mut">{_esc(msg)}</span>'
+
+
+def _kv(pairs: list[tuple[str, str]]) -> str:
+    """Label/value rows. Pairs whose value is empty are dropped by the caller,
+    never silently — an absent field gets an explicit 'not set' value instead."""
+    body = "".join(f"<dt>{_esc(k)}</dt><dd>{v}</dd>" for k, v in pairs)
+    return f'<dl class="kv">{body}</dl>'
+
+
+def _words(items, empty: str = "not set") -> str:
+    """A list of short values. A bare string is treated as one value, not as a
+    list of characters — `voice.do_say` has no writer that normalises it, and
+    rendering "d, i, r, e, c, t" would look like corrupted data rather than a
+    shape mismatch."""
+    if isinstance(items, str):
+        items = [items] if items.strip() else []
+    items = [str(i) for i in (items or []) if str(i).strip()]
+    return _esc(", ".join(items)) if items else _mut(empty)
+
+
+def _attr_chips(d: dict) -> str:
+    if not d:
+        return ""
+    return '<div class="chips">' + "".join(
+        f'<span class="chip nb">{_esc(str(k).replace("_", " "))} '
+        f'<b>{_esc(v)}</b></span>' for k, v in d.items()) + "</div>"
+
+
+def _date(v) -> str:
+    if not v:
+        return ""
+    try:
+        return db.as_utc(v).date().isoformat()
+    except Exception:
+        return str(v)[:10]
+
+
+def _selection_line(cfg: dict) -> str:
+    """How this tenant's catalogue gets ranked — the thing that decided a
+    200-seat room was offered for 220 guests. It belongs on screen."""
+    if not cfg:
+        return _mut("not set — falls back to keyword relevance over every type")
+    bits = []
+    if cfg.get("primary_type"):
+        bits.append(f'ranks <code>{_esc(cfg["primary_type"])}</code>')
+    for m in cfg.get("modes") or []:
+        mode = m.get("mode", "")
+        if not mode:
+            continue
+        detail = ""
+        if m.get("requirement"):
+            detail = f' on <code>{_esc(m["requirement"])}</code>'
+            attrs = m.get("attributes") or {}
+            if attrs:
+                detail += " → " + ", ".join(
+                    f'{_esc(k)}: <code>{_esc(v)}</code>' for k, v in attrs.items())
+        bits.append(f"<b>{_esc(mode)}</b>{detail}")
+    return " · ".join(bits) if bits else _mut("not set")
+
+
+def _approval_policy_html(policy: dict) -> str:
+    """Which assets go out unattended and which need a signature. An empty policy
+    is not 'no policy' — it decides behaviour, so it is shown either way."""
+    if not policy:
+        return ('<div class="mut">Approval policy not set — nothing is marked '
+                'auto-publishable, so everything waits for a human.</div>')
+    auto = policy.get("auto_publish") or []
+    signoff = policy.get("requires_signoff") or []
+    return _kv([
+        ("auto publish", _words(auto, "nothing — all output waits for approval")),
+        ("needs signoff", _words(signoff, "nothing listed")),
+    ])
+
+
+def _next_steps_line(steps: dict) -> str:
+    """What the tenant asks for at the end of a draft. Silently emptied once by
+    a migration, which produced blank asks on every agency brief and was visible
+    nowhere but the rendered output."""
+    if not steps:
+        return _mut("not set — every draft ends with a blank ask")
+    return "<br>".join(
+        f'<code>{_esc(stage)}</code> {_esc((v or {}).get("ask", ""))}'
+        for stage, v in steps.items())
 
 
 def render_kb(key: str, tenant: str = "") -> str:
@@ -560,35 +665,147 @@ def render_kb(key: str, tenant: str = "") -> str:
     banned_html = "".join(f'<span class="chip off">{_esc(p)}</span>' for p in banned) \
         or '<span class="mut">None — the validator has nothing to enforce.</span>'
 
-    claims_html = _kb_list("Claims", [
-        f"<div>{_esc(r.claim)}</div>"
-        f"<div class='when'>{_esc(r.evidence or '')}</div>"
-        f"<div class='when'><code>{_esc(' '.join(r.situations or []))}</code> · "
-        f"{_esc(r.strength or '')} · {_esc(r.source or '')}</div>"
-        for r in kb.claims(tenant)],
-        "No proof. Any draft that needs a number will be blocked.")
+    # --- claims, split by whether they can actually be used ------------------
+    inv = kb.claim_inventory(tenant)
+
+    def _claim_msg(r, note: str = "", cls: str = "") -> str:
+        meta = " · ".join(x for x in [
+            _esc(r.strength or ""), _esc(r.proof_type or ""),
+            f"verified {_date(r.verified_at)}" if r.verified_at else "",
+            f"expires {_date(r.expires_at)}" if r.expires_at else "",
+        ] if x)
+        tags = " ".join(r.situations or []) or "untagged — can never be selected"
+        return (f'<div class="msg {cls}">'
+                f"<div>{_esc(r.claim)}</div>"
+                + (f'<div class="when"><strong>{_esc(r.evidence)}</strong></div>'
+                   if r.evidence else
+                   '<div class="when"><span class="mut">no evidence recorded</span></div>')
+                + f'<div class="when"><code>{_esc(tags)}</code></div>'
+                + f'<div class="when">{meta}{" · " if meta else ""}'
+                f'{_esc(r.source or "source not recorded")}</div>'
+                + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
+                + "</div>")
+
+    def _claim_block(title: str, rows_, empty: str, note: str = "",
+                     cls: str = "", open_: bool = False) -> str:
+        if not rows_:
+            return (f'<details class="sec"><summary>{_esc(title)} (0)</summary>'
+                    f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
+        body = "".join(_claim_msg(r, note, cls) for r in rows_)
+        return (f'<details class="sec"{" open" if open_ else ""}>'
+                f'<summary>{_esc(title)} ({len(rows_)})</summary>'
+                f'<div class="thread">{body}</div></details>')
+
+    claims_html = (
+        _claim_block("Claims — selectable", inv["selectable"],
+                     "No usable proof. Any draft that needs a number is blocked.")
+        + _claim_block("Claims — awaiting review", inv["pending"],
+                       "Nothing submitted for review.",
+                       "not selectable until approved", "gone")
+        + _claim_block("Claims — expired", inv["expired"],
+                       "Nothing has gone stale.",
+                       "past its expiry date, so selection skips it", "gone")
+        + _claim_block("Claims — retired", inv["retired"],
+                       "Nothing retired.", "withdrawn from selection", "gone"))
 
     aud_html = _kb_list("Audiences", [
         f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.key)}</code></div>"
-        f"<div class='when'>pains: {_esc('; '.join(r.pains or []))}</div>"
-        f"<div class='when'>their words: {_esc(', '.join(r.vocabulary or []))}</div>"
+        + _kv([("pains", _words(r.pains, "none recorded")),
+               ("their words", _words(r.vocabulary,
+                                      "none — selection cannot recognise this buyer")),
+               ("buying trigger", _esc(r.buying_trigger) or _mut("not set")),
+               ("decides in", _esc(r.decision_timeline) or _mut("not set"))]
+              + ([("notes", _esc(r.notes))] if r.notes else []))
         for r in kb.audiences(tenant)],
         "No segments. Selection cannot narrow to a buyer.")
 
     obj_html = _kb_list("Objections", [
-        f"<div><strong>{_esc(r.objection)}</strong></div>"
-        f"<div class='when'>{_esc(r.response)}</div>"
+        f'<div><strong>{_esc(r.objection)}</strong>'
+        + (' <span class="chip off">escalate</span>'
+           if (r.escalate or "").lower() == "yes" else "")
+        + "</div>"
+        + f"<div>{_esc(r.response)}</div>"
+        + f'<div class="when">'
+        + (f"segment <code>{_esc(r.audience_key)}</code>"
+           if r.audience_key else "applies to everyone")
+        + (f" · paired proof <code>{_esc(r.claim_id)}</code>" if r.claim_id else "")
+        + "</div>"
         for r in kb.objections(tenant)],
         "None. This is human-authored and it is half of the intake.")
 
+    ents = kb.entities(tenant, available_only=False)
     ent_html = _kb_list("Things they sell", [
-        f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.type)}</code> "
-        f"{_esc(r.price or '')}</div>"
-        f"<div class='when'>{_esc(r.description or '')}</div>"
-        + (f"<div class='when'><code>{_esc(str(r.attributes))}</code></div>"
-           if r.attributes else "")
-        for r in kb.entities(tenant, available_only=False)],
-        "Nothing catalogued.")
+        f'<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.type)}</code> '
+        f"{_esc(r.price) or _mut('no price')}"
+        + ("" if (r.availability or "available") == "available"
+           else f' <span class="chip off">{_esc(r.availability)}</span>')
+        + "</div>"
+        + f'<div class="when">{_esc(r.description) or _mut("no description")}</div>'
+        + _attr_chips(r.attributes or {})
+        + f'<div class="when"><code>{_esc(r.key)}</code> · '
+        + _esc(r.source or "source not recorded")
+        + (f" · verified {_date(r.verified_at)}" if r.verified_at else "")
+        + (f" · goes stale after {_esc(r.freshness_days)} days"
+           if r.freshness_days else "")
+        + "</div>"
+        for r in ents],
+        "Nothing catalogued. Selection has nothing to offer.")
+
+    # --- the tenant's own diagnostic vocabulary ------------------------------
+    sits = kb.situation_rows(tenant)
+    if sits:
+        sit_body = "".join(
+            f'<div class="msg"><div><code>{_esc(r.tag)}</code> '
+            f'<span class="chip nb">{_esc(r.kind or "problem")}</span></div>'
+            f'<div class="when">{_esc(r.description) or _mut("no description")}</div>'
+            f'<div class="when">triggers on: '
+            + (_esc(", ".join(" ".join(p) for p in (r.patterns or []) if p))
+               or _mut("no patterns — diagnosis can never assign this tag"))
+            + "</div></div>" for r in sits)
+        sit_note = (f'<p class="mut">These {len(sits)} tags are the only ones a claim '
+                    f'for {_esc(t.name)} may carry. A claim tagged with anything else '
+                    f'is refused on the way in.</p>')
+    else:
+        sit_body = ""
+        sit_note = ('<div class="note">No vocabulary authored, so this account '
+                    'silently inherits the agency\'s B2B language — which no venue '
+                    'or product enquiry will ever match. Claims tagged in this '
+                    'account\'s own words will be refused until tags exist here.</div>')
+
+    # --- gaps the selection loop actually hit --------------------------------
+    unk = kb.unknowns(tenant)
+    closed = len(kb.unknowns(tenant, status="answered")) + \
+        len(kb.unknowns(tenant, status="not_applicable"))
+    if unk:
+        unk_body = "".join(
+            f'<div class="msg"><div><strong>{_esc(r.entity_name or r.entity_key)}</strong> '
+            f'— {_esc((r.attribute or "").replace("_", " "))} unknown</div>'
+            f'<div class="when">blocked an answer {_esc(r.hits)}× · last asked: '
+            f'{_esc(r.asked_for or "—")}</div>'
+            f'<form class="f" method="get" action="/admin/kb_unknown" '
+            f'style="margin-top:6px">'
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="id" value="{_esc(r.id)}">'
+            f'<div class="row"><input name="value" placeholder="the value, or n/a">'
+            f'<button>Save</button></div></form></div>' for r in unk)
+        unk_card = f"""
+    <div class="card">
+      <div class="head"><h2>Gaps that cost an answer</h2>
+        <span class="chip off">{len(unk)} open</span></div>
+      <p class="mut">Ranked by how often each one blocked a real enquiry — not every
+      empty field, only the ones that lost something. Answering writes the value
+      straight onto the item and it becomes matchable immediately.</p>
+      <div class="thread">{unk_body}</div>
+    </div>"""
+    else:
+        unk_card = f"""
+    <div class="card">
+      <div class="head"><h2>Gaps that cost an answer</h2>
+        <span class="chip on">none open</span></div>
+      <p class="mut">Nothing has been asked for that this account could not answer.
+      {closed} gap(s) closed so far.</p>
+    </div>"""
 
     forms = (
         _kb_add_form(key, tenant, "claim", "Add a claim",
@@ -628,15 +845,33 @@ def render_kb(key: str, tenant: str = "") -> str:
     <span><b>{c['counts'].get('audiences', 0)}</b> audiences</span>
     <span><b>{c['counts'].get('objections', 0)}</b> objections</span>
     <span><b>{c['counts'].get('entities', 0)}</b> entities</span>
+    <span><b>{len(sits)}</b> situations</span>
     <span><b>{len(banned)}</b> hard rules</span>
+    <span><b>{len(unk)}</b> open gaps</span>
   </div>
-  <div><span class="mut">Positioning:</span> {_esc(b.positioning if b else '') or '<span class="mut">not set</span>'}</div>
-  <div><span class="mut">Voice:</span> {_esc(', '.join(voice.get('tone', []))) or '<span class="mut">not set</span>'}</div>
-  <div><span class="mut">Never say:</span></div>
+  {_kv([
+    ("positioning", _esc(b.positioning if b else "") or _mut("not set")),
+    ("elevator", _esc((b.elevator or {}).get("sentence", "") if b else "")
+                 or _mut("not set")),
+    ("tone", _words(voice.get("tone"))),
+    ("do say", _words(voice.get("do_say"), "nothing specified")),
+    ("never say", _words(voice.get("never_say"), "nothing specified")),
+    ("selection", _selection_line(kb.selection_config(tenant))),
+    ("next steps", _next_steps_line((b.next_steps or {}) if b else {})),
+  ])}
+  <div><span class="mut">Hard rules the validator enforces:</span></div>
   <div class="chips">{banned_html}</div>
+  {_approval_policy_html((b.approval_policy or {}) if b else {})}
 </div>
 
 {ask}
+
+<div class="card">
+  <div class="head"><h2>Situations — this account's vocabulary</h2>
+    <span class="chip {'on' if sits else 'off'}">{len(sits)} tags</span></div>
+  {sit_note}
+  <div class="thread">{sit_body}</div>
+</div>
 
 <div class="card">
   <div class="head"><h2>What is in there</h2></div>
@@ -645,6 +880,8 @@ def render_kb(key: str, tenant: str = "") -> str:
   {obj_html}
   {ent_html}
 </div>
+
+{unk_card}
 
 <div class="card">
   <div class="head"><h2>Add to {_esc(t.name)}</h2></div>

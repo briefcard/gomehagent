@@ -779,6 +779,23 @@ def kb_add(key: str = "", tenant: str = "", step: str = "", text: str = ""):
                             status_code=303)
 
 
+@app.get("/admin/kb_unknown")
+def kb_unknown(key: str = "", tenant: str = "", id: str = "", value: str = ""):
+    """Close one gap from the console. Same writer as the Telegram `/unknowns`
+    reply, so the value lands on the entity identically either way."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    result = kbm.resolve_unknown(id, value)
+    # resolve_unknown returns prose either way; the row's status is the fact.
+    still_open = any(u.id == id for u in kbm.unknowns(tenant))
+    if still_open:
+        return {"error": result, "id": id}
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
+                            status_code=303)
+
+
 @app.get("/admin/intake_new")
 def intake_new(key: str = "", tenant: str = "", label: str = "", days: int = 30):
     """Mint a private intake link for one client."""
