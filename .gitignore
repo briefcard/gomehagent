@@ -3,3 +3,4 @@ accounts.json
 local.db
 __pycache__/
 *.pyc
+*.db

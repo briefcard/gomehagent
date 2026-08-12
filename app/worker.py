@@ -33,6 +33,31 @@ def is_trusted(sender: str, alias: str = "") -> bool:
         return any(c.trusted == "yes" for c in q.all())
 
 
+def inboxes() -> list[tuple[str, str]]:
+    """Every mailbox this worker polls, as (alias, tenant).
+
+    Driven from the tenant registry rather than `GMAIL_ACCOUNTS` directly, so
+    onboarding a client is a row instead of an env change plus a worker
+    redeploy — which was the last place adding a client needed a deploy.
+
+    An alias with no tenant is still polled, and reported as unattributed. The
+    tempting version of this function returns only claimed inboxes; that one
+    silently stops processing mail the moment a `gmail_alias` is mistyped, and
+    nothing would say so. Absence is a third state here too.
+    """
+    from . import tenants
+    claimed: dict[str, str] = {}
+    for t in tenants.all_tenants(include_paused=False):
+        if t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS:
+            claimed[t.gmail_alias] = t.key
+    pairs = [(alias, claimed.get(alias, "")) for alias in config.GMAIL_ACCOUNTS]
+    orphans = [a for a, k in pairs if not k]
+    if orphans:
+        log.warning("inboxes with no tenant (still polled, unattributed): %s",
+                    ", ".join(orphans))
+    return pairs
+
+
 def already_seen(message_id: str) -> bool:
     with db.SessionLocal() as s:
         return s.query(db.EmailLog).filter(
@@ -47,7 +72,12 @@ def _sender_email(sender: str) -> str:
     return sender.split("<")[-1].rstrip(">").strip().lower()
 
 
-def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> None:
+def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
+                   tenant: str = "") -> None:
+    """Triage a batch from one inbox. `tenant` is resolved once by the caller
+    so every email in the batch is attributed and scoped identically."""
+    from . import tenants as _tn
+    tenant = tenant or _tn.for_alias(alias)
     for email in emails:
         if already_seen(email["id"]):
             continue
@@ -75,7 +105,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
             except Exception:  # noqa: BLE001
                 log.exception("pdf download failed: %s", att["filename"])
         trusted = is_trusted(email["from"], alias)
-        result = triage.triage_email(email, alias, trusted)
+        result = triage.triage_email(email, alias, trusted, tenant=tenant)
         action = result["action"]
         detail = result.get("reason", "")
         bucket = result.get("category", "notifications")
@@ -98,7 +128,8 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
         ex = result.get("expense")
         if isinstance(ex, dict) and ex.get("vendor"):
             with db.SessionLocal() as s:
-                s.add(db.Expense(account=alias, vendor=ex.get("vendor"),
+                s.add(db.Expense(account=alias, tenant=tenant,
+                                 vendor=ex.get("vendor"),
                                  amount=ex.get("amount", ""),
                                  expense_date=ex.get("date", ""),
                                  source_subject=email["subject"]))
@@ -109,7 +140,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
         if isinstance(dl, dict) and dl.get("due_date"):
             with db.SessionLocal() as s:
                 s.add(db.Deadline(
-                    account=alias, description=dl.get("what", email["subject"]),
+                    account=alias, tenant=tenant, description=dl.get("what", email["subject"]),
                     amount=dl.get("amount", "unknown"), due_date=dl["due_date"],
                     source_subject=email["subject"],
                 ))
@@ -174,7 +205,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str]) -> 
 
         with db.SessionLocal() as s:
             s.add(db.EmailLog(
-                account=alias, gmail_message_id=email["id"], thread_id=email["threadId"],
+                account=alias, tenant=tenant, gmail_message_id=email["id"], thread_id=email["threadId"],
                 sender=email["from"], subject=email["subject"],
                 category=bucket, action=logged, detail=detail,
             ))
@@ -243,9 +274,10 @@ def deadline_alerts() -> None:
 
 def poll_all() -> None:
     new_approvals: list[str] = []
-    for alias in config.GMAIL_ACCOUNTS:
+    for alias, tenant in inboxes():
         try:
-            process_emails(alias, gmail_client.fetch_unread(alias), new_approvals)
+            process_emails(alias, gmail_client.fetch_unread(alias),
+                           new_approvals, tenant=tenant)
         except Exception:  # noqa: BLE001 — one bad inbox must not kill the loop
             log.exception("inbox %s failed", alias)
     # NOTE: no notification here — approvals.notify_pending runs on its own
@@ -256,17 +288,67 @@ def backlog_sweep() -> None:
     """First-run sweep: every email of the last BACKLOG_DAYS days that never
     got a reply -> triaged -> one big approval batch for Gomeh."""
     new_approvals: list[str] = []
-    for alias in config.GMAIL_ACCOUNTS:
+    for alias, tenant in inboxes():
         try:
             emails = gmail_client.fetch_unanswered(alias, config.BACKLOG_DAYS)
-            log.info("[%s] backlog sweep: %d unanswered threads", alias, len(emails))
-            process_emails(alias, emails, new_approvals)
+            log.info("[%s/%s] backlog sweep: %d unanswered threads",
+                     alias, tenant or "unattributed", len(emails))
+            process_emails(alias, emails, new_approvals, tenant=tenant)
         except Exception:  # noqa: BLE001
             log.exception("backlog sweep %s failed", alias)
     if new_approvals:
         approvals.notify_pending(
             title=f"[Assistant · BACKLOG] {len(new_approvals)} unanswered emails — drafts ready",
         )
+
+
+def systems_tick() -> None:
+    """Evaluate every installed system once, and record what happened.
+
+    `start_run` and `finish_run` had no callers outside their test script, so
+    every run count on the Systems tab was structurally zero and
+    `blocked_reasons()` — the KB backlog ranked by how often each gap actually
+    cost an output — had nothing to rank. This is the caller.
+
+    Nothing here sends. A system that is not `live` is skipped entirely, and a
+    system on the `shadow` rung records and stops. That is what makes it safe to
+    switch on before the generator exists: the ledger starts filling with real
+    blockers today, so when the generator lands it has a baseline to be measured
+    against rather than starting blind.
+
+    Daily rather than per-interval, deliberately. The question this answers is
+    "could this system have run today", which does not change every ten minutes,
+    and a run row per system per tick would bury the signal it exists to carry.
+    """
+    from . import systems
+    live = ready_count = blocked_count = 0
+    for sysrow in systems.all_systems():
+        if sysrow.status not in ("live", "designed"):
+            continue          # paused and retired are decisions, not failures
+        live += 1
+        run_id = systems.start_run(sysrow.id, sysrow.tenant, trigger="schedule")
+        try:
+            state = systems.ready(sysrow)
+            if not state["ready"]:
+                blocked_count += 1
+                # A LIST, not a joined string: `blocked_reasons()` iterates this
+                # to rank the backlog, and a string iterates into characters —
+                # which ranked ' ' and 'e' as the two costliest gaps.
+                systems.finish_run(run_id, "blocked",
+                                   blocked_on=list(state["blockers"]))
+                continue
+            ready_count += 1
+            # The generator lands here. Until it does, say so on the run rather
+            # than recording a success that never happened.
+            systems.finish_run(
+                run_id, "blocked",
+                blocked_on=["no generator yet — system is otherwise ready to run"])
+        except Exception as exc:  # noqa: BLE001 — one system must not stop the rest
+            log.exception("systems tick failed for %s/%s", sysrow.tenant, sysrow.key)
+            systems.finish_run(run_id, "failed",
+                               error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
+    log.info("systems tick: %d evaluated, %d ready, %d blocked",
+             live, ready_count, blocked_count)
 
 
 def follow_up_chase() -> None:
@@ -365,9 +447,13 @@ def weekly_cost_report() -> None:
 
 def main() -> None:
     db.init_db()
-    log.info("Worker starting. Inboxes: %s | WhatsApp: %s | auto-send: %s",
-             list(config.GMAIL_ACCOUNTS), config.WHATSAPP_ENABLED,
-             config.AUTO_SEND_ENABLED)
+    # Report what it is actually about to do, per client. "Inboxes: [...]" said
+    # nothing about which account each one served, so a mistyped gmail_alias
+    # looked identical to a correct one at startup.
+    log.info("Worker starting. WhatsApp: %s | auto-send: %s",
+             config.WHATSAPP_ENABLED, config.AUTO_SEND_ENABLED)
+    for _alias, _tenant in inboxes():
+        log.info("  inbox %-12s -> %s", _alias, _tenant or "UNATTRIBUTED")
     # Startup jobs are wrapped so a failure can NEVER crash the worker (exit 1).
     _safe(voice_learn.ensure_profiles, "voice profiles")()
     from . import systems_map
@@ -380,6 +466,9 @@ def main() -> None:
     sched.add_job(_safe(approvals.notify_pending, "approval batching"),
                   "interval", minutes=config.APPROVAL_BATCH_MINUTES)
     sched.add_job(_safe(deadline_alerts, "deadline alerts"), "cron", hour=9, minute=0)
+    # Its own slot, not chained to polling: a slow system evaluation must never
+    # delay the inbox loop, and vice versa.
+    sched.add_job(_safe(systems_tick, "systems tick"), "cron", hour=7, minute=0)
     sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
                   hour=9, minute=30)
     from . import ops_jobs

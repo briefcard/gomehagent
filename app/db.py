@@ -577,6 +577,57 @@ class IntakeLink(Base):
     last_used_at = Column(DateTime(timezone=True))
 
 
+class Credential(Base):
+    """One provider connection for one client, held encrypted.
+
+    Credentials used to live only in Render env-group JSON blobs keyed by name
+    — fine while Gomeh created every one of them by hand, and the reason
+    onboarding needed him at a keyboard. This is the same value, per tenant,
+    written by the client themselves through a scoped connect link.
+
+    `secret` is Fernet ciphertext and is never returned to any surface: the
+    console and the connect page render `status` and `last_verified`, never the
+    value. A credential that has verified against the live API is self-proving,
+    which is why there is no approval queue in front of it.
+    """
+
+    __tablename__ = "credentials"
+    __table_args__ = (UniqueConstraint("tenant", "provider",
+                                       name="uq_credential_tenant_provider"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    provider = Column(String, nullable=False)   # google | shopify | omnisend | ...
+    kind = Column(String, default="api_key")    # api_key | oauth
+    secret = Column(Text)                       # Fernet ciphertext — never rendered
+    meta = Column(JSON, default=dict)           # non-secret: store domain, from_name…
+    scopes = Column(Text, default="")
+    status = Column(String, default="active")   # active | failed | revoked
+    granted_by = Column(String, default="")     # label from the connect link
+    granted_at = Column(DateTime(timezone=True), default=utcnow)
+    last_verified = Column(DateTime(timezone=True))
+    last_error = Column(Text, default="")
+
+
+class ConnectLink(Base):
+    """A scoped, expiring link that lets a CLIENT connect their own accounts.
+
+    Same shape and same guarantees as `IntakeLink`, for the other half of
+    onboarding: one tenant, no admin key, nothing else reachable. Where the
+    intake link fills the knowledge base, this one fills `Credential`.
+    """
+
+    __tablename__ = "connect_links"
+
+    token = Column(String, primary_key=True)
+    tenant = Column(String, nullable=False, index=True)
+    label = Column(String)                      # who it was sent to
+    status = Column(String, default="active")   # active | revoked
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    expires_at = Column(DateTime(timezone=True))
+    last_used_at = Column(DateTime(timezone=True))
+
+
 class KbUnknown(Base):
     """A question the catalogue could not answer, and how often it mattered.
 

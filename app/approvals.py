@@ -15,8 +15,13 @@ _signer = URLSafeTimedSerializer(config.APPROVAL_SECRET)
 def request_approval(kind: str, summary: str, payload: dict, notify: bool = True) -> str:
     """Create a pending approval. notify=False lets the caller batch
     notifications (one email per poll cycle instead of one per item)."""
+    # Attribute now, while the payload that names the client is in hand. Doing
+    # it later is archaeology: the 330 approvals written before this line have
+    # to be recovered from their payloads, and some of them cannot be.
+    from . import tenant_scope
     with db.SessionLocal() as s:
         ap = db.Approval(kind=kind, summary=summary, payload=payload,
+                         tenant=tenant_scope.resolve(payload=payload),
                          channel="whatsapp" if config.WHATSAPP_ENABLED else "email")
         s.add(ap)
         s.commit()
@@ -162,7 +167,8 @@ def _execute(ap: db.Approval) -> None:
             import datetime as dt
             with db.SessionLocal() as s:
                 s.add(db.FollowUp(
-                    account=p["account"], thread_id=p.get("thread_id"),
+                    account=p["account"], tenant=ap.tenant or "",
+                    thread_id=p.get("thread_id"),
                     to=p["to"], subject=p["subject"],
                     due_date=(dt.date.today() + dt.timedelta(days=3)).isoformat(),
                 ))

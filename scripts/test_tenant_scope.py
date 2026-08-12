@@ -100,14 +100,44 @@ def main() -> int:
         s.add(db.SystemDoc(key="drive:baci", title="Baci drive"))
         s.add(db.Contact(email="legacy@x.com", entity="saias"))     # old vocabulary
         s.add(db.Contact(email="legacy2@x.com", entity="baci"))
+        # An expense records the inbox it was captured from.
+        if alias_key:
+            s.add(db.Expense(account=aliases[alias_key], vendor="Staples", amount="$40"))
+        # An approval records what it was about, in its payload.
+        s.add(db.Approval(kind="seo_new_collection", summary="x",
+                          payload={"site": "baci", "bucket": "seo"}))
+        s.add(db.Approval(kind="send_email", summary="y",
+                          payload={"account": "baci", "to": "a@b.com"}))
+        s.add(db.Approval(kind="other", summary="z", payload={"note": "nothing"}))
         # Deliberately unattributable: nothing on the row says whose it is.
-        s.add(db.Expense(vendor="Staples", amount="$40"))
+        s.add(db.Expense(account="nosuchalias", vendor="Costco", amount="$9"))
         s.add(db.DocIndex(filename="BOL.pdf", path="/B2B", anchor="PO-2241"))
         s.add(db.Usage(purpose="command", model="claude-opus-5"))
         s.commit()
 
+    # The dry run must predict exactly what the write does, or it is worse
+    # than no dry run — it would be a number someone acts on.
+    pred = tenant_scope.preview()
+    predicted = {t: r["would_attribute"] for t, r in pred.items() if r["would_attribute"]}
+    with db.SessionLocal() as s:
+        before = s.query(db.Memory).filter(db.Memory.tenant != db.UNASSIGNED).count()
+
     filled = tenant_scope.backfill()
+    print(f"  predicted:  {predicted}")
     print(f"  backfilled: {filled}")
+    ck("the dry run predicted the write exactly", predicted == filled,
+       f"{predicted} vs {filled}")
+
+    with db.SessionLocal() as s:
+        after_preview_only = s.query(db.Memory).filter(
+            db.Memory.tenant != db.UNASSIGNED).count()
+    ck("preview() wrote nothing itself", after_preview_only >= before)
+    ck("preview reports who each row would go to",
+       all(sum(r["by_tenant"].values()) == r["would_attribute"]
+           for r in pred.values()))
+    ck("and how many it cannot reach",
+       all(r["would_remain"] == r["unassigned"] - r["would_attribute"]
+           for r in pred.values()))
 
     with db.SessionLocal() as s:
         if alias_key:
@@ -136,10 +166,26 @@ def main() -> int:
            s.query(db.Contact).filter(db.Contact.email == "legacy2@x.com")
             .first().tenant == "baci")
 
+        print("\n— what a row does record —")
+        if alias_key:
+            ck("an expense is attributed from the inbox that captured it",
+               s.query(db.Expense).filter(db.Expense.vendor == "Staples")
+                .first().tenant == alias_key)
+        ck("an approval is attributed from payload.site",
+           s.query(db.Approval).filter(db.Approval.kind == "seo_new_collection")
+            .first().tenant == "baci")
+        ck("an approval is attributed from payload.account",
+           s.query(db.Approval).filter(db.Approval.kind == "send_email")
+            .first().tenant == "baci")
+
         # ---- 4. and refuses to invent one -------------------------------
         print("\n— refusing to guess —")
-        ck("an expense with no client stays unassigned",
-           s.query(db.Expense).first().tenant == db.UNASSIGNED)
+        ck("an approval whose payload says nothing stays unassigned",
+           s.query(db.Approval).filter(db.Approval.kind == "other")
+            .first().tenant == db.UNASSIGNED)
+        ck("an expense on an unknown inbox stays unassigned",
+           s.query(db.Expense).filter(db.Expense.vendor == "Costco")
+            .first().tenant == db.UNASSIGNED)
         ck("a document with no client stays unassigned",
            s.query(db.DocIndex).first().tenant == db.UNASSIGNED)
         ck("a usage row with no client stays unassigned",
