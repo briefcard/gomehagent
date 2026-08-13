@@ -1149,6 +1149,25 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
             'situations submitted by a client or read from a spreadsheet land '
             'here first — they are not usable until approved.</p>')
 
+    # --- clearing a queue in one action ------------------------------------
+    # A queue filled by an earlier version of the crawler is not worth reading
+    # one card at a time — the filter that selected it has since been fixed, so
+    # re-running the harvest costs less than reviewing its output. The count is
+    # in the button because "clear everything" should say how much everything is.
+    n_props = len(pending) + sum(len(v) for v in other.values())
+    if n_props:
+        clear_all = f"""
+        <form method="post" action="/admin/purge_proposals" class="row"
+              onsubmit="return confirm('Delete all {n_props} un-reviewed \
+proposals for {_esc(t.name)}? Approved rows are not touched.')">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <button class="sec">Clear all {n_props} proposals</button>
+          <span class="mut">deletes un-reviewed rows only — nothing approved is
+          touched, and nothing is kept as a rejection</span>
+        </form>"""
+    else:
+        clear_all = ""
+
     # --- compliance --------------------------------------------------------
     scan = compliance.last_scan(tenant)
     if not scan:
@@ -1226,6 +1245,7 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
   {proposals}
   <div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}
     <span class="mut">reads the site and files what it finds</span></div>
+  {clear_all}
 </div>
 
 <div class="card">

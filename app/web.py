@@ -1352,21 +1352,42 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
 
 @app.get("/admin/purge_proposals")
 def purge_proposals_route(key: str = Depends(admin_key), tenant: str = "",
-                          origin: str = "", dry_run: str = "1") -> dict:
-    """Delete un-reviewed proposals produced by an earlier version of the crawler.
+                          origin: str = "") -> dict:
+    """What a purge WOULD delete. Always a dry run — this route never deletes.
 
-    /admin/purge_proposals?tenant=baci                 what it WOULD delete
-    /admin/purge_proposals?tenant=baci&dry_run=0       delete them
-    /admin/purge_proposals?dry_run=0&origin=crawl      every account, crawl only
+    /admin/purge_proposals?tenant=baci                what it would delete
+    /admin/purge_proposals?tenant=baci&origin=crawl   narrowed to one source
 
-    Approved rows are never touched. Deleting rather than rejecting is
-    deliberate — see `kb.purge_proposals`.
+    A GET that deletes is fired by anything that causes a URL to load: a browser
+    prefetch, a link preview, a scanner walking history. That is a listed defect
+    for the console's other write routes and it is worst here, because this one
+    is destructive. Deleting requires the POST below.
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import kb as kbm
-    return kbm.purge_proposals(tenant=tenant, origin=origin,
-                               dry_run=dry_run not in ("0", "false", "no"))
+    return kbm.purge_proposals(tenant=tenant, origin=origin, dry_run=True)
+
+
+@app.post("/admin/purge_proposals", response_class=HTMLResponse)
+async def purge_proposals_do(request: Request, key: str = Depends(admin_key)):
+    """Clear every un-reviewed proposal for one account, in one action.
+
+    Approved rows are never touched, and proposals are DELETED rather than
+    rejected — `suggest_tags` learns what a bad claim looks like from retired
+    rows, so filing a hundred pieces of parser noise as "rejected" would teach
+    the tagger that noise is what rejection looks like.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse('<h3>unauthorized</h3>')
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    if not tenant:
+        return HTMLResponse('<h3>an account is required</h3>', status_code=400)
+    kbm.purge_proposals(tenant=tenant, origin=str(form.get("origin", "")),
+                        dry_run=False)
+    return _back_to_content(tenant)
 
 
 @app.get("/admin/purge_scans")

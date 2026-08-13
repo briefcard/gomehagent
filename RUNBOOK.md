@@ -261,9 +261,14 @@ to a dry run and never touch anything approved:
 
 ```bash
 curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_proposals?tenant=baci"
-curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_proposals?tenant=baci&dry_run=0"
+curl -b ~/.gomeh-console -s -X POST -d "tenant=baci" "https://assistant-web-zm2d.onrender.com/admin/purge_proposals"
 curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_scans?tenant=baci&dry_run=0"
 ```
+
+Easier: the Content tab has a **Clear all N proposals** button that does the
+same thing for the account you are looking at, with the count in the label and
+a confirmation. The GET above only ever *reports* — deleting requires the POST
+or the button, because a GET that deletes is fired by a browser prefetch.
 
 Proposals are **deleted, not rejected** — deliberately. `suggest_tags` learns
 what a bad claim looks like from retired rows, so filing a hundred pieces of

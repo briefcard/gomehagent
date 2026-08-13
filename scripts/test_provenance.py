@@ -223,6 +223,44 @@ ck("and they leave no trace to poison the tagger",
 ck("scoped to one account by default",
    kb.purge_proposals("some-other-tenant")["total"] == 0)
 
+# The console surface for the same thing. A queue filled by an older crawler is
+# cleared in one action rather than card by card — but the route that deletes
+# must be a POST. A GET that deletes is fired by a browser prefetch or a link
+# preview, and this one is destructive.
+import os as _os
+_os.environ.setdefault("APPROVAL_SECRET", "s3cret")
+from fastapi.testclient import TestClient  # noqa: E402
+from app import admin_ui, kb_seed, tenants, web  # noqa: E402
+
+tenants.seed(); kb_seed.seed_all()
+kb.add_claim("baci", "Junk the old parser proposed 8217.", "", ["gifting"],
+             status="pending", origin="crawl")
+kb.add_objection("baci", "An old proposal", "x", origin="client")
+approved_baci = len(kb.claims("baci"))
+
+with TestClient(web.app) as cl:
+    page = admin_ui.render_content("s3cret", "baci")
+    ck("the console offers a one-click clear, with the count",
+       "Clear all 2 proposals" in page)
+    ck("and it is a POST, not a link",
+       'action="/admin/purge_proposals"' in page and 'method="post"' in page)
+    r = cl.get("/admin/purge_proposals",
+               params={"key": "s3cret", "tenant": "baci", "dry_run": "0"})
+    ck("the GET route cannot delete, even when asked to",
+       r.json()["dry_run"] is True and len(kb.pending_claims("baci")) == 1)
+    r = cl.post("/admin/purge_proposals", data={"tenant": "baci"},
+                params={"key": "s3cret"}, follow_redirects=False)
+    ck("the POST clears the whole queue",
+       r.status_code == 303 and not kb.pending_claims("baci"))
+    ck("and leaves approved rows alone", len(kb.claims("baci")) == approved_baci)
+    ck("the button disappears once the queue is empty",
+       "Clear all" not in admin_ui.render_content("s3cret", "baci"))
+
+ck("an unauthenticated purge is refused",
+   "unauthorized" in TestClient(web.app).post(
+       "/admin/purge_proposals", data={"tenant": "baci"},
+       params={"key": "wrong"}).text)
+
 print()
 if _fail:
     print(f"{len(_fail)} FAILED: {_fail}")
