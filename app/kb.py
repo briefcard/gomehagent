@@ -249,7 +249,8 @@ def _tok(text: str) -> set[str]:
     return {w for w in _re.findall(r"[a-z][a-z'-]{3,}", (text or "").lower())}
 
 
-def suggest_tags(tenant: str, text: str, limit: int = 2) -> dict:
+def suggest_tags(tenant: str, text: str, limit: int = 2,
+                 entity_key: str = "") -> dict:
     """Best-guess situation tags for a candidate claim, and why.
 
     Two sources, in order of authority:
@@ -274,6 +275,20 @@ def suggest_tags(tenant: str, text: str, limit: int = 2) -> dict:
     if not words:
         return {"tags": [], "basis": "", "similar_to_rejected": ""}
 
+    inv = claim_inventory(tenant)
+    rejected_like = ""
+    for row in inv["retired"]:
+        # Rejecting "dishwasher safe" for the pouf must not teach the tagger
+        # that the same sentence is bad for the porcelain. A rejection only
+        # carries across rows that share a scope.
+        rek = (getattr(row, "entity_key", "") or "")
+        if rek and entity_key and rek != entity_key:
+            continue
+        overlap = words & _tok(row.claim)
+        if len(overlap) >= max(3, len(words) // 3):
+            rejected_like = row.claim[:120]
+            break
+
     # 1. patterns
     hits = []
     for tag, patterns in situation_patterns(tenant).items():
@@ -282,11 +297,13 @@ def suggest_tags(tenant: str, text: str, limit: int = 2) -> dict:
                 hits.append(tag)
                 break
     if hits:
+        # The warning rides along even here. A pattern match tells you which
+        # tag applies; it says nothing about whether this exact sentence has
+        # already been turned down.
         return {"tags": hits[:limit], "basis": "pattern",
-                "similar_to_rejected": ""}
+                "similar_to_rejected": rejected_like}
 
     # 2. learned from what has already been approved here
-    inv = claim_inventory(tenant)
     per_tag: dict[str, set[str]] = {}
     for row in inv["selectable"]:
         for tag in (row.situations or []):
@@ -301,13 +318,6 @@ def suggest_tags(tenant: str, text: str, limit: int = 2) -> dict:
             # out-score a precise one purely by having more words.
             scored.append((len(shared) / (len(words) ** 0.5), tag, shared))
     scored.sort(reverse=True)
-
-    rejected_like = ""
-    for row in inv["retired"]:
-        overlap = words & _tok(row.claim)
-        if len(overlap) >= max(3, len(words) // 3):
-            rejected_like = row.claim[:120]
-            break
 
     if not scored:
         return {"tags": [], "basis": "", "similar_to_rejected": rejected_like}
@@ -950,12 +960,46 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
                     aq = aq.filter(model.tenant == tenant)
                 approved = aq.all()
             s.expunge_all()
-        if rows:
-            out[name] = [
-                {"row": r,
-                 "near_duplicates": prov.near_duplicates(
-                     getattr(r, field, "") or "", approved, field)}
-                for r in rows]
+        if not rows:
+            continue
+
+        # Two products can carry facts that read alike and are not
+        # interchangeable — "dishwasher safe" is true of the porcelain and false
+        # of the pouf; "Ø 25 cm" is true of exactly one thing. So similarity is
+        # only a DUPLICATE within the scope where both rows could actually be
+        # selected together. Outside it, the same wording is a parallel fact and
+        # merging or rejecting one would delete a real product's answer.
+        def _scoped(row):
+            ek = getattr(row, "entity_key", "") or ""
+            if not hasattr(row, "entity_key"):
+                return approved, []
+            # Would collide: brand-level rows, plus rows on the same entity.
+            same = [a for a in approved
+                    if (getattr(a, "entity_key", "") or "") in ("", ek)]
+            # Same words, different thing. Informational, never a duplicate.
+            other = [a for a in approved
+                     if (getattr(a, "entity_key", "") or "") not in ("", ek)]
+            return same, other
+
+        entries = []
+        for r in rows:
+            same, other = _scoped(r)
+            text = getattr(r, field, "") or ""
+            dupes = prov.near_duplicates(text, same, field)
+            # A brand-level row saying the same thing DOES cover an
+            # entity-scoped proposal — that is real redundancy, and the
+            # narrower row adds nothing.
+            covered = [d for d in dupes
+                       if not (getattr(d, "entity_key", "") or "")
+                       and (getattr(r, "entity_key", "") or "")]
+            entries.append({
+                "row": r,
+                "near_duplicates": dupes,
+                "covered_by_brand_level": covered,
+                "parallel_on_other_entities":
+                    prov.near_duplicates(text, other, field),
+            })
+        out[name] = entries
     return out
 
 
@@ -1462,6 +1506,57 @@ _AGENCY_OFFERS = [
 ]
 
 
+# The agency's own vocabulary, as rows rather than as the module constant.
+# `seed_agency` looped no situations at all, so `situations("agency")` fell back
+# to `SITUATIONS` — a bare set with NO patterns — and `situation_patterns()`
+# returned {}. Nothing could ever pattern-match for the agency; only the learned
+# tagger worked there, and a crawl of its own site could tag nothing.
+#
+# Patterns are roots, not whole phrases: real people write "raising prices",
+# not "raise prices".
+_AGENCY_SITUATIONS = [
+    ("ecom_dtc", "who_they_are", "sells direct to consumers online",
+     [["shopify"], ["dtc"], ["our store"], ["online store"], ["ecommerce"]]),
+    ("ecom_inventory", "who_they_are", "carries stock, so cash sits in inventory",
+     [["inventory"], ["stock"], ["sku"], ["reorder"], ["warehouse"]]),
+    ("digital_products", "who_they_are", "sells courses, memberships or info products",
+     [["course"], ["membership"], ["funnel"], ["launch"], ["webinar"]]),
+    ("coaching", "who_they_are", "coaching or consulting business",
+     [["coaching"], ["coach"], ["clients"], ["program"]]),
+    ("local_venue", "who_they_are", "a venue, events or local service business",
+     [["venue"], ["event"], ["booking"], ["walk-in"], ["local"]]),
+    ("b2b_spec", "who_they_are", "sells into specification or trade channels",
+     [["spec"], ["trade"], ["architect"], ["designer"], ["distributor"]]),
+    ("real_estate", "who_they_are", "property or development marketing",
+     [["development"], ["units"], ["real estate"], ["broker"]]),
+    ("food_bev", "who_they_are", "food or beverage brand",
+     [["food"], ["beverage"], ["produce"], ["grocery"]]),
+    ("scaling", "problem", "growing and the current setup will not carry it",
+     [["scale"], ["scaling"], ["grow"], ["growth"], ["next level"]]),
+    ("margin_problem", "problem", "revenue is there and margin is not",
+     [["margin"], ["profitab"], ["cost"], ["unit econom"]]),
+    ("ads_not_working", "problem", "paid acquisition stopped performing",
+     [["ads"], ["roas"], ["cac"], ["facebook"], ["meta"], ["google ads"]]),
+    ("no_traffic", "problem", "not enough demand reaching them at all",
+     [["traffic"], ["no one"], ["nobody finds"], ["visibility"], ["seo"]]),
+    ("pricing_fear", "problem", "knows the price is wrong and is afraid to move it",
+     [["price"], ["pricing"], ["raise"], ["discount"], ["too cheap"]]),
+    ("email_problems", "problem", "owned channel is decaying",
+     [["email"], ["deliverab"], ["open rate"], ["list"], ["klaviyo"], ["omnisend"]]),
+    ("new_channel", "problem", "wants a channel they have never run",
+     [["affiliate"], ["new channel"], ["expand into"], ["tiktok"], ["amazon"]]),
+    ("us_market_entry", "problem", "entering the US market",
+     [["us market"], ["united states"], ["market entry"], ["expand to the us"]]),
+    ("team_exists", "doubt", "wonders whether there is a team behind it",
+     [["team"], ["capacity"], ["bandwidth"], ["who does the work"]]),
+    ("solo_operator_doubt", "doubt", "wonders whether one person can carry it",
+     [["one person"], ["just you"], ["freelance"], ["agency or"]]),
+    ("big_spender", "doubt", "spends enough that competence matters",
+     [["budget"], ["spend"], ["per month"], ["monthly spend"]]),
+    ("wants_operator", "doubt", "wants someone who has run it, not advised on it",
+     [["operator"], ["actually run"], ["own brand"], ["hands on"]]),
+]
+
 def seed_agency(force: bool = False) -> dict:
     """Populate the `agency` tenant. Idempotent unless force=True."""
     tenant = "agency"
@@ -1532,6 +1627,11 @@ def seed_agency(force: bool = False) -> dict:
         # first re-seed duplicates them and no sync knows to leave them alone.
         _seed = dict(origin="seed", review=prov.APPROVED, approved_by="seed",
                      approved_at=db.utcnow())
+
+        for tag, kind, desc, pats in _AGENCY_SITUATIONS:
+            s.add(db.KbSituation(tenant=tenant, tag=tag, kind=kind,
+                                 description=desc, patterns=pats,
+                                 fingerprint=prov.fingerprint(tag), **_seed))
 
         for claim, ev, ptype, src, sits, strength in _AGENCY_CLAIMS:
             bad = set(sits) - SITUATIONS

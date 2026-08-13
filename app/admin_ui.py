@@ -1019,7 +1019,9 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
         f'{_esc(r.name)}</a>' for r in rows)
 
     # --- proposals ---------------------------------------------------------
-    pending = kbm.pending_claims(tenant)
+    entries = kbm.proposals(tenant, kind="claim").get("claim", [])
+    pending = [e["row"] for e in entries]
+    _dupes = {e["row"].id: e for e in entries}
     vocab = sorted(kbm.situations(tenant))
     cat = sorted(((e.key, e.name) for e in
                   kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
@@ -1044,6 +1046,28 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
                 f'<label class="tag"><input type="checkbox" name="tags" '
                 f'value="{_esc(t)}"{" checked" if t in chosen else ""}> '
                 f'{_esc(t)}</label>' for t in vocab)
+            # Similarity is only a duplicate where both rows could be
+            # selected together. The same sentence on a different product is a
+            # parallel fact — showing it as a duplicate would invite a reviewer
+            # to reject a real product's answer.
+            ent = _dupes.get(p.id, {})
+            dup = ""
+            for d in ent.get("covered_by_brand_level", [])[:2]:
+                dup += ('<div class="note">Already covered brand-level: '
+                        f'&ldquo;{_esc((d.claim or "")[:110])}&rdquo; — that one '
+                        'applies everywhere, so this narrower copy adds nothing.'
+                        '</div>')
+            others = [d for d in ent.get("near_duplicates", [])
+                      if d not in ent.get("covered_by_brand_level", [])]
+            for d in others[:2]:
+                dup += ('<div class="note">Close to an approved claim in the same '
+                        f'scope: &ldquo;{_esc((d.claim or "")[:110])}&rdquo;</div>')
+            for d in ent.get("parallel_on_other_entities", [])[:2]:
+                dup += ('<div class="when">Same wording on a different item '
+                        f'({_esc(d.entity_key or "")}): '
+                        f'&ldquo;{_esc((d.claim or "")[:90])}&rdquo; — not a '
+                        'duplicate; both can be true.</div>')
+
             warn = ""
             if not chosen:
                 warn = ('<div class="note">No tag matched. Pick at least one — '
@@ -1072,6 +1096,7 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
                   if p.entity_key else
                   "Brand-level &mdash; usable in any content for this account."
               }</div>
+              {dup}
               {warn}
               <label>Situations</label>
               <div class="tags">{tagbox}</div>

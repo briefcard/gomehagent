@@ -200,15 +200,48 @@ ck("a row created without a review state is not selectable",
 
 
 # --------------------------------------------------------------------------
+print("\n— similar wording is not the same fact —")
+# Two products can carry facts that read alike and are not interchangeable.
+# Treating those as duplicates would invite a reviewer to reject one and delete
+# a real product's answer.
+kb.add_entity(T, "product", "plate", "Plate", origin="store_sync")
+kb.add_entity(T, "product", "pouf", "Pouf", origin="store_sync")
+kb.add_claim(T, "Dishwasher safe on a normal cycle, all 6 pieces.", "6",
+             ["gifting"], entity_key="plate")
+kb.add_claim(T, "Dishwasher safe on a normal cycle, all 6 pieces.", "6",
+             ["gifting"], entity_key="pouf", status="pending", origin="crawl")
+kb.add_claim(T, "Every piece is tested to 2,000 dishwasher cycles.", "2,000",
+             ["gifting"])
+kb.add_claim(T, "Every piece is tested to 2,000 dishwasher cycles.", "2,000",
+             ["gifting"], entity_key="plate", status="pending", origin="crawl")
+
+by_ent = {e["row"].entity_key: e for e in kb.proposals(T, kind="claim")["claim"]}
+ck("the same wording on another item is not a duplicate",
+   not by_ent["pouf"]["near_duplicates"])
+ck("it is surfaced as a parallel fact instead",
+   len(by_ent["pouf"]["parallel_on_other_entities"]) == 1)
+ck("a narrower copy of a brand-level claim IS redundant, and says so",
+   len(by_ent["plate"]["covered_by_brand_level"]) == 1)
+
+kb.review_claim(by_ent["pouf"]["row"].id, approve=False)
+ck("a rejection does not carry to another item's identical claim",
+   not kb.suggest_tags(T, "Dishwasher safe on a normal cycle, all 6 pieces.",
+                       entity_key="plate")["similar_to_rejected"])
+ck("but it does carry within the same item",
+   bool(kb.suggest_tags(T, "Dishwasher safe on a normal cycle, all 6 pieces.",
+                        entity_key="pouf")["similar_to_rejected"]))
+
 print("\n— clearing out proposals from an older parser —")
 before_usable = len(kb.claims(T))
 kb.add_claim(T, "Junk the old parser thought was checkable 8217.", "",
              ["gifting"], status="pending", origin="crawl")
 kb.add_objection(T, "An old proposal", "x", origin="client")
 
+before_pending = len(kb.pending_claims(T))
 dry = kb.purge_proposals(T)
 ck("a dry run reports and deletes nothing",
-   dry["total"] >= 2 and dry["dry_run"] and len(kb.pending_claims(T)) == 1,
+   dry["total"] >= 2 and dry["dry_run"]
+   and len(kb.pending_claims(T)) == before_pending,
    str(dry["deleted"]))
 
 real = kb.purge_proposals(T, dry_run=False)

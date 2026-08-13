@@ -434,7 +434,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             # untaggable one is proposed untagged rather than discarded — the
             # segmentation happens when a human approves it, which is the only
             # point at which anyone actually knows the answer.
-            guess = kb.suggest_tags(tenant, body)
+            guess = kb.suggest_tags(tenant, body,
+                                    entity_key=cand.get("entity_key", ""))
             tags = guess["tags"]
             if not tags:
                 untaggable.append({"text": body[:160], "url": url})
