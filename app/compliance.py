@@ -100,6 +100,43 @@ def is_dead_page(html: str, text: str | None = None,
     return ""
 
 
+# Tags that end a thought. A table cell, a list item and a heading are separate
+# statements however the markup runs them together, and collapsing every tag to
+# a space is what let a spec value, an FAQ question and two carousel prices
+# become one "sentence" that happened to contain a number.
+_BLOCK = re.compile(
+    r"</?(?:p|div|li|ul|ol|dl|dt|dd|tr|td|th|table|thead|tbody|section|article"
+    r"|h[1-6]|br|hr|blockquote|figcaption|figure|summary|details|label|option"
+    r"|main|address|pre|fieldset|legend)\b[^>]*>", re.I)
+
+
+def text_blocks(html_text: str) -> list[str]:
+    """The page's prose, one string per block-level element.
+
+    The unit matters. Harvest reads sentences, and a sentence can only be
+    trusted if it came from one block: markup is what separates
+    `<td>32 CM</td>` from `<h3>Is it dishwasher safe?</h3>`, and once both are
+    joined by a space no amount of sentence-splitting can tell them apart —
+    `"32 CM (32 CM) Is it dishwasher safe?"` was a real proposal.
+    """
+    import html as _htmllib
+
+    raw = html_text or ""
+    raw = _TAG.sub(" ", raw)
+    body = _MAIN.search(raw)
+    if body:
+        raw = body.group(1)
+    raw = _FURNITURE.sub("\n", raw)
+    raw = _BLOCK.sub("\n", raw)          # boundary, not a space
+    raw = _HTML.sub(" ", raw)            # inline tags collapse, as before
+    out = []
+    for line in _htmllib.unescape(raw).split("\n"):
+        line = " ".join(line.split())
+        if line:
+            out.append(line)
+    return out
+
+
 def _clean(html_text: str) -> str:
     """Readable prose from a page: the body, without the furniture, unescaped.
 
@@ -117,16 +154,12 @@ def _clean(html_text: str) -> str:
 
     Unescape happens AFTER tags are stripped. The other order turns an escaped
     `&lt;script&gt;` in the copy into something that looks like markup.
-    """
-    import html as _htmllib
 
-    raw = html_text or ""
-    raw = _TAG.sub(" ", raw)
-    body = _MAIN.search(raw)
-    if body:
-        raw = body.group(1)          # the markup told us where the content is
-    raw = _FURNITURE.sub(" ", raw)
-    return _WS.sub(" ", _htmllib.unescape(_HTML.sub(" ", raw))).strip()
+    Flat, single-line: this is what the compliance matcher reads, and it only
+    ever asks whether a banned phrase appears. Harvest wants the block
+    structure and calls `text_blocks` instead.
+    """
+    return " ".join(text_blocks(html_text))
 
 
 def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:

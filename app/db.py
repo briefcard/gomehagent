@@ -532,6 +532,12 @@ class KbClaim(_Provenance, Base):
     proof_type = Column(String)                 # data | case_study | certification | testimonial | spec
     source = Column(Text)                       # where it came from — required for spec claims
     situations = Column(JSON, default=list)     # tags the assembler matches on
+    # Which entity this is true OF. Blank = true of the brand, usable anywhere.
+    # A product FAQ answer, a dimension, a line of product copy — all real, all
+    # only sayable in content that references that product. Without this column
+    # the choice was to flatten them into brand claims (which produced
+    # "Dedicated to cultural innovators … O 13 cm, H 5.5 cm") or discard them.
+    entity_key = Column(String, default="", index=True)
     strength = Column(String, default="strong") # strong | supporting — caps how many per asset
     verified_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))  # stale claims stop being selectable
@@ -570,6 +576,10 @@ class KbObjection(_Provenance, Base):
     response = Column(Text, nullable=False)
     claim_id = Column(String)                   # optional proof to pair with it
     audience_key = Column(String)               # blank = applies to everyone
+    # Blank = applies to the brand. Set = only when writing about that entity.
+    # A product FAQ is exactly an objection with its approved answer, which is
+    # why this is the one place objections can be derived rather than authored.
+    entity_key = Column(String, default="", index=True)
     escalate = Column(String, default="no")     # yes -> hand to a human, don't answer
     source = Column(Text)                       # where this objection came from
 

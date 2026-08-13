@@ -26,6 +26,7 @@ the brand asserts about itself.
 """
 from __future__ import annotations
 
+import html as html_lib
 import json
 import re
 
@@ -61,13 +62,62 @@ _HAS_NUMBER = re.compile(r"\d")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 # A real sentence has a verb-ish word in it. Headings and menu runs do not.
+#
+# The irregular list is not padding. `\w+ed` covers "raised", "doubled",
+# "recovered" — but the strongest claims a business makes open on an irregular
+# past tense, and without these "Took a regional produce brand from $300k to
+# $1M/year" (a real seeded agency claim) was dropped as a fragment.
 _VERBISH = re.compile(
-    r"\b(is|are|was|were|has|have|had|can|will|do|does|did|"
-    r"\w+(?:s|ed|es))\b", re.I)
+    r"\b(is|are|was|were|be|been|has|have|had|can|will|do|does|did"
+    r"|took|take|built|build|ran|run|led|lead|grew|grow|sold|sell|made|make"
+    r"|won|win|brought|bring|drove|drive|cut|kept|keep|held|hold|spent|spend"
+    r"|got|went|began|broke|chose|drew|found|gave|left|lost|met|paid|put"
+    r"|saw|sent|set|taught|told|wrote|knew|thought|rose|stands|serves"
+    r"|\w+(?:s|ed|es))\b", re.I)
+
+
+# A measurement, in any of the forms a spec table uses.
+#
+# No bare `m` or `l`, and never after a currency symbol: "$6M to $20M in 18
+# months" read as two metre measurements and got a real revenue claim dropped
+# as a spec table. Millions look exactly like metres, so the unit list has to
+# be the ones a spec sheet actually uses.
+_MEASURE = re.compile(
+    r"(?<![$£€\d])\d+[\d.,]*\s*(?:cm|mm|ml|cl|kg|oz|lb|inch(?:es)?|in|g)\b",
+    re.I)
+# Spec-sheet vocabulary. These are field LABELS, not things a brand asserts.
+_SPEC_LABEL = re.compile(
+    r"\b(dimensions?|material|collection|care (?:&|and) use|specifications?"
+    r"|frequently asked|weight|capacity|colou?r|finish|sku|ref\.?|model"
+    r"|hand wash|dishwasher safe|microwave safe|indoor only|made of"
+    r"|designed in|h\s*\d|w\s*\d|d\s*\d)\b", re.I)
 
 
 def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE.split(text or "") if s.strip()]
+
+
+def _is_spec_run(s: str) -> bool:
+    """A run of specification data rather than a sentence.
+
+    Real examples that reached the queue, all of them one block in the markup
+    and none of them a claim:
+
+        "Ø 25 cm, h 14 cm Specifications Material Polyresin Dimensions
+         Ø 25 cm; H 14 cm Collection Joke Care & use Hand wash recommended"
+        "32 CM (32 CM) Is it dishwasher safe?"
+        "Dedicated to cultural innovators … Ø 13 cm, H 5.5 cm"
+
+    Two or more measurements, or a measurement sitting next to spec-sheet
+    vocabulary, means this is a table someone flattened — not prose.
+    """
+    measures = len(_MEASURE.findall(s))
+    if measures >= 2:
+        return True
+    labels = len(_SPEC_LABEL.findall(s))
+    if measures and labels:
+        return True
+    return labels >= 2
 
 
 def _looks_like_heading(s: str) -> bool:
@@ -100,6 +150,15 @@ def _quality(s: str) -> str:
         return "no number, so nothing to check"
     if _looks_like_heading(s):
         return "reads as a heading, not a sentence"
+    if s.rstrip().endswith("?"):
+        return "a question — an FAQ heading, not an assertion"
+    if _is_spec_run(s):
+        return "specification data, not a claim"
+    # Catches the carousel run "Pitcher $135 Cake stand $195" as well as menu
+    # fragments. A dedicated price-list rule was tried here and removed: two
+    # currency figures in a sentence is far more often a real before-and-after
+    # claim ("$6M to $20M", "$300k to $1M") than a price list, and it was
+    # dropping the best proof the agency has.
     if not _VERBISH.search(s):
         return "no verb — a fragment or a menu run"
     letters = sum(c.isalpha() for c in s)
@@ -164,6 +223,44 @@ def _reviews_from(html: str, url: str) -> list[dict]:
     return found
 
 
+def _faqs_from(html: str, url: str) -> list[dict]:
+    """Question-and-answer pairs, from FAQPage structured data only.
+
+    This is the highest-value thing on a product page and it was being thrown
+    away twice over — first flattened into prose (`"32 CM (32 CM) Is it
+    dishwasher safe?"`), then dropped as junk.
+
+    An FAQ entry is *exactly* the shape of a `KbObjection`: a reason someone
+    hesitates, and the answer the brand has already approved. Objections are
+    zero on all five accounts and have been described throughout this codebase
+    as human-authored and underivable. That is true of brand-level objections.
+    It is not true of a product FAQ, which the brand has already written and
+    published — so this is the one place they can be derived, and the reason
+    they must carry an entity is that the answer is only correct about that
+    product.
+
+    Structured data only, exactly as reviews are read: Baci's PDP template
+    emits FAQPage JSON-LD, and guessing at accordion markup would put invented
+    pairings in front of a reviewer.
+    """
+    out = []
+    for node in _jsonld(html):
+        if str(node.get("@type", "")).lower() != "question":
+            continue
+        q = (node.get("name") or node.get("text") or "").strip()
+        ans = node.get("acceptedAnswer") or node.get("suggestedAnswer") or {}
+        if isinstance(ans, list):
+            ans = ans[0] if ans else {}
+        a = (ans.get("text") if isinstance(ans, dict) else "") or ""
+        a = re.sub(r"<[^>]+>", " ", a)
+        a = " ".join(html_lib.unescape(a).split())
+        if len(q) < 8 or len(a) < 8:
+            continue
+        out.append({"question": q[:300], "answer": a[:900],
+                    "source": f"FAQ on {url}"})
+    return out
+
+
 def _claims_from(text: str, url: str,
                  dropped: dict | None = None) -> list[dict]:
     """Sentences that assert something checkable — i.e. that carry a number."""
@@ -213,9 +310,17 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
     known = {prov.fingerprint(c.claim)
              for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
-    proposed, rejected, untaggable = [], [], []
+    proposed, rejected, untaggable, faqs = [], [], [], []
     dropped: dict[str, int] = {}          # why candidates were not proposed
     skipped: list[dict] = []              # pages not worth reading, and why
+
+    # Pages the catalogue already owns, by handle. A product page crawled off
+    # the storefront is a strictly worse copy of what the Shopify API serves
+    # properly — the same prose, plus the spec table, the FAQ accordion and the
+    # related-items carousel, with no structure to tell them apart. That is
+    # where every incoherent proposal came from, and it is redundant besides:
+    # `catalog_sync` already imported the description, the price and the stock.
+    owned = {e.key for e in kb.entities(tenant, available_only=False)}
 
     # --- pass 1: read the pages, keep candidates, write nothing -----------
     # Two passes because boilerplate can only be recognised by looking across
@@ -228,6 +333,12 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
         if compliance.skip_url(url):
             skipped.append({"url": url, "why": "not brand copy"})
             continue
+        # A product page is not skipped and not flattened. What it holds is
+        # true OF that product, so it is harvested against the entity the
+        # catalogue already knows — which is what makes the FAQ and the copy
+        # usable instead of nonsense.
+        handle = url.rstrip("/").rsplit("/", 1)[-1].lower()
+        entity = handle if ("/products/" in url.lower() and handle in owned) else ""
         html = p.get("html", "")
         if not html:
             try:
@@ -240,7 +351,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
             except Exception as exc:  # noqa: BLE001
                 skipped.append({"url": url, "why": exc.__class__.__name__})
                 continue
-        text = compliance._clean(html)
+        # One string per block, never one string for the page. Sentences are
+        # only split WITHIN a block, so a spec cell and the FAQ heading beside
+        # it can never become one candidate.
+        blocks = compliance.text_blocks(html)
+        text = " ".join(blocks)
         # Reviews are read BEFORE the page is judged. A product page carries
         # its testimonials in JSON-LD and often has almost no prose — judging
         # it on prose length would throw away the strongest source there is.
@@ -253,7 +368,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
         if dead:
             skipped.append({"url": url, "why": dead})
             continue
-        per_page.append((url, reviews + _claims_from(text, url, dropped)))
+        cands = [{**r, "entity_key": entity} for r in reviews]
+        for block in blocks:
+            cands += [{**c, "entity_key": entity}
+                      for c in _claims_from(block, url, dropped)]
+        per_page.append((url, cands))
+        for f in _faqs_from(html, url):
+            faqs.append({**f, "entity_key": entity, "url": url})
 
     # --- how often does each candidate appear across the site? ------------
     seen_on: dict[str, int] = {}
@@ -305,10 +426,24 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
                 kb.add_claim(tenant, body, cand["evidence"], tags,
                              proof_type=cand["proof_type"],
                              source=cand["source"], status="pending",
-                             origin="crawl")
+                             origin="crawl",
+                             entity_key=cand.get("entity_key", ""))
+
+    filed_faqs = 0
+    if apply:
+        for f in faqs:
+            msg = kb.add_objection(tenant, f["question"], f["answer"],
+                                   origin="crawl", source=f["source"],
+                                   entity_key=f["entity_key"])
+            if msg.startswith("Added"):
+                filed_faqs += 1
 
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
+        "faqs_found": len(faqs),
+        "faqs_filed_as_objections": filed_faqs,
+        "faqs": [{"q": f["question"][:90], "entity": f["entity_key"] or "(brand)"}
+                 for f in faqs[:12]],
         "page_source": source,
         "pages_enumerated": len(pages),
         "pages_read": len(per_page),

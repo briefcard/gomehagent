@@ -80,8 +80,14 @@ def banned_claims(tenant: str) -> list[str]:
 
 
 def claims(tenant: str, situations: list[str] | None = None,
-           limit: int = 0) -> list[db.KbClaim]:
+           limit: int = 0, entity_key: str | None = None) -> list[db.KbClaim]:
     """Active, unexpired claims, ranked by how well they fit the situation.
+
+    Scoped by entity, and the default is the safe one. With no `entity_key`
+    you get only what is true of the BRAND — a fact that is only true of one
+    product ("generous 32 cm footprint") must not turn up in a newsletter about
+    something else. Name an entity and you get the brand's claims plus that
+    entity's, which is what writing about a product actually needs.
 
     Ranking is SPECIFICITY first, strength second. Sorting on strength alone
     ties every "strong" claim and breaks on insertion order — which had a
@@ -94,11 +100,16 @@ def claims(tenant: str, situations: list[str] | None = None,
     with db.SessionLocal() as s:
         # Approved AND lifecycle-active. `review` is the approval axis and
         # `status` is the lifecycle one; a row needs both to be selectable.
-        rows = s.query(db.KbClaim).filter(
+        q = s.query(db.KbClaim).filter(
             db.KbClaim.tenant == tenant,
             db.KbClaim.review == prov.APPROVED,
             db.KbClaim.status == "active",
-        ).all()
+        )
+        if entity_key:
+            q = q.filter(db.KbClaim.entity_key.in_(["", None, entity_key]))
+        else:
+            q = q.filter(db.KbClaim.entity_key.in_(["", None]))
+        rows = q.all()
         scored = []
         for r in rows:
             if r.expires_at and db.as_utc(r.expires_at) < now:
@@ -167,8 +178,13 @@ def audience(tenant: str, key: str) -> db.KbAudience | None:
 
 
 def objections(tenant: str, audience_key: str = "",
-               include_proposed: bool = False) -> list[db.KbObjection]:
+               include_proposed: bool = False,
+               entity_key: str | None = None) -> list[db.KbObjection]:
     """Approved objections for a tenant; narrowed to a segment when one is given.
+
+    Entity scope works exactly as it does for claims, and matters more here:
+    "Is it dishwasher safe? Yes, every piece" is a true and useful answer about
+    one product and a nonsense answer about a pouf.
 
     No audience_key means "everything" — not "only the universal ones". The
     latter silently undercounts, which made completeness() report 5 of 6.
@@ -177,6 +193,10 @@ def objections(tenant: str, audience_key: str = "",
         q = s.query(db.KbObjection).filter(db.KbObjection.tenant == tenant)
         if not include_proposed:
             q = q.filter(db.KbObjection.review == prov.APPROVED)
+        if entity_key:
+            q = q.filter(db.KbObjection.entity_key.in_(["", None, entity_key]))
+        else:
+            q = q.filter(db.KbObjection.entity_key.in_(["", None]))
         rows = q.all()
         if audience_key:
             rows = [r for r in rows
@@ -719,7 +739,7 @@ def add_banned(tenant: str, phrase: str) -> str:
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
               strength: str = "strong", status: str = "active",
-              origin: str = "human") -> str:
+              origin: str = "human", entity_key: str = "") -> str:
     """Add a claim, or record that another source corroborates one on file.
 
     `status="pending"` is kept as the way callers ask for a proposal, and is
@@ -743,7 +763,10 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     if not tags and review == prov.APPROVED:
         return "Needs at least one situation tag, or it can never be selected."
 
-    fp = prov.fingerprint(claim)
+    # The entity is part of the identity: the same sentence about two products
+    # is two facts, and collapsing them would attach one product's copy to
+    # another.
+    fp = prov.fingerprint(claim, entity_key)
     with db.SessionLocal() as s:
         # The same fact arriving from a second source is corroboration, not a
         # second claim. Before this, a re-run of the seed or the harvester
@@ -767,6 +790,7 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                          proof_type=proof_type, source=source or "captured",
                          situations=tags, strength=strength, status=status,
                          review=review, origin=origin, fingerprint=fp,
+                         entity_key=entity_key,
                          approved_by="seed" if origin == "seed" else "",
                          approved_at=db.utcnow() if review == prov.APPROVED else None,
                          also_seen=[{"origin": origin, "ref": source or "",
@@ -1034,12 +1058,12 @@ def add_audience(tenant: str, key: str, name: str, pains: list[str],
 def add_objection(tenant: str, objection: str, response: str,
                   audience_key: str = "", escalate: str = "no",
                   origin: str = "human", source: str = "",
-                  review: str = "") -> str:
+                  review: str = "", entity_key: str = "") -> str:
     if not objection or not response:
         return "An objection needs both the objection and the approved answer."
     review = review or (prov.APPROVED if prov.lands_approved(origin)
                         else prov.PROPOSED)
-    fp = prov.fingerprint(objection)
+    fp = prov.fingerprint(objection, entity_key)
     with db.SessionLocal() as s:
         # This table inserted unconditionally, so every re-seed duplicated the
         # whole set. Same objection, same answer -> one row.
@@ -1063,6 +1087,7 @@ def add_objection(tenant: str, objection: str, response: str,
                              response=response, audience_key=audience_key,
                              escalate=escalate, origin=origin, review=review,
                              source=source, fingerprint=fp,
+                             entity_key=entity_key,
                              approved_by="seed" if origin == "seed" else "",
                              approved_at=db.utcnow() if review == prov.APPROVED else None))
         s.commit()
