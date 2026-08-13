@@ -20,6 +20,32 @@ from __future__ import annotations
 from . import db, kb
 
 
+class _Seeded:
+    """`kb`, with every write attributed to the seed.
+
+    Seeded rows are established facts and land approved — but they carry an
+    origin like anything else, so that a later crawl or upload disagreeing with
+    one raises a conflict instead of quietly replacing it. A proxy rather than
+    fifteen edited call sites, so a new seed entry cannot forget.
+    """
+
+    _ORIGINED = ("add_claim", "add_audience", "add_objection", "add_entity",
+                 "add_situation")
+
+    def __getattr__(self, name):
+        fn = getattr(kb, name)
+        if name not in self._ORIGINED:
+            return fn
+
+        def _call(*args, **kw):
+            kw.setdefault("origin", "seed")
+            return fn(*args, **kw)
+        return _call
+
+
+_kb = _Seeded()
+
+
 def _claim(tenant: str, *args, **kw) -> None:
     """Add a claim, skipping one that already exists, and refuse to continue
     if a new one did not land.
@@ -43,7 +69,7 @@ def _claim(tenant: str, *args, **kw) -> None:
            for c in kb.claims(tenant)):
         return  # already present — re-running the seed must be a no-op
     before = len(kb.claims(tenant))
-    msg = kb.add_claim(tenant, *args, **kw)
+    msg = _kb.add_claim(tenant, *args, **kw)
     if len(kb.claims(tenant)) == before:
         raise SystemExit(f"seed: claim REJECTED for {tenant} — {msg}")
 
@@ -89,7 +115,7 @@ def seed_baci() -> None:
                            ["chip"], ["how well"]],
          "wants reassurance the piece is worth the price"),
     ]:
-        kb.add_situation("baci", tag, pats, desc, kind="who_they_are")
+        _kb.add_situation("baci", tag, pats, desc, kind="who_they_are")
 
     # Hard compliance boundary. Every phrase below is a real, established rule
     # with a documented reason — origin and production-method claims are an
@@ -112,7 +138,7 @@ def seed_baci() -> None:
 
     # Buyer segments — from six months of Meta delivery and Shopify sales,
     # not from a persona workshop.
-    kb.add_audience(
+    _kb.add_audience(
         "baci", "core_hostess", "Women 35–44 — the core buyer",
         ["generic tableware that says nothing about her",
          "wants a gift that feels chosen, not bought",
@@ -120,14 +146,14 @@ def seed_baci() -> None:
         ["set", "sign", "gift", "hosting", "table", "colour"],
         buying_trigger="A birthday, a housewarming, or her own table feeling tired",
         decision_timeline="days")
-    kb.add_audience(
+    _kb.add_audience(
         "baci", "established_host", "Women 45–54 — efficient and under-funded",
         ["already owns plenty; needs a reason for another set",
          "quality anxiety when buying colourful pieces"],
         ["quality", "dishwasher", "everyday", "collection"],
         buying_trigger="Replacing a broken piece, or a milestone gift",
         decision_timeline="days")
-    kb.add_audience(
+    _kb.add_audience(
         "baci", "price_led", "Women 25–34 — volume, price-sensitive",
         ["wants the look at a reachable price", "buys into a bundle over a single piece"],
         ["deal", "bundle", "starter", "affordable"],
@@ -156,7 +182,7 @@ def seed_baci() -> None:
         proof_type="data",
         source="Shopify sell-through + Meta delivery, Jul 2026")
 
-    kb.add_entity("baci", "product", "zodiac-vibe-cup", "Zodiac Vibe cup",
+    _kb.add_entity("baci", "product", "zodiac-vibe-cup", "Zodiac Vibe cup",
                   description="Sold per zodiac sign. The hero SKU of the catalogue.",
                   price="$65", source="Shopify catalogue, verified Jul 2026")
 
@@ -235,7 +261,7 @@ def seed_ironside() -> None:
                            ["available on"]],
          "a date is set and the venue is the last unbooked piece"),
     ]:
-        kb.add_situation("ironside", tag, pats, desc, kind="problem")
+        _kb.add_situation("ironside", tag, pats, desc, kind="problem")
 
     # The system must keep refusing to quote until a rate card exists. These
     # phrases are how an invented quote would actually surface in a draft.
@@ -249,11 +275,11 @@ def seed_ironside() -> None:
             attrs["standing_capacity"] = standing
         if seated:
             attrs["seated_capacity"] = seated
-        kb.add_entity("ironside", "space", key, name, description=desc,
+        _kb.add_entity("ironside", "space", key, name, description=desc,
                       attributes=attrs,
                       source="Live venue pages, read 2026-06-18 (team corrections applied)")
 
-    kb.add_audience(
+    _kb.add_audience(
         "ironside", "corporate_planner", "Corporate event planner or agency producer",
         ["needs a room that fits an exact headcount",
          "load-in, power and AV decide the venue before aesthetics",
@@ -296,7 +322,7 @@ def seed_eien() -> None:
                                  ["contains"], ["allergen"]],
          "wants a factual answer about what is in it"),
     ]:
-        kb.add_situation("eien", tag, pats, desc, kind="problem")
+        _kb.add_situation("eien", tag, pats, desc, kind="problem")
     for phrase in [
         # disease claims — the line between a supplement and an unapproved drug
         "cure", "cures", "treat", "treats", "prevent", "prevents",
@@ -337,8 +363,8 @@ def seed_coverings() -> None:
                              ["square feet"], ["sq ft"]],
          "a dimension decides whether it works — a wrong number loses the job"),
     ]:
-        kb.add_situation("coverings", tag, pats, desc, kind="problem")
-    kb.add_audience(
+        _kb.add_situation("coverings", tag, pats, desc, kind="problem")
+    _kb.add_audience(
         "coverings", "specifier", "Architect, designer or specifier",
         ["a wrong dimension loses the job",
          "samples that go nowhere",

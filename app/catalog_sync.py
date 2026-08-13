@@ -24,7 +24,7 @@ The real fix is the product page, and this is what tells you which ones.
 """
 from __future__ import annotations
 
-from . import db, kb, tenants
+from . import db, kb, provenance as prov, tenants
 
 # Attribute keys the sync owns. Anything else on an entity was authored by a
 # human and is never touched.
@@ -100,6 +100,7 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     added = updated = skipped = 0
     violations: list[dict] = []
     oos: list[str] = []
+    held: list[dict] = []      # fields the store wanted to change and could not
 
     with db.SessionLocal() as s:
         existing = {e.key: e for e in s.query(db.KbEntity).filter(
@@ -116,7 +117,6 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                                    "url": f"https://{t.domain}/products/{key}"})
 
             row = existing.get(key)
-            human = bool(row and (row.source or "") not in ("shopify", ""))
             if dry_run:
                 if row:
                     updated += 1
@@ -126,27 +126,47 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                     oos.append(p.get("title", key))
                 continue
 
+            ref = f"https://{t.domain}/products/{key}"
             if not row:
-                row = db.KbEntity(tenant=tenant, key=key, type="product")
+                # The store is the system of record for what exists, so a new
+                # product lands usable rather than queued — 250 products in a
+                # review queue is a review queue nobody opens. What the store
+                # does NOT get is the right to change copy a human has since
+                # approved; that is `may_write`'s job on the next pass.
+                row = db.KbEntity(
+                    tenant=tenant, key=key, type="product",
+                    name=p.get("title") or key,   # NOT NULL, and flush is next
+                    origin="store_sync", review=prov.APPROVED,
+                    approved_by="store_sync", approved_at=db.utcnow(),
+                    fingerprint=prov.fingerprint(key), source="shopify")
                 s.add(row)
+                s.flush()          # needs an id before a conflict can name it
                 added += 1
             else:
                 updated += 1
 
-            # The store owns price and stock, always — that is the whole point
-            # of syncing rather than typing. It owns the prose only when it
-            # wrote it: a description someone edited through intake is human
-            # work and a sync must not silently overwrite it.
-            row.name = p.get("title") or row.name or key
-            row.price = _price(p) or row.price
-            row.availability = _available(p)
+            # Copy carrying a banned phrase is never imported. It exists on the
+            # storefront; that does not make it sayable.
+            desc = ("" if hits else
+                    _text(p).replace(p.get("title", ""), "").strip()[:600])
+
+            # One shared precedence rule instead of this file's own. The store
+            # owns price and availability outright, forever. Everything else it
+            # may refresh only while the row is still store-owned — the moment
+            # a human edits or approves the prose, a disagreeing sync records a
+            # conflict and changes nothing.
+            res = prov.apply_fields(
+                row, {"name": p.get("title") or key, "price": _price(p),
+                      "description": desc},
+                "store_sync", ref, table="kb_entities", tenant=tenant)
+            for field in res["conflicts"]:
+                held.append({"product": p.get("title", ""), "handle": key,
+                             "field": field, "url": ref})
+
+            row.availability = _available(p)   # owned outright — never blocked
             if row.availability == "oos":
                 oos.append(row.name)
-            if not human:
-                # Copy carrying a banned phrase is not imported as description.
-                # It exists on the storefront; that does not make it sayable.
-                row.description = ("" if hits else
-                                   _text(p).replace(p.get("title", ""), "").strip()[:600])
+
             attrs = dict(row.attributes or {})
             attrs.update({
                 "vendor": p.get("vendor", ""),
@@ -159,7 +179,6 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
             else:
                 attrs.pop("_compliance", None)
             row.attributes = attrs
-            row.source = row.source if human else "shopify"
             row.verified_at = db.utcnow()
             row.freshness_days = row.freshness_days or "7"
         if not dry_run:
@@ -172,8 +191,13 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
         "out_of_stock": len(oos),
         "out_of_stock_examples": oos[:8],
         "compliance_violations": violations,
+        "held_back": held,
+        "held_back_count": len(held),
         "note": ("Products whose storefront copy uses a banned phrase are listed "
                  "under compliance_violations. They are still catalogued and "
                  "sellable — their copy is not imported, so nothing downstream "
-                 "can quote it. Fix the product page to clear the flag."),
+                 "can quote it. Fix the product page to clear the flag. "
+                 "`held_back` is the other direction: fields the store wanted to "
+                 "change on a row a human has approved. Those were not written — "
+                 "each is a conflict on the Knowledge tab, to keep or discard."),
     }

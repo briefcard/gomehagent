@@ -1074,6 +1074,81 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
                      'own site and files what it finds here — as proposals, never '
                      'as facts.</p>')
 
+    # --- disagreements between sources -------------------------------------
+    # A conflict nobody can see is worse than the silent overwrite it replaced:
+    # the data is right and the work is invisible. This is that surface.
+    from . import provenance as prov
+    open_conflicts = prov.conflicts(tenant)
+    if open_conflicts:
+        def _conflict(c) -> str:
+            where = f"{c.table_name.replace('kb_', '').rstrip('s')} · {_esc(c.field)}"
+            times = (f' <span class="chip off">seen {c.hits}×</span>'
+                     if int(c.hits or "1") > 1 else "")
+            return f"""
+            <form class="f" method="post" action="/admin/conflict_resolve">
+              <input type="hidden" name="conflict_id" value="{_esc(c.id)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <div class="when">{where}{times}</div>
+              <label>Approved — what is in use now</label>
+              <div class="msg">{_esc((c.approved_value or '')[:400])}</div>
+              <label>{_esc(c.origin or 'another source')} says</label>
+              <div class="msg esc">{_esc((c.incoming_value or '')[:400])}</div>
+              <div class="when">{_esc(c.source_ref or '')}</div>
+              <div class="row">
+                <button class="sec" name="keep" value="approved">Keep ours</button>
+                <button name="keep" value="incoming">Take theirs</button>
+              </div>
+            </form>"""
+        conflicts_html = ('<div class="grid" style="grid-template-columns:1fr">'
+                          + "".join(_conflict(c) for c in open_conflicts[:20])
+                          + "</div>")
+    else:
+        conflicts_html = ('<p class="mut">Nothing in dispute. When a crawl, an '
+                          'upload or the store disagrees with something already '
+                          'approved, the approved value stays and the '
+                          'disagreement appears here.</p>')
+
+    # --- proposals from the other four tables ------------------------------
+    # Claims had a review queue; audiences, objections, entities and situations
+    # went live on write, so a client could redefine a buyer segment through an
+    # intake link and nobody would ever see it happen.
+    other = {k: v for k, v in kbm.proposals(tenant).items() if k != "claim"}
+    if other:
+        def _prop(kind: str, item: dict) -> str:
+            r = item["row"]
+            label = (getattr(r, "name", "") or getattr(r, "objection", "")
+                     or getattr(r, "tag", "") or r.id)
+            detail = (getattr(r, "response", "") or getattr(r, "description", "")
+                      or getattr(r, "price", "") or "")
+            dupes = "".join(
+                f'<div class="when">looks like: '
+                f'{_esc((getattr(d, "name", "") or getattr(d, "objection", "") or "")[:90])}'
+                f'</div>' for d in item["near_duplicates"][:3])
+            return f"""
+            <form class="f" method="post" action="/admin/proposal_review">
+              <input type="hidden" name="kind" value="{_esc(kind)}">
+              <input type="hidden" name="row_id" value="{_esc(r.id)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <div class="when">{_esc(kind)} · from {_esc(r.origin or 'unknown')}
+                {_esc(r.source or '')}</div>
+              <div class="msg">{_esc(str(label)[:200])}</div>
+              {f'<div class="when">{_esc(str(detail)[:240])}</div>' if detail else ''}
+              {dupes}
+              <div class="row">
+                <button name="action" value="approve">Approve</button>
+                <button class="sec" name="action" value="reject">Reject</button>
+              </div>
+            </form>"""
+        n_other = sum(len(v) for v in other.values())
+        others_html = ('<div class="grid" style="grid-template-columns:1fr">'
+                       + "".join(_prop(k, i) for k, items in other.items()
+                                 for i in items) + "</div>")
+    else:
+        n_other, others_html = 0, (
+            '<p class="mut">Nothing waiting. Audiences, objections, entities and '
+            'situations submitted by a client or read from a spreadsheet land '
+            'here first — they are not usable until approved.</p>')
+
     # --- compliance --------------------------------------------------------
     scan = compliance.last_scan(tenant)
     if not scan:
@@ -1151,6 +1226,24 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
   {proposals}
   <div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}
     <span class="mut">reads the site and files what it finds</span></div>
+</div>
+
+<div class="card">
+  <div class="head"><h2>Everything else awaiting you</h2>
+    <span class="chip {'off' if n_other else 'on'}">{n_other} pending</span></div>
+  <p class="mut">Buyer segments, objections, catalogue rows and situation tags
+  proposed by a client, a spreadsheet or a crawl. Approving one makes it final —
+  no machine source can change it afterwards.</p>
+  {others_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Sources disagree</h2>
+    <span class="chip {'off' if open_conflicts else 'on'}">{len(open_conflicts)} open</span></div>
+  <p class="mut">Something approved was contradicted by a later crawl, upload or
+  store sync. The approved value is still what gets used — nothing was
+  overwritten. Pick one and the disagreement closes.</p>
+  {conflicts_html}
 </div>
 
 <div class="card">

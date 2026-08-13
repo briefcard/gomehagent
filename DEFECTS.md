@@ -226,152 +226,156 @@ does. Verified in `test_tenant_scope.py`.
 
 ## 3. Still broken — in priority order
 
-**Recommendation 2 — the readiness bar is a floor, not a standard.** *Not built.*
-`completeness()` passes on one or more of each. Ironside reports **ready** on one
-claim and one objection; one objection cannot cover what a planner asks. Worse,
-a hollow brief still passes: an enquiry that produces no situations, no matched
-entity and no offer returns `blocked=False` and would be handed to a generator.
+Updated 2026-08-12. Everything here is measured, not assumed.
 
-**Recommendation 3 — half wired (2026-08-12).** `worker.systems_tick` now calls
-`start_run`/`finish_run` daily, so the Systems tab shows real runs and
-`blocked_reasons()` ranks the KB backlog by what actually costs an output. It
-sends nothing: a system that is not live is skipped, and one on the `shadow`
-rung records and stops.
+### Blocks producing anything a client sees
 
-Still unwired: **`feedback_block` has no caller.** Guidance written into a
-system thread is stored and never reaches a drafting prompt — it will, when the
-generator lands, which is the same slice.
+**Nothing generates.** No generator, no validator, no send. `systems_tick`
+evaluates readiness daily and records "no generator yet" on every ready system.
+This is the whole of recommendation 4 and the only thing between the platform
+and an output. `feedback_block` also still has no caller — guidance written into
+a system thread is stored and never reaches a drafting prompt. Same slice.
 
-**Recommendation 4 — nothing generates.** *Not built.* No generator, no
-validator, no send.
+**Objections are 0 on all five accounts.** Human-authored, cannot be derived
+from a website, and half of what any real reply needs. `/next` is the only path.
+Baci also has no `voice.tone`, which is the single highest-leverage answer for
+"does this draft sound like us".
 
-**Nine lookups still find a row by its old global key.** `Shipment.name` and
-`RFQ.shipment_name` are queried without a tenant in `command_agent.py:421,856`,
-`data_tools.py:488,505`, `ops_jobs.py:841-842` and `skills.py:148`. Correct
-*today* — only one client has logistics rows, so `.first()` can only return the
-right one — and a silent cross-client bug the moment a second client gets a
-shipment. Fix these when logistics becomes multi-client, not before; they are
-listed here so the trigger is written down rather than remembered.
+### Known bugs, small
 
-**~~The Postgres constraint regrade has not run against the live database.~~
-Verified 2026-08-12.** `/admin/schema_check` on the deployed service reports
-`ok: true` — all three regrades landed (`uq_contact_tenant_email`,
-`uq_shipment_tenant_name`, `uq_rfq_tenant_shipment` present; the old global
-uniques gone) and every scoped table has its tenant column. That route is the
-permanent answer to "did the migration land", since no local test can exercise
-the Postgres-only path.
+**`seed_agency` creates no `KbSituation` rows.** The four client seeds each loop
+`kb.add_situation`; the agency seed does not. So `situations("agency")` reports
+29 tags from the fallback constant `kb.SITUATIONS` — a bare set with **no
+patterns** — and `situation_patterns("agency")` returns `{}`. Nothing can ever
+pattern-match for the agency; only the learned tagger works there. ~15 lines in
+`kb.py::seed_agency`, but note it is idempotent on the brand row, so situations
+need seeding separately or the guard relaxing.
 
-**Approval now has `tenant`, `system_id` and `run_id`** — added while the table
-was still empty. Nothing writes them yet; `approvals.py`, `worker.py` and
-`kernel.py` remain tenant-blind at the call sites.
+**Harvest and compliance read page furniture.** `_clean` strips tags but keeps
+nav, header and footer text, so candidates come back as
+`"Book a 25-min intro Start the intake ↓ Agentic Core SEO Fig."` and the
+compliance matcher can flag a banned word in a menu link. Prefer
+`<main>`/`<article>` and drop `<nav>`, `<header>`, `<footer>`, `<aside>` before
+splitting sentences. Fixes proposal quality on every site at once.
 
-**Idempotency on publish.** A worker restarting mid-publish double-sends.
-Must land before anything sends for real.
+### Client-side blockers (not our code)
 
-**No edit or delete on KB rows.** `retire_claim` / `review_claim` now exist for
-claims, but audiences, objections and entities remain add-only — a wrong row is
-permanent without direct database access.
+**coveringsetc.com serves an incomplete TLS chain.** Only the leaf certificate,
+no intermediate — `openssl` reports `Verify return code: 21`. `curl` tolerates it
+via the system store; `certifi` does not, and neither will strict clients,
+older Android, or server-to-server integrations. Blocks all crawling of that
+account and is worth fixing regardless of us.
 
-**Objections are zero on three accounts** (baci, coverings, eien). Human-authored,
-cannot be scraped, and half the paid intake.
+**marketingthatworks.co has WordPress sitemaps switched off** —
+`/sitemap.xml` 301s to `/wp-sitemap.xml`, which 404s. Worked around: discovery
+falls through to the wp-json API. A sitemap would still be better for SEO.
 
-**Eien's banned claims are my conservative defaults, not Gomeh's.** A supplement
-brand with a GLP-1 product. Needs review.
+**Coverings has no `banned_claims`**, so compliance correctly refuses to scan
+it. That is the one input a crawler can never derive — a site records what a
+brand *does* say; the ban list is what it must *not*. Baci's own site says
+"handmade in Italy", which is exactly why deriving rules from a site is wrong.
 
-**~~Free text falls through to an unscoped agent.~~ Half fixed 2026-08-12.**
-`kernel.run` now takes a tenant: the thread is qualified by it, memory and
-lessons are filtered to it, and `tenants.agent_block()` injects the account's
-identity, connections and banned claims. With no account selected the agent
-refuses rather than assuming. Enforced by `scripts/test_tenant_isolation.py`.
+### ~~The three ingest sources each had their own rules~~ Fixed 2026-08-12
 
-**Tools are gated too (2026-08-12).** Seven of the eleven shared tools took the
-account as a MODEL-SUPPLIED argument (`store`, `account`), so which client the
-agent addressed was a suggestion rather than a boundary. Now, while an account
-is active: the parameter is stripped from the schema the model sees, the
-resolved value is injected at dispatch, a tool naming a *different* account is
-refused by name, and a tool whose connection is not wired is not offered at all.
-The last one also cuts context — a venue is sent 4 schemas instead of 11.
+The onboarding data layer had no shared answer to "where did this row come from
+and who may change it", so each source invented one. All five were measured on
+the write layer before anything was changed, not inferred from reading it:
 
-**Gating one pack was not a boundary (2026-08-12).** The first pass covered the
-11 shared tools. An audit of the roles found **32 more taking an account** — 12
-in admin, 27 in seo, including `queue_email_draft` (drafts mail *as* an account),
-`calendar_create_event`, `save_file_to_drive`, and four `propose_*` tools that
-publish to a live storefront. All 81 tools now pass through
-`tool_scope.guard()` in `kernel._dispatch`, before anything is routed.
+1. **Two of five KB tables had an approval state.** `kb_audiences`,
+   `kb_objections` and `kb_situations` went live the instant anything wrote to
+   them — a client could redefine a buyer segment through an intake link and it
+   was in use before anyone read it.
+2. **`add_claim` and `add_objection` inserted unconditionally.** Writing the
+   same objection twice produced two rows; only `kb_seed`'s own guard kept the
+   seed idempotent, and the harvester's guard was an exact lowercase match.
+3. **The same fact from a crawl and an upload became two unrelated rows.**
+4. **Approval left no trace** — no who, no when. "Approved is final" was a
+   convention.
+5. **`catalog_sync` decided ownership with `source not in ("shopify", "")`.**
+   Owner-approved copy on a row the store originally supplied still read
+   `source="shopify"`, so the next sync overwrote it.
 
-`tool_scope.ACCOUNT_PARAMS` is the completeness guard: a tool whose schema
-exposes `store`, `account`, `alias` or `site` and is absent from `SCOPED` fails
-the isolation test by name. Verified by removing `queue_email_draft` from the
-registry and watching it fail. That is what stops tool 82 reopening this.
+`app/provenance.py` is now the single answer. Every KB content table carries
+`origin` (the source *kind*, deliberately separate from the free-text `source`
+so precedence is never decided by string-matching prose), `review`,
+`approved_by`, `approved_at`, `fingerprint` and `also_seen`.
 
-Note the SEO resolver: a tenant with no `sites.py` profile gets **no** SEO
-tools, rather than the primary site by default — which is what the unscoped code
-did, and is how one client's content work would have been done against
-another's property.
+- **Approved is final.** No machine source may change editorial content on an
+  approved row. It records a `KbConflict` — both values kept, neither applied —
+  which is the Bio-Glass 100"×56" vs 110"×49" case given somewhere to live.
+- **Two narrow exceptions**, both in `may_write`: a store owns `price` and
+  `availability` forever, and any source may refresh a row it created that no
+  human has since touched. Without the second, a nightly sync would raise a
+  conflict on every changed product description and bury the real ones.
+- **Duplicates collapse only on an exact normalised fingerprint**; anything
+  merely similar is flagged in the queue, never merged — merging two
+  near-identical sentences invents a third that neither source said.
+- **`review` and `origin` have no column defaults, on purpose.** Auto-migration
+  applies a column default to every existing row, which would have stamped the
+  whole KB "approved / human" and left the backfill nothing to derive from.
+  A row written without a review state is invisible to selection instead.
+- **`gaps()` counts proposals; `completeness()` does not.** Different
+  questions: "has anyone told us yet" versus "may we generate from this". The
+  first version got this wrong and made the intake form re-ask a client a
+  question they had already answered.
 
-### 2.19 A joined string ranked ' ' and 'e' as the costliest gaps
-`SystemRun.blocked_on` is `Column(JSON, default=list)` and `blocked_reasons()`
-iterates it to rank the KB backlog. The first `systems_tick` passed
-`"; ".join(blockers)` instead of the list. SQLite accepted it, iterating a
-string yielded characters, and the backlog came back as
-`[(' ', 206), ('e', 195)]`.
+Verified end to end in `scripts/test_provenance.py`, on a legacy-schema
+database in `scripts/test_migration.py` (the path that runs against production:
+grandfathering, derived origins, and stability across restarts), and rendered
+in `scripts/test_kb_ui.py`.
 
-Every assertion passed — the test checked that reasons existed and were sorted,
-both true of characters. It was caught by reading the printed output, which is
-the §12 rule in the handoff working exactly as intended.
-**Fix:** pass the list. The test now asserts a reason is longer than three
-characters and reads like a missing thing, so the shape cannot regress silently.
+**Still open on this:** `kb.SITUATIONS` remains the fallback constant, and
+`seed_agency` still creates no `KbSituation` rows.
 
-### 2.20 The unattended half could send a banned claim
-`worker.py` and `triage.py` run with nobody watching and can auto-send. They
-were addressed by inbox alias and had no idea which client that was:
-`triage.py` called `data_tools.dispatch()` with **no tenant**, so triage's own
-tool loop could read another client's mail while triaging this one; its working
-memory was unscoped; and it had never been able to see `banned_claims`. Baci's
-ban on "made in Italy" was enforced nowhere in the code that actually sends.
+### Architecture debt
 
-**Fix:** `tenants.for_alias()` resolves the inbox to its client once in the
-worker and threads it through. Triage's tool loop is filtered and gated like the
-agent's, its memory is scoped, and `agent_block` supplies the account's rules.
-The post-verdict guardrails moved into `triage._apply_guards()` — testable on
-their own, reusable by the generator — and gained a **brand guard**: a draft
-containing a banned phrase can never auto-send. An `auto_reply` carrying one is
-downgraded to `escalate`, not to `draft`, because a rule violation is a signal
-the model misread the account, not a wording problem.
+**The SEO subsystem still does not read the KB.** `seo_tools`, `sites`,
+`google_seo`, `shopify_seo`, `wordpress_seo` — 1,725 lines, zero references to
+`banned_claims`, while publishing titles, descriptions and collection pages to
+live stores. The new compliance scanner *detects* the result; nothing prevents
+it. Highest-value remaining fix in the codebase.
 
-The guard is code, and the same phrase is also in the prompt via `agent_block`.
-Both, deliberately: a prompt mostly obeys, a check always blocks (decision #2).
-An inbox with no tenant is **not** brand-checked and says so rather than
-claiming a clean pass.
+**A client is defined in three places** — the `Tenant` table, `SEO_SITES_JSON`
+(via `sites.py`), and `SeoSiteConfig`. The SEO subsystem uses the second; the
+platform uses the first. Merge before onboarding client #6.
 
-**`capabilities()` did not know about client-connected credentials.** Building
-the connect page created it: a client could connect Shopify successfully and the
-account still read "not wired", so the agent was never offered its tools — the
-connection worked and nothing could use it. Found by the tool-gating test
-failing on a correctly-connected account. `capabilities()` now counts a stored
-`Credential` exactly as much as an env-group entry.
+**Console writes are GET requests.** `/admin/kb_add`, `/admin/seed_kb`,
+`/admin/tenant_scope`, `/admin/harvest` mutate on a GET, so a prefetch or link
+preview can fire them. `/admin/claim_edit` and `/connect/<token>` are POST and
+are the model to follow.
 
-**Write operations are GET requests.** `/admin/kb_add`, `/admin/seed_kb` and
-`/admin/tenant_scope` all mutate on a GET, so anything that causes a URL to load
-— a browser prefetch, a link preview, a scanner walking history — can fire them.
-A prefetched `/admin/tenant_scope` would run a 13,000-row backfill. Converting
-the ten console forms to POST closes it; the session cookie already means the
-credential is no longer in those URLs.
+**The console is one shared credential.** A session cookie replaced the key in
+URLs, but there is no per-user identity and no revocation — and it now guards
+client credentials, not just data.
 
-**~~The console key travels in every form URL.~~ Fixed 2026-08-12** — the key is
-accepted once (query string or `X-Admin-Key`) and exchanged for an httpOnly
-session cookie carrying an HMAC of the secret, never the secret itself, because
-`APPROVAL_SECRET` also signs approval decision links. Comparisons are constant
-time. What this is *not*: one shared credential remains, with no per-user
-identity and no revocation — real auth is still required before any client gets
-a login. See `scripts/test_console_auth.py`.
+**`Approval` has tenant / system_id / run_id and nothing writes them.**
+`approvals.py` derives the tenant from the payload; the system and run columns
+are still empty, so an approval cannot be tied back to the run that produced it.
 
-It must still not be the same credential once clients have logins.
+**Nine lookups still find a row by its old global key** —
+`command_agent.py:421,856`, `data_tools.py:488,505`, `ops_jobs.py:841-842`,
+`skills.py:148`. Correct while only one client has logistics rows; a silent
+cross-client bug the moment that changes.
 
-**`kb.SITUATIONS` is still the fallback constant.** Per-tenant vocabularies now
-exist as data, but a tenant with none silently inherits agency-B2B language.
+**`kb.SITUATIONS` is still the fallback constant**, and the agency is the
+account relying on it. See the seed bug above.
 
----
+### Not built
+
+**Spreadsheet upload** (Coverings' 26-column spec data, Ironside's rate card)
+— the third source. Now unblocked and shaped: parse to rows, call the existing
+`kb.add_*` with `origin="upload"` and `source="<file>#<row>"`, and it inherits
+dedupe, the review queue and conflict-on-disagreement for free. What it still
+needs is its own work: column mapping per client, and a preview before write.
+
+Media layer (blocks the campaign email builder), reports, Canva (OAuth),
+per-tenant prompt/model pinning, publish idempotency (a worker restarting
+mid-publish double-sends — must land before anything sends for real).
+
+### Needs owner review
+
+**Eien's `banned_claims` are conservative defaults, not established fact.** A
+supplement brand with a GLP-1 product. Read them on the Knowledge tab.
 
 ## 4. How to verify
 

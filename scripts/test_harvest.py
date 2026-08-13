@@ -152,7 +152,8 @@ def main() -> int:
        f"{len(pending)} pending")
     ck("and are NOT selectable", len(kb.claims("baci")) == before_selectable,
        "a crawl must not change what the generator may say")
-    ck("they are marked pending", all(c.status == "pending" for c in pending))
+    ck("they are marked proposed, and attributed to the crawl",
+       all(c.review == "proposed" and c.origin == "crawl" for c in pending))
     ck("approving one makes it selectable",
        "Approved" in kb.review_claim(pending[0].id, approve=True)
        and len(kb.claims("baci")) == before_selectable + 1)
@@ -245,8 +246,8 @@ def main() -> int:
     ck("they are filed untagged", rb["untagged_count"] > 0,
        str(rb["untagged_count"]))
     bare_pending = kb.pending_claims("bare")
-    ck("and land as pending, not active", bare_pending
-       and all(c.status == "pending" for c in bare_pending))
+    ck("and land as proposed, not approved", bare_pending
+       and all(c.review == "proposed" for c in bare_pending))
     ck("none of them is selectable", not kb.claims("bare"))
     ck("and none can be approved until it is tagged",
        "tag before approving" in kb.review_claim(bare_pending[0].id, approve=True))

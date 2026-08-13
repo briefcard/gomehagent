@@ -1323,6 +1323,39 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
+@app.post("/admin/proposal_review", response_class=HTMLResponse)
+async def proposal_review(request: Request, key: str = Depends(admin_key)):
+    """Approve or reject a proposed audience, objection, entity or situation.
+
+    Claims have their own route because approving one edits it first and can be
+    refused for want of a tag. Everything else is a straight yes or no, and
+    approving it is what makes it usable AND final — from that point no crawl,
+    upload or store sync may change it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse('<h3>unauthorized</h3>')
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    kbm.approve(str(form.get("kind", "")), str(form.get("row_id", "")),
+                by="owner",
+                approve_it=str(form.get("action", "")) == "approve")
+    return _back_to_content(tenant)
+
+
+@app.post("/admin/conflict_resolve", response_class=HTMLResponse)
+async def conflict_resolve(request: Request, key: str = Depends(admin_key)):
+    """Settle a disagreement between two sources about an approved value."""
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse('<h3>unauthorized</h3>')
+    from . import provenance as prov
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    prov.resolve_conflict(str(form.get("conflict_id", "")),
+                          str(form.get("keep", "approved")))
+    return _back_to_content(tenant)
+
+
 @app.post("/admin/claim_edit", response_class=HTMLResponse)
 async def claim_edit(request: Request, key: str = Depends(admin_key)):
     """Edit a proposal, then save / approve / reject it.

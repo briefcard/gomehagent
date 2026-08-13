@@ -436,7 +436,50 @@ class User(Base):
 # Consumed by the brief assembler (deterministic) and enforced by the
 # validator (also deterministic). Models are generated FROM these rows and
 # never allowed to assert anything that isn't in them.
+#
+# Every KB content table also carries the provenance columns below. Three
+# sources fill these tables — a website crawl, a spreadsheet upload, and a
+# human — and without a shared answer to "where did this come from and who may
+# change it" each one invented its own. See `provenance.py` for the rules; this
+# is the storage they need.
 # ---------------------------------------------------------------------------
+
+class _Provenance:
+    """Mixin: where a KB row came from and whether a human has signed it off.
+
+    `origin` is the source KIND and is what precedence is computed from. It is
+    deliberately separate from the free-text `source` reference, because
+    deciding who may overwrite a row by string-matching prose is precisely the
+    bug that let a store sync clobber owner-approved copy.
+
+    `review` is one axis shared by all five tables, distinct from the lifecycle
+    `status` that claims and entities also carry. A row is proposed, approved
+    or rejected; approved is final and only a human may move it.
+
+    `fingerprint` is the normalised content hash. It is what makes a second
+    harvest of the same page, or a re-uploaded spreadsheet, update one row
+    instead of adding another.
+    """
+
+    # No column default, for the same reason `review` has none: auto-migration
+    # applies a column default to every existing row, which would stamp the
+    # whole knowledge base "human" and leave `_backfill_provenance` nothing to
+    # derive from. A store-synced product reading as human-owned would then
+    # raise a conflict on every future sync instead of refreshing quietly.
+    origin = Column(String)                       # seed|crawl|upload|store_sync|client|human
+    # No default, on purpose. Every read accessor treats anything that is not
+    # exactly "approved" as not approved, so a row created without one is
+    # invisible to the pipeline rather than silently usable — the failure that
+    # matters here is a proposal reaching a draft, so this fails closed.
+    # Existing production rows come out of the migration as NULL and are
+    # grandfathered to approved exactly once, by `_backfill_provenance`.
+    review = Column(String)                       # proposed | approved | rejected
+    approved_by = Column(String, default="")
+    approved_at = Column(DateTime(timezone=True))
+    fingerprint = Column(String, default="", index=True)
+    # Every source that has asserted this same row, so collapsing a duplicate
+    # keeps the corroboration instead of discarding it. [{origin, ref, seen}]
+    also_seen = Column(JSON, default=list)
 
 class KbBrand(Base):
     """One row per tenant: who they are, how they sound, what they may not say."""
@@ -471,7 +514,7 @@ class KbBrand(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
-class KbClaim(Base):
+class KbClaim(_Provenance, Base):
     """A fact the brand is allowed to assert, with its proof and when to use it.
 
     `situations` is what makes selection deterministic: the assembler filters
@@ -495,7 +538,7 @@ class KbClaim(Base):
     status = Column(String, default="active")   # active | retired | conflicted
 
 
-class KbAudience(Base):
+class KbAudience(_Provenance, Base):
     """A buyer segment, in their vocabulary rather than yours."""
 
     __tablename__ = "kb_audiences"
@@ -509,9 +552,10 @@ class KbAudience(Base):
     buying_trigger = Column(Text)
     decision_timeline = Column(String)
     notes = Column(Text)
+    source = Column(Text)                       # where this segment came from
 
 
-class KbObjection(Base):
+class KbObjection(_Provenance, Base):
     """Why a deal stalls, and the approved answer.
 
     Empty across all four client accounts at audit time. Cannot be machine-
@@ -527,9 +571,10 @@ class KbObjection(Base):
     claim_id = Column(String)                   # optional proof to pair with it
     audience_key = Column(String)               # blank = applies to everyone
     escalate = Column(String, default="no")     # yes -> hand to a human, don't answer
+    source = Column(Text)                       # where this objection came from
 
 
-class KbSituation(Base):
+class KbSituation(_Provenance, Base):
     """One tenant's diagnostic vocabulary, as data.
 
     The situation tags were a module constant shared by every tenant, written
@@ -552,6 +597,7 @@ class KbSituation(Base):
     kind = Column(String, default="problem")  # who_they_are | problem | doubt
     description = Column(Text)
     patterns = Column(JSON, default=list)
+    source = Column(Text)                     # where this tag came from
 
 
 class IntakeLink(Base):
@@ -656,7 +702,40 @@ class KbUnknown(Base):
     last_seen = Column(DateTime(timezone=True), default=utcnow)
 
 
-class KbEntity(Base):
+class KbConflict(Base):
+    """Two sources disagree about an approved value. Both are kept; neither wins.
+
+    Coverings' Bio-Glass Emerald Forest is the case this exists for: the master
+    sheet says the slab is 100"x56" and the cut sheet says 110"x49". One of
+    those loses a specification. No precedence rule can tell you which, because
+    the information needed to decide is not in either source — so the row keeps
+    what a human approved, the disagreement becomes a visible piece of work, and
+    nothing downstream quotes a dimension the system guessed at.
+
+    Aggregated per (row, field) while open: a nightly sync that keeps
+    disagreeing raises `hits`, it does not fill a queue.
+    """
+
+    __tablename__ = "kb_conflicts"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    table_name = Column(String, nullable=False)   # kb_claims | kb_entities | ...
+    row_id = Column(String, nullable=False)
+    field = Column(String, nullable=False)
+    approved_value = Column(Text)                 # what the human signed off on
+    incoming_value = Column(Text)                 # what the machine now says
+    origin = Column(String)                       # which source disagreed
+    source_ref = Column(Text)                     # the URL / file+row it came from
+    hits = Column(String, default="1")
+    status = Column(String, default="open")       # open | resolved
+    resolution = Column(String, default="")       # approved | incoming
+    first_seen = Column(DateTime(timezone=True), default=utcnow)
+    last_seen = Column(DateTime(timezone=True), default=utcnow)
+    resolved_at = Column(DateTime(timezone=True))
+
+
+class KbEntity(_Provenance, Base):
     """The polymorphic thing being sold.
 
     One table absorbs agency offers, Baci products, Ironside spaces and
@@ -855,6 +934,94 @@ def _auto_migrate() -> None:
                     pass
 
 
+def _backfill_provenance() -> None:
+    """Give existing KB rows the provenance the new columns expect.
+
+    Auto-migration adds columns and never values, so without this every row
+    already in production would carry an empty origin and no fingerprint —
+    which means no dedupe, and a review queue that cannot tell a crawled
+    proposal from something the owner wrote himself.
+
+    Two jobs:
+
+    1. **Consolidate the review axis.** `KbClaim.status` used to carry both the
+       lifecycle (active / retired) and the approval state (pending), so the
+       same question had two answers depending on which column you read. Review
+       now owns approval and status owns lifecycle. A claim that was `pending`
+       becomes `proposed` and goes back to being lifecycle-active.
+
+    2. **Fingerprint what is already there**, so the first re-crawl or re-upload
+       after this ships collapses onto the existing row instead of duplicating
+       it.
+
+    Runs **once**, behind a marker. Not for speed: `review` has no column
+    default so that a row written without one is treated as unapproved, and a
+    backfill that ran on every boot would keep promoting exactly those rows to
+    approved — turning the fail-closed default back into a fail-open one.
+    """
+    from . import provenance as prov
+
+    MARKER = "kb_provenance_backfilled"
+    with SessionLocal() as s:
+        if s.get(Setting, MARKER):
+            return
+
+    def _origin_from(source: str, default: str) -> str:
+        """Read the old free-text `source` back into a structured origin.
+
+        Prefix matches and one exact match, never a substring search: a claim
+        sourced "Baci Milano USA — verified in Shopify" was established by a
+        human who checked the store, and calling that a store sync would hand
+        the catalogue sync ownership of a row it never wrote.
+        """
+        s = (source or "").strip().lower()
+        if s.startswith("stated on http") or s.startswith("review on"):
+            return "crawl"
+        if s.startswith("submitted by"):
+            return "client"
+        if s == "shopify":
+            return "store_sync"
+        return default
+
+    with SessionLocal() as s:
+        # --- claims: the one table where status carried two meanings --------
+        for row in s.query(KbClaim).all():
+            if row.status == "pending":
+                row.review, row.status = prov.PROPOSED, "active"
+            elif row.status in ("retired", "conflicted"):
+                row.review = prov.REJECTED
+            elif not row.review:
+                row.review = prov.APPROVED
+            if not row.origin:
+                row.origin = _origin_from(row.source, "seed")
+            if not row.fingerprint:
+                row.fingerprint = prov.fingerprint(row.claim)
+
+        for row in s.query(KbEntity).all():
+            if not row.review:
+                row.review = prov.APPROVED
+            if not row.origin:
+                row.origin = _origin_from(row.source, "seed")
+            if not row.fingerprint:
+                row.fingerprint = prov.fingerprint(row.key)
+
+        # These three had no provenance at all and went live on write. Anything
+        # already in them was put there by the seed or by Gomeh, so approved is
+        # the honest reading — but it is recorded rather than assumed from now on.
+        for model, fp in ((KbAudience, lambda r: prov.fingerprint(r.key)),
+                          (KbObjection, lambda r: prov.fingerprint(r.objection)),
+                          (KbSituation, lambda r: prov.fingerprint(r.tag))):
+            for row in s.query(model).all():
+                if not row.review:
+                    row.review = prov.APPROVED
+                if not row.origin:
+                    row.origin = "seed"
+                if not row.fingerprint:
+                    row.fingerprint = fp(row)
+        s.add(Setting(key=MARKER, value=utcnow().isoformat()))
+        s.commit()
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
     try:
@@ -863,3 +1030,8 @@ def init_db() -> None:
     except Exception:  # noqa: BLE001 — never block startup on migration
         import logging
         logging.getLogger("db").exception("auto-migrate failed")
+    try:
+        _backfill_provenance()
+    except Exception:  # noqa: BLE001 — a failed backfill must not block boot
+        import logging
+        logging.getLogger("db").exception("provenance backfill failed")

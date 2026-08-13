@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from . import db
+from . import db, provenance as prov
 
 # Controlled situation vocabulary. Claims are tagged with these and the
 # assembler matches on them, so proof selection is a query rather than a model
@@ -92,8 +92,11 @@ def claims(tenant: str, situations: list[str] | None = None,
     now = dt.datetime.now(dt.timezone.utc)
     want = set(situations or [])
     with db.SessionLocal() as s:
+        # Approved AND lifecycle-active. `review` is the approval axis and
+        # `status` is the lifecycle one; a row needs both to be selectable.
         rows = s.query(db.KbClaim).filter(
             db.KbClaim.tenant == tenant,
+            db.KbClaim.review == prov.APPROVED,
             db.KbClaim.status == "active",
         ).all()
         scored = []
@@ -126,10 +129,11 @@ def claim_inventory(tenant: str) -> dict[str, list[db.KbClaim]]:
         rows = s.query(db.KbClaim).filter(db.KbClaim.tenant == tenant).all()
         s.expunge_all()
     for r in rows:
-        if r.status == "pending":
+        review = r.review or prov.APPROVED
+        if review == prov.PROPOSED:
             out["pending"].append(r)
-        elif r.status != "active":
-            out["retired"].append(r)          # retired | conflicted
+        elif review == prov.REJECTED or r.status != "active":
+            out["retired"].append(r)          # rejected | retired | conflicted
         elif r.expires_at and db.as_utc(r.expires_at) < now:
             out["expired"].append(r)
         else:
@@ -137,9 +141,18 @@ def claim_inventory(tenant: str) -> dict[str, list[db.KbClaim]]:
     return out
 
 
-def audiences(tenant: str) -> list[db.KbAudience]:
+def audiences(tenant: str, include_proposed: bool = False) -> list[db.KbAudience]:
+    """Approved segments only, unless a reviewer asks to see the rest.
+
+    Every read accessor in this module is a pipeline input, so the approval
+    filter belongs here rather than at each call site — a proposal that reaches
+    a generator is indistinguishable from a fact once it is in a draft.
+    """
     with db.SessionLocal() as s:
-        rows = s.query(db.KbAudience).filter(db.KbAudience.tenant == tenant).all()
+        q = s.query(db.KbAudience).filter(db.KbAudience.tenant == tenant)
+        if not include_proposed:
+            q = q.filter(db.KbAudience.review == prov.APPROVED)
+        rows = q.all()
         s.expunge_all()
         return rows
 
@@ -153,14 +166,18 @@ def audience(tenant: str, key: str) -> db.KbAudience | None:
         return row
 
 
-def objections(tenant: str, audience_key: str = "") -> list[db.KbObjection]:
-    """All objections for a tenant; narrowed to a segment when one is given.
+def objections(tenant: str, audience_key: str = "",
+               include_proposed: bool = False) -> list[db.KbObjection]:
+    """Approved objections for a tenant; narrowed to a segment when one is given.
 
     No audience_key means "everything" — not "only the universal ones". The
     latter silently undercounts, which made completeness() report 5 of 6.
     """
     with db.SessionLocal() as s:
-        rows = s.query(db.KbObjection).filter(db.KbObjection.tenant == tenant).all()
+        q = s.query(db.KbObjection).filter(db.KbObjection.tenant == tenant)
+        if not include_proposed:
+            q = q.filter(db.KbObjection.review == prov.APPROVED)
+        rows = q.all()
         if audience_key:
             rows = [r for r in rows
                     if not r.audience_key or r.audience_key == audience_key]
@@ -289,14 +306,19 @@ def situation_desc(tenant: str) -> dict[str, str]:
 
 
 def add_situation(tenant: str, tag: str, patterns: list[list[str]],
-                  description: str = "", kind: str = "problem") -> str:
+                  description: str = "", kind: str = "problem",
+                  origin: str = "human", source: str = "") -> str:
     tag = (tag or "").strip().lower().replace(" ", "_")
     if not tag:
         return "A situation needs a tag."
     with db.SessionLocal() as s:
         existing = s.query(db.KbSituation).filter(
             db.KbSituation.tenant == tenant, db.KbSituation.tag == tag).first()
-        row = existing or db.KbSituation(tenant=tenant, tag=tag)
+        row = existing or db.KbSituation(
+            tenant=tenant, tag=tag, origin=origin, source=source,
+            review=prov.APPROVED, fingerprint=prov.fingerprint(tag),
+            approved_by="seed" if origin == "seed" else "",
+            approved_at=db.utcnow())
         row.patterns = [list(p) for p in patterns]
         row.description = description or row.description
         row.kind = kind
@@ -306,11 +328,13 @@ def add_situation(tenant: str, tag: str, patterns: list[list[str]],
     return f"{'Updated' if existing else 'Added'} situation {tag} for {tenant}."
 
 
-def entities(tenant: str, type: str = "", available_only: bool = True
-             ) -> list[db.KbEntity]:
+def entities(tenant: str, type: str = "", available_only: bool = True,
+             include_proposed: bool = False) -> list[db.KbEntity]:
     with db.SessionLocal() as s:
         q = s.query(db.KbEntity).filter(db.KbEntity.tenant == tenant,
                                         db.KbEntity.status == "active")
+        if not include_proposed:
+            q = q.filter(db.KbEntity.review == prov.APPROVED)
         if type:
             q = q.filter(db.KbEntity.type == type)
         rows = q.all()
@@ -580,11 +604,19 @@ def next_step_for(tenant: str, stage: str) -> dict:
 # --------------------------------------------------------------------------
 
 def completeness(tenant: str) -> dict:
+    """Whether this account can be generated from, and what is missing if not.
+
+    Counts APPROVED rows only — a proposal is not something a generator may
+    use. But "none" and "three waiting for you to approve them" are different
+    problems with different fixes, and reporting both as `kb_objections (none)`
+    sends someone off to author what a client already wrote. So a pending count
+    rides alongside, and the blocker names the action rather than the absence.
+    """
     b = brand(tenant)
     missing: list[str] = []
     if not b:
         return {"tenant": tenant, "ready": False, "missing": ["kb_brand row"],
-                "counts": {}}
+                "counts": {}, "awaiting_review": {}}
     if not (b.voice or {}).get("tone"):
         missing.append("brand.voice.tone")
     if not b.banned_claims:
@@ -595,11 +627,23 @@ def completeness(tenant: str) -> dict:
         "objections": len(objections(tenant)),
         "entities": len(entities(tenant, available_only=False)),
     }
+    waiting = {
+        "claims": len(pending_claims(tenant)),
+        "audiences": len([a for a in audiences(tenant, include_proposed=True)
+                          if (a.review or "") == prov.PROPOSED]),
+        "objections": len([o for o in objections(tenant, include_proposed=True)
+                           if (o.review or "") == prov.PROPOSED]),
+        "entities": len([e for e in entities(tenant, available_only=False,
+                                             include_proposed=True)
+                         if (e.review or "") == prov.PROPOSED]),
+    }
     for name in ("claims", "audiences", "objections", "entities"):
         if counts[name] == 0:
-            missing.append(f"kb_{name} (none)")
-    return {"tenant": tenant, "ready": not missing,
-            "missing": missing, "counts": counts}
+            missing.append(
+                f"kb_{name} ({waiting[name]} waiting for review)" if waiting[name]
+                else f"kb_{name} (none)")
+    return {"tenant": tenant, "ready": not missing, "missing": missing,
+            "counts": counts, "awaiting_review": waiting}
 
 
 # --------------------------------------------------------------------------
@@ -674,7 +718,16 @@ def add_banned(tenant: str, phrase: str) -> str:
 
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
-              strength: str = "strong", status: str = "active") -> str:
+              strength: str = "strong", status: str = "active",
+              origin: str = "human") -> str:
+    """Add a claim, or record that another source corroborates one on file.
+
+    `status="pending"` is kept as the way callers ask for a proposal, and is
+    translated to `review=proposed` — approval and lifecycle are two axes now,
+    and this is the one place that still has to know they used to be one.
+    """
+    review = prov.PROPOSED if status == "pending" else prov.APPROVED
+    status = "active" if status == "pending" else status
     valid = situations(tenant)
     unknown = [t for t in tags if t not in valid]
     if unknown:
@@ -687,17 +740,42 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     # infer. `claims()` only returns active rows, so an untagged pending claim
     # is invisible to selection either way — and `review_claim` refuses to
     # activate one.
-    if not tags and status == "active":
+    if not tags and review == prov.APPROVED:
         return "Needs at least one situation tag, or it can never be selected."
+
+    fp = prov.fingerprint(claim)
     with db.SessionLocal() as s:
+        # The same fact arriving from a second source is corroboration, not a
+        # second claim. Before this, a re-run of the seed or the harvester
+        # duplicated every row it had already written.
+        dupe = s.query(db.KbClaim).filter(
+            db.KbClaim.tenant == tenant, db.KbClaim.fingerprint == fp).first()
+        if dupe:
+            seen = list(dupe.also_seen or [])
+            if not any(e.get("ref") == (source or "") and
+                       e.get("origin") == origin for e in seen):
+                seen.append({"origin": origin, "ref": source or "",
+                             "seen": db.utcnow().isoformat()})
+                dupe.also_seen = seen
+                s.commit()
+            state = ("already approved" if (dupe.review or "") == prov.APPROVED
+                     else "already waiting for review")
+            return (f"Already on file for {tenant} — {state}. Recorded that "
+                    f"{origin} says it too.\n{dupe.claim}")
+
         s.add(db.KbClaim(tenant=tenant, claim=claim, evidence=evidence,
                          proof_type=proof_type, source=source or "captured",
                          situations=tags, strength=strength, status=status,
+                         review=review, origin=origin, fingerprint=fp,
+                         approved_by="seed" if origin == "seed" else "",
+                         approved_at=db.utcnow() if review == prov.APPROVED else None,
+                         also_seen=[{"origin": origin, "ref": source or "",
+                                     "seen": db.utcnow().isoformat()}],
                          verified_at=db.utcnow()))
         s.commit()
-    if status != "active":
-        # claims() filters on active, so a pending claim is invisible to
-        # selection until a human has looked at it. That is the point.
+    if review != prov.APPROVED:
+        # claims() filters on approved, so a proposal is invisible to selection
+        # until a human has looked at it. That is the point.
         return (f"Submitted for review — it will not be used until approved.\n"
                 f"{claim}")
     return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
@@ -705,9 +783,9 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
 
 
 def pending_claims(tenant: str = "") -> list[db.KbClaim]:
-    """Claims awaiting review — client-submitted proof, not yet selectable."""
+    """Claims awaiting review — proposals from any source, not yet selectable."""
     with db.SessionLocal() as s:
-        q = s.query(db.KbClaim).filter(db.KbClaim.status == "pending")
+        q = s.query(db.KbClaim).filter(db.KbClaim.review == prov.PROPOSED)
         if tenant:
             q = q.filter(db.KbClaim.tenant == tenant)
         rows = q.order_by(db.KbClaim.verified_at.desc()).all()
@@ -715,7 +793,14 @@ def pending_claims(tenant: str = "") -> list[db.KbClaim]:
         return rows
 
 
-def review_claim(claim_id: str, approve: bool) -> str:
+def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
+    """Approve or reject a claim, and record who did it.
+
+    Approval is the moment a row becomes final: from here no crawl, upload or
+    store sync may change its wording — they raise a `KbConflict` instead. That
+    guarantee is only as good as the record of who made it, which is why
+    `approved_by` and `approved_at` are written here and nowhere else.
+    """
     with db.SessionLocal() as s:
         row = s.get(db.KbClaim, claim_id)
         if not row:
@@ -726,10 +811,14 @@ def review_claim(claim_id: str, approve: bool) -> str:
             # while looking approved — worse than refusing.
             return ("Give it at least one situation tag before approving — "
                     "an untagged claim can never be selected.")
-        row.status = "active" if approve else "retired"
+        if approve:
+            row.review, row.status = prov.APPROVED, "active"
+            row.approved_by, row.approved_at = by, db.utcnow()
+        else:
+            row.review, row.status = prov.REJECTED, "retired"
         s.commit()
         text = row.claim
-    return (f"Approved — now selectable.\n{text}" if approve
+    return (f"Approved — now selectable, and final.\n{text}" if approve
             else f"Rejected.\n{text}")
 
 
@@ -767,6 +856,12 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                              ("strength", strength)):
             if value is not None and str(value).strip():
                 setattr(row, field, str(value).strip())
+        # A human has touched the wording, so the row is theirs from now on and
+        # the fingerprint has to follow the text — otherwise a re-crawl of the
+        # ORIGINAL sentence would not recognise the row it belongs to and would
+        # file the uncorrected version all over again.
+        row.origin = "human"
+        row.fingerprint = prov.fingerprint(row.claim)
         s.commit()
     return "Saved."
 
@@ -776,59 +871,209 @@ def retire_claim(claim_id: str) -> str:
     return review_claim(claim_id, approve=False)
 
 
+# --------------------------------------------------------------------------
+# The review queue, for every table rather than just claims.
+#
+# Claims were the only table with an approval state, so a proposal was only
+# possible for the one kind of row a crawler happened to produce. A spreadsheet
+# upload proposes entities, a client intake link proposes audiences and
+# objections, and all of them went live on write. These two functions are the
+# uniform surface: one place to see what is waiting, one place to make it final.
+# --------------------------------------------------------------------------
+
+REVIEWABLE = {
+    "claim": (db.KbClaim, "claim"),
+    "audience": (db.KbAudience, "name"),
+    "objection": (db.KbObjection, "objection"),
+    "entity": (db.KbEntity, "name"),
+    "situation": (db.KbSituation, "tag"),
+}
+
+
+def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
+    """Everything waiting for a human, by kind, newest table first.
+
+    Each row is returned with the near-duplicates already on file, because the
+    reviewer's real question is rarely "is this true" — it is "haven't I seen
+    this already", and answering that by memory is how a queue stops being read.
+    """
+    out: dict[str, list] = {}
+    for name, (model, field) in REVIEWABLE.items():
+        if kind and name != kind:
+            continue
+        with db.SessionLocal() as s:
+            q = s.query(model).filter(model.review == prov.PROPOSED)
+            if tenant:
+                q = q.filter(model.tenant == tenant)
+            rows = q.all()
+            approved = []
+            if rows:
+                aq = s.query(model).filter(model.review == prov.APPROVED)
+                if tenant:
+                    aq = aq.filter(model.tenant == tenant)
+                approved = aq.all()
+            s.expunge_all()
+        if rows:
+            out[name] = [
+                {"row": r,
+                 "near_duplicates": prov.near_duplicates(
+                     getattr(r, field, "") or "", approved, field)}
+                for r in rows]
+    return out
+
+
+def approve(kind: str, row_id: str, by: str = "owner",
+            approve_it: bool = True) -> str:
+    """Make a proposed row final — or reject it — for any KB table.
+
+    Claims keep their own entry point because approving one has an extra
+    precondition (it must carry a situation tag or it can never be selected).
+    """
+    if kind == "claim":
+        return review_claim(row_id, approve_it, by=by)
+    pair = REVIEWABLE.get(kind)
+    if not pair:
+        return f"Unknown kind {kind!r}. One of: {', '.join(sorted(REVIEWABLE))}."
+    model, field = pair
+    with db.SessionLocal() as s:
+        row = s.get(model, row_id)
+        if not row:
+            return f"No such {kind}."
+        row.review = prov.APPROVED if approve_it else prov.REJECTED
+        if approve_it:
+            row.approved_by, row.approved_at = by, db.utcnow()
+        s.commit()
+        label = getattr(row, field, "") or row_id
+    return (f"Approved — {kind} “{label}” is now in use, and final."
+            if approve_it else f"Rejected {kind} “{label}”.")
+
+
 def add_audience(tenant: str, key: str, name: str, pains: list[str],
                  vocabulary: list[str], buying_trigger: str = "",
-                 decision_timeline: str = "") -> str:
+                 decision_timeline: str = "", origin: str = "human",
+                 source: str = "", review: str = "") -> str:
     key = (key or "").strip().lower().replace(" ", "_")
     if not key or not name:
         return "An audience needs a key and a name."
+    review = review or (prov.APPROVED if prov.lands_approved(origin)
+                        else prov.PROPOSED)
     with db.SessionLocal() as s:
         existing = s.query(db.KbAudience).filter(
             db.KbAudience.tenant == tenant, db.KbAudience.key == key).first()
-        row = existing or db.KbAudience(tenant=tenant, key=key)
-        row.name, row.pains, row.vocabulary = name, pains, vocabulary
-        if buying_trigger:
-            row.buying_trigger = buying_trigger
-        if decision_timeline:
-            row.decision_timeline = decision_timeline
-        if not existing:
-            s.add(row)
+        if existing:
+            # An approved segment is final. A client re-submitting through an
+            # intake link, or a later upload, proposes a change — it does not
+            # silently redefine who the buyer is.
+            res = prov.apply_fields(
+                existing,
+                {"name": name, "buying_trigger": buying_trigger,
+                 "decision_timeline": decision_timeline},
+                origin, source, table="kb_audiences", tenant=tenant)
+            if prov.may_write("pains", existing.origin or "", existing.review or "",
+                              origin):
+                existing.pains, existing.vocabulary = pains, vocabulary
+            s.commit()
+            if res["conflicts"]:
+                return (f"Audience {key} is approved — left unchanged. "
+                        f"Disagreement recorded on: {', '.join(res['conflicts'])}.")
+            return f"Updated audience {key} for {tenant}."
+        s.add(db.KbAudience(
+            tenant=tenant, key=key, name=name, pains=pains,
+            vocabulary=vocabulary, buying_trigger=buying_trigger,
+            decision_timeline=decision_timeline, origin=origin, review=review,
+            source=source, fingerprint=prov.fingerprint(key),
+            approved_by="seed" if origin == "seed" else "",
+            approved_at=db.utcnow() if review == prov.APPROVED else None))
         s.commit()
-    return f"{'Updated' if existing else 'Added'} audience {key} for {tenant}."
+    return f"Added audience {key} for {tenant}."
 
 
 def add_objection(tenant: str, objection: str, response: str,
-                  audience_key: str = "", escalate: str = "no") -> str:
+                  audience_key: str = "", escalate: str = "no",
+                  origin: str = "human", source: str = "",
+                  review: str = "") -> str:
     if not objection or not response:
         return "An objection needs both the objection and the approved answer."
+    review = review or (prov.APPROVED if prov.lands_approved(origin)
+                        else prov.PROPOSED)
+    fp = prov.fingerprint(objection)
     with db.SessionLocal() as s:
+        # This table inserted unconditionally, so every re-seed duplicated the
+        # whole set. Same objection, same answer -> one row.
+        dupe = s.query(db.KbObjection).filter(
+            db.KbObjection.tenant == tenant,
+            db.KbObjection.fingerprint == fp).first()
+        if dupe:
+            if prov.may_write("response", dupe.origin or "", dupe.review or "",
+                              origin) and response != dupe.response:
+                dupe.response = response
+                s.commit()
+                return f"Updated the answer to that objection for {tenant}."
+            if response != dupe.response:
+                prov.record_conflict(tenant, "kb_objections", dupe.id,
+                                     "response", dupe.response, response,
+                                     origin, source)
+                return (f"That objection is already answered and approved for "
+                        f"{tenant} — the differing answer was recorded, not applied.")
+            return f"Already on file for {tenant}."
         s.add(db.KbObjection(tenant=tenant, objection=objection,
                              response=response, audience_key=audience_key,
-                             escalate=escalate))
+                             escalate=escalate, origin=origin, review=review,
+                             source=source, fingerprint=fp,
+                             approved_by="seed" if origin == "seed" else "",
+                             approved_at=db.utcnow() if review == prov.APPROVED else None))
         s.commit()
     return f"Added objection for {tenant} ({len(objections(tenant))} total)."
 
 
 def add_entity(tenant: str, type: str, key: str, name: str,
                description: str = "", price: str = "",
-               attributes: dict | None = None, source: str = "") -> str:
+               attributes: dict | None = None, source: str = "",
+               origin: str = "human", review: str = "") -> str:
+    """Add or update a thing being sold, respecting who owns which field.
+
+    The store owns price and availability forever — those change on their own
+    and re-approving a price is how a catalogue goes stale. Everything else is
+    editorial: once approved, a sync or an upload that disagrees records a
+    conflict rather than overwriting.
+    """
     key = (key or "").strip().lower().replace(" ", "-")
     if not key or not name:
         return "An entity needs a key and a name."
+    review = review or (prov.APPROVED if prov.lands_approved(origin)
+                        else prov.PROPOSED)
     with db.SessionLocal() as s:
         existing = s.query(db.KbEntity).filter(
             db.KbEntity.tenant == tenant, db.KbEntity.key == key).first()
-        row = existing or db.KbEntity(tenant=tenant, key=key)
-        row.type, row.name = type, name
-        row.description = description or row.description
-        row.price = price or row.price
-        row.attributes = attributes if attributes is not None else (row.attributes or {})
-        row.source = source or row.source or "captured"
-        row.verified_at = db.utcnow()
-        if not existing:
-            s.add(row)
+        if existing:
+            res = prov.apply_fields(
+                existing,
+                {"type": type, "name": name, "description": description,
+                 "price": price},
+                origin, source, table="kb_entities", tenant=tenant)
+            if attributes is not None and prov.may_write(
+                    "attributes", existing.origin or "", existing.review or "",
+                    origin):
+                existing.attributes = attributes
+            if source:
+                existing.source = source
+            existing.verified_at = db.utcnow()
+            s.commit()
+            if res["conflicts"]:
+                return (f"{key} is approved — kept as approved. Disagreement "
+                        f"recorded on: {', '.join(res['conflicts'])}.")
+            return f"Updated {type} {key} for {tenant}."
+        s.add(db.KbEntity(
+            tenant=tenant, key=key, type=type, name=name,
+            description=description, price=price,
+            attributes=attributes if attributes is not None else {},
+            source=source or "captured", origin=origin, review=review,
+            fingerprint=prov.fingerprint(key),
+            approved_by="seed" if origin == "seed" else "",
+            approved_at=db.utcnow() if review == prov.APPROVED else None,
+            verified_at=db.utcnow()))
         s.commit()
-    return f"{'Updated' if existing else 'Added'} {type} {key} for {tenant}."
+    return f"Added {type} {key} for {tenant}."
 
 
 # --------------------------------------------------------------------------
@@ -876,7 +1121,14 @@ _STEP = {s["id"]: s for s in INTAKE_STEPS}
 
 
 def gaps(tenant: str) -> list[dict]:
-    """Every intake step still unmet, in the order they should be answered."""
+    """Every intake step still unanswered, in the order they should be answered.
+
+    Counts proposals as answered — deliberately, and in contrast to
+    `completeness()`. The question this asks is "has anybody told us yet",
+    not "may we use it". A client whose objection is sitting in the review
+    queue has already answered; asking them again because nobody has approved
+    it yet is the fastest way to make someone abandon an intake form.
+    """
     b = brand(tenant)
     voice = (b.voice or {}) if b else {}
     have = {
@@ -884,10 +1136,11 @@ def gaps(tenant: str) -> list[dict]:
         "positioning": bool(b and b.positioning),
         "tone": bool(voice.get("tone")),
         "banned_claims": bool(b and b.banned_claims),
-        "audience": len(audiences(tenant)) > 0,
-        "objection": len(objections(tenant)) > 0,
-        "entity": len(entities(tenant, available_only=False)) > 0,
-        "claim": len(claims(tenant)) > 0,
+        "audience": len(audiences(tenant, include_proposed=True)) > 0,
+        "objection": len(objections(tenant, include_proposed=True)) > 0,
+        "entity": len(entities(tenant, available_only=False,
+                               include_proposed=True)) > 0,
+        "claim": len(claims(tenant)) + len(pending_claims(tenant)) > 0,
         # Without this the decision layer has nothing to propose and the ask
         # comes back empty — which is exactly what happened to the agency when
         # its hardcoded offer keys were removed and nothing replaced them.
@@ -945,22 +1198,32 @@ def apply_answer(tenant: str, step_id: str, text: str,
         phrases = _split(text.replace("\n", ";"))
         return "\n".join(add_banned(tenant, p) for p in phrases) or "Nothing captured."
 
+    # A client filling their own intake link is a source, not an authority.
+    # Their claims already waited for review; their audiences, objections and
+    # entities went live the moment they typed them, which is the same
+    # over-claiming risk with none of the same protection.
+    origin = "human" if source == "owner" else "client"
+    ref = "" if source == "owner" else f"submitted by {source}"
+
     parts = [p.strip() for p in text.split("|")]
     if step_id == "audience":
         if len(parts) < 4:
             return f"Format: {step['hint']}"
         return add_audience(tenant, parts[0], parts[1],
-                            _split(parts[2]), _split(parts[3]))
+                            _split(parts[2]), _split(parts[3]),
+                            origin=origin, source=ref)
     if step_id == "objection":
         if len(parts) < 2:
             return f"Format: {step['hint']}"
-        return add_objection(tenant, parts[0], parts[1])
+        return add_objection(tenant, parts[0], parts[1],
+                             origin=origin, source=ref)
     if step_id == "entity":
         if len(parts) < 3:
             return f"Format: {step['hint']}"
         return add_entity(tenant, parts[0], parts[1], parts[2],
                           description=parts[4] if len(parts) > 4 else "",
-                          price=parts[3] if len(parts) > 3 else "")
+                          price=parts[3] if len(parts) > 3 else "",
+                          origin=origin, source=ref)
     if step_id == "claim":
         if len(parts) < 3:
             return f"Format: {step['hint']}"
@@ -968,8 +1231,8 @@ def apply_answer(tenant: str, step_id: str, text: str,
         tags = [t.strip().lower() for t in _re.split(r"[\s,]+", parts[2]) if t.strip()]
         # A client will always over-claim. Their proof waits for review; the
         # owner's does not.
-        return add_claim(tenant, parts[0], parts[1], tags,
-                         source=f"submitted by {source}" if source != "owner" else "",
+        return add_claim(tenant, parts[0], parts[1], tags, source=ref,
+                         origin=origin,
                          status="pending" if source != "owner" else "active")
     return "Unrecognised step."
 
@@ -1183,26 +1446,37 @@ def seed_agency(force: bool = False) -> dict:
             },
         ))
 
+        # Seeded rows are owner-authored facts, so they land approved — but
+        # they carry the same provenance columns as anything else, or the
+        # first re-seed duplicates them and no sync knows to leave them alone.
+        _seed = dict(origin="seed", review=prov.APPROVED, approved_by="seed",
+                     approved_at=db.utcnow())
+
         for claim, ev, ptype, src, sits, strength in _AGENCY_CLAIMS:
             bad = set(sits) - SITUATIONS
             if bad:
                 raise ValueError(f"unknown situation tags {bad} on claim {claim!r}")
             s.add(db.KbClaim(tenant=tenant, claim=claim, evidence=ev,
                              proof_type=ptype, source=src, situations=sits,
-                             strength=strength, verified_at=db.utcnow()))
+                             strength=strength, verified_at=db.utcnow(),
+                             fingerprint=prov.fingerprint(claim), **_seed))
 
         for key, name, pains, vocab, trigger, timeline in _AGENCY_AUDIENCES:
             s.add(db.KbAudience(tenant=tenant, key=key, name=name, pains=pains,
                                 vocabulary=vocab, buying_trigger=trigger,
-                                decision_timeline=timeline))
+                                decision_timeline=timeline,
+                                fingerprint=prov.fingerprint(key), **_seed))
 
         for obj, resp, aud, esc in _AGENCY_OBJECTIONS:
             s.add(db.KbObjection(tenant=tenant, objection=obj, response=resp,
-                                 audience_key=aud, escalate=esc))
+                                 audience_key=aud, escalate=esc,
+                                 fingerprint=prov.fingerprint(obj), **_seed))
 
         for key, name, desc, attrs, price in _AGENCY_OFFERS:
             s.add(db.KbEntity(tenant=tenant, type="offer", key=key, name=name,
                               description=desc, attributes=attrs, price=price,
-                              source="marketingthatworks.co", verified_at=db.utcnow()))
+                              source="marketingthatworks.co",
+                              verified_at=db.utcnow(),
+                              fingerprint=prov.fingerprint(key), **_seed))
         s.commit()
     return {"status": "seeded", **completeness(tenant)}

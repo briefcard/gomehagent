@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import re
 
-from . import compliance, kb, tenants
+from . import compliance, kb, provenance as prov, tenants
 
 _MIN, _MAX = 25, 240
 
@@ -141,9 +141,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
         return {"error": f"could not enumerate any pages at {t.domain}"}
 
     # Claims already on file, so a repeat run does not re-propose the same line.
-    known = {(c.claim or "").strip().lower()
-             for c in kb.claims(tenant)} | {
-        (c.claim or "").strip().lower() for c in kb.pending_claims(tenant)}
+    # Matched on the shared normalised fingerprint rather than a lowercased
+    # string: a re-crawl after someone fixed a typo, or the same sentence with
+    # different punctuation, is the same claim and must not queue twice.
+    known = {prov.fingerprint(c.claim)
+             for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
     proposed, rejected, untaggable = [], [], []
     import httpx
@@ -163,7 +165,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
         for cand in _reviews_from(html, url) + _claims_from(text, url):
             body = cand["text"].strip()
             low = body.lower()
-            if low in known:
+            fp = prov.fingerprint(body)
+            if fp in known:
                 continue
             hit = next((b for b in banned if b in low), "")
             if hit:
@@ -180,7 +183,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
             tags = guess["tags"]
             if not tags:
                 untaggable.append({"text": body[:160], "url": url})
-            known.add(low)
+            known.add(fp)
             entry = {**cand, "text": body, "tags": tags,
                      "tag_basis": guess["basis"],
                      "similar_to_rejected": guess["similar_to_rejected"]}
@@ -188,7 +191,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
             if apply:
                 kb.add_claim(tenant, body, cand["evidence"], tags,
                              proof_type=cand["proof_type"],
-                             source=cand["source"], status="pending")
+                             source=cand["source"], status="pending",
+                             origin="crawl")
 
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,

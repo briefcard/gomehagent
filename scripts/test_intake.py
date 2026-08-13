@@ -50,7 +50,14 @@ with TestClient(app) as cl:
         cl.get(f"/intake/{tok}",params={"answer":ANS[st["id"]]})
     ck("a misrouted pipe answer never becomes a banned phrase",
        not any("|" in p for p in kb.banned_claims("coverings")), str(kb.banned_claims("coverings")))
-    ck("progress advances through the gaps", len(kb.objections("coverings"))==1)
+    # A client's answer counts as answered — the intake must not re-ask it —
+    # while staying unusable until someone approves it. Two different questions
+    # of the same row, which is why gaps() and objections() disagree here.
+    ck("progress advances through the gaps",
+       len(kb.objections("coverings", include_proposed=True))==1)
+    ck("but a client's objection is not usable until approved",
+       len(kb.objections("coverings"))==0
+       and kb.completeness("coverings")["awaiting_review"]["objections"]==1)
     before=len(kb.claims("coverings"))
     ck("a CLIENT claim is not selectable until reviewed",
        len(kb.claims("coverings"))==before and len(kb.pending_claims("coverings"))==1)

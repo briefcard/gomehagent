@@ -87,16 +87,19 @@ def main() -> int:
     # ---- 2. non-selectable proof is shown as such, not hidden --------------
     import datetime as _dt
     with db.SessionLocal() as s:
+        # `status` is the lifecycle axis and `review` is the approval axis;
+        # they used to be one column, which is why a pending claim also had to
+        # be lifecycle-nonactive to stay out of selection.
         s.add(db.KbClaim(tenant="baci", claim="STALE PROOF ROW",
                          evidence="last year", situations=["gift_moment"],
-                         status="active",
+                         status="active", review="approved",
                          expires_at=db.utcnow() - _dt.timedelta(days=2)))
         s.add(db.KbClaim(tenant="baci", claim="RETIRED PROOF ROW",
                          evidence="withdrawn", situations=["gift_moment"],
-                         status="retired"))
+                         status="retired", review="rejected"))
         s.add(db.KbClaim(tenant="baci", claim="PENDING PROOF ROW",
                          evidence="submitted", situations=["gift_moment"],
-                         status="pending"))
+                         status="active", review="proposed"))
         s.commit()
 
     inv = kb.claim_inventory("baci")
@@ -189,6 +192,42 @@ def main() -> int:
                                "/admin/catalog_sync")))
     ck("an account never scanned says so rather than looking clean",
        "Never scanned" in admin_ui.render_content(KEY, "coverings"))
+
+    # ---- 4. the work the provenance spine creates is visible --------------
+    # A conflict nobody can see is worse than the silent overwrite it replaced:
+    # the data is correct and the work is invisible. Same for a proposal in one
+    # of the four tables that never had a review queue.
+    from app import provenance as prov
+    kb.add_entity("baci", "product", "aqua", "Aqua Set",
+                  description="Store copy.", origin="store_sync")
+    kb.add_entity("baci", "product", "aqua", "Aqua Set",
+                  description="Gomeh's own wording for this set.", origin="human")
+    kb.add_entity("baci", "product", "aqua", "Aqua Set",
+                  description="Handmade in Italy, artisanal.",
+                  origin="store_sync",
+                  source="https://bacimilanousa.com/products/aqua")
+    kb.add_objection("baci", "Is it dishwasher safe?", "Yes, every piece.",
+                     origin="client", source="submitted by Dana")
+    page = admin_ui.render_content(KEY, "baci")
+
+    ck("a disagreement between sources reaches the page",
+       "Sources disagree" in page and len(prov.conflicts("baci")) == 1)
+    ck("it shows the value in use", has(page, "Gomeh's own wording for this set."))
+    ck("and the value that was refused", has(page, "Handmade in Italy, artisanal."))
+    ck("attributed to the source that disagreed", has(page, "store_sync"))
+    ck("with both resolutions offered, without leaving the page",
+       all(x in page for x in ("/admin/conflict_resolve", 'value="approved"',
+                               'value="incoming"')))
+    ck("a proposal from a table that never had a review queue is shown",
+       "Everything else awaiting you" in page
+       and has(page, "Is it dishwasher safe?"))
+    ck("attributed to whoever submitted it", has(page, "submitted by Dana"))
+    ck("and approvable from the tab",
+       "/admin/proposal_review" in page
+       and 'name="action" value="approve"' in page)
+    ck("nothing proposed is usable in the meantime",
+       not [o for o in kb.objections("baci")
+            if o.objection == "Is it dishwasher safe?"])
 
     print()
     if _fail:
