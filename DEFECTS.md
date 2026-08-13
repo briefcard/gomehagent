@@ -327,6 +327,35 @@ in `scripts/test_kb_ui.py`.
 **Still open on this:** `kb.SITUATIONS` remains the fallback constant, and
 `seed_agency` still creates no `KbSituation` rows.
 
+### ~~Every form POST 500'd in production~~ Fixed 2026-08-12
+
+`python-multipart` was never in `requirements.txt`. Starlette imports it
+lazily, from inside `request.form()` — nothing in `app/` says
+`import multipart`, so it is invisible to an import audit, and every local test
+passed because the dev machine had it as somebody else's transitive
+dependency. On Render every form POST raised
+`AssertionError: The python-multipart library must be installed`.
+
+Broken since `8b9121b`, when form parsing arrived. What that means:
+
+- `/admin/claim_edit` — **approve and reject have never worked** on the live
+  console. The review queue was readable and not actionable.
+- `/connect/<token>` — **the client-facing connect page has never worked**.
+  This is the self-serve onboarding path the runbook tells you to send clients:
+  they paste an API key, submit, and get an Internal Server Error.
+
+Two reasons it went unnoticed for so long. It fails on one code path only, so
+everything else on the console looked healthy. And a 500 on the console was a
+dead end — the traceback in the service log, the operator in a browser, and
+nothing joining them. The `/admin` exception handler added in the same change
+is what identified it in one click: it names the exception on the page with a
+reference matching the log line.
+
+Guarded in `test_console_auth.py`, which now matches a FEATURE to the package
+it silently requires — `.form()` implies `python-multipart`, `Jinja2Templates`
+implies `jinja2`, and so on. An import audit cannot catch this class; that can.
+Verified by removing the line and watching the suite fail.
+
 ### Architecture debt
 
 **The SEO subsystem still does not read the KB.** `seo_tools`, `sites`,

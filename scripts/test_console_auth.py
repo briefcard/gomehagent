@@ -122,6 +122,42 @@ def main() -> int:
         ck("/health still open", r.status_code == 200 and r.json().get("ok"))
         ck("and sets no console cookie", "console" not in r.cookies)
 
+    # --- dependencies nothing in app/ imports by name ----------------------
+    #
+    # This exists because of a real outage. Starlette imports `python-multipart`
+    # lazily, from inside `request.form()`. No file in app/ says
+    # `import multipart`, so it is invisible to an import audit, and every test
+    # here passed because the dev machine had it installed as somebody else's
+    # transitive dependency. It was missing from requirements.txt, so on Render
+    # every form POST raised
+    #     AssertionError: The `python-multipart` library must be installed
+    # — which meant the console's approve/reject buttons AND the client-facing
+    # connect page, where a client pastes their own API keys, had never worked
+    # in production. Both of them 500'd from the day form parsing landed.
+    #
+    # An import audit cannot catch this class. Matching the FEATURE to the
+    # package it silently requires can.
+    print("\n— implicit runtime dependencies —")
+    import pathlib as _pl
+    import re as _re
+
+    root = _pl.Path(__file__).resolve().parent.parent
+    src = "\n".join(p.read_text() for p in (root / "app").glob("*.py"))
+    reqs = (root / "requirements.txt").read_text().lower()
+    LAZY = [
+        (r"\.form\(\)|UploadFile|File\(", "python-multipart",
+         "form POSTs and file uploads"),
+        (r"Jinja2Templates", "jinja2", "server-side templates"),
+        (r"SessionMiddleware", "itsdangerous", "signed session cookies"),
+        (r"EmailStr", "email-validator", "pydantic email fields"),
+    ]
+    for pattern, package, why in LAZY:
+        if not _re.search(pattern, src):
+            continue
+        ok = package in reqs
+        ck(f"{package} is declared — {why} need it at runtime", ok,
+           "" if ok else "app/ uses it; requirements.txt does not list it")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
