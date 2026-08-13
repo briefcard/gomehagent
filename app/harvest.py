@@ -30,7 +30,7 @@ import html as html_lib
 import json
 import re
 
-from . import compliance, kb, provenance as prov, tenants
+from . import compliance, extract, kb, provenance as prov, tenants
 
 _MIN, _MAX = 25, 240
 
@@ -288,7 +288,8 @@ def _tags_for(tenant: str, text: str) -> list[str]:
     return hits
 
 
-def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
+def harvest(tenant: str, limit: int = 25, apply: bool = False,
+            use_model: bool | None = None) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
     `apply` is set, and even then only as pending claims."""
     t = tenants.get(tenant)
@@ -311,6 +312,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
              for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
     proposed, rejected, untaggable, faqs = [], [], [], []
+    not_verbatim: list[str] = []          # spans the model returned that the
+                                          # page does not actually contain
+    used_model = False
+    extractor_note = ""
+    model_on = extract.available() if use_model is None else use_model
     dropped: dict[str, int] = {}          # why candidates were not proposed
     skipped: list[dict] = []              # pages not worth reading, and why
 
@@ -369,9 +375,24 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
             skipped.append({"url": url, "why": dead})
             continue
         cands = [{**r, "entity_key": entity} for r in reviews]
-        for block in blocks:
-            cands += [{**c, "entity_key": entity}
-                      for c in _claims_from(block, url, dropped)]
+        if model_on:
+            # The model judges what is a claim; every guard below still runs.
+            res = extract.extract(tenant, url, blocks, entity_key=entity)
+            used_model = used_model or res["used"] == "model"
+            if res["used"] == "model":
+                cands += res["claims"]
+                not_verbatim += res["rejected_not_verbatim"]
+            else:
+                extractor_note = res.get("note") or res.get("error") or res["used"]
+                for block in blocks:
+                    cands += [{**c, "entity_key": entity}
+                              for c in _claims_from(block, url, dropped)]
+        else:
+            # The deterministic floor. Known 0% recall on qualitative claims —
+            # kept as the offline path, not as the judge.
+            for block in blocks:
+                cands += [{**c, "entity_key": entity}
+                          for c in _claims_from(block, url, dropped)]
         per_page.append((url, cands))
         for f in _faqs_from(html, url):
             faqs.append({**f, "entity_key": entity, "url": url})
@@ -440,6 +461,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
 
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
+        "extractor": ("model" if used_model else "deterministic filter"),
+        "extractor_note": extractor_note,
+        "rejected_not_verbatim": not_verbatim[:10],
+        "not_verbatim_count": len(not_verbatim),
         "faqs_found": len(faqs),
         "faqs_filed_as_objections": filed_faqs,
         "faqs": [{"q": f["question"][:90], "entity": f["entity_key"] or "(brand)"}

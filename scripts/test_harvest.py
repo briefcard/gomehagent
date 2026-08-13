@@ -21,7 +21,13 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'hv.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import compliance, db, harvest, kb, kb_seed, tenants  # noqa: E402
+from app import compliance, db, extract, harvest, kb, kb_seed, tenants  # noqa: E402
+
+# This suite must never touch the network, and that includes the model. Without
+# this a developer who happens to have ANTHROPIC_API_KEY set would make a live
+# call per page here — slow, billable, and non-deterministic in a suite whose
+# whole value is that it is none of those. The extractor has its own benchmark.
+extract.available = lambda: False
 
 _fail = []
 
