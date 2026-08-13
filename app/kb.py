@@ -922,6 +922,49 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
     return out
 
 
+def purge_proposals(tenant: str = "", origin: str = "",
+                    dry_run: bool = True) -> dict:
+    """Delete un-reviewed proposals. Nothing approved is ever touched.
+
+    Proposals produced by an earlier version of the crawler are not wrong so
+    much as meaningless — they were selected by a filter that has since been
+    fixed, and re-reading them costs more than re-running the harvest.
+
+    **Deleted, not rejected**, and that is the deliberate part. `suggest_tags`
+    treats retired claims as the negative signal for future tagging, so
+    rejecting a hundred pieces of parser noise would teach the tagger that
+    noise is what a rejected claim looks like and quietly degrade every
+    suggestion after it. A row that was never really a proposal should leave no
+    trace.
+
+    Defaults to a dry run, like every other bulk write here.
+    """
+    hit: dict[str, int] = {}
+    with db.SessionLocal() as s:
+        for name, (model, _field) in REVIEWABLE.items():
+            q = s.query(model).filter(model.review == prov.PROPOSED)
+            if tenant:
+                q = q.filter(model.tenant == tenant)
+            if origin:
+                q = q.filter(model.origin == origin)
+            rows = q.all()
+            if not rows:
+                continue
+            hit[name] = len(rows)
+            if not dry_run:
+                for r in rows:
+                    s.delete(r)
+        if not dry_run:
+            s.commit()
+    return {"tenant": tenant or "all", "origin": origin or "any",
+            "dry_run": dry_run, "deleted": hit,
+            "total": sum(hit.values()),
+            "note": ("Approved rows are never touched. Proposals are deleted "
+                     "rather than rejected, because a rejected row is training "
+                     "data for the tagger and parser noise is not a lesson. "
+                     "Pass dry_run=0 to actually delete.")}
+
+
 def approve(kind: str, row_id: str, by: str = "owner",
             approve_it: bool = True) -> str:
     """Make a proposed row final — or reject it — for any KB table.

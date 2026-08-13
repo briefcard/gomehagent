@@ -74,6 +74,33 @@ def admin_key(request: Request, key: str = "") -> str:
     return ""
 
 
+@app.exception_handler(Exception)
+async def _console_error(request: Request, exc: Exception):
+    """Show the operator what broke, instead of a bare Internal Server Error.
+
+    A 500 on the console is a dead end: the traceback is in the Render log, the
+    person who hit it is in a browser, and the two are only connected by
+    guesswork about what was clicked. This prints the exception and a reference
+    that matches the log line, and — for the console — a link back.
+
+    Non-console paths (the Telegram and WhatsApp webhooks) keep the plain 500,
+    because the caller there is a machine that retries.
+    """
+    ref = secrets.token_hex(4)
+    log.exception("unhandled error [%s] on %s %s", ref, request.method,
+                  request.url.path)
+    if not request.url.path.startswith("/admin"):
+        return PlainTextResponse("internal error", status_code=500)
+    import html as _h
+    return HTMLResponse(
+        f"<h3>That action failed</h3>"
+        f"<p><b>{_h.escape(exc.__class__.__name__)}</b>: "
+        f"{_h.escape(str(exc)[:400])}</p>"
+        f"<p>Reference <code>{ref}</code> — the full traceback is in the "
+        f"service log under that reference.</p>"
+        f"<p><a href='/admin/ui'>Back to the console</a></p>", status_code=500)
+
+
 @app.middleware("http")
 async def _console_session(request: Request, call_next):
     """Establish the cookie whenever a request arrives carrying a valid secret.
@@ -1321,6 +1348,36 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
         except Exception:  # noqa: BLE001
             log.exception("%s failed", label)
     threading.Thread(target=_go, daemon=True).start()
+
+
+@app.get("/admin/purge_proposals")
+def purge_proposals_route(key: str = Depends(admin_key), tenant: str = "",
+                          origin: str = "", dry_run: str = "1") -> dict:
+    """Delete un-reviewed proposals produced by an earlier version of the crawler.
+
+    /admin/purge_proposals?tenant=baci                 what it WOULD delete
+    /admin/purge_proposals?tenant=baci&dry_run=0       delete them
+    /admin/purge_proposals?dry_run=0&origin=crawl      every account, crawl only
+
+    Approved rows are never touched. Deleting rather than rejecting is
+    deliberate — see `kb.purge_proposals`.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    return kbm.purge_proposals(tenant=tenant, origin=origin,
+                               dry_run=dry_run not in ("0", "false", "no"))
+
+
+@app.get("/admin/purge_scans")
+def purge_scans_route(key: str = Depends(admin_key), tenant: str = "",
+                      dry_run: str = "1") -> dict:
+    """Drop recorded compliance scans so the tab stops showing a stale one."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import compliance
+    return compliance.purge_scans(
+        tenant=tenant, dry_run=dry_run not in ("0", "false", "no"))
 
 
 @app.post("/admin/proposal_review", response_class=HTMLResponse)

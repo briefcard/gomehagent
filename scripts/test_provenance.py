@@ -199,6 +199,30 @@ ck("a row created without a review state is not selectable",
    not [c for c in kb.claims(T) if c.claim == "ROW WITH NO REVIEW STATE"])
 
 
+# --------------------------------------------------------------------------
+print("\n— clearing out proposals from an older parser —")
+before_usable = len(kb.claims(T))
+kb.add_claim(T, "Junk the old parser thought was checkable 8217.", "",
+             ["gifting"], status="pending", origin="crawl")
+kb.add_objection(T, "An old proposal", "x", origin="client")
+
+dry = kb.purge_proposals(T)
+ck("a dry run reports and deletes nothing",
+   dry["total"] >= 2 and dry["dry_run"] and len(kb.pending_claims(T)) == 1,
+   str(dry["deleted"]))
+
+real = kb.purge_proposals(T, dry_run=False)
+ck("the proposals are gone", not kb.pending_claims(T), str(real["deleted"]))
+ck("approved rows are untouched", len(kb.claims(T)) == before_usable)
+# Deleted, not rejected, and this is the reason: suggest_tags learns what a bad
+# claim looks like from retired rows, so filing parser noise as "rejected"
+# would teach the tagger that noise is what rejection looks like.
+ck("and they leave no trace to poison the tagger",
+   not [r for r in kb.claim_inventory(T)["retired"]
+        if "old parser" in (r.claim or "")])
+ck("scoped to one account by default",
+   kb.purge_proposals("some-other-tenant")["total"] == 0)
+
 print()
 if _fail:
     print(f"{len(_fail)} FAILED: {_fail}")

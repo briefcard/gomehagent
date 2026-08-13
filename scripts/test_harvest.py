@@ -21,7 +21,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'hv.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import db, harvest, kb, kb_seed, tenants  # noqa: E402
+from app import compliance, db, harvest, kb, kb_seed, tenants  # noqa: E402
 
 _fail = []
 
@@ -262,6 +262,72 @@ def main() -> int:
        or all("proposed_count" in v for v in allr["accounts"].values()))
 
     httpx.get = real
+    # ---- the quality gate -------------------------------------------------
+    # Everything below is verbatim from a real review queue, except the last
+    # three, which are real claims that must survive. The gate is worth having
+    # only if it keeps those.
+    print("\n— the quality gate —")
+    import html as _htmllib
+    JUNK = [
+        ("an entity-encoded heading",
+         "Powerful Closures: Leaving a Lasting Impression Concluding your blog "
+         "post isn&#8217;t just about wrapping things up &#8211; it&#8217;s "
+         "your final opportunity to leave a strong impact."),
+        ("a nav run", "Book a 25-min intro Start the intake Agentic Core SEO Fig."),
+        ("blog meta", "Posted on March 3, 2026 by admin | 4 Comments"),
+        ("WordPress' default page", "Sample Page This is an example page."),
+        ("error copy", "404 Not Found. The page you requested does not exist."),
+        ("a bare price", "$95.00"),
+    ]
+    for label, raw in JUNK:
+        ck(f"dropped: {label}",
+           bool(harvest._quality(_htmllib.unescape(raw))),
+           harvest._quality(_htmllib.unescape(raw)))
+    KEEP = [
+        "Baci Milano tableware is stocked in 4 Four Seasons properties worldwide.",
+        "We took a coaching company from $6M to $20M in 18 months.",
+        "Our team has directed over $60M in ad spend across a decade.",
+    ]
+    for good in KEEP:
+        ck(f"kept: {good[:44]}…", not harvest._quality(good),
+           harvest._quality(good))
+
+    # The root cause, pinned. `&#8217;` contains 8217, and "carries a number"
+    # is the whole test for whether a sentence is checkable — so every curly
+    # apostrophe on the page was manufacturing evidence.
+    entity = "Concluding your post isn&#8217;t just about wrapping it up."
+    ck("an un-decoded entity would have faked the number test",
+       harvest._HAS_NUMBER.search(entity) is not None)
+    ck("and decoding it removes the fake number",
+       harvest._HAS_NUMBER.search(_htmllib.unescape(entity)) is None)
+
+    # ---- page selection ---------------------------------------------------
+    print("\n— pages not worth reading —")
+    for url in ("https://x.com/sample-page", "https://x.com/tag/gifts",
+                "https://x.com/author/admin", "https://x.com/page/4",
+                "https://x.com/404", "https://x.com/cart"):
+        ck(f"skipped {url.split('.com')[1]}", compliance.skip_url(url))
+    ck("a real page is not skipped", not compliance.skip_url("https://x.com/about"))
+    ck("a 200 that is really a 404 is caught by its title",
+       "error or placeholder" in compliance.is_dead_page(
+           "<title>404 – Page Not Found</title><body>" + "x" * 500 + "</body>"))
+    ck("a page with reviews but little prose is still read",
+       not compliance.is_dead_page("<title>Aqua</title><body>Six pieces.</body>",
+                                   min_chars=0))
+
+    # ---- furniture and entities ------------------------------------------
+    print("\n— what _clean returns —")
+    page = ("<html><head><title>About</title></head><body>"
+            "<nav>Home Shop Book a 25-min intro</nav>"
+            "<main><p>Concluding isn&#8217;t the end &#8211; we shipped 1,200 "
+            "orders in 2025.</p></main>"
+            "<footer>&copy; 2026 All rights reserved</footer></body></html>")
+    text = compliance._clean(page)
+    ck("nav is dropped", "Book a 25-min intro" not in text)
+    ck("footer is dropped", "All rights reserved" not in text)
+    ck("entities are decoded", "’" in text and "&#8217;" not in text)
+    ck("the actual copy survives", "we shipped 1,200 orders in 2025" in text.lower())
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

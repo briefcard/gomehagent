@@ -36,17 +36,97 @@ UA = ("SaiasOpsBot/1.0 (+content-compliance; first-party check of a site we "
 HEADERS = {"User-Agent": UA}
 
 
-_TAG = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S | re.I)
+_TAG = re.compile(r"<(script|style|noscript|svg|template)[^>]*>.*?</\1>", re.S | re.I)
+# Page furniture. Present on every page, identical every time, and none of it is
+# brand copy — a banned word in a menu link is not the site making a claim, and
+# a nav item is not a candidate for the proof library.
+_FURNITURE = re.compile(
+    r"<(nav|header|footer|aside|form|button|select)[^>]*>.*?</\1>", re.S | re.I)
+# The body of the page, when the markup says where it is.
+_MAIN = re.compile(r"<(?:main|article)[^>]*>(.*?)</(?:main|article)>", re.S | re.I)
 _HTML = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 
-# Pages that are never brand copy — checking them produces noise, not findings.
+# Pages that are never brand copy — reading them produces noise, not findings.
+#
+# The additions past the first line are all things a real crawl brought back:
+# WordPress' default "Sample Page", tag and author archives that restate other
+# pages' copy, pagination, and error pages that a site serves with a 200.
 _SKIP = ("/cart", "/checkout", "/account", "/policies/", "/wp-json",
-         "/feed", ".xml", ".json", ".pdf", "/search")
+         "/feed", ".xml", ".json", ".pdf", "/search",
+         "/sample-page", "/wp-admin", "/wp-content", "/wp-includes",
+         "/404", "/error", "/not-found", "/thank-you", "/thanks",
+         "/tag/", "/category/", "/author/", "/page/", "?s=", "?p=",
+         "/privacy", "/terms", "/cookie", "/legal", "/disclaimer",
+         "/login", "/register", "/cdn-cgi/")
+
+# A page whose title says it is an error, whatever status code it was served
+# with. Squarespace and plenty of WordPress themes return 200 on a missing page.
+_DEAD_TITLE = re.compile(
+    r"\b(404|403|not found|page not found|error|oops|nothing here|"
+    r"sample page|coming soon|under construction|untitled)\b", re.I)
 
 
-def _clean(html: str) -> str:
-    return _WS.sub(" ", _HTML.sub(" ", _TAG.sub(" ", html or ""))).strip()
+def skip_url(url: str) -> bool:
+    return any(s in (url or "").lower() for s in _SKIP)
+
+
+def page_title(html: str) -> str:
+    m = _TITLE.search(html or "")
+    return _clean(m.group(1)) if m else ""
+
+
+def is_dead_page(html: str, text: str | None = None,
+                 min_chars: int = 0) -> str:
+    """Why this page is not worth reading, or "" if it is.
+
+    Returns the reason rather than a bool so a report can say which pages were
+    skipped and why — "enumerated 400, read 240" with no explanation is the
+    kind of silent narrowing this codebase treats as a defect.
+
+    `min_chars` defaults to 0 because the two callers want different things.
+    Compliance must read a thin page: a two-line page can still say "handmade
+    in Italy", and skipping it would report a clean site that is not clean.
+    Harvest passes a real threshold, because a page with no prose on it has no
+    claim on it either.
+    """
+    title = page_title(html)
+    if _DEAD_TITLE.search(title):
+        return f"title reads as an error or placeholder: {title[:60]!r}"
+    body = _clean(html) if text is None else text
+    if len(body) < min_chars:
+        return f"almost no text on the page ({len(body)} chars)"
+    return ""
+
+
+def _clean(html_text: str) -> str:
+    """Readable prose from a page: the body, without the furniture, unescaped.
+
+    Two defects, both of which reached the review queue:
+
+    1. **Furniture was kept.** Stripping tags but not nav/header/footer meant
+       candidates came back as `"Book a 25-min intro Start the intake ..."` and
+       a banned word in a menu link was reported as a claim the site makes.
+
+    2. **Entities were never decoded**, so `isn&#8217;t` survived into the
+       text. That is not only ugly in the queue — harvest's "a claim carries a
+       number" filter is what decides a sentence is checkable, and `8217`
+       is a number. Every curly apostrophe on the page was manufacturing
+       evidence, which is most of why the proposals were junk.
+
+    Unescape happens AFTER tags are stripped. The other order turns an escaped
+    `&lt;script&gt;` in the copy into something that looks like markup.
+    """
+    import html as _htmllib
+
+    raw = html_text or ""
+    raw = _TAG.sub(" ", raw)
+    body = _MAIN.search(raw)
+    if body:
+        raw = body.group(1)          # the markup told us where the content is
+    raw = _FURNITURE.sub(" ", raw)
+    return _WS.sub(" ", _htmllib.unescape(_HTML.sub(" ", raw))).strip()
 
 
 def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
@@ -420,6 +500,35 @@ def record_scan(tenant: str, result: dict) -> str:
             "truncated": max(0, len(result["violations"]) - 40),
         })
     return run_id
+
+
+def purge_scans(tenant: str = "", dry_run: bool = True) -> dict:
+    """Drop recorded compliance scans, so the tab stops showing a stale one.
+
+    A scan taken before `_clean` unescaped entities and dropped page furniture
+    reports findings against text the site never displayed — a banned word in a
+    nav link, or a match inside `&#8217;`. Keeping it is worse than having no
+    scan: the tab presents it with a timestamp and it reads as current.
+    """
+    from . import db as _db, systems
+    hit = 0
+    with _db.SessionLocal() as s:
+        q = s.query(_db.SystemRun).join(
+            _db.System, _db.System.id == _db.SystemRun.system_id).filter(
+                _db.System.key == "content_compliance")
+        if tenant:
+            q = q.filter(_db.SystemRun.tenant == tenant)
+        rows = q.all()
+        hit = len(rows)
+        if not dry_run:
+            for r in rows:
+                s.delete(r)
+            s.commit()
+    return {"tenant": tenant or "all", "dry_run": dry_run,
+            "scans_cleared": hit,
+            "note": ("Clears recorded scans only — no knowledge-base row is "
+                     "touched. Re-run the scan to get a current one. "
+                     "Pass dry_run=0 to actually delete.")}
 
 
 def last_scan(tenant: str) -> dict:

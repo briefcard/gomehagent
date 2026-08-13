@@ -38,15 +38,79 @@ _MIN, _MAX = 25, 240
 _NOISE = re.compile(
     r"free shipping|subscribe|newsletter|cookie|privacy|copyright|all rights"
     r"|add to cart|sold out|quantity|sign up|log in|©|terms of service"
-    r"|returns? policy|use code|off your first", re.I)
+    r"|returns? policy|use code|off your first"
+    # Blog and CMS furniture. All of these arrived in a real review queue.
+    r"|read more|continue reading|posted on|posted in|filed under|min read"
+    r"|share this|leave a (comment|reply)|\d+ comments?|related posts?"
+    r"|previous post|next post|older posts|newer posts|tagged with"
+    r"|click here|learn more|skip to (content|main)|back to top"
+    r"|all rights reserved|powered by|lorem ipsum|sample page"
+    # Error-page prose. `skip_url` and the title check catch these first; this
+    # is the third layer, because a site that serves its 404 copy inside a real
+    # page defeats both of the others.
+    r"|\b40[0-9]\b|not found|page you (requested|are looking for)"
+    r"|does(n't| not) exist|try again later|temporarily unavailable", re.I)
 
 # A claim worth proposing carries a number — that is what makes it checkable.
+#
+# It must be a number in the PROSE. Before `_clean` unescaped entities, every
+# curly apostrophe reached this filter as `&#8217;` and matched, so ordinary
+# blog copy looked checkable and filled the queue. The filter was working; it
+# was being fed manufactured digits.
 _HAS_NUMBER = re.compile(r"\d")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+# A real sentence has a verb-ish word in it. Headings and menu runs do not.
+_VERBISH = re.compile(
+    r"\b(is|are|was|were|has|have|had|can|will|do|does|did|"
+    r"\w+(?:s|ed|es))\b", re.I)
 
 
 def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE.split(text or "") if s.strip()]
+
+
+def _looks_like_heading(s: str) -> bool:
+    """Title Case with no terminal punctuation is a heading, not a claim.
+
+    "Powerful Closures: Leaving a Lasting Impression" is a section title that
+    got proposed as proof. Headings restate what the body already says, so
+    dropping them costs nothing and clears a good share of the queue.
+    """
+    words = [w for w in s.split() if w[:1].isalpha()]
+    if len(words) < 3:
+        return True
+    capped = sum(1 for w in words if w[:1].isupper())
+    return capped / len(words) > 0.6 and not s.rstrip().endswith((".", "!", "?"))
+
+
+def _quality(s: str) -> str:
+    """Why this sentence is not worth proposing, or "" if it is.
+
+    Deterministic, and it reports a reason rather than a verdict — the point of
+    a filter that drops most of what it sees is that you can check what it
+    dropped. A model deciding this would be a model deciding what counts as
+    proof, which is the one judgement the review queue exists to keep human.
+    """
+    if not (_MIN <= len(s) <= _MAX):
+        return "wrong length"
+    if _NOISE.search(s):
+        return "page furniture"
+    if not _HAS_NUMBER.search(s):
+        return "no number, so nothing to check"
+    if _looks_like_heading(s):
+        return "reads as a heading, not a sentence"
+    if not _VERBISH.search(s):
+        return "no verb — a fragment or a menu run"
+    letters = sum(c.isalpha() for c in s)
+    if letters < len(s) * 0.5:
+        return "mostly punctuation, digits or markup residue"
+    # A price on its own, a date on its own, a phone number: real numbers that
+    # are not evidence of anything.
+    stripped = re.sub(r"[\d\s.,:$%/£€-]+", "", s)
+    if len(stripped) < 12:
+        return "a bare figure with no assertion around it"
+    return ""
 
 
 def _jsonld(html: str) -> list[dict]:
@@ -100,13 +164,15 @@ def _reviews_from(html: str, url: str) -> list[dict]:
     return found
 
 
-def _claims_from(text: str, url: str) -> list[dict]:
+def _claims_from(text: str, url: str,
+                 dropped: dict | None = None) -> list[dict]:
     """Sentences that assert something checkable — i.e. that carry a number."""
     out = []
     for s in _sentences(text):
-        if not (_MIN <= len(s) <= _MAX):
-            continue
-        if _NOISE.search(s) or not _HAS_NUMBER.search(s):
+        why = _quality(s)
+        if why:
+            if dropped is not None:
+                dropped[why] = dropped.get(why, 0) + 1
             continue
         out.append({"text": s, "evidence": "", "proof_type": "data",
                     "source": f"stated on {url}"})
@@ -148,25 +214,72 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
              for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
     proposed, rejected, untaggable = [], [], []
+    dropped: dict[str, int] = {}          # why candidates were not proposed
+    skipped: list[dict] = []              # pages not worth reading, and why
+
+    # --- pass 1: read the pages, keep candidates, write nothing -----------
+    # Two passes because boilerplate can only be recognised by looking across
+    # pages. A sentence is furniture not because of what it says but because it
+    # says it on every page, and that is not visible one page at a time.
     import httpx
+    per_page: list[tuple[str, list[dict]]] = []
     for p in pages[:limit]:
         url = p["url"]
+        if compliance.skip_url(url):
+            skipped.append({"url": url, "why": "not brand copy"})
+            continue
         html = p.get("html", "")
         if not html:
             try:
                 r = httpx.get(url, timeout=25, follow_redirects=True,
                               headers=compliance.HEADERS)
                 if r.status_code != 200:
+                    skipped.append({"url": url, "why": f"HTTP {r.status_code}"})
                     continue
                 html = r.text
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                skipped.append({"url": url, "why": exc.__class__.__name__})
                 continue
         text = compliance._clean(html)
-        for cand in _reviews_from(html, url) + _claims_from(text, url):
+        # Reviews are read BEFORE the page is judged. A product page carries
+        # its testimonials in JSON-LD and often has almost no prose — judging
+        # it on prose length would throw away the strongest source there is.
+        reviews = _reviews_from(html, url)
+        # A page served 200 with an error title, or with no prose and no
+        # structured data, has no claim on it. Plenty of themes return 200 for
+        # a missing page, which is why the title is checked at all.
+        dead = compliance.is_dead_page(html, text,
+                                       min_chars=0 if reviews else 200)
+        if dead:
+            skipped.append({"url": url, "why": dead})
+            continue
+        per_page.append((url, reviews + _claims_from(text, url, dropped)))
+
+    # --- how often does each candidate appear across the site? ------------
+    seen_on: dict[str, int] = {}
+    for _, cands in per_page:
+        for fp in {prov.fingerprint(c["text"]) for c in cands}:
+            seen_on[fp] = seen_on.get(fp, 0) + 1
+    n_pages = max(len(per_page), 1)
+    # A third of the site saying the same sentence is a template, not a claim.
+    # Computed per site, so it needs no hand-maintained list and works for a
+    # storefront, a blog and a venue site alike — the same document-frequency
+    # trick `kb.match_entities` uses to discount uninformative words.
+    boilerplate = {fp for fp, n in seen_on.items()
+                   if n_pages >= 4 and n > 0.33 * n_pages}
+
+    # --- pass 2: propose what survived ------------------------------------
+    for url, cands in per_page:
+        for cand in cands:
             body = cand["text"].strip()
             low = body.lower()
             fp = prov.fingerprint(body)
             if fp in known:
+                continue
+            if fp in boilerplate:
+                dropped["appears site-wide — a template, not a claim"] = \
+                    dropped.get("appears site-wide — a template, not a claim", 0) + 1
+                known.add(fp)
                 continue
             hit = next((b for b in banned if b in low), "")
             if hit:
@@ -197,19 +310,28 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False) -> dict:
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
         "page_source": source,
-        "pages_read": min(len(pages), limit),
+        "pages_enumerated": len(pages),
+        "pages_read": len(per_page),
+        "pages_skipped": len(skipped),
+        "skipped_examples": skipped[:10],
         "vocabulary_tags": len(vocab),
         "proposed": proposed,
         "proposed_count": len(proposed),
+        # What the quality gate threw away, and why. A filter that drops most
+        # of what it sees has to be auditable, or the next person to look at a
+        # thin queue cannot tell a clean site from a broken crawler.
+        "dropped_by_reason": dict(sorted(dropped.items(), key=lambda kv: -kv[1])),
         "rejected_for_banned_claim": rejected,
         "proposed_without_tags": untaggable[:15],
         "untagged_count": len(untaggable),
         "note": ("Proposals land as PENDING claims — invisible to selection "
-                 "until approved at /admin/ui?tab=kb. Anything using a banned "
-                 "phrase was dropped, not queued. Candidates the tagger could "
-                 "not place are proposed untagged — approval refuses until a "
-                 "tag is chosen, so they are segmented by a human rather than "
-                 "guessed at or thrown away."),
+                 "until approved at /admin/ui?tab=content. Anything using a "
+                 "banned phrase was dropped, not queued. Candidates the tagger "
+                 "could not place are proposed untagged — approval refuses "
+                 "until a tag is chosen, so they are segmented by a human "
+                 "rather than guessed at or thrown away. `dropped_by_reason` "
+                 "and `skipped_examples` say what the crawl chose not to show "
+                 "you, so a thin queue can be told apart from a broken read."),
     }
 
 

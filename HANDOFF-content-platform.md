@@ -27,36 +27,87 @@ and six reference artifacts (§11).
 
 ## 2. Status board
 
+Everything below is **on `main` and deployed** unless marked otherwise.
+Last verified 2026-08-12 at commit `2ad82d9`.
+
+> **Not yet deployed.** `0a7f4e7` and later sit on `feat/context-architecture`,
+> committed and unpushed: the ingest provenance spine (`app/provenance.py`),
+> the crawl-quality fixes, and the proposal/scan purge. Until that is pushed to
+> `main`, every "live" below means 2ad82d9's behaviour, not what the code in
+> the working tree does. Push with
+> `git push origin HEAD:main` — and read §12b first, because the deploy runs a
+> one-time backfill over five tables of live client knowledge.
+
 | Component | State |
 |---|---|
-| Telegram ops channel | **Deployed and live** |
-| Tenant registry + user scoping | Deployed, tested |
-| Knowledge base (5 tables) | Deployed, agency tenant seeded |
-| Brief assembler (decision layer) | Deployed, tested offline |
-| Admin console + live verification | Deployed |
-| Systems registry + run ledger | Built. `worker.systems_tick` is now its caller — runs daily, records blockers, sends nothing |
-| Systems tab (console) + per-system threads | Built, rendered — **not yet pushed** |
-| KB write layer + guided intake (`/next`) | Built, tested — **not yet pushed** |
-| Knowledge tab (console) | Built, rendered. Now shows **every** KB column per client, including the situation vocabulary, non-selectable claims, and the gap queue — **not yet pushed** |
-| KB seeded for baci / ironside / eien / coverings | Script written, **not yet run against prod** |
-| Tenant-shaped selection (rec 1) | Built, tested — **not yet pushed** |
-| Unknowns feedback loop (`KbUnknown`, `/unknowns`) | Built, tested — **not yet pushed** |
-| Client intake links (`/intake/<token>`) | Built, tested — **not yet pushed** |
-| Readiness bar means something (rec 2) | **Not built** |
-| Ledger + guidance wired into the path (rec 3) | Ledger wired via `worker.systems_tick`; `feedback_block` still has no caller |
-| Generator / validator / send (rec 4) | **Not built** |
+| Telegram ops channel | live |
+| Tenant registry + user scoping | live |
+| Knowledge base (5 tables) | live, **all five accounts seeded** |
+| Knowledge tab | live — renders every KB column, incl. situations, non-selectable claims, gap queue |
+| Content tab | live — proposals (editable), compliance findings, catalogue |
+| Systems tab + per-system threads | live |
+| Brief assembler | live, tested offline |
+| Console session (key once, then a cookie) | live |
+| Client credentials + connect links | live — API-key providers only |
+| Operational half tenant-scoped | live — `tenant` on 18 models, per-client uniqueness **verified on prod Postgres** |
+| Agent / tool / triage / worker scoping | live, enforced by `test_tenant_isolation.py` |
+| `worker.systems_tick` (run ledger's caller) | live — daily 07:00, records blockers, sends nothing |
+| Catalogue sync (Shopify → KbEntity) | live, **never run against prod** |
+| Website content compliance | live, **never run against prod** |
+| Harvest (site → pending proposals) | live, **never run against prod** |
+| Readiness bar means something (rec 2) | **not built** |
+| Generator / validator / send (rec 4) | **not built** — nothing produces output |
+| Reports | not started |
+| Spreadsheet upload | **not built** |
+| Media layer | **not built** |
+| Canva | not connected (OAuth) |
 
-| Operational half tenant-scoped (schema) | **Built** — `tenant` on 18 models, per-client uniqueness, derivable backfill. Call sites still to follow |
-| Reports (ads, business health) | Not started |
-| Canva | Not connected (OAuth, needs auth layer) |
-| Agent scoping for non-owners | **Not started — blocks client access** |
+**What has NOT been run against production yet** (all are safe reads first):
 
-**Read `DEFECTS.md` before touching `kb.py`, `brief.py` or `systems.py`** — it
-records every defect found so far, the six patterns they share, and what is
-still broken.
+```
+/admin/systems_seed                      -> systems is currently []
+/admin/tenant_scope                      -> 13,772 rows still unattributed
+/admin/seed_kb                           -> re-run: the agency seed was fixed
+/admin/catalog_sync?tenant=baci&report_only=1
+/admin/compliance_scan?tenant=baci
+/admin/harvest
+```
+
+`CREDENTIAL_KEY` is **not set** in the env group. Set it before any client
+connects anything — it is the encryption key, and changing it later orphans
+stored credentials.
 
 Live service: `https://assistant-web-zm2d.onrender.com`
 Bot: `@Gomehadmin_bot`
+
+---
+
+## 2b. Where each account actually stands (measured 2026-08-12)
+
+| Account | KB | Site enumerable | Compliance |
+|---|---|---|---|
+| agency | ready (12 claims, 4 aud, 6 obj) | 19 pages via **wp-json** | ready |
+| baci | 3 claims, 3 aud, 0 obj, 1 entity, 24 rules | 400 pages via sitemap | **3 real violations found** |
+| eien | ban list only | 289 pages via sitemap | ready |
+| ironside | 1 claim, 1 aud, 8 venues, 6 rules | 169 pages via sitemap | ready |
+| coverings | 1 audience only | **TLS chain broken** | blocked: no `banned_claims` |
+
+Baci's live violations, found by the real scanner:
+`/pages/wholesale` (bespoke + "personalization"), `/pages/best-italian-espresso-cups…`
+(craftsmanship), `/pages/care-guide` (hand-painted).
+
+**Objections are 0 on every account.** Human-authored, cannot be derived, and
+half of what a real reply needs. `/next` on Telegram and the client intake link
+are the two paths.
+
+> **Draft — reword to taste.** Once `feat/context-architecture` deploys, a
+> count of 0 stops meaning "nobody has answered". A client filling an intake
+> link now files a **proposal**: it is recorded, the form does not ask them
+> again, and it does not count as an objection until someone approves it. So
+> read the count next to it — `completeness()` reports
+> `kb_objections (2 waiting for review)` rather than `(none)`, and the Content
+> tab lists them under "Everything else awaiting you". Zero with proposals
+> waiting is an approval job; zero with none waiting is still an authoring job.
 
 ---
 
@@ -115,6 +166,40 @@ New this session:
 | `scripts/seed_kb.py` | Seeds baci/ironside/eien/coverings from established facts only; `--report` shows remaining gaps; `backfill()` fills columns added after a tenant was first seeded |
 | `scripts/test_selection.py` | Tenant-shaped selection + the unknowns loop |
 | `scripts/test_kb_ui.py` | Asserts every seeded KB fact reaches the rendered Knowledge tab, per tenant. Catches the class of bug where a field exists, is used by the pipeline, and is invisible to the person meant to maintain it |
+
+### Files added 2026-08-12
+
+| File | Purpose |
+|---|---|
+| `app/tenant_scope.py` | Attributes the operational tables to a client. `preview()` predicts per row and shares `_derive()` with `backfill()`; `resolve()` is what writers call to attribute at capture time |
+| `app/credentials.py` | Per-client credentials, Fernet at rest. `PROVIDERS` registry, `resolve()` = DB first then env blob, `store()` verifies against the live API before writing |
+| `app/tool_scope.py` | **The account boundary.** `SCOPED` maps every tool that names an account to its parameter + capability; `filter_tools` strips it from the schema; `guard` injects the right one and refuses a different one |
+| `app/catalog_sync.py` | Shopify → `KbEntity`. Store owns price and stock; copy using a banned phrase is flagged and not imported. **Ownership of the prose is decided by `provenance.may_write`, never by inspecting the `source` string** — the old `source not in ("shopify","")` test let an approved description on a store-supplied row be overwritten, which is the defect the spine exists to close |
+| `app/compliance.py` | Website content compliance. `discover_pages` = sitemap → wp-json → homepage crawl; `_match` separates assertions from questions; `record_scan` stores findings in the run ledger |
+| `app/harvest.py` | Site → **pending** claim proposals. Banned phrases dropped, reviews from JSON-LD with provenance, untagged candidates proposed for human segmentation |
+| `scripts/test_tenant_isolation.py` | **The mandatory rule as a test.** A model without `tenant`, or a tool naming an account without being in `SCOPED`, fails by name |
+| `scripts/test_migration.py` | Runs the migration over a database that already has rows — the case every other suite misses |
+| `scripts/test_console_auth.py` · `test_credentials.py` · `test_catalog_sync.py` · `test_compliance.py` · `test_harvest.py` · `test_worker_systems.py` | one per system above |
+
+**Key API additions:** `kb.claim_inventory()`, `kb.situation_rows()`,
+`kb.suggest_tags()` (patterns, then similarity to already-approved claims),
+`kb.update_claim()`, `kb.PROOF_USAGE` / `VERBATIM_ONLY`, `tenants.for_alias()`,
+`tenants.agent_block()`, `db.tenant_filter()`, `worker.inboxes()`,
+`worker.systems_tick()`.
+
+### Files added on `feat/context-architecture` — NOT deployed
+
+| File | Purpose |
+|---|---|
+| `app/provenance.py` | **The ingest spine.** `origin` / `review` / `fingerprint` on every KB table, `may_write` (the one precedence rule), `record_conflict`, `near_duplicates`. Approved is final: a machine that disagrees records a conflict and changes nothing |
+| `scripts/test_provenance.py` | The five measured ingest defects, each as a named check |
+
+**Further API additions:** `kb.proposals()` (one review queue across all five
+tables), `kb.approve()`, `kb.purge_proposals()`, `compliance.purge_scans()`,
+`compliance.skip_url()` / `page_title()` / `is_dead_page()`,
+`harvest._quality()`, `provenance.*`, and the `KbConflict` model.
+
+---
 
 **Tenant-shaped selection (Aug 2026) — recommendation 1 of 4.** Proven broken
 by running a real Ironside enquiry: "220 guests seated in March" produced

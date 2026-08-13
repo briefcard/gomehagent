@@ -191,6 +191,93 @@ Treat it as "not obviously empty," not "good."
 
 ---
 
+## 3b. Derive the rest from their website
+
+Three tools, all safe to read first. They appear in the console under
+**Content** (`/admin/ui?tab=content&tenant=acme`) with a button each, or as
+routes.
+
+**Catalogue** — Shopify products into the knowledge base, with live stock:
+
+```bash
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/catalog_sync?tenant=baci&report_only=1"
+```
+
+The store owns price and availability on every sync; a description you wrote by
+hand is never overwritten. Products whose storefront copy uses a banned phrase
+are catalogued but their copy is not imported, and they are listed so the page
+can be fixed.
+
+> **Draft — reword to taste.** From `feat/context-architecture` on, "never
+> overwritten" is enforced rather than intended, and the refusal is now
+> reported instead of silent. When the store contradicts something you have
+> approved, the sync writes nothing and lists the field under `held_back`; the
+> disagreement appears on the Content tab under **Sources disagree**, with both
+> values and a button each. Nothing downstream changes until you pick one, so
+> the queue is safe to leave — but it is also the only place that work shows
+> up, so check it after a sync. A row the store created and you have never
+> edited is still refreshed silently; that is not a conflict.
+
+**Compliance** — is the live site already saying what the brand banned:
+
+```bash
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/compliance_scan?tenant=baci"
+```
+
+Pages come from sitemap → WordPress API → homepage crawl, whichever the site
+supports, and the result says which was used. `&since=2026-08-01` checks only
+what changed. An account with no `banned_claims` is **refused, not passed** —
+scanning against zero rules and reporting "clean" is worse than not scanning.
+
+**Harvest** — propose claims and reviews from their own site:
+
+```bash
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/harvest?tenant=baci"
+```
+
+Add `&apply=1` to file them. They land **pending** — invisible to every
+generator until approved on the Content tab, where each one is editable: fix the
+wording, set the situation tags, then Save & approve.
+
+Three rules worth knowing:
+
+- A candidate using a banned phrase is **dropped, not queued** — including a
+  customer review. Someone else saying it does not make it sayable.
+- A candidate the tagger cannot place is proposed **untagged**. Approval is
+  refused until you tag it, so segmentation happens where someone actually knows
+  the answer.
+- **A testimonial's wording cannot be edited.** A review reworded as brand copy
+  is a fabrication however true the sentiment. Tags and attribution stay
+  editable; the customer's words do not.
+
+What a crawler can **never** derive is `banned_claims` — a site records what a
+brand does say, and the ban list is what it must not. Baci's own site says
+"handmade in Italy", which is exactly why.
+
+**Clearing a queue that came from an older crawler.** Proposals filed before
+the crawl-quality fixes were chosen by a filter that has since been corrected,
+so re-reading them costs more than re-running the harvest. Both purges default
+to a dry run and never touch anything approved:
+
+```bash
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_proposals?tenant=baci"
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_proposals?tenant=baci&dry_run=0"
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/purge_scans?tenant=baci&dry_run=0"
+```
+
+Proposals are **deleted, not rejected** — deliberately. `suggest_tags` learns
+what a bad claim looks like from retired rows, so filing a hundred pieces of
+parser noise as "rejected" would teach the tagger that noise is what a rejected
+claim looks like and degrade every suggestion after it.
+
+**What the harvest report tells you now.** `pages_enumerated` vs `pages_read`
+vs `pages_skipped` (with `skipped_examples`), and `dropped_by_reason` — the
+count of candidate sentences the quality gate threw away, by reason. A thin
+queue is supposed to be readable as either "the site says little that is
+checkable" or "the crawl broke", and those two numbers are how you tell.
+
+---
+
 ## 4. Attribute their existing data
 
 Only relevant if the account already has history in the operational tables
@@ -332,7 +419,11 @@ python3 scripts/test_kb.py && python3 scripts/test_intake.py && \
 python3 scripts/test_kb_ui.py && python3 scripts/test_tenant_scope.py && \
 python3 scripts/test_migration.py && python3 scripts/test_console_auth.py && \
 python3 scripts/test_credentials.py && \
-python3 scripts/test_tenant_isolation.py
+python3 scripts/test_tenant_isolation.py && \
+python3 scripts/test_worker_systems.py && python3 scripts/test_catalog_sync.py && \
+python3 scripts/test_compliance.py && python3 scripts/test_harvest.py && \
+python3 scripts/test_provenance.py && python3 scripts/test_brief.py --demo && \
+python3 scripts/test_selection.py && python3 scripts/test_systems.py
 ```
 
 Still outstanding from the tenant migration — the Postgres constraint regrade
