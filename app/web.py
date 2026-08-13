@@ -1455,11 +1455,15 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         kbm.review_claim(claim_id, approve=False)
         return _back_to_content(tenant)
 
-    kbm.update_claim(
+    msg = kbm.update_claim(
         claim_id,
         claim=str(form.get("claim", "")),
         evidence=str(form.get("evidence", "")),
+        entity_key=str(form.get("entity_key", "")),
         tags=[str(t) for t in form.getlist("tags")])
+    if msg != "Saved." and "catalogue" in msg:
+        return HTMLResponse(f"<h3>{msg}</h3><p><a href='/admin/ui?tab=content"
+                            f"&tenant={tenant}'>Back</a></p>", status_code=400)
     if action == "approve":
         # May refuse — an untagged claim cannot be approved, and the tab will
         # still show it with the reason.

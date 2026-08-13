@@ -848,7 +848,8 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
 
 def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                  tags: list[str] | None = None, proof_type: str = None,
-                 source: str = None, strength: str = None) -> str:
+                 source: str = None, strength: str = None,
+                 entity_key: str | None = None) -> str:
     """Edit a claim in place. The editing half of propose-then-approve.
 
     Tags are validated against the tenant's vocabulary exactly as `add_claim`
@@ -859,6 +860,18 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
         row = s.get(db.KbClaim, claim_id)
         if not row:
             return "No such claim."
+        if entity_key is not None:
+            ek = (entity_key or "").strip().lower()
+            # Validated exactly as tags are. A claim scoped to an entity that
+            # does not exist is unreachable: selection only ever asks for the
+            # scope of something it is already writing about, so a typo here
+            # silently retires the claim rather than failing loudly.
+            if ek and not [e for e in entities(row.tenant, available_only=False,
+                                               include_proposed=True)
+                           if e.key == ek]:
+                return (f"{row.tenant} has nothing in its catalogue keyed "
+                        f"{ek!r}. Leave it blank for a brand-level claim.")
+            row.entity_key = ek
         if tags is not None:
             valid = situations(row.tenant)
             unknown = [t for t in tags if t not in valid]

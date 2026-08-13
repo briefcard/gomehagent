@@ -229,6 +229,32 @@ def main() -> int:
        not [o for o in kb.objections("baci")
             if o.objection == "Is it dishwasher safe?"])
 
+    # ---- 5. an entity-scoped claim says so, on the page ------------------
+    # A claim harvested from a product page is attached to that product, and
+    # `entity_key` was set correctly from the first run — but the card rendered
+    # only `proof_type · source`, so a reviewer approving "Generous 32 cm
+    # footprint…" had no way to see what it was true OF. That is the same class
+    # of defect as 2.13: a field the pipeline uses and the maintainer cannot see.
+    kb.add_entity("baci", "product", "cake-stand-cover",
+                  "Clear Cake Stand with Cover", origin="store_sync")
+    kb.add_claim("baci", "Generous 32 cm footprint: ample room for a layer cake.",
+                 "", [], proof_type="data", status="pending", origin="crawl",
+                 source="stated on https://bacimilanousa.com/products/cake-stand-cover",
+                 entity_key="cake-stand-cover")
+    page = admin_ui.render_content(KEY, "baci")
+    ck("the card names what the claim is true of",
+       has(page, "Clear Cake Stand with Cover"))
+    ck("and says what that restricts it to",
+       "only ever appear in content about that" in page)
+    ck("the scope is editable against the account's own catalogue",
+       'name="entity_key"' in page and 'list="ents"' in page)
+    scoped = [c for c in kb.pending_claims("baci")
+              if c.entity_key == "cake-stand-cover"]
+    ck("a product-page claim is attached at capture, not left brand-level",
+       len(scoped) == 1)
+    ck("a scope that is not in the catalogue is refused by name",
+       "catalogue" in kb.update_claim(scoped[0].id, entity_key="no-such-key"))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

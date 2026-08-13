@@ -1021,6 +1021,11 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
     # --- proposals ---------------------------------------------------------
     pending = kbm.pending_claims(tenant)
     vocab = sorted(kbm.situations(tenant))
+    cat = sorted(((e.key, e.name) for e in
+                  kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
+    catlist = ('<datalist id="ents">'
+               + "".join(f'<option value="{_esc(k)}">{_esc(n)}</option>'
+                         for k, n in cat) + "</datalist>")
     if pending:
         def _card(p) -> str:
             chosen = set(p.situations or [])
@@ -1058,6 +1063,15 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
               <input name="evidence" value="{_esc(p.evidence or '')}"
                      placeholder="what makes this checkable">
               <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>
+              <label>True of &mdash; blank means the whole brand</label>
+              <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
+                     placeholder="brand-level (used in any content)">
+              <div class="when">{
+                  "Scoped to " + _esc(dict(cat).get(p.entity_key, p.entity_key))
+                  + " &mdash; it will only ever appear in content about that."
+                  if p.entity_key else
+                  "Brand-level &mdash; usable in any content for this account."
+              }</div>
               {warn}
               <label>Situations</label>
               <div class="tags">{tagbox}</div>
@@ -1067,8 +1081,8 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
                 <button class="sec" name="action" value="reject">Reject</button>
               </div>
             </form>"""
-        proposals = f'<div class="grid" style="grid-template-columns:1fr">' \
-                    + "".join(_card(p) for p in pending) + "</div>"
+        proposals = (catlist + '<div class="grid" style="grid-template-columns:1fr">'
+                     + "".join(_card(p) for p in pending) + "</div>")
     else:
         proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
                      'own site and files what it finds here — as proposals, never '
