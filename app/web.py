@@ -898,6 +898,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_systems(link_key)
     if tab == "kb":
         return ui.render_kb(link_key, tenant)
+    if tab == "schema":
+        return ui.render_schema(link_key, tenant)
     if tab == "content":
         return ui.render_content(link_key, tenant, started=started)
     return ui.render(link_key)

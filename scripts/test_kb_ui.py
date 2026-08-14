@@ -255,6 +255,57 @@ def main() -> int:
     ck("a scope that is not in the catalogue is refused by name",
        "catalogue" in kb.update_claim(scoped[0].id, entity_key="no-such-key"))
 
+    # ---- 6. the Data layer tab describes the schema from the models ------
+    # Hand-written schema documentation goes stale the first time someone adds
+    # a column. This page is built by reading the models, so the assertion is
+    # that every KB table and every provenance column reaches it on its own.
+    print("\n— the Data layer tab —")
+    page = admin_ui.render_schema(KEY, "baci")
+    for table in ("kb_brand", "kb_claims", "kb_entities", "kb_objections",
+                  "kb_audiences", "kb_situations", "kb_unknowns", "kb_conflicts"):
+        ck(f"{table} is on the page", table in page)
+    for col in ("origin", "review", "approved_by", "fingerprint", "entity_key"):
+        ck(f"column {col} is listed", f">{col}<" in page)
+    ck("the two scoping axes are labelled",
+       ">provenance<" in page and ">scope<" in page)
+    ck("rows are broken down by review state", "approved" in page)
+    ck("and by where they came from", "seed" in page)
+    ck("counts are the approved ones the generator would see",
+       "APPROVED rows only" in page)
+    ck("an account with nothing still renders",
+       "Data layer" in admin_ui.render_schema(KEY, "blank"))
+
+    # ---- 7. the Data layer tab describes the schema from the models -------
+    # Hand-written schema documentation goes stale the first time somebody adds
+    # a column. This page is built by reading the models, so what is asserted is
+    # that every table and every provenance column reaches it on its own.
+    print("\n— the Data layer tab —")
+    page = admin_ui.render_schema(KEY, "baci")
+    for table in ("kb_brand", "kb_claims", "kb_entities", "kb_objections",
+                  "kb_audiences", "kb_situations", "kb_unknowns", "kb_conflicts"):
+        ck(f"{table} is on the page", table in page)
+    for col in ("origin", "review", "approved_by", "fingerprint", "entity_key"):
+        ck(f"column {col} is listed", f">{col}<" in page)
+    ck("the scoping axes are labelled",
+       ">provenance<" in page and ">scope<" in page)
+    ck("rows break down by review state and by origin",
+       "approved" in page and "seed" in page)
+    ck("counts are the approved ones a generator would see",
+       "APPROVED rows only" in page)
+
+    # The relational view. The no-foreign-keys fact is the single most important
+    # thing to know before extending this schema, so it is asserted rather than
+    # left to whoever happens to read db.py.
+    ck("identifiers are documented", "<h2>Identifiers</h2>" in page)
+    ck("business keys are named, not just primary keys",
+       "fingerprint(claim, entity_key)" in page and "tenant + key" in page)
+    ck("relationships are documented", "How the tables relate" in page)
+    ck("and the absence of foreign keys is stated outright",
+       "no foreign keys anywhere" in page)
+    ck("nullable joins are marked as such", page.count(">nullable<") >= 3)
+    ck("an account with nothing still renders",
+       "Data layer" in admin_ui.render_schema(KEY, "blank"))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

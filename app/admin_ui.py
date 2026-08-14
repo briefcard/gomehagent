@@ -112,7 +112,7 @@ padding:.1em .35em;border-radius:3px}
 border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
 .ok{background:var(--oks);border-left:3px solid var(--ok);padding:10px 14px;
 border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.cols{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}.cols th{text-align:left;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#8a8f98;padding:5px 8px;border-bottom:1px solid #e2e5ea}.cols td{padding:5px 8px;border-bottom:1px solid #f0f2f5;vertical-align:middle}.cols .cn{font-family:ui-monospace,Menlo,monospace}.cols .ct{font-family:ui-monospace,Menlo,monospace;color:#8a8f98;font-size:11px}.cols .cf{width:150px;white-space:nowrap}.fillbar{display:inline-block;width:88px;height:6px;border-radius:3px;background:#e6e9ee;vertical-align:middle;overflow:hidden}.fillbar i{display:block;height:100%;background:#2f7d5c}.fillbar i.sec{background:#c9a227}.fillbar i.off{background:#cfd4da}.fillpct{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#8a8f98;margin-left:7px}.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
 .tabs a{text-decoration:none;font-size:.85rem;font-weight:600;color:var(--mut);
 padding:8px 15px;border:1px solid transparent;border-bottom:none;border-radius:5px 5px 0 0;
 position:relative;bottom:-1px}
@@ -146,7 +146,7 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 """
 
 _TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
-         ("content", "Content"))
+         ("content", "Content"), ("schema", "Data layer"))
 
 
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
@@ -1405,3 +1405,239 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
 <p class="lock">Keys are encrypted before they are stored and are never shown
 again — not on this page, and not to us. This link is private to {name}.</p>
 </div></body></html>"""
+
+
+# ---------------------------------------------------------------------------
+# The Data layer tab — what the knowledge base actually holds, per account.
+#
+# The Knowledge tab shows the CONTENT: this shows the SHAPE. Which tables exist,
+# how full each column is, and how the rows break down by where they came from
+# and whether anyone has approved them. Built by reading the models rather than
+# by hand, so a column added tomorrow appears here without anyone remembering
+# to add it — the same reason `test_kb_ui` asserts against rendered HTML.
+# ---------------------------------------------------------------------------
+
+_KB_TABLES = [
+    ("KbBrand", "kb_brand", "Who they are, how they sound, what they may never say",
+     "One row per account. Voice, positioning, banned claims, and the config "
+     "that tells selection what this account sells."),
+    ("KbClaim", "kb_claims", "Assertions the brand is allowed to make",
+     "The heart of it. Each carries its proof, its proof TYPE (which governs "
+     "what a generator may do with it), the situations it answers, and what it "
+     "is true of."),
+    ("KbEntity", "kb_entities", "The thing being sold",
+     "One table absorbs offers, products, venue spaces and slabs. `attributes` "
+     "is the typed bag selection matches numeric requirements against."),
+    ("KbObjection", "kb_objections", "Why a deal stalls, and the approved answer",
+     "Scoped to an audience, an entity, or neither. A product FAQ is exactly "
+     "this shape, which is why it is the one place objections can be derived."),
+    ("KbAudience", "kb_audiences", "A buyer segment, in their words not yours",
+     "`vocabulary` is what THEY say — the words a draft should echo back."),
+    ("KbSituation", "kb_situations", "The account's own diagnostic vocabulary",
+     "The controlled tag list claims are filed under. Per account, as data — a "
+     "shared constant was agency language no product enquiry could ever match."),
+    ("KbUnknown", "kb_unknowns", "Questions the catalogue could not answer",
+     "Counted by how often each gap actually cost an answer, so the backlog is "
+     "ranked by real cost rather than by guesswork."),
+    ("KbConflict", "kb_conflicts", "Two sources disagree about an approved value",
+     "Both values kept, neither applied. The row keeps what a human approved "
+     "until someone settles it."),
+]
+
+
+# How the KB tables find each other. Written down here rather than derived,
+# because there are no foreign keys to derive it FROM — every one of these is a
+# join the write layer performs and validates by hand. Anyone reading the schema
+# needs that stated, not implied.
+_IDENTIFIERS = [
+    ("kb_brand", "tenant", "—",
+     "The account key IS the primary key. One brand row per client."),
+    ("kb_claims", "id (uuid)", "fingerprint(claim, entity_key)",
+     "Dedupe is on the normalised claim text plus its scope, so the same "
+     "sentence about two products stays two rows."),
+    ("kb_entities", "id (uuid)", "tenant + key",
+     "`key` is the stable slug or SKU — the join target every entity_key points at."),
+    ("kb_audiences", "id (uuid)", "tenant + key", "Upserted on key."),
+    ("kb_objections", "id (uuid)", "fingerprint(objection, entity_key)",
+     "Same rule as claims: one question, two products, two answers."),
+    ("kb_situations", "id (uuid)", "tenant + tag", "The controlled vocabulary."),
+    ("kb_unknowns", "id (uuid)", "tenant + entity_key + attribute",
+     "One row per real gap, counted — not one per enquiry."),
+    ("kb_conflicts", "id (uuid)", "tenant + table_name + row_id + field",
+     "Aggregated while open, so a nightly sync raises the count not the rows."),
+]
+
+_RELATIONSHIPS = [
+    ("tenants.key", "every KB table .tenant", "1 : N", "required",
+     "The account boundary. Reads are filtered by it server-side, never from a "
+     "caller-supplied parameter."),
+    ("kb_entities (tenant, key)", "kb_claims.entity_key", "1 : N", "nullable",
+     "Blank means the claim is true of the brand and usable anywhere. Set means "
+     "it only ever appears in content about that entity."),
+    ("kb_entities (tenant, key)", "kb_objections.entity_key", "1 : N", "nullable",
+     "Same rule. A product FAQ answer is correct about one product and wrong "
+     "about the next."),
+    ("kb_entities (tenant, key)", "kb_unknowns.entity_key", "1 : N", "required",
+     "A gap is always a gap in one thing's data."),
+    ("kb_audiences (tenant, key)", "kb_objections.audience_key", "1 : N", "nullable",
+     "Blank means it applies to every segment."),
+    ("kb_situations (tenant, tag)", "kb_claims.situations[]", "N : M", "validated",
+     "A JSON array, checked against the account's own tags on every write. An "
+     "unknown tag is refused rather than stored."),
+    ("kb_claims.id", "kb_objections.claim_id", "1 : N", "nullable, unused",
+     "Designed to pair an objection with the proof that answers it. Nothing "
+     "writes it yet."),
+    ("any KB row .id", "kb_conflicts.row_id + table_name", "1 : N", "polymorphic",
+     "The conflict names its table, so one queue covers every kind of row."),
+]
+
+def _fill_bar(pct: int) -> str:
+    """A column's fill rate. Empty columns are the point of this screen."""
+    cls = "on" if pct >= 80 else ("sec" if pct >= 30 else "off")
+    return (f'<span class="fillbar"><i class="{cls}" style="width:{pct}%"></i>'
+            f'</span><span class="fillpct">{pct}%</span>')
+
+
+def render_schema(key: str, tenant: str = "") -> str:
+    from . import db as _db, kb as kbm, provenance as prov
+
+    rows_t = tenants.all_tenants(include_paused=True)
+    tenant = tenant or (rows_t[0].key if rows_t else "")
+    picker = "".join(
+        f'<a class="{"on" if r.key == tenant else ""}" '
+        f'href="/admin/ui?tab=schema&amp;tenant={_esc(r.key)}">{_esc(r.name)}</a>'
+        for r in rows_t)
+
+    blocks = []
+    for cls_name, table, headline, why in _KB_TABLES:
+        model = getattr(_db, cls_name)
+        cols = [c for c in model.__table__.columns]
+        with _db.SessionLocal() as s:
+            q = s.query(model)
+            if "tenant" in [c.name for c in cols]:
+                q = q.filter(model.tenant == tenant)
+            rows = q.all()
+            s.expunge_all()
+        n = len(rows)
+
+        # Per-column fill rate. A column nobody fills is either dead weight or
+        # a gap in the intake, and both are worth seeing.
+        colrows = ""
+        for c in cols:
+            if c.name in ("id", "tenant"):
+                continue
+            filled = 0
+            for r in rows:
+                v = getattr(r, c.name, None)
+                if v not in (None, "", [], {}):
+                    filled += 1
+            pct = int(100 * filled / n) if n else 0
+            axis = ""
+            if c.name in ("origin", "review", "approved_by", "approved_at",
+                          "fingerprint", "also_seen"):
+                axis = '<span class="chip sec">provenance</span>'
+            elif c.name in ("entity_key", "audience_key"):
+                axis = '<span class="chip sec">scope</span>'
+            colrows += (f'<tr><td class="cn">{_esc(c.name)}</td>'
+                        f'<td class="ct">{_esc(str(c.type)[:14])}</td>'
+                        f'<td class="cf">{_fill_bar(pct) if n else "&mdash;"}</td>'
+                        f'<td>{axis}</td></tr>')
+
+        # How the rows break down on the two axes that decide usability.
+        def _tally(attr):
+            out = {}
+            for r in rows:
+                out[getattr(r, attr, None) or "—"] = out.get(
+                    getattr(r, attr, None) or "—", 0) + 1
+            return out
+        breakdown = ""
+        if n and hasattr(model, "review"):
+            rev = _tally("review")
+            org = _tally("origin")
+            breakdown = ('<div class="chips">'
+                         + "".join(f'<span class="chip {"on" if k == prov.APPROVED else "off"}">'
+                                   f'{_esc(k)} {v}</span>' for k, v in sorted(rev.items()))
+                         + "".join(f'<span class="chip sec">{_esc(k)} {v}</span>'
+                                   for k, v in sorted(org.items())) + "</div>")
+
+        blocks.append(f"""
+        <div class="card">
+          <div class="head">
+            <h2>{_esc(headline)}</h2>
+            <span class="chip {"on" if n else "off"}">{n} row{"" if n == 1 else "s"}</span>
+          </div>
+          <div class="when">{_esc(cls_name)} &middot; <code>{_esc(table)}</code></div>
+          <p class="mut">{why}</p>
+          {breakdown}
+          <table class="cols">
+            <tr><th>Column</th><th>Type</th><th>Filled</th><th></th></tr>
+            {colrows}
+          </table>
+        </div>""")
+
+    ident = "".join(
+        f'<tr><td class="cn">{_esc(t)}</td><td class="cn">{_esc(pk)}</td>'
+        f'<td class="cn">{_esc(bk)}</td><td class="mut">{_esc(why)}</td></tr>'
+        for t, pk, bk, why in _IDENTIFIERS)
+    rels = "".join(
+        f'<tr><td class="cn">{_esc(a)}</td><td class="ct">&rarr;</td>'
+        f'<td class="cn">{_esc(b)}</td><td class="ct">{_esc(card)}</td>'
+        f'<td><span class="chip sec">{_esc(req)}</span></td>'
+        f'<td class="mut">{_esc(why)}</td></tr>'
+        for a, b, card, req, why in _RELATIONSHIPS)
+    relational = f"""
+<div class="card">
+  <div class="head"><h2>Identifiers</h2></div>
+  <p class="mut">Every table has a surrogate primary key. The business key is
+  what the write layer actually dedupes and upserts on — and none of these are
+  database constraints, so concurrent writers could still both insert.</p>
+  <table class="cols">
+    <tr><th>Table</th><th>Primary key</th><th>Business key</th><th></th></tr>
+    {ident}
+  </table>
+</div>
+
+<div class="card">
+  <div class="head"><h2>How the tables relate</h2></div>
+  <p class="mut"><b>There are no foreign keys anywhere in this schema.</b> Every
+  relationship below is a join the write layer performs and validates by hand —
+  which is why an unknown situation tag or an entity key that is not in the
+  catalogue is refused at the door rather than caught by the database.</p>
+  <table class="cols">
+    <tr><th>From</th><th></th><th>To</th><th>Card.</th><th></th><th></th></tr>
+    {rels}
+  </table>
+</div>"""
+
+    comp = kbm.completeness(tenant)
+    waiting = comp.get("awaiting_review", {})
+    top = (f'<div class="stat">'
+           f'<span><b>{comp["counts"].get("claims", 0)}</b> claims</span>'
+           f'<span><b>{comp["counts"].get("entities", 0)}</b> entities</span>'
+           f'<span><b>{comp["counts"].get("objections", 0)}</b> objections</span>'
+           f'<span><b>{sum(waiting.values())}</b> awaiting review</span>'
+           f'<span>{"ready" if comp["ready"] else "not ready"}</span></div>')
+    missing = ("".join(f'<span class="chip off">{_esc(m)}</span>'
+                       for m in comp.get("missing", []))) or ""
+
+    return _shell(key, "schema", "Data layer", f"""
+<div>
+  <h1>Data layer</h1>
+  <p class="mut">What the knowledge base holds for this account, table by table.
+  The Knowledge tab shows the content; this shows the shape — which columns are
+  actually being filled, and how the rows break down by where they came from and
+  whether a human has approved them. Read from the models, so a new column shows
+  up here on its own.</p>
+</div>
+<div class="tabs">{picker}</div>
+<div class="card">
+  <div class="head"><h2>This account at a glance</h2></div>
+  {top}
+  <div class="chips">{missing}</div>
+  <p class="mut">Counts are APPROVED rows only — the same filter every generator
+  reads through. Anything proposed is in "awaiting review" and cannot be used
+  until someone approves it.</p>
+</div>
+{"".join(blocks)}
+{relational}
+""", suffix=f"&amp;tenant={_esc(tenant)}")
