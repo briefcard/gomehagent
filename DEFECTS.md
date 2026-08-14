@@ -356,6 +356,81 @@ it silently requires — `.form()` implies `python-multipart`, `Jinja2Templates`
 implies `jinja2`, and so on. An import audit cannot catch this class; that can.
 Verified by removing the line and watching the suite fail.
 
+### ~~The crawler proposed nonsense~~ Fixed 2026-08-12, and measured
+
+Reported from a live queue: `"32 CM (32 CM) Is it dishwasher safe?"`,
+`"Powerful Closures: ... isn&#8217;t just about wrapping things up"`,
+`"1 of 2 Pitcher $135 Cake stand $195 In your table Authentic Italian design"`.
+
+Three separate causes, and the first fix attempted was wrong.
+
+1. **Block boundaries were destroyed.** `_clean` replaced every tag with a
+   space, so a spec cell, an FAQ heading and two carousel prices merged into one
+   string with no sentence boundary in it. `text_blocks()` now returns one
+   string per block-level element and sentences are only split WITHIN a block.
+
+2. **Entities were never decoded**, so `isn&#8217;t` survived — and `8217` is a
+   number, which is the entire test for whether a sentence is "checkable". Every
+   curly apostrophe was manufacturing evidence.
+
+3. **Facts had no entity.** The wrong first fix was to discard product FAQs and
+   specs as junk. They are not junk; the KB had nowhere to put a fact true of
+   one product. `entity_key` on claims and objections fixed it properly, and a
+   product FAQ became the one derivable source of objections.
+
+Then the differential that mattered. Five homepages read by hand against what
+the crawler proposed:
+
+    baci      0 proposed  ·  3 real claims on the page   ·   0% recall
+    ironside  0 proposed  ·  6 real claims on the page   ·   0% recall
+    eien      12 proposed ·  two testimonials mistyped as brand assertions
+
+Every miss traced to one rule — "a claim carries a number" — written for the
+agency's case-study proof and wrong for the attribute claims every other client
+differentiates on ("Designed in Milan", "No PFAS. No seed oils.", "Original
+sections of the Berlin Wall"). Worse, the drop reasons reported
+`"no number, so nothing to check": 77`, which reads as a finding about the site
+and was a finding about the filter.
+
+**The judgement moved to a model** (`extract.py`), under one constraint: it
+SELECTS verbatim spans and `_verify` discards anything not in the source, so
+fabrication is checked in code rather than trusted. Every deterministic guard
+stays after it — banned phrases, tag validation, fingerprint dedupe,
+`review="proposed"`, human approval.
+
+**Still open:** recall is unmeasured. `scripts/test_extract.py --live` has the
+differential checked in as a fixture with a baseline of baci 0/3, ironside 0/6,
+and has never been run. That is the single highest-information thing available.
+
+### ~~Objections could not be derived~~ Partly false, fixed 2026-08-12
+
+This log said repeatedly that objections are human-authored and cannot be
+derived. True of a website. False of a mailbox, where the brand has been
+answering the same questions for years, and false of a product FAQ, which is
+literally an objection with its approved answer.
+
+`email_harvest` mines sent mail — filtered by the bucket `triage` already
+assigned, so the noise was sorted once, months ago, rather than re-litigated.
+`extract_qa` pairs the question with the answer and verifies each half against
+its own side of the exchange, so the pair cannot silently swap who said what.
+
+What remains true: an account with no mailbox has no source. **Ironside** is
+one, and its objections are an authoring job.
+
+### ~~Situations did not reach objections~~ Fixed 2026-08-12
+
+Claims carried situations; objections did not; `claim_id` existed and nothing
+had ever written it. So selection matched proof to a buyer's problem and
+matched objections by word overlap — with a fallback that looked for the
+literal string `"how fast"`, which exists only in the agency's seeded rows. On
+Baci and Ironside the brief went out with no objection handled at all. Third
+occurrence of hardcoded agency language in `_select`.
+
+`KbObjection.situations` closes both edges: the vocabulary IS the join, so
+"which objection fits this situation" and "which claims support this answer"
+are the same query. Empty means universal, matching the `audience_key`
+convention, so adding the column retired nothing.
+
 ### Architecture debt
 
 **The SEO subsystem still does not read the KB.** `seo_tools`, `sites`,
@@ -391,11 +466,15 @@ account relying on it. See the seed bug above.
 
 ### Not built
 
-**Spreadsheet upload** (Coverings' 26-column spec data, Ironside's rate card)
-— the third source. Now unblocked and shaped: parse to rows, call the existing
-`kb.add_*` with `origin="upload"` and `source="<file>#<row>"`, and it inherits
-dedupe, the review queue and conflict-on-disagreement for free. What it still
+**Spreadsheet upload** (Coverings' 26-column spec data, Ironside's rate card).
+Now a single entry in `sources.SOURCES` — `key · label · produces · capability
+· precondition · run` — plus the parser behind it. It inherits dedupe, the
+review queue, provenance and conflict-on-disagreement for free. What it still
 needs is its own work: column mapping per client, and a preview before write.
+
+**OAuth for Google and Meta.** The blocker for connectors, and therefore for
+`sent_mail`, and therefore for objections on any account without a mailbox
+already wired. Everything else self-serves.
 
 Media layer (blocks the campaign email builder), reports, Canva (OAuth),
 per-tenant prompt/model pinning, publish idempotency (a worker restarting

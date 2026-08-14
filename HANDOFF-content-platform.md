@@ -1,7 +1,8 @@
 # Handoff — Multi-tenant Content Platform
 
-Everything a fresh thread needs to continue this build. Written 2026-08-10.
-All code referenced here is on `main` and deployed.
+Everything a fresh thread needs to continue this build. Written 2026-08-10,
+revised 2026-08-12. Check §2 for what is deployed and what is not — they are
+no longer the same thing.
 
 ---
 
@@ -27,55 +28,42 @@ and six reference artifacts (§11).
 
 ## 2. Status board
 
-Everything below is **on `main` and deployed** unless marked otherwise.
-Last verified 2026-08-12 at commit `2ad82d9`.
+Last verified 2026-08-12 at commit `e27ea0a`.
+**Deployed through `1da3207`. Seven commits are committed and unpushed** —
+everything from `81bcb50` on. Push with:
 
-> **Not yet deployed.** `0a7f4e7` and later sit on `feat/context-architecture`,
-> committed and unpushed: the ingest provenance spine (`app/provenance.py`),
-> the crawl-quality fixes, and the proposal/scan purge. Until that is pushed to
-> `main`, every "live" below means 2ad82d9's behaviour, not what the code in
-> the working tree does. Push with
-> `git push origin HEAD:main` — and read §12b first, because the deploy runs a
-> one-time backfill over five tables of live client knowledge.
+```bash
+git -C ~/Documents/gomehagent-build push origin HEAD:main
+```
 
 | Component | State |
 |---|---|
-| Telegram ops channel | live |
-| Tenant registry + user scoping | live |
-| Knowledge base (5 tables) | live, **all five accounts seeded** |
-| Knowledge tab | live — renders every KB column, incl. situations, non-selectable claims, gap queue |
-| Content tab | live — proposals (editable), compliance findings, catalogue |
-| Systems tab + per-system threads | live |
-| Brief assembler | live, tested offline |
-| Console session (key once, then a cookie) | live |
-| Client credentials + connect links | live — API-key providers only |
-| Operational half tenant-scoped | live — `tenant` on 18 models, per-client uniqueness **verified on prod Postgres** |
-| Agent / tool / triage / worker scoping | live, enforced by `test_tenant_isolation.py` |
-| `worker.systems_tick` (run ledger's caller) | live — daily 07:00, records blockers, sends nothing |
-| Catalogue sync (Shopify → KbEntity) | live, **never run against prod** |
-| Website content compliance | live, **never run against prod** |
-| Harvest (site → pending proposals) | live, **never run against prod** |
-| Readiness bar means something (rec 2) | **not built** |
+| Telegram ops channel · tenant registry · user scoping | live |
+| Knowledge base (8 tables) | live, all five accounts seeded |
+| **Ingest provenance spine** (`provenance.py`) | live — origin · review · fingerprint · conflicts on every KB table |
+| **Model claim extractor** (`extract.py`) | live, **recall never measured** |
+| **Email miner** (`email_harvest.py`) | built, **not pushed** |
+| **Source registry** (`sources.py`) — `/admin/fill` | built, **not pushed** |
+| Knowledge · Content · Systems · Accounts tabs | live |
+| **Data layer tab** | built, **not pushed** |
+| Catalogue sync (Shopify → KbEntity) | live — **251 entities on Baci** |
+| Website compliance · harvest | live |
+| Console session · client credentials · connect links | live — API-key providers only |
+| Operational half tenant-scoped | live, enforced by `test_tenant_isolation.py` |
 | Generator / validator / send (rec 4) | **not built** — nothing produces output |
-| Reports | not started |
-| Spreadsheet upload | **not built** |
-| Media layer | **not built** |
-| Canva | not connected (OAuth) |
+| Spreadsheet upload | **not built** — one `sources.SOURCES` entry when it is |
+| Reports · media layer · Canva | not started |
 
-**What has NOT been run against production yet** (all are safe reads first):
+**Where the platform actually is:** the knowledge layer is built and the
+ingest side is four sources deep. Nothing generates. The single measurement
+that would change what we know is `scripts/test_extract.py --live`, which has
+never been run.
 
-```
-/admin/systems_seed                      -> systems is currently []
-/admin/tenant_scope                      -> 13,772 rows still unattributed
-/admin/seed_kb                           -> re-run: the agency seed was fixed
-/admin/catalog_sync?tenant=baci&report_only=1
-/admin/compliance_scan?tenant=baci
-/admin/harvest
-```
-
-`CREDENTIAL_KEY` is **not set** in the env group. Set it before any client
-connects anything — it is the encryption key, and changing it later orphans
-stored credentials.
+**Env:** `CREDENTIAL_KEY` is still **not set** in the env group. Set it before
+any client connects anything — it is the encryption key, and changing it later
+orphans every stored credential. `ANTHROPIC_API_KEY` must also be present or
+harvest silently falls back to a filter measured at 0% recall on qualitative
+claims; the run reports `extractor: "deterministic filter"` when that happens.
 
 Live service: `https://assistant-web-zm2d.onrender.com`
 Bot: `@Gomehadmin_bot`
@@ -87,7 +75,7 @@ Bot: `@Gomehadmin_bot`
 | Account | KB | Site enumerable | Compliance |
 |---|---|---|---|
 | agency | ready (12 claims, 4 aud, 6 obj) | 19 pages via **wp-json** | ready |
-| baci | 3 claims, 3 aud, 0 obj, 1 entity, 24 rules | 400 pages via sitemap | **3 real violations found** |
+| baci | 3 claims, 3 aud, 0 obj, **251 entities**, 24 rules | 400 pages via sitemap | **3 real violations found** |
 | eien | ban list only | 289 pages via sitemap | ready |
 | ironside | 1 claim, 1 aud, 8 venues, 6 rules | 169 pages via sitemap | ready |
 | coverings | 1 audience only | **TLS chain broken** | blocked: no `banned_claims` |
@@ -96,18 +84,86 @@ Baci's live violations, found by the real scanner:
 `/pages/wholesale` (bespoke + "personalization"), `/pages/best-italian-espresso-cups…`
 (craftsmanship), `/pages/care-guide` (hand-painted).
 
-**Objections are 0 on every account.** Human-authored, cannot be derived, and
-half of what a real reply needs. `/next` on Telegram and the client intake link
-are the two paths.
+**Objections are 0 on every account** — but that sentence changed meaning this
+session, twice.
 
-> **Draft — reword to taste.** Once `feat/context-architecture` deploys, a
-> count of 0 stops meaning "nobody has answered". A client filling an intake
-> link now files a **proposal**: it is recorded, the form does not ask them
-> again, and it does not count as an objection until someone approves it. So
-> read the count next to it — `completeness()` reports
-> `kb_objections (2 waiting for review)` rather than `(none)`, and the Content
-> tab lists them under "Everything else awaiting you". Zero with proposals
-> waiting is an approval job; zero with none waiting is still an authoring job.
+First: a count of 0 no longer means nobody has answered. A client filling an
+intake link now files a **proposal** — recorded, not re-asked, and not counted
+until approved. Read the number beside it: `completeness()` reports
+`kb_objections (2 waiting for review)` rather than `(none)`. Zero with
+proposals waiting is an approval job; zero with none waiting is an authoring job.
+
+Second, and more useful: **objections are no longer underivable.** A product
+FAQ is an objection with its approved answer, and so is any support thread —
+the brand has been answering the same questions for years. `email_harvest`
+mines sent mail for exactly this. What that leaves is accounts with no mailbox,
+where they genuinely have to be authored. Ironside is one.
+
+---
+
+## 2c. Start here — connectors
+
+The next thread is connector setup, and it starts from one uncomfortable fact:
+
+> **The client connect page has never worked in production.** `python-multipart`
+> was missing from `requirements.txt`, so every form POST 500'd from the day
+> form parsing landed until `6a04e65` deployed this session. Anyone who was ever
+> sent a connect link pasted a key and got an Internal Server Error. It is fixed
+> and **has still never been used successfully by a client.**
+
+So the first job is not building anything. It is proving the path end to end,
+yourself, before a client sees it again.
+
+**Before touching a connector**
+
+1. `CREDENTIAL_KEY` in the `assistant-env` group. It is the Fernet key. Setting
+   it later orphans every credential stored before it, so this comes first and
+   it must not live where the database backups live.
+2. `ANTHROPIC_API_KEY` in the same group, or every harvest silently runs the
+   0%-recall filter. The response says `extractor: "deterministic filter"` when
+   it happens — check that field, not the proposal count.
+3. Push the seven unpushed commits.
+
+**Then prove it, on yourself**
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/connect_new?tenant=baci&label=self-test&days=1"
+```
+
+Open the returned URL in a browser, paste a real key, submit. A wrong key must
+fail in front of you; a right one must verify against the live API before it is
+stored. If that works, the path is real for the first time.
+
+**What is self-serve today**
+
+| Provider | Path |
+|---|---|
+| Shopify · Omnisend · Klaviyo · WordPress | API key, self-serve, verified on save |
+| Google (Gmail · Drive · Calendar · GSC · GA4) | **OAuth, not built** — a screen-share while you run `scripts/google_oauth.py` |
+| Meta Ads | **OAuth, not built** — same |
+
+OAuth is the gap, and it is the one that matters most: Google is what
+`email_harvest` needs, and `email_harvest` is the only source objections can be
+derived from. **Ironside has no mailbox at all**, which is why its objections
+are an authoring job and Baci's are a mining job.
+
+**What a connector unlocks, per source** — this is the argument for doing
+connectors before anything else:
+
+| Connect | Source it turns on | What the KB gains |
+|---|---|---|
+| Shopify | `catalogue` | entities with live price and stock, and the keys that scope product claims |
+| Google | `sent_mail` | claims already made, and **objections** |
+| (domain only) | `website` · `compliance` | claim proposals, and what the live site says that it should not |
+
+Check any account's position with:
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/fill?tenant=ironside"
+```
+
+It reports every source, whether it is usable, and why not — and ends with the
+questions only a human can answer.
 
 ---
 
@@ -187,7 +243,26 @@ New this session:
 `tenants.agent_block()`, `db.tenant_filter()`, `worker.inboxes()`,
 `worker.systems_tick()`.
 
-### Files added on `feat/context-architecture` — NOT deployed
+### Files added 2026-08-12 (the ingest rebuild)
+
+| File | Purpose |
+|---|---|
+| `app/provenance.py` | **The ingest spine.** `origin` / `review` / `fingerprint` on every KB table, `may_write` (the one precedence rule), `record_conflict`, `near_duplicates`. Approved is final: a machine that disagrees records a conflict and changes nothing |
+| `app/extract.py` | **Claim extraction as span SELECTION.** The model returns verbatim substrings and `_verify` discards anything not present in the source, so fabrication is checked rather than trusted. `extract_qa` does the same for a question/answer pair, verifying each half against its own side of the exchange |
+| `app/email_harvest.py` | Sent mail → claims and objections. Filters by the bucket `triage` already assigned, so the noise was sorted once, months ago. Strips quoted history and signatures before reading |
+| `app/sources.py` | **The source registry.** A source declares `key · label · produces · capability · precondition · run`; the runner knows none by name. Adding the spreadsheet upload is one entry |
+| `scripts/test_provenance.py` · `test_extract.py` · `test_email_harvest.py` · `test_sources.py` | One suite per system above. 19 suites total, none touching the network |
+
+**Key API additions:** `kb.proposals()` (one review queue across all five
+tables, with near-duplicates scoped), `kb.approve()`, `kb.purge_proposals()`,
+`kb.support_for()` (the claims backing an objection), `kb.objections(...,
+situations=)`, `compliance.text_blocks()` / `skip_url()` / `is_dead_page()`,
+`gmail_client.fetch_sent_threads()`, `sources.available()` / `fill()`.
+
+**Schema:** `KbConflict` is new. The provenance mixin is on all five content
+tables. `entity_key` is on claims and objections; `situations` is on objections.
+
+### Superseded — files added on `feat/context-architecture`
 
 | File | Purpose |
 |---|---|

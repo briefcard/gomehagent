@@ -53,6 +53,26 @@ The original five (agency, baci, eien, coverings, ironside) already exist.
 
 ## 2. Connect their tools
 
+> **Read this before sending anyone a link.** The connect page 500'd on every
+> submission from the day form parsing landed until `6a04e65` deployed on
+> 2026-08-12 — `python-multipart` was missing from `requirements.txt`. Any
+> client who was ever sent a link pasted a key and got an Internal Server Error.
+> It is fixed and **has never been used successfully by a client**, so prove the
+> path on yourself first:
+>
+> ```bash
+> curl -b ~/.gomeh-console -s ".../admin/connect_new?tenant=baci&label=self-test&days=1"
+> ```
+>
+> Open the URL, paste a real key, submit. A wrong key must fail in front of you;
+> a right one must verify against the live API before it is stored.
+
+**Set `CREDENTIAL_KEY` in the env group before any of this.** It is the Fernet
+key, and it must not live where the database backups live — if it does,
+encryption at rest buys nothing. Without it the code derives one from
+`APPROVAL_SECRET`, which still encrypts but ties two secrets together. Setting
+it later orphans every credential stored before it.
+
 ### The short version — send them a link
 
 ```bash
@@ -77,11 +97,6 @@ Disconnect: `/admin/connect_revoke?tenant=acme&provider=shopify`.
 OAuth, which is not built — those stay a ten-minute screen-share where they
 click Allow while you run `scripts/google_oauth.py`. The connect page shows them
 as "on a call" rather than pretending they are self-serve.
-
-Set **`CREDENTIAL_KEY`** in the env group before using this in production. It is
-the encryption key, and it must not live where the database backups live — if it
-does, encryption at rest buys nothing. Without it the code derives a key from
-`APPROVAL_SECRET`, which still encrypts but ties two secrets together.
 
 ### The long version — doing it yourself
 
@@ -191,11 +206,35 @@ Treat it as "not obviously empty," not "good."
 
 ---
 
-## 3b. Derive the rest from their website
+## 3b. Fill it from every source they have wired
 
-Three tools, all safe to read first. They appear in the console under
-**Content** (`/admin/ui?tab=content&tenant=acme`) with a button each, or as
-routes.
+**The one call that does all of it:**
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/fill?tenant=acme"          # rehearsal
+curl -b ~/.gomeh-console -s ".../admin/fill?tenant=acme&apply=1"  # file proposals
+```
+
+It runs every source this account can use, skips the rest with a reason, and
+ends with the questions only a human can answer. Sources declare themselves in
+`sources.SOURCES`, so this list grows without the route changing:
+
+| Source | Needs | Produces |
+|---|---|---|
+| `catalogue` | a commerce connection | entities with live price and stock |
+| `compliance` | `banned_claims` on file | pages that break the brand's own rules |
+| `website` | a domain | claim and review proposals |
+| `sent_mail` | a connected mailbox | claims already made, **and objections** |
+
+**Check `extractor` in the response.** If it reads `deterministic filter`,
+`ANTHROPIC_API_KEY` is not set and you are getting a path measured at 0% recall
+on qualitative claims — it found none of the six real claims on Ironside's
+homepage. The proposal count will look plausible either way; the field is the
+only tell.
+
+The individual tools below still exist and are what `/admin/fill` calls. They
+appear in the console under **Content**
+(`/admin/ui?tab=content&tenant=acme`) with a button each.
 
 **Catalogue** — Shopify products into the knowledge base, with live stock:
 
@@ -249,6 +288,28 @@ Three rules worth knowing:
 - **A testimonial's wording cannot be edited.** A review reworded as brand copy
   is a fabrication however true the sentiment. Tags and attribution stay
   editable; the customer's words do not.
+
+**Sent mail** — what this account has already told customers:
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/email_harvest?tenant=baci"
+```
+
+This is the only source **objections** can be derived from, and it is why a
+Google connection matters more than the others. It reads SENT mail, not the
+inbox: a sentence someone sent a real customer is a claim they were already
+willing to make, and paired with the message it answers it is an objection with
+its approved answer.
+
+Noise is not re-litigated here — threads are filtered by the bucket `triage`
+already assigned, months ago, one message at a time. `promo`, `notifications`,
+`receipts`, `subscriptions`, `sales_orders` and `urgent_money` are never opened.
+Quoted history and signatures are cut before anything is read, so a customer's
+words can never be attributed to the brand. A banned phrase found in your own
+sent mail is refused **and reported** — someone has already said it to a
+customer.
+
+An account with no mailbox has no source for objections. Ironside is one.
 
 What a crawler can **never** derive is `banned_claims` — a site records what a
 brand does say, and the ban list is what it must not. Baci's own site says
