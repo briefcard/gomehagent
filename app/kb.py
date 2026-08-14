@@ -1081,7 +1081,7 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
               strength: str = "strong", status: str = "active",
               origin: str = "human", entity_key: str = "",
-              proves: str = "") -> str:
+              proves: str = "", context: str = "") -> str:
     """Add a claim, or record that another source corroborates one on file.
 
     `status="pending"` is kept as the way callers ask for a proposal, and is
@@ -1132,7 +1132,7 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                          proof_type=proof_type, source=source or "captured",
                          situations=tags, strength=strength, status=status,
                          review=review, origin=origin, fingerprint=fp,
-                         entity_key=entity_key, proves=proves,
+                         entity_key=entity_key, proves=proves, context=context,
                          approved_by="seed" if origin == "seed" else "",
                          approved_at=db.utcnow() if review == prov.APPROVED else None,
                          also_seen=[{"origin": origin, "ref": source or "",
@@ -1191,7 +1191,8 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
 def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                  tags: list[str] | None = None, proof_type: str = None,
                  source: str = None, strength: str = None,
-                 entity_key: str | None = None, proves: str | None = None) -> str:
+                 entity_key: str | None = None, proves: str | None = None,
+                 context: str | None = None) -> str:
     """Edit a claim in place. The editing half of propose-then-approve.
 
     Tags are validated against the tenant's vocabulary exactly as `add_claim`
@@ -1230,6 +1231,8 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
             return ("This is a customer's own words — quote it, do not rewrite "
                     "it. Correct the tags or the attribution instead, or reject "
                     "it if it should not be used at all.")
+        if context is not None:
+            row.context = str(context).strip()[:600]
         if proves is not None:
             # Editable to empty, unlike the fields below: a model-written
             # reading a reviewer disagrees with should be removable, not only

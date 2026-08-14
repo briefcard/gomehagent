@@ -546,6 +546,14 @@ class KbClaim(_Provenance, Base):
     # what a number is FOR. Empty on every pre-existing row, which is correct:
     # nobody has interpreted those yet.
     proves = Column(Text, default="")
+    # Verbatim text from NEAR the claim on the page — the heading it sat under,
+    # the sentence beside it — that makes the span mean anything.
+    # "1,652 residential & hotel units" is not a claim about anything until you
+    # know it is the Opus Communities development. The span rule kept evidence
+    # inside the claim's own sentence, so that fact was unrecordable: the name
+    # is in the block above, and a verbatim check against the span alone threw
+    # it away. Selected like every other span and verified against the page.
+    context = Column(Text, default="")
     strength = Column(String, default="strong") # strong | supporting — caps how many per asset
     verified_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))  # stale claims stop being selectable

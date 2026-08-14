@@ -172,6 +172,56 @@ def main() -> int:
         ck("and there is a cap, so a bad vocabulary cannot be papered over",
            kb.MAX_NEW_SITUATIONS <= 5, str(kb.MAX_NEW_SITUATIONS))
 
+        print("\n— a number is not a claim until you know whose it is —")
+        # Reported: "1,652 residential & hotel units" arrived with an empty
+        # interpretation and, on its own, means nothing. It is an Opus
+        # Communities development, and that name is in the block ABOVE — so the
+        # span-only evidence rule threw the one fact that made it usable.
+        PAGE = ["Opus Communities — Hallandale Beach",
+                "1,652 residential & hotel units",
+                "Delivered across three phases."]
+        kept, _ = extract._verify(
+            [{"text": "1,652 residential & hotel units", "proof_type": "data",
+              "evidence": "1,652",
+              "context": "Opus Communities — Hallandale Beach",
+              "proves": "They marketed a 1,652-unit residential and hotel "
+                        "development.",
+              "situations": [], "_url": "https://x/work"}],
+            PAGE, valid_situations=set(kb.situations("agency")))
+        ck("the claim is still the verbatim span",
+           kept[0]["text"] == "1,652 residential & hotel units")
+        ck("and it now carries whose development it was",
+           "Opus" in kept[0]["context"], kept[0]["context"] or "(empty)")
+        ck("so the interpretation has something to work from",
+           "1,652-unit" in kept[0]["proves"], kept[0]["proves"])
+
+        print("\n— but context is checked, not taken —")
+        bad, _ = extract._verify(
+            [{"text": "1,652 residential & hotel units", "proof_type": "data",
+              "context": "a landmark development for a prestige client",
+              "_url": "x"}], PAGE)
+        ck("invented context is dropped, like an invented span",
+           bad[0]["context"] == "", bad[0]["context"])
+
+        # A portfolio page lists a dozen projects. Verifying context page-wide
+        # would attach one development's name to another's unit count — and the
+        # result would be verbatim, checkable, and wrong.
+        FAR = PAGE + ["filler"] * 6 + ["Sunrise Harbour — Fort Lauderdale"]
+        far, _ = extract._verify(
+            [{"text": "1,652 residential & hotel units", "proof_type": "data",
+              "context": "Sunrise Harbour — Fort Lauderdale", "_url": "x"}], FAR)
+        ck("a heading from the far end of the page is refused",
+           far[0]["context"] == "",
+           "another project's name was attached to this project's number")
+
+        print("\n— the deterministic path cannot interpret anything —")
+        from app import harvest as hv
+        rows = hv._claims_from("We delivered 1,652 units in 2024.", "x", [])
+        ck("it produces no interpretation, by construction",
+           all(not r.get("proves") for r in rows),
+           "so an empty `proves` means the model never ran, not that it had "
+           "nothing to say")
+
         print("\n— two tags doing one job —")
         # The real agency vocabulary, which is where the reported pair lives.
         kb.seed_agency()

@@ -55,6 +55,12 @@ from . import config, kb
 # nav, header and footer by `compliance.text_blocks`, which is both cheaper and
 # more reliable than asking a model to ignore page furniture.
 _MAX_BLOCKS = 60
+
+#: How many blocks either side of a claim count as "near" for context. A
+#: portfolio page lists a dozen projects; verifying context page-wide would
+#: attach one development's name to another's unit count, and the result would
+#: be verbatim, checkable, and wrong.
+CONTEXT_BLOCKS = 2
 _MAX_CHARS = 14000
 
 PROOF_TYPES = ("data", "case_study", "certification", "spec", "testimonial")
@@ -85,25 +91,32 @@ exercise: a claim nobody can place is a claim no draft will ever use.
 6. `needs_situation` — if the list has nothing that fits, leave `situations` \
 empty and put a SHORT lowercase tag here naming the situation you would have \
 needed (e.g. "proof_of_scale"). Do not invent one when an existing tag fits.
-7. `proves` — one plain sentence: what a reader should conclude from this. \
+7. `context` — verbatim text from a NEARBY block that makes the span mean \
+something: the project or client it belongs to, the heading it sits under, the \
+sentence that names who it is about. Copy it EXACTLY from a block, as with \
+`text`. "1,652 residential & hotel units" is not a claim about anything until \
+the reader knows whose development it was. Use "" only when the span already \
+stands alone.
+8. `proves` — one plain sentence: what a reader should conclude from this. \
 Not a restatement. "15,000 trained across 30+ seminars" proves they have \
 taught this at scale rather than only practised it. This is the only field \
 where you write rather than select, and it is read by whoever drafts copy \
 from this claim.
-8. `proof_type`:
+9. `proof_type`:
    - "testimonial" for a customer's own words (first person, a review, a quote)
    - "data" for a figure the business states about itself
    - "case_study" for a named engagement or outcome
    - "certification" for a standard, accreditation or award
    - "spec" for a stated product property (material, durability, capacity)
-9. `evidence` is the part of the SAME span that makes it checkable (the figure, \
+10. `evidence` is the part of the SAME span that makes it checkable (the figure, \
 the named party, the standard). Copy it verbatim from the span, or use "".
 7. If the page is about one product and the claim is only true of that product, \
 set `entity_scoped` true. A claim true of the whole brand is false.
 
 Return ONLY a JSON array, no prose:
 [{"text": "...", "proof_type": "...", "evidence": "...", "entity_scoped": bool,
-  "situations": ["..."], "needs_situation": "", "proves": "..."}]
+  "situations": ["..."], "needs_situation": "", "context": "...",
+  "proves": "..."}]
 Return [] if the page makes no claims."""
 
 
@@ -159,6 +172,7 @@ def _verify(candidates: list[dict], blocks: list[str],
     kept, rejected = [], []
     norm = {" ".join(b.split()): b for b in blocks}
     joined = "\n".join(norm)
+    ordered = list(norm)          # normalised blocks, in page order
     for c in candidates:
         text = " ".join(str(c.get("text", "")).split())
         if not text:
@@ -172,6 +186,20 @@ def _verify(candidates: list[dict], blocks: list[str],
         ev = " ".join(str(c.get("evidence", "") or "").split())
         if ev and ev not in text:
             ev = ""          # evidence must come from the span, not from air
+
+        # Context is verified against the PAGE rather than the span — that is
+        # the whole point of it — but only against blocks NEAR the claim.
+        # A portfolio page lists a dozen developments; page-wide verification
+        # would happily attach the heading of one project to the unit count of
+        # another, and the result would be verbatim, checkable, and wrong.
+        ctx = " ".join(str(c.get("context", "") or "").split())
+        if ctx:
+            here = next((i for i, b in enumerate(ordered) if text in b), -1)
+            near = ("\n".join(ordered[max(0, here - CONTEXT_BLOCKS):
+                                       here + CONTEXT_BLOCKS + 1])
+                    if here >= 0 else "")
+            if ctx == text or ctx not in near:
+                ctx = ""
 
         # Tags are verified against the vocabulary the same way spans are
         # verified against the page: the model proposes, code decides. A tag
@@ -197,6 +225,7 @@ def _verify(candidates: list[dict], blocks: list[str],
             "source": f"stated on {c.get('_url', '')}".strip(),
             "situations": tags,
             "needs_situation": wants_new,
+            "context": ctx,
             "proves": " ".join(str(c.get("proves", "") or "").split())[:400],
         })
     return kept, rejected

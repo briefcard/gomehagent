@@ -1282,13 +1282,23 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <input name="evidence" value="{_esc(p.evidence or '')}"
                      placeholder="what makes this checkable">
               <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>
+              {(f'<label>Found next to &mdash; copied from the page</label>'
+                f'<div class="when">&ldquo;{_esc(getattr(p, "context", ""))}&rdquo;</div>')
+               if getattr(p, "context", "") else ""}
               <label>What it proves &mdash; written by the model, not the site</label>
               <textarea name="proves" rows="2"
                 placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
-              <div class="when">The one field here the model WROTE rather than
-                copied. Read it: a wrong reading of a true number is invisible
-                once approved, and this is what a drafter reaches for when
-                deciding how to use the claim.</div>
+              <div class="when">{
+                "The one field here the model WROTE rather than copied. Read it: "
+                "a wrong reading of a true number is invisible once approved, and "
+                "this is what a drafter reaches for when deciding how to use the "
+                "claim."
+                if getattr(p, "proves", "") else
+                "Empty because no model read this page &mdash; the deterministic "
+                "filter produces no interpretation at all. Write one, or re-run "
+                "the harvest once the extractor is working and check "
+                "<code>extractor</code> in the response."
+              }</div>
               <label>True of &mdash; blank means the whole brand</label>
               <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
                      placeholder="brand-level (used in any content)">

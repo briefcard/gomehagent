@@ -513,6 +513,46 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### 2.23 A number with no owner — fixed 2026-08-14
+
+Reported: `proves` was empty on every claim, and the example given showed why
+it could not have been otherwise. `"1,652 residential & hotel units"` was
+harvested correctly and means nothing on its own. It is an Opus Communities
+development, and that is the only thing that makes it usable as proof.
+
+Two causes, and the second is the interesting one.
+
+**The deterministic path produces no interpretation at all.** `_claims_from`
+appends `{"text", "evidence": "", "proof_type": "data"}` — there is no
+`proves` in it and there could not be, since writing one is a judgement. So on
+the live agency run, which reported `extractor: "deterministic filter"`, every
+claim was always going to arrive with an empty field. An empty `proves` means
+the model never ran; it does not mean the model had nothing to say, and the
+review editor now says which.
+
+**Evidence was verified against the claim's own span.** `if ev not in text:
+ev = ""` — written to stop fabrication, and it also made attribution
+impossible. "Opus Communities" is in the block ABOVE the number, so the one
+fact that turns a figure into proof was unrecordable by construction. The rule
+was tighter than the guarantee needed: the guarantee is that nothing is
+asserted which the page does not say, and a neighbouring block is still the
+page.
+
+`KbClaim.context` carries verbatim text from near the claim — the heading it
+sat under, the sentence that names whose it is — selected like any other span
+and verified in code.
+
+**Verified against NEARBY blocks, not the page.** A portfolio page lists a
+dozen developments. Page-wide verification would cheerfully attach one
+project's heading to another project's unit count, and the result would be
+verbatim, checkable and wrong — §2.4 in a new place, structural proximity
+mistaken for relation. `CONTEXT_BLOCKS = 2` either side of the block the claim
+was found in.
+
+*Rule: when a verbatim check is used as a fabrication guard, check the size of
+the haystack separately from the fact of checking. Too small a haystack throws
+away true things; too large attaches them to the wrong subject.*
+
 ### 2.22 Two situations doing one job, and no way to see it — fixed 2026-08-14
 
 Reported from the agency's own vocabulary:

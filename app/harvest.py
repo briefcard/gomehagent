@@ -457,7 +457,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                              source=cand["source"], status="pending",
                              origin="crawl",
                              entity_key=cand.get("entity_key", ""),
-                             proves=cand.get("proves", ""))
+                             proves=cand.get("proves", ""),
+                             context=cand.get("context", ""))
 
     # A tag the model reached for and could not find is the account telling us
     # its vocabulary is short. Filed as a PROPOSAL like everything else — it is
