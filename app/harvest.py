@@ -415,6 +415,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # One string per block, never one string for the page. Sentences are
         # only split WITHIN a block, so a spec cell and the FAQ heading beside
         # it can never become one candidate.
+        page_truncated = False      # per page, never inherited from the last
         blocks = compliance.text_blocks(html)
         text = " ".join(blocks)
         # Hash the extracted TEXT, not the markup: a changed analytics tag or
@@ -466,8 +467,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # skip the page as already-read and the claims would never land. A
         # dry run must consume nothing, budget included.
         if apply:
-            _record_page(tenant, url, page_hash, len(cands),
-                         bool(locals().get("page_truncated")))
+            _record_page(tenant, url, page_hash, len(cands), page_truncated)
         for f in _faqs_from(html, url):
             faqs.append({**f, "entity_key": entity, "url": url})
 

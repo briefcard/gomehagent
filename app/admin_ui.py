@@ -1504,6 +1504,27 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     banner = (f'<div class="ok">{_esc(_STARTED.get(started, ""))}</div>'
               if started in _STARTED else "")
 
+    # What the last background action actually did. Without this a run that
+    # failed and a run still going look identical — the banner says "proposals
+    # will appear above" either way, and the traceback is in a service log the
+    # person reading this page cannot see.
+    from .web import bg_status
+    for label, name in (("harvest", "Harvest"), ("scan", "Compliance scan"),
+                        ("sync", "Catalogue sync"), ("email", "Sent mail")):
+        st = bg_status(label, tenant)
+        if not st:
+            continue
+        when = _esc((st.get("at") or "")[:16].replace("T", " "))
+        if st.get("state") == "failed":
+            banner += (f'<div class="note"><strong>{name} failed</strong> '
+                       f'({when})<br>{_esc(st.get("detail", ""))}</div>')
+        elif st.get("state") == "running":
+            banner += (f'<div class="ok">{name} is running ({when}). '
+                       f'Refresh in a moment.</div>')
+        elif st.get("detail"):
+            banner += (f'<div class="ok"><strong>{name}</strong> finished '
+                       f'{when} — {_esc(st["detail"])}</div>')
+
     if err:
         banner = f'<div class="note">{_esc(err)}</div>' + banner
     return _shell(key, "content", "Content", f"""

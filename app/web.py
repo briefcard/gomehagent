@@ -1543,15 +1543,70 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     and a GET that blocks that long with no feedback is indistinguishable from a
     broken button — which is exactly how it was reported. The work continues;
     the page comes straight back and the result appears in the tab when it
-    lands."""
+    lands.
+
+    The outcome is RECORDED, not only logged. The first version caught the
+    exception, wrote it to the service log and returned — so a background
+    action that failed looked exactly like one still running: the banner said
+    "proposals will appear above when it finishes" and they never did. That is
+    the same broken-button experience this function was written to remove,
+    moved one layer down. The traceback was in Render and the operator was in
+    a browser, and nothing joined them.
+
+    A successful run that produced nothing is recorded too, for the same
+    reason: "read 40 pages, proposed 0, everything already on file" and "the
+    button did nothing" are different facts and must not look alike.
+    """
+    import json as _json
     import threading
+
+    tenant = kw.get("tenant") or (args[0] if args else "")
+
+    def _mark(state: str, detail: str = "") -> None:
+        with db.SessionLocal() as s:
+            key = f"bg:{label}:{tenant}"
+            row = s.get(db.Setting, key) or db.Setting(key=key)
+            row.value = _json.dumps({"state": state, "detail": detail[:1500],
+                                     "at": db.utcnow().isoformat()})
+            s.merge(row)
+            s.commit()
 
     def _go():
         try:
-            fn(*args, **kw)
-        except Exception:  # noqa: BLE001
+            result = fn(*args, **kw)
+        except Exception as exc:  # noqa: BLE001
             log.exception("%s failed", label)
+            _mark("failed", f"{exc.__class__.__name__}: {exc}")
+            return
+        _mark("done", _summarise(result))
+
+    _mark("running")
     threading.Thread(target=_go, daemon=True).start()
+
+
+def _summarise(result) -> str:
+    """The two or three numbers that say whether a run was worth anything."""
+    if not isinstance(result, dict):
+        return ""
+    if result.get("error"):
+        return f"error: {result['error']}"
+    keep = ("proposed_count", "pages_read", "pages_unchanged", "pages_remaining",
+            "faqs_filed_as_objections", "claims_count", "objections_count",
+            "threads_seen", "added", "updated", "violations", "extractor")
+    bits = [f"{k} {result[k]}" for k in keep if result.get(k) not in (None, "")]
+    note = result.get("extractor_note") or ""
+    return " · ".join(bits) + (f" — {note[:200]}" if note else "")
+
+
+def bg_status(label: str, tenant: str) -> dict:
+    """What the last background run of this action did, if anything."""
+    import json as _json
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"bg:{label}:{tenant}")
+        try:
+            return _json.loads(row.value) if row and row.value else {}
+        except Exception:  # noqa: BLE001
+            return {}
 
 
 @app.get("/admin/fill")
