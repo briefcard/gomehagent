@@ -24,9 +24,23 @@ _creds: dict = {}
 
 
 def creds_for(alias: str) -> Credentials:
-    """Refresh-token credentials for one account (shared by Gmail + Drive)."""
+    """Refresh-token credentials for one account (shared by Gmail + Drive).
+
+    Reads `credentials.google_config` rather than `config.GMAIL_ACCOUNTS`
+    directly, so a mailbox the client connected themselves through the consent
+    screen is used in preference to one Gomeh pasted into the Render env group,
+    with the env value still there for every account that never does. Same
+    shape and same precedence as `credentials.shopify_config`.
+
+    The KeyError on an unknown alias is preserved deliberately: callers already
+    handle it, and an empty dict here would surface as an authentication
+    failure somewhere further away from the cause.
+    """
     if alias not in _creds:
-        acct = config.GMAIL_ACCOUNTS[alias]
+        from . import credentials as _cred
+        acct = _cred.google_config(alias)
+        if not acct.get("refresh_token"):
+            raise KeyError(alias)
         creds = Credentials(
             token=None,
             refresh_token=acct["refresh_token"],
@@ -37,6 +51,19 @@ def creds_for(alias: str) -> Credentials:
         creds.refresh(Request())
         _creds[alias] = creds
     return _creds[alias]
+
+
+def forget(alias: str) -> None:
+    """Drop the cached credential and client for one alias.
+
+    Both caches are process-lifetime, which was correct while a refresh token
+    only ever changed by someone editing an env var and redeploying. Connecting
+    is now a self-serve action a client takes mid-run, so without this a
+    reconnect — or a revoke — would keep using the previous token until the next
+    deploy, and a revoked connection would go on reading mail.
+    """
+    _creds.pop(alias, None)
+    _services.pop(alias, None)
 
 
 def service_for(alias: str):

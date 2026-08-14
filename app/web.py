@@ -1,6 +1,7 @@
 """Web service: health check, approval links, WhatsApp webhook."""
 import hashlib
 import hmac
+import html
 import json
 import logging
 import secrets
@@ -902,7 +903,9 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_schema(link_key, tenant)
     if tab == "content":
         return ui.render_content(link_key, tenant, started=started)
-    return ui.render(link_key)
+    q = request.query_params
+    return ui.render(link_key, msg=q.get("ok", ""), err=q.get("err", ""),
+                     link=q.get("link", ""))
 
 
 @app.get("/admin/kb_add")
@@ -1055,6 +1058,105 @@ async def connect_submit(token: str, request: Request):
     return RedirectResponse(f"/connect/{token}?err={quote(result['error'])}", 303)
 
 
+@app.get("/connect/{token}/oauth/{provider}")
+def connect_oauth_start(token: str, provider: str):
+    """Send the client to the provider's consent screen.
+
+    The connect token is the capability, so it is checked here rather than
+    trusted from the state that comes back: a link revoked between this request
+    and the callback must not complete.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import oauth
+    link, problem = _connect_link(token)
+    if problem:
+        return HTMLResponse(problem)
+    why = oauth.configured(provider)
+    if why:
+        return RedirectResponse(f"/connect/{token}?err={quote(why)}", 303)
+    state = oauth.sign_state(link.tenant, provider, connect_token=token)
+    return RedirectResponse(oauth.authorize_url(provider, state), 303)
+
+
+@app.get("/admin/oauth/{provider}")
+def admin_oauth_start(provider: str, request: Request,
+                      key: str = Depends(admin_key), tenant: str = ""):
+    """The same flow for the owner, for accounts he connects himself.
+
+    Kept separate from the client link rather than minting a connect link and
+    using it, because a link is a thing that gets sent to someone. This one
+    needs the console session and reaches whichever tenant is named.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from . import oauth, tenants as tn
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tn.get(tenant):
+        return {"error": f"unknown tenant {tenant!r}"}
+    why = oauth.configured(provider)
+    if why:
+        return {"error": why}
+    state = oauth.sign_state(tenant, provider, via="admin")
+    return RedirectResponse(oauth.authorize_url(provider, state), 303)
+
+
+@app.get("/oauth/{provider}/callback", response_class=HTMLResponse)
+def oauth_callback(provider: str, request: Request, code: str = "",
+                   state: str = "", error: str = "",
+                   key: str = Depends(admin_key)):
+    """Where consent lands. One route for every provider, by design.
+
+    The redirect URI is registered with Google and Meta and cannot vary per
+    client, so this is the single place a sign-in completes. Everything that
+    differs between providers is in `oauth.FLOWS`.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import credentials as cred, oauth
+
+    data, why = oauth.read_state(state)
+    if why:
+        return HTMLResponse(f"<h3>{html.escape(why)}</h3>", status_code=400)
+    back = (f"/connect/{data['t']}" if data.get("t")
+            else f"/admin/ui?tab=accounts&tenant={quote(data.get('tenant', ''))}")
+
+    # The user declining is the common non-success and it is not an error.
+    if error or not code:
+        msg = "Sign-in was cancelled." if error in ("access_denied", "") \
+            else f"Sign-in failed: {error}"
+        return RedirectResponse(f"{back}?err={quote(msg)}", 303)
+
+    # Re-derive authority rather than trusting the state's own claim to it.
+    if data.get("via") == "admin":
+        if key != config.APPROVAL_SECRET:
+            return HTMLResponse("<h3>Console session expired — sign in to the "
+                                "console and try again.</h3>", status_code=403)
+        tenant, granted_by = data.get("tenant", ""), "Gomeh"
+    else:
+        link, problem = _connect_link(data.get("t", ""))
+        if problem:
+            return HTMLResponse(problem)
+        tenant, granted_by = link.tenant, (link.label or "")
+        with db.SessionLocal() as s:
+            row = s.get(db.ConnectLink, data["t"])
+            if row:
+                row.last_used_at = db.utcnow()
+                s.commit()
+
+    result = oauth.exchange(provider, code)
+    if not result["ok"]:
+        return RedirectResponse(f"{back}?err={quote(result['error'])}", 303)
+    stored = cred.store_oauth(tenant, provider, result, granted_by=granted_by)
+    if not stored["ok"]:
+        return RedirectResponse(f"{back}?err={quote(stored['error'])}", 303)
+    return RedirectResponse(f"{back}?ok={quote(stored['detail'])}", 303)
+
+
 @app.get("/admin/connect_new")
 def connect_new(key: str = Depends(admin_key), tenant: str = "",
                 label: str = "", days: int = 30) -> dict:
@@ -1097,6 +1199,63 @@ def connect_revoke(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     from . import credentials as cred
     return {"result": cred.revoke(tenant, provider)}
+
+
+@app.post("/admin/connect_revoke")
+async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
+    """The console's disconnect button. POST, unlike its GET twin.
+
+    DEFECTS records that console writes on GET can be fired by a browser
+    prefetch or a link preview. That is tolerable for `seed_kb`, which is
+    idempotent; it is not tolerable for the control that severs a client's
+    connection. The GET stays because the runbook documents it for curl.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import credentials as cred
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    result = cred.revoke(str(form.get("tenant", "")),
+                         str(form.get("provider", "")))
+    return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(result)}", 303)
+
+
+@app.post("/admin/connect_link")
+async def connect_link_post(request: Request, key: str = Depends(admin_key)):
+    """Mint a connect link from the console and show it, rather than as JSON.
+
+    `/admin/connect_new` returns the URL in a JSON body, which meant creating a
+    link for a client required a terminal — so the one action onboarding is
+    built around was the one action the console could not do.
+    """
+    import datetime as _dt
+    import secrets as _secrets
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import tenants as tn
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    if not tn.get(tenant):
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&err={quote(f'unknown tenant {tenant!r}')}", 303)
+    try:
+        days = max(1, min(365, int(str(form.get("days", "30")) or 30)))
+    except ValueError:
+        days = 30
+    token = _secrets.token_urlsafe(24)
+    with db.SessionLocal() as s:
+        s.add(db.ConnectLink(
+            token=token, tenant=tenant, label=str(form.get("label", "")),
+            expires_at=db.utcnow() + _dt.timedelta(days=days)))
+        s.commit()
+    url = f"{config.PUBLIC_BASE_URL.rstrip('/')}/connect/{token}"
+    return RedirectResponse(f"/admin/ui?tab=accounts&link={quote(url)}", 303)
 
 
 @app.get("/intake/{token}", response_class=HTMLResponse)

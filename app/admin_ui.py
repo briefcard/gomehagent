@@ -138,6 +138,20 @@ ul.bl li{margin:2px 0}
 font-weight:700;padding-top:2px}
 .kv dd{margin:0;color:var(--ink2);min-width:0;overflow-wrap:anywhere}
 @media(max-width:560px){.kv{grid-template-columns:1fr;gap:1px 0}.kv dd{margin-bottom:7px}}
+details.conns{border:1px solid var(--rule);border-radius:6px;padding:10px 13px;
+background:var(--rule2);margin:4px 0}
+details.conns>summary{cursor:pointer;font-weight:600;font-size:.85rem;color:var(--acc)}
+.conn{display:flex;justify-content:space-between;align-items:center;gap:12px;
+flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--rule)}
+.conn:first-of-type{border-top:0}
+form.inl{display:inline}
+.mklink{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
+/* `size` is ignored once these are flex children, so both are pinned here or
+   the days box stretches to the full row width and wraps the button. */
+.mklink input[name=label]{flex:0 1 190px}
+.mklink input[name=days]{flex:0 0 56px}
+input.copy{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;
+margin-top:6px}
 details.sec{border:1px solid var(--rule);border-radius:5px;padding:9px 12px;background:var(--rule2)}
 details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;color:var(--acc)}
 details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);padding-bottom:7px}
@@ -172,6 +186,76 @@ def _chips(caps: dict) -> str:
         for c, ok in caps.items())
 
 
+def _connections(tenant: str, key: str) -> str:
+    """What this account has actually connected, and the buttons to change it.
+
+    `credentials.status()` has always returned all of this — state, who granted
+    it, when it last verified, which scopes came back dark — and nothing on the
+    console rendered any of it. Every connection action was a curl the runbook
+    told you to paste, which is the §2.13 shape: the credential layer was the
+    part of the platform its own operator could not see.
+
+    The secret is not here and cannot be. Nothing on this page has ever held a
+    value, only a state.
+    """
+    from . import credentials as cred
+    rows = cred.status(tenant)
+    out = []
+    for r in rows:
+        state = r["state"]
+        chip = f'<span class="chip {"on" if state == "connected" else "off"}">' \
+               f'{_esc(state)}</span>'
+        bits = []
+        if r["detail"]:
+            bits.append(_esc(r["detail"]))
+        if r["last_verified"]:
+            bits.append(f'checked {_esc(r["last_verified"])}')
+        detail = f'<div class="mut">{" · ".join(bits)}</div>' if bits else ""
+
+        if r["kind"] == "oauth" and r["self_serve"]:
+            label = "Reconnect" if state == "connected" else "Connect"
+            action = (f'<a href="/admin/oauth/{_esc(r["provider"])}'
+                      f'?key={_esc(key)}&amp;tenant={_esc(tenant)}">'
+                      f'<button class="sec" type="button">{label}</button></a>')
+        elif r["kind"] == "oauth":
+            # Named, not hidden: the thing standing in the way is an env var
+            # someone can go and set, and saying which is the whole difference
+            # between a blocker and a feature that reads as unbuilt.
+            action = f'<span class="mut">{_esc(r["blocked_by"])}</span>'
+        else:
+            action = ('<span class="mut">client pastes this on their connect '
+                      'link</span>')
+
+        if state == "connected":
+            action += f"""
+            <form method="post" action="/admin/connect_revoke" class="inl">
+              <input type="hidden" name="key" value="{_esc(key)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <input type="hidden" name="provider" value="{_esc(r['provider'])}">
+              <button class="sec">Disconnect</button>
+            </form>"""
+
+        out.append(f"""
+        <div class="conn">
+          <div><strong>{_esc(r['name'])}</strong> {chip}{detail}</div>
+          <div class="row">{action}</div>
+        </div>""")
+
+    return f"""
+    <details class="conns" open>
+      <summary>Connections</summary>
+      {''.join(out)}
+      <form method="post" action="/admin/connect_link" class="row mklink">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input name="label" placeholder="who it is for, e.g. Jane" required>
+        <input name="days" value="30" size="3" title="days until it expires">
+        <button class="sec">Create a connect link</button>
+        <span class="mut">for the client to connect their own accounts</span>
+      </form>
+    </details>"""
+
+
 def _field(t, key: str, name: str) -> str:
     title, howto = FIELD_HELP.get(name, (name, ""))
     raw = getattr(t, name, None)
@@ -189,7 +273,7 @@ def _field(t, key: str, name: str) -> str:
     </form>"""
 
 
-def render(key: str) -> str:
+def render(key: str, msg: str = "", err: str = "", link: str = "") -> str:
     rows = tenants.all_tenants(include_paused=True)
     if not rows:
         body = ('<div class="note">No accounts yet. Run '
@@ -215,16 +299,30 @@ def render(key: str) -> str:
                 <a href="/admin/verify?key={_esc(key)}&amp;tenant={_esc(t.key)}"><button class="sec" type="button">Test connections</button></a>
                 <span class="mut">chips show what is <em>configured</em>; this calls each one to see if it <em>works</em></span>
               </div>
+              {_connections(t.key, key)}
               <div class="grid">{fields}</div>
             </div>"""
+
+    note = f'<div class="ok">{_esc(msg)}</div>' if msg else ""
+    if err:
+        note += f'<div class="note">{_esc(err)}</div>'
+    if link:
+        note += f"""
+        <div class="ok">
+          <div>Connect link — send this to the client. It reaches one account
+          and connects nothing else.</div>
+          <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
+        </div>"""
 
     return _shell(key, "accounts", "Accounts", f"""
 <div>
   <h1>Accounts</h1>
-  <p class="mut">Values here are <strong>keys into</strong> credential dictionaries or
-  env-var names — never the secrets themselves. API keys and tokens live in
-  Render env vars.</p>
+  <p class="mut">The fields on each card are <strong>keys into</strong> credential
+  dictionaries or env-var names — never secrets. The secrets themselves are
+  either in the Render env group or, for anything a client connected
+  themselves, encrypted in the database and shown here only as a state.</p>
 </div>
+{note}
 
 <div class="card">
   <div class="head"><h2>Add an account</h2></div>
@@ -1346,6 +1444,9 @@ border-radius:6px;padding:14px 16px;background:var(--panel)}
 .prov .how{font-size:.82rem;color:var(--ink2);border-left:2px solid var(--rule);
 padding-left:10px}
 .lock{font-size:.78rem;color:var(--mut)}
+a.btn{font-size:.82rem;font-weight:600;padding:7px 14px;border-radius:5px;
+border:1px solid var(--acc);background:var(--acc);color:var(--panel);
+text-decoration:none;display:inline-block}
 """
 
 
@@ -1362,6 +1463,33 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
         done = r["state"] == "connected"
         chip = (f'<span class="chip on">connected</span>' if done else
                 f'<span class="chip off">{_esc(r["state"])}</span>')
+        if r["kind"] == "oauth":
+            # An OAuth provider with its app credentials set is a button. Without
+            # them it is still "on a call" — but the reason is now named, so the
+            # thing blocking it is an env var someone can go and set rather than
+            # a feature that reads as unbuilt.
+            if not r["self_serve"]:
+                blocks.append(f"""
+                <div class="prov">
+                  <h3>{_esc(r['name'])} <span class="chip nb">on a call</span></h3>
+                  <div class="how">{_esc(spec['howto'])}</div>
+                  <div class="mut">{_esc(r.get('blocked_by', ''))}</div>
+                </div>""")
+                continue
+            detail = (f'<div class="mut">{_esc(r["detail"])}'
+                      + (f' · last checked {_esc(r["last_verified"])}'
+                         if r["last_verified"] else "") + "</div>") if done else ""
+            blocks.append(f"""
+            <div class="prov{' done' if done else ''}">
+              <h3>{_esc(r['name'])} {chip}</h3>
+              {detail}
+              <details class="how"><summary>What happens when I click this?</summary>
+                <p>{_esc(spec['howto'])}</p></details>
+              <div class="row"><a class="btn"
+                 href="/connect/{_esc(link.token)}/oauth/{_esc(r['provider'])}"
+                 >{'Reconnect' if done else 'Connect'} {_esc(spec['name'].split(' (')[0])}</a></div>
+            </div>""")
+            continue
         if not r["self_serve"]:
             blocks.append(f"""
             <div class="prov">

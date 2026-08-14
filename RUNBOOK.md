@@ -73,7 +73,22 @@ encryption at rest buys nothing. Without it the code derives one from
 `APPROVAL_SECRET`, which still encrypts but ties two secrets together. Setting
 it later orphans every credential stored before it.
 
-### The short version — send them a link
+### The short version — do it on the console
+
+`/admin/ui?tab=accounts`. Every account card now has a **Connections** block:
+one row per provider, its state, who granted it, when it last verified, and
+which permissions came back dark. From there —
+
+- **Connect / Reconnect** on Google or Meta runs the OAuth flow as you, for
+  accounts you connect yourself on a screen-share.
+- **Disconnect** revokes. It is a POST, so a link preview cannot fire it.
+- **Create a connect link** mints the client's own private link and shows it to
+  copy.
+
+Everything below still works and is what the console calls. Until 2026-08-13
+the console rendered none of it and all of this was curl-only — which is why
+the runbook used to open with a shell command for the most common action in
+onboarding.
 
 ```bash
 curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/connect_new?tenant=acme&label=Jane&days=30"
@@ -92,11 +107,52 @@ curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/conne
 
 Disconnect: `/admin/connect_revoke?tenant=acme&provider=shopify`.
 
-**Self-serve today:** Shopify, Omnisend, Klaviyo, WordPress.
-**Still needs you:** Google (Gmail/Drive/Calendar/GSC/GA4) and Meta Ads are
-OAuth, which is not built — those stay a ten-minute screen-share where they
-click Allow while you run `scripts/google_oauth.py`. The connect page shows them
-as "on a call" rather than pretending they are self-serve.
+**Self-serve today:** Shopify, Omnisend, Klaviyo, WordPress — paste a key.
+Google (Gmail/Drive/Calendar/GSC/GA4) and Meta Ads — click Connect and sign in.
+
+### What the client sees on the Google button
+
+Our Google app is **not verified by Google**, deliberately: verification takes
+weeks and caps nothing that matters at five clients. So the consent screen shows
+"Google hasn't verified this app". They click **Advanced → Continue**. The
+connect page says this in advance, in those words, because a client who meets
+that screen unwarned closes the tab.
+
+Unverified apps allow 100 users. If that ever becomes the limit, start
+verification then.
+
+**Leave every permission ticked.** One Google sign-in grants the mailbox,
+Search Console and GA4 together. If they untick one, the connection still
+stores and works — and the console names the missing scope beside it rather
+than failing quietly a month later inside something that needed it. That is the
+one thing OAuth does that an API key never could.
+
+Before either OAuth provider works, four env vars must be in `assistant-env`:
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `META_APP_ID`, `META_APP_SECRET`.
+Until they are, the connect page shows that provider as "on a call" **and names
+the missing variable** — a blocker someone can clear, rather than a feature that
+reads as unbuilt. The registered redirect URI must be exactly:
+
+```
+https://assistant-web-zm2d.onrender.com/oauth/google/callback
+```
+
+and the Meta equivalent. It is derived from `PUBLIC_BASE_URL` in one place
+(`oauth.redirect_uri`), so it cannot drift between the two providers.
+
+**Meta connections expire.** Meta long-lived tokens die at ~60 days and cannot
+refresh — they are exchanged for a new one while still valid. A worker job at
+06:30 daily renews anything inside 14 days of expiry; a renewal that fails marks
+the credential `failed` and pings Telegram, because the alternative is an ads
+connection that lapses silently. Google refresh tokens have no clock and are
+never touched by it.
+
+**You can also run either flow yourself**, for an account you connect on a
+screen-share — same flow, console session instead of a client link:
+
+```
+/admin/oauth/google?tenant=acme
+```
 
 ### The long version — doing it yourself
 
@@ -439,8 +495,12 @@ and no revocation. That mattered less when the worst case was your data; now the
 worst case is your clients' credentials. Real console auth moved from
 nice-to-have to required.
 
-**Google and Meta are not self-serve.** OAuth is not built, so those two stay a
-screen-share. Everything else on the connect page is.
+**Nothing has connected through OAuth in production yet.** The flow is built and
+covered offline end to end — signing, consent URL, the exchange, storage,
+renewal, and the routes — but no real Google or Meta account has completed it.
+Prove it on Baci before a client sees it, the same way §2 says to prove the
+API-key path. The `GOOGLE_CLIENT_ID` pair also has to exist first, and the
+redirect URI has to be registered byte for byte.
 
 **Only Shopify is consumed from the new store yet.** `data_tools` reads a
 client-connected Shopify token in preference to the env blob. Omnisend, Klaviyo
@@ -488,8 +548,9 @@ python3 scripts/test_credentials.py && \
 python3 scripts/test_tenant_isolation.py && \
 python3 scripts/test_worker_systems.py && python3 scripts/test_catalog_sync.py && \
 python3 scripts/test_compliance.py && python3 scripts/test_harvest.py && \
-python3 scripts/test_provenance.py && python3 scripts/test_brief.py --demo && \
-python3 scripts/test_selection.py && python3 scripts/test_systems.py
+python3 scripts/test_provenance.py && python3 scripts/test_extract.py && \
+python3 scripts/test_email_harvest.py && python3 scripts/test_sources.py && \
+python3 scripts/test_oauth.py && python3 scripts/test_brief.py --demo
 ```
 
 Still outstanding from the tenant migration — the Postgres constraint regrade

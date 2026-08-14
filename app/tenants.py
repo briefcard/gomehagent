@@ -60,22 +60,28 @@ def capabilities(key: str) -> dict:
     # Gomeh pasted into the env group. Without this, connecting Shopify through
     # the connect page left the account reading "not wired" and the agent was
     # never offered its tools — the connection worked and nothing could use it.
+    # `granted` is derived from credentials.GRANTS — one table saying what each
+    # provider turns on — rather than a clause per capability here. The clause
+    # version had drifted: `ads` and `analytics` checked only the Tenant JSON
+    # columns, so connecting Meta through the connect page stored a working
+    # credential and still read `ads: False`, and every ads source was skipped
+    # with "no ads connection" on an account that had just wired one.
     from . import credentials as _cred
-    connected = _cred.connected_providers(key)
+    granted = _cred.granted_capabilities(key)
     return {
         "inbox": bool(t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS)
-        or "google" in connected,
+        or "inbox" in granted,
         "commerce": bool(t.shopify_store and t.shopify_store in config.SHOPIFY_STORES)
-        or "shopify" in connected,
-        "esp": bool((t.esp or {}).get("provider"))
-        or bool({"omnisend", "klaviyo"} & connected),
-        "cms": bool((t.cms or {}).get("platform")) or "wordpress" in connected,
+        or "commerce" in granted,
+        "esp": bool((t.esp or {}).get("provider")) or "esp" in granted,
+        "cms": bool((t.cms or {}).get("platform")) or "cms" in granted,
         "ads": bool((t.ads or {}).get("meta_account_id")
-                    or (t.ads or {}).get("google_customer_id")),
+                    or (t.ads or {}).get("google_customer_id")) or "ads" in granted,
         "analytics": bool((t.analytics or {}).get("ga4_property")
-                          or (t.analytics or {}).get("gsc_site")),
-        "design": bool((t.design or {}).get("canva_brand_id")),
-        "crm": bool((t.crm or {}).get("provider")),
+                          or (t.analytics or {}).get("gsc_site"))
+        or "analytics" in granted,
+        "design": bool((t.design or {}).get("canva_brand_id")) or "design" in granted,
+        "crm": bool((t.crm or {}).get("provider")) or "crm" in granted,
     }
 
 

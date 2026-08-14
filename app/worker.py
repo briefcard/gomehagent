@@ -302,6 +302,25 @@ def backlog_sweep() -> None:
         )
 
 
+def credential_renewal() -> None:
+    """Extend OAuth tokens that expire on a clock, and say so when one cannot.
+
+    Silence on success is the point — this should be invisible for months at a
+    time. A failure is announced, because a client whose Meta connection has
+    lapsed needs to click Connect again and nothing else will tell them.
+    """
+    from . import channel, credentials as cred
+    result = cred.renew_tick()
+    if result["renewed"]:
+        log.info("renewed credentials: %s", ", ".join(result["renewed"]))
+    if result["failed"]:
+        log.warning("credential renewal FAILED: %s", "; ".join(result["failed"]))
+        channel.send_text(
+            "⚠️ A connection could not be renewed and is now marked failed:\n"
+            + "\n".join(f"· {f}" for f in result["failed"])
+            + "\n\nThe client needs to reconnect it from their connect link.")
+
+
 def systems_tick() -> None:
     """Evaluate every installed system once, and record what happened.
 
@@ -471,6 +490,11 @@ def main() -> None:
     sched.add_job(_safe(systems_tick, "systems tick"), "cron", hour=7, minute=0)
     sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
                   hour=9, minute=30)
+    # Meta long-lived tokens expire at ~60 days and cannot refresh; they must be
+    # exchanged while still valid. Daily, because the failure mode is an ads
+    # connection that dies quietly and is discovered by whatever reads it next.
+    sched.add_job(_safe(credential_renewal, "credential renewal"), "cron",
+                  hour=6, minute=30)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'

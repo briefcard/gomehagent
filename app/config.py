@@ -17,6 +17,12 @@ if DATABASE_URL.startswith("postgres://"):
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
+# Meta app credentials, for the Ads connector. Same pair as Google: the app is
+# ours and one registration serves every client, so a new account connects by
+# signing in rather than by anyone creating anything.
+META_APP_ID = os.environ.get("META_APP_ID", "")
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
+
 # JSON map of inbox alias -> {"email": ..., "refresh_token": ...}
 # e.g. {"personal": {...}, "baci": {...}, "eien": {...}}
 GMAIL_ACCOUNTS = json.loads(os.environ.get("GMAIL_ACCOUNTS_JSON", "{}"))

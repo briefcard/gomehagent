@@ -28,12 +28,15 @@ and six reference artifacts (§11).
 
 ## 2. Status board
 
-Last verified 2026-08-12 at commit `e27ea0a`.
-**Deployed through `1da3207`. Seven commits are committed and unpushed** —
-everything from `81bcb50` on. Push with:
+Last verified 2026-08-13 at commit `aa83de0`.
+
+**The "seven unpushed commits" this section used to warn about are pushed.**
+`origin/main` is at `aa83de0`, the working tree was clean, and everything from
+`81bcb50` on — `email_harvest`, `sources.py` / `/admin/fill`, the Data layer tab
+— is deployed. Verify rather than trust that sentence:
 
 ```bash
-git -C ~/Documents/gomehagent-build push origin HEAD:main
+git -C ~/Documents/gomehagent-build log --oneline -1 origin/main
 ```
 
 | Component | State |
@@ -48,7 +51,10 @@ git -C ~/Documents/gomehagent-build push origin HEAD:main
 | **Data layer tab** | built, **not pushed** |
 | Catalogue sync (Shopify → KbEntity) | live — **251 entities on Baci** |
 | Website compliance · harvest | live |
-| Console session · client credentials · connect links | live — API-key providers only |
+| Console session · client credentials · connect links | live |
+| **OAuth (`oauth.py`) — Google · Meta** | built, 45 offline checks, **never run against a real provider** |
+| **Gmail reads client-connected credentials** | built — `credentials.google_config`, the bridge without which OAuth stores a token nothing reads |
+| **Meta token renewal** | built — daily worker tick, 14-day window |
 | Operational half tenant-scoped | live, enforced by `test_tenant_isolation.py` |
 | Generator / validator / send (rec 4) | **not built** — nothing produces output |
 | Spreadsheet upload | **not built** — one `sources.SOURCES` entry when it is |
@@ -139,13 +145,38 @@ stored. If that works, the path is real for the first time.
 | Provider | Path |
 |---|---|
 | Shopify · Omnisend · Klaviyo · WordPress | API key, self-serve, verified on save |
-| Google (Gmail · Drive · Calendar · GSC · GA4) | **OAuth, not built** — a screen-share while you run `scripts/google_oauth.py` |
-| Meta Ads | **OAuth, not built** — same |
+| Google (Gmail · Drive · Calendar · GSC · GA4) | OAuth, self-serve — **built 2026-08-13, never run against Google** |
+| Meta Ads | OAuth, self-serve — **built 2026-08-13, never run against Meta** |
 
-OAuth is the gap, and it is the one that matters most: Google is what
-`email_harvest` needs, and `email_harvest` is the only source objections can be
-derived from. **Ironside has no mailbox at all**, which is why its objections
-are an authoring job and Baci's are a mining job.
+OAuth was the gap and the code is now there; what is left is proving it, plus
+four env vars (`GOOGLE_CLIENT_ID` / `_SECRET`, `META_APP_ID` / `_SECRET`) and a
+redirect URI registered in each provider's console. Until those exist the
+connect page shows the provider as "on a call" **and names the missing
+variable**.
+
+This still matters most of anything on the board, for the same reason as
+before: Google is what `email_harvest` needs, and `email_harvest` is the only
+source objections can be derived from. **Ironside has no mailbox at all**, which
+is why its objections are an authoring job and Baci's are a mining job.
+
+Three things about the OAuth work worth carrying forward:
+
+- **The bridge was the real work, not the flow.** `gmail_client.creds_for` read
+  `config.GMAIL_ACCOUNTS` directly, so a client could complete consent, have the
+  credential store, verify, and show as connected — and `email_harvest` would
+  still read the env blob, find nothing, and report an account with no mailbox.
+  A connection that is real and unreadable is worse than an absent one.
+  `credentials.google_config` mirrors `shopify_config`, which had solved exactly
+  this a session earlier for the other provider.
+- **`capabilities()` had drifted into a clause per capability**, and `ads` and
+  `analytics` never got one — so a Meta connection would have stored, worked,
+  and still read `ads: False`. It now derives from `credentials.GRANTS`, one
+  table saying what each provider turns on. A Google sign-in grants `inbox` and
+  `analytics` together, which no clause had ever said.
+- **Scope narrowness stopped being invisible, for OAuth.** Both providers report
+  what was actually granted, so an unticked permission is named on the console
+  the moment it happens. The DEFECTS entry stays open for API keys — a Shopify
+  token with too few scopes still fails quietly later.
 
 **What a connector unlocks, per source** — this is the argument for doing
 connectors before anything else:

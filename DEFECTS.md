@@ -445,8 +445,25 @@ platform uses the first. Merge before onboarding client #6.
 
 **Console writes are GET requests.** `/admin/kb_add`, `/admin/seed_kb`,
 `/admin/tenant_scope`, `/admin/harvest` mutate on a GET, so a prefetch or link
-preview can fire them. `/admin/claim_edit` and `/connect/<token>` are POST and
-are the model to follow.
+preview can fire them. `/admin/claim_edit`, `/connect/<token>`,
+`/admin/connect_link` and the POST half of `/admin/connect_revoke` are the
+model to follow.
+
+**The credential layer was invisible to its own operator** — fixed 2026-08-13.
+`credentials.status()` returned per-provider state, who granted it, when it
+last verified and which scopes came back dark; `/admin/connect_new`,
+`/admin/connections` and `/admin/connect_revoke` all existed. **The console
+rendered none of it.** The Accounts tab showed capability chips and a "Test
+connections" button, and its own copy still claimed "API keys and tokens live
+in Render env vars" — written before client-connected credentials existed and
+wrong ever since.
+
+This is §2.13 in a second subsystem, and the same sentence applies: a field
+nobody can read is a field nobody maintains. It is also why the connect page
+being broken for weeks (§"Every form POST 500'd") went unnoticed — there was no
+screen on which a connection's state was ever shown, so there was nothing to
+look wrong. Fixed by `admin_ui._connections`, asserted against the rendered
+HTML in `test_oauth.py` the way `test_kb_ui.py` asserts the Knowledge tab.
 
 **The console is one shared credential.** A session cookie replaced the key in
 URLs, but there is no per-user identity and no revocation — and it now guards
@@ -472,9 +489,37 @@ Now a single entry in `sources.SOURCES` — `key · label · produces · capabil
 review queue, provenance and conflict-on-disagreement for free. What it still
 needs is its own work: column mapping per client, and a preview before write.
 
-**OAuth for Google and Meta.** The blocker for connectors, and therefore for
-`sent_mail`, and therefore for objections on any account without a mailbox
-already wired. Everything else self-serves.
+~~**OAuth for Google and Meta.**~~ Built 2026-08-13 — `app/oauth.py`, one
+declared flow per provider so the routes know none by name. Still unproven
+against a real provider, and still needs its four env vars. Two defects found
+while building it, both the same shape as things already in this log:
+
+- **A credential nothing reads.** `gmail_client.creds_for` read
+  `config.GMAIL_ACCOUNTS` directly, so the entire Google flow would have stored
+  a token, verified it, shown "connected" on the console, and left
+  `email_harvest` reading the env blob and reporting an account with no mailbox.
+  This is §2.13 in a different surface — a thing that exists, is used by the
+  pipeline, and is invisible to the path that needs it. `shopify_config` had
+  already solved exactly this for the other provider a session earlier, which is
+  the part worth noticing: the fix existed and was not generalised.
+  *Rule: when a second instance of a bridge is needed, look for the first.*
+
+- **`capabilities()` had a clause per capability, and two never got one.**
+  `ads` and `analytics` checked only the `Tenant` JSON columns, so a Meta
+  sign-in would have stored a working credential and still read `ads: False`,
+  and `sources.available()` would skip every ads source with "no ads
+  connection" on an account that had just wired one. Now derived from
+  `credentials.GRANTS`. The general point is that a per-case clause list grows
+  by being edited, and the cases added last are the ones that get missed —
+  §1 *customisation in code*, one layer down.
+
+**Scope narrowness is no longer invisible, for OAuth.** Both providers report
+what was actually granted, so `_missing_scopes` names an unticked permission on
+the console at the moment it happens. A partial grant is stored and reported,
+not refused: the connection works for what was granted, and refusing outright
+leaves a client who unticked Calendar with no connection rather than most of
+one. Still open for API keys — a Shopify token with too few scopes fails
+quietly later, exactly as before.
 
 Media layer (blocks the campaign email builder), reports, Canva (OAuth),
 per-tenant prompt/model pinning, publish idempotency (a worker restarting
@@ -502,12 +547,17 @@ python3 scripts/test_worker_systems.py    # the tick that fills the run ledger
 python3 scripts/test_catalog_sync.py      # Shopify -> KbEntity, banned claims win
 python3 scripts/test_compliance.py        # the live site vs the brand's own rules
 python3 scripts/test_harvest.py           # site -> PENDING proposals, never facts
+python3 scripts/test_provenance.py        # origin, review, conflict-on-disagreement
+python3 scripts/test_extract.py           # spans are selected, then verified in code
+python3 scripts/test_email_harvest.py     # sent mail -> claims and objections
+python3 scripts/test_sources.py           # the registry; a fill is a rehearsal
+python3 scripts/test_oauth.py             # signing in, scope narrowness, renewal
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All fifteen suites pass as of 2026-08-12. None of them touch the network.
+All nineteen suites pass as of 2026-08-13. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.
