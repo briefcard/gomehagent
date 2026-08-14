@@ -331,7 +331,11 @@ def _select(tenant: str, situations: list[str], audience_key: str,
     picked = [{"id": r.id, "claim": r.claim, "evidence": r.evidence,
                "source": r.source} for r in rows]
 
-    objs = kb.objections(tenant, audience_key)
+    # Objections are ranked by the SAME situations the claims were selected on,
+    # so the doubt that gets pre-empted is the one this buyer's problem actually
+    # raises. `kb.objections` ranks rather than filters, so an untagged general
+    # objection is still reachable.
+    objs = kb.objections(tenant, audience_key, situations=situations)
     chosen: dict = {}
     if voiced:
         low = voiced.lower()
@@ -339,12 +343,25 @@ def _select(tenant: str, situations: list[str], audience_key: str,
             if any(w in o.objection.lower() for w in low.split()[:6]):
                 chosen = {"objection": o.objection, "response": o.response}
                 break
-    if not chosen:
-        # Nothing voiced: pre-empt the one that actually kills these deals.
-        for o in objs:
-            if "how fast" in o.objection.lower():
-                chosen = {"objection": o.objection, "response": o.response}
-                break
+    if not chosen and objs:
+        # Nothing voiced: pre-empt the best-ranked one for this situation.
+        #
+        # This used to look for the literal string "how fast", which exists only
+        # in the agency's seeded objections — so on Baci and Ironside it matched
+        # nothing and the brief went out with no objection handled at all. Same
+        # defect as the hardcoded `diagnostic` offer key, in the same function.
+        o = objs[0]
+        chosen = {"objection": o.objection, "response": o.response}
+
+    # The proof that backs the answer, joined on the same vocabulary. An
+    # objection answered with an assertion is an opinion; answered with a claim
+    # that carries its evidence, it is an argument.
+    if chosen:
+        row = next((o for o in objs if o.objection == chosen["objection"]), None)
+        support = kb.support_for(tenant, row)
+        if support:
+            chosen["support"] = [{"id": c.id, "claim": c.claim,
+                                  "evidence": c.evidence} for c in support]
     return picked, chosen
 
 

@@ -574,6 +574,16 @@ class KbObjection(_Provenance, Base):
     tenant = Column(String, nullable=False, index=True)
     objection = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
+    # The join to everything else. A claim carries situations and an objection
+    # did not, so selection could match proof to a buyer's problem and could
+    # only match objections by word overlap against whatever they happened to
+    # type. Sharing the vocabulary makes "which objection fits this situation"
+    # and "which claims support this objection" the same query.
+    #
+    # EMPTY MEANS UNIVERSAL, deliberately — the same convention `audience_key`
+    # already uses. An objection nobody has tagged still applies everywhere,
+    # so adding this column cannot silently retire the ones already on file.
+    situations = Column(JSON, default=list)
     claim_id = Column(String)                   # optional proof to pair with it
     audience_key = Column(String)               # blank = applies to everyone
     # Blank = applies to the brand. Set = only when writing about that entity.

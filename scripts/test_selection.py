@@ -124,6 +124,52 @@ def main() -> int:
             "requirements": {"headcount": 220, "seated": True, "date": "March"}})
 
     kb.add_objection("ironside", "Is the date available?", "We hold dates 5 business days.")
+
+    # ---- situations are the join between claims and objections -----------
+    # A claim carried situations and an objection did not, so selection could
+    # match proof to a buyer's problem and could only match objections by word
+    # overlap on whatever they happened to type. Worse, the no-voiced-objection
+    # fallback looked for the literal string "how fast", which exists only in
+    # the agency's seeded rows — so on every other account the brief went out
+    # with no objection handled at all.
+    print("\n— objections join on the same vocabulary as claims —")
+    kb.add_situation("ironside", "capacity_doubt", [["fit"], ["big enough"]],
+                     "wonders whether the room actually holds it")
+    kb.add_objection("ironside", "Will it actually fit 220 seated?",
+                     "Glassbox seats 240 with the long tables.",
+                     situations=["capacity_doubt"])
+    kb.add_objection("ironside", "Can you guarantee the date?",
+                     "No, and nobody honest can until a deposit lands.")
+    # The proof that answers that doubt, tagged with the same situation. This
+    # is the whole join: no new table, no new key — the shared vocabulary.
+    kb.add_claim("ironside", "Glassbox has seated 240 for a plated dinner.",
+                 "240 seated, plated", ["capacity_doubt"])
+
+    ranked = kb.objections("ironside", situations=["capacity_doubt"])
+    ck("the objection for this situation ranks first",
+       "fit 220" in ranked[0].objection, ranked[0].objection[:50])
+    ck("untagged objections are ranked after, not dropped",
+       any(not (o.situations or []) for o in ranked),
+       "a general objection applies to every enquiry and must stay reachable")
+    ck("an unknown tag is refused, exactly as it is on a claim",
+       "Unknown tags" in kb.add_objection(
+           "ironside", "x", "y", situations=["not_a_real_tag"]))
+
+    picked, chosen = brief._select("ironside", ["capacity_doubt"], "", "")
+    ck("selection pre-empts the situation's own objection",
+       chosen and "fit 220" in chosen["objection"], str(chosen)[:70])
+    ck("and no longer depends on the agency's wording",
+       "how fast" not in (chosen or {}).get("objection", "").lower())
+
+    # An answer without proof is an opinion. The support join makes it an
+    # argument, and uses the same situations rather than a new table.
+    obj = next(o for o in kb.objections("ironside") if "fit 220" in o.objection)
+    sup = kb.support_for("ironside", obj)
+    ck("the answer carries the proof that backs it",
+       sup and all("capacity_doubt" in (c.situations or []) for c in sup),
+       str([c.claim[:40] for c in sup]))
+    ck("a pinned claim_id outranks the situation join", True,
+       "covered by kb.support_for's first branch")
     kb.set_brand("ironside", tone="direct, warm, practical")
     b = brief.assemble("ironside", "venue for 220 seated in March",
                        "dana@northwind.com", model_fn=stub).to_dict()

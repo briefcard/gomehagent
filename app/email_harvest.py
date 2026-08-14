@@ -204,13 +204,19 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
                     fp = prov.fingerprint(question, "")
                     if fp not in known_obj:
                         known_obj.add(fp)
+                        # Tagged from the QUESTION, not the answer: the
+                        # situation is the buyer's problem, and the answer is
+                        # the response to it.
+                        otags = kb.suggest_tags(tenant, question)["tags"]
                         objections.append({
                             "objection": question[:300], "response": answer[:900],
+                            "situations": otags,
                             "source": f"answered in {ref}", "bucket": bucket})
                         if apply:
                             kb.add_objection(
                                 tenant, question[:300], answer[:900],
-                                origin="email", source=f"answered in {ref}")
+                                origin="email", source=f"answered in {ref}",
+                                situations=otags)
             elif not extract.available():
                 # No key: the crude path, kept so the feature degrades rather
                 # than disappears — and labelled, because its output is worse.

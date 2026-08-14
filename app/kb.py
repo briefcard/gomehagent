@@ -179,7 +179,8 @@ def audience(tenant: str, key: str) -> db.KbAudience | None:
 
 def objections(tenant: str, audience_key: str = "",
                include_proposed: bool = False,
-               entity_key: str | None = None) -> list[db.KbObjection]:
+               entity_key: str | None = None,
+               situations: list[str] | None = None) -> list[db.KbObjection]:
     """Approved objections for a tenant; narrowed to a segment when one is given.
 
     Entity scope works exactly as it does for claims, and matters more here:
@@ -202,7 +203,40 @@ def objections(tenant: str, audience_key: str = "",
             rows = [r for r in rows
                     if not r.audience_key or r.audience_key == audience_key]
         s.expunge_all()
-        return rows
+
+    if situations:
+        # Ranked, never filtered. An objection tagged for this situation comes
+        # first; an untagged one is general and still useful. Dropping the
+        # general ones would lose "can you guarantee a result", which applies
+        # to every enquiry any client ever gets.
+        want = set(situations)
+        rows.sort(key=lambda r: (-len(set(r.situations or []) & want),
+                                 0 if (r.situations or []) else 1))
+    return rows
+
+
+def support_for(tenant: str, objection: db.KbObjection,
+                limit: int = 2) -> list[db.KbClaim]:
+    """The claims that back up an answer.
+
+    Two ways, in order of authority. A `claim_id` pinned by a human is a
+    decision and wins outright. Otherwise the situations are the join: a claim
+    tagged for the same problem this objection raises is, by construction,
+    proof aimed at the same doubt.
+    """
+    if objection is None:
+        return []
+    if objection.claim_id:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbClaim, objection.claim_id)
+            if row and row.tenant == tenant and row.review == prov.APPROVED:
+                s.expunge(row)
+                return [row]
+    tags = list(objection.situations or [])
+    if not tags:
+        return []
+    return claims(tenant, situations=tags, limit=limit,
+                  entity_key=objection.entity_key or None)
 
 
 def situations(tenant: str) -> set[str]:
@@ -1115,9 +1149,17 @@ def add_audience(tenant: str, key: str, name: str, pains: list[str],
 def add_objection(tenant: str, objection: str, response: str,
                   audience_key: str = "", escalate: str = "no",
                   origin: str = "human", source: str = "",
-                  review: str = "", entity_key: str = "") -> str:
+                  review: str = "", entity_key: str = "",
+                  situations: list[str] | None = None) -> str:
     if not objection or not response:
         return "An objection needs both the objection and the approved answer."
+    tags = list(situations or [])
+    if tags:
+        valid = globals()["situations"](tenant)
+        unknown = [t for t in tags if t not in valid]
+        if unknown:
+            return (f"Unknown tags for {tenant}: {', '.join(unknown)}\n"
+                    f"Valid: {', '.join(sorted(valid))}")
     review = review or (prov.APPROVED if prov.lands_approved(origin)
                         else prov.PROPOSED)
     fp = prov.fingerprint(objection, entity_key)
@@ -1144,7 +1186,7 @@ def add_objection(tenant: str, objection: str, response: str,
                              response=response, audience_key=audience_key,
                              escalate=escalate, origin=origin, review=review,
                              source=source, fingerprint=fp,
-                             entity_key=entity_key,
+                             entity_key=entity_key, situations=tags,
                              approved_by="seed" if origin == "seed" else "",
                              approved_at=db.utcnow() if review == prov.APPROVED else None))
         s.commit()
