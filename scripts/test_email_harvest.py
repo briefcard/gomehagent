@@ -84,6 +84,15 @@ def _stub_extract(tenant, url, blocks, entity_key=""):
     return {"claims": out, "rejected_not_verbatim": [], "used": "model"}
 
 
+def _stub_qa(tenant, inbound, reply, ref=""):
+    """Stands in for the model. Returns the SHORT spans, verbatim from each side."""
+    if "dishwasher safe" in inbound and "dishwasher safe" in reply:
+        return {"objection": "is this dishwasher safe?",
+                "answer": "Yes, every piece is dishwasher safe on a normal cycle.",
+                "general": True, "ref": ref}
+    return {}
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -93,6 +102,7 @@ def main() -> int:
     gmail_client.fetch_sent_threads = _stub_fetch
     eh.extract.extract = _stub_extract
     eh.extract.available = lambda: True
+    eh.extract.extract_qa = _stub_qa
     config.GMAIL_ACCOUNTS["baci"] = {"email": "hi@bacimilanousa.com"}
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, "baci")
@@ -147,6 +157,11 @@ def main() -> int:
         o = r["objections"][0]
         ck("the objection is what THEY asked",
            "dishwasher safe" in o["objection"].lower())
+        # The upgrade over picking the first line with a "?" in it: the
+        # greeting and the backstory are not part of the objection.
+        ck("and only the question — not the greeting or the backstory",
+           "Hi" not in o["objection"] and "broke my last set" not in o["objection"],
+           o["objection"])
         ck("the answer is what WE said",
            "dishwasher safe" in o["response"].lower()
            and "I broke my last set" not in o["response"])

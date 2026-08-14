@@ -214,3 +214,62 @@ def extract(tenant: str, url: str, blocks: list[str],
     cands = [{**c, "_url": url} for c in _parse(raw)]
     kept, rejected = _verify(cands, body, entity_key)
     return {"claims": kept, "rejected_not_verbatim": rejected, "used": "model"}
+
+_QA_SYSTEM = """You are reading one email exchange: a message a customer sent, and the reply the business sent back. You SELECT text; you never write it.
+
+Return the OBJECTION and the ANSWER, if the exchange contains one.
+
+An objection is the thing the customer actually wanted to know or was worried about — not their greeting, not their backstory, not their sign-off. An answer is the part of the reply that addresses it.
+
+RULES:
+1. `objection` MUST be an exact substring of the INBOUND message. `answer` MUST be an exact substring of the REPLY. Character for character, both of them. A span that is not an exact substring is discarded and wasted.
+2. Return the SHORTEST span that carries the whole question, and the shortest that carries the whole answer. "Hi - is this dishwasher safe? I broke my last set." is wrong; "is this dishwasher safe?" is right.
+3. Skip the exchange entirely if the customer asked nothing, if the reply does not answer, or if it is scheduling, chit-chat or an acknowledgement.
+4. `general` is true when the answer would be just as correct for any customer asking the same thing, and false when it is specific to this order, this person or this date.
+
+Return ONLY JSON, no prose:
+{"objection": "...", "answer": "...", "general": bool}
+Return {} if there is no reusable question-and-answer here."""
+
+
+def extract_qa(tenant: str, inbound: str, reply: str, ref: str = "") -> dict:
+    """The question a customer asked and the answer they were given.
+
+    Both spans are verified against their own source — the objection must
+    appear in the inbound message and the answer in the reply — so the pair
+    cannot be a paraphrase of either, and cannot silently swap who said what.
+    That last failure is the one worth engineering against: attributing a
+    customer's words to the brand is exactly what `PROOF_USAGE` forbids
+    everywhere else.
+
+    Returns {} when there is no reusable pair, which is most exchanges.
+    """
+    inbound, reply = (inbound or "").strip(), (reply or "").strip()
+    if not available() or len(inbound) < 15 or len(reply) < 25:
+        return {}
+    user = (f"INBOUND (what the customer sent):\n{inbound[:4000]}\n\n"
+            f"REPLY (what the business sent back):\n{reply[:4000]}")
+    try:
+        raw = _call(_QA_SYSTEM, user)
+    except Exception:  # noqa: BLE001 — one unreadable thread is not a failure
+        return {}
+    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end < start:
+        return {}
+    try:
+        data = json.loads(raw[start:end + 1])
+    except Exception:  # noqa: BLE001
+        return {}
+
+    q = " ".join(str(data.get("objection", "")).split())
+    a = " ".join(str(data.get("answer", "")).split())
+    if not q or not a:
+        return {}
+    # The guarantee. Each span must come from ITS OWN side of the exchange.
+    if q not in " ".join(inbound.split()):
+        return {"rejected": "objection is not in the inbound message"}
+    if a not in " ".join(reply.split()):
+        return {"rejected": "answer is not in the reply"}
+    return {"objection": q, "answer": a, "general": bool(data.get("general")),
+            "ref": ref}

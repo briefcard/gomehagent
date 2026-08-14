@@ -135,6 +135,7 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:180]}"}
 
     claims, objections, rejected = [], [], []
+    not_verbatim: list[str] = []
     skipped: dict[str, int] = {}
     read = 0
 
@@ -188,21 +189,45 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         if inbound and bucket in ("order_issue", "order_routine", "order_basic",
                                   "sales_leads"):
             asked = _own_words(inbound.get("body", ""))
-            question = next((ln for ln in asked.splitlines()
-                             if _is_question(ln)), "")
-            if question and len(ours) > 60:
-                fp = prov.fingerprint(question, "")
-                if fp not in known_obj:
-                    known_obj.add(fp)
-                    answer = ours[:900]
-                    if not any(b in answer.lower() for b in banned):
+            pair = extract.extract_qa(tenant, asked, ours, ref=ref)
+            if pair.get("rejected"):
+                not_verbatim.append(pair["rejected"])
+            elif pair.get("objection"):
+                question, answer = pair["objection"], pair["answer"]
+                # Only reusable answers. "Your order ships Tuesday" is true and
+                # useless as an objection — it answers one order, not a question
+                # the next customer will ask.
+                if not pair.get("general"):
+                    skipped["answer was specific to one customer"] = \
+                        skipped.get("answer was specific to one customer", 0) + 1
+                elif not any(b in answer.lower() for b in banned):
+                    fp = prov.fingerprint(question, "")
+                    if fp not in known_obj:
+                        known_obj.add(fp)
                         objections.append({
-                            "objection": question[:300], "response": answer,
+                            "objection": question[:300], "response": answer[:900],
                             "source": f"answered in {ref}", "bucket": bucket})
                         if apply:
                             kb.add_objection(
-                                tenant, question[:300], answer,
+                                tenant, question[:300], answer[:900],
                                 origin="email", source=f"answered in {ref}")
+            elif not extract.available():
+                # No key: the crude path, kept so the feature degrades rather
+                # than disappears — and labelled, because its output is worse.
+                question = next((ln for ln in asked.splitlines()
+                                 if _is_question(ln)), "")
+                if question and not any(b in ours.lower() for b in banned):
+                    fp = prov.fingerprint(question, "")
+                    if fp not in known_obj:
+                        known_obj.add(fp)
+                        objections.append({
+                            "objection": question[:300], "response": ours[:900],
+                            "source": f"answered in {ref} (unrefined — no "
+                                      f"extractor available)", "bucket": bucket})
+                        if apply:
+                            kb.add_objection(tenant, question[:300], ours[:900],
+                                             origin="email",
+                                             source=f"answered in {ref}")
 
     return {
         "tenant": tenant, "mailbox": alias, "applied": apply,
@@ -212,6 +237,7 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         "claims": claims, "claims_count": len(claims),
         "objections": objections, "objections_count": len(objections),
         "rejected_for_banned_claim": rejected,
+        "rejected_not_verbatim": not_verbatim[:10],
         "skipped_by_reason": dict(sorted(skipped.items(), key=lambda kv: -kv[1])),
         "buckets_mined": sorted(MINEABLE),
         "note": ("Reads SENT mail only — what this account said, not what it "
