@@ -195,6 +195,30 @@ def main() -> int:
         ck("so the interpretation has something to work from",
            "1,652-unit" in kept[0]["proves"], kept[0]["proves"])
 
+        print("\n— the page's own wording, not the comparison form —")
+        # Matching must be whitespace-insensitive (a claim can span a line
+        # break in the HTML), so _verify compares normalised forms — and then
+        # stored the normalised form. `norm` mapped it back to the original
+        # block for exactly this purpose and nothing read it, so every claim
+        # was silently reflowed away from what the page said.
+        WRAPPED = ["15,000 +   Trained across\n30+ seminars worldwide"]
+        got, _ = extract._verify(
+            [{"text": "15,000 + Trained across 30+ seminars worldwide",
+              "proof_type": "data", "_url": "x"}], WRAPPED)
+        ck("the match still succeeds across the line break", got,
+           "whitespace-insensitive matching is what makes the claim findable")
+        ck("and what is stored is the source, verbatim",
+           got[0]["text"] == WRAPPED[0],
+           repr(got[0]["text"]))
+        ck("which is NOT the collapsed form",
+           got[0]["text"] != "15,000 + Trained across 30+ seminars worldwide")
+
+        import app.provenance as _pv
+        ck("dedupe is unaffected — normalise collapses whitespace anyway",
+           _pv.fingerprint(got[0]["text"])
+           == _pv.fingerprint("15,000 + Trained across 30+ seminars worldwide"),
+           "storing the source form must not split one fact into two")
+
         print("\n— but context is checked, not taken —")
         bad, _ = extract._verify(
             [{"text": "1,652 residential & hotel units", "proof_type": "data",

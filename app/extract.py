@@ -159,6 +159,32 @@ def _context(tenant: str, url: str, entity_key: str = "") -> str:
     return "\n".join(bits)
 
 
+def _exact(text: str, blocks: list[str]) -> str:
+    """The verbatim source span behind a whitespace-normalised match.
+
+    Matching has to be whitespace-insensitive — a claim that spans a line
+    break in the HTML is still the same claim — so `_verify` compares
+    normalised forms. It then STORED the normalised form, which is not what
+    the page says: `norm` maps normalised text back to the original block for
+    exactly this purpose and nothing ever read it. The result was a knowledge
+    base of claims silently reflowed from their source.
+
+    Rebuilding the match as a whitespace-flexible pattern recovers the source
+    bytes, so the stored claim is the page's own wording. Fingerprints are
+    unaffected — `provenance.normalise` collapses whitespace anyway — so this
+    changes what is stored without changing what deduplicates.
+    """
+    words = text.split()
+    if not words:
+        return text
+    pattern = re.compile(r"\s+".join(re.escape(w) for w in words))
+    for b in blocks:
+        m = pattern.search(b)
+        if m:
+            return m.group(0)
+    return text          # matched the joined form across blocks; keep as-is
+
+
 def _verify(candidates: list[dict], blocks: list[str],
             entity_key: str = "",
             valid_situations: set[str] | None = None) -> tuple[list[dict], list[str]]:
@@ -218,7 +244,8 @@ def _verify(candidates: list[dict], blocks: list[str],
                 str(c.get("needs_situation", "")).strip().lower()).strip("_")[:40]
 
         kept.append({
-            "text": text,
+            # The page's own wording, not the comparison form.
+            "text": _exact(text, blocks),
             "proof_type": ptype,
             "evidence": ev,
             "entity_key": entity_key if c.get("entity_scoped") else "",

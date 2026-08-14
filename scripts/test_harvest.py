@@ -13,6 +13,7 @@ the knowledge base, and what must not become selectable without a human.
 """
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import tempfile
@@ -334,6 +335,9 @@ def main() -> int:
     ck("entities are decoded", "’" in text and "&#8217;" not in text)
     ck("the actual copy survives", "we shipped 1,200 orders in 2025" in text.lower())
 
+    print("\n— a thin queue must say WHY it is thin —")
+    check_known_drops_are_counted(ck)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
@@ -342,6 +346,34 @@ def main() -> int:
         return 1
     print("all checks passed")
     return 0
+
+
+
+def check_known_drops_are_counted(ck):
+    """A thin queue must be readable as "we already have this", not as silence.
+
+    A live Baci crawl returned 5 proposals. The cause was not the site: the
+    account had never been purged, so its existing claims populated `known`
+    and every repeat was dropped by `if fp in known: continue` — with no
+    counter. `dropped_by_reason` named every other rejection and said nothing
+    about the one doing all the work, so the run read as "the site says little
+    that is checkable" when it meant "we have all of this already".
+    """
+    from app import harvest as hv, kb, provenance as prov
+
+    src = inspect.getsource(hv.harvest)
+    ck("the already-on-file branch increments a counter",
+       "already on file" in src,
+       "a silent `continue` here is indistinguishable from a thin site")
+    ck("and the counter rides in the reported drop reasons",
+       "dropped_by_reason" in src)
+
+    # The dedupe key is the fingerprint, so the reflow fix must not split one
+    # fact into two — a stored source-form claim and a re-crawled one have to
+    # collide.
+    ck("a reflowed claim still fingerprints as the same fact",
+       prov.fingerprint("Designed in Milan\n  since 1993.")
+       == prov.fingerprint("Designed in Milan since 1993."))
 
 
 if __name__ == "__main__":

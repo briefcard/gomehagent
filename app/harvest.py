@@ -417,6 +417,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             low = body.lower()
             fp = prov.fingerprint(body)
             if fp in known:
+                # Counted, not silent. A re-crawl of an account that already
+                # has claims drops every repeat here, and with no counter the
+                # run reported a handful of proposals and gave no way to tell
+                # "the site says little" from "we already have all of this".
+                # Baci returned 5 for exactly this reason.
+                dropped["already on file — same fact, earlier crawl"] = \
+                    dropped.get("already on file — same fact, earlier crawl", 0) + 1
                 continue
             if fp in boilerplate:
                 dropped["appears site-wide — a template, not a claim"] = \
