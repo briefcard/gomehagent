@@ -677,6 +677,64 @@ def next_step_for(tenant: str, stage: str) -> dict:
 # inventing something (this is what stopped the Ironside quote).
 # --------------------------------------------------------------------------
 
+#: One place that knows how to test a single named KB requirement. `completeness`
+#: answers "may we generate from this account at all"; this answers "may THIS
+#: system run", which is a different and usually much smaller question.
+def needs_met(tenant: str, fields: tuple[str, ...]) -> list[str]:
+    """Which of the named KB requirements this account does not meet.
+
+    `systems.ready` used to ignore the per-system `kb_needs` entirely and gate
+    everything on `completeness()` — one global bar of six things. That was
+    wrong in both directions at once, and neither error was visible because the
+    declared list was never read:
+
+      · Website content compliance declares it needs `banned_claims` and
+        nothing else. It was blocked until the account had a tone, a claim, an
+        audience, an objection AND a product — five things it never touches.
+        The cheapest system to switch on was gated like the most expensive one.
+      · `next_steps` is in the lead responder's declared needs and
+        `completeness()` does not check it at all, so a lead responder could
+        pass its gate and produce a draft with a blank ask — the §2.8 failure,
+        still reachable.
+
+    A refusal that names something the system does not use is a false refusal,
+    and this codebase's whole claim is that it refuses accurately.
+    """
+    b = brand(tenant)
+    if not b:
+        return ["kb_brand row"]
+    have = {
+        "tone": bool((b.voice or {}).get("tone")),
+        "banned_claims": bool(b.banned_claims),
+        "next_steps": bool(b.next_steps),
+        "positioning": bool(b.positioning),
+        "claim": bool(claims(tenant)),
+        "audience": bool(audiences(tenant)),
+        "objection": bool(objections(tenant)),
+        "entity": bool(entities(tenant, available_only=False)),
+    }
+    waiting = {
+        "claim": len(pending_claims(tenant)),
+        "audience": len([a for a in audiences(tenant, include_proposed=True)
+                         if (a.review or "") == prov.PROPOSED]),
+        "objection": len([o for o in objections(tenant, include_proposed=True,
+                                                any_entity=True)
+                          if (o.review or "") == prov.PROPOSED]),
+        "entity": len([e for e in entities(tenant, available_only=False,
+                                           include_proposed=True)
+                       if (e.review or "") == prov.PROPOSED]),
+    }
+    missing = []
+    for f in fields:
+        if have.get(f, True):
+            continue
+        # Same distinction completeness() draws: nobody has told us yet, versus
+        # somebody has and it is sitting in a queue. Different fixes.
+        n = waiting.get(f, 0)
+        missing.append(f"{f} ({n} waiting for review)" if n else f)
+    return missing
+
+
 def completeness(tenant: str) -> dict:
     """Whether this account can be generated from, and what is missing if not.
 

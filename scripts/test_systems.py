@@ -153,12 +153,69 @@ def main() -> int:
     check("every entry carries named blockers or none",
           all(isinstance(b["blockers"], list) for b in board))
 
+    # ---- per-system KB gating -------------------------------------------
+    print("\n— gated on what it declared, not one global bar —")
+    check_per_system_kb_gate(check)
+
     print()
     if _failures:
         print(f"{len(_failures)} FAILED: " + ", ".join(_failures))
         return 1
     print(f"all checks passed ({_tmp})")
     return 0
+
+
+def check_per_system_kb_gate(ck):
+    """A system is gated on what IT declared, not on one global bar.
+
+    `kb_needs` was declared per system and read nowhere: `ready()` called
+    `completeness()`, so compliance — which uses one field — was blocked until
+    the account had a tone, a claim, an audience, an objection and a product.
+    Meanwhile `next_steps`, which the lead responder genuinely needs,
+    was checked by neither, leaving the blank-ask failure of DEFECTS 2.8
+    reachable through a passing gate.
+    """
+    from app import kb, systems, db
+    with db.SessionLocal() as s:
+        if not s.get(db.Tenant, "gatetest"):
+            s.add(db.Tenant(key="gatetest", name="Gate Test", kind="client",
+                            domain="gatetest.com"))
+            s.commit()
+    kb.ensure_brand("gatetest", "Gate Test")
+    with db.SessionLocal() as s:
+        b = s.query(db.KbBrand).filter(db.KbBrand.tenant == "gatetest").first()
+        b.banned_claims = ["made in italy"]
+        s.commit()
+
+    def ready_for(key):
+        row = systems.find("gatetest", key) or systems.create("gatetest", key)
+        with db.SessionLocal() as s:
+            live = s.get(db.System, row.id)
+            for f, _l, _w in systems.CONTRACT:
+                setattr(live, f, "filled in")
+            s.commit()
+            return systems.ready(s.get(db.System, live.id))
+
+    r = ready_for("content_compliance")
+    ck("compliance runs on its one declared field and nothing else",
+       r["ready"], str(r["blockers"]))
+
+    r = ready_for("lead_responder")
+    kbb = next((b for b in r["blockers"] if b.startswith("knowledge base")), "")
+    ck("the lead responder is gated on next_steps, which the old bar never checked",
+       "next_steps" in kbb, kbb)
+    ck("and not on fields it never declared",
+       "positioning" not in kbb, kbb)
+
+    r = ready_for("reorder_engine")
+    kbb = next((b for b in r["blockers"] if b.startswith("knowledge base")), "")
+    ck("the reorder engine is gated at all — it used to be gated on nothing",
+       "entity" in kbb, str(r["blockers"]))
+
+    ck("a field nobody has answered is named plainly",
+       kb.needs_met("gatetest", ("tone",)) == ["tone"])
+    ck("and one satisfied is not named",
+       kb.needs_met("gatetest", ("banned_claims",)) == [])
 
 
 if __name__ == "__main__":

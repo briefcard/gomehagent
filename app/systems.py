@@ -240,7 +240,20 @@ def ready(system: db.System) -> dict:
     if sp["requires_any"] and not any(caps.get(c) for c in sp["requires_any"]):
         blockers.append("needs at least one of: " + ", ".join(sp["requires_any"]))
 
-    if sp["needs_kb"]:
+    # Gate on what THIS system declared it needs, not on a single global bar.
+    # `kb_needs` was declared per system and read nowhere — `ready` called
+    # `completeness()`, so every system was blocked until the whole knowledge
+    # base was populated. Compliance, which uses one field, was held to the same
+    # bar as the lead responder, which uses six; and `next_steps`, which the
+    # lead responder does need, was checked by neither.
+    needs = tuple(sp.get("kb_needs") or ())
+    if needs:
+        absent_kb = kb.needs_met(system.tenant, needs)
+        if absent_kb:
+            blockers.append("knowledge base: " + ", ".join(absent_kb))
+    elif sp["needs_kb"]:
+        # Declares it needs the KB but names no fields — fall back to the old
+        # global bar rather than silently letting it through.
         c = kb.completeness(system.tenant)
         if not c["ready"]:
             blockers.append("knowledge base: " + ", ".join(c["missing"]))

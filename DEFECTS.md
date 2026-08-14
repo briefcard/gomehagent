@@ -513,6 +513,43 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### 2.20 Every system's declared requirements were read by nothing — fixed 2026-08-14
+
+`systems.CATALOG` gives each system a `kb_needs` tuple — the knowledge-base
+fields it cannot run without. `ready()` never read it. It called
+`kb.completeness()`, one global bar of six things, so every system was gated
+identically regardless of what it actually used. `kb_needs` had exactly one
+consumer, `waiting_on()`, which is a prioritisation display and not a gate.
+
+Wrong in both directions, and neither error could be seen, because the declared
+list was decorative:
+
+  · **Website content compliance** declares `banned_claims` and nothing else,
+    and needs no connections at all. It was blocked until the account also had
+    a tone, a claim, an audience, an objection and a product — five things it
+    never touches. The cheapest system to switch on, and the one that gets a
+    client a verifiable number in week one, was gated like the most expensive.
+  · **`next_steps`** is in the lead responder's declared needs and
+    `completeness()` does not test it at all, so a lead responder could pass
+    its gate and draft with a blank ask — §2.8, still reachable through a green
+    light.
+  · **`reorder_engine`** carries `needs_kb=False`, so it was gated on no
+    knowledge-base check whatever — including no `banned_claims` — while
+    triggering customer-facing email through an ESP. Same shape as the SEO
+    subsystem publishing to live stores without reading the ban list.
+
+`kb.needs_met(tenant, fields)` tests named requirements one at a time and
+`ready()` gates on the system's own list. *Rule: a declaration that nothing
+reads is a comment. If a spec field is meant to constrain behaviour, find its
+consumer before trusting it — and if there is none, that is the defect.*
+
+**Still open, and a judgement call rather than a bug:** two declarations look
+wrong on inspection now that they are load-bearing. `campaign_email` names no
+`audience` and no `next_steps` — a campaign email with no segment and no
+call to action. `reorder_engine` names neither `tone` nor `banned_claims`
+despite sending customer-facing copy. Both were written before any generator
+existed and have never been tested against one, because nothing generates.
+
 ### 2.19 A product answer was claimed of the whole catalogue — fixed 2026-08-14
 
 Reported from the live Knowledge tab. Six objections harvested off Baci product
