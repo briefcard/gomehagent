@@ -1222,6 +1222,32 @@ async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(result)}", 303)
 
 
+@app.post("/admin/connect_test")
+async def connect_test_post(request: Request, key: str = Depends(admin_key)):
+    """Re-verify a stored API key against the live provider, and record it.
+
+    "Connected" was a claim made once, at the moment of pasting, and never
+    tested again — so a rotated or provider-revoked key kept a green chip and a
+    `last_verified` date from months earlier. This is the button that turns
+    that back into a measurement.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import credentials as cred
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant, provider = str(form.get("tenant", "")), str(form.get("provider", ""))
+    r = cred.recheck(tenant, provider)
+    name = (cred.PROVIDERS.get(provider) or {}).get("name", provider)
+    if r["ok"]:
+        msg = f"{name} still works" + (f" — {r['detail']}" if r.get("detail") else "")
+        return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(msg)}", 303)
+    return RedirectResponse(
+        f"/admin/ui?tab=accounts&err={quote(f'{name}: ' + r['error'])}", 303)
+
+
 @app.post("/admin/connect_link")
 async def connect_link_post(request: Request, key: str = Depends(admin_key)):
     """Mint a connect link from the console and show it, rather than as JSON.

@@ -50,6 +50,42 @@ def main() -> int:
         ck("it decrypts back", cred._decrypt(blob) == SECRET_VALUE)
         ck("a bad blob returns empty, never raises", cred._decrypt("garbage") == "")
 
+        # --- what a person actually types -------------------------------
+        # Every case here was measured against the live APIs on 2026-08-13 and
+        # every one of them failed, most with an exception class name on the
+        # client's screen. A wrong value nobody can act on is the same defect
+        # as a silent one.
+        print("\n— normalising what a client pastes —")
+        norm, why = cred._normalize_meta(
+            "shopify", {"domain": "https://769684-2.myshopify.com"})
+        ck("a domain pasted from the browser bar loses its scheme",
+           not why and norm["domain"] == "769684-2.myshopify.com", str(norm))
+        norm, why = cred._normalize_meta(
+            "shopify", {"domain": "769684-2.myshopify.com/admin/"})
+        ck("and any path or trailing slash",
+           not why and norm["domain"] == "769684-2.myshopify.com", str(norm))
+        norm, why = cred._normalize_meta(
+            "shopify", {"domain": "769684-2.MyShopify.com"})
+        ck("case does not matter", norm["domain"] == "769684-2.myshopify.com")
+
+        _, why = cred._normalize_meta("shopify", {"domain": "bacimilanousa.com"})
+        ck("the storefront domain — the one a merchant knows — is refused",
+           bool(why), "it was accepted")
+        ck("and the refusal says where to find the right one",
+           "myshopify.com" in why and "Settings" in why, why)
+        ck("including that it may be a number, because Baci's is",
+           "number" in why, why)
+
+        norm, _ = cred._normalize_meta("wordpress", {"site": "marketingthatworks.co"})
+        ck("a WordPress site with no scheme gets one",
+           norm["site"] == "https://marketingthatworks.co", str(norm))
+        norm, _ = cred._normalize_meta("wordpress",
+                                       {"site": "https://acme.com/blog/"})
+        ck("and loses its trailing slash", norm["site"] == "https://acme.com/blog",
+           str(norm))
+        ck("a provider needing no normalisation is untouched",
+           cred._normalize_meta("omnisend", {}) == ({}, ""))
+
         # --- storing without a live probe ------------------------------
         # _probe would call Shopify; stub it so the test stays offline.
         print("\n— storing —")
@@ -71,6 +107,44 @@ def main() -> int:
         ck("resolve returns the decrypted value to code",
            cred.resolve("baci", "shopify")["secret"] == SECRET_VALUE)
         ck("and marks it as the client's", cred.resolve("baci", "shopify")["source"] == "client")
+
+        # --- connected is a claim, and claims go stale -------------------
+        print("\n— re-checking a key that was only ever verified once —")
+        cred._probe = lambda p, s, m: {"ok": True, "detail": "Acme Store"}
+        r = cred.recheck("baci", "shopify")
+        ck("a key that still works re-verifies", r["ok"] and r["checked"], str(r))
+
+        cred._probe = lambda p, s, m: {"ok": False,
+                                       "error": "Shopify rejected that token."}
+        r = cred.recheck("baci", "shopify")
+        ck("a key rotated at the provider fails the re-check", not r["ok"], str(r))
+        st = {x["provider"]: x for x in cred.status("baci")}
+        ck("and the console stops calling it connected",
+           st["shopify"]["state"] == "not verifying", str(st["shopify"]))
+        ck("with the provider's own reason",
+           "rejected" in st["shopify"]["detail"], st["shopify"]["detail"])
+        # The important negative. resolve() returns only active rows and falls
+        # through to the env blob otherwise, so demoting a credential on a
+        # failed probe would silently swap which one is in use — on one network
+        # blip, mid-flight, with nothing downstream questioning it.
+        ck("but the client's credential is STILL the one in use",
+           cred.resolve("baci", "shopify").get("secret") == SECRET_VALUE,
+           "a failed probe silently changed which credential resolves")
+        ck("and it is still attributed to the client, not the env group",
+           cred.resolve("baci", "shopify").get("source") == "client")
+
+        cred._probe = lambda p, s, m: {"ok": True, "detail": "Acme Store"}
+        ck("and it recovers when the provider does",
+           cred.recheck("baci", "shopify")["ok"])
+
+        r = cred.recheck("baci", "google")
+        ck("an oauth credential is skipped, not marked broken",
+           not r["ok"] and not r["checked"], str(r))
+        ck("and says how to re-verify it instead",
+           "reconnect" in r["error"].lower(), r["error"])
+        r = cred.recheck("coverings", "shopify")
+        ck("re-checking nothing says so rather than failing a row",
+           not r["checked"] and "Nothing stored" in r["error"], str(r))
 
         # --- what must never be stored ---------------------------------
         print("\n— refusing —")

@@ -214,7 +214,12 @@ def status(tenant: str) -> list[dict]:
     for key, spec in PROVIDERS.items():
         row = rows.get(key)
         env = _from_env(tenant, key)
-        if row and row.status == "active":
+        if row and row.status == "active" and row.last_error:
+            # Still the credential in use — see `recheck`. "We could not verify
+            # this" is a third state between connected and missing, and
+            # collapsing it into either one is how the console starts lying.
+            state, detail = "not verifying", (row.last_error or "")[:160]
+        elif row and row.status == "active":
             state, detail = "connected", f"by {row.granted_by or 'the client'}"
             # A partial grant is a connection with a dark half, and the only
             # place that can ever be said is here — the token itself works.
@@ -260,6 +265,9 @@ def store(tenant: str, provider: str, secret: str, meta: dict | None = None,
     if not secret:
         return {"ok": False, "error": f"{spec['name']} needs a {spec['field']}."}
     meta = {k: (v or "").strip() for k, v in (meta or {}).items() if v}
+    meta, why = _normalize_meta(provider, meta)
+    if why:
+        return {"ok": False, "error": why}
     for field in spec["also"]:
         if not meta.get(field):
             return {"ok": False, "error": f"{spec['also'][field]}"}
@@ -347,6 +355,60 @@ def store_oauth(tenant: str, provider: str, result: dict,
     return {"ok": True, "detail": detail, "missing": missing}
 
 
+def recheck(tenant: str, provider: str) -> dict:
+    """Re-probe a stored credential and record what happened.
+
+    `store()` verifies once, at the moment of connection, and nothing has ever
+    checked again. A key that is rotated, revoked at the provider, or attached
+    to an app whose scopes were narrowed goes on reading "connected" with a
+    `last_verified` date from whenever it was pasted — which is worse than
+    showing nothing, because it is a positive claim that has stopped being
+    tested.
+
+    OAuth credentials are skipped rather than failed: probing a Google refresh
+    token means minting an access token, and treating "we did not check" as
+    "broken" would mark a working connection failed. Absence is a third state
+    here too.
+    """
+    spec = PROVIDERS.get(provider)
+    if not spec:
+        return {"ok": False, "error": f"unknown provider {provider!r}"}
+    if spec["kind"] != "api_key":
+        return {"ok": False, "checked": False,
+                "error": f"{spec['name']} is a sign-in, not a key — reconnect "
+                         f"it to re-verify."}
+    with db.SessionLocal() as s:
+        row = (s.query(db.Credential)
+               .filter(db.Credential.tenant == tenant,
+                       db.Credential.provider == provider,
+                       db.Credential.status.in_(("active", "failed"))).first())
+        if not row or not row.secret:
+            return {"ok": False, "checked": False,
+                    "error": f"Nothing stored for {spec['name']}."}
+        secret, meta = _decrypt(row.secret), dict(row.meta or {})
+
+    probe = _probe(provider, secret, meta)
+    with db.SessionLocal() as s:
+        row = (s.query(db.Credential)
+               .filter(db.Credential.tenant == tenant,
+                       db.Credential.provider == provider).first())
+        if row:
+            # `status` is deliberately NOT set to "failed" here. `resolve()`
+            # returns only active rows and falls through to the env blob
+            # otherwise, so demoting on a failed probe would silently swap a
+            # client's live credential for whatever Gomeh pasted into Render —
+            # on one network blip, mid-flight, with nothing downstream
+            # questioning it. A probe failing is evidence about the probe as
+            # well as about the key. The failure is recorded and shown; which
+            # credential is in use does not move until a human decides.
+            row.last_error = "" if probe["ok"] else probe["error"][:500]
+            if probe["ok"]:
+                row.last_verified = db.utcnow()
+            s.commit()
+    return {"ok": probe["ok"], "checked": True,
+            "detail": probe.get("detail", ""), "error": probe.get("error", "")}
+
+
 def revoke(tenant: str, provider: str) -> str:
     with db.SessionLocal() as s:
         row = (s.query(db.Credential)
@@ -380,6 +442,56 @@ def _invalidate(tenant: str, provider: str) -> None:
         pass
 
 
+# Shopify serves an unsupported version by falling back to the oldest supported
+# one, so a stale string here degrades quietly rather than breaking — which is
+# exactly why it drifted to 2024-10 unnoticed. Pinned and dated so the next
+# person can tell at a glance whether it is old.
+SHOPIFY_API_VERSION = "2026-01"   # set 2026-08; Shopify supports each for 12mo
+KLAVIYO_REVISION = "2024-10-15"   # Klaviyo keeps dated revisions working
+
+
+def _normalize_meta(provider: str, meta: dict) -> tuple[dict, str]:
+    """Fix what a person actually types, and refuse what cannot be fixed.
+
+    Measured against the four inputs a real client is most likely to give,
+    every one of which failed before this existed:
+
+      https://acme.myshopify.com   built `https://https://…` and died on a
+                                   ConnectError with no usable message
+      acme.com                     the storefront domain — the one a merchant
+                                   knows — answered, was not an admin API, and
+                                   reported "HTTPStatusError"
+      acme.com  (WordPress)        no scheme, so httpx refused with
+                                   "UnsupportedProtocol"
+      trailing slashes / spaces    handled already for spaces, not for slashes
+
+    A wrong value that produces an exception class name on a client's screen is
+    the same defect as a silent failure: they cannot act on either. Returns
+    (meta, error) — a non-empty error is a refusal made before any request.
+    """
+    meta = dict(meta)
+
+    if provider == "shopify":
+        raw = (meta.get("domain") or "").strip().lower()
+        raw = raw.split("://", 1)[-1]          # paste from the browser bar
+        raw = raw.split("/", 1)[0].strip()     # any path, any trailing slash
+        if raw and not raw.endswith(".myshopify.com"):
+            return meta, (
+                f"{raw} is the storefront domain. Shopify's API needs the admin "
+                f"one, which ends in .myshopify.com — it is in Shopify admin "
+                f"under Settings → Domains, and it may be a number rather than "
+                f"your brand name.")
+        meta["domain"] = raw
+
+    if provider == "wordpress":
+        raw = (meta.get("site") or "").strip()
+        if raw and "://" not in raw:
+            raw = f"https://{raw}"             # nobody types the scheme
+        meta["site"] = raw.rstrip("/")
+
+    return meta, ""
+
+
 def _probe(provider: str, secret: str, meta: dict) -> dict:
     """The lightest authenticated call each provider offers.
 
@@ -390,12 +502,23 @@ def _probe(provider: str, secret: str, meta: dict) -> dict:
     try:
         if provider == "shopify":
             domain = meta.get("domain", "")
-            r = httpx.get(f"https://{domain}/admin/api/2024-10/shop.json",
-                          headers={"X-Shopify-Access-Token": secret}, timeout=20)
+            r = httpx.get(
+                f"https://{domain}/admin/api/{SHOPIFY_API_VERSION}/shop.json",
+                headers={"X-Shopify-Access-Token": secret}, timeout=20)
             if r.status_code == 401:
                 return {"ok": False, "error": "Shopify rejected that token."}
+            if r.status_code == 403:
+                # A live token whose app was never granted read_products et al.
+                # This is the one scope failure a probe CAN see; the rest still
+                # surface later, which is why the runbook says grant the full set.
+                return {"ok": False,
+                        "error": "That token is valid but the app has no read "
+                                 "access. Re-check the Admin API scopes on the "
+                                 "custom app, then reveal the token again."}
             if r.status_code == 404:
-                return {"ok": False, "error": f"No store found at {domain}."}
+                return {"ok": False,
+                        "error": f"No store found at {domain}. Check it against "
+                                 f"Settings → Domains in Shopify admin."}
             r.raise_for_status()
             return {"ok": True, "detail": r.json()["shop"]["name"]}
         if provider == "omnisend":
@@ -408,7 +531,7 @@ def _probe(provider: str, secret: str, meta: dict) -> dict:
         if provider == "klaviyo":
             r = httpx.get("https://a.klaviyo.com/api/accounts/",
                           headers={"Authorization": f"Klaviyo-API-Key {secret}",
-                                   "revision": "2024-10-15"}, timeout=20)
+                                   "revision": KLAVIYO_REVISION}, timeout=20)
             if r.status_code in (401, 403):
                 return {"ok": False, "error": "Klaviyo rejected that API key."}
             r.raise_for_status()
@@ -422,10 +545,25 @@ def _probe(provider: str, secret: str, meta: dict) -> dict:
                         "error": "WordPress rejected that username and password."}
             r.raise_for_status()
             return {"ok": True, "detail": r.json().get("name", "WordPress connected")}
-    except httpx.HTTPError as exc:
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
+        # The two causes are a typo in the address and an outage, and a client
+        # can only act on the first — so name it first.
+        where = meta.get("domain") or meta.get("site") or PROVIDERS[provider]["name"]
         return {"ok": False,
-                "error": f"Could not reach {PROVIDERS[provider]['name']}: "
-                         f"{exc.__class__.__name__}"}
+                "error": f"Could not reach {where}. Check the address is right "
+                         f"and that the site is up."}
+    except httpx.HTTPStatusError as exc:
+        # Something answered and it was not the API we asked for — almost always
+        # the wrong address rather than the wrong key.
+        return {"ok": False,
+                "error": f"{meta.get('domain') or meta.get('site') or 'That address'} "
+                         f"answered with HTTP {exc.response.status_code}, which is "
+                         f"not a {PROVIDERS[provider]['name']} API. Check the "
+                         f"address rather than the key."}
+    except httpx.HTTPError:
+        return {"ok": False,
+                "error": f"Could not reach {PROVIDERS[provider]['name']}. "
+                         f"Try again in a moment."}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}
     return {"ok": True, "detail": "stored without a live check"}

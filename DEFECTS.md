@@ -513,6 +513,47 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### The API-key connectors were never tried with a real address — fixed 2026-08-13
+
+Four providers self-serve on a pasted key, and the probes had only ever been
+exercised through a stubbed `_probe` in the test suite. Run against the live
+APIs with the inputs a client would actually give, three of four plausible
+Shopify values failed, as did the commonest WordPress one:
+
+    https://acme.myshopify.com   built `https://https://…`  -> ConnectError
+    acme.com   (the storefront)  answered, was not an API   -> HTTPStatusError
+    acme.com   (WordPress)       no scheme                  -> UnsupportedProtocol
+    acme.myshopify.com/          trailing slash             -> worked, by luck
+
+Every failure surfaced an **exception class name on the client's screen**,
+which is the same defect as a silent failure — nobody can act on either.
+`_normalize_meta` now strips the scheme, path, slash and case a person actually
+pastes, and the storefront domain is refused with where to find the admin one.
+That case matters more than it looks: Baci's is `769684-2.myshopify.com`, a
+number, so "use your myshopify domain" is not advice a merchant can follow
+without being told where it is written down.
+
+Also found, and NOT a version problem though it looked like one: the probe
+pinned `2024-10`, twenty-two months stale. Shopify serves an unsupported
+version by falling back to the oldest supported one, so it never broke and
+never would have — which is precisely why it drifted. Now a dated constant.
+
+**`connected` was a claim made once and never re-tested.** `store()` verifies
+at the moment of pasting; nothing checked again, so a rotated or
+provider-revoked key kept a green chip and a `last_verified` date from months
+earlier. `recheck()` plus a Re-check button re-probes on demand.
+
+The interesting part was the first version of it, which set `status="failed"`
+on a failed probe. `resolve()` returns only active rows and falls through to
+the env blob otherwise — so **one network blip would have silently swapped a
+client's live credential for whatever Gomeh pasted into Render**, mid-flight,
+with nothing downstream questioning it. A probe failing is evidence about the
+probe as much as about the key. The state is now `not verifying`: recorded,
+shown, and load-bearing on nothing. *Rule: a check that cannot distinguish "it
+is broken" from "I could not reach it" must not be wired to anything that
+changes behaviour.* Same shape as §1 *unknown collapsed into a value*, caught
+by a test written to assert the opposite.
+
 **Scope narrowness is no longer invisible, for OAuth.** Both providers report
 what was actually granted, so `_missing_scopes` names an unticked permission on
 the console at the moment it happens. A partial grant is stored and reported,

@@ -81,6 +81,12 @@ which permissions came back dark. From there —
 
 - **Connect / Reconnect** on Google or Meta runs the OAuth flow as you, for
   accounts you connect yourself on a screen-share.
+- **Re-check** re-probes a stored API key against the live provider. Worth
+  doing before you rely on one: `store()` verified it the day it was pasted and
+  nothing has checked since. A failed re-check reads **not verifying** and does
+  **not** change which credential is in use — a probe can fail for reasons the
+  real call will not, and demoting on that would silently fall back to the env
+  blob.
 - **Disconnect** revokes. It is a POST, so a link preview cannot fire it.
 - **Create a connect link** mints the client's own private link and shows it to
   copy.
@@ -174,8 +180,14 @@ web-only makes cron silently fall back.
 | `cms` (WordPress) | `WORDPRESS_SITES_JSON` | an application password on an editor account |
 | `esp` | any env var | Omnisend: Store settings → Integrations & API. Klaviyo: Settings → API keys |
 
-Grant the **full read set** when creating a Shopify app. `verify` catches a dead
-token but not a token with too few scopes — that fails quietly later.
+Grant the **full read set** when creating a Shopify app. The probe now catches a
+403 (a valid token whose app has no read access) and says so, but a token with
+*some* scopes and not others still passes and fails quietly later.
+
+**The domain field wants the `.myshopify.com` one, not their storefront.** It is
+in Shopify admin under Settings → Domains, and it is often a number rather than
+a brand name — Baci's is `769684-2.myshopify.com`. Pasting the storefront domain
+is refused with that instruction rather than a network error.
 
 Then point the tenant at those names, either in the console
 (`/admin/ui` → Accounts) or directly:

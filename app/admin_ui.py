@@ -226,7 +226,18 @@ def _connections(tenant: str, key: str) -> str:
             action = ('<span class="mut">client pastes this on their connect '
                       'link</span>')
 
-        if state == "connected":
+        if state in ("connected", "failed"):
+            if r["kind"] == "api_key":
+                # store() verifies once and nothing checked again, so a rotated
+                # or revoked key read "connected" forever off a last_verified
+                # date from whenever it was pasted.
+                action += f"""
+                <form method="post" action="/admin/connect_test" class="inl">
+                  <input type="hidden" name="key" value="{_esc(key)}">
+                  <input type="hidden" name="tenant" value="{_esc(tenant)}">
+                  <input type="hidden" name="provider" value="{_esc(r['provider'])}">
+                  <button class="sec">Re-check</button>
+                </form>"""
             action += f"""
             <form method="post" action="/admin/connect_revoke" class="inl">
               <input type="hidden" name="key" value="{_esc(key)}">
