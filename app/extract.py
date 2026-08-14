@@ -334,3 +334,77 @@ def extract_qa(tenant: str, inbound: str, reply: str, ref: str = "") -> dict:
         return {"rejected": "answer is not in the reply"}
     return {"objection": q, "answer": a, "general": bool(data.get("general")),
             "ref": ref}
+
+
+_VOCAB_SYSTEM = """You are reviewing the situation vocabulary of one business's \
+knowledge base. A situation is WHEN a claim is worth reaching for.
+
+A good vocabulary is small and each tag earns its place. Two tags that a person \
+would answer with the same proof are one tag, however differently they are \
+worded — "wonders whether one person can carry it" and "wonders whether there \
+is a team behind it" are the same doubt from two sides, and no measure of \
+shared words will ever pair them.
+
+RULES:
+1. Only propose a merge when the SAME proof would answer both. Different \
+phrasings of one worry are a merge; two worries that happen to occur together \
+are not.
+2. `keep` must be the tag that reads more generally, since every row under the \
+other moves to it.
+3. Do not propose merging tags of different kinds — a `who_they_are` tag \
+describes the account and a `problem` tag describes a doubt.
+4. Be conservative. A vocabulary that is slightly too long costs a reviewer a \
+moment; a wrong merge silently rewrites what every claim under it can answer.
+5. Return at most 5.
+
+Return ONLY a JSON array, no prose:
+[{"keep": "...", "drop": "...", "why": "one short sentence"}]
+Return [] if every tag earns its place."""
+
+
+def review_vocabulary(tenant: str) -> dict:
+    """Ask the model which situations are doing one job.
+
+    The deterministic half — `kb.situation_overlaps` — catches tags used on the
+    same rows and tags that read alike. Neither can see the case that prompted
+    this: measured on the real pair, tag-to-tag similarity was 0.00, triggers
+    0.00 and descriptions 0.25, against a threshold of 0.65. Same shape as
+    claims themselves, where a deterministic filter scored 0% recall because
+    the judgement is open-class. So this is a model call, under the same
+    constraint as everywhere else: it may only propose, using tags that already
+    exist, and a human decides.
+    """
+    from . import kb
+    rows = kb.situation_rows(tenant)
+    if len(rows) < 2:
+        return {"pairs": [], "used": "none", "note": "too few tags to compare"}
+    if not available():
+        return {"pairs": [], "used": "unavailable",
+                "note": "ANTHROPIC_API_KEY is not set; only the deterministic "
+                        "overlap check ran, which cannot see two tags that "
+                        "mean the same thing in different words."}
+    listing = "\n".join(
+        f"- {r.tag} [{r.kind or 'problem'}] — {r.description or '(no description)'}"
+        + (f"  triggers: {', '.join(' '.join(p) for p in (r.patterns or [])[:6])}"
+           if r.patterns else "")
+        for r in rows)
+    try:
+        raw = _call(_VOCAB_SYSTEM, f"Account: {tenant}\n\nTags:\n{listing}")
+    except Exception as exc:  # noqa: BLE001
+        return {"pairs": [], "used": "error",
+                "note": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+
+    have = {r.tag: r for r in rows}
+    pairs = []
+    for c in _parse(raw):
+        keep, drop = str(c.get("keep", "")), str(c.get("drop", ""))
+        # Both must already exist. A merge naming a tag this account does not
+        # have is not a merge, and acting on one would retag rows into a
+        # vocabulary entry that cannot be selected on.
+        if keep not in have or drop not in have or keep == drop:
+            continue
+        if (have[keep].kind or "") != (have[drop].kind or ""):
+            continue
+        pairs.append({"keep": keep, "drop": drop,
+                      "why": str(c.get("why", ""))[:200], "basis": "model"})
+    return {"pairs": pairs[:5], "used": "model"}

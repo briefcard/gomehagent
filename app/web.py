@@ -1680,6 +1680,40 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant)
 
 
+@app.get("/admin/vocabulary")
+def vocabulary_review(key: str = Depends(admin_key), tenant: str = "",
+                      model: str = "") -> dict:
+    """Situations that are probably one situation, and the map between them.
+
+    The deterministic check runs always; `model=1` adds the pass that can see
+    two tags meaning the same thing in different words, which no lexical
+    measure can.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import extract, kb as kbm
+    out = {"tenant": tenant,
+           "overlaps": kbm.situation_overlaps(tenant),
+           "neighbours": {r.tag: kbm.situation_neighbours(tenant, r.tag)
+                          for r in kbm.situation_rows(tenant)}}
+    if model in ("1", "true"):
+        out["model_review"] = extract.review_vocabulary(tenant)
+    return out
+
+
+@app.post("/admin/merge_situation", response_class=HTMLResponse)
+async def merge_situation(request: Request, key: str = Depends(admin_key)):
+    """Fold one situation into another. POST — it retags every row using it."""
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    r = kbm.merge_situations(tenant, str(form.get("keep", "")),
+                             str(form.get("drop", "")), dry_run=False)
+    return _back_to_kb(tenant, err=r.get("error", "") or r.get("note", ""))
+
+
 @app.get("/admin/mail_cursor")
 def mail_cursor(key: str = Depends(admin_key), tenant: str = "",
                 reset: str = "") -> dict:

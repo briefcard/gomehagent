@@ -172,6 +172,76 @@ def main() -> int:
         ck("and there is a cap, so a bad vocabulary cannot be papered over",
            kb.MAX_NEW_SITUATIONS <= 5, str(kb.MAX_NEW_SITUATIONS))
 
+        print("\n— two tags doing one job —")
+        # The real agency vocabulary, which is where the reported pair lives.
+        kb.seed_agency()
+        # The reported pair. Measured before anything was built: tag-to-tag
+        # similarity 0.00, triggers 0.00, descriptions 0.25, against a 0.65
+        # threshold. No lexical measure will ever pair these, which is the
+        # whole reason the empirical signal and the model pass exist.
+        import app.provenance as _p
+        rows = {r.tag: r for r in kb.situation_rows("agency")}
+        if "solo_operator_doubt" in rows and "team_exists" in rows:
+            a, b = rows["solo_operator_doubt"], rows["team_exists"]
+            ck("lexical similarity genuinely cannot see the reported pair",
+               _p.similarity(a.description or "", b.description or "")
+               < _p.NEAR_DUPLICATE,
+               "if this ever passes, the deterministic guard got better and "
+               "this test should be re-read rather than deleted")
+
+        # Empirical: same rows tagged, however differently they read.
+        wrote = 0
+        for i in range(3):
+            msg = kb.add_claim("agency", f"Proof number {i} of capacity.", f"{i}",
+                               ["solo_operator_doubt", "team_exists"],
+                               proof_type="data", origin="human")
+            wrote += msg.startswith("Added")
+        # §2.1: a writer returns a status nobody reads and rows vanish. The
+        # first version of this test ignored it and reported an empty overlap
+        # as a finding about the detector.
+        ck("the fixture claims were really written", wrote == 3,
+           f"{wrote}/3 — the tags do not exist for this account")
+        over = {(o["keep"], o["drop"]) for o in kb.situation_overlaps("agency")}
+        ck("but shared USE catches them",
+           ("solo_operator_doubt", "team_exists") in over
+           or ("team_exists", "solo_operator_doubt") in over,
+           str(sorted(over)))
+
+        # Thin data makes a ratio meaningless: two tags on one shared claim
+        # score 100%. Measured on the agency seed, co-occurrence alone paired
+        # food_bev with no_traffic off a single row.
+        ck("a pair backed by too few rows is NOT reported",
+           not any({"food_bev", "no_traffic"} == {o["keep"], o["drop"]}
+                   for o in kb.situation_overlaps("agency")),
+           "a coincidence with a percent sign on it")
+
+        nb = kb.situation_neighbours("agency", "solo_operator_doubt")
+        ck("and the neighbour map ranks it first",
+           nb and nb[0]["tag"] == "team_exists", str(nb[:2]))
+        ck("naming WHY, so widened context is never mistaken for matched",
+           nb[0]["basis"] == "used_together", nb[0]["basis"])
+        ck("a tag with no relation to anything returns nothing",
+           kb.situation_neighbours("agency", "no_such_tag") == [])
+
+        print("\n— folding one into the other —")
+        dry = kb.merge_situations("agency", "solo_operator_doubt", "team_exists")
+        ck("a dry run says what it would move", dry["retagged"]["claims"] >= 3,
+           str(dry["retagged"]))
+        ck("and moves nothing", "team_exists" in kb.situations("agency"))
+        ck("an unknown tag is refused",
+           "error" in kb.merge_situations("agency", "nope", "team_exists"))
+
+        kb.merge_situations("agency", "solo_operator_doubt", "team_exists",
+                            dry_run=False)
+        ck("the folded tag is gone", "team_exists" not in kb.situations("agency"))
+        ck("and nothing is left holding it",
+           not [c for c in kb.claims("agency")
+                if "team_exists" in (c.situations or [])],
+           "a claim left holding a retired tag can never be re-approved and "
+           "can never be selected — silent retirement of real proof")
+        ck("while the surviving tag still selects them",
+           len(kb.claims("agency", situations=["solo_operator_doubt"])) >= 3)
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + ", ".join(_fail)))
     return 1 if _fail else 0

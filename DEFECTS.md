@@ -513,6 +513,62 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### 2.22 Two situations doing one job, and no way to see it — fixed 2026-08-14
+
+Reported from the agency's own vocabulary:
+
+    solo_operator_doubt   wonders whether one person can carry it
+                          triggers: one person, just you, freelance
+    team_exists           wonders whether there is a team behind it
+                          triggers: team, capacity, bandwidth
+
+The same doubt from two sides. Split across both, neither accumulates the
+approved examples that make the learned tagger work, and selection reaches half
+the evidence it should.
+
+**The lexical guard added the same day cannot see this, and it was measured
+rather than assumed:**
+
+    similarity(tag, tag)   = 0.00
+    similarity(desc, desc) = 0.25        threshold 0.65
+    similarity(patterns)   = 0.00
+
+`similar_situation` catches spelling variants — `scale_proof` against
+`proof_of_scale` — and nothing else. Two tags that mean one thing in different
+words share no words, which is the definition of the problem. Same shape as
+§2.21 one level up: open-class semantic judgement on a token matcher.
+
+Three signals now, and they answer different questions:
+
+- **`used_together`** — the share of rows carrying both tags. Empirical, and it
+  sees what words cannot: however differently two tags read, if every claim
+  under one is under the other they are one tag.
+- **`reads_alike`** — descriptions and triggers overlapping. Weakest, and blind
+  to the reported case.
+- **`extract.review_vocabulary`** — a model pass over the whole vocabulary,
+  proposing merges. The only thing that can pair the reported two. Constrained
+  as everywhere else: it may only name tags that already exist, may not cross
+  `kind`, and a human decides.
+
+**The floor matters more than the threshold.** The first version reported four
+pairs on the agency seed, of which three were noise — `food_bev` with
+`no_traffic` among them, on a single shared claim. Two tags co-occurring once
+score 100%. `MIN_ROWS_FOR_OVERLAP = 3`; below that a ratio is a coincidence
+with a percent sign on it. Same reasoning as the standing note that holdouts
+are meaningless on small lists. *Rule: a ratio needs a denominator big enough
+to have been able to come out differently.*
+
+**`situation_neighbours` is the context-priority map.** When a situation has
+thin proof, the alternative to returning nothing is reaching to its nearest
+neighbours — in a known order, and while saying so. `basis` names which signal
+fired, because widened context is not matched context and reporting one as the
+other is §2.5 exactly.
+
+**Merging retags before it deletes.** `add_claim` refuses tags outside the
+vocabulary, so a claim left holding a retired tag can never be re-approved and
+can never be selected — silent retirement of real proof. `merge_situations`
+moves every row first, and dry-runs by default.
+
 ### 2.21 The model was asked what a claim IS, never what it is FOR — fixed 2026-08-14
 
 Reported off a real harvest of the agency site. `"15,000 + Trained across 30+

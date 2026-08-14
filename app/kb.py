@@ -433,6 +433,161 @@ def similar_situation(tenant: str, tag: str) -> str:
     return ""
 
 
+def _situation_users(tenant: str) -> dict[str, set[str]]:
+    """Which rows each situation actually tags. The empirical signal.
+
+    Two tags that read differently and are used identically are the same tag.
+    `solo_operator_doubt` ("wonders whether one person can carry it") and
+    `team_exists` ("wonders whether there is a team behind it") score 0.25 on
+    their descriptions and 0.0 on their tags and triggers — no lexical measure
+    will ever pair them — but every claim that answers one answers the other.
+    Usage sees what words cannot.
+    """
+    used: dict[str, set[str]] = {}
+    with db.SessionLocal() as s:
+        for model in (db.KbClaim, db.KbObjection):
+            for row in s.query(model).filter(model.tenant == tenant).all():
+                for tag in (row.situations or []):
+                    used.setdefault(tag, set()).add(f"{model.__name__}:{row.id}")
+    return used
+
+
+def situation_neighbours(tenant: str, tag: str, limit: int = 3) -> list[dict]:
+    """The nearest situations to this one, best first, and why each is near.
+
+    This is the context-priority map. When a situation has thin proof behind
+    it, the alternative to returning nothing is reaching to its closest
+    neighbours — but only in a known order, and only while saying that is what
+    happened. `basis` names which signal fired so a caller can decide whether
+    to trust it, exactly as `fits` is tri-state rather than a bare boolean:
+    widened context is not matched context and must never be reported as it.
+
+      used_together   the two tags land on the same rows. Strongest — it is
+                      what the account DOES, not what the words look like.
+      reads_alike     descriptions and triggers overlap. Weakest, and blind to
+                      the case above.
+    """
+    rows = {r.tag: r for r in situation_rows(tenant)}
+    if tag not in rows:
+        return []
+    used = _situation_users(tenant)
+    mine, me = used.get(tag, set()), rows[tag]
+    out = []
+    for other, row in rows.items():
+        if other == tag:
+            continue
+        theirs = used.get(other, set())
+        together = (len(mine & theirs) / len(mine | theirs)
+                    if (mine or theirs) else 0.0)
+        words_a = f"{me.description or ''} " + " ".join(
+            w for pp in (me.patterns or []) for w in pp)
+        words_b = f"{row.description or ''} " + " ".join(
+            w for pp in (row.patterns or []) for w in pp)
+        alike = prov.similarity(words_a, words_b)
+        # Used-together dominates. Reading alike may only break a tie — the
+        # same rule the catalogue matcher follows, for the same reason: two
+        # signals of different kinds must not be sorted against each other.
+        score = together if together else alike * 0.5
+        if score <= 0:
+            continue
+        out.append({"tag": other, "score": round(score, 3),
+                    "basis": "used_together" if together else "reads_alike",
+                    "description": row.description or "",
+                    "same_kind": (row.kind or "") == (me.kind or "")})
+    return sorted(out, key=lambda d: -d["score"])[:limit]
+
+
+#: Above this share of shared rows, two tags are doing one job.
+SITUATION_OVERLAP = 0.6
+
+#: ...but only once there are enough rows for the share to mean anything. Two
+#: tags that co-occur on a single claim score 100% and are usually unrelated:
+#: measured on the agency's seed, the co-occurrence signal alone paired
+#: `food_bev` with `no_traffic` on one shared row. The same reasoning as the
+#: note about holdouts on small lists — a ratio over a tiny denominator is a
+#: coincidence with a percent sign on it.
+MIN_ROWS_FOR_OVERLAP = 3
+
+
+def situation_overlaps(tenant: str) -> list[dict]:
+    """Pairs of situations that are probably one situation.
+
+    Reported, never merged automatically — the same rule `near_duplicates`
+    follows. Merging two tags rewrites how every claim under them can be
+    selected, and a machine has no business doing that unasked.
+    """
+    rows = {r.tag: r for r in situation_rows(tenant)}
+    used = _situation_users(tenant)
+    seen, out = set(), []
+    for tag in rows:
+        for n in situation_neighbours(tenant, tag, limit=len(rows)):
+            pair = tuple(sorted((tag, n["tag"])))
+            if pair in seen:
+                continue
+            shared = len(used.get(tag, set()) | used.get(n["tag"], set()))
+            hit = (
+                (n["basis"] == "used_together"
+                 and n["score"] >= SITUATION_OVERLAP
+                 and shared >= MIN_ROWS_FOR_OVERLAP)
+                or (n["basis"] == "reads_alike"
+                    and n["score"] >= prov.NEAR_DUPLICATE)
+            )
+            if not hit:
+                continue
+            seen.add(pair)
+            out.append({
+                "keep": pair[0], "drop": pair[1], "score": n["score"],
+                "basis": n["basis"],
+                "rows": {p: len(used.get(p, set())) for p in pair},
+                "why": (f"{n['score']:.0%} of the rows tagged one are tagged "
+                        f"the other" if n["basis"] == "used_together"
+                        else "their descriptions and triggers read alike"),
+            })
+    return sorted(out, key=lambda d: -d["score"])
+
+
+def merge_situations(tenant: str, keep: str, drop: str,
+                     dry_run: bool = True) -> dict:
+    """Fold one situation into another, retagging everything that used it.
+
+    The tag has to move BEFORE the row is deleted, or every claim tagged only
+    with `drop` becomes untaggable — `add_claim` refuses tags outside the
+    vocabulary, so a claim left holding a retired tag can never be re-approved
+    and can never be selected. Silent retirement of real proof.
+    """
+    valid = situations(tenant, include_proposed=True)
+    if keep not in valid:
+        return {"error": f"{keep!r} is not a situation for {tenant}."}
+    if drop not in valid or drop == keep:
+        return {"error": f"{drop!r} is not a separate situation for {tenant}."}
+
+    moved = {"claims": 0, "objections": 0}
+    with db.SessionLocal() as s:
+        for model, name in ((db.KbClaim, "claims"), (db.KbObjection, "objections")):
+            for row in s.query(model).filter(model.tenant == tenant).all():
+                tags = list(row.situations or [])
+                if drop not in tags:
+                    continue
+                moved[name] += 1
+                if dry_run:
+                    continue
+                tags = [keep if x == drop else x for x in tags]
+                row.situations = sorted(set(tags))
+        if not dry_run:
+            row = (s.query(db.KbSituation)
+                   .filter(db.KbSituation.tenant == tenant,
+                           db.KbSituation.tag == drop).first())
+            if row:
+                s.delete(row)
+            s.commit()
+    return {"tenant": tenant, "keep": keep, "dropped": drop,
+            "dry_run": dry_run, "retagged": moved,
+            "note": ("Nothing changed — this is what it would do."
+                     if dry_run else
+                     f"{drop!r} folded into {keep!r}; every row that carried it "
+                     f"now carries {keep!r}.")}
+
+
 def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None,
                   description: str = "", kind: str = "problem",
                   origin: str = "human", source: str = "",

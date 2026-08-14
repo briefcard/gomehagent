@@ -837,6 +837,41 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
     # not what selection would pick. Without it the list was the brand-wide
     # subset presented as the whole, and every product-scoped answer was
     # invisible here.
+    # Situations doing one job. Reported here rather than merged anywhere,
+    # because a merge rewrites what every claim under both tags can answer.
+    overlaps = kb.situation_overlaps(tenant)
+    over_html = ""
+    if overlaps:
+        rowsh = "".join(f"""
+        <div class="conn">
+          <div><code>{_esc(o['keep'])}</code> and <code>{_esc(o['drop'])}</code>
+            <span class="chip off">{_esc(o['basis'].replace('_', ' '))}</span>
+            <div class="mut">{_esc(o['why'])} &middot;
+              {o['rows'].get(o['keep'], 0)} and {o['rows'].get(o['drop'], 0)} rows</div>
+          </div>
+          <form method="post" action="/admin/merge_situation" class="inl"
+                onsubmit="return confirm('Fold {_esc(o['drop'])} into {_esc(o['keep'])}? Every row tagged the first will be retagged.')">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="keep" value="{_esc(o['keep'])}">
+            <input type="hidden" name="drop" value="{_esc(o['drop'])}">
+            <button class="sec">Fold into {_esc(o['keep'])}</button>
+          </form>
+        </div>""" for o in overlaps[:8])
+        over_html = f"""
+        <div class="card danger">
+          <div class="head"><h2>These situations may be one situation</h2></div>
+          <p class="mut">Two tags a person would answer with the same proof are
+          one tag. Split across both, neither accumulates the approved examples
+          that make tagging work, and selection reaches half the evidence it
+          should. Nothing is merged automatically.</p>
+          {rowsh}
+          <p class="mut">A pair that means the same thing in different words
+          will not appear here &mdash; measured on the real case, the two tags
+          shared no trigger words and scored 0.25 on their descriptions. Run
+          <code>/admin/vocabulary?tenant={_esc(tenant)}&amp;model=1</code> for the
+          pass that can see those.</p>
+        </div>"""
+
     obj_rows = kb.objections(tenant, any_entity=True)
     obj_cat = {e.key: e.name for e in kb.entities(tenant, available_only=False)}
 
@@ -883,7 +918,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
               <div class="row"><button class="sec">Save scope</button></div>
             </form>""")
 
-    obj_html = _kb_list("Objections", [_obj(r) for r in obj_rows],
+    obj_html = over_html + _kb_list("Objections", [_obj(r) for r in obj_rows],
                         "None. This is human-authored and it is half of the "
                         "intake.")
     obj_html += ('<datalist id="objents">'
