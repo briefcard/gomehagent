@@ -1244,6 +1244,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <input name="evidence" value="{_esc(p.evidence or '')}"
                      placeholder="what makes this checkable">
               <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>
+              <label>What it proves &mdash; written by the model, not the site</label>
+              <textarea name="proves" rows="2"
+                placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
+              <div class="when">The one field here the model WROTE rather than
+                copied. Read it: a wrong reading of a true number is invisible
+                once approved, and this is what a drafter reaches for when
+                deciding how to use the claim.</div>
               <label>True of &mdash; blank means the whole brand</label>
               <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
                      placeholder="brand-level (used in any content)">

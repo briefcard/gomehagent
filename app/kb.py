@@ -249,16 +249,31 @@ def support_for(tenant: str, objection: db.KbObjection,
                   entity_key=objection.entity_key or None)
 
 
-def situations(tenant: str) -> set[str]:
+def situations(tenant: str, include_proposed: bool = False) -> set[str]:
     """The valid situation tags for one tenant.
 
     Falls back to the shared default set only when a tenant has authored none,
     so existing behaviour is preserved while new tenants get their own words.
+
+    **Proposed tags are excluded**, and this matters more than it looks. This
+    set is what `add_claim` validates against, so it decides which claims may
+    exist at all. While only the seed wrote here every row was approved and the
+    filter was moot; the moment the extractor could propose a tag it wished
+    existed, returning proposed rows would have let a machine widen the
+    vocabulary and then immediately file claims against its own invention —
+    review gate intact and bypassed in the same breath.
+
+    The test is `!= PROPOSED` rather than `== APPROVED` on purpose. Rows
+    written before this table carried a review state have none, and they have
+    been in use all along; excluding them would empty the vocabulary of every
+    existing tenant and fall through to the shared constant, which is how the
+    agency ended up unable to match anything in the first place.
     """
     with db.SessionLocal() as s:
-        rows = s.query(db.KbSituation).filter(
-            db.KbSituation.tenant == tenant).all()
-        tags = {r.tag for r in rows}
+        q = s.query(db.KbSituation).filter(db.KbSituation.tenant == tenant)
+        rows = q.all()
+        tags = {r.tag for r in rows
+                if include_proposed or (r.review or "") != prov.PROPOSED}
     return tags or set(SITUATIONS)
 
 
@@ -379,21 +394,80 @@ def situation_desc(tenant: str) -> dict[str, str]:
         return {r.tag: (r.description or "") for r in rows if r.description}
 
 
-def add_situation(tenant: str, tag: str, patterns: list[list[str]],
+#: How many new tags one crawl may propose before the answer stops being "add
+#: a tag" and starts being "this account's vocabulary is wrong".
+MAX_NEW_SITUATIONS = 3
+
+
+def similar_situation(tenant: str, tag: str) -> str:
+    """An existing tag that already covers `tag`, or "".
+
+    Without this the extractor's no-fit path is a tag generator: nothing stops
+    `proof_of_scale`, `scale_proof` and `training_volume` all being created for
+    the same idea, and a vocabulary of near-synonyms is worse than a short one
+    — selection splits across them and no single tag accumulates the approved
+    examples that make the learned tagger work.
+
+    Compared against each existing tag AND its description, because the tags
+    are slugs and the description is where the meaning actually lives:
+    `credibility` and `proof_of_scale` share no characters, but "they doubt we
+    can actually do this" and "proof of scale" do.
+    """
+    want = (tag or "").strip().lower().replace(" ", "_")
+    if not want:
+        return ""
+    words = _tok(want.replace("_", " "))
+    for row in situation_rows(tenant):
+        if row.tag == want:
+            return row.tag
+        if prov.similarity(want.replace("_", " "),
+                           row.tag.replace("_", " ")) >= 0.6:
+            return row.tag
+        # A short slug against a sentence: ask what fraction of the proposed
+        # tag's words the description already contains, not how alike the two
+        # strings are overall — a three-word tag can never look like a
+        # twelve-word description however well it is covered by it.
+        desc = _tok(row.description or "")
+        if words and len(words & desc) / len(words) >= 0.6:
+            return row.tag
+    return ""
+
+
+def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None,
                   description: str = "", kind: str = "problem",
-                  origin: str = "human", source: str = "") -> str:
+                  origin: str = "human", source: str = "",
+                  review: str = "") -> str:
+    """Add or update a situation tag.
+
+    `review` follows the same rule as every other KB table: a human or a seed
+    lands approved, a machine lands proposed. This used to be hardcoded to
+    APPROVED, which was harmless while only the seed wrote here — and became a
+    hole the moment the extractor started proposing tags it wished existed,
+    because a machine would have been silently editing the one vocabulary that
+    decides whether any claim can be accepted at all.
+    """
     tag = (tag or "").strip().lower().replace(" ", "_")
     if not tag:
         return "A situation needs a tag."
+    # A machine may not widen the vocabulary with a synonym of something that
+    # is already in it. A human still can — they may have a reason, and they
+    # can see both.
+    if not prov.lands_approved(origin):
+        near = similar_situation(tenant, tag)
+        if near and near != tag:
+            return (f"Not added — {tenant} already has {near!r}, which covers "
+                    f"{tag!r}. Use that instead.")
     with db.SessionLocal() as s:
         existing = s.query(db.KbSituation).filter(
             db.KbSituation.tenant == tenant, db.KbSituation.tag == tag).first()
+        landed = review or (prov.APPROVED if prov.lands_approved(origin)
+                            else prov.PROPOSED)
         row = existing or db.KbSituation(
             tenant=tenant, tag=tag, origin=origin, source=source,
-            review=prov.APPROVED, fingerprint=prov.fingerprint(tag),
+            review=landed, fingerprint=prov.fingerprint(tag),
             approved_by="seed" if origin == "seed" else "",
-            approved_at=db.utcnow())
-        row.patterns = [list(p) for p in patterns]
+            approved_at=db.utcnow() if landed == prov.APPROVED else None)
+        row.patterns = [list(p) for p in (patterns or [])]
         row.description = description or row.description
         row.kind = kind
         if not existing:
@@ -851,7 +925,8 @@ def add_banned(tenant: str, phrase: str) -> str:
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
               strength: str = "strong", status: str = "active",
-              origin: str = "human", entity_key: str = "") -> str:
+              origin: str = "human", entity_key: str = "",
+              proves: str = "") -> str:
     """Add a claim, or record that another source corroborates one on file.
 
     `status="pending"` is kept as the way callers ask for a proposal, and is
@@ -902,7 +977,7 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                          proof_type=proof_type, source=source or "captured",
                          situations=tags, strength=strength, status=status,
                          review=review, origin=origin, fingerprint=fp,
-                         entity_key=entity_key,
+                         entity_key=entity_key, proves=proves,
                          approved_by="seed" if origin == "seed" else "",
                          approved_at=db.utcnow() if review == prov.APPROVED else None,
                          also_seen=[{"origin": origin, "ref": source or "",
@@ -961,7 +1036,7 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
 def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                  tags: list[str] | None = None, proof_type: str = None,
                  source: str = None, strength: str = None,
-                 entity_key: str | None = None) -> str:
+                 entity_key: str | None = None, proves: str | None = None) -> str:
     """Edit a claim in place. The editing half of propose-then-approve.
 
     Tags are validated against the tenant's vocabulary exactly as `add_claim`
@@ -1000,6 +1075,11 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
             return ("This is a customer's own words — quote it, do not rewrite "
                     "it. Correct the tags or the attribution instead, or reject "
                     "it if it should not be used at all.")
+        if proves is not None:
+            # Editable to empty, unlike the fields below: a model-written
+            # reading a reviewer disagrees with should be removable, not only
+            # replaceable.
+            row.proves = str(proves).strip()[:400]
         for field, value in (("claim", claim), ("evidence", evidence),
                              ("proof_type", proof_type), ("source", source),
                              ("strength", strength)):

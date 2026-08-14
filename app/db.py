@@ -538,6 +538,14 @@ class KbClaim(_Provenance, Base):
     # the choice was to flatten them into brand claims (which produced
     # "Dedicated to cultural innovators … O 13 cm, H 5.5 cm") or discard them.
     entity_key = Column(String, default="", index=True)
+    # The one model-WRITTEN field on this table. Everything else is either
+    # copied verbatim from the source or chosen by a human; `proves` is a
+    # one-line interpretation of what the claim demonstrates, proposed at
+    # extraction and frozen by approval like any other editorial field. It is
+    # never asserted to a customer — it exists so selection and drafting know
+    # what a number is FOR. Empty on every pre-existing row, which is correct:
+    # nobody has interpreted those yet.
+    proves = Column(Text, default="")
     strength = Column(String, default="strong") # strong | supporting — caps how many per asset
     verified_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))  # stale claims stop being selectable

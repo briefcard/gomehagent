@@ -77,19 +77,33 @@ punctuation. A span that is not an exact substring is discarded and wasted.
 cookie and newsletter text, and headings that only restate the body.
 4. Skip anything that is purely a specification value (dimensions, material \
 name on its own) — those belong on the product record, not in the claim library.
-5. `proof_type`:
+5. `situations` — WHEN this claim is worth reaching for. Choose from the \
+account's own list below, which is the only vocabulary that exists; anything \
+not on it is discarded. Pick every one that genuinely applies, usually one or \
+two, and pick none rather than a loose fit. Deciding this is the point of the \
+exercise: a claim nobody can place is a claim no draft will ever use.
+6. `needs_situation` — if the list has nothing that fits, leave `situations` \
+empty and put a SHORT lowercase tag here naming the situation you would have \
+needed (e.g. "proof_of_scale"). Do not invent one when an existing tag fits.
+7. `proves` — one plain sentence: what a reader should conclude from this. \
+Not a restatement. "15,000 trained across 30+ seminars" proves they have \
+taught this at scale rather than only practised it. This is the only field \
+where you write rather than select, and it is read by whoever drafts copy \
+from this claim.
+8. `proof_type`:
    - "testimonial" for a customer's own words (first person, a review, a quote)
    - "data" for a figure the business states about itself
    - "case_study" for a named engagement or outcome
    - "certification" for a standard, accreditation or award
    - "spec" for a stated product property (material, durability, capacity)
-6. `evidence` is the part of the SAME span that makes it checkable (the figure, \
+9. `evidence` is the part of the SAME span that makes it checkable (the figure, \
 the named party, the standard). Copy it verbatim from the span, or use "".
 7. If the page is about one product and the claim is only true of that product, \
 set `entity_scoped` true. A claim true of the whole brand is false.
 
 Return ONLY a JSON array, no prose:
-[{"text": "...", "proof_type": "...", "evidence": "...", "entity_scoped": bool}]
+[{"text": "...", "proof_type": "...", "evidence": "...", "entity_scoped": bool,
+  "situations": ["..."], "needs_situation": "", "proves": "..."}]
 Return [] if the page makes no claims."""
 
 
@@ -110,11 +124,31 @@ def _context(tenant: str, url: str, entity_key: str = "") -> str:
             bits.append("This brand must never claim: " + ", ".join(banned[:30]))
     if entity_key:
         bits.append(f"This page is the product page for: {entity_key}")
+
+    # The situation vocabulary, with whatever the tenant recorded about what
+    # each tag means. Naming the tags in the rules while never showing them is
+    # how the old flow got `situations: []` on every claim — except the tagging
+    # happened after the call, in a keyword matcher that could not see the page
+    # at all.
+    rows = kb.situation_rows(tenant) if hasattr(kb, "situation_rows") else []
+    lines = []
+    for r in rows:
+        tag = getattr(r, "tag", None) or (r.get("tag") if isinstance(r, dict) else "")
+        desc = (getattr(r, "description", "") if not isinstance(r, dict)
+                else r.get("description", "")) or ""
+        if tag:
+            lines.append(f"  {tag}" + (f" — {desc}" if desc else ""))
+    if not lines:
+        lines = [f"  {s}" for s in sorted(kb.situations(tenant))]
+    if lines:
+        bits.append("Situations available for this account (the ONLY valid "
+                    "values for `situations`):\n" + "\n".join(lines))
     return "\n".join(bits)
 
 
 def _verify(candidates: list[dict], blocks: list[str],
-            entity_key: str = "") -> tuple[list[dict], list[str]]:
+            entity_key: str = "",
+            valid_situations: set[str] | None = None) -> tuple[list[dict], list[str]]:
     """Keep only spans that genuinely appear in the source. Code, not trust.
 
     This is the guarantee. Whatever the model returned, a claim survives only
@@ -138,12 +172,32 @@ def _verify(candidates: list[dict], blocks: list[str],
         ev = " ".join(str(c.get("evidence", "") or "").split())
         if ev and ev not in text:
             ev = ""          # evidence must come from the span, not from air
+
+        # Tags are verified against the vocabulary the same way spans are
+        # verified against the page: the model proposes, code decides. A tag
+        # that does not exist for this tenant can never be selected on, so
+        # storing one would be a silent retirement of the claim.
+        want = [str(s).strip().lower() for s in (c.get("situations") or [])
+                if str(s).strip()]
+        tags = ([s for s in want if s in valid_situations]
+                if valid_situations is not None else want)
+        # Only a genuine no-fit asks for a new tag. A model that returned a
+        # usable tag AND a wishlist entry gets the usable one.
+        wants_new = ""
+        if not tags:
+            wants_new = re.sub(
+                r"[^a-z0-9_]+", "_",
+                str(c.get("needs_situation", "")).strip().lower()).strip("_")[:40]
+
         kept.append({
             "text": text,
             "proof_type": ptype,
             "evidence": ev,
             "entity_key": entity_key if c.get("entity_scoped") else "",
             "source": f"stated on {c.get('_url', '')}".strip(),
+            "situations": tags,
+            "needs_situation": wants_new,
+            "proves": " ".join(str(c.get("proves", "") or "").split())[:400],
         })
     return kept, rejected
 
@@ -212,8 +266,15 @@ def extract(tenant: str, url: str, blocks: list[str],
                 "used": "error", "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
 
     cands = [{**c, "_url": url} for c in _parse(raw)]
-    kept, rejected = _verify(cands, body, entity_key)
-    return {"claims": kept, "rejected_not_verbatim": rejected, "used": "model"}
+    kept, rejected = _verify(cands, body, entity_key,
+                             valid_situations=set(kb.situations(tenant)))
+    # What the account's vocabulary could not name. Surfaced rather than
+    # dropped: a tag the model reached for repeatedly is the strongest signal
+    # available about what this brand's situation list is missing, and on an
+    # account whose list was never authored it is the only signal there is.
+    wanted = [c["needs_situation"] for c in kept if c.get("needs_situation")]
+    return {"claims": kept, "rejected_not_verbatim": rejected, "used": "model",
+            "situations_wanted": sorted(set(wanted))}
 
 _QA_SYSTEM = """You are reading one email exchange: a message a customer sent, and the reply the business sent back. You SELECT text; you never write it.
 

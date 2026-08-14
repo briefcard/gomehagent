@@ -1769,6 +1769,7 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         claim=str(form.get("claim", "")),
         evidence=str(form.get("evidence", "")),
         entity_key=str(form.get("entity_key", "")),
+        proves=str(form.get("proves", "")),
         tags=[str(t) for t in form.getlist("tags")])
     if msg != "Saved." and "catalogue" in msg:
         return HTMLResponse(f"<h3>{msg}</h3><p><a href='/admin/ui?tab=content"

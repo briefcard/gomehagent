@@ -434,14 +434,21 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             # untaggable one is proposed untagged rather than discarded — the
             # segmentation happens when a human approves it, which is the only
             # point at which anyone actually knows the answer.
+            # The model tagged this while it could still see the page it came
+            # off. `suggest_tags` only sees the sentence, so it is the fallback
+            # now rather than the decision — it was never able to get from
+            # "trained across 30+ seminars" to "credibility", and on an account
+            # whose situation patterns were never authored it returned nothing
+            # at all, for everything.
             guess = kb.suggest_tags(tenant, body,
                                     entity_key=cand.get("entity_key", ""))
-            tags = guess["tags"]
+            tags = [s for s in (cand.get("situations") or []) if s] or guess["tags"]
             if not tags:
                 untaggable.append({"text": body[:160], "url": url})
             known.add(fp)
             entry = {**cand, "text": body, "tags": tags,
-                     "tag_basis": guess["basis"],
+                     "tag_basis": ("model, at extraction"
+                                   if cand.get("situations") else guess["basis"]),
                      "similar_to_rejected": guess["similar_to_rejected"]}
             proposed.append(entry)
             if apply:
@@ -449,7 +456,36 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                              proof_type=cand["proof_type"],
                              source=cand["source"], status="pending",
                              origin="crawl",
-                             entity_key=cand.get("entity_key", ""))
+                             entity_key=cand.get("entity_key", ""),
+                             proves=cand.get("proves", ""))
+
+    # A tag the model reached for and could not find is the account telling us
+    # its vocabulary is short. Filed as a PROPOSAL like everything else — it is
+    # a machine's opinion about how this brand talks, and that is exactly the
+    # kind of thing a human signs off.
+    wanted = sorted({c["needs_situation"] for _u, cs in per_page for c in cs
+                     if c.get("needs_situation")})
+    filed_situations, covered_already = [], []
+    if apply:
+        for tag in wanted:
+            if tag in kb.situations(tenant, include_proposed=True):
+                continue
+            near = kb.similar_situation(tenant, tag)
+            if near:
+                # Already expressible. Recorded so a run that keeps reaching
+                # for the same missing idea is visible, without the vocabulary
+                # growing a synonym for it.
+                covered_already.append(f"{tag} -> {near}")
+                continue
+            if len(filed_situations) >= kb.MAX_NEW_SITUATIONS:
+                # Past this, the shortfall is the vocabulary, not the site.
+                # Filing fifteen tags nobody chose is how a controlled list
+                # stops being controlled.
+                break
+            msg = kb.add_situation(tenant, tag, patterns=[], origin="crawl",
+                                   source="proposed while reading the site")
+            if msg.startswith(("Added", "Updated")):
+                filed_situations.append(tag)
 
     filed_faqs = 0
     if apply:
@@ -466,6 +502,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "extractor_note": extractor_note,
         "rejected_not_verbatim": not_verbatim[:10],
         "not_verbatim_count": len(not_verbatim),
+        "situations_wanted": wanted,
+        "situations_proposed": filed_situations,
+        "situations_already_covered": covered_already,
+        "situations_capped": (
+            f"stopped after {kb.MAX_NEW_SITUATIONS}; {len(wanted)} were wanted "
+            f"— review the vocabulary rather than adding more"
+            if len(filed_situations) >= kb.MAX_NEW_SITUATIONS else ""),
         "faqs_found": len(faqs),
         "faqs_filed_as_objections": filed_faqs,
         "faqs": [{"q": f["question"][:90], "entity": f["entity_key"] or "(brand)"}

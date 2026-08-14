@@ -513,6 +513,66 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### 2.21 The model was asked what a claim IS, never what it is FOR — fixed 2026-08-14
+
+Reported off a real harvest of the agency site. `"15,000 + Trained across 30+
+seminars worldwide"` was extracted correctly and filed with **no situations**,
+so nothing downstream knew it was credibility or when to reach for it.
+
+`extract` returned `{text, proof_type, evidence, entity_scoped}`. Situations
+were assigned afterwards by `suggest_tags`, which has two paths and no model
+call: literal substring matching against the tenant's triggers, and word
+overlap against already-approved claims. Neither gets from "trained ... seminars
+... worldwide" to *credibility*. Measured on the reporting account, **both paths
+were structurally dead**: `situation_patterns("agency")` was `{}` and there were
+zero approved claims to learn from, so it returned `[]` for everything, always.
+
+The shape is the one this log already contains. `extract.py`'s own docstring
+records that the deterministic filter was measured at **0% recall** on *"is this
+a claim"* because that is open-class semantic judgement. *"What is this claim
+for"* is the same class of problem, and it was left on a keyword matcher one
+step downstream. *Rule: when a measurement retires a heuristic, check whether
+the same heuristic is doing the same job elsewhere in the pipeline.*
+
+The model now returns `situations` in the same call, with the tenant's
+vocabulary and descriptions in front of it, and `_verify` drops any tag not in
+that vocabulary — the same model-proposes/code-decides discipline that already
+guards the spans. Zero extra model calls.
+
+**Three things this opened, each guarded:**
+
+- **A no-fit claim now names the tag it would have needed**, filed as a
+  proposed `KbSituation`, so the vocabulary grows from real claims rather than
+  needing to be authored up front. Without a guard that is a tag generator:
+  `proof_of_scale`, `scale_proof` and `training_volume` all mean one thing, and
+  a vocabulary of near-synonyms is worse than a short one because selection
+  splits across them and no tag accumulates the approved examples the learned
+  tagger needs. `kb.similar_situation()` compares a proposed slug against every
+  existing tag AND its description — `credibility` and `proof_of_expertise`
+  share no characters, but their meanings do — and refuses a machine a synonym
+  while still letting a human add one. `MAX_NEW_SITUATIONS = 3` per crawl: past
+  that the shortfall is the vocabulary, not the site.
+
+- **`add_situation` wrote `review=APPROVED` unconditionally.** Harmless while
+  only the seed wrote there; a hole the moment a machine could propose a tag,
+  since this table decides which claims may exist at all. Now follows
+  `lands_approved(origin)` like every other table.
+
+- **`situations()` did not filter by review** — so a machine-proposed tag would
+  have been immediately valid for `add_claim`, review gate intact and bypassed
+  in the same breath. Caught by a test written to assert the opposite. The
+  filter is `!= PROPOSED` rather than `== APPROVED` deliberately: rows written
+  before this table carried a review state have none and have been in use all
+  along, and excluding them would empty every tenant's vocabulary and fall back
+  to the shared constant — which is how the agency got here.
+
+**`KbClaim.proves`** is new: one model-written sentence saying what a reader
+should conclude, because a tag says *when* to use a claim and not *what it
+demonstrates*. It is the only model-WRITTEN field on the table — everything
+else is copied verbatim or chosen by a human — so it is rendered in the review
+editor with that said plainly, and is editable to empty. Empty on every
+pre-existing row, which is correct: nobody has interpreted those yet.
+
 ### 2.20 Every system's declared requirements were read by nothing — fixed 2026-08-14
 
 `systems.CATALOG` gives each system a `kb_needs` tuple — the knowledge-base
@@ -688,12 +748,13 @@ python3 scripts/test_email_harvest.py     # sent mail -> claims and objections
 python3 scripts/test_sources.py           # the registry; a fill is a rehearsal
 python3 scripts/test_oauth.py             # signing in, scope narrowness, renewal
 python3 scripts/test_objection_scope.py   # an answer about one product stays about it
+python3 scripts/test_claim_tagging.py     # a claim knows when it applies, and what it proves
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All twenty suites pass as of 2026-08-14. None of them touch the network.
+All twenty-one suites pass as of 2026-08-14. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.
