@@ -158,6 +158,84 @@ def main() -> int:
            WRONG in [o.objection for o in
                      kb.objections("baci", entity_key="acrylic-tumbler")])
 
+        print("\n— clearing what a rescrape refills, and only that —")
+        kb.add_claim("baci", "Designed in Milan since 1993.", "about page",
+                     ["credibility"], origin="crawl", source="/pages/about")
+        before_ents = len(kb.entities("baci", available_only=False))
+        before_ban = len(kb.banned_claims("baci"))
+
+        rep = kb.purge_harvested("baci")
+        ck("a dry run reports and deletes nothing", rep["dry_run"])
+        ck("it counts the approved rows, which purge_proposals cannot touch",
+           rep["would_delete"]["objection"]["approved"] >= 1,
+           str(rep.get("would_delete")))
+        ck("and the objections are still there",
+           len(kb.objections("baci", any_entity=True)) > 0)
+
+        ck("it refuses to run across every account at once",
+           "error" in kb.purge_harvested(""))
+        ck("and refuses to delete what a person authored",
+           "human origin" in kb.purge_harvested("baci",
+                                                origins=("human",)).get("error", ""))
+
+        done = kb.purge_harvested("baci", dry_run=False)
+        ck("applying it clears the harvested rows",
+           not kb.objections("baci", any_entity=True, include_proposed=True),
+           "harvested objections survived")
+        ck("including the approved ones", "objection" in done["deleted"])
+
+        # The three the rescrape depends on. Losing the catalogue is the worst
+        # of them: harvest scopes a product page by looking its handle up in
+        # `owned`, so with entities gone every re-harvested answer returns
+        # unscoped and the bug this purge exists to clear comes straight back.
+        ck("the catalogue is untouched",
+           len(kb.entities("baci", available_only=False)) == before_ents,
+           "a rescrape would then scope nothing at all")
+        ck("the ban list is untouched",
+           len(kb.banned_claims("baci")) == before_ban,
+           "a rescrape would reintroduce what the rules exist to keep out")
+        ck("the tag vocabulary is untouched", len(kb.situations("baci")) > 0)
+        ck("and the report says what it kept and why",
+           done["kept"]["entities_kept"]["baci"] == before_ents
+           and any("handmade" in n for n in done["kept_note"]))
+
+        print("\n— the wider blast radius, when it is asked for —")
+        # Tags are validated per tenant, so borrow one eien actually has —
+        # an invalid tag is refused and the row would never exist to purge.
+        etag = sorted(kb.situations("eien"))[:1]
+        msg = kb.add_claim("eien", "No PFAS.", "label", etag,
+                           origin="crawl", source="/pages/about")
+        ck("the fixture claim was really written", msg.startswith("Added"), msg)
+        rep = kb.purge_harvested("*")
+        ck("'*' reaches every account",
+           len(rep["accounts"]) > 1, str(rep["accounts"]))
+        ck("and names which ones actually have rows to lose",
+           "eien" in rep["would_delete"]["claim"]["accounts"],
+           str(rep["would_delete"].get("claim")))
+
+        # A synced row, which is what "the catalogue" actually means — the
+        # test's other entities are human-authored and must survive.
+        kb.add_entity("baci", "product", "synced-plate", "Synced Plate",
+                      origin="store_sync")
+        rep = kb.purge_harvested("baci", include_entities=True)
+        ck("including entities matches the SYNCED catalogue, not just crawl",
+           "entity" in rep.get("would_delete", {}),
+           "store_sync was not included, so this would delete nothing")
+        ck("and the report leads with what that costs",
+           "unscoped" in rep["kept_note"][0].lower(), rep["kept_note"][0][:80])
+        ck("ordering the catalogue sync BEFORE the harvest",
+           "catalog_sync" in rep["next"][0], str(rep["next"][0]))
+        ck("a seeded venue is still not a synced catalogue row",
+           "seed" not in rep["origins"] and "human" not in rep["origins"])
+        ck("it targets the synced row",
+           rep["would_delete"]["entity"]["total"] == 1,
+           str(rep["would_delete"]["entity"]))
+        kb.purge_harvested("baci", include_entities=True, dry_run=False)
+        left = {e.key for e in kb.entities("baci", available_only=False)}
+        ck("which is gone", "synced-plate" not in left)
+        ck("while the hand-authored ones survive",
+           {"acrylic-tumbler", "gold-rim-porcelain-cup"} <= left, str(left))
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + ", ".join(_fail)))
     return 1 if _fail else 0

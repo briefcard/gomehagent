@@ -383,6 +383,27 @@ What a crawler can **never** derive is `banned_claims` — a site records what a
 brand does say, and the ban list is what it must not. Baci's own site says
 "handmade in Italy", which is exactly why.
 
+**Starting the machine-read half over.** `purge_proposals` below clears only
+un-reviewed rows, which is the wrong tool when the bad rows were approved.
+`purge_harvested` clears crawl- and email-origin claims and objections whatever
+their review state, for one account or `*` for all:
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/purge_harvested?tenant=baci"            # report
+curl -b ~/.gomeh-console -s ".../admin/purge_harvested?tenant=*&entities=1"    # report, wider
+curl -b ~/.gomeh-console -s -X POST -d "tenant=baci" ".../admin/purge_harvested"
+```
+
+It never deletes `banned_claims`, the situation vocabulary, or anything of
+human or seed origin — a crawler cannot derive the ban list, an empty tag
+vocabulary refuses every harvested claim, and Ironside's eight venues were
+authored rather than synced.
+
+`entities=1` additionally clears the **store-synced** catalogue. **Order
+matters if you use it:** `harvest` scopes a product page by looking its handle
+up in the entity set, so until the catalogue is rebuilt every harvested answer
+comes back unscoped. Re-run `catalog_sync` FIRST, then `fill`.
+
 **Clearing a queue that came from an older crawler.** Proposals filed before
 the crawl-quality fixes were chosen by a filter that has since been corrected,
 so re-reading them costs more than re-running the harvest. Both purges default

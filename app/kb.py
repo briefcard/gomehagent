@@ -1047,6 +1047,129 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
     return out
 
 
+#: What a rescrape puts back. Everything else it depends on.
+HARVESTED_ORIGINS = ("crawl", "email")
+
+
+def purge_harvested(tenant: str, origins: tuple[str, ...] = HARVESTED_ORIGINS,
+                    include_entities: bool = False,
+                    dry_run: bool = True) -> dict:
+    """Clear machine-read claims and objections so a rescrape can refill them.
+
+    `purge_proposals` deletes only un-reviewed rows, which is the wrong tool
+    here: the objections filed brand-wide by the old harvester were APPROVED —
+    through a review form that offered no way to scope them — so they are
+    exactly the rows it will not touch.
+
+    **What this deliberately does NOT delete**, because a rescrape cannot put
+    any of it back and two of them make the rescrape worse:
+
+      · `KbEntity` — the catalogue. `harvest` scopes a product page by looking
+        its handle up in this set, so with the entities gone EVERY re-harvested
+        objection comes back unscoped and the defect this purge is meant to
+        clear recurs in full. Delete these and the rescrape is guaranteed to
+        reproduce the bug.
+      · `KbBrand.banned_claims` — the one input a crawler can never derive. A
+        site records what a brand does say; the ban list is what it must not.
+        It is also the filter that drops "handmade in Italy" before it reaches
+        the queue, so without it the rescrape reintroduces what the rules exist
+        to keep out.
+      · `KbSituation` — the tag vocabulary. `add_claim` refuses tags outside
+        it, so an empty vocabulary means nothing harvested can be filed.
+      · anything of human or seed origin, and the store sync's own rows.
+
+    Rows are DELETED, not rejected, for the reason `purge_proposals` gives:
+    `suggest_tags` learns what a bad claim looks like from retired rows, and
+    filing a hundred correct-but-mis-scoped answers as rejected would teach the
+    tagger the wrong lesson.
+
+    Dry run by default, like every other bulk write here.
+    """
+    if not tenant:
+        return {"error": "name the account, or '*' for every account — an "
+                         "empty target is how the wrong one gets emptied"}
+    human = [o for o in origins if o in prov.HUMAN_ORIGINS]
+    if human:
+        return {"error": f"{', '.join(human)} is a human origin. This clears "
+                         f"what a machine read, never what a person authored."}
+
+    kinds = ["claim", "objection"]
+    ent_origins = tuple(origins)
+    if include_entities:
+        # The synced catalogue is store_sync origin, not crawl — without this
+        # "include entities" would match almost nothing and quietly do nothing.
+        kinds.append("entity")
+        ent_origins = tuple(set(origins) | {"store_sync"})
+
+    hit: dict[str, dict] = {}
+    with db.SessionLocal() as s:
+        for name in kinds:
+            model, field = REVIEWABLE[name]
+            want = ent_origins if name == "entity" else origins
+            q = s.query(model).filter(model.origin.in_(list(want)))
+            if tenant != "*":
+                q = q.filter(model.tenant == tenant)
+            rows = q.all()
+            if not rows:
+                continue
+            hit[name] = {
+                "total": len(rows),
+                "approved": sum(1 for r in rows
+                                if (r.review or "") == prov.APPROVED),
+                "accounts": sorted({r.tenant for r in rows}),
+                "examples": [str(getattr(r, field, ""))[:70] for r in rows[:3]],
+            }
+            if not dry_run:
+                for r in rows:
+                    s.delete(r)
+        if not dry_run:
+            s.commit()
+
+    targets = ([t.key for t in tenants_mod().all_tenants(include_paused=True)]
+               if tenant == "*" else [tenant])
+    kept = {
+        "entities_kept": {k: len(entities(k, available_only=False,
+                                          include_proposed=True))
+                          for k in targets},
+        "banned_claims": {k: len(banned_claims(k)) for k in targets},
+        "situations": {k: len(situations(k)) for k in targets},
+    }
+    notes = [
+        "The ban list and the tag vocabulary are untouched. A crawler can "
+        "never derive banned_claims — a site records what a brand does say — "
+        "and it is the filter that drops 'handmade in Italy' before it reaches "
+        "the queue. An empty tag vocabulary would refuse every harvested claim.",
+        "Human- and seed-origin entities are kept: Ironside's eight venues "
+        "were authored, not synced, and no catalogue sync would put them back. "
+        "`/admin/seed_kb` restores them if you do clear them.",
+    ]
+    if include_entities:
+        notes.insert(0, (
+            "THE SYNCED CATALOGUE IS GONE. `harvest` scopes a product page by "
+            "looking its handle up in the entity set, so until it is rebuilt "
+            "EVERY harvested answer comes back unscoped — which is the defect "
+            "this purge was run to clear. Re-run the catalogue sync BEFORE the "
+            "harvest, not after."))
+    order = ([f"/admin/catalog_sync?tenant=<account>  (rebuild the catalogue "
+              f"FIRST — nothing scopes without it)"] if include_entities else [])
+    return {
+        "tenant": tenant, "accounts": targets, "origins": list(origins),
+        "included_entities": include_entities, "dry_run": dry_run,
+        "deleted" if not dry_run else "would_delete": hit,
+        "kept": kept, "kept_note": notes,
+        "next": order + [
+            "/admin/fill?tenant=<account>&apply=1  (re-harvest)",
+            "/admin/ui?tab=content&tenant=<account>  (review — objections now "
+            "refuse to approve until you say what each one is true of)",
+        ],
+    }
+
+
+def tenants_mod():
+    from . import tenants as _t
+    return _t
+
+
 def purge_proposals(tenant: str = "", origin: str = "",
                     dry_run: bool = True) -> dict:
     """Delete un-reviewed proposals. Nothing approved is ever touched.

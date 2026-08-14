@@ -1680,6 +1680,37 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant)
 
 
+@app.get("/admin/purge_harvested")
+def purge_harvested_report(request: Request, key: str = Depends(admin_key),
+                           tenant: str = "") -> dict:
+    """What a purge WOULD remove. Reports only — deleting needs the POST."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    return kbm.purge_harvested(
+        tenant, include_entities=str(
+            request.query_params.get("entities", "")).lower() in ("1", "true"),
+        dry_run=True)
+
+
+@app.post("/admin/purge_harvested")
+async def purge_harvested_apply(request: Request, key: str = Depends(admin_key)):
+    """Actually clear the machine-read claims and objections for one account.
+
+    POST because it deletes. The GET above reports and never removes anything,
+    for the reason DEFECTS gives about console writes on GET: a link preview
+    must not be able to empty a knowledge base.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    form = await request.form()
+    return kbm.purge_harvested(
+        str(form.get("tenant", "")),
+        include_entities=str(form.get("entities", "")).lower() in ("1", "true"),
+        dry_run=False)
+
+
 @app.post("/admin/objection_edit", response_class=HTMLResponse)
 async def objection_edit(request: Request, key: str = Depends(admin_key)):
     """Re-scope an objection that is already approved.
