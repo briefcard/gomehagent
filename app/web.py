@@ -1352,6 +1352,27 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
+@app.get("/admin/fill")
+def fill_route(key: str = Depends(admin_key), tenant: str = "",
+               apply: str = "", budget: int = 40, only: str = "") -> dict:
+    """Run every source this account has wired, and report what is still missing.
+
+    /admin/fill?tenant=ironside              a read-only rehearsal
+    /admin/fill?tenant=baci&apply=1          file the proposals
+    /admin/fill?tenant=baci&only=sent_mail   one source
+
+    Sources declare themselves in `sources.SOURCES`; this route knows none of
+    them by name, so adding one does not change this code.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import sources
+    if not tenant:
+        return {"error": "an account is required"}
+    return sources.fill(tenant, apply=bool(apply), budget=budget,
+                        only=[o for o in only.split(",") if o] or None)
+
+
 @app.get("/admin/email_harvest")
 def email_harvest_route(key: str = Depends(admin_key), tenant: str = "",
                         days: int = 365, limit: int = 80, apply: str = "",
