@@ -377,6 +377,25 @@ words can never be attributed to the brand. A banned phrase found in your own
 sent mail is refused **and reported** — someone has already said it to a
 customer.
 
+**Sent mail is walked, not sampled.** Gmail answers newest-first, so the old
+call — `newer_than:365d` capped at a few dozen threads — read the same newest
+few dozen on every run for ever. There is now a cursor per account with two
+hands: `newest` is how far forward it has caught up, `oldest` is how far back
+the backfill has walked. `/admin/fill` moves the forward hand only, so it is a
+fast top-up of new mail; a nightly worker job at 03:15 moves the backward one,
+`MAIL_BACKFILL_THREADS` (250) at a time, and stops on its own when it reaches
+the start of the mailbox.
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/mail_cursor"                      # all accounts
+curl -b ~/.gomeh-console -s ".../admin/mail_cursor?tenant=baci&reset=1"  # start over
+```
+
+A thread with no triage bucket used to be classified and the answer thrown
+away, so the next pass paid for it again. It is now written back to
+`EmailLog`, which is what makes a multi-night backfill get cheaper rather than
+costing the same every night.
+
 An account with no mailbox has no source for objections. Ironside is one.
 
 What a crawler can **never** derive is `banned_claims` — a site records what a

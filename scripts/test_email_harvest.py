@@ -39,7 +39,7 @@ def ck(label, cond, detail=""):
 # real mail: our reply on top, their message quoted underneath, a signature.
 THREADS = [
     {   # a real customer question, answered — this is an objection pair
-        "thread_id": "t1",
+        "thread_id": "t1", "epoch": 1700086400,
         "reply": {"id": "m1", "date": "Mon, 3 Mar 2026", "subject": "Re: dishwasher",
                   "body": "Yes, every piece is dishwasher safe on a normal cycle.\n"
                           "We ship from Miami in 2 business days.\n\n"
@@ -49,7 +49,7 @@ THREADS = [
                     "body": "Hi — is this dishwasher safe? I broke my last set."},
     },
     {   # promotional noise: must never be opened
-        "thread_id": "t2",
+        "thread_id": "t2", "epoch": 1700172800,
         "reply": {"id": "m3", "date": "", "subject": "Re: newsletter",
                   "body": "Thanks for subscribing! Here is 10% off your first "
                           "order, plus free shipping over $95."},
@@ -57,7 +57,7 @@ THREADS = [
                     "body": "Your weekly digest"},
     },
     {   # our own words, but they break the brand's rules
-        "thread_id": "t3",
+        "thread_id": "t3", "epoch": 1700259200,
         "reply": {"id": "m5", "date": "", "subject": "Re: wholesale",
                   "body": "Every piece is handmade in Italy by our artisans, "
                           "so the lead time is 4 weeks."},
@@ -67,8 +67,21 @@ THREADS = [
 ]
 
 
-def _stub_fetch(alias, days=365, max_threads=120):
-    return THREADS
+def _stub_fetch(alias, days=365, max_threads=120, after=0, before=0,
+                exclude=()):
+    """Mirrors the real signature, INCLUDING the window arguments.
+
+    A stub that lags the function it stands in for is worse than none: the
+    real call raised TypeError on the new kwargs, `mine` caught it as an
+    unreachable-mailbox error, and the suite reported a mailbox that could not
+    be read rather than a fixture that was out of date.
+    """
+    rows = [dict(th) for th in THREADS]
+    if after:
+        rows = [r for r in rows if r.get("epoch", 0) > after]
+    if before:
+        rows = [r for r in rows if r.get("epoch", 0) < before]
+    return rows[:max_threads]
 
 
 def _stub_extract(tenant, url, blocks, entity_key=""):
@@ -197,6 +210,50 @@ def main() -> int:
        "no connected mailbox" in eh.mine("coverings").get("error", ""))
     ck("an unknown account is refused", "unknown tenant" in
        eh.mine("nope").get("error", ""))
+
+    print("\n— the walk remembers where it got to —")
+    # Without a cursor, fetch asked for `newer_than:365d` capped at N and Gmail
+    # answers newest-first, so every run for ever read the same newest N
+    # threads. A mailbox of ten thousand exchanges, mined forty at a time,
+    # always the same forty.
+    eh.reset_cursor("baci")
+    ck("a fresh account has read nothing", eh.cursor("baci")["newest"] == 0)
+
+    first = eh.mine("baci", apply=True)
+    ck("a first run reads the mailbox", first["threads_seen"] > 0,
+       str(first["threads_seen"]))
+    cur = eh.cursor("baci")
+    ck("and the cursor moves to the newest thread it saw", cur["newest"] > 0,
+       str(cur))
+
+    again = eh.mine("baci", apply=True)
+    ck("a SECOND run reads nothing — it is caught up, not stuck",
+       again["threads_seen"] == 0,
+       "the same threads were re-read, which is the bug this exists to fix")
+    ck("and the window says why", again["window"]["after"] == cur["newest"],
+       str(again["window"]))
+
+    back = eh.mine("baci", apply=True, direction="backward")
+    ck("walking backwards reaches history the forward hand skipped",
+       back["threads_seen"] > 0, str(back["threads_seen"]))
+    ck("the backward hand moved", eh.cursor("baci")["oldest"] > 0)
+    ck("and the forward hand did NOT rewind",
+       eh.cursor("baci")["newest"] == cur["newest"],
+       "an overnight backfill rewound a top-up that ran at noon")
+    ck("reaching the end of the mailbox is recorded, not retried for ever",
+       eh.cursor("baci")["backfill_done"] is True,
+       str(eh.cursor("baci")))
+    ck("and a finished backfill says so instead of re-reading",
+       "nothing older" in eh.mine("baci", direction="backward").get("note", ""))
+
+    eh.reset_cursor("baci")
+    ck("the cursor can be cleared to start over",
+       eh.cursor("baci")["newest"] == 0)
+
+    print("\n— budgeting by useful threads, not threads fetched —")
+    r = eh.mine("baci", apply=False, want=1)
+    ck("it stops once it has what it was asked for",
+       r["threads_mined"] <= 1, str(r["threads_mined"]))
 
     print("\n— the bucket list is explicit in both directions —")
     ck("noise buckets are named, so a new bucket fails safe",

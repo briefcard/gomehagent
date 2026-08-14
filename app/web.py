@@ -1680,6 +1680,19 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant)
 
 
+@app.get("/admin/mail_cursor")
+def mail_cursor(key: str = Depends(admin_key), tenant: str = "",
+                reset: str = "") -> dict:
+    """How far each mailbox has been read, and a way to start over."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import email_harvest as eh, tenants as tn
+    if tenant and reset in ("1", "true"):
+        return {"result": eh.reset_cursor(tenant)}
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    return {k: eh.cursor(k) for k in keys}
+
+
 @app.get("/admin/purge_harvested")
 def purge_harvested_report(request: Request, key: str = Depends(admin_key),
                            tenant: str = "") -> dict:

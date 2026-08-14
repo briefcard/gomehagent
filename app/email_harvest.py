@@ -82,6 +82,76 @@ def _is_question(text: str) -> bool:
     return "?" in t and 12 < len(t) < 600
 
 
+# ---------------------------------------------------------------------------
+# Where the walk has got to.
+#
+# `Setting` rather than a table: this is a marker, which is what that store is
+# for, and it needs no migration. Two hands, because a mailbox is read in two
+# directions and they must not overwrite each other — `newest` is how far
+# FORWARD we have caught up (so a routine run only sees mail that has arrived
+# since), and `oldest` is how far BACK the backfill has walked.
+#
+# Without this, `fetch_sent_threads` asked for `newer_than:365d` capped at N
+# and Gmail answers newest-first, so every run for ever read the same newest N
+# threads. Ten thousand exchanges, mined forty at a time, always the same forty.
+# ---------------------------------------------------------------------------
+
+def cursor(tenant: str) -> dict:
+    """How far this account's sent mail has been read, in both directions."""
+    import json as _json
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"mail_cursor:{tenant}")
+        try:
+            got = _json.loads(row.value) if row and row.value else {}
+        except Exception:  # noqa: BLE001 — a corrupt marker restarts the walk
+            got = {}
+    return {"newest": int(got.get("newest") or 0),
+            "oldest": int(got.get("oldest") or 0),
+            "backfill_done": bool(got.get("backfill_done")),
+            "threads_read": int(got.get("threads_read") or 0),
+            "last_run": got.get("last_run") or ""}
+
+
+def save_cursor(tenant: str, **fields) -> dict:
+    import json as _json
+    got = cursor(tenant) | {k: v for k, v in fields.items() if v is not None}
+    got["last_run"] = db.utcnow().isoformat()
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"mail_cursor:{tenant}")
+        if not row:
+            row = db.Setting(key=f"mail_cursor:{tenant}")
+            s.add(row)
+        row.value = _json.dumps(got)
+        s.commit()
+    return got
+
+
+def reset_cursor(tenant: str) -> str:
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"mail_cursor:{tenant}")
+        if row:
+            s.delete(row)
+            s.commit()
+    return f"{tenant}: sent-mail cursor cleared — the next run starts over."
+
+
+def _own_domains(tenant: str) -> tuple[str, ...]:
+    """Addresses worth excluding in the Gmail query rather than after fetching.
+
+    A thread filtered in the query costs nothing. The same thread filtered
+    after the fact costs a full message fetch and often a classification call,
+    which is most of what a run spends.
+    """
+    t = tenants.get(tenant)
+    out = set()
+    if t and t.domain:
+        out.add(t.domain.replace("https://", "").replace("http://", "").strip("/"))
+    acct = config.GMAIL_ACCOUNTS.get((t.gmail_alias if t else "") or "") or {}
+    if acct.get("email") and "@" in acct["email"]:
+        out.add(acct["email"].split("@", 1)[1])
+    return tuple(sorted(d for d in out if d))
+
+
 def bucket_for(alias: str, thread_id: str, inbound: dict | None) -> str:
     """What triage already decided about this thread, or a fresh cheap call.
 
@@ -99,19 +169,54 @@ def bucket_for(alias: str, thread_id: str, inbound: dict | None) -> str:
         return ""
     try:
         from . import triage
-        return triage.classify_only(
+        bucket = triage.classify_only(
             {"subject": inbound.get("subject", ""),
              "from": inbound.get("from", ""),
              "body": (inbound.get("body") or "")[:2000]}, alias)
     except Exception:  # noqa: BLE001 — an unclassifiable thread is skipped
         return ""
+    # Write it back. This result used to be thrown away, so the next pass over
+    # the same history paid for the same classification again — on a backfill
+    # walking years of mail that is the single largest recurring cost, and it
+    # was buying nothing. Recorded here, triage history becomes a shared asset
+    # rather than the harvest's private guess.
+    if bucket and inbound.get("id"):
+        try:
+            with db.SessionLocal() as s:
+                row = (s.query(db.EmailLog)
+                       .filter(db.EmailLog.gmail_message_id == inbound["id"])
+                       .first())
+                if row:
+                    if not row.category:
+                        row.category = bucket
+                else:
+                    s.add(db.EmailLog(
+                        account=alias, gmail_message_id=inbound["id"],
+                        thread_id=thread_id, sender=inbound.get("from", ""),
+                        subject=(inbound.get("subject") or "")[:500],
+                        category=bucket, action="classified_by_harvest",
+                        tenant=tenants.for_alias(alias) or ""))
+                s.commit()
+        except Exception:  # noqa: BLE001 — caching is an optimisation, not a step
+            pass
+    return bucket
 
 
 def mine(tenant: str, days: int = 365, limit: int = 80,
-         apply: bool = False) -> dict:
+         apply: bool = False, direction: str = "forward",
+         want: int = 0) -> dict:
     """Read this account's sent mail and propose what it finds.
 
     Writes nothing unless `apply`, and even then only proposals.
+
+    `direction` decides which end of the mailbox is read. "forward" takes only
+    what has arrived since the last run and is what a routine fill should do;
+    "backward" walks further into history and is what the nightly backfill
+    does. They move different hands of the cursor, so a backfill running
+    overnight cannot rewind a top-up that ran at noon.
+
+    `want` budgets by USEFUL threads rather than threads fetched. "Read 40" is
+    the wrong unit when thirty of them are receipts.
     """
     t = tenants.get(tenant)
     if not t:
@@ -128,9 +233,23 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
     known_obj = {prov.fingerprint(o.objection, o.entity_key or "")
                  for o in kb.objections(tenant, include_proposed=True)}
 
+    cur = cursor(tenant)
+    after = before = 0
+    if direction == "backward":
+        # Walk into history. With no cursor yet, start from now and go back.
+        before = cur["oldest"] or int(db.utcnow().timestamp())
+        if cur["backfill_done"]:
+            return {"tenant": tenant, "direction": direction,
+                    "note": "backfill already reached the start of this "
+                            "mailbox — nothing older to read.",
+                    "cursor": cur, "claims_count": 0, "objections_count": 0}
+    else:
+        after = cur["newest"]     # 0 on a first run, which means "everything"
+
     try:
-        threads = gmail_client.fetch_sent_threads(alias, days=days,
-                                                  max_threads=limit)
+        threads = gmail_client.fetch_sent_threads(
+            alias, days=days, max_threads=limit, after=after, before=before,
+            exclude=_own_domains(tenant))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:180]}"}
 
@@ -139,7 +258,10 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
     skipped: dict[str, int] = {}
     read = 0
 
+    seen_epochs = [th.get("epoch", 0) for th in threads if th.get("epoch")]
     for th in threads:
+        if want and read >= want:
+            break                 # budget is mineable threads, not threads seen
         reply, inbound = th["reply"], th.get("inbound")
         bucket = bucket_for(alias, th["thread_id"], inbound)
         if bucket not in MINEABLE:
@@ -235,11 +357,39 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
                                              origin="email",
                                              source=f"answered in {ref}")
 
+    # Move the hand this direction owns, and only that one. A backfill running
+    # overnight must not rewind a top-up that ran at noon, and vice versa.
+    moved = cur
+    if apply and seen_epochs:
+        if direction == "backward":
+            moved = save_cursor(
+                tenant, oldest=min(seen_epochs),
+                threads_read=cur["threads_read"] + len(threads),
+                # Fewer threads than the window asked for means Gmail has no
+                # more that old — the end of the mailbox, not the end of the
+                # budget.
+                backfill_done=len(threads) < limit)
+        else:
+            moved = save_cursor(
+                tenant, newest=max(seen_epochs),
+                threads_read=cur["threads_read"] + len(threads))
+    elif apply and not threads and direction == "backward":
+        moved = save_cursor(tenant, backfill_done=True)
+
     return {
         "tenant": tenant, "mailbox": alias, "applied": apply,
         "threads_seen": len(threads),
         "threads_mined": read,
-        "extractor": "model" if extract.available() else "unavailable",
+        "direction": direction,
+        "window": {"after": after, "before": before},
+        "cursor": moved,
+        # What actually ran, not what was configured. Reporting
+        # `available()` here said "model" on a run where every thread was
+        # skipped before the model was reached — the same misreading that made
+        # the website path's "deterministic filter" impossible to diagnose.
+        "extractor": ("model" if read else
+                      ("model (nothing reached it)" if extract.available()
+                       else "unavailable — ANTHROPIC_API_KEY is not set")),
         "claims": claims, "claims_count": len(claims),
         "objections": objections, "objections_count": len(objections),
         "rejected_for_banned_claim": rejected,

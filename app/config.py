@@ -23,6 +23,12 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 META_APP_ID = os.environ.get("META_APP_ID", "")
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
 
+# How many sent threads one nightly backfill window reads. A mailbox holds
+# years and a request holds seconds, so history is walked on a schedule — a few
+# hundred a night rather than a few dozen per run, and without one job holding
+# the Gmail quota for an hour.
+MAIL_BACKFILL_THREADS = int(os.environ.get("MAIL_BACKFILL_THREADS", "250"))
+
 # JSON map of inbox alias -> {"email": ..., "refresh_token": ...}
 # e.g. {"personal": {...}, "baci": {...}, "eien": {...}}
 GMAIL_ACCOUNTS = json.loads(os.environ.get("GMAIL_ACCOUNTS_JSON", "{}"))

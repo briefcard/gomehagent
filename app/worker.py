@@ -302,6 +302,39 @@ def backlog_sweep() -> None:
         )
 
 
+def mail_backfill() -> None:
+    """Walk one more window of each account's sent-mail history, nightly.
+
+    A mailbox holds years; a request holds seconds. Before this, the harvest
+    asked Gmail for `newer_than:365d` capped at a few dozen threads and Gmail
+    answers newest-first, so every run read the same newest few dozen for ever
+    — which is why a real account reported 40 threads seen and 0 claims found.
+
+    Backwards, on a schedule, is the only shape that fits: each night the
+    cursor moves a little further into history and the knowledge base fills
+    over a week or two, at no cost to any request. `/admin/fill` stays a fast
+    top-up of new mail only.
+    """
+    from . import email_harvest, tenants
+    done = []
+    for t in tenants.all_tenants():
+        if not tenants.capabilities(t.key).get("inbox"):
+            continue
+        cur = email_harvest.cursor(t.key)
+        if cur["backfill_done"]:
+            continue
+        r = email_harvest.mine(t.key, apply=True, direction="backward",
+                               limit=config.MAIL_BACKFILL_THREADS, want=0)
+        if r.get("error"):
+            log.warning("mail backfill %s: %s", t.key, r["error"])
+            continue
+        done.append(f"{t.key}: +{r.get('threads_seen', 0)} threads, "
+                    f"{r.get('claims_count', 0)} claims, "
+                    f"{r.get('objections_count', 0)} objections")
+    if done:
+        log.info("mail backfill — %s", "; ".join(done))
+
+
 def credential_renewal() -> None:
     """Extend OAuth tokens that expire on a clock, and say so when one cannot.
 
@@ -495,6 +528,10 @@ def main() -> None:
     # connection that dies quietly and is discovered by whatever reads it next.
     sched.add_job(_safe(credential_renewal, "credential renewal"), "cron",
                   hour=6, minute=30)
+    # Overnight, so a long walk never competes with the inbox loop. Stops on
+    # its own once each account's cursor reaches the start of its mailbox.
+    sched.add_job(_safe(mail_backfill, "sent-mail backfill"), "cron",
+                  hour=3, minute=15)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'

@@ -181,7 +181,9 @@ def fetch_sent(alias: str, max_results: int = 50) -> list[str]:
 
 
 def fetch_sent_threads(alias: str, days: int = 365,
-                       max_threads: int = 120) -> list[dict]:
+                       max_threads: int = 120,
+                       after: int = 0, before: int = 0,
+                       exclude: tuple[str, ...] = ()) -> list[dict]:
     """Threads this mailbox has REPLIED in, with both halves of the exchange.
 
     `fetch_sent` returns bodies only, which is enough to learn a writing voice
@@ -189,13 +191,45 @@ def fetch_sent_threads(alias: str, days: int = 365,
     from so a reviewer can check it, and an objection needs the question that
     was asked as well as the answer that was given.
 
+    `after` and `before` are epoch seconds and are what makes an incremental
+    walk possible. Without them this asked for `newer_than:365d` capped at
+    `max_threads` and Gmail answers newest-first, so every run read the SAME
+    newest N threads for ever — a mailbox of ten thousand exchanges was being
+    mined forty at a time, always the same forty.
+
+    Pagination matters for the same reason: `maxResults` is a page size, not a
+    total, and without following `nextPageToken` a window bigger than one page
+    silently truncated to the newest page of it.
+
+    `exclude` drops senders in the Gmail query rather than after fetching. Every
+    thread filtered here costs nothing; every thread filtered later costs a full
+    message fetch and sometimes a classification call.
+
     Returns, per thread: the last inbound message (what they asked) and our
     reply (what we said), with ids for provenance.
     """
     svc = service_for(alias)
-    resp = svc.users().threads().list(
-        userId="me", q=f"in:sent -to:me newer_than:{days}d",
-        maxResults=max_threads).execute()
+    q = "in:sent -to:me"
+    if after or before:
+        if after:
+            q += f" after:{int(after)}"
+        if before:
+            q += f" before:{int(before)}"
+    else:
+        q += f" newer_than:{days}d"
+    for addr in exclude:
+        q += f" -to:{addr}"
+
+    refs, token = [], None
+    while len(refs) < max_threads:
+        resp = svc.users().threads().list(
+            userId="me", q=q, pageToken=token,
+            maxResults=min(100, max_threads - len(refs))).execute()
+        refs.extend(resp.get("threads", []))
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    resp = {"threads": refs[:max_threads]}
     out = []
     for ref in resp.get("threads", []):
         try:
@@ -211,14 +245,18 @@ def fetch_sent_threads(alias: str, days: int = 365,
             rec = {"id": m["id"], "threadId": th["id"],
                    "subject": hdrs.get("subject", ""),
                    "from": hdrs.get("from", ""), "to": hdrs.get("to", ""),
-                   "date": hdrs.get("date", ""), "body": body}
+                   "date": hdrs.get("date", ""), "body": body,
+                   # Epoch SECONDS. Gmail reports internalDate in ms, and the
+                   # search operators take seconds — a cursor that stored the
+                   # raw value would ask for mail from the year 57,000.
+                   "epoch": int(m.get("internalDate", 0) or 0) // 1000}
             if "SENT" in (m.get("labelIds") or []):
                 reply = rec          # keep the LAST thing we said
             else:
                 inbound = rec        # and the last thing they said
         if reply and (reply.get("body") or "").strip():
             out.append({"thread_id": th["id"], "reply": reply,
-                        "inbound": inbound})
+                        "inbound": inbound, "epoch": reply.get("epoch", 0)})
     return out
 
 
