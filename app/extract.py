@@ -68,10 +68,19 @@ PROOF_TYPES = ("data", "case_study", "certification", "spec", "testimonial")
 _SYSTEM = """You extract claims from a company's own website for a knowledge \
 base. You SELECT text; you never write it.
 
-Return every span that is a claim the business makes about itself. A claim is \
-any checkable assertion: origin, materials, standards, certifications, \
-ownership, provenance, scale, performance, capability, or a customer's own \
-words.
+Return every span that is a claim the business makes about itself.
+
+A claim has to pass two tests. It must be CHECKABLE — someone who doubted it \
+could find out whether it is true. And it must be CONTESTABLE — a competitor \
+selling the same category could not honestly write the identical sentence \
+about their own product. Origin, standards, certifications, ownership, \
+provenance, scale, performance, named engagements, and a customer's own words \
+usually pass both. Adjectives about quality, design, or feel almost never do.
+
+Apply the competitor test to every candidate before returning it. "Designed \
+in Milan" passes: a competitor designing in Shenzhen cannot say it. "Designed \
+to combine functionality with minimalist elegance" fails: every brand in the \
+category says exactly that, and nobody can check it.
 
 RULES, in order of importance:
 
@@ -81,7 +90,13 @@ punctuation. A span that is not an exact substring is discarded and wasted.
 2. One claim per span. Do not merge sentences.
 3. Skip navigation, buttons, prices on their own, product-listing repetition, \
 cookie and newsletter text, and headings that only restate the body.
-4. Skip anything that is purely a specification value (dimensions, material \
+4. Skip PRODUCT DESCRIPTION — the marketing sentence that names what a thing \
+is and how it is meant to feel. "Taupe acrylic pitcher from the Aqua \
+collection, designed to combine functionality with minimalist elegance" is a \
+description, not a claim: colour, material and collection belong on the \
+product record, and "functionality with minimalist elegance" is unfalsifiable. \
+Returning it fills the claim library with sentences no draft can ever use as \
+proof. Skip anything that is purely a specification value (dimensions, material \
 name on its own) — those belong on the product record, not in the claim library.
 5. `situations` — WHEN this claim is worth reaching for. Choose from the \
 account's own list below, which is the only vocabulary that exists; anything \

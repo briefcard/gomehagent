@@ -186,6 +186,9 @@ def main() -> int:
         ck("beats the deterministic baseline of 0 on baci and ironside",
            total_found > 0, f"{total_found} of {total_expected}")
 
+    print("\n— a product description is not a claim —")
+    check_claim_definition(ck)
+
     print("\n— a cut-off reply must not cost the whole page —")
     check_truncation_salvage(ck)
 
@@ -198,6 +201,51 @@ def main() -> int:
     print("all checks passed")
     return 0
 
+
+
+def check_claim_definition(ck):
+    """A product description is not a claim.
+
+    Reported from a live Baci queue:
+
+        "Taupe acrylic pitcher from the Aqua collection, designed to combine
+         functionality with minimalist elegance."
+
+    Nothing there is contestable. Colour, material and collection belong on
+    the product record, and "functionality with minimalist elegance" is what
+    every brand in the category writes — a draft can never use it as proof of
+    anything. The prompt invited it twice: the claim definition listed
+    `materials` as a claim type, so "acrylic" qualified, and the skip rule
+    only excluded spans that were PURELY specification, so a sentence mixing
+    spec with evaluative prose passed both.
+
+    The discriminator is now stated as a test the model can apply: could a
+    competitor selling the same category honestly write this identical
+    sentence? "Designed in Milan" — no. "Minimalist elegance" — yes, and
+    routinely does.
+
+    This is prompt-level on purpose. A keyword filter for marketing adjectives
+    is the same mistake as the deterministic claim filter measured at 0%
+    recall: deciding whether a sentence asserts anything is open-class
+    judgement, and a word list cannot do it.
+    """
+    from app import extract as ex
+
+    ck("the definition demands a checkable assertion",
+       "CHECKABLE" in ex._SYSTEM)
+    ck("and one a competitor could not equally make",
+       "CONTESTABLE" in ex._SYSTEM)
+    ck("the competitor test is spelled out as a test, not a preference",
+       "competitor test" in ex._SYSTEM)
+    ck("the reported sentence is named in the rules as the negative example",
+       "minimalist elegance" in ex._SYSTEM,
+       "the case that prompted the rule should survive a future rewrite")
+    ck("and its passing counterpart is named beside it",
+       "Designed in Milan" in ex._SYSTEM,
+       "an exclusion with no contrasting positive over-corrects")
+    ck("`materials` no longer stands alone as a claim type",
+       "any checkable assertion: origin, materials" not in ex._SYSTEM,
+       "listing materials invited the colour/material/collection sentence")
 
 
 def check_truncation_salvage(ck):
