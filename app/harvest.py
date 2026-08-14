@@ -498,7 +498,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
 
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
-        "extractor": ("model" if used_model else "deterministic filter"),
+        # Three different things used to report as "deterministic filter": the
+        # key being absent, every page having nothing worth sending, and the
+        # API failing mid-crawl. Only the first is a configuration problem, and
+        # telling them apart is the difference between "set an env var" and
+        # "the crawler read nothing".
+        "extractor": ("model" if used_model
+                      else ("deterministic filter" if extract.available()
+                            else "deterministic filter (no ANTHROPIC_API_KEY)")),
         "extractor_note": extractor_note,
         "rejected_not_verbatim": not_verbatim[:10],
         "not_verbatim_count": len(not_verbatim),

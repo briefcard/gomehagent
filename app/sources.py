@@ -60,9 +60,15 @@ def _compliance(tenant: str, apply: bool, budget: int) -> dict:
 def _website(tenant: str, apply: bool, budget: int) -> dict:
     from . import harvest
     r = harvest.harvest(tenant, limit=budget, apply=apply)
+    # `extractor_note` carries WHY the model did not run — no blocks worth
+    # reading, an API error, a missing key. Dropping it meant a run could
+    # report `extractor: "deterministic filter"` with no way to tell which of
+    # those happened, which is the §2 lesson about drop reasons reading as a
+    # finding about the site when they were a finding about the filter.
     return {k: r.get(k) for k in
-            ("extractor", "pages_read", "pages_skipped", "proposed_count",
-             "faqs_found", "untagged_count", "error")}
+            ("extractor", "extractor_note", "pages_read", "pages_skipped",
+             "proposed_count", "faqs_found", "untagged_count",
+             "situations_wanted", "situations_proposed", "error")}
 
 
 def _sent_mail(tenant: str, apply: bool, budget: int) -> dict:
