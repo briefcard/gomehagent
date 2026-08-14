@@ -262,7 +262,7 @@ def _call(system: str, user: str) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     msg = client.messages.create(
-        model=config.CLAUDE_MODEL, max_tokens=2000, temperature=0,
+        model=config.CLAUDE_MODEL, max_tokens=config.EXTRACT_MAX_TOKENS,
         system=system, messages=[{"role": "user", "content": user}],
     )
     try:
@@ -270,19 +270,40 @@ def _call(system: str, user: str) -> str:
         usage.log_usage("harvest_extract", config.CLAUDE_MODEL, msg)
     except Exception:  # noqa: BLE001 — never fail a crawl on accounting
         pass
-    return msg.content[0].text.strip()
+    return {"text": msg.content[0].text.strip(),
+            "truncated": msg.stop_reason == "max_tokens"}
 
 
 def _parse(raw: str) -> list[dict]:
+    """Every complete object in the array, even when the array is truncated.
+
+    The first version took the span between the first `[` and the last `]` and
+    handed it to `json.loads`. A reply cut off at `max_tokens` has no closing
+    bracket, or has one belonging to a nested list — so it either returned `[]`
+    on the missing bracket or raised and returned `[]` on the partial. **One
+    over-long page therefore contributed nothing at all**, silently, while the
+    run still reported that the model had worked.
+
+    Decoding object by object salvages everything that arrived complete and
+    discards only the fragment at the end.
+    """
     raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
-    start, end = raw.find("["), raw.rfind("]")
-    if start < 0 or end < start:
+    start = raw.find("[")
+    if start < 0:
         return []
-    try:
-        data = json.loads(raw[start:end + 1])
-    except Exception:  # noqa: BLE001 — a malformed reply is not a crawl failure
-        return []
-    return [d for d in data if isinstance(d, dict)]
+    body, dec, out, i = raw[start + 1:], json.JSONDecoder(), [], 0
+    while i < len(body):
+        while i < len(body) and body[i] in ", \t\r\n":
+            i += 1
+        if i >= len(body) or body[i] == "]":
+            break
+        try:
+            obj, i = dec.raw_decode(body, i)
+        except ValueError:
+            break            # truncated mid-object — keep what came before it
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
 
 
 def available() -> bool:
@@ -316,12 +337,12 @@ def extract(tenant: str, url: str, blocks: list[str],
     user = (_context(tenant, url, entity_key) + "\n\nBLOCKS:\n"
             + "\n".join(f"- {b}" for b in body))
     try:
-        raw = _call(_SYSTEM, user)
+        got = _call(_SYSTEM, user)
     except Exception as exc:  # noqa: BLE001
         return {"claims": [], "rejected_not_verbatim": [],
                 "used": "error", "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
 
-    cands = [{**c, "_url": url} for c in _parse(raw)]
+    cands = [{**c, "_url": url} for c in _parse(got["text"])]
     kept, rejected = _verify(cands, body, entity_key,
                              valid_situations=set(kb.situations(tenant)))
     # What the account's vocabulary could not name. Surfaced rather than
@@ -330,7 +351,12 @@ def extract(tenant: str, url: str, blocks: list[str],
     # account whose list was never authored it is the only signal there is.
     wanted = [c["needs_situation"] for c in kept if c.get("needs_situation")]
     return {"claims": kept, "rejected_not_verbatim": rejected, "used": "model",
-            "situations_wanted": sorted(set(wanted))}
+            "situations_wanted": sorted(set(wanted)),
+            # The page had more to say than the ceiling allowed. Reported, not
+            # swallowed: a truncated reply used to lose the WHOLE page, and a
+            # run that silently drops its richest pages is indistinguishable
+            # from a site with nothing on it.
+            "truncated": got["truncated"]}
 
 _QA_SYSTEM = """You are reading one email exchange: a message a customer sent, and the reply the business sent back. You SELECT text; you never write it.
 
@@ -367,7 +393,7 @@ def extract_qa(tenant: str, inbound: str, reply: str, ref: str = "") -> dict:
     user = (f"INBOUND (what the customer sent):\n{inbound[:4000]}\n\n"
             f"REPLY (what the business sent back):\n{reply[:4000]}")
     try:
-        raw = _call(_QA_SYSTEM, user)
+        raw = _call(_QA_SYSTEM, user)["text"]
     except Exception as exc:  # noqa: BLE001 — one thread must not stop the run
         # Returned rather than swallowed. A silent {} here is indistinguishable
         # from "this exchange held no question", which is how an out-of-credit
@@ -449,7 +475,8 @@ def review_vocabulary(tenant: str) -> dict:
            if r.patterns else "")
         for r in rows)
     try:
-        raw = _call(_VOCAB_SYSTEM, f"Account: {tenant}\n\nTags:\n{listing}")
+        raw = _call(_VOCAB_SYSTEM,
+                    f"Account: {tenant}\n\nTags:\n{listing}")["text"]
     except Exception as exc:  # noqa: BLE001
         return {"pairs": [], "used": "error",
                 "note": f"{exc.__class__.__name__}: {str(exc)[:160]}"}

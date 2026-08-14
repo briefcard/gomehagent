@@ -66,7 +66,9 @@ def _website(tenant: str, apply: bool, budget: int) -> dict:
     # those happened, which is the §2 lesson about drop reasons reading as a
     # finding about the site when they were a finding about the filter.
     return {k: r.get(k) for k in
-            ("extractor", "extractor_note", "pages_read", "pages_skipped",
+            ("extractor", "extractor_note", "truncated_page_count",
+             "pages_read", "pages_skipped", "pages_unchanged",
+             "pages_discovered", "pages_remaining",
              "proposed_count", "faqs_found", "untagged_count",
              "situations_wanted", "situations_proposed", "error")}
 

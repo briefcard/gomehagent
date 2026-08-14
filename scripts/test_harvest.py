@@ -335,6 +335,63 @@ def main() -> int:
     ck("entities are decoded", "’" in text and "&#8217;" not in text)
     ck("the actual copy survives", "we shipped 1,200 orders in 2025" in text.lower())
 
+    print("\n— the crawl walks the site instead of restarting it —")
+    from app import harvest as _hv
+    _hv.forget_pages("baci")
+    ck("a fresh account has read nothing", not _hv._page_state("baci"))
+
+    first = harvest.harvest("baci", limit=2, apply=True)
+    ck("a run reads pages", first["pages_read"] > 0, str(first["pages_read"]))
+    ck("and remembers them", len(_hv._page_state("baci")) == first["pages_read"])
+
+    first_urls = set(_hv._page_state("baci"))
+    again = harvest.harvest("baci", limit=2, apply=True)
+    second_urls = set(_hv._page_state("baci"))
+    # The property that matters: run 2 covers ground run 1 did not. It should
+    # NOT report unchanged pages — spending the budget on new pages first is
+    # the point; unchanged only shows once new ground runs out.
+    ck("a second run reads pages the first one did not",
+       second_urls > first_urls,
+       "the same first N pages were read again — the bug this exists to fix")
+    ck("and says how much of the site is left",
+       "pages_remaining" in again, str(sorted(again)[:6]))
+
+    # With a budget big enough to exhaust the new pages, it re-encounters the
+    # read ones and skips them on their content hash rather than re-reading.
+    # The requirement in one assertion: nothing is read twice. Capture when
+    # each known page was read, run again, and confirm those timestamps did
+    # not move — a re-read would refresh them.
+    from app import db as _db
+    def _read_times():
+        with _db.SessionLocal() as s:
+            return {r.url: r.read_at for r in s.query(_db.HarvestedPage)
+                    .filter(_db.HarvestedPage.tenant == "baci").all()}
+
+    before_times = _read_times()
+    wide = harvest.harvest("baci", limit=20, apply=True)
+    after_times = _read_times()
+    ck("no already-read page is read a second time",
+       all(after_times[u] == ts for u, ts in before_times.items()),
+       "a page was re-read — the run is repeating work, not advancing")
+    ck("and the run advanced onto new pages",
+       len(after_times) > len(before_times),
+       f"{len(before_times)} -> {len(after_times)}")
+    ck("discovery reaches the whole site, not a 90-page slice",
+       wide["pages_discovered"] > 200, str(wide["pages_discovered"]))
+    ck("and the report says how much is left to cover",
+       wide["pages_remaining"] > 0, str(wide["pages_remaining"]))
+
+    # A rehearsal must consume nothing — recording during a dry run was the
+    # obvious optimisation and it silently starves the apply that follows.
+    _hv.forget_pages("baci")
+    harvest.harvest("baci", limit=2, apply=False)
+    ck("a rehearsal consumes no page budget", not _hv._page_state("baci"),
+       "the apply after a rehearsal would skip the page and file nothing")
+
+    ck("recrawl ignores the memory",
+       harvest.harvest("baci", limit=2, apply=False,
+                       recrawl=True)["pages_read"] > 0)
+
     print("\n— a thin queue must say WHY it is thin —")
     check_known_drops_are_counted(ck)
 

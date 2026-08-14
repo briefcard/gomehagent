@@ -30,7 +30,7 @@ import html as html_lib
 import json
 import re
 
-from . import compliance, extract, kb, provenance as prov, tenants
+from . import compliance, db, extract, kb, provenance as prov, tenants
 
 _MIN, _MAX = 25, 240
 
@@ -288,10 +288,55 @@ def _tags_for(tenant: str, text: str) -> list[str]:
     return hits
 
 
+def _page_state(tenant: str) -> dict[str, str]:
+    """url -> content hash, for every page of this site already read."""
+    with db.SessionLocal() as s:
+        return {r.url: (r.content_hash or "")
+                for r in s.query(db.HarvestedPage)
+                .filter(db.HarvestedPage.tenant == tenant).all()}
+
+
+def _record_page(tenant: str, url: str, content_hash: str,
+                 claims_found: int, truncated: bool) -> None:
+    with db.SessionLocal() as s:
+        row = (s.query(db.HarvestedPage)
+               .filter(db.HarvestedPage.tenant == tenant,
+                       db.HarvestedPage.url == url).first())
+        if not row:
+            row = db.HarvestedPage(tenant=tenant, url=url)
+            s.add(row)
+        row.content_hash = content_hash
+        row.read_at = db.utcnow()
+        row.claims_found = claims_found
+        row.truncated = "yes" if truncated else ""
+        s.commit()
+
+
+def forget_pages(tenant: str) -> str:
+    """Drop the read record so the next harvest starts the site over."""
+    with db.SessionLocal() as s:
+        n = (s.query(db.HarvestedPage)
+             .filter(db.HarvestedPage.tenant == tenant).delete())
+        s.commit()
+    return f"{tenant}: forgot {n} pages — the next harvest re-reads the site."
+
+
 def harvest(tenant: str, limit: int = 25, apply: bool = False,
-            use_model: bool | None = None) -> dict:
+            use_model: bool | None = None, recrawl: bool = False) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
-    `apply` is set, and even then only as pending claims."""
+    `apply` is set, and even then only as pending claims.
+
+    Successive runs WALK the site rather than restarting it. `discover_pages`
+    returns a stable order and this used to take the first `limit` every time,
+    so a 400-page site was read 40 pages deep, for ever, at the cost of a model
+    call per page to be told the claims were already on file. Pages already
+    read at their current content hash are skipped, so each run spends its
+    budget on ground it has not covered.
+
+    `recrawl=True` ignores that memory and re-reads everything — for when the
+    extractor itself has changed and the old readings are the thing you want
+    to replace.
+    """
     t = tenants.get(tenant)
     if not t:
         return {"error": f"unknown tenant {tenant!r}"}
@@ -300,7 +345,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
 
     banned = [b.lower() for b in kb.banned_claims(tenant) if b]
     vocab = kb.situation_patterns(tenant)
-    pages, source = compliance.discover_pages(t.domain, limit=max(limit * 3, 90))
+    # Discover far more than one run will read: the budget decides how much is
+    # read per run, the discovery cap decides how much of the site is reachable
+    # at all, and conflating them capped the site at 90 pages for ever.
+    pages, source = compliance.discover_pages(t.domain, limit=max(limit * 20, 500))
+    seen_pages = {} if recrawl else _page_state(tenant)
     if not pages:
         return {"error": f"could not enumerate any pages at {t.domain}"}
 
@@ -315,6 +364,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     not_verbatim: list[str] = []          # spans the model returned that the
                                           # page does not actually contain
     used_model = False
+    truncated_pages: list[str] = []
     extractor_note = ""
     model_on = extract.available() if use_model is None else use_model
     dropped: dict[str, int] = {}          # why candidates were not proposed
@@ -334,7 +384,12 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     # says it on every page, and that is not visible one page at a time.
     import httpx
     per_page: list[tuple[str, list[dict]]] = []
-    for p in pages[:limit]:
+    # Unread pages first, then everything else — so a run always spends its
+    # budget on new ground before re-checking what it has already seen.
+    ordered_pages = ([p for p in pages if p["url"] not in seen_pages]
+                     + [p for p in pages if p["url"] in seen_pages])
+    unchanged = 0
+    for p in ordered_pages[:limit]:
         url = p["url"]
         if compliance.skip_url(url):
             skipped.append({"url": url, "why": "not brand copy"})
@@ -362,6 +417,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # it can never become one candidate.
         blocks = compliance.text_blocks(html)
         text = " ".join(blocks)
+        # Hash the extracted TEXT, not the markup: a changed analytics tag or
+        # cache-buster is not a changed claim, and hashing the HTML would
+        # re-read the whole site every time they touch their theme.
+        page_hash = prov.fingerprint(text[:20000])
+        if not recrawl and seen_pages.get(url) == page_hash:
+            unchanged += 1
+            skipped.append({"url": url, "why": "unchanged since it was last read"})
+            continue
         # Reviews are read BEFORE the page is judged. A product page carries
         # its testimonials in JSON-LD and often has almost no prose — judging
         # it on prose length would throw away the strongest source there is.
@@ -379,6 +442,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             # The model judges what is a claim; every guard below still runs.
             res = extract.extract(tenant, url, blocks, entity_key=entity)
             used_model = used_model or res["used"] == "model"
+            page_truncated = bool(res.get("truncated"))
+            if page_truncated:
+                truncated_pages.append(url)
             if res["used"] == "model":
                 cands += res["claims"]
                 not_verbatim += res["rejected_not_verbatim"]
@@ -394,6 +460,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                 cands += [{**c, "entity_key": entity}
                           for c in _claims_from(block, url, dropped)]
         per_page.append((url, cands))
+        # ONLY on apply. Recording during a rehearsal was the obvious
+        # optimisation — reading the page is the expensive part — and it is
+        # wrong: a rehearsal files nothing, so the apply that follows would
+        # skip the page as already-read and the claims would never land. A
+        # dry run must consume nothing, budget included.
+        if apply:
+            _record_page(tenant, url, page_hash, len(cands),
+                         bool(locals().get("page_truncated")))
         for f in _faqs_from(html, url):
             faqs.append({**f, "entity_key": entity, "url": url})
 
@@ -517,6 +591,17 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "extractor_note": extractor_note,
         "rejected_not_verbatim": not_verbatim[:10],
         "not_verbatim_count": len(not_verbatim),
+        # Pages whose claims did not all fit in one reply. A non-empty list
+        # here means the crawl under-reports that page — raise
+        # EXTRACT_MAX_TOKENS rather than concluding the site is thin.
+        # How much of the site this run covered, and how much is left. A run
+        # that reports pages_remaining > 0 has more to give — run it again.
+        "pages_unchanged": unchanged,
+        "pages_known": len(seen_pages),
+        "pages_discovered": len(pages),
+        "pages_remaining": max(0, len(pages) - len(seen_pages) - len(per_page)),
+        "truncated_pages": truncated_pages[:10],
+        "truncated_page_count": len(truncated_pages),
         "situations_wanted": wanted,
         "situations_proposed": filed_situations,
         "situations_already_covered": covered_already,

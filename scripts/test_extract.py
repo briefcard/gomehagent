@@ -186,6 +186,9 @@ def main() -> int:
         ck("beats the deterministic baseline of 0 on baci and ironside",
            total_found > 0, f"{total_found} of {total_expected}")
 
+    print("\n— a cut-off reply must not cost the whole page —")
+    check_truncation_salvage(ck)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
@@ -194,6 +197,41 @@ def main() -> int:
         return 1
     print("all checks passed")
     return 0
+
+
+
+def check_truncation_salvage(ck):
+    """A reply cut off at max_tokens must not cost the whole page.
+
+    Reported as "only 5 claims from the Baci scrape". Two causes, both ours —
+    not an API limit. `max_tokens` was 2000, sized before the response schema
+    grew `situations`, `context` and `proves`, so a claim costs roughly twice
+    what it did and about five fit. And when the array was cut mid-object the
+    parser took the span from the first `[` to the last `]` and handed it to
+    json.loads — no closing bracket meant `[]`, a partial object meant a raise
+    and `[]`. The page's richest replies were the ones most likely to return
+    nothing at all, silently, while the run still reported the model had run.
+    """
+    from app import config, extract as ex
+
+    ck("the ceiling is sized to the schema, not to 2000",
+       config.EXTRACT_MAX_TOKENS >= 8000, str(config.EXTRACT_MAX_TOKENS))
+
+    whole = '[{"text": "a", "proves": "x"}, {"text": "b", "proves": "y"}]'
+    ck("a complete array still parses", len(ex._parse(whole)) == 2)
+
+    # Exactly what a max_tokens cut looks like: two good objects, then a
+    # fragment, and no closing bracket.
+    cut = '[{"text": "a", "proves": "x"}, {"text": "b", "proves": "y"}, {"text": "c", "prov'
+    got = ex._parse(cut)
+    ck("a truncated array keeps every COMPLETE object", len(got) == 2,
+       f"{len(got)} — the old parser returned 0 and lost the page")
+    ck("and drops only the fragment",
+       [g["text"] for g in got] == ["a", "b"], str(got))
+
+    ck("a reply with no array at all is still empty", ex._parse("sorry, none") == [])
+    ck("and fenced JSON still parses",
+       len(ex._parse('```json\n[{"text": "a"}]\n```')) == 1)
 
 
 if __name__ == "__main__":

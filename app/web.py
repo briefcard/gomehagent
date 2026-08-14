@@ -1714,6 +1714,23 @@ async def merge_situation(request: Request, key: str = Depends(admin_key)):
     return _back_to_kb(tenant, err=r.get("error", "") or r.get("note", ""))
 
 
+@app.get("/admin/harvest_pages")
+def harvest_pages(key: str = Depends(admin_key), tenant: str = "",
+                  forget: str = "") -> dict:
+    """How much of each site has been read, and a way to start it over."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import harvest as hv, tenants as tn
+    if tenant and forget in ("1", "true"):
+        return {"result": hv.forget_pages(tenant)}
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    out = {}
+    for k in keys:
+        seen = hv._page_state(k)
+        out[k] = {"pages_read": len(seen)}
+    return out
+
+
 @app.get("/admin/mail_cursor")
 def mail_cursor(key: str = Depends(admin_key), tenant: str = "",
                 reset: str = "") -> dict:
@@ -1839,7 +1856,8 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
 
 @app.get("/admin/harvest")
 def harvest_route(key: str = Depends(admin_key), tenant: str = "",
-                  limit: int = 25, apply: str = "", ui: str = ""):
+                  limit: int = 25, apply: str = "", ui: str = "",
+                  recrawl: str = ""):
     """Propose claims from a client's own site. Reads by default.
 
     /admin/harvest?tenant=baci            what it would propose

@@ -29,6 +29,12 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
 # the Gmail quota for an hour.
 MAIL_BACKFILL_THREADS = int(os.environ.get("MAIL_BACKFILL_THREADS", "250"))
 
+# Output ceiling for one page of claim extraction. Sized to the response
+# SCHEMA, not to a round number: each claim now carries text, evidence,
+# proof_type, situations, context and proves, so it costs roughly twice what it
+# did when this was 2000 — a cap that quietly fitted about five claims a page.
+EXTRACT_MAX_TOKENS = int(os.environ.get("EXTRACT_MAX_TOKENS", "8000"))
+
 # JSON map of inbox alias -> {"email": ..., "refresh_token": ...}
 # e.g. {"personal": {...}, "baci": {...}, "eien": {...}}
 GMAIL_ACCOUNTS = json.loads(os.environ.get("GMAIL_ACCOUNTS_JSON", "{}"))

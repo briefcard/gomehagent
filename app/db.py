@@ -2,8 +2,8 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import (JSON, Column, DateTime, String, Text, UniqueConstraint,
-                        create_engine)
+from sqlalchemy import (JSON, Column, DateTime, Integer, String, Text,
+                        UniqueConstraint, create_engine)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from . import config
@@ -689,6 +689,34 @@ class Credential(Base):
     granted_at = Column(DateTime(timezone=True), default=utcnow)
     last_verified = Column(DateTime(timezone=True))
     last_error = Column(Text, default="")
+
+
+class HarvestedPage(Base):
+    """One page of a client's site, and the state it was in when last read.
+
+    Without this the crawl had no memory. `discover_pages` returns the site in
+    a stable order and the loop took the first N, so a re-run re-read the same
+    first N — Baci has 400 pages in its sitemap and every run read the same 40,
+    paying a model call each time to be told the claims were already on file.
+    Same shape as the sent-mail cursor, and the same fix: record what has been
+    read so a later run can move past it.
+
+    `content_hash` is over the extracted text blocks, not the raw HTML — a
+    changed analytics tag or cache-buster is not a changed claim, and hashing
+    the markup would re-read the whole site on every deploy of their theme.
+    """
+
+    __tablename__ = "harvested_pages"
+    __table_args__ = (UniqueConstraint("tenant", "url",
+                                       name="uq_harvested_page_tenant_url"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    content_hash = Column(String)
+    read_at = Column(DateTime(timezone=True), default=utcnow)
+    claims_found = Column(Integer, default=0)
+    truncated = Column(String, default="")   # "yes" when the reply hit the cap
 
 
 class ConnectLink(Base):
