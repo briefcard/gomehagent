@@ -513,6 +513,63 @@ while building it, both the same shape as things already in this log:
   by being edited, and the cases added last are the ones that get missed —
   §1 *customisation in code*, one layer down.
 
+### 2.19 A product answer was claimed of the whole catalogue — fixed 2026-08-14
+
+Reported from the live Knowledge tab. Six objections harvested off Baci product
+pages, every one rendered **"applies to everyone"**:
+
+    Is it dishwasher safe?      Yes — dishwasher safe (top rack only).
+    How many pieces?            This is sold as a set of 6 pieces.
+
+Baci sells gold-rim porcelain, which is **not** dishwasher safe, and plenty that
+is not sold in sixes. Each answer is true of the page it was scraped from and
+false of the catalogue it was filed against. Approved, live, and exactly the
+class of error the KB exists to prevent — a generator reading that row tells a
+porcelain buyer to put it in the dishwasher.
+
+Four failures in one chain, and the retrieval layer was not one of them:
+`kb.objections()` has scoped by `entity_key` since the column landed, and its
+docstring already named this case. The data was wrong, and everything that
+could have shown that was missing.
+
+1. **`harvest.py:347` collapsed unknown into a value.**
+   `entity = handle if ("/products/" in url and handle in owned) else ""` — and
+   `""` already meant *true of the whole brand*. A page whose product could not
+   be resolved was filed as a fact about everything. §1, in the one place where
+   being wrong misinforms a customer.
+2. **The objection review form had no way to say what an answer was about.**
+   Claims have had an entity picker since the queue existed; objections got
+   Approve and Reject and nothing else. So a reviewer who *saw* the problem
+   could only approve it wrong or throw away a real answer. **This is why the
+   wrong rows are approved** — the form gave nobody a third option.
+3. **The Knowledge tab rendered `audience_key` and never `entity_key`**, so a
+   correctly scoped answer still displayed "applies to everyone". §2.13 again.
+4. **That page called `objections(tenant)` with no entity**, which filters to
+   `entity_key IN ("", None)` — the brand-wide subset — and presented it as the
+   list. Every product-scoped answer was invisible on the one page whose job is
+   showing what the account knows.
+
+**The fix needed no new column.** `entity_key = ""` carried two meanings the
+code could not separate — a human deciding "brand-wide" and a crawler failing
+to resolve a product — and `origin` already separates them.
+`kb.scope_unconfirmed()` reads machine-origin + no entity + not yet approved as
+undecided, and approval is refused until the reviewer picks an item or ticks
+that it really is brand-wide. Approving IS the decision, which is why the guard
+sits on the approval path.
+
+Rows already approved by the old code are the ones saying something false
+today, and a guard on approval does nothing about them —
+`kb.update_objection` plus a Save-scope control on every row is how those get
+fixed without deleting a real answer.
+
+*Rule, third time of asking: when a column's empty value means something, a
+writer that cannot determine the value must not be able to write the empty
+one.* See §2.5 (`fits` tri-state) and §2.6 (entities silently dropped).
+
+Verified in `scripts/test_objection_scope.py`, which encodes the reported case
+by name — including the check that the gold-rim porcelain is **not** told it is
+dishwasher safe.
+
 ### The API-key connectors were never tried with a real address — fixed 2026-08-13
 
 Four providers self-serve on a pasted key, and the probes had only ever been
@@ -593,12 +650,13 @@ python3 scripts/test_extract.py           # spans are selected, then verified in
 python3 scripts/test_email_harvest.py     # sent mail -> claims and objections
 python3 scripts/test_sources.py           # the registry; a fill is a rehearsal
 python3 scripts/test_oauth.py             # signing in, scope narrowness, renewal
+python3 scripts/test_objection_scope.py   # an answer about one product stays about it
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All nineteen suites pass as of 2026-08-13. None of them touch the network.
+All twenty suites pass as of 2026-08-14. None of them touch the network.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.

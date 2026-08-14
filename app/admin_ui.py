@@ -728,7 +728,7 @@ def _next_steps_line(steps: dict) -> str:
         for stage, v in steps.items())
 
 
-def render_kb(key: str, tenant: str = "") -> str:
+def render_kb(key: str, tenant: str = "", err: str = "") -> str:
     rows = tenants.all_tenants(include_paused=True)
     tenant = tenant or (rows[0].key if rows else "")
     t = tenants.get(tenant)
@@ -831,19 +831,62 @@ def render_kb(key: str, tenant: str = "") -> str:
         for r in kb.audiences(tenant)],
         "No segments. Selection cannot narrow to a buyer.")
 
-    obj_html = _kb_list("Objections", [
-        f'<div><strong>{_esc(r.objection)}</strong>'
-        + (' <span class="chip off">escalate</span>'
-           if (r.escalate or "").lower() == "yes" else "")
-        + "</div>"
-        + f"<div>{_esc(r.response)}</div>"
-        + f'<div class="when">'
-        + (f"segment <code>{_esc(r.audience_key)}</code>"
-           if r.audience_key else "applies to everyone")
-        + (f" · paired proof <code>{_esc(r.claim_id)}</code>" if r.claim_id else "")
-        + "</div>"
-        for r in kb.objections(tenant)],
-        "None. This is human-authored and it is half of the intake.")
+    # `any_entity` because this page's job is to show what the account knows,
+    # not what selection would pick. Without it the list was the brand-wide
+    # subset presented as the whole, and every product-scoped answer was
+    # invisible here.
+    obj_rows = kb.objections(tenant, any_entity=True)
+    obj_cat = {e.key: e.name for e in kb.entities(tenant, available_only=False)}
+
+    def _obj(r) -> str:
+        # The scope is the first thing that has to be readable. An answer true
+        # of one product and shown as true of the catalogue is not a display
+        # bug — it is the system asserting something false about every other
+        # thing the account sells.
+        if r.entity_key:
+            scope = (f'true of <code>{_esc(obj_cat.get(r.entity_key, r.entity_key))}'
+                     f'</code> only')
+            flag = ""
+        else:
+            scope = "<strong>true of everything they sell</strong>"
+            # A machine-origin row that nobody scoped never had that decided.
+            flag = ('<div class="note">Nothing has said what this is true of, '
+                    'so it is being claimed of the whole catalogue. If it came '
+                    'off one product page, scope it — approving a product '
+                    'answer brand-wide is how a customer is told the wrong '
+                    'thing about a different item.</div>'
+                    if kb.scope_unconfirmed(r) or (r.origin or "") == "crawl"
+                    else "")
+        return (
+            f'<div><strong>{_esc(r.objection)}</strong>'
+            + (' <span class="chip off">escalate</span>'
+               if (r.escalate or "").lower() == "yes" else "")
+            + "</div>"
+            + f"<div>{_esc(r.response)}</div>"
+            + f'<div class="when">{scope}'
+            + (f" · segment <code>{_esc(r.audience_key)}</code>"
+               if r.audience_key else " · any segment")
+            + (f" · from {_esc(r.origin)}" if r.origin else "")
+            + (f" · paired proof <code>{_esc(r.claim_id)}</code>"
+               if r.claim_id else "")
+            + "</div>" + flag
+            + f"""
+            <form class="f" method="post" action="/admin/objection_edit">
+              <input type="hidden" name="row_id" value="{_esc(r.id)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <label>True of &mdash; blank claims it of everything they sell</label>
+              <input name="entity_key" list="objents"
+                     value="{_esc(r.entity_key or '')}"
+                     placeholder="leave blank only if it really is brand-wide">
+              <div class="row"><button class="sec">Save scope</button></div>
+            </form>""")
+
+    obj_html = _kb_list("Objections", [_obj(r) for r in obj_rows],
+                        "None. This is human-authored and it is half of the "
+                        "intake.")
+    obj_html += ('<datalist id="objents">'
+                 + "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
+                           for k, v in obj_cat.items()) + "</datalist>")
 
     ents = kb.entities(tenant, available_only=False)
     ent_html = _kb_list("Things they sell", [
@@ -935,7 +978,9 @@ def render_kb(key: str, tenant: str = "") -> str:
         + _kb_add_form(key, tenant, "tone", "Set voice",
                        "three or four words, comma separated", 1))
 
+    warn = f'<div class="note">{_esc(err)}</div>' if err else ""
     return _shell(key, "kb", "Knowledge", f"""
+{warn}
 <div>
   <h1>Knowledge</h1>
   <p class="mut">Everything the generators are allowed to say, per account. A draft
@@ -1114,7 +1159,8 @@ def _act(key: str, action: str, label: str, tenant: str = "",
             f'{hidden}<button{cls}>{_esc(label)}</button></form>')
 
 
-def render_content(key: str, tenant: str = "", started: str = "") -> str:
+def render_content(key: str, tenant: str = "", started: str = "",
+                   err: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     rows = tenants.all_tenants(include_paused=True)
@@ -1274,6 +1320,32 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
                 f'<div class="when">looks like: '
                 f'{_esc((getattr(d, "name", "") or getattr(d, "objection", "") or "")[:90])}'
                 f'</div>' for d in item["near_duplicates"][:3])
+            # An objection needs its scope decided before it can be approved,
+            # and until now this form offered Approve and Reject and nothing
+            # else — so a reviewer who could SEE that "sold as a set of 6" was
+            # true of one product had no way to say so. The only moves were to
+            # approve it wrong or throw away a real answer, which is why the
+            # wrong ones are approved.
+            scope = ""
+            if kind == "objection":
+                cat = {e.key: e.name for e in
+                       kbm.entities(tenant, available_only=False)}
+                opts = "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
+                               for k, v in cat.items())
+                scope = f"""
+              <label>True of &mdash; which item is this answer about?</label>
+              <input name="entity_key" list="pents"
+                     value="{_esc(getattr(r, 'entity_key', '') or '')}"
+                     placeholder="start typing a product name">
+              <datalist id="pents">{opts}</datalist>
+              <label class="row" style="gap:6px">
+                <input type="checkbox" name="brand_wide" value="1">
+                <span>No item &mdash; this is true of everything they sell</span>
+              </label>
+              <div class="when">One of the two is required. An answer approved
+                with neither is claimed of the whole catalogue &mdash;
+                &ldquo;dishwasher safe&rdquo; read off one product page becomes
+                a promise about the porcelain too.</div>"""
             return f"""
             <form class="f" method="post" action="/admin/proposal_review">
               <input type="hidden" name="kind" value="{_esc(kind)}">
@@ -1284,6 +1356,7 @@ def render_content(key: str, tenant: str = "", started: str = "") -> str:
               <div class="msg">{_esc(str(label)[:200])}</div>
               {f'<div class="when">{_esc(str(detail)[:240])}</div>' if detail else ''}
               {dupes}
+              {scope}
               <div class="row">
                 <button name="action" value="approve">Approve</button>
                 <button class="sec" name="action" value="reject">Reject</button>
@@ -1376,6 +1449,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     banner = (f'<div class="ok">{_esc(_STARTED.get(started, ""))}</div>'
               if started in _STARTED else "")
 
+    if err:
+        banner = f'<div class="note">{_esc(err)}</div>' + banner
     return _shell(key, "content", "Content", f"""
 {banner}
 <div>

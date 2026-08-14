@@ -898,11 +898,13 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "systems":
         return ui.render_systems(link_key)
     if tab == "kb":
-        return ui.render_kb(link_key, tenant)
+        return ui.render_kb(link_key, tenant,
+                            err=request.query_params.get("err", ""))
     if tab == "schema":
         return ui.render_schema(link_key, tenant)
     if tab == "content":
-        return ui.render_content(link_key, tenant, started=started)
+        return ui.render_content(link_key, tenant, started=started,
+                                 err=request.query_params.get("err", ""))
     q = request.query_params
     return ui.render(link_key, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""))
@@ -1508,14 +1510,29 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
-def _back_to_content(tenant: str, started: str = ""):
+def _back_to_content(tenant: str, started: str = "", err: str = ""):
     """Return to the Content tab. No key in the URL: by the time an action has
     run, the session cookie is already set (the middleware sets it on any
     request carrying a valid key), so putting the secret back into the address
     bar would undo the session for nothing."""
+    from urllib.parse import quote
+
     from fastapi.responses import RedirectResponse
     q = f"/admin/ui?tab=content&tenant={tenant}"
-    return RedirectResponse(q + (f"&started={started}" if started else ""),
+    if started:
+        q += f"&started={started}"
+    if err:
+        q += f"&err={quote(err)}"
+    return RedirectResponse(q, status_code=303)
+
+
+def _back_to_kb(tenant: str, err: str = ""):
+    """Return to the Knowledge tab, carrying any refusal with it."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    q = f"/admin/ui?tab=kb&tenant={tenant}"
+    return RedirectResponse(q + (f"&err={quote(err)}" if err else ""),
                             status_code=303)
 
 
@@ -1645,10 +1662,41 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    kbm.approve(str(form.get("kind", "")), str(form.get("row_id", "")),
-                by="owner",
-                approve_it=str(form.get("action", "")) == "approve")
+    kind, row_id = str(form.get("kind", "")), str(form.get("row_id", ""))
+    # Scope is set BEFORE approval, not after: approving is what makes a row
+    # final, and a row that goes final unscoped is claimed of the whole
+    # catalogue. Writing it afterwards would mean the wrong version was
+    # briefly true, and `may_write` refuses machine edits to approved rows.
+    if kind == "objection" and form.get("entity_key") is not None:
+        problem = kbm.update_objection(row_id,
+                                       entity_key=str(form.get("entity_key", "")))
+        if problem != "Saved.":
+            return _back_to_content(tenant, err=problem)
+    result = kbm.approve(kind, row_id, by="owner",
+                         approve_it=str(form.get("action", "")) == "approve",
+                         brand_wide=bool(form.get("brand_wide")))
+    if result.startswith("Say what"):
+        return _back_to_content(tenant, err=result)
     return _back_to_content(tenant)
+
+
+@app.post("/admin/objection_edit", response_class=HTMLResponse)
+async def objection_edit(request: Request, key: str = Depends(admin_key)):
+    """Re-scope an objection that is already approved.
+
+    The guard on approval stops new rows going final unscoped; it does nothing
+    about the ones already in the database, which were filed brand-wide by the
+    code this replaces and are the ones actually saying something false today.
+    This is how those get fixed without deleting a real answer.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>")
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    result = kbm.update_objection(str(form.get("row_id", "")),
+                                  entity_key=str(form.get("entity_key", "")))
+    return _back_to_kb(tenant, err="" if result == "Saved." else result)
 
 
 @app.post("/admin/conflict_resolve", response_class=HTMLResponse)

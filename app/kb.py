@@ -180,6 +180,7 @@ def audience(tenant: str, key: str) -> db.KbAudience | None:
 def objections(tenant: str, audience_key: str = "",
                include_proposed: bool = False,
                entity_key: str | None = None,
+               any_entity: bool = False,
                situations: list[str] | None = None) -> list[db.KbObjection]:
     """Approved objections for a tenant; narrowed to a segment when one is given.
 
@@ -194,7 +195,16 @@ def objections(tenant: str, audience_key: str = "",
         q = s.query(db.KbObjection).filter(db.KbObjection.tenant == tenant)
         if not include_proposed:
             q = q.filter(db.KbObjection.review == prov.APPROVED)
-        if entity_key:
+        if any_entity:
+            # Every objection this account holds, whatever it is scoped to.
+            # For SELECTION that would be wrong — it is how a porcelain answer
+            # reaches a pouf. For a person maintaining the knowledge base it is
+            # the only honest view: the Knowledge tab used to call `objections`
+            # with no entity, get back the brand-wide subset, and present it as
+            # the list. Every product-scoped answer was invisible on the one
+            # page whose job is showing what the account knows.
+            pass
+        elif entity_key:
             q = q.filter(db.KbObjection.entity_key.in_(["", None, entity_key]))
         else:
             q = q.filter(db.KbObjection.entity_key.in_(["", None]))
@@ -1080,12 +1090,85 @@ def purge_proposals(tenant: str = "", origin: str = "",
                      "Pass dry_run=0 to actually delete.")}
 
 
+def scope_unconfirmed(row) -> bool:
+    """True when nobody has yet said what this row is true OF.
+
+    `entity_key = ""` carries two completely different meanings and the code
+    could not tell them apart: a human deciding "this is true of the whole
+    brand", and a crawler failing to work out which product a page was about.
+    Collapsing the second into the first is how "Is it dishwasher safe? Yes,
+    top rack" — scraped off one product page — became a fact about a catalogue
+    that includes gold-rim porcelain, which is not dishwasher safe at all.
+
+    No new column: `origin` already separates them. A machine-origin row with
+    no entity and no human approval never had its scope decided. Approving it
+    IS the decision, which is why the guard is on the approval path and why
+    approving with the box ticked is allowed.
+    """
+    if getattr(row, "entity_key", None):
+        return False                      # scoped to something: decided
+    if prov.lands_approved(getattr(row, "origin", "") or ""):
+        return False                      # a human said it: decided
+    return (getattr(row, "review", "") or "") != prov.APPROVED
+
+
+def update_objection(row_id: str, objection: str = None, response: str = None,
+                     entity_key: str | None = None, audience_key: str = None,
+                     escalate: str = None,
+                     situations: list[str] | None = None) -> str:
+    """Edit an objection in place — the editing half of propose-then-approve.
+
+    Claims have had this since the review queue existed; objections never did,
+    so the review form offered Approve and Reject and nothing else. A reviewer
+    who could SEE that "sold as a set of 6" was true of one product and not the
+    catalogue had no way to say so — the only moves were to approve it wrong or
+    throw away a real answer. That is why the wrong ones are approved.
+
+    `entity_key` is validated against the catalogue exactly as `update_claim`
+    does it: an objection scoped to something that does not exist is
+    unreachable, because selection only ever asks for the scope of what it is
+    already writing about.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbObjection, row_id)
+        if not row:
+            return "No such objection."
+        if entity_key is not None:
+            ek = (entity_key or "").strip().lower()
+            if ek and not [e for e in entities(row.tenant, available_only=False,
+                                               include_proposed=True)
+                           if e.key == ek]:
+                return (f"{row.tenant} has nothing in its catalogue keyed "
+                        f"{ek!r}. Leave it blank only if the answer really is "
+                        f"true of everything they sell.")
+            row.entity_key = ek
+            row.fingerprint = prov.fingerprint(row.objection or "", ek)
+        if situations is not None:
+            valid = globals()["situations"](row.tenant)
+            unknown = [t for t in situations if t not in valid]
+            if unknown:
+                return (f"Unknown tags for {row.tenant}: {', '.join(unknown)}\n"
+                        f"Valid: {', '.join(sorted(valid))}")
+            row.situations = list(situations)
+        for field, value in (("objection", objection), ("response", response),
+                             ("audience_key", audience_key),
+                             ("escalate", escalate)):
+            if value is not None and str(value).strip():
+                setattr(row, field, str(value).strip())
+        s.commit()
+    return "Saved."
+
+
 def approve(kind: str, row_id: str, by: str = "owner",
-            approve_it: bool = True) -> str:
+            approve_it: bool = True, brand_wide: bool = False) -> str:
     """Make a proposed row final — or reject it — for any KB table.
 
     Claims keep their own entry point because approving one has an extra
     precondition (it must carry a situation tag or it can never be selected).
+
+    Objections have gained a second one, for the same reason and with worse
+    consequences: an answer with no scope is claimed of everything the account
+    sells. `brand_wide=True` is the reviewer saying so on purpose.
     """
     if kind == "claim":
         return review_claim(row_id, approve_it, by=by)
@@ -1097,6 +1180,14 @@ def approve(kind: str, row_id: str, by: str = "owner",
         row = s.get(model, row_id)
         if not row:
             return f"No such {kind}."
+        if (approve_it and kind == "objection" and not brand_wide
+                and scope_unconfirmed(row)):
+            return ("Say what this answer is true of before approving it. A "
+                    "product answer approved with no scope is claimed of "
+                    "everything this account sells — “dishwasher safe” read "
+                    "off one product page becomes a promise about the "
+                    "porcelain too. Pick the item, or tick that it really is "
+                    "true brand-wide.")
         row.review = prov.APPROVED if approve_it else prov.REJECTED
         if approve_it:
             row.approved_by, row.approved_at = by, db.utcnow()
