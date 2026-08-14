@@ -211,6 +211,31 @@ def main() -> int:
     ck("an unknown account is refused", "unknown tenant" in
        eh.mine("nope").get("error", ""))
 
+    print("\n— a failing model is not an empty mailbox —")
+    # Measured in production: an out-of-credit Anthropic account made every
+    # extraction 400, and the run reported extractor "model" with 0 claims —
+    # which reads as a mailbox holding nothing worth mining.
+    eh.reset_cursor("baci")     # an earlier section may have caught this up
+    baseline = eh.mine("baci", apply=False)
+    ck("a thread reaches the extractor at all in this fixture",
+       baseline["threads_mined"] > 0, str(baseline["threads_mined"]))
+
+    real = eh.extract.extract
+    eh.extract.extract = lambda *a, **k: {
+        "claims": [], "rejected_not_verbatim": [], "used": "error",
+        "error": "BadRequestError: credit balance is too low"}
+    r = eh.mine("baci", apply=False)
+    ck("the failure is named, not reported as a clean zero",
+       "FAILED" in r["extractor"], r["extractor"])
+    ck("even when another path succeeded — a partial failure is its own state",
+       "model," in r["extractor"] or r["extractor"].startswith("model FAILED"),
+       r["extractor"])
+    ck("with the provider's own words",
+       "credit balance" in r["extractor_note"], r["extractor_note"])
+    ck("and how many calls failed", r["extractor_failures"] > 0,
+       str(r["extractor_failures"]))
+    eh.extract.extract = real
+
     print("\n— the walk remembers where it got to —")
     # Without a cursor, fetch asked for `newer_than:365d` capped at N and Gmail
     # answers newest-first, so every run for ever read the same newest N

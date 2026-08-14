@@ -254,6 +254,8 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:180]}"}
 
     claims, objections, rejected = [], [], []
+    api_errors: list[str] = []
+    model_ran = False
     not_verbatim: list[str] = []
     skipped: dict[str, int] = {}
     read = 0
@@ -280,6 +282,15 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         # --- claims: the same verbatim-span extractor the crawler uses -----
         blocks = [b for b in ours.split("\n") if len(b) > 25]
         res = extract.extract(tenant, ref, blocks)
+        # The website path learned this the hard way: a run that reported
+        # "model" while every call 400'd looked like a mailbox with nothing in
+        # it. `used` and `error` were both returned here and both ignored, so
+        # an out-of-credit account read ten threads, failed twenty calls, and
+        # reported a clean zero.
+        if res.get("used") == "error":
+            api_errors.append(res.get("error", "")[:200])
+        elif res.get("used") == "model":
+            model_ran = True
         for c in res.get("claims", []):
             body = c["text"].strip()
             fp = prov.fingerprint(body)
@@ -312,6 +323,10 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
                                   "sales_leads"):
             asked = _own_words(inbound.get("body", ""))
             pair = extract.extract_qa(tenant, asked, ours, ref=ref)
+            if pair.get("error"):
+                api_errors.append(str(pair["error"])[:200])
+            elif pair.get("objection"):
+                model_ran = True
             if pair.get("rejected"):
                 not_verbatim.append(pair["rejected"])
             elif pair.get("objection"):
@@ -387,9 +402,20 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         # `available()` here said "model" on a run where every thread was
         # skipped before the model was reached — the same misreading that made
         # the website path's "deterministic filter" impossible to diagnose.
-        "extractor": ("model" if read else
-                      ("model (nothing reached it)" if extract.available()
-                       else "unavailable — ANTHROPIC_API_KEY is not set")),
+        # What actually happened, in three distinguishable states. Reporting
+        # "model" because threads were READ said the model had worked on a run
+        # where every call to it failed.
+        # Four states, because a partial failure is its own thing: one path
+        # succeeding while another 400s must not report as a clean "model", or
+        # the failures are invisible again in a different way.
+        "extractor": (
+            (f"model, {len(api_errors)} calls FAILED — see extractor_note"
+             if api_errors else "model") if model_ran else
+            ("model FAILED — see extractor_note" if api_errors else
+             ("model (nothing reached it)" if extract.available()
+              else "unavailable — ANTHROPIC_API_KEY is not set"))),
+        "extractor_note": (api_errors[0] if api_errors else ""),
+        "extractor_failures": len(api_errors),
         "claims": claims, "claims_count": len(claims),
         "objections": objections, "objections_count": len(objections),
         "rejected_for_banned_claim": rejected,

@@ -341,8 +341,12 @@ def extract_qa(tenant: str, inbound: str, reply: str, ref: str = "") -> dict:
             f"REPLY (what the business sent back):\n{reply[:4000]}")
     try:
         raw = _call(_QA_SYSTEM, user)
-    except Exception:  # noqa: BLE001 — one unreadable thread is not a failure
-        return {}
+    except Exception as exc:  # noqa: BLE001 — one thread must not stop the run
+        # Returned rather than swallowed. A silent {} here is indistinguishable
+        # from "this exchange held no question", which is how an out-of-credit
+        # account reported a mailbox with nothing in it instead of a billing
+        # problem.
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:180]}"}
     raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end < start:
