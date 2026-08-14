@@ -50,7 +50,8 @@ from . import db
 # free-text `source` reference (a URL, a filename and row number) precisely
 # because precedence must never be decided by string-matching prose — which is
 # the bug that let a sync overwrite approved copy.
-ORIGINS = ("seed", "crawl", "upload", "store_sync", "client", "human")
+ORIGINS = ("seed", "crawl", "upload", "store_sync", "client", "human",
+           "email")
 
 # Origins that a human is behind. These may always write.
 HUMAN_ORIGINS = ("human", "seed")

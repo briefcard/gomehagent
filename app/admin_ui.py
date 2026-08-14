@@ -988,6 +988,8 @@ _STARTED = {
             "refresh this page and the result will be below.",
     "harvest": "Harvest started. Proposals will appear above when it finishes.",
     "sync": "Catalogue sync started. Refresh in a moment.",
+    "email": "Reading sent mail. Only threads triage already bucketed as worth "
+             "mining are opened, so this is quick — refresh in a moment.",
 }
 
 
@@ -1284,6 +1286,10 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   {proposals}
   <div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}
     <span class="mut">reads the site and files what it finds</span></div>
+  <div class="row">{_act(key, "/admin/email_harvest", "Mine sent mail", tenant, {"ui": "1"})}
+    <span class="mut">reads what this account has already SAID — the one place
+    objections exist, because the brand has been answering the same questions
+    for years. Only the buckets triage flagged as worth mining are opened.</span></div>
   {clear_all}
 </div>
 

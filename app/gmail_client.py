@@ -153,6 +153,48 @@ def fetch_sent(alias: str, max_results: int = 50) -> list[str]:
     return bodies
 
 
+def fetch_sent_threads(alias: str, days: int = 365,
+                       max_threads: int = 120) -> list[dict]:
+    """Threads this mailbox has REPLIED in, with both halves of the exchange.
+
+    `fetch_sent` returns bodies only, which is enough to learn a writing voice
+    and not enough to mine knowledge from: a claim needs the message it came
+    from so a reviewer can check it, and an objection needs the question that
+    was asked as well as the answer that was given.
+
+    Returns, per thread: the last inbound message (what they asked) and our
+    reply (what we said), with ids for provenance.
+    """
+    svc = service_for(alias)
+    resp = svc.users().threads().list(
+        userId="me", q=f"in:sent -to:me newer_than:{days}d",
+        maxResults=max_threads).execute()
+    out = []
+    for ref in resp.get("threads", []):
+        try:
+            th = svc.users().threads().get(
+                userId="me", id=ref["id"], format="full").execute()
+        except Exception:  # noqa: BLE001 — one unreadable thread is not a failure
+            continue
+        inbound, reply = None, None
+        for m in th.get("messages", []):
+            hdrs = {h["name"].lower(): h["value"]
+                    for h in m["payload"].get("headers", [])}
+            body = _extract_text(m["payload"])
+            rec = {"id": m["id"], "threadId": th["id"],
+                   "subject": hdrs.get("subject", ""),
+                   "from": hdrs.get("from", ""), "to": hdrs.get("to", ""),
+                   "date": hdrs.get("date", ""), "body": body}
+            if "SENT" in (m.get("labelIds") or []):
+                reply = rec          # keep the LAST thing we said
+            else:
+                inbound = rec        # and the last thing they said
+        if reply and (reply.get("body") or "").strip():
+            out.append({"thread_id": th["id"], "reply": reply,
+                        "inbound": inbound})
+    return out
+
+
 _labels: dict = {}
 
 
@@ -316,5 +358,6 @@ def _serialize(fn):
 for _name in ("fetch_unread", "fetch_unanswered", "get_thread_context",
               "fetch_sent", "fetch_recent", "fetch_with_attachments",
               "download_attachment", "ensure_label", "add_label", "mark_read",
+              "fetch_sent_threads",
               "create_draft", "send_email"):
     globals()[_name] = _serialize(globals()[_name])

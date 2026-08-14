@@ -1352,6 +1352,28 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
+@app.get("/admin/email_harvest")
+def email_harvest_route(key: str = Depends(admin_key), tenant: str = "",
+                        days: int = 365, limit: int = 80, apply: str = "",
+                        ui: str = ""):
+    """Mine claims and objections out of this account's SENT mail.
+
+    /admin/email_harvest?tenant=baci               what it would propose
+    /admin/email_harvest?tenant=baci&apply=1       file them as proposals
+
+    Threads are filtered by the bucket triage already assigned, so this reads
+    the handful worth reading rather than the whole mailbox.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import email_harvest as eh
+    if ui:
+        _run_bg("email_harvest", eh.mine, tenant, days=days, limit=limit,
+                apply=True)
+        return _back_to_content(tenant, "email")
+    return eh.mine(tenant, days=days, limit=limit, apply=bool(apply))
+
+
 @app.get("/admin/purge_proposals")
 def purge_proposals_route(key: str = Depends(admin_key), tenant: str = "",
                           origin: str = "") -> dict:
