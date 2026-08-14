@@ -1954,10 +1954,28 @@ _AGENCY_SITUATIONS = [
 def seed_agency(force: bool = False) -> dict:
     """Populate the `agency` tenant. Idempotent unless force=True."""
     tenant = "agency"
+
+    # The vocabulary is ensured on EVERY call, ahead of the idempotence guard
+    # below. That guard returns early whenever the brand row exists, so once
+    # `_AGENCY_SITUATIONS` was written it could never actually reach a database
+    # that had already been seeded — which is why production still reported
+    # `situation_patterns("agency") == {}` long after the rows were authored,
+    # and why a crawl of the agency's own site could tag nothing. The only way
+    # to apply them was force=True, which DELETES every claim, audience,
+    # objection and entity: a destructive operation to fix a missing one.
+    #
+    # `add_situation` is idempotent per tag and updates in place, so calling it
+    # every time is free and self-healing.
+    ensured = 0
+    for tag, kind, desc, pats in _AGENCY_SITUATIONS:
+        add_situation(tenant, tag, pats, desc, kind=kind, origin="seed")
+        ensured += 1
+
     with db.SessionLocal() as s:
         existing = s.get(db.KbBrand, tenant)
         if existing and not force:
-            return {"status": "already seeded — pass force=True to overwrite"}
+            return {"status": "already seeded — pass force=True to overwrite",
+                    "situations_ensured": ensured}
         if force:
             for model in (db.KbClaim, db.KbAudience, db.KbObjection, db.KbEntity):
                 s.query(model).filter(model.tenant == tenant).delete()
@@ -2022,10 +2040,8 @@ def seed_agency(force: bool = False) -> dict:
         _seed = dict(origin="seed", review=prov.APPROVED, approved_by="seed",
                      approved_at=db.utcnow())
 
-        for tag, kind, desc, pats in _AGENCY_SITUATIONS:
-            s.add(db.KbSituation(tenant=tenant, tag=tag, kind=kind,
-                                 description=desc, patterns=pats,
-                                 fingerprint=prov.fingerprint(tag), **_seed))
+        # Situations are ensured above, before the idempotence guard, so they
+        # are deliberately not inserted here.
 
         for claim, ev, ptype, src, sits, strength in _AGENCY_CLAIMS:
             bad = set(sits) - SITUATIONS
