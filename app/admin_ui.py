@@ -150,6 +150,8 @@ form.inl{display:inline}
    the days box stretches to the full row width and wraps the button. */
 .mklink input[name=label]{flex:0 1 190px}
 .mklink input[name=days]{flex:0 0 56px}
+.card.danger{border-color:var(--gap);background:var(--gaps)}
+.card.danger .head h2{color:var(--gap)}
 input.copy{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;
 margin-top:6px}
 details.sec{border:1px solid var(--rule);border-radius:5px;padding:9px 12px;background:var(--rule2)}
@@ -990,6 +992,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
 
 <div class="tabs">{picker}</div>
 
+
 <div class="card">
   <div class="head">
     <h2>{_esc(t.name)}</h2><code>{_esc(tenant)}</code>
@@ -1468,6 +1471,29 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 </div>
 
 <div class="tabs">{picker}</div>
+<div class="card danger">
+  <div class="head"><h2>Start this account's machine-read half over</h2></div>
+  <p class="mut">Deletes every claim and objection that came from a crawl or a
+  mailbox for <strong>{_esc(t.name if t else tenant)}</strong> — <strong>including approved
+  ones</strong>, which is what the proposal clear below cannot reach. Keeps the
+  ban list, the situation vocabulary, the catalogue, and anything a person
+  wrote: a re-harvest needs all four, and without the catalogue every answer
+  comes back unscoped.</p>
+  <div class="row">
+    <form method="get" action="/admin/purge_harvested" class="inl">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <button class="sec">Show me what it would delete</button>
+    </form>
+    <form method="post" action="/admin/purge_harvested" class="inl"
+          onsubmit="return confirm('Delete every crawled and mailed claim and objection for {_esc(tenant)}, approved ones included? The ban list, vocabulary and catalogue are kept.')">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="ui" value="1">
+      <button>Clear and re-harvest</button>
+    </form>
+    <span class="mut">then run Fill from every source, below</span>
+  </div>
+</div>
+
 
 <div class="card">
   <div class="head"><h2>Proposed, awaiting you</h2>

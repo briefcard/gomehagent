@@ -1705,10 +1705,18 @@ async def purge_harvested_apply(request: Request, key: str = Depends(admin_key))
         return {"error": "unauthorized"}
     from . import kb as kbm
     form = await request.form()
-    return kbm.purge_harvested(
-        str(form.get("tenant", "")),
+    tenant = str(form.get("tenant", ""))
+    result = kbm.purge_harvested(
+        tenant,
         include_entities=str(form.get("entities", "")).lower() in ("1", "true"),
         dry_run=False)
+    if form.get("ui"):
+        gone = sum(v.get("total", 0) for v in (result.get("deleted") or {}).values())
+        return _back_to_content(
+            tenant, err=f"Cleared {gone} crawled and mailed rows. Run Fill from "
+                        f"every source to re-harvest — the ban list, vocabulary "
+                        f"and catalogue were kept.")
+    return result
 
 
 @app.post("/admin/objection_edit", response_class=HTMLResponse)
