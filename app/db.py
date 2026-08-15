@@ -98,6 +98,142 @@ class Contact(Base):
     trusted = Column(String, default="no")  # yes -> routine replies may auto-send
 
 
+class Conversation(Base):
+    """One ongoing exchange with one counterparty, for one system.
+
+    `ChatMessage.thread` already namespaces conversation history, and it is the
+    right primitive for what it was built for: Gomeh talking to his agents. That
+    is roughly twenty threads — roles times tenants — with one operator and no
+    lifecycle. Every system on the roadmap breaks it, for reasons that are about
+    shape rather than scale:
+
+    * **A thread string is a namespace, not an entity.** There is nowhere to put
+      what stage a lead is at, whether we are waiting on them or they on us, or
+      when the next touch is due. Those are columns.
+    * **Loading context meant replaying messages.** A fourteen-touch sequence
+      either re-reads everything, which is the token overhead this layer exists
+      to remove, or truncates and forgets what was promised in touch three.
+    * **No state machine.** Nothing could enforce "do not send touch four if
+      they replied", or "do not offer a refund twice".
+
+    So this sits beside `ChatMessage`, it does not replace it. Operator threads
+    stay there; counterparty threads live here.
+
+    **Overlapping threads collapse onto one row.** Two email chains with the same
+    person about the same job are one conversation — `open_or_get` finds the open
+    one rather than starting a second, and `external_refs` keeps every provider
+    thread id that has been folded in. That is the whole answer to "the same
+    company has three threads and the agent cannot tell they are one thing".
+
+    There is deliberately no unique constraint on (tenant, contact, system): a
+    lead who goes quiet and returns next quarter is a *new* conversation, and a
+    constraint would either forbid that or force the old one to stay open.
+    Reuse is a lookup on `status == "open"`, not a schema rule.
+    """
+
+    __tablename__ = "conversations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    contact_id = Column(String, index=True)
+    system_key = Column(String, default="", index=True)  # lead_responder | service_desk | …
+
+    subject = Column(String, default="")        # a human label, for a queue view
+    stage = Column(String, default="", index=True)
+    status = Column(String, default="open", index=True)   # open | closed | blocked
+    outcome = Column(String, default="")        # won | lost | resolved | abandoned
+
+    # The join to the knowledge half. The conversation carries the situation
+    # tags; the KB serves the objections and claims for those tags. Written by
+    # a classifier that now refuses to guess (see kb.suggest_tags).
+    situations = Column(JSON, default=list)
+    entity_key = Column(String, default="")     # the product/venue/offer in play
+
+    # Every provider thread id folded into this conversation. [{source, ref}]
+    external_refs = Column(JSON, default=list)
+
+    opened_at = Column(DateTime(timezone=True), default=utcnow)
+    last_touch_at = Column(DateTime(timezone=True))
+    next_action_at = Column(DateTime(timezone=True), index=True)
+    closed_at = Column(DateTime(timezone=True))
+    blocked_on = Column(String, default="")     # named, never a bare "blocked"
+
+
+class Touch(Base):
+    """One message in one conversation, in either direction.
+
+    Bounded history: the conversation carries state, so reading it never means
+    replaying every message. A touch is a record that something was sent or
+    received, not the transcript of it.
+
+    `idempotency_key` is the anti-double-send guard, and it is why this is a row
+    rather than an entry in a log. A worker restarting mid-publish is a known
+    unfixed failure in this codebase; a touch that already exists for a key
+    cannot be written twice. The constraint is composite with `tenant` because a
+    globally unique column on a per-client table means two clients cannot both
+    have one — `test_tenant_isolation` fails the build for exactly this.
+    """
+
+    __tablename__ = "touches"
+    __table_args__ = (UniqueConstraint("tenant", "idempotency_key",
+                                       name="uq_touch_tenant_idem"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    conversation_id = Column(String, index=True)
+
+    channel = Column(String, default="email")   # email | whatsapp | telegram | call | form
+    direction = Column(String, default="out")   # out | in
+    summary = Column(Text)                      # what was said, not the full body
+    ref = Column(String, default="")            # provider message id
+
+    # Ties a touch back to the run that produced it, so an output can be traced
+    # to the context that produced it. `Approval` has had these columns since
+    # the tenant migration and nothing has ever written them.
+    run_id = Column(String, default="", index=True)
+    approval_id = Column(String, default="")
+
+    idempotency_key = Column(String, default="")
+    stage_at = Column(String, default="")       # the stage when this was sent
+    sent_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class Commitment(Base):
+    """Something we told a counterparty we would do.
+
+    The point of this table is that "effective without misleading" stops being a
+    line in a prompt and becomes a row a validator can check. A prompt mostly
+    obeys; a check always blocks — the same split as `note()` versus
+    `promote_rule()` on the systems side, one layer over.
+
+    A price quoted, a date offered, a refund promised, a callback agreed. Before
+    a drafter says anything about a price or a date, the open commitments on the
+    conversation are in front of it, so it cannot quietly contradict what was
+    already said or promise the same thing twice.
+
+    `value` is a string for the same reason `KbEntity.price` is: "$2,400", "by
+    Friday" and "2–3 weeks" are all real answers and none of them is a number.
+    """
+
+    __tablename__ = "commitments"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    conversation_id = Column(String, index=True)
+
+    kind = Column(String, default="other")      # price | date | refund | discount | callback | other
+    value = Column(String, default="")
+    detail = Column(Text)
+
+    status = Column(String, default="open", index=True)  # open | met | broken | withdrawn
+    due_at = Column(DateTime(timezone=True), index=True)
+
+    stated_in = Column(String, default="")      # Touch.id — where we said it
+    stated_at = Column(DateTime(timezone=True), default=utcnow)
+    settled_at = Column(DateTime(timezone=True))
+    settled_note = Column(String, default="")
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 
