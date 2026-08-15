@@ -75,6 +75,69 @@ def admin_key(request: Request, key: str = "") -> str:
     return ""
 
 
+def read_key(request: Request, key: str = "") -> str:
+    """Resolve a READ credential. Returns 'admin', 'read', or ''.
+
+    Deliberately a different shape from `admin_key`, which returns the secret
+    itself so that every `if key != config.APPROVAL_SECRET` downstream keeps
+    working. That is exactly why a read-only key cannot be threaded through the
+    same dependency: it would have to return the admin secret to satisfy those
+    checks, and would then unlock the GET routes that mutate.
+
+    So the split is structural rather than a matter of discipline. Read routes
+    depend on this and accept either principal; every write route keeps
+    `admin_key` and there is no value this can return that satisfies one.
+
+    An unset `READ_KEY` means read-only access is off — `_matches` refuses an
+    empty expected value, so this fails closed.
+    """
+    if admin_key(request, key):
+        return "admin"
+    expected = config.READ_KEY or ""
+    if (_matches(key, expected)
+            or _matches(request.headers.get("x-read-key", ""), expected)):
+        return "read"
+    return ""
+
+
+@app.get("/resolve")
+def resolve_context(request: Request, auth: str = Depends(read_key),
+                    tenant: str = "", system: str = "", utterance: str = "",
+                    contact_id: str = "", entity_key: str = "",
+                    audience_key: str = "", requirements: str = "",
+                    tier: int = 3, limit: int = 3) -> dict:
+    """Hand a caller its context in one call. Reads only.
+
+    `requirements` is a JSON object of what the buyer actually asked for —
+    `{"seated_capacity": 220}`. Malformed JSON is reported rather than
+    silently ignored, because a dropped requirement turns a checked match into
+    a keyword one and the caller would never know.
+
+    Read `blocked_on` first. A non-empty list means this account cannot safely
+    produce output for this request, and each entry names the field to fill.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    reqs, bad = {}, ""
+    if requirements:
+        try:
+            reqs = json.loads(requirements)
+            if not isinstance(reqs, dict):
+                reqs, bad = {}, "requirements must be a JSON object"
+        except Exception as exc:  # noqa: BLE001
+            reqs, bad = {}, f"requirements is not valid JSON: {exc}"
+    if bad:
+        return {"error": bad}
+
+    from . import resolve as rs
+    out = rs.resolve(tenant, system=system, utterance=utterance,
+                     contact_id=contact_id, entity_key=entity_key,
+                     audience_key=audience_key, requirements=reqs,
+                     tier=tier, limit=limit)
+    out["principal"] = auth
+    return out
+
+
 @app.exception_handler(Exception)
 async def _console_error(request: Request, exc: Exception):
     """Show the operator what broke, instead of a bare Internal Server Error.

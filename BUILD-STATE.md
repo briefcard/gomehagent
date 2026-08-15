@@ -1,4 +1,4 @@
-# Build state — 2026-08-14, after step 02
+# Build state — 2026-08-14, after step 03
 
 The rolling state of the data-layer build. **This file is rewritten by every
 thread.** It is always current and never historical — do not add dated sections
@@ -10,194 +10,166 @@ build up to 2026-08-13. It is no longer updated and parts of it are already
 stale — it describes the execution half as tenant-blind, which is no longer
 true. Read it for background, not for state.
 
-Plan of record: the Data Layer Build Map (11 steps). Steps 01 and 02 are done.
+Plan of record: the Data Layer Build Map (11 steps). **Steps 01–03 are done.**
 
 ---
 
 ## Where we are
 
-The layer now has both halves. The knowledge half already answered *what is
-true about this brand*; `app/conversation.py` answers *what is true about this
-conversation*, and the two meet at `Conversation.situations` — the field the
-resolver will hand to `kb.objections()` in step 03.
+The layer has both halves and a single door into them.
 
-**Step 01** — the situation classifier stopped asserting tags on weak evidence.
-`kb.suggest_tags` returns `confident`, `score` and `candidates`; a guess that
-clears neither of two floors comes back with no tag and a legible reason.
+**Step 01** — the classifier stopped asserting tags on weak evidence.
+`kb.suggest_tags` returns `confident`, `score` and `candidates`; below either
+of two floors it returns no tag and a legible reason.
 
-**Step 02** — three new models and a read/write layer over them:
+**Step 02** — `Conversation`, `Touch`, `Commitment` on top of `Contact`. Two
+email chains with one person fold onto one row; an outbound touch without an
+idempotency key is refused; a commitment is a row a validator can check.
 
-- `Conversation` — the state machine and the retrieval key. Two email chains
-  with the same person for the same system fold onto **one row** via
-  `open_or_get`, with every provider thread id kept in `external_refs`. That is
-  the overlapping-threads problem closed. Reuse is a lookup on
-  `status == "open"`, not a unique constraint, so a lead who goes quiet and
-  returns next quarter correctly starts a second conversation.
-- `Touch` — bounded history plus the idempotency guard. An **outbound touch
-  without an idempotency key is refused**; inbound defaults its key to the
-  provider's own message id. A repeat writes nothing and returns the original.
-- `Commitment` — what we told them, as a row a validator can check. This is
-  what makes "effective without misleading" enforceable rather than a line in
-  a prompt.
+**Step 03** — `app/resolve.py`. One call returns a tiered bundle plus a
+coverage receipt, and `GET /resolve` serves it behind a read-only credential.
 
-`state_for()` is the read step 03 will call. It reports absence explicitly
-(`exists: False` plus a reason) rather than returning a blank that reads
-downstream as "nothing happened".
+The three pieces now compose: a conversation carries `situations`, the
+classifier decides whether an utterance can be placed against them, and the KB
+serves the objections and support claims for what was placed. Where any link
+fails, the bundle blocks and names the field rather than answering anyway.
+
+**What `resolve()` refuses to do, which is the point:**
+
+- An **unplaceable utterance retrieves nothing.** Ranking objections against a
+  tag nobody stands behind returns a plausible answer aimed at the wrong
+  problem, and nothing downstream could tell it from a good one. The skip is
+  recorded with its reason and the near-miss candidates ride along.
+- An account with **no ban list is blocked, not warned** — nothing can validate
+  output against rules that do not exist.
+- `coverage.complete` is **never optimistic**. A bundle that skipped retrieval
+  is not complete, whatever it managed to return.
 
 ## Verified vs assumed
 
-**Ran and confirmed — 23 offline suites, all exit 0, none touching the
+**Ran and confirmed — 24 offline suites, all exit 0, none touching the
 network:**
 
 ```
-python3 scripts/test_classify.py          25 checks   3s
-python3 scripts/test_conversation.py      40 checks   2s
-python3 scripts/test_tenant_isolation.py  passed      3s   ← unmodified
-python3 scripts/test_migration.py         passed      1s
+python3 scripts/test_resolve.py           30 checks   ← new
+python3 scripts/test_classify.py          25 checks
+python3 scripts/test_conversation.py      40 checks
+python3 scripts/test_tenant_isolation.py  passed      ← still unmodified
 ```
 
-plus `test_kb`, `test_harvest`, `test_provenance`, `test_claim_tagging`,
-`test_selection`, `test_systems`, `test_intake`, `test_kb_ui`,
-`test_tenant_scope`, `test_console_auth`, `test_credentials`,
-`test_worker_systems`, `test_catalog_sync`, `test_compliance`, `test_extract`,
-`test_email_harvest`, `test_sources`, `test_oauth`, `test_brief --demo`.
+plus `test_kb`, `test_kb_ui`, `test_harvest`, `test_provenance`,
+`test_claim_tagging`, `test_console_auth`, `test_credentials`,
+`test_selection`, `test_systems`, `test_intake`, `test_tenant_scope`,
+`test_migration`, `test_worker_systems`, `test_catalog_sync`,
+`test_compliance`, `test_extract`, `test_email_harvest`, `test_oauth`,
+`test_sources`, `test_brief --demo`.
 
-**`test_tenant_isolation.py` passes unmodified** — verified with
-`git diff --stat` showing no change to that file. Three new models entered the
-schema and none needed an entry in `PLATFORM_MODELS`. That test is also what
-forced `Touch.idempotency_key` to be a composite `UniqueConstraint` with
-`tenant` rather than a globally unique column: a global unique on a per-client
-table means two clients cannot both use the same key, and
-`test_conversation.py` now asserts that they can.
+**Timing:** the full suite is ~2m10s wall clock, so running all of it in one
+shell call hits a 2-minute default timeout. Split it. `test_sources` is 52s,
+`test_harvest` 16s, `test_selection` 15s; the rest are 1–4s.
 
-**Timing note for the next thread:** the full suite takes ~2m10s wall clock, so
-running all of it in one shell call hits a 2-minute default timeout. Split it,
-or raise the timeout. `test_sources` is 52s, `test_harvest` 16s,
-`test_selection` 15s; everything else is 1–4s.
+**Live:** steps 01–02 and the calibration route are deployed (`a788f30`).
+`/health` returns `ok:true`; `/admin/calibrate_classify` returns 200. Step 03
+is committed but **not pushed**.
 
 **Built but unproven:**
 
-- **The classifier floors are reasoned, not tuned** — but there is now an
-  instrument for it. `MIN_SHARED_WORDS = 2` and `MIN_LEARNED_SCORE = 0.5` come
-  from the scoring arithmetic and two constructed cases, not from production
-  rows. `kb.calibration()` runs leave-one-out over every approved, human-tagged
-  claim and reports what the live floors do, the score distribution of correct
-  versus mistagged placements, and a sweep to choose from:
+- **`/resolve` has never run against the live database.** Every check above is
+  the offline harness on SQLite.
+- **The classifier floors are still reasoned, not tuned.** The instrument
+  exists and is deployed:
 
   ```bash
   curl -b ~/.gomeh-console -s \
     "https://assistant-web-zm2d.onrender.com/admin/calibrate_classify" | jq
   ```
 
-  Read-only. `scripts/calibrate_classify.py` prints the same function for a
-  terminal, so the console and the script cannot drift. **Expect
-  `enough_to_calibrate: false`** — Baci has 3 claims and agency 12 against a
-  `CALIBRATION_MIN_N` of 25. That is a finding about the knowledge base, not
-  about the floors: leave them alone and re-run after the next harvest.
-- **No live call has been made against either step.** Everything above is the
-  offline harness.
-- **No conversation has been created by a real system**, because nothing calls
-  `conversation.py` yet. Step 03 is its first consumer.
-
-**Deliberately not done — no backfill, and that is a decision:**
-
-Step 02's exit contract asked for a migration backfill. Three *new* tables need
-none: `create_all` builds them and `_auto_migrate` only ever adds columns to
-tables that already exist. The backfill that could have been written —
-deriving historical `Conversation` rows from `EmailLog` — was not, on the same
-grounds as `tenant_scope.UNDERIVABLE`: a wrongly attributed row is worse than
-an absent one, because nothing downstream will ever question it. History stays
-blank; conversations start when a system starts one.
+  Read-only. **It has not been run yet.** Expect `enough_to_calibrate: false` —
+  Baci has 3 tagged claims and agency 12 against a `CALIBRATION_MIN_N` of 25.
+  On a seeded smoke test the correct placements clustered at 1.51–1.77 and a
+  single mistag sat at 0.67, which hints 0.5 may be too permissive — but that
+  was n=5 synthetic and proves nothing.
 
 ## Commit
 
-`feat/context-architecture`, two commits on top of `5566ebb` (`193196a`, then
-step 02). Base was clean and level with `origin/main`.
+`feat/context-architecture`. `origin/main` is at `a788f30` (steps 01–02 plus
+calibration, deployed). Step 03 is one commit on top, **not pushed**.
 
-**Not pushed.** Pushing `main` auto-deploys to Render, and that is the owner's
-call. Neither step changes a route or an existing behaviour — step 02 is
-additive schema plus a module with no callers — so it is safe to deploy and
-gains nothing until step 03 lands. Reasonable to batch all three.
+Pushing needs one thing first, or the new credential is dead on arrival — see
+the owner track: **`READ_KEY` must exist in the `assistant-env` group.** Unset
+means read-only access is disabled (it fails closed, not open), so `/resolve`
+will only answer the admin secret until it is set.
 
 ## Next thread starts here
 
-**Step:** 03 — the resolver, the coverage receipt, and a read-only key
-**Size:** large, budget a full thread
+**Step:** 04 — the ledger
+**Size:** medium
 
 **Read, and only these:**
 
-- `app/tenants.py::agent_block` — the compact identity + rules block, already
-  written and already the right shape for tier 1
-- `app/kb.py` — `objections`, `support_for`, `match_entities`, `completeness`,
-  `suggest_tags` (note its new `confident` / `score` / `candidates` keys)
-- `app/conversation.py::state_for` — the state half of the bundle
-- `app/systems_map.py::block` — how an every-turn injection is kept small
-- `app/web.py` — the auth section only, for where the read-only key goes
+- `app/systems.py` — `SystemRun`, `start_run`, `finish_run`, `blocked_reasons`
+- `app/db.py` — `_Provenance`, and `Touch` for how `run_id` is carried
+- `app/resolve.py` — the bundle whose fields become the brief record
 
-Do **not** search the repo broadly. Those five are sufficient.
+Do **not** search the repo broadly.
 
-**Touches:** new `app/resolve.py`, `app/web.py`, `app/config.py`, new
-`scripts/test_resolve.py`
+**Touches:** `app/db.py`, new `app/ledger.py`, new `scripts/test_ledger.py`
 
-**Done when:**
+**Done when** three queries work against seeded rows:
 
-- `resolve(tenant, system, contact?, utterance?, entity?)` returns a tiered
-  bundle: tier 1 rules always, tier 2 situated objections plus their support
-  claims, tier 3 entity match and conversation state.
-- The **coverage receipt** states what was searched and what could not be
-  grounded. An account missing a required field returns `blocked_on` naming
-  the field rather than a thin bundle that looks complete.
-- An unconfident classification does **not** silently retrieve tier 2. It says
-  it could not place the utterance and returns the candidates.
-- The read-only key reaches the read routes and nothing else. Today's
-  `APPROVAL_SECRET` also fires GET routes that mutate (`/admin/seed_kb`,
-  `/admin/kb_add`, `/admin/tenant_scope`, `/admin/harvest`), so handing it to
-  a consumer hands over write access.
+1. "Has this claim been used for this entity in the last N outputs?" — the
+   anti-repeat check.
+2. "Which claims have never been selected?" — the hygiene signal. A claim
+   unused across 200 outputs is wrong or redundant, and nothing can currently
+   tell you which claims those are.
+3. "What varied between these two outputs?" — the attribution query the
+   e-commerce hypothesis loop needs.
 
-**Verify:**
+One table serves all three. Record the brief that produced each output —
+`claim_ids, audience_key, situation, entity_key, media_ids, theme, angle,
+format` — plus destination, published_at and outcome.
 
-```bash
-python3 scripts/test_resolve.py
-python3 scripts/test_classify.py && python3 scripts/test_conversation.py
-```
-
-Then a live call per tenant with the read-only key, and one with that key
-against a write route proving refusal.
+**Verify:** `python3 scripts/test_ledger.py`
 
 **Watch for:**
 
-- **Baci and Ironside will return `blocked_on` for most requests, and that is
-  correct.** Objections are zero on all five accounts. Do not weaken the
-  bundle to make a demo look better — a thin bundle that reads as complete is
-  the failure this receipt exists to prevent.
 - `Approval.system_id` and `run_id` are still written by nothing. `Touch` now
-  carries `run_id`, so step 03 or the first generator is the moment to wire
-  both together.
+  carries `run_id`; the ledger is the third place that needs the same link, so
+  wire all three together here rather than a fourth time later.
+- The ledger is also what makes step 07's validator able to check "topic not
+  already covered", which is listed in the handoff as a validator requirement
+  and has never had anything behind it.
 - `ops_jobs.py` remains the one file in the execution half with zero tenant
   references.
 
 ## Defects filed
 
-- **DEFECTS §2.24** — *One shared word asserted a situation tag* (fixed in
-  step 01). Fourth instance of §1 *unknown collapsed into a value*, and the
-  first entry in that log caught by reading rather than by a failing run.
-- Noted inside §2.24, **not fixed**: `email_harvest.py:314` and the equivalent
-  in `harvest.py` ignore `add_claim`'s returned status string, so a dedupe
-  refusal or unknown-tag rejection disappears without a count. §1 *silent
-  loss*, in live code.
-- **Step 02 found no new defect.** Nothing is filed for it, rather than
+- **DEFECTS §2.24** — *One shared word asserted a situation tag* (fixed,
+  step 01). Fourth instance of §1 *unknown collapsed into a value*.
+- Noted in §2.24, **not fixed**: `email_harvest.py:314` and the equivalent in
+  `harvest.py` ignore `add_claim`'s returned status, so a dedupe refusal
+  disappears without a count. §1 *silent loss*, in live code.
+- Steps 02 and 03 found no new defect. Nothing is filed for them rather than
   something being manufactured to fill the section.
 
-## Owner track — runs alongside, blocks content not code
+## Owner track — runs alongside
 
-1. `CREDENTIAL_KEY` in the `assistant-env` group. Setting it later orphans
-   every credential stored before it.
-2. `ANTHROPIC_API_KEY` in the same group, or harvest silently runs a path
-   measured at 0% recall. Check the `extractor` field, not the proposal count.
-3. `GOOGLE_CLIENT_ID` / `_SECRET`, `META_APP_ID` / `_SECRET`, plus both
-   redirect URIs registered byte for byte. Then prove the Google flow on Baci —
-   it has never run against a real provider.
-4. Author objections on at least one account. They are zero on all five, and
-   sent-mail harvest (which needs #3) is the only derivable source. Ironside
-   has no mailbox at all — that one is an authoring job. **This is now the
-   binding constraint on step 03 showing anything useful.**
+1. **`READ_KEY` in the `assistant-env` group** — new, and it gates step 03.
+   Any long random string. Until it is set, `/resolve` answers only the admin
+   secret and the whole point of the split is unrealised. Set it on the
+   **group**, not one service.
+2. `CREDENTIAL_KEY` in the same group. Setting it later orphans every
+   credential stored before it.
+3. `ANTHROPIC_API_KEY`, or harvest silently runs a path measured at 0% recall.
+   Check the `extractor` field, not the proposal count.
+4. `GOOGLE_CLIENT_ID` / `_SECRET`, `META_APP_ID` / `_SECRET`, plus both
+   redirect URIs registered byte for byte, then prove the Google flow on Baci.
+   **Note:** a local `.env` in the *other* clone
+   (`~/Documents/gomehagent/.env`) already defines `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET` — worth checking whether those are the values the
+   env group needs before minting new ones.
+5. **Author objections on at least one account.** They are zero on all five.
+   This is now the binding constraint on everything: `/resolve` will correctly
+   block on "nothing on file to answer with" for every real request until it
+   changes, and the classifier cannot be calibrated without tagged claims
+   either.

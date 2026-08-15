@@ -43,6 +43,16 @@ APPROVER_EMAIL = os.environ.get("APPROVER_EMAIL", "gomehsaias@gmail.com")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 APPROVAL_SECRET = os.environ.get("APPROVAL_SECRET", "dev-secret-change-me")
 
+# A credential that reads and cannot write. APPROVAL_SECRET is not one: several
+# console routes still mutate on a GET (/admin/seed_kb, /admin/kb_add,
+# /admin/harvest, /admin/tenant_scope), so handing it to a consumer that only
+# needs context hands over write access to the knowledge base.
+#
+# NO DEFAULT, deliberately. Unset means read-only access is disabled rather
+# than protected by a guessable string — `_matches` refuses an empty expected
+# value, so this fails closed rather than open.
+READ_KEY = os.environ.get("READ_KEY", "")
+
 # Which inbox sends agent notifications/digests (alias key in GMAIL_ACCOUNTS)
 NOTIFY_FROM_ALIAS = os.environ.get("NOTIFY_FROM_ALIAS", "personal")
 
