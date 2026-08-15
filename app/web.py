@@ -1383,6 +1383,35 @@ def _back_to_systems(key: str, msg: str = ""):
     return RedirectResponse(url, status_code=303)
 
 
+@app.get("/admin/calibrate_classify")
+def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Are the classifier's floors right for this account's real claims?
+
+    Leave-one-out over every approved, human-tagged claim. Reads only — no row
+    is written and no floor is changed; moving one is an edit to
+    `kb.MIN_SHARED_WORDS` / `kb.MIN_LEARNED_SCORE` after reading `sweep`.
+
+    Omit `tenant` for every account at once. Read `n` before any percentage:
+    under `min_n` the numbers are real but the conclusion is not.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm, tenants as tn
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    out, total = {}, 0
+    for k in keys:
+        try:
+            res = kbm.calibration(k)
+        except Exception as exc:  # noqa: BLE001 — one bad account must not
+            out[k] = {"error": f"{exc.__class__.__name__}: {exc}"}
+            continue
+        total += res["n"]
+        out[k] = res
+    return {"accounts": out, "total_tagged_claims": total,
+            "enough_to_calibrate": total >= kbm.CALIBRATION_MIN_N,
+            "read_only": True}
+
+
 @app.get("/admin/systems")
 def list_systems(key: str = Depends(admin_key)) -> dict:
     """The board as JSON — same data the tab renders, for the bot and for MCP."""

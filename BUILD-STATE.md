@@ -77,11 +77,23 @@ or raise the timeout. `test_sources` is 52s, `test_harvest` 16s,
 
 **Built but unproven:**
 
-- **The classifier floors are reasoned, not tuned.** `MIN_SHARED_WORDS = 2` and
-  `MIN_LEARNED_SCORE = 0.5` come from the scoring arithmetic and two
-  constructed cases that isolate each floor, not from production rows — no
-  database access in either session. Re-check against real Baci and agency
-  claims before live traffic routes through the classifier.
+- **The classifier floors are reasoned, not tuned** — but there is now an
+  instrument for it. `MIN_SHARED_WORDS = 2` and `MIN_LEARNED_SCORE = 0.5` come
+  from the scoring arithmetic and two constructed cases, not from production
+  rows. `kb.calibration()` runs leave-one-out over every approved, human-tagged
+  claim and reports what the live floors do, the score distribution of correct
+  versus mistagged placements, and a sweep to choose from:
+
+  ```bash
+  curl -b ~/.gomeh-console -s \
+    "https://assistant-web-zm2d.onrender.com/admin/calibrate_classify" | jq
+  ```
+
+  Read-only. `scripts/calibrate_classify.py` prints the same function for a
+  terminal, so the console and the script cannot drift. **Expect
+  `enough_to_calibrate: false`** — Baci has 3 claims and agency 12 against a
+  `CALIBRATION_MIN_N` of 25. That is a finding about the knowledge base, not
+  about the floors: leave them alone and re-run after the next harvest.
 - **No live call has been made against either step.** Everything above is the
   offline harness.
 - **No conversation has been created by a real system**, because nothing calls

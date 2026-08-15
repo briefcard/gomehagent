@@ -320,8 +320,14 @@ MIN_LEARNED_SCORE = 0.5
 
 
 def suggest_tags(tenant: str, text: str, limit: int = 2,
-                 entity_key: str = "") -> dict:
+                 entity_key: str = "", exclude_claim_id: str = "") -> dict:
     """Best-guess situation tags for a candidate claim, and why.
+
+    ``exclude_claim_id`` scores against every row on file *except* that one.
+    A claim already in the vocabulary matches itself perfectly and tells you
+    nothing, so anything re-tagging an existing row — or measuring whether the
+    floors below are set right, which is leave-one-out over real claims — has
+    to leave it out.
 
     Two sources, in order of authority:
 
@@ -374,6 +380,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
     inv = claim_inventory(tenant)
     rejected_like = ""
     for row in inv["retired"]:
+        if exclude_claim_id and row.id == exclude_claim_id:
+            continue
         # Rejecting "dishwasher safe" for the pouf must not teach the tagger
         # that the same sentence is bad for the porcelain. A rejection only
         # carries across rows that share a scope.
@@ -405,6 +413,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
     # 2. learned from what has already been approved here
     per_tag: dict[str, set[str]] = {}
     for row in inv["selectable"]:
+        if exclude_claim_id and row.id == exclude_claim_id:
+            continue
         for tag in (row.situations or []):
             if tag in valid:
                 per_tag.setdefault(tag, set()).update(
@@ -455,6 +465,109 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
             "score": round(top_score, 3),
             "candidates": candidates,
             "similar_to_rejected": rejected_like}
+
+
+#: Below this many human-tagged claims, a percentage over them is theatre.
+#: The same rule the platform already applies to revenue on small lists:
+#: report the number, refuse the conclusion.
+CALIBRATION_MIN_N = 25
+
+#: (min_shared, min_score) pairs to compare when choosing floors. The live
+#: setting is inserted at read time so it is ranked among the alternatives
+#: rather than assumed to be the right one.
+CALIBRATION_SWEEP = [(1, 0.0), (1, 0.5), (2, 0.0), (2, 0.4), (2, 0.6),
+                     (2, 0.8), (3, 0.5), (3, 0.8)]
+
+
+def calibration(tenant: str) -> dict:
+    """Are `MIN_SHARED_WORDS` and `MIN_LEARNED_SCORE` right for this account?
+
+    Leave-one-out over every approved claim a human tagged: hide the claim from
+    the vocabulary, re-score it, and see whether it recovers the tag the human
+    chose and at what score. A claim left in its own vocabulary matches itself
+    perfectly and proves nothing, which is what `exclude_claim_id` is for.
+
+    The two failure modes point opposite ways and only real claims can say
+    which one is live. A floor set too low places a tag nobody stands behind,
+    and a service desk answers with the wrong objection, confidently. A floor
+    set too high refuses claims it used to place, and every harvest lands
+    untagged.
+
+    Pattern hits are counted separately and excluded from the sweep: a pattern
+    match is a decision that never passes through the floors, so folding it in
+    would credit them for placements they had no part in.
+
+    Reads only. `n` is the number that decides whether any percentage here is
+    worth believing — see `CALIBRATION_MIN_N`.
+    """
+    rows = [r for r in claim_inventory(tenant)["selectable"] if r.situations]
+    pattern, learned = [], []
+
+    for row in rows:
+        human = sorted({t for t in (row.situations or []) if t})
+        text = f"{row.claim} {row.evidence or ''}".strip()
+        g = suggest_tags(tenant, text, entity_key=(row.entity_key or ""),
+                         exclude_claim_id=row.id)
+        rec = {"claim": row.claim[:80], "human": human, "tags": g["tags"],
+               "basis": g["basis"], "top": (g["candidates"] or [None])[0]}
+        if g["basis"] == "pattern":
+            rec["hit"] = bool(set(g["tags"]) & set(human))
+            pattern.append(rec)
+        else:
+            learned.append(rec)
+
+    def _outcome(rec, min_shared, min_score):
+        top = rec["top"]
+        if not top:
+            return "no_overlap"
+        if top["shared"] < min_shared or top["score"] < min_score:
+            return "refused"
+        return "correct" if top["tag"] in rec["human"] else "wrong"
+
+    grid = list(CALIBRATION_SWEEP)
+    live = (MIN_SHARED_WORDS, MIN_LEARNED_SCORE)
+    if live not in grid:
+        grid.append(live)
+    sweep = []
+    for ms, sc in sorted(grid):
+        tally = {"correct": 0, "wrong": 0, "refused": 0, "no_overlap": 0}
+        for rec in learned:
+            tally[_outcome(rec, ms, sc)] += 1
+        sweep.append({"min_shared": ms, "min_score": sc, "live": (ms, sc) == live,
+                      **tally})
+
+    right = sorted(r["top"]["score"] for r in learned
+                   if r["top"] and r["top"]["tag"] in r["human"])
+    wrong = sorted(r["top"]["score"] for r in learned
+                   if r["top"] and r["top"]["tag"] not in r["human"])
+
+    def _dist(vals):
+        if not vals:
+            return None
+        return {"n": len(vals), "min": vals[0], "max": vals[-1],
+                "p10": vals[max(0, int(len(vals) * 0.10) - 1)],
+                "median": vals[len(vals) // 2],
+                "p90": vals[min(len(vals) - 1, int(len(vals) * 0.90))]}
+
+    separable = bool(right and wrong and min(right) > max(wrong))
+    return {
+        "tenant": tenant,
+        "n": len(rows),
+        "enough_to_calibrate": len(rows) >= CALIBRATION_MIN_N,
+        "min_n": CALIBRATION_MIN_N,
+        "live_floors": {"min_shared": MIN_SHARED_WORDS,
+                        "min_score": MIN_LEARNED_SCORE},
+        "pattern": {"n": len(pattern),
+                    "agreed": sum(1 for r in pattern if r["hit"]),
+                    "misses": [r for r in pattern if not r["hit"]]},
+        "learned_n": len(learned),
+        "scores": {"correct_tag_on_top": _dist(right),
+                   "wrong_tag_on_top": _dist(wrong)},
+        "separable": separable,
+        "separable_window": ([max(wrong), min(right)] if separable else None),
+        "sweep": sweep,
+        "rows": learned,
+    }
 
 
 def situation_desc(tenant: str) -> dict[str, str]:
