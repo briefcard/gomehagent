@@ -308,6 +308,17 @@ def _tok(text: str) -> set[str]:
     return {w for w in _re.findall(r"[a-z][a-z'-]{3,}", (text or "").lower())}
 
 
+#: A single shared word is a coincidence, not a signal. Checked BEFORE the
+#: normalised score because the score can be inflated by a short candidate:
+#: one word shared with a four-word fragment already scores 0.5.
+MIN_SHARED_WORDS = 2
+
+#: Shared words over the square root of the candidate's length. Two words
+#: shared with a sixteen-word sentence lands exactly on this floor; anything
+#: below it is too thin to carry a tag nobody is going to re-read.
+MIN_LEARNED_SCORE = 0.5
+
+
 def suggest_tags(tenant: str, text: str, limit: int = 2,
                  entity_key: str = "") -> dict:
     """Best-guess situation tags for a candidate claim, and why.
@@ -315,7 +326,7 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
     Two sources, in order of authority:
 
       1. **Patterns** — the tenant's own `KbSituation` triggers. An exact match
-         is a decision, not a guess.
+         is a decision, not a guess, and `basis` says so.
       2. **The claims already approved for this account.** Every active claim
          carries tags a human chose, so the words in them are a worked example
          of what each tag means here. A candidate is scored against that,
@@ -328,11 +339,37 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
 
     No model call — this is word overlap over the tenant's own rows, so it is
     explainable and it cannot invent a tag that does not exist.
+
+    **A weak overlap now returns no tag.** This function was written to seed a
+    review queue, where a human reads `basis` and catches a bad guess. It is
+    also the only classifier the account has, so anything that routes on
+    situations inherits it — and there, nobody is reading `basis`. The score
+    was computed and thrown away, and the gate was "shared any word at all", so
+    a one-word overlap asserted a tag with exactly the authority of a
+    twelve-word one. That is the same shape as a keyword match asserting
+    ``fits: True`` (DEFECTS 2.5): weak evidence and strong evidence arriving
+    indistinguishable. Absence is a third state, so it survives to the caller:
+
+    * ``confident`` — whether ``tags`` may be acted on without a human.
+    * ``score`` — the top candidate's normalised overlap. ``None`` for a
+      pattern hit, because a decision does not have a confidence; a number
+      there would be the metadata-as-content mistake in a new place.
+    * ``candidates`` — every tag considered with its score and shared-word
+      count, **including the ones that fell below the floor**. A reviewer
+      should still see "we wondered about pricing and weren't sure" rather
+      than a blank, and a runtime caller should be able to log the near-miss.
+
+    ``tags`` stays empty unless the guess clears both floors. Callers that
+    file proposals get an untagged proposal, which is a supported state that
+    routes to a human (``add_claim`` allows it for proposals, and refuses it
+    at approval). Callers that route live traffic should check ``confident``
+    and refuse rather than answer against a tag nobody stands behind.
     """
     valid = situations(tenant)
     words = _tok(text)
     if not words:
-        return {"tags": [], "basis": "", "similar_to_rejected": ""}
+        return {"tags": [], "basis": "", "confident": False, "score": None,
+                "candidates": [], "similar_to_rejected": ""}
 
     inv = claim_inventory(tenant)
     rejected_like = ""
@@ -359,7 +396,10 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
         # The warning rides along even here. A pattern match tells you which
         # tag applies; it says nothing about whether this exact sentence has
         # already been turned down.
-        return {"tags": hits[:limit], "basis": "pattern",
+        return {"tags": hits[:limit], "basis": "pattern", "confident": True,
+                "score": None,
+                "candidates": [{"tag": t, "score": None, "shared": None}
+                               for t in hits[:limit]],
                 "similar_to_rejected": rejected_like}
 
     # 2. learned from what has already been approved here
@@ -378,11 +418,42 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
             scored.append((len(shared) / (len(words) ** 0.5), tag, shared))
     scored.sort(reverse=True)
 
+    # Everything considered, floor or no floor. A near-miss is information —
+    # it is what tells a reviewer the vocabulary is missing a tag rather than
+    # that the sentence was unreadable.
+    candidates = [{"tag": tag, "score": round(score, 3), "shared": len(shared)}
+                  for score, tag, shared in scored[:limit]]
+
     if not scored:
-        return {"tags": [], "basis": "", "similar_to_rejected": rejected_like}
-    return {"tags": [t for _, t, _ in scored[:limit]],
-            "basis": "resembles approved claims tagged "
-                     + ", ".join(t for _, t, _ in scored[:limit]),
+        return {"tags": [], "basis": "", "confident": False, "score": None,
+                "candidates": [], "similar_to_rejected": rejected_like}
+
+    top_score, _, top_shared = scored[0]
+    confident = (len(top_shared) >= MIN_SHARED_WORDS
+                 and top_score >= MIN_LEARNED_SCORE)
+
+    if not confident:
+        return {
+            "tags": [],
+            "basis": (f"too thin to place — best was {scored[0][1]} on "
+                      f"{len(top_shared)} shared word"
+                      f"{'' if len(top_shared) == 1 else 's'} "
+                      f"(score {top_score:.2f}, floor {MIN_LEARNED_SCORE})"),
+            "confident": False,
+            "score": round(top_score, 3),
+            "candidates": candidates,
+            "similar_to_rejected": rejected_like,
+        }
+
+    # Only tags that clear the floor themselves ride along. The second tag is
+    # a suggestion in its own right, not a passenger on the first one's score.
+    kept = [t for score, t, shared in scored[:limit]
+            if len(shared) >= MIN_SHARED_WORDS and score >= MIN_LEARNED_SCORE]
+    return {"tags": kept,
+            "basis": "resembles approved claims tagged " + ", ".join(kept),
+            "confident": True,
+            "score": round(top_score, 3),
+            "candidates": candidates,
             "similar_to_rejected": rejected_like}
 
 

@@ -816,6 +816,68 @@ Media layer (blocks the campaign email builder), reports, Canva (OAuth),
 per-tenant prompt/model pinning, publish idempotency (a worker restarting
 mid-publish double-sends — must land before anything sends for real).
 
+### 2.24 One shared word asserted a situation tag — fixed 2026-08-14
+
+Found by reading `suggest_tags` against the job it is about to be given, not by
+a failing run — so it is the first entry here that was caught before it cost
+anything.
+
+The function was written to seed a review queue. Its docstring says so: *"best
+guess situation tags for a **candidate claim**"*. In that setting a bad guess
+is cheap, because a human reads `basis`, sees "resembles approved claims tagged
+gifting", disagrees and retags. It is also the **only classifier an account
+has**, so everything that routes on situations inherits it — and a service desk
+choosing which objections to answer with, or a voice caller picking a script
+branch, has no human reading `basis`.
+
+Two things made those uses incompatible:
+
+- **The score was computed and discarded.** `scored` held
+  `len(shared) / sqrt(len(words))` and the return threw it away, so a caller
+  could not tell a twelve-word overlap from a one-word one.
+- **The gate was `if shared:`** — a single word in common qualified a tag.
+
+That is §1 *unknown collapsed into a value* and it is the fourth instance
+(2.5, 2.6, 2.11). It is closest to 2.5: a keyword match asserting `fits: True`,
+where relevance was reported as satisfaction. Here resemblance was reported as
+placement.
+
+Fixed with **two floors, checked separately**, because either alone is
+defeatable:
+
+- `MIN_SHARED_WORDS = 2` — one word is a coincidence.
+- `MIN_LEARNED_SCORE = 0.5` — normalised, so a couple of words shared with a
+  long sentence does not qualify.
+
+`test_classify.py` carries one case per floor, and they are the interesting
+part: *"The registry of our warehouse locations changed."* shares one word and
+scores **exactly 0.500**, so the score floor alone would have passed it — the
+shared-word floor is what refuses it. *"Wedding registry aside, the logistics
+team…"* shares two words over twenty-two and scores 0.426, clearing the
+shared-word floor and refused by the score. Neither floor is redundant.
+
+The return now carries `confident`, `score` and `candidates`. `candidates`
+holds every tag considered **including those below the floor**, because a
+reviewer should see "we wondered about gifting and weren't sure" rather than a
+blank — absence surviving to the output, the same rule as tri-state `fits`.
+`score` is `None` on a pattern hit: a pattern match is a decision and does not
+have a confidence, and a number there would be metadata dressed as evidence.
+
+Downstream, `tags` now comes back empty more often. That lands where it should:
+`add_claim` accepts an untagged **proposal** and refuses it at approval, and
+`harvest` already routes untagged candidates to `untaggable`. So a weak guess
+becomes a human's decision instead of a silent one.
+
+**Still open, found while fixing it:** `email_harvest.py:314` calls
+`kb.add_claim(...)` and ignores the returned status string. That is §1 *silent
+loss* — a dedupe refusal or an unknown-tag rejection vanishes without a count.
+`harvest.py` has the same shape. Neither was touched here.
+
+**Not done:** the floors are reasoned from the scoring function's own
+arithmetic, not tuned against production rows — this session had no access to
+the live database. Re-check them against real Baci and agency claims before
+anything routes live traffic through this.
+
 ### Needs owner review
 
 **Eien's `banned_claims` are conservative defaults, not established fact.** A
