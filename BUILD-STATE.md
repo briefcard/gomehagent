@@ -100,7 +100,55 @@ the owner track: **`READ_KEY` must exist in the `assistant-env` group.** Unset
 means read-only access is disabled (it fails closed, not open), so `/resolve`
 will only answer the admin secret until it is set.
 
-## Step 03b — semantic recall (added to the plan, blocked on two answers)
+## Step 03b — semantic recall — BUILT, needs one env var to switch on
+
+`app/embed.py` plus `KbEmbedding`, a semantic tier inside `suggest_tags`, an
+approve-time index hook, and `/admin/embed_backfill`. 25 offline suites green.
+
+**The authority order is now three deep:** pattern is a decision, semantic is
+the second authority, word overlap is the floor and the offline path. `path`
+names which one decided; `degraded` carries the reason when semantic could not
+run. That pairing is the `extractor: "deterministic filter"` lesson — a
+fallback that looks like the real path is how something ran at 0% recall for
+weeks.
+
+**Storage is a seam, not a decision.** `embed.Backend` is the interface and
+`JsonRows` is what ships: vectors as JSON in Postgres, cosine in process.
+Brute force over a few thousand 512-dim vectors is single-digit milliseconds
+with numpy and under a second without, and it beats a network round trip to
+anything at this corpus size. **pgvector or a search cluster is a `Backend`
+subclass when a measured number says so** — no extension, no cluster, and no
+second copy of a truth whose approval state lives in Postgres regardless.
+
+`numpy` is now in `requirements.txt` and is genuinely optional — `cosine`
+falls back to pure Python, roughly 100× slower, which is fine at hundreds of
+vectors and not inside a voice turn.
+
+**To switch it on:** set `OPENAI_API_KEY` in the env group (the same variable
+voice notes already need), then
+
+```bash
+curl -b ~/.gomeh-console -s ".../admin/embed_backfill?tenant=baci"            # rehearsal
+curl -b ~/.gomeh-console -s ".../admin/embed_backfill?tenant=baci&report_only=0"
+```
+
+Approving a claim indexes it from then on, so the backfill is for the backlog
+and for re-indexing after a model change — which invalidates every stored
+vector, since cosine between two models is a number with no meaning.
+
+**Adopt on evidence, not on novelty.** `kb.calibration()` now splits results
+three ways and reports `semantic.agreed` beside `pattern.agreed`. Keep the
+semantic path because that number moved, not because it is newer. Two defects
+were already caught this way while building: `search` reported "nothing
+embedded" when the real cause was a missing key (sending someone to run a
+backfill that could not succeed), and `calibration` was about to sweep
+semantic placements against word-overlap floors they never passed through.
+
+**pgvector is no longer a blocker** — it was only ever needed for the storage
+decision, and that decision is deferred behind the seam. Still worth knowing
+for later: `CREATE EXTENSION IF NOT EXISTS vector;`
+
+## Original step 03b prerequisites (now resolved)
 
 pgvector behind the contracts steps 01–03 already fixed. `suggest_tags` keeps
 returning `confident` / `score` / `basis`; this changes what computes them.

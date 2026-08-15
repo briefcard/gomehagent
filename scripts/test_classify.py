@@ -54,7 +54,7 @@ THIN_ON_LONG = (
     "levels, carrier contracts and returns handling this quarter.")
 
 CONTRACT = {"tags", "basis", "confident", "score", "candidates",
-            "similar_to_rejected"}
+            "similar_to_rejected", "path", "degraded"}
 
 
 def ck(label, cond, detail=""):

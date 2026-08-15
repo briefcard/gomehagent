@@ -874,6 +874,46 @@ class ConnectLink(Base):
     last_used_at = Column(DateTime(timezone=True))
 
 
+class KbEmbedding(Base):
+    """One vector for one row, whatever kind of row it is.
+
+    Polymorphic on purpose, for the same reason `KbEntity` absorbs products,
+    venues and slabs: making a new type searchable should be zero schema
+    change. `kind` is 'claim' | 'objection' | 'situation' | 'entity' | 'media',
+    and adding the sixth is a string, not a migration.
+
+    `text_hash` is what stops every harvest re-paying for the whole corpus. The
+    vector is only recomputed when the text behind it actually changed.
+
+    `vector` is JSON rather than a pgvector column, deliberately and for now.
+    Brute-force cosine over a few thousand rows is milliseconds and needs no
+    extension, no cluster and no second source of truth. The storage seam lives
+    in `embed.Backend`, so pgvector or a search cluster becomes a backend swap
+    when a measured number says so — not a bet placed before there was one.
+
+    `model` and `dims` are stored per row because a model change invalidates
+    comparison: cosine between vectors from two different models is a number
+    with no meaning, and the alternative to recording it is computing one.
+    """
+
+    __tablename__ = "kb_embeddings"
+    __table_args__ = (UniqueConstraint("tenant", "kind", "row_id",
+                                       name="uq_embedding_tenant_kind_row"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False, index=True)
+    row_id = Column(String, nullable=False, index=True)
+
+    model = Column(String, default="")
+    dims = Column(Integer, default=0)
+    text_hash = Column(String, default="", index=True)
+    vector = Column(JSON, default=list)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class KbUnknown(Base):
     """A question the catalogue could not answer, and how often it mattered.
 

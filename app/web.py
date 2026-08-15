@@ -1475,6 +1475,52 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/admin/embed_backfill")
+def embed_backfill(key: str = Depends(admin_key), tenant: str = "",
+                   kind: str = "claim", report_only: int = 1) -> dict:
+    """Index this account's rows for semantic recall.
+
+    `report_only=1` (the default) says what WOULD be embedded and what it would
+    cost, without calling the provider. Drop it to actually write.
+
+    Approving a claim already embeds it, so this is for the backlog that
+    existed before the semantic path did — and for re-indexing after a model
+    change, which invalidates every stored vector because cosine between two
+    models is a number with no meaning.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import embed, kb as kbm, tenants as tn
+    if kind not in embed.KINDS:
+        return {"error": f"kind must be one of {', '.join(embed.KINDS)}"}
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+
+    out, planned = {}, 0
+    for k in keys:
+        if kind == "claim":
+            items = [(r.id, f"{r.claim} {r.evidence or ''}".strip())
+                     for r in kbm.claims(k)]
+        elif kind == "objection":
+            items = [(r.id, f"{r.objection} {r.response or ''}".strip())
+                     for r in kbm.objections(k, any_entity=True)]
+        elif kind == "entity":
+            items = [(r.id, f"{r.name} {r.description or ''}".strip())
+                     for r in kbm.entities(k, available_only=False)]
+        else:
+            items = []
+        if report_only:
+            stale = [i for i, t in items
+                     if embed.BACKEND.hash_for(k, kind, i) != embed.text_hash(t)]
+            planned += len(stale)
+            out[k] = {"rows": len(items), "would_embed": len(stale)}
+        else:
+            out[k] = embed.backfill(k, kind, items)
+    ok, why = (True, "") if report_only else embed.available()
+    return {"kind": kind, "accounts": out, "report_only": bool(report_only),
+            "would_embed_total": planned if report_only else None,
+            "provider_available": ok, "provider_note": why}
+
+
 @app.get("/admin/systems")
 def list_systems(key: str = Depends(admin_key)) -> dict:
     """The board as JSON — same data the tab renders, for the bot and for MCP."""

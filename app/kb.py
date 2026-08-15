@@ -10,8 +10,11 @@ never in forked code. A new tenant is new data, not a new module.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from . import db, provenance as prov
+
+log = logging.getLogger("kb")
 
 # Controlled situation vocabulary. Claims are tagged with these and the
 # assembler matches on them, so proof selection is a query rather than a model
@@ -375,7 +378,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
     words = _tok(text)
     if not words:
         return {"tags": [], "basis": "", "confident": False, "score": None,
-                "candidates": [], "similar_to_rejected": ""}
+                "candidates": [], "similar_to_rejected": "",
+                "path": "none", "degraded": ""}
 
     inv = claim_inventory(tenant)
     rejected_like = ""
@@ -408,7 +412,53 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
                 "score": None,
                 "candidates": [{"tag": t, "score": None, "shared": None}
                                for t in hits[:limit]],
-                "similar_to_rejected": rejected_like}
+                "similar_to_rejected": rejected_like,
+                "path": "pattern", "degraded": ""}
+
+    # 2. semantic — nearest approved claims by meaning rather than by words.
+    #
+    # This is the tier word overlap cannot reach: "will it survive the
+    # dishwasher" and "is it dishwasher safe" share almost no informative
+    # words and are the same question. It sits BELOW patterns, which remain a
+    # decision, and ABOVE overlap, which remains the floor and the offline
+    # path.
+    #
+    # When it cannot run — no key, no network, nothing indexed — the cascade
+    # continues to overlap and `degraded` carries the reason. A fallback that
+    # looks like the real path is how the extractor ran at 0% recall for weeks.
+    degraded = ""
+    try:
+        from . import embed
+        hits, why = embed.search(tenant, "claim", text, limit=max(4, limit * 2))
+        degraded = why
+        if hits:
+            by_id = {r.id: r for r in inv["selectable"]}
+            per_tag: dict[str, float] = {}
+            for h in hits:
+                if exclude_claim_id and h["row_id"] == exclude_claim_id:
+                    continue
+                row = by_id.get(h["row_id"])
+                if not row:
+                    continue          # retired or approved-away since indexing
+                for tag in (row.situations or []):
+                    if tag in valid:
+                        per_tag[tag] = max(per_tag.get(tag, 0.0), h["score"])
+            if per_tag:
+                ranked = sorted(per_tag.items(), key=lambda kv: -kv[1])[:limit]
+                return {
+                    "tags": [t for t, _ in ranked],
+                    "basis": ("means the same as approved claims tagged "
+                              + ", ".join(t for t, _ in ranked)),
+                    "confident": True,
+                    "score": round(ranked[0][1], 4),
+                    "candidates": [{"tag": t, "score": round(sc, 4),
+                                    "shared": None} for t, sc in ranked],
+                    "similar_to_rejected": rejected_like,
+                    "path": "semantic", "degraded": "",
+                }
+    except Exception as exc:  # noqa: BLE001 — recall must never break tagging
+        degraded = f"semantic path errored: {exc.__class__.__name__}"
+        log.warning("semantic tagging failed for %s: %s", tenant, exc)
 
     # 2. learned from what has already been approved here
     per_tag: dict[str, set[str]] = {}
@@ -436,7 +486,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
 
     if not scored:
         return {"tags": [], "basis": "", "confident": False, "score": None,
-                "candidates": [], "similar_to_rejected": rejected_like}
+                "candidates": [], "similar_to_rejected": rejected_like,
+                "path": "none", "degraded": degraded}
 
     top_score, _, top_shared = scored[0]
     confident = (len(top_shared) >= MIN_SHARED_WORDS
@@ -453,6 +504,7 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
             "score": round(top_score, 3),
             "candidates": candidates,
             "similar_to_rejected": rejected_like,
+            "path": "overlap", "degraded": degraded,
         }
 
     # Only tags that clear the floor themselves ride along. The second tag is
@@ -464,7 +516,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
             "confident": True,
             "score": round(top_score, 3),
             "candidates": candidates,
-            "similar_to_rejected": rejected_like}
+            "similar_to_rejected": rejected_like,
+            "path": "overlap", "degraded": degraded}
 
 
 #: Below this many human-tagged claims, a percentage over them is theatre.
@@ -501,7 +554,8 @@ def calibration(tenant: str) -> dict:
     worth believing — see `CALIBRATION_MIN_N`.
     """
     rows = [r for r in claim_inventory(tenant)["selectable"] if r.situations]
-    pattern, learned = [], []
+    pattern, semantic, learned = [], [], []
+    degraded = ""
 
     for row in rows:
         human = sorted({t for t in (row.situations or []) if t})
@@ -509,10 +563,19 @@ def calibration(tenant: str) -> dict:
         g = suggest_tags(tenant, text, entity_key=(row.entity_key or ""),
                          exclude_claim_id=row.id)
         rec = {"claim": row.claim[:80], "human": human, "tags": g["tags"],
-               "basis": g["basis"], "top": (g["candidates"] or [None])[0]}
-        if g["basis"] == "pattern":
+               "basis": g["basis"], "path": g["path"],
+               "top": (g["candidates"] or [None])[0]}
+        degraded = degraded or g.get("degraded", "")
+        # Three paths now, and only ONE of them passes through the word-overlap
+        # floors. Sweeping a semantic placement against MIN_LEARNED_SCORE would
+        # credit those floors for a decision they had no part in — the same
+        # mistake as folding pattern hits into the sweep.
+        if g["path"] == "pattern":
             rec["hit"] = bool(set(g["tags"]) & set(human))
             pattern.append(rec)
+        elif g["path"] == "semantic":
+            rec["hit"] = bool(set(g["tags"]) & set(human))
+            semantic.append(rec)
         else:
             learned.append(rec)
 
@@ -560,6 +623,13 @@ def calibration(tenant: str) -> dict:
         "pattern": {"n": len(pattern),
                     "agreed": sum(1 for r in pattern if r["hit"]),
                     "misses": [r for r in pattern if not r["hit"]]},
+        # The comparison the whole exercise exists for: two scorers on the same
+        # claims. Adopt the semantic path because `agreed` moved, not because
+        # it is newer.
+        "semantic": {"n": len(semantic),
+                     "agreed": sum(1 for r in semantic if r["hit"]),
+                     "misses": [r for r in semantic if not r["hit"]],
+                     "degraded": degraded},
         "learned_n": len(learned),
         "scores": {"correct_tag_on_top": _dist(right),
                    "wrong_tag_on_top": _dist(wrong)},
@@ -1368,6 +1438,21 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
             row.review, row.status = prov.REJECTED, "retired"
         s.commit()
         text = row.claim
+        tenant, ev = row.tenant, (row.evidence or "")
+
+    # Index at the moment it becomes selectable. The alternative is an index
+    # that drifts from the truth it indexes — which is the exact failure that
+    # argued against putting retrieval in a separate datastore, and it would be
+    # no better for having been built here. Best effort: a provider outage must
+    # never turn an approval into a failure, and `/admin/embed_backfill` picks
+    # up whatever this missed.
+    if approve:
+        try:
+            from . import embed
+            embed.ensure(tenant, "claim", claim_id, f"{text} {ev}".strip())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("embed on approve failed for %s: %s", claim_id, exc)
+
     return (f"Approved — now selectable, and final.\n{text}" if approve
             else f"Rejected.\n{text}")
 

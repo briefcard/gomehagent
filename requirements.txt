@@ -19,3 +19,8 @@ itsdangerous>=2.2
 openpyxl>=3.1
 pypdf>=4.0
 cryptography>=42.0
+# Optional in code, wanted in production: `embed.cosine` falls back to pure
+# Python when numpy is absent, which is correct and roughly a hundred times
+# slower. That difference does not matter at a few hundred vectors and does
+# matter inside a voice turn's latency budget.
+numpy>=1.26

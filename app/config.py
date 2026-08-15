@@ -53,6 +53,19 @@ APPROVAL_SECRET = os.environ.get("APPROVAL_SECRET", "dev-secret-change-me")
 # value, so this fails closed rather than open.
 READ_KEY = os.environ.get("READ_KEY", "")
 
+# Embeddings. The same key `whatsapp.transcribe` already needs for voice notes,
+# so one variable covers both. Unset means the semantic path is unavailable and
+# the classifier falls back to word overlap — which it will SAY, because a
+# silent fallback that looks like a working one is how the extractor ran at 0%
+# recall for weeks.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# text-embedding-3 supports shortening at request time. 512 is a third of the
+# storage and compute of the full 1536 for a quality difference that does not
+# show up at this corpus size.
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-small")
+EMBED_DIMS = int(os.environ.get("EMBED_DIMS", "512"))
+
 # Which inbox sends agent notifications/digests (alias key in GMAIL_ACCOUNTS)
 NOTIFY_FROM_ALIAS = os.environ.get("NOTIFY_FROM_ALIAS", "personal")
 
