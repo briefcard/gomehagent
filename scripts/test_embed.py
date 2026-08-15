@@ -157,17 +157,34 @@ def main() -> int:
 
         print("\n— one account's vectors are invisible to another —")
         ck("nothing is indexed for eien", embed.BACKEND.rows("eien", "claim") == [])
-        hits, why = embed.search("eien", "claim", PARAPHRASE)
+        hits, why, scan = embed.search("eien", "claim", PARAPHRASE)
         ck("and a search there returns nothing, with a reason",
            hits == [] and "nothing embedded" in why, why)
+        ck("the scan is measured even when it found nothing",
+           scan["scanned"] == 0 and isinstance(scan["ms"], float), str(scan))
 
         print("\n— vectors from another model are skipped, not compared —")
         embed.BACKEND.upsert("eien", "claim", "x", [1.0, 0.0, 0.0, 0.15],
                              "some-other-model", 4, "h")
-        hits, why = embed.search("eien", "claim", DURABLE)
+        hits, why, scan = embed.search("eien", "claim", DURABLE)
         ck("no cross-model score is produced", hits == [],
            "cosine between two models is a number with no meaning")
         ck("and the caller is told why", "another model" in why, why)
+
+        print("\n— the backend decision is measured, not asserted —")
+        st = embed.stats()
+        ck("it reports which backend is answering",
+           st["backend"] == "JsonRows", st["backend"])
+        ck("and how many vectors it would scan",
+           st["total_vectors"] >= 2, str(st["total_vectors"]))
+        ck("with the scan actually timed",
+           isinstance(st["scan_ms_for_total"], float), str(st["scan_ms_for_total"]))
+        ck("against a stated ceiling rather than a feeling",
+           st["brute_force_ceiling"] == embed.BRUTE_FORCE_CEILING
+           and st["swap_backend_yet"] is False,
+           f"headroom {st['headroom']} rows")
+        ck("and it says plainly that a network hop would cost more",
+           "network hop" in st["note"], st["note"][:60])
 
         print("\n— leave-one-out reaches the semantic path too —")
         g = kb.suggest_tags("baci", GIFT, exclude_claim_id=approved[GIFT])

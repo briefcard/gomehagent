@@ -148,6 +148,20 @@ semantic placements against word-overlap floors they never passed through.
 decision, and that decision is deferred behind the seam. Still worth knowing
 for later: `CREATE EXTENSION IF NOT EXISTS vector;`
 
+**And the swap now has a number behind it, not a feeling.** `embed.stats()`
+reports total vectors, the largest account, a timed scan of all of them, and
+the headroom left against `BRUTE_FORCE_CEILING = 20000`:
+
+```bash
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/embed_status" | jq
+```
+
+Read-gated, not admin-gated — it carries no client content, and a monitor that
+must hold the console secret to watch a threshold is the exact problem the read
+key exists to solve. When `swap_backend_yet` turns true, measure a pgvector
+`Backend` against the scan time it prints. Until then the answer is that a
+network hop to any index costs more than the scan does.
+
 ## Original step 03b prerequisites (now resolved)
 
 pgvector behind the contracts steps 01–03 already fixed. `suggest_tags` keeps

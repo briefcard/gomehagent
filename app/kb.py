@@ -429,7 +429,8 @@ def suggest_tags(tenant: str, text: str, limit: int = 2,
     degraded = ""
     try:
         from . import embed
-        hits, why = embed.search(tenant, "claim", text, limit=max(4, limit * 2))
+        hits, why, _scan = embed.search(tenant, "claim", text,
+                                        limit=max(4, limit * 2))
         degraded = why
         if hits:
             by_id = {r.id: r for r in inv["selectable"]}

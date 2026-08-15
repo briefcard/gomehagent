@@ -228,14 +228,81 @@ def backfill(tenant: str, kind: str, items: list[tuple[str, str]]) -> dict:
             "skipped": skipped, "failed": failed, "why": reason}
 
 
+#: The row count above which brute force stops being obviously right. Below it,
+#: scanning every vector beats a network round trip to any index; above it, a
+#: `Backend` swap to pgvector or a cluster is worth measuring. Deliberately a
+#: number rather than a feeling — "swap when it gets big" is how a decision
+#: gets deferred for ever.
+BRUTE_FORCE_CEILING = 20000
+
+
+def stats(tenant: str = "") -> dict:
+    """How much is indexed, how long a scan takes, and whether that is still fine.
+
+    The argument for keeping vectors in Postgres and scanning them in process
+    is a claim about size, and a claim about size needs a measurement or it is
+    just a preference. This is the measurement.
+    """
+    import time
+    with db.SessionLocal() as s:
+        q = s.query(db.KbEmbedding)
+        if tenant:
+            q = q.filter(db.tenant_filter(db.KbEmbedding, tenant))
+        rows = q.all()
+        s.expunge_all()
+
+    by = {}
+    for r in rows:
+        d = by.setdefault(r.tenant, {})
+        d[r.kind] = d.get(r.kind, 0) + 1
+
+    # Time the part that would actually get slower: the scan, not the provider.
+    probe_ms, widest = None, max((len(rs) for rs in
+                                  ([r for r in rows if r.tenant == t]
+                                   for t in by)), default=0)
+    if rows:
+        vec = list(rows[0].vector or [])
+        t0 = time.perf_counter()
+        for r in rows:
+            cosine(vec, list(r.vector or []))
+        probe_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    return {
+        "backend": BACKEND.__class__.__name__,
+        "numpy": _np is not None,
+        "total_vectors": len(rows),
+        "largest_account": widest,
+        "by_account": by,
+        "scan_ms_for_total": probe_ms,
+        "brute_force_ceiling": BRUTE_FORCE_CEILING,
+        "headroom": BRUTE_FORCE_CEILING - widest,
+        "swap_backend_yet": widest >= BRUTE_FORCE_CEILING,
+        "note": ("still well inside brute force — a network hop to an index "
+                 "would cost more than this scan"
+                 if widest < BRUTE_FORCE_CEILING else
+                 "past the ceiling: measure a pgvector Backend against this"),
+    }
+
+
 def search(tenant: str, kind: str, query: str, limit: int = 5,
-           min_score: float = MIN_SEMANTIC_SCORE) -> tuple[list[dict], str]:
-    """Nearest rows of one kind. Returns (hits, degraded_reason).
+           min_score: float = MIN_SEMANTIC_SCORE
+           ) -> tuple[list[dict], str, dict]:
+    """Nearest rows of one kind. Returns (hits, degraded_reason, stats).
 
     A non-empty second value means the semantic path did NOT run — no key, no
     network, nothing indexed. Callers must report it rather than presenting
     a fallback as though it were this.
+
+    The third carries what was scanned and how long it took, so the decision to
+    keep scanning in process stays evidence-based rather than assumed.
     """
+    import time
+    _t0 = time.perf_counter()
+
+    def _stat(n: int) -> dict:
+        return {"scanned": n,
+                "ms": round((time.perf_counter() - _t0) * 1000, 2),
+                "backend": BACKEND.__class__.__name__}
     # Order matters here, and it cost a test to find out. Checking rows first
     # and returning "nothing embedded" is the PROXIMATE reason and it
     # misdirects the fix: when the index is empty *because* there is no key,
@@ -245,10 +312,10 @@ def search(tenant: str, kind: str, query: str, limit: int = 5,
     # Keeping the question with the provider also keeps this backend-agnostic.
     vecs, note = embed_texts([query])
     if not vecs:
-        return [], note
+        return [], note, _stat(0)
     rows = BACKEND.rows(tenant, kind)
     if not rows:
-        return [], "nothing embedded for this account yet"
+        return [], "nothing embedded for this account yet", _stat(0)
     q = vecs[0]
     model = config.EMBED_MODEL
     hits = []
@@ -262,6 +329,7 @@ def search(tenant: str, kind: str, query: str, limit: int = 5,
             hits.append({"row_id": r.row_id, "score": round(score, 4),
                          "kind": kind})
     if not hits and all(r.model and r.model != model for r in rows):
-        return [], f"every indexed row is from another model ({rows[0].model})"
+        return ([], f"every indexed row is from another model ({rows[0].model})",
+                _stat(len(rows)))
     hits.sort(key=lambda h: -h["score"])
-    return hits[:limit], ""
+    return hits[:limit], "", _stat(len(rows))

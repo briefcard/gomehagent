@@ -1475,6 +1475,26 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/embed_status")
+def embed_status(request: Request, auth: str = Depends(read_key),
+                 tenant: str = "") -> dict:
+    """Is scanning vectors in process still the right answer?
+
+    The case for keeping vectors in Postgres instead of an index is a claim
+    about size, and a claim about size needs a number. This is that number:
+    how many vectors exist, how long scanning all of them takes, and how much
+    headroom is left before a `Backend` swap is worth measuring.
+
+    Read-gated rather than admin-gated — it carries no client content, and a
+    monitor that has to hold the console secret to watch a threshold is the
+    problem the read key exists to solve.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    from . import embed
+    return embed.stats(tenant)
+
+
 @app.get("/admin/embed_backfill")
 def embed_backfill(key: str = Depends(admin_key), tenant: str = "",
                    kind: str = "claim", report_only: int = 1) -> dict:
