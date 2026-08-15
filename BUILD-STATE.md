@@ -100,9 +100,48 @@ the owner track: **`READ_KEY` must exist in the `assistant-env` group.** Unset
 means read-only access is disabled (it fails closed, not open), so `/resolve`
 will only answer the admin secret until it is set.
 
+## Step 03b — semantic recall (added to the plan, blocked on two answers)
+
+pgvector behind the contracts steps 01–03 already fixed. `suggest_tags` keeps
+returning `confident` / `score` / `basis`; this changes what computes them.
+`resolve()` does not change, the receipt does not change, the refusal does not
+change — which is the whole reason it is safe to adopt now and would not have
+been safe to start with.
+
+**Shape:** one polymorphic `kb_embeddings` table (tenant, kind, row_id, model,
+text_hash, vector), so making a new type embeddable is zero schema change. A
+semantic tier lands **between** pattern and word overlap: pattern stays the
+decision, embeddings become the second authority, overlap stays as the floor.
+`basis` names which path ran, and with no key or no extension it degrades to
+overlap **and says so** — the `extractor: "deterministic filter"` lesson, where
+a silent fallback at 0% recall looked exactly like a working one. Re-embedding
+is gated on `text_hash` or every harvest re-pays for the corpus.
+
+Also picks up semantic dedup at ingest (`near_duplicates` cannot currently see
+that "ships in 2–3 days" and "usually dispatched within three business days"
+are one claim) and retires the hand-rolled similarity in `similar_situation`
+and `situation_neighbours`.
+
+**Adopt only on evidence.** `kb.calibration()` already runs leave-one-out; run
+it against both scorers on the same claims and keep the new one only if the
+numbers move. That is what building the instrument first bought.
+
+**Two answers needed before a thread starts:**
+
+1. **Does Render's Postgres have pgvector?** `CREATE EXTENSION IF NOT EXISTS
+   vector;`. If not, store vectors as JSON and cosine in Python — fine at
+   hundreds of rows, wrong at a hundred thousand.
+2. **Which embeddings provider?** Anthropic does not serve one. `OPENAI_API_KEY`
+   is already on the owner track for voice notes, so one key could cover both;
+   Voyage is the alternative.
+
+**Not on the critical path.** Steps 04–11 all run without it. Step 06 is where
+it stops being an improvement and becomes the mechanism — semantic search over
+thousands of photo descriptions is not a SQL problem.
+
 ## Next thread starts here
 
-**Step:** 04 — the ledger
+**Step:** 04 — the ledger (or 03b, if the two answers above land first)
 **Size:** medium
 
 **Read, and only these:**
