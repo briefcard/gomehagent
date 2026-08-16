@@ -24,12 +24,13 @@ separate, explicit act, so the default is shadow and autonomy stays earned.
 """
 from __future__ import annotations
 
-from . import conversation as cv, ledger, resolve as rs, validator
+from . import conversation as cv, kb, ledger, resolve as rs, validator
 
 
 def answer(tenant: str, utterance: str, *, contact_id: str = "",
            entity_key: str = "", system_key: str = "service_desk",
-           run_id: str = "", within_days: int = 30) -> dict:
+           run_id: str = "", within_days: int = 30,
+           facts: dict | None = None) -> dict:
     """Answer one question from what this account actually knows.
 
     Returns the draft, the evidence behind it, the validator's verdict, and the
@@ -53,17 +54,106 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
                 "note": "recorded as blocked — a gap only gets fixed if it is "
                         "counted"}
 
-    # --- 1. could the layer ground it at all ------------------------------
+    # --- 1. does this need something no knowledge base holds ---------------
+    #
+    # Asked BEFORE the blocked check, because a question needing live data is
+    # not a gap in the knowledge base and must not be filed as one. Filing it
+    # as unanswerable would put "where is my order" on the authoring backlog
+    # for ever, where no amount of writing could ever satisfy it.
+    declared = bundle.get("needs_lookup") or []
+    if declared and not facts:
+        # ANY declared lookup routes here, not only the ones that can run.
+        # A missing parameter and an unconnected Shopify are both reasons the
+        # caller must act on, and neither is something authoring can fix —
+        # which is what filing them as blocked would have implied.
+        return {
+            "ok": False, "stage": "lookup", "situation": situation,
+            "needs": [{"call": n["tool"], "with": n["have"],
+                       "returns": n["returns"], "ready": n["ready"],
+                       "blocked_because": n["blocked_because"]}
+                      for n in declared],
+            "ready_to_call": [n["tool"] for n in declared if n["ready"]],
+            "bundle": bundle,
+            "note": ("this needs live data, not more knowledge. Call what is "
+                     "ready, then ask again with facts={...}. Nothing was "
+                     "filed as a knowledge gap, because there is none — no "
+                     "amount of authoring answers 'where is my order'."),
+        }
+
+    # --- 2. unsafe to send at all -----------------------------------------
+    # The only genuine stop: with no ban list the validator has nothing to
+    # check against, so "clean" would be a false assurance. Everything else
+    # that used to stop here is now context handed over with its grounding
+    # labelled.
     if bundle.get("blocked_on"):
-        return _blocked(bundle["blocked_on"], "resolve")
-    if not bundle.get("objections"):
-        return _blocked(["no approved objection matched this question"],
-                        "resolve")
+        return _blocked(bundle["blocked_on"], "unsafe")
+
+    # --- 3. no pre-approved answer is not a refusal ------------------------
+    #
+    # This was the design error worth naming. Refusing here made a missing row
+    # able to veto an intelligence that had the brand rules, the positioning,
+    # the catalogue and every approved claim in front of it — plenty to write
+    # a good answer from. The layer's job is to supply context and say how
+    # strong it is; what to do with that belongs to the reader.
+    #
+    # The guard against invention stays exactly where it belongs: on the way
+    # out, in `validator`, which is code and fails closed.
+    # Assemble ONLY on a confident match. `resolve` hands unranked objections
+    # to whatever is reading, because a reader can judge relevance — but this
+    # function has no judgement in it, and picking the top of an unranked list
+    # is precisely the plausible-answer-to-the-wrong-question failure. So an
+    # unranked bundle goes to the caller intact, candidates included, rather
+    # than being answered from here.
+    confident = (bundle.get("grounding") or {}).get("level") == "answered"
+    if not confident:
+        ledger.record(tenant, system_key, situation=situation,
+                      entity_key=entity_key, status="draft_from_context",
+                      run_id=run_id, conversation_id=conversation_id,
+                      format="reply", blocked_on=[])
+        return {
+            "ok": True,
+            "mode": "draft_from_context",
+            "draft": "",
+            "grounding": bundle.get("grounding", {}),
+            "context": {
+                "rules": bundle.get("rules", {}),
+                "claims": [
+                    {"claim": c.claim, "evidence": c.evidence or "",
+                     "claim_id": c.id, "situations": sorted(c.situations or [])}
+                    for c in kb.claims(tenant, entity_key=entity_key or None,
+                                       limit=6)],
+                "entities": bundle.get("entities", []),
+                "conversation": bundle.get("conversation", {}),
+                # Candidates, explicitly not an answer. A reader that can weigh
+                # relevance should see them; this function picking one would be
+                # the judgement it does not have.
+                "possible_objections": bundle.get("objections", []),
+            },
+            "gaps": bundle.get("gaps", []),
+            "situation": situation,
+            "validate_with": {
+                "endpoint": "validator.check",
+                "why": "draft freely, then run it through the validator — the "
+                       "ban list, citations, stock and repeats are enforced "
+                       "on the way out, not by withholding context",
+            },
+            "note": ("no pre-approved answer for this, which is not a reason "
+                     "to say nothing. Everything above is real and current. "
+                     "Draft from it, then validate."),
+        }
 
     # --- 2. assemble, from what a human already approved ------------------
     top = bundle["objections"][0]
     claim_ids = [c["claim_id"] for c in top.get("support", []) if c.get("claim_id")]
     body = (top.get("response") or "").strip()
+
+    # Live facts are appended as data, never woven into the approved sentence.
+    # The response is wording a human signed off; editing it to fit a tool
+    # result would be re-authoring it without the approval, and the whole
+    # reason this runs without a model is that nobody is doing that.
+    if facts:
+        body = body + "\n\n" + "\n".join(
+            f"{k}: {v}" for k, v in facts.items() if str(v).strip())
 
     # --- 3. validate: code only, fails closed -----------------------------
     verdict = validator.check(

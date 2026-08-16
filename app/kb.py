@@ -1020,7 +1020,7 @@ def merge_situations(tenant: str, keep: str, drop: str,
 def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None,
                   description: str = "", kind: str = "problem",
                   origin: str = "human", source: str = "",
-                  review: str = "") -> str:
+                  review: str = "", needs: list[dict] | None = None) -> str:
     """Add or update a situation tag.
 
     `review` follows the same rule as every other KB table: a human or a seed
@@ -1054,6 +1054,16 @@ def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None
         row.patterns = [list(p) for p in (patterns or [])]
         row.description = description or row.description
         row.kind = kind
+        if needs is not None:
+            # Validated like a tag is. A situation naming a tool that does not
+            # exist reads as a route and is a dead end — worse than declaring
+            # nothing, because a caller will try to follow it.
+            from . import lookups
+            kept, bad = lookups.validate_declaration(needs)
+            if bad:
+                return (f"Unknown lookup(s): {', '.join(bad)}. Known tools: "
+                        f"{', '.join(sorted(lookups.TOOLS))}")
+            row.needs = kept
         if not existing:
             s.add(row)
         s.commit()

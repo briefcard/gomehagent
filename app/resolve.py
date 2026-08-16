@@ -156,9 +156,32 @@ def _situated(tenant: str, utterance: str, entity_key: str,
                 "confident": g["confident"], "score": g["score"],
                 "candidates": g["candidates"], "why": ""}
     if not g["confident"]:
+        # Label it, do not withhold it. Withholding was the wrong instinct:
+        # ranking objections against a tag nobody stands behind is dangerous
+        # for a machine that takes the top one blindly, and merely *unhelpful*
+        # for a reader that can judge relevance. The consumer here is
+        # intelligent, so the honest move is to hand over what the account has
+        # with the confidence marked, not to decide on its behalf that it gets
+        # nothing.
         detected["why"] = ("could not place this against the account's "
-                           "situation vocabulary")
-        return detected, [], []
+                           "situation vocabulary — the objections below are "
+                           "unranked, judge relevance yourself")
+        rows = kb.objections(tenant, audience_key=audience_key,
+                             entity_key=entity_key or None)[:limit]
+        out, support = [], []
+        for o in rows:
+            backing = kb.support_for(tenant, o)
+            support.extend(backing)
+            out.append({
+                "objection_id": o.id, "objection": o.objection,
+                "response": o.response,
+                "situations": list(o.situations or []),
+                "entity_key": o.entity_key or "",
+                "relevance": "unranked — the question could not be placed",
+                "support": [{"claim": c.claim, "evidence": c.evidence or "",
+                             "claim_id": c.id} for c in backing],
+            })
+        return detected, out, support
 
     rows = kb.objections(tenant, audience_key=audience_key,
                          entity_key=entity_key or None,
@@ -203,14 +226,21 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # --- tier 1 ---------------------------------------------------------
     rules = _rules(tenant)
     searched.append("rules")
+    # `blocked` is now reserved for the one thing that makes OUTPUT unsafe:
+    # without a ban list, the validator has nothing to check against and
+    # "clean" would be a false assurance. Everything else that used to live
+    # here is a gap — reported, never a veto. This layer's job is to hand over
+    # what it has and say how well-grounded it is; deciding what can be done
+    # with that belongs to whatever is reading, which is smarter than a list
+    # of missing rows.
+    gaps: list[dict] = []
     if not rules["banned_claims"]:
-        # Not a warning. Nothing downstream can be checked against a ban list
-        # that does not exist, and a compliance scan on zero rules reporting
-        # "clean" is worse than no scan.
-        blocked.append("brand.banned_claims — nothing can validate output")
+        blocked.append("brand.banned_claims — the validator has nothing to "
+                       "check output against, so nothing can be sent safely")
     if not rules["voice_tone"]:
-        blocked.append("brand.voice.tone — nothing can judge whether a draft "
-                       "sounds like this account")
+        gaps.append({"missing": "brand.voice.tone",
+                     "means": "no measured house voice to match",
+                     "fix": "/admin/propose_voice, then set it"})
 
     bundle = {"tenant": tenant, "system": system, "tier": tier,
               "rules": rules}
@@ -222,23 +252,59 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         situations, objections, support = _situated(
             tenant, utterance, entity_key, audience_key, limit)
         searched.append("situations")
-        if utterance and not situations["confident"]:
-            skipped.append({"what": "objections",
-                            "why": situations["why"],
-                            "candidates": situations["candidates"]})
-            blocked.append("the utterance could not be placed — answering "
-                           "would aim at whichever objection ranked first")
-        elif utterance:
+        if utterance:
             searched.append("objections")
+            if not situations["confident"]:
+                gaps.append({
+                    "missing": "a confident situation match",
+                    "means": "the objections returned are unranked",
+                    "fix": "add a pattern for this phrasing, or approve a "
+                           "claim that resembles it",
+                    "candidates": situations["candidates"]})
             if not objections:
-                blocked.append(
-                    f"no approved objection for {situations['detected']} — "
-                    "this account has nothing on file to answer with")
+                gaps.append({
+                    "missing": f"an approved objection for "
+                               f"{situations['detected'] or 'this question'}",
+                    "means": "no pre-approved answer — draft from the rules, "
+                             "claims and entities below",
+                    "fix": "author one, or approve what is in review"})
     else:
         skipped.append({"what": "situated", "why": "tier 1 requested"})
 
     bundle["situations"] = situations
     bundle["objections"] = objections
+
+    # --- what no knowledge base can answer --------------------------------
+    #
+    # Two refusals that look identical and are not. "Nobody has authored an
+    # objection for this" is fixed by writing one. "Where is my order" is not
+    # a gap in the knowledge base at all — it is a fact that exists in the
+    # store at the moment of asking, and refusing it is as wrong as inventing
+    # it. Separating them is what lets a caller act instead of stopping.
+    needs: list[dict] = []
+    if tier >= 2 and situations.get("detected"):
+        from . import lookups
+        needs = lookups.needed_for(tenant, situations["detected"], utterance,
+                                   entity_key)
+        if needs:
+            searched.append("lookups")
+    bundle["needs_lookup"] = needs
+    ready = [n for n in needs if n["ready"]]
+    if needs:
+        # Deliberately NOT added to `blocked_on`, and that took a failing test
+        # to get right. A lookup that cannot run — no parameter, no connection
+        # — is still not a knowledge gap, and putting it in the same list made
+        # the responder file "where is my order" on the authoring backlog,
+        # where no amount of writing could ever satisfy it. Each entry carries
+        # its own `ready` and `blocked_because`; a caller reads those.
+        if ready:
+            # An answer that needs live data is not groundable from the KB
+            # alone, and saying so is the honest state — but the caller has
+            # everything it needs to change that, which "blocked" would not
+            # communicate.
+            bundle["action_required"] = [
+                {"call": n["tool"], "with": n["have"], "returns": n["returns"]}
+                for n in ready]
 
     # --- tier 3 ---------------------------------------------------------
     entities, convo = [], {"exists": False, "why": "not requested"}
@@ -247,8 +313,11 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             entities = kb.match_entities(tenant, requirements or {}, limit=limit)
             searched.append("entities")
             if not entities:
-                blocked.append("no entity on file to answer a product or "
-                               "space question with")
+                gaps.append({"missing": "a matching entity",
+                             "means": "nothing in the catalogue fits what was "
+                                      "asked for",
+                             "fix": "re-run catalog_sync, or answer without "
+                                    "naming a product"})
         else:
             skipped.append({"what": "entities",
                             "why": "no requirement or entity given"})
@@ -267,6 +336,29 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # --- the receipt ----------------------------------------------------
     comp = kb.completeness(tenant)
     bundle["blocked_on"] = blocked
+    bundle["gaps"] = gaps
+    # How much support this bundle actually carries, so a reader can calibrate
+    # rather than infer it from what is absent. This is the number that used to
+    # be expressed as a refusal.
+    bundle["grounding"] = {
+        "level": ("answered" if objections and situations.get("confident") else
+                  "unranked" if objections else
+                  "supported" if (bundle.get("entities") or rules["banned_claims"])
+                  else "rules_only"),
+        "means": {
+            "answered": "an approved objection matches — the response below "
+                        "was written and signed off by a human",
+            "unranked": "objections exist but the question could not be "
+                        "placed; judge relevance yourself",
+            "supported": "no pre-approved answer, but the rules, claims and "
+                         "entities here are real and current — draft from them",
+            "rules_only": "brand rules only. Say less rather than inventing "
+                          "specifics, and everything in `gaps` would help",
+        }[("answered" if objections and situations.get("confident") else
+           "unranked" if objections else
+           "supported" if (bundle.get("entities") or rules["banned_claims"])
+           else "rules_only")],
+    }
     bundle["coverage"] = {
         "searched": searched,
         "skipped": skipped,

@@ -801,7 +801,27 @@ class KbObjection(_Provenance, Base):
     source = Column(Text)                       # where this objection came from
 
 
-class KbSituation(_Provenance, Base):
+class _SituationNeedsMixin:
+    """Declared live-data requirements for a situation.
+
+    Some questions can never be answered from a knowledge base, however well
+    filled. "Where is my order" is not a claim, an objection or an entity — it
+    is a fact that exists in Shopify at the moment of asking, and a layer that
+    refuses it is as wrong as one that invents an answer.
+
+    So a situation declares what it needs looked up, as data, per tenant. That
+    keeps the routing deterministic — the caller is TOLD which tool to call and
+    which parameters it takes, rather than an agent guessing from the sentence
+    — and it keeps `blocked_on` honest by separating "nobody has authored this"
+    (fix: write it) from "this needs a lookup" (fix: call the tool).
+
+    `[{"tool": "shopify_order", "params": ["order_number"], "why": "..."}]`
+    """
+
+    needs = Column(JSON, default=list)
+
+
+class KbSituation(_SituationNeedsMixin, _Provenance, Base):
     """One tenant's diagnostic vocabulary, as data.
 
     The situation tags were a module constant shared by every tenant, written

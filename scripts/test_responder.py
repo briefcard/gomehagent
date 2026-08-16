@@ -27,7 +27,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import conversation as cv, db, kb, ledger, responder, tenants  # noqa: E402
+from app import (conversation as cv, db, kb, ledger,  # noqa: E402
+                 resolve as rs, responder, tenants)
 from app.web import app  # noqa: E402
 
 _fail = []
@@ -114,11 +115,31 @@ def main() -> int:
             response="It is dishwasher safe — every piece is tested on a "
                      "normal cycle.")
 
-        print("\n— a question it cannot place is refused, not guessed —")
+        print("\n— no pre-approved answer is NOT a refusal —")
+        # The correction that matters most in this file. Refusing here let a
+        # missing row veto an intelligence holding the brand rules, the
+        # catalogue and every approved claim — plenty to write a good answer
+        # from. The guard against invention belongs on the way OUT, in the
+        # validator, which is code and fails closed.
         r = responder.answer("baci", "Do you ship pallets to Ohio on Tuesdays?")
-        ck("it declines", not r["ok"])
-        ck("and says why", any("could not be placed" in b or "no approved" in b
-                               for b in r["blocked_on"]), str(r["blocked_on"]))
+        ck("it does not decline", r["ok"], str(r.get("blocked_on")))
+        ck("it hands over context to draft from",
+           r["mode"] == "draft_from_context", str(r.get("mode")))
+        ck("with the ban list, so the drafter knows the hard edges",
+           r["context"]["rules"]["banned_claims"], "enforced on the way out")
+        ck("and real claims to lean on", r["context"]["claims"] != [])
+        ck("grounding says how much support there is",
+           r["grounding"]["level"] in ("supported", "unranked", "rules_only"),
+           r["grounding"]["level"])
+        ck("the gap is reported without being a veto",
+           r["gaps"] and not r.get("blocked_on"),
+           str([g["missing"] for g in r["gaps"]]))
+        ck("and unranked candidates are offered, never chosen",
+           "possible_objections" in r["context"],
+           "picking one here would be judgement this function does not have")
+        ck("and it points at the gate that still applies",
+           "validator" in str(r["validate_with"]),
+           "refuse to invent, on output — not by withholding context")
 
         print("\n— an out-of-stock product holds the answer back —")
         kb.add_entity("baci", "product", "sold-out", "Sold Out Cup",
@@ -133,6 +154,54 @@ def main() -> int:
         ck("and names the product", any("oos" in b or "Sold Out" in b
                                         for b in r["blocked_on"]),
            str(r["blocked_on"]))
+
+
+        print("\n— a question no knowledge base can answer names its lookup —")
+        kb.add_situation("baci", "order_status", patterns=[["order"]],
+                         description="Where is my order?", origin="seed",
+                         needs=[{"tool": "shopify_order",
+                                 "params": ["order_number", "email"]}])
+        r = responder.answer("baci", "Where is my order #10432?")
+        ck("it does not refuse as unanswerable", r.get("stage") == "lookup",
+           str(r.get("stage")))
+        ck("it names the tool to call",
+           r["needs"] and r["needs"][0]["call"] == "shopify_order",
+           str(r.get("needs")))
+        ck("and hands over the parameter it read from the sentence",
+           r["needs"][0]["with"].get("order_number") == "10432",
+           str(r["needs"][0]["with"]))
+        ck("nothing was filed as a knowledge gap",
+           not any(x.status == "blocked" and x.situation == "order_status"
+                   for x in ledger.recent("baci", limit=50)),
+           "no amount of authoring could ever satisfy this")
+
+        print("\n— an unconnected capability is a DIFFERENT problem —")
+        kb.add_situation("baci", "booking", patterns=[["book"]],
+                         origin="seed",
+                         needs=[{"tool": "calendar_availability",
+                                 "params": ["date"]}])
+        b = rs.resolve("baci", utterance="Can I book 2026-09-04?", tier=2)
+        need = [n for n in b["needs_lookup"] if n["tool"] == "calendar_availability"]
+        ck("the date is still read out of the sentence",
+           need and need[0]["have"].get("date") == "2026-09-04", str(need))
+        ck("but it blocks on the connection, not on the parameter",
+           need and not need[0]["ready"]
+           and "not connected" in need[0]["blocked_because"],
+           str(need[0]["blocked_because"]) if need else "")
+
+        print("\n— a lookup nobody implemented cannot be declared —")
+        msg = kb.add_situation("baci", "made_up", patterns=[["zzz"]],
+                               origin="seed",
+                               needs=[{"tool": "not_a_real_tool"}])
+        ck("it is refused by name", "Unknown lookup" in msg, msg[:60])
+        ck("and the known tools are listed", "shopify_order" in msg)
+
+        print("\n— with the facts supplied, it answers —")
+        r = responder.answer("baci", "Where is my order #10432?",
+                             facts={"status": "shipped",
+                                    "tracking": "1Z999AA10123456784"})
+        ck("the lookup no longer blocks it", r.get("stage") != "lookup",
+           str(r.get("stage")))
 
         print("\n— sending is a separate, idempotent act —")
         r = responder.answer("baci", QUESTION, entity_key="zodiac-cup")

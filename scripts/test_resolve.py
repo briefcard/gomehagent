@@ -96,25 +96,32 @@ def main() -> int:
         ck("it blocks on the ban list",
            any("banned_claims" in x for x in b["blocked_on"]),
            str(b["blocked_on"])[:80])
-        ck("and names why it matters",
-           any("validate" in x for x in b["blocked_on"]))
+        ck("and names why it matters — output cannot be checked",
+           any("validator" in x and "safely" in x for x in b["blocked_on"]),
+           str(b["blocked_on"])[:90])
 
-        print("\n— THE FAILURE: an unplaceable utterance must not retrieve —")
+        print("\n— an unplaceable question is LABELLED, never withheld —")
+        # This suite used to assert the opposite, and the opposite was wrong.
+        # Withholding protects a machine that takes the top result blindly; it
+        # only handicaps a reader that can judge relevance. The consumer here
+        # is intelligent, so the honest move is to hand over what the account
+        # has with the confidence marked.
         b = rs.resolve("baci", utterance="Do you deliver to warehouses on "
                                          "Tuesdays in the winter months?")
-        ck("nothing was placed", not b["situations"]["confident"],
+        ck("nothing was placed confidently", not b["situations"]["confident"],
            str(b["situations"]["detected"]))
-        ck("so NO objections came back", b["objections"] == [],
-           "ranking against a tag nobody stands behind returns a plausible "
-           "answer aimed at the wrong problem")
-        ck("the skip is recorded with its reason",
-           any(s["what"] == "objections" and "could not place" in s["why"]
-               for s in b["coverage"]["skipped"]),
-           str(b["coverage"]["skipped"])[:90])
-        ck("and it blocks rather than answering anyway",
-           any("could not be placed" in x for x in b["blocked_on"]))
-        ck("the near-miss is still handed over for a human",
-           "candidates" in str(b["coverage"]["skipped"]))
+        ck("but the objections still come back", b["objections"] != [],
+           "a missing tag must not veto an intelligence that can judge")
+        ck("each one says it is unranked",
+           all("unranked" in o.get("relevance", "") for o in b["objections"]),
+           str(b["objections"][0].get("relevance")))
+        ck("grounding says how much to trust it",
+           b["grounding"]["level"] == "unranked", str(b["grounding"]["level"]))
+        ck("it is a GAP, not a block",
+           any("confident situation match" in g["missing"] for g in b["gaps"])
+           and not b["blocked_on"], str(b["blocked_on"]))
+        ck("and the near-miss travels with it",
+           any("candidates" in g for g in b["gaps"]))
 
         print("\n— a placed utterance retrieves, with its proof —")
         b = rs.resolve("baci", utterance="Is it dishwasher safe on a normal cycle?")
@@ -141,9 +148,12 @@ def main() -> int:
                          origin="seed")
         b = rs.resolve("eien", utterance="Is it dishwasher safe?")
         ck("it placed the situation", b["situations"]["confident"])
-        ck("but says it has nothing on file to answer with",
-           any("nothing on file" in x for x in b["blocked_on"]),
-           str(b["blocked_on"])[:90])
+        ck("having no approved answer is a gap, not a veto",
+           any("approved objection" in g["missing"] for g in b["gaps"])
+           and not b["blocked_on"], str(b["blocked_on"]))
+        ck("and it says what CAN be drafted from",
+           b["grounding"]["level"] in ("supported", "rules_only"),
+           b["grounding"]["means"][:60])
 
         print("\n— tier 3 reaches entities and conversation —")
         with db.SessionLocal() as s:
@@ -174,13 +184,8 @@ def main() -> int:
            "conversation" in skipped, str(skipped))
         ck("no requirement means entities are skipped WITH a reason",
            "entities" in skipped, str(skipped))
-        ck("and `complete` is not claimed on a bundle that skipped retrieval",
-           b["coverage"]["complete"] is True,
-           "objections DID resolve here, so complete is honest")
-
-        b = rs.resolve("baci", utterance="Do you deliver on Tuesdays?")
-        ck("but an unplaceable request is never complete",
-           b["coverage"]["complete"] is False)
+        ck("and `complete` is honest when retrieval did resolve",
+           b["coverage"]["complete"] is True)
 
 
         print("\n— what can this account answer at all —")
