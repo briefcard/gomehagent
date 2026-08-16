@@ -21,11 +21,22 @@ thin means "there is little" or "we did not look". That is the same discipline
 the kernel already demands of agents ("state what you searched and what you
 might have missed"), applied to retrieval itself.
 
-**Refusing is a feature.** `blocked_on` names the missing field and the caller
-stops. An account with no ban list cannot have its output validated, and an
-utterance nobody could place must not be answered against whichever objections
-happened to rank first. Producing something anyway is the failure this exists
-to prevent — see the platform's fourth locked decision.
+**This layer enriches; it does not gatekeep.** That distinction was got wrong
+once and is worth stating plainly. Refusing to *invent* is essential and lives
+in `validator`, on output, in code that fails closed. Refusing to hand over
+*context* is a different act entirely — it lets a missing row veto a reader
+holding the brand rules, the catalogue and every approved claim, which is
+plenty to work from.
+
+So almost nothing here blocks. `gaps` reports what is thin, each with a fix.
+`grounding.level` says how much support a bundle carries, so a reader can
+calibrate rather than infer it from silence. Material that is weakly matched
+comes back **labelled**, not withheld — withholding protects a machine that
+takes the top result blindly and merely handicaps one that can judge.
+
+`blocked_on` is reserved for the single case that makes output genuinely
+unsafe: no ban list, so the validator has nothing to check against and "clean"
+would be a false assurance.
 """
 from __future__ import annotations
 
@@ -274,6 +285,28 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     bundle["situations"] = situations
     bundle["objections"] = objections
 
+    # Approved proof, whether or not an objection matched. A direct consumer
+    # of this bundle got claims only as a by-product of objection support,
+    # which meant the account with no objection on file handed over rules and
+    # nothing to substantiate them.
+    #
+    # Still scoped by entity, and that is CORRECTNESS rather than gatekeeping:
+    # "generous 32 cm footprint" is not a fact about a different product, and
+    # labelling it would not make it one.
+    if tier >= 2:
+        rows = kb.claims(tenant, situations=situations.get("detected") or None,
+                         entity_key=entity_key or None, limit=limit * 2)
+        bundle["claims"] = [
+            {"claim": c.claim, "evidence": c.evidence or "", "claim_id": c.id,
+             "situations": sorted(c.situations or []),
+             "scope": c.entity_key or "brand-wide",
+             "proves": getattr(c, "proves", "") or ""}
+            for c in rows]
+        if rows:
+            searched.append("claims")
+    else:
+        bundle["claims"] = []
+
     # --- what no knowledge base can answer --------------------------------
     #
     # Two refusals that look identical and are not. "Nobody has authored an
@@ -310,7 +343,8 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     entities, convo = [], {"exists": False, "why": "not requested"}
     if tier >= 3:
         if requirements or entity_key:
-            entities = kb.match_entities(tenant, requirements or {}, limit=limit)
+            entities = kb.match_entities(tenant, requirements or {},
+                                         limit=limit, include_unavailable=True)
             searched.append("entities")
             if not entities:
                 gaps.append({"missing": "a matching entity",

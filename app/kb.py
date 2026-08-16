@@ -1118,7 +1118,7 @@ def selection_config(tenant: str) -> dict:
 
 
 def match_entities(tenant: str, requirements: dict | None = None,
-                   limit: int = 3) -> list[dict]:
+                   limit: int = 3, include_unavailable: bool = False) -> list[dict]:
     """Rank what this tenant sells against what the buyer actually asked for.
 
     Returns dicts rather than rows because the *reason* a thing matched is part
@@ -1132,7 +1132,13 @@ def match_entities(tenant: str, requirements: dict | None = None,
     requirements = requirements or {}
     cfg = selection_config(tenant)
     etype = cfg.get("primary_type", "")
-    rows = entities(tenant, etype) if etype else entities(tenant)
+    # Out-of-stock rows were invisible here while the VALIDATOR blocks on
+    # exactly that — so a drafter could not see the thing that was going to
+    # stop it. Incoherent, and the withholding half is the wrong half: knowing
+    # a piece is sold out is useful context ("that one is out until March"),
+    # and routing demand to an empty shelf is caught on the way out.
+    rows = (entities(tenant, etype, available_only=not include_unavailable)
+            if etype else entities(tenant, available_only=not include_unavailable))
     if not rows:
         return []
 
