@@ -212,11 +212,24 @@ def _active_tenant(chat_id: str) -> str:
 
 @app.get("/health")
 def health() -> dict:
+    """Liveness, and WHICH BUILD is answering.
+
+    The commit was added after half an hour was spent guessing whether a
+    route's absence meant a failed deploy, a stale container or a mistake in
+    the code — while the dashboard said everything had shipped. A service that
+    cannot say what it is running turns every deploy question into archaeology.
+
+    `RENDER_GIT_COMMIT` is set by Render itself, so this is what is actually
+    executing rather than what a dashboard believes.
+    """
     from . import channel
+    import os as _os
     return {"ok": True, "whatsapp": config.WHATSAPP_ENABLED,
             "telegram": config.TELEGRAM_ENABLED,
             "ops_channel": channel.active(),
-            "inboxes": list(config.GMAIL_ACCOUNTS)}
+            "inboxes": list(config.GMAIL_ACCOUNTS),
+            "commit": (_os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:12],
+            "routes": len({r.path for r in app.routes})}
 
 
 @app.get("/health/connections")
