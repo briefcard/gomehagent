@@ -1518,8 +1518,14 @@ def embed_backfill(key: str = Depends(admin_key), tenant: str = "",
     out, planned = {}, 0
     for k in keys:
         if kind == "claim":
+            # `claims()` with no entity_key returns BRAND-level rows only —
+            # that default is right for selection (a fact true of one product
+            # must not turn up in a newsletter about another) and wrong here,
+            # where the job is to index everything so retrieval can scope it
+            # later. On an account with 251 entities that quietly skipped most
+            # of the corpus. `claim_inventory` is the unscoped, approved set.
             items = [(r.id, f"{r.claim} {r.evidence or ''}".strip())
-                     for r in kbm.claims(k)]
+                     for r in kbm.claim_inventory(k)["selectable"]]
         elif kind == "objection":
             items = [(r.id, f"{r.objection} {r.response or ''}".strip())
                      for r in kbm.objections(k, any_entity=True)]

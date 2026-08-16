@@ -99,6 +99,9 @@ def main() -> int:
                              [(i, t) for t, i in approved.items()])
         ck("nothing was written", res["wrote"] == 0 and res["failed"] == 2)
         ck("and the reason travels with it", "OPENAI" in res["why"], res["why"])
+        ck("a failure is not filed as a skip",
+           res["skipped"] == 0 and res["unchanged"] == 0 and res["empty"] == 0,
+           str(res))
 
         g = kb.suggest_tags("baci", PARAPHRASE)
         ck("the paraphrase is unplaceable by words alone", g["tags"] == [],
@@ -148,6 +151,13 @@ def main() -> int:
                                [(i, t) for t, i in approved.items()])
         ck("unchanged rows are skipped", again["skipped"] == 2 and again["wrote"] == 0,
            str(again))
+        ck("and 'already done' is counted apart from 'nothing to index'",
+           again["unchanged"] == 2 and again["empty"] == 0,
+           "wrote:0 skipped:N was unreadable — opposite causes, opposite fixes")
+        ck("with row ids to go and look at", len(again["examples"]["unchanged"]) > 0)
+        blank = embed.backfill("baci", "claim", [("no-text-row", "   ")])
+        ck("an empty row is 'empty', never 'unchanged'",
+           blank["empty"] == 1 and blank["unchanged"] == 0, str(blank))
         ck("and the provider was never called",
            _calls["n"] == before,
            "otherwise every harvest re-pays for the whole corpus")

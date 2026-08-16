@@ -212,20 +212,41 @@ def ensure(tenant: str, kind: str, row_id: str, text: str) -> tuple[bool, str]:
 
 
 def backfill(tenant: str, kind: str, items: list[tuple[str, str]]) -> dict:
-    """Embed many rows. `items` is [(row_id, text)]. Reports, never raises."""
-    wrote = skipped = failed = 0
+    """Embed many rows. `items` is [(row_id, text)]. Reports, never raises.
+
+    **"Unchanged" and "empty" are counted apart**, and the first version of
+    this collapsed them into one `skipped`. That made a run reporting
+    `wrote: 0, skipped: 8` unreadable: already-indexed and had-no-text-to-index
+    are opposite situations with opposite fixes, and the number could not tell
+    them apart. Same shape as every other entry in DEFECTS §1 — a status
+    nobody can act on. `examples` carries the first few row ids per reason so
+    the answer is a row you can go and look at, not an inference.
+    """
+    wrote = unchanged = empty = failed = 0
     reason = ""
+    examples: dict[str, list] = {"unchanged": [], "empty": [], "failed": []}
     for row_id, text in items:
         ok, note = ensure(tenant, kind, row_id, text)
         if ok:
             wrote += 1
-        elif note in ("unchanged", "nothing to embed"):
-            skipped += 1
+        elif note == "unchanged":
+            unchanged += 1
+            if len(examples["unchanged"]) < 3:
+                examples["unchanged"].append(row_id)
+        elif note == "nothing to embed":
+            empty += 1
+            if len(examples["empty"]) < 3:
+                examples["empty"].append(row_id)
         else:
             failed += 1
             reason = reason or note
-    return {"tenant": tenant, "kind": kind, "wrote": wrote,
-            "skipped": skipped, "failed": failed, "why": reason}
+            if len(examples["failed"]) < 3:
+                examples["failed"].append({"row_id": row_id, "why": note})
+    return {"tenant": tenant, "kind": kind,
+            "considered": len(items), "wrote": wrote,
+            "unchanged": unchanged, "empty": empty, "failed": failed,
+            "skipped": unchanged + empty,   # kept: the old field, now derived
+            "why": reason, "examples": examples}
 
 
 #: The row count above which brute force stops being obviously right. Below it,
