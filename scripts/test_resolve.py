@@ -182,6 +182,37 @@ def main() -> int:
         ck("but an unplaceable request is never complete",
            b["coverage"]["complete"] is False)
 
+
+        print("\n— what can this account answer at all —")
+        r = rs.readiness("baci")
+        ck("it scores against the account's OWN vocabulary",
+           r["situations"] == len(kb.situations("baci")), r["score"])
+        ck("durability is answerable — there is an approved objection",
+           any(x["situation"] == "durability" and x["state"] == "proven"
+               for x in r["per_situation"]),
+           str([x for x in r["per_situation"] if x["situation"] == "durability"]))
+        ck("gifting is not — no objection carries that tag",
+           any(x["situation"] == "gifting" and x["state"] == "unanswerable"
+               for x in r["per_situation"]))
+        ck("the verdict counts rather than reassures",
+           "can answer" in r["verdict"], r["verdict"])
+        ck("and the fixes are ranked by how much each unblocks",
+           r["next_actions"] and r["next_actions"] == sorted(
+               r["next_actions"], key=lambda x: -x["situations"]),
+           str([a["fix"][:34] for a in r["next_actions"]]))
+
+        blank = rs.readiness("coverings")
+        ck("an empty account says so plainly",
+           blank["answerable"] == 0 and "cannot answer" in blank["verdict"],
+           blank["verdict"])
+        ck("and names the ban list before anything else",
+           any("banned_claims" in a["fix"] for a in blank["next_actions"]),
+           str([a["fix"] for a in blank["next_actions"]][:2]))
+
+        r = cl.get("/readiness", params={"key": "r3adonly"})
+        ck("the board is readable with the read-only key",
+           "accounts" in r.json(), str(r.json())[:60])
+
         print("\n— the read-only key reads, and cannot write —")
         r = cl.get("/resolve", params={"tenant": "baci", "tier": 1})
         ck("no credential is refused", r.json().get("error") == "unauthorized")

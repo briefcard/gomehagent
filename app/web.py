@@ -1475,6 +1475,53 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/admin/answer")
+def admin_answer(key: str = Depends(admin_key), tenant: str = "", q: str = "",
+                 entity: str = "", contact_id: str = "",
+                 system: str = "service_desk") -> dict:
+    """Answer a real customer question from what this account actually knows.
+
+    resolve -> assemble -> validate -> ledger, with no model call in it. An
+    approved objection already carries the response a human signed off, so
+    this is retrieval and validation rather than authorship.
+
+    Returns a DRAFT and files it. Nothing is sent — publishing is a separate
+    act, so the default stays shadow.
+
+    Read `blocked_on` when it refuses: every refusal names the field that would
+    unblock it, and is recorded so the gap gets counted rather than forgotten.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not (tenant and q):
+        return {"error": "need tenant= and q="}
+    from . import responder
+    return responder.answer(tenant, q, entity_key=entity,
+                            contact_id=contact_id, system_key=system)
+
+
+@app.get("/admin/ledger")
+def admin_ledger(key: str = Depends(admin_key), tenant: str = "",
+                 system: str = "", limit: int = 20) -> dict:
+    """What this account has produced, and what stopped when it did not."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import ledger as lg
+    rows = lg.recent(tenant, system_key=system, limit=limit)
+    return {
+        "tenant": tenant, "outputs": len(rows),
+        "rows": [{"id": r.id, "system": r.system_key, "status": r.status,
+                  "situation": r.situation, "entity_key": r.entity_key,
+                  "claim_ids": r.claim_ids, "objection_id": r.objection_id,
+                  "blocked_on": r.blocked_on, "body": (r.body or "")[:160],
+                  "created_at": r.created_at, "published_at": r.published_at}
+                 for r in rows],
+        "hygiene": lg.unused_claims(tenant),
+    }
+
+
 @app.get("/admin/propose_voice")
 def propose_voice(key: str = Depends(admin_key), tenant: str = "",
                   limit: int = 25) -> dict:
@@ -1565,6 +1612,38 @@ def label_conflicts(key: str = Depends(admin_key), tenant: str = "",
             "note": ("each pair is one tagging decision to make; fixing it "
                      "improves every future placement, which moving a floor "
                      "cannot")}
+
+
+@app.get("/readiness")
+def readiness(request: Request, auth: str = Depends(read_key),
+              tenant: str = "") -> dict:
+    """Which clients this layer can actually serve, and what to fix first.
+
+    `/resolve` answers whether ONE request can be grounded. This answers how
+    many can, before anything is sent — the question an agency onboarding a
+    client is really asking.
+
+    Probes each account against its OWN situation vocabulary rather than
+    invented questions, and ranks the fixes by how many situations each one
+    unblocks. Counting rows: no model call, no network.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    from . import resolve as rs, tenants as tn
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    out, ready = {}, 0
+    for k in keys:
+        try:
+            r = rs.readiness(k)
+        except Exception as exc:  # noqa: BLE001
+            out[k] = {"error": f"{exc.__class__.__name__}: {exc}"}
+            continue
+        ready += bool(r["answerable"])
+        out[k] = r
+    return {"accounts": out, "accounts_that_can_answer_anything": ready,
+            "of": len(keys),
+            "note": ("a situation is 'answerable' when an approved objection "
+                     "carries that tag, and 'proven' when a claim backs it")}
 
 
 @app.get("/embed_status")

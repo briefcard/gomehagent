@@ -36,6 +36,89 @@ from . import conversation as cv, kb, tenants
 TIERS = ("rules", "situated", "deep")
 
 
+def readiness(tenant: str) -> dict:
+    """What can this account actually answer, and what would unblock the rest.
+
+    `resolve()` tells you whether ONE request can be grounded. This tells you
+    how many of them can, before you send any — which is the question an agency
+    onboarding a client is really asking, and the one nothing here answered.
+
+    The probe set is the tenant's **own situation vocabulary**, not questions
+    invented for the occasion. A situation is answerable when an approved
+    objection carries that tag; it is proven when a claim backs the objection.
+    Those are the two states a drafter can tell apart, so they are the two
+    states reported.
+
+    No model call and no network — this is counting rows the KB already has.
+    """
+    from . import kb
+
+    tags = sorted(kb.situations(tenant))
+    all_obj = kb.objections(tenant, any_entity=True)
+    inv = kb.claim_inventory(tenant)
+    b = kb.brand(tenant)
+
+    per, answerable, proven = [], 0, 0
+    for tag in tags:
+        obj = [o for o in all_obj if tag in (o.situations or [])]
+        cl = [c for c in inv["selectable"] if tag in (c.situations or [])]
+        pend_o = len([o for o in kb.objections(tenant, any_entity=True,
+                                               include_proposed=True)
+                      if tag in (o.situations or [])]) - len(obj)
+        state = ("proven" if obj and cl else
+                 "answerable" if obj else
+                 "waiting on review" if pend_o > 0 else "unanswerable")
+        answerable += bool(obj)
+        proven += bool(obj and cl)
+        per.append({"situation": tag, "state": state,
+                    "objections": len(obj), "claims": len(cl),
+                    "objections_in_review": max(pend_o, 0)})
+
+    # Ranked by how many situations each one unblocks, because "what should I
+    # do first" is the only useful ordering and a flat list of gaps is not it.
+    blockers = []
+    if not (b and (b.voice or {}).get("tone")):
+        blockers.append({"fix": "brand.voice.tone", "unblocks": "every draft",
+                         "where": "Knowledge tab", "situations": len(tags)})
+    if not (b and b.banned_claims):
+        blockers.append({"fix": "brand.banned_claims",
+                         "unblocks": "every draft AND every compliance scan",
+                         "where": "Knowledge tab", "situations": len(tags)})
+    waiting = [p for p in per if p["state"] == "waiting on review"]
+    if waiting:
+        blockers.append({
+            "fix": f"approve {sum(p['objections_in_review'] for p in waiting)} "
+                   f"objection(s) already proposed",
+            "unblocks": f"{len(waiting)} situation(s)", "where": "Content tab",
+            "situations": len(waiting)})
+    missing = [p["situation"] for p in per if p["state"] == "unanswerable"]
+    if missing:
+        blockers.append({
+            "fix": f"author an objection for: {', '.join(missing[:6])}"
+                   + (" …" if len(missing) > 6 else ""),
+            "unblocks": f"{len(missing)} situation(s)",
+            "where": "/next on Telegram, or an intake link",
+            "situations": len(missing)})
+    blockers.sort(key=lambda x: -x["situations"])
+
+    return {
+        "tenant": tenant,
+        "situations": len(tags),
+        "answerable": answerable,
+        "proven": proven,
+        "score": f"{answerable}/{len(tags)}" if tags else "0/0",
+        "entities": len(kb.entities(tenant, available_only=False)),
+        "has_voice": bool(b and (b.voice or {}).get("tone")),
+        "has_ban_list": bool(b and b.banned_claims),
+        "per_situation": per,
+        "next_actions": blockers,
+        "verdict": (
+            "cannot answer anything yet" if answerable == 0 else
+            f"can answer {answerable} of {len(tags)} situations, "
+            f"{proven} of them with proof attached"),
+    }
+
+
 def _rules(tenant: str) -> dict:
     """Tier 1. Identity and the constraints that must never be violated.
 
@@ -85,6 +168,9 @@ def _situated(tenant: str, utterance: str, entity_key: str,
         backing = kb.support_for(tenant, o)
         support.extend(backing)
         out.append({
+            # The ledger records which objection answered, so "why did we say
+            # that" is a lookup rather than a reconstruction.
+            "objection_id": o.id,
             "objection": o.objection,
             "response": o.response,
             "situations": list(o.situations or []),

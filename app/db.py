@@ -234,6 +234,61 @@ class Commitment(Base):
     settled_note = Column(String, default="")
 
 
+class Output(Base):
+    """One thing a system produced, and the brief that produced it.
+
+    The table that makes a system improvable rather than merely operable. It
+    does three jobs that were each going to need their own store:
+
+    * **Anti-repeat.** "Has this claim been used for this product lately" is a
+      query here and is unanswerable anywhere else. The handoff lists "topic
+      not already covered" as a validator requirement and nothing has ever
+      been able to check it.
+    * **Attribution.** The e-commerce loop is analyse → hypothesis → generate →
+      measure, and it closes only if what varied between two outputs is
+      recorded. The brief fields ARE the experiment record.
+    * **Hygiene.** A claim never selected across hundreds of outputs is wrong
+      or redundant, and nothing else can name which claims those are.
+
+    The brief is stored as columns rather than prose because all three of those
+    are queries. `body` is deliberately a short rendering, not the artifact:
+    this is a ledger of decisions, not a content store.
+    """
+
+    __tablename__ = "outputs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    system_key = Column(String, default="", index=True)
+    run_id = Column(String, default="", index=True)
+
+    # --- the brief: what was chosen, and why this rather than that ---------
+    situation = Column(String, default="", index=True)
+    entity_key = Column(String, default="", index=True)
+    audience_key = Column(String, default="")
+    objection_id = Column(String, default="", index=True)
+    claim_ids = Column(JSON, default=list)
+    media_ids = Column(JSON, default=list)
+    theme = Column(String, default="")
+    angle = Column(String, default="")
+    format = Column(String, default="")
+
+    # --- what happened to it ----------------------------------------------
+    status = Column(String, default="draft", index=True)  # draft|blocked|approved|published
+    blocked_on = Column(JSON, default=list)
+    destination = Column(String, default="")
+    body = Column(Text)                    # short rendering, not the artifact
+    body_hash = Column(String, default="", index=True)
+
+    # Who it concerned, so an output can be traced to a conversation and back.
+    conversation_id = Column(String, default="", index=True)
+    touch_id = Column(String, default="")
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    published_at = Column(DateTime(timezone=True))
+    outcome = Column(JSON, default=dict)   # metrics, filled in later
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 
