@@ -211,6 +211,32 @@ def ensure(tenant: str, kind: str, row_id: str, text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def pairs(tenant: str, kind: str, min_score: float = 0.85,
+          limit: int = 50) -> list[dict]:
+    """Every pair of indexed rows above a similarity, cheapest possible.
+
+    Both sides are already embedded, so this costs **no provider call at all** —
+    it is stored vector against stored vector. That is what makes "which two
+    rows are secretly the same thing" a query rather than a project.
+
+    O(n²) on purpose and bounded by the same ceiling as everything else here:
+    21 rows is 210 comparisons, 20,000 rows would be 200 million and is what
+    `BRUTE_FORCE_CEILING` exists to catch first.
+    """
+    rows = [r for r in BACKEND.rows(tenant, kind) if r.vector]
+    model = config.EMBED_MODEL
+    rows = [r for r in rows if not r.model or r.model == model]
+    out = []
+    for i, a in enumerate(rows):
+        for b in rows[i + 1:]:
+            score = cosine(list(a.vector), list(b.vector))
+            if score >= min_score:
+                out.append({"a": a.row_id, "b": b.row_id,
+                            "score": round(score, 4)})
+    out.sort(key=lambda p: -p["score"])
+    return out[:limit]
+
+
 def forget(tenant: str, kind: str, row_id: str) -> bool:
     """Drop a row's vector when the row stops being usable.
 

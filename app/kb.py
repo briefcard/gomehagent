@@ -696,6 +696,57 @@ def calibration(tenant: str) -> dict:
     }
 
 
+#: Two claims this close are the same claim for tagging purposes. Measured
+#: rather than picked: on Baci, "This is sold as a set of 5 pieces" scored
+#: 0.9672 against a near-identical claim carrying completely different tags,
+#: and the pair below that sat around 0.76 — which is genuine topical
+#: similarity, not duplication.
+LABEL_CONFLICT_SCORE = 0.85
+
+
+def label_conflicts(tenant: str, min_score: float = LABEL_CONFLICT_SCORE,
+                    limit: int = 25) -> list[dict]:
+    """Near-identical claims that were tagged differently.
+
+    This is the defect the calibration run surfaced and could not fix. Three of
+    Baci's misses were not the classifier being wrong — they were two claims
+    saying the same thing under opposite tags, so leave-one-out marked each of
+    them wrong using the other as truth. One inconsistency, two failures, and
+    no floor anywhere separates them: the worst offender scored **0.9672**,
+    which is higher than most correct placements.
+
+    So the fix is upstream of retrieval. A tagger cannot be better than the
+    labels it learns from, and this is the queue for making those labels agree.
+
+    Reported, never merged. Same rule as `near_duplicates` and
+    `situation_overlaps`: which of two tags is right is a judgement about the
+    business, and a machine that picks one is inventing.
+
+    Costs no provider call — both sides are already vectors.
+    """
+    from . import embed
+    inv = {r.id: r for r in claim_inventory(tenant)["selectable"]}
+    out = []
+    for p in embed.pairs(tenant, "claim", min_score=min_score, limit=limit * 4):
+        a, b = inv.get(p["a"]), inv.get(p["b"])
+        if not a or not b:
+            continue                     # retired since indexing
+        ta, tb = set(a.situations or []), set(b.situations or [])
+        if not ta or not tb or (ta & tb):
+            continue                     # they already agree on something
+        out.append({
+            "score": p["score"],
+            "a": {"id": a.id, "claim": a.claim[:110], "situations": sorted(ta),
+                  "entity_key": a.entity_key or ""},
+            "b": {"id": b.id, "claim": b.claim[:110], "situations": sorted(tb),
+                  "entity_key": b.entity_key or ""},
+            "why": (f"{int(p['score'] * 100)}% the same claim, and not one tag "
+                    f"in common — every future tagging decision inherits "
+                    f"whichever of these it happens to match first"),
+        })
+    return out[:limit]
+
+
 def situation_desc(tenant: str) -> dict[str, str]:
     """Tag -> the headline constraint it implies, in the tenant's own words."""
     with db.SessionLocal() as s:

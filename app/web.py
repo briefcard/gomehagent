@@ -1475,6 +1475,41 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/admin/label_conflicts")
+def label_conflicts(key: str = Depends(admin_key), tenant: str = "",
+                    min_score: float = 0.0) -> dict:
+    """Near-identical claims your account tagged differently.
+
+    The queue that fixes calibration rather than chasing it. A classifier
+    cannot beat the labels it learns from, and three of Baci's four "wrong"
+    placements were one pair of claims saying the same thing under opposite
+    tags — the worst at 0.9672, higher than most correct placements, so no
+    threshold anywhere separates them.
+
+    Reported, never merged: which tag is right is a judgement about the
+    business. Reads only, and costs no provider call.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm, tenants as tn
+    floor = min_score or kbm.LABEL_CONFLICT_SCORE
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    out, total = {}, 0
+    for k in keys:
+        try:
+            rows = kbm.label_conflicts(k, min_score=floor)
+        except Exception as exc:  # noqa: BLE001
+            out[k] = {"error": f"{exc.__class__.__name__}: {exc}"}
+            continue
+        total += len(rows)
+        out[k] = {"conflicts": len(rows), "pairs": rows}
+    return {"min_score": floor, "accounts": out, "total": total,
+            "read_only": True,
+            "note": ("each pair is one tagging decision to make; fixing it "
+                     "improves every future placement, which moving a floor "
+                     "cannot")}
+
+
 @app.get("/embed_status")
 def embed_status(request: Request, auth: str = Depends(read_key),
                  tenant: str = "") -> dict:

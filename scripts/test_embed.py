@@ -224,6 +224,29 @@ def main() -> int:
            cal["semantic_scores"]["separable"] is None,
            f"n below {kb.MIN_N_FOR_SEPARABLE} on at least one side")
 
+        print("\n— two claims saying one thing under opposite tags —")
+        # Exactly the shape found on Baci: near-identical wording, disjoint
+        # tags, and a cosine ABOVE most correct placements — so no floor
+        # anywhere separates it and the fix has to be upstream of retrieval.
+        kb.add_claim("baci", "Arrives in a rigid presentation box for a wedding.",
+                     "photographed", ["durability"], proof_type="data",
+                     source="t", origin="human")
+        conflicts = kb.label_conflicts("baci", min_score=0.8)
+        ck("the pair is found", len(conflicts) >= 1, str(len(conflicts)))
+        if conflicts:
+            c = conflicts[0]
+            ck("both sides come back with their tags",
+               c["a"]["situations"] and c["b"]["situations"])
+            ck("and they share none",
+               not (set(c["a"]["situations"]) & set(c["b"]["situations"])),
+               f"{c['a']['situations']} vs {c['b']['situations']}")
+            ck("the score is high enough to be a duplicate, not a topic",
+               c["score"] >= 0.8, str(c["score"]))
+        agree = [x for x in kb.label_conflicts("baci", min_score=0.0)
+                 if set(x["a"]["situations"]) & set(x["b"]["situations"])]
+        ck("claims that already agree are never reported", agree == [],
+           "this is a queue of decisions, not a list of similarities")
+
         print("\n— leave-one-out reaches the semantic path too —")
         g = kb.suggest_tags("baci", GIFT, exclude_claim_id=approved[GIFT])
         ck("a claim excluded cannot place itself",
