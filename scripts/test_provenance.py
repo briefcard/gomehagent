@@ -294,6 +294,43 @@ ck("an unauthenticated purge is refused",
        "/admin/purge_proposals", data={"tenant": "baci"},
        params={"key": "wrong"}).text)
 
+# ---------------------------------------------------------------------------
+# The fingerprint had to agree with itself — found live on Baci
+#
+# These checks must sit ABOVE the summary below. Appended after it they still
+# printed, still said FAIL, and still exited 0 — a test that cannot fail the
+# run is decoration, and this file reports by falling off the end rather than
+# from inside a main().
+# ---------------------------------------------------------------------------
+print("\n— an edited claim keeps a fingerprint a fresh add would produce —")
+# Use a tag this tenant actually has. The first version of this test picked
+# `collector` for the second add, which that vocabulary does not contain — so
+# it was refused for an unrelated reason and the check failed while the code
+# under test was correct. A test that fails for the wrong reason is worse than
+# no test: it sent me looking for a bug I had already fixed.
+_tag = sorted(kb.situations(T))[0]
+kb.add_entity(T, "product", "set-5", "Set of 5", origin="human")
+kb.add_claim(T, "This is sold as a set of 5 pieces.", "counted",
+             [_tag], proof_type="data", source="t", origin="human",
+             entity_key="set-5")
+row = [c for c in kb.claims(T, entity_key="set-5")
+       if c.claim.startswith("This is sold")][0]
+kb.update_claim(row.id, evidence="counted twice")
+again = kb.add_claim(T, "This is sold as a set of 5 pieces.", "counted",
+                     [_tag], proof_type="data", source="t",
+                     origin="human", entity_key="set-5")
+ck("after an edit, the same claim is still recognised as a duplicate",
+   "Already on file" in again,
+   "update_claim wrote fingerprint(claim) where add_claim writes "
+   "fingerprint(claim, entity_key) — so Baci has this row twice")
+
+rep = kb.repair_fingerprints(T, apply=False)
+ck("the repair reports without writing",
+   rep["applied"] is False and "duplicate_groups" in rep)
+ck("and it merges nothing",
+   "nothing was merged" in rep["note"],
+   "the surviving id is what every objection's claim_id points at")
+
 print()
 if _fail:
     print(f"{len(_fail)} FAILED: {_fail}")

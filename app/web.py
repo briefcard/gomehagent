@@ -1475,6 +1475,33 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/admin/repair_fingerprints")
+def repair_fingerprints(key: str = Depends(admin_key), tenant: str = "",
+                        apply: int = 0) -> dict:
+    """Rewrite claim fingerprints so dedup starts working again.
+
+    `update_claim` computed `fingerprint(claim)` where `add_claim` computes
+    `fingerprint(claim, entity_key)`, so any edited row stopped matching a
+    fresh add of the same claim on the same product — and got filed twice.
+    Reports by default; `apply=1` writes.
+
+    Merges nothing. Duplicate groups are reported for a human to resolve from
+    `/admin/label_conflicts`, because the surviving row's id is what every
+    objection's `claim_id` still points at.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm, tenants as tn
+    keys = [tenant] if tenant else [t.key for t in tn.all_tenants()]
+    out = {}
+    for k in keys:
+        try:
+            out[k] = kbm.repair_fingerprints(k, apply=bool(apply))
+        except Exception as exc:  # noqa: BLE001
+            out[k] = {"error": f"{exc.__class__.__name__}: {exc}"}
+    return {"accounts": out, "applied": bool(apply)}
+
+
 @app.get("/admin/label_conflicts")
 def label_conflicts(key: str = Depends(admin_key), tenant: str = "",
                     min_score: float = 0.0) -> dict:

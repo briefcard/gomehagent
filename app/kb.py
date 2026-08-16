@@ -768,6 +768,53 @@ def label_conflicts(tenant: str, min_score: float = LABEL_CONFLICT_SCORE,
     return out[:limit]
 
 
+def repair_fingerprints(tenant: str, apply: bool = False) -> dict:
+    """Recompute claim fingerprints, and report the duplicates that surface.
+
+    Every row edited before the `update_claim` fix carries
+    `fingerprint(claim)` where `add_claim` would have written
+    `fingerprint(claim, entity_key)`. Until those are rewritten the dedup check
+    keeps missing, so this is not cosmetic — it is what stops the next harvest
+    filing the same claim a third time.
+
+    Recomputing **collapses nothing**. Two rows landing on one fingerprint is
+    reported as a collision and left alone: which of two taggings is right is a
+    judgement about the business, and the row that keeps its id is the row
+    every objection's `claim_id` still points at. Merge from
+    `label_conflicts`, deliberately, one pair at a time.
+    """
+    changed, collisions = [], {}
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbClaim).filter(db.KbClaim.tenant == tenant).all()
+        for r in rows:
+            want = prov.fingerprint(r.claim or "", r.entity_key or "")
+            if want != (r.fingerprint or ""):
+                changed.append({"id": r.id, "claim": (r.claim or "")[:80],
+                                "entity_key": r.entity_key or "",
+                                "was": (r.fingerprint or "")[:12],
+                                "now": want[:12]})
+                if apply:
+                    r.fingerprint = want
+            collisions.setdefault(want, []).append(
+                {"id": r.id, "claim": (r.claim or "")[:80],
+                 "situations": sorted(r.situations or []),
+                 "entity_key": r.entity_key or ""})
+        if apply:
+            s.commit()
+
+    dupes = [{"fingerprint": fp[:12], "rows": rs}
+             for fp, rs in collisions.items() if len(rs) > 1]
+    return {
+        "tenant": tenant, "applied": bool(apply),
+        "claims": len(rows), "fingerprints_rewritten": len(changed),
+        "examples": changed[:5],
+        "duplicate_groups": len(dupes), "duplicates": dupes[:10],
+        "note": ("nothing was merged — a duplicate group is a decision, and "
+                 "the surviving row's id is what every objection's claim_id "
+                 "still points at"),
+    }
+
+
 def situation_desc(tenant: str) -> dict[str, str]:
     """Tag -> the headline constraint it implies, in the tenant's own words."""
     with db.SessionLocal() as s:
@@ -1668,7 +1715,15 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
         # ORIGINAL sentence would not recognise the row it belongs to and would
         # file the uncorrected version all over again.
         row.origin = "human"
-        row.fingerprint = prov.fingerprint(row.claim)
+        # entity_key is PART of the fingerprint in add_claim, and leaving it
+        # out here made the two disagree: after any edit a row carried
+        # fingerprint(claim) while a fresh add of the same claim on the same
+        # product computed fingerprint(claim, entity_key). They never matched,
+        # so dedup missed and the row was filed twice. Baci has exactly that —
+        # "This is sold as a set of 5 pieces." on set-5-dishes-appetizer-joke,
+        # twice, with different tags. `update_objection` had this right; the
+        # claim path is the one that got missed.
+        row.fingerprint = prov.fingerprint(row.claim, row.entity_key or "")
         s.commit()
     return "Saved."
 
