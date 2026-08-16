@@ -211,6 +211,28 @@ def ensure(tenant: str, kind: str, row_id: str, text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def forget(tenant: str, kind: str, row_id: str) -> bool:
+    """Drop a row's vector when the row stops being usable.
+
+    Retrieval already refuses to act on a stale hit — `suggest_tags` looks each
+    one up in `claim_inventory["selectable"]` and drops what is no longer
+    there — so this cannot change an answer. It is here because an index that
+    accumulates rows its source has retired is the drift that argued against
+    keeping retrieval in a separate datastore, and it would be no more
+    acceptable for having been built in-house.
+    """
+    with db.SessionLocal() as s:
+        row = (s.query(db.KbEmbedding)
+               .filter(db.KbEmbedding.tenant == tenant,
+                       db.KbEmbedding.kind == kind,
+                       db.KbEmbedding.row_id == row_id).first())
+        if not row:
+            return False
+        s.delete(row)
+        s.commit()
+        return True
+
+
 def backfill(tenant: str, kind: str, items: list[tuple[str, str]]) -> dict:
     """Embed many rows. `items` is [(row_id, text)]. Reports, never raises.
 

@@ -532,6 +532,20 @@ CALIBRATION_MIN_N = 25
 CALIBRATION_SWEEP = [(1, 0.0), (1, 0.5), (2, 0.0), (2, 0.4), (2, 0.6),
                      (2, 0.8), (3, 0.5), (3, 0.8)]
 
+#: Cosine thresholds to compare for the semantic path. Cosine lives on a
+#: different scale from the overlap score and needs its own sweep.
+SEMANTIC_SWEEP = [0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85]
+
+#: Below this many samples on EACH side, "these two distributions separate" is
+#: a statement about two numbers, not about a classifier. `separable` reports
+#: None rather than a boolean that reads as evidence.
+MIN_N_FOR_SEPARABLE = 5
+
+
+def _semantic_floor() -> float:
+    from . import embed
+    return embed.MIN_SEMANTIC_SCORE
+
 
 def calibration(tenant: str) -> dict:
     """Are `MIN_SHARED_WORDS` and `MIN_LEARNED_SCORE` right for this account?
@@ -605,6 +619,33 @@ def calibration(tenant: str) -> dict:
     wrong = sorted(r["top"]["score"] for r in learned
                    if r["top"] and r["top"]["tag"] not in r["human"])
 
+    # The semantic path has its own floor and had no measurement — the first
+    # version of this reported distributions for word overlap only, which is
+    # the floor that existed when it was written. Setting MIN_SEMANTIC_SCORE
+    # without this is the same guessing the instrument was built to stop.
+    sem_right = sorted(r["top"]["score"] for r in semantic
+                       if r["top"] and r["top"]["tag"] in r["human"])
+    sem_wrong = sorted(r["top"]["score"] for r in semantic
+                       if r["top"] and r["top"]["tag"] not in r["human"])
+
+    sem_sweep = []
+    for t in SEMANTIC_SWEEP:
+        ok = bad = through = 0
+        for r in semantic:
+            top = r["top"]
+            if not top or top["score"] < t:
+                # NOT "refused" — raising this floor drops the claim to the
+                # word-overlap tier, which may still place it. Calling that a
+                # refusal would overstate the cost of a higher floor.
+                through += 1
+            elif top["tag"] in r["human"]:
+                ok += 1
+            else:
+                bad += 1
+        sem_sweep.append({"min_score": t, "correct": ok, "wrong": bad,
+                          "falls_through_to_overlap": through,
+                          "live": abs(t - _semantic_floor()) < 1e-9})
+
     def _dist(vals):
         if not vals:
             return None
@@ -613,7 +654,13 @@ def calibration(tenant: str) -> dict:
                 "median": vals[len(vals) // 2],
                 "p90": vals[min(len(vals) - 1, int(len(vals) * 0.90))]}
 
-    separable = bool(right and wrong and min(right) > max(wrong))
+    def _separable(a: list, b: list):
+        """True, False, or None when there is not enough to say either."""
+        if len(a) < MIN_N_FOR_SEPARABLE or len(b) < MIN_N_FOR_SEPARABLE:
+            return None
+        return min(a) > max(b)
+
+    separable = _separable(right, wrong)
     return {
         "tenant": tenant,
         "n": len(rows),
@@ -631,6 +678,14 @@ def calibration(tenant: str) -> dict:
                      "agreed": sum(1 for r in semantic if r["hit"]),
                      "misses": [r for r in semantic if not r["hit"]],
                      "degraded": degraded},
+        "semantic_scores": {
+            "floor": _semantic_floor(),
+            "correct_tag_on_top": _dist(sem_right),
+            "wrong_tag_on_top": _dist(sem_wrong),
+            "separable": _separable(sem_right, sem_wrong),
+            "sweep": sem_sweep,
+            "min_n_for_separable": MIN_N_FOR_SEPARABLE,
+        },
         "learned_n": len(learned),
         "scores": {"correct_tag_on_top": _dist(right),
                    "wrong_tag_on_top": _dist(wrong)},
@@ -1399,6 +1454,25 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
         # until a human has looked at it. That is the point.
         return (f"Submitted for review — it will not be used until approved.\n"
                 f"{claim}")
+
+    # A row that lands approved never passes through `review_claim`, so the
+    # index hook there never fires for it — and seeding and console adds are
+    # exactly that path. Without this, every claim written by `seed_kb` was
+    # invisible to semantic recall until somebody remembered to run a backfill,
+    # and nothing would have looked wrong. Index where the row becomes
+    # selectable, which is here as well as there.
+    try:
+        from . import embed
+        with db.SessionLocal() as s:
+            row = (s.query(db.KbClaim)
+                   .filter(db.KbClaim.tenant == tenant,
+                           db.KbClaim.fingerprint == fp).first())
+        if row:
+            embed.ensure(tenant, "claim", row.id,
+                         f"{claim} {evidence or ''}".strip())
+    except Exception as exc:  # noqa: BLE001 — indexing must not fail a write
+        log.warning("embed on add failed for %s: %s", tenant, exc)
+
     return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
             f"{claim}\n{evidence}\ntags: {', '.join(tags)}")
 
@@ -1447,12 +1521,16 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
     # no better for having been built here. Best effort: a provider outage must
     # never turn an approval into a failure, and `/admin/embed_backfill` picks
     # up whatever this missed.
-    if approve:
-        try:
-            from . import embed
+    try:
+        from . import embed
+        if approve:
             embed.ensure(tenant, "claim", claim_id, f"{text} {ev}".strip())
-        except Exception as exc:  # noqa: BLE001
-            log.warning("embed on approve failed for %s: %s", claim_id, exc)
+        else:
+            # Rejected means retired means unusable. Leaving the vector behind
+            # is the index-drift this design exists to avoid.
+            embed.forget(tenant, "claim", claim_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("embed sync on review failed for %s: %s", claim_id, exc)
 
     return (f"Approved — now selectable, and final.\n{text}" if approve
             else f"Rejected.\n{text}")

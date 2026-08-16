@@ -196,6 +196,34 @@ def main() -> int:
         ck("and it says plainly that a network hop would cost more",
            "network hop" in st["note"], st["note"][:60])
 
+        print("\n— a retired claim's vector does not linger —")
+        kb.add_claim("baci", "Stacks flat in a cupboard without chipping.",
+                     "measured", ["durability"], proof_type="data",
+                     source="t", origin="human")
+        doomed = [c for c in kb.claims("baci")
+                  if c.claim.startswith("Stacks flat")][0]
+        ck("approving it indexed it",
+           embed.BACKEND.hash_for("baci", "claim", doomed.id) != "")
+        kb.review_claim(doomed.id, approve=False)
+        ck("retiring it drops the vector",
+           embed.BACKEND.hash_for("baci", "claim", doomed.id) == "",
+           "an index that keeps rows its source retired is the drift this "
+           "design exists to avoid")
+
+        print("\n— the semantic floor is measured, not just the overlap one —")
+        cal = kb.calibration("baci")
+        ck("the semantic path has its own score distribution",
+           "semantic_scores" in cal and "sweep" in cal["semantic_scores"])
+        ck("its floor is reported alongside",
+           cal["semantic_scores"]["floor"] == embed.MIN_SEMANTIC_SCORE)
+        ck("a higher floor falls THROUGH to overlap, not to a refusal",
+           all("falls_through_to_overlap" in s
+               for s in cal["semantic_scores"]["sweep"]),
+           "calling it a refusal would overstate the cost of raising it")
+        ck("and 'separable' refuses to conclude from a handful",
+           cal["semantic_scores"]["separable"] is None,
+           f"n below {kb.MIN_N_FOR_SEPARABLE} on at least one side")
+
         print("\n— leave-one-out reaches the semantic path too —")
         g = kb.suggest_tags("baci", GIFT, exclude_claim_id=approved[GIFT])
         ck("a claim excluded cannot place itself",
