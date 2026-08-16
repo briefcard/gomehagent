@@ -361,11 +361,31 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             searched.append("conversation")
         else:
             skipped.append({"what": "conversation", "why": "no contact given"})
+
+        # What was said BEFORE any of this existed. `conversation` covers the
+        # thread a system is running; the archive covers the years of email and
+        # documents that predate it — which is where "what did we agree in
+        # March" actually lives, and why an agent kept asking for it.
+        if utterance:
+            from . import archive
+            found = archive.search(tenant, utterance, limit=3)
+            bundle["correspondence"] = found["hits"]
+            bundle["correspondence_coverage"] = found["coverage"]
+            searched.append("correspondence")
+            if found["degraded"]:
+                gaps.append({
+                    "missing": "part of the correspondence archive",
+                    "means": found["degraded"],
+                    "fix": "/admin/archive_index?tenant=&kind=thread"})
+        else:
+            skipped.append({"what": "correspondence",
+                            "why": "no utterance to search the archive with"})
     else:
         skipped.append({"what": "deep", "why": f"tier {tier} requested"})
 
     bundle["entities"] = entities
     bundle["conversation"] = convo
+    bundle.setdefault("correspondence", [])
 
     # --- the receipt ----------------------------------------------------
     comp = kb.completeness(tenant)

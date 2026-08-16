@@ -76,6 +76,17 @@ class EmailLog(Base):
     subject = Column(Text)
     category = Column(String)  # forwarder | order | invoice | client | junk | other
     action = Column(String)  # auto_replied | drafted | escalated | ignored
+
+    # What was actually SAID, not just that something arrived. Without this the
+    # archive is a catalogue: an agent could report that a thread with this
+    # counterparty exists and could not tell you a word of what was agreed in
+    # it. That is the single failure that made inbox drafts untrustworthy —
+    # it looked like a reasoning problem and was a storage one.
+    #
+    # Bounded, and quoted history stripped before it lands: a re-quoted chain
+    # embeds as whatever it is replying to, so a fifteen-message thread would
+    # otherwise retrieve as fifteen near-identical rows.
+    body_excerpt = Column(Text)
     detail = Column(Text)
 
 
@@ -422,6 +433,12 @@ class DocIndex(Base):
     anchor = Column(String, default="")  # 'Primorous PO-2241', 'Turkey-Mar2026'
     source = Column(String, default="")  # email | whatsapp | sweep | refile
     content_hash = Column(String, default="", index=True)  # sha256 — dedup across runs
+
+    # The extracted text, so a document is answerable rather than merely
+    # findable. `read_email_attachment` has been pulling this out of PDFs all
+    # along and throwing it away — which is why "what did the BOL say" needed a
+    # human to open the file, while "is there a BOL" did not.
+    text_excerpt = Column(Text)
 
 
 class Usage(Base):

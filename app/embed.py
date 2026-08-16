@@ -37,7 +37,11 @@ from . import config, db
 
 log = logging.getLogger("embed")
 
-KINDS = ("claim", "objection", "situation", "entity", "media")
+# `thread` and `document` are the correspondence archive. They were the point
+# of making this table polymorphic: adding the two kinds that fix the inbox
+# agent is a tuple entry, not a migration.
+KINDS = ("claim", "objection", "situation", "entity", "media",
+         "thread", "document")
 
 #: Cosine floor for a semantic match to count. text-embedding-3 puts unrelated
 #: English in the 0.0–0.25 band and genuine paraphrase well above 0.45, so this

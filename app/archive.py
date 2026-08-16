@@ -1,0 +1,264 @@
+"""The correspondence archive, made answerable instead of merely catalogued.
+
+This closes the failure that made inbox drafts untrustworthy, and it was never
+a reasoning failure. `EmailLog` recorded that a message arrived — sender,
+subject, what the agent did — and not a word of what was said. `DocIndex`
+recorded that a bill of lading exists and not what was on it. So an agent
+asked to reference a prior thread had two options: ask, or guess. Both look
+like a stupid model and both are a storage problem.
+
+Three things make an archive answerable rather than searchable:
+
+**The text has to be kept.** Obvious in hindsight; the extraction was already
+happening in `read_email_attachment` and being thrown away.
+
+**Quoted history has to go first.** A fifteen-message thread where everyone
+top-posts is fifteen rows that all embed as whatever the first message said.
+`email_harvest._own_words` already solves this and is reused rather than
+rewritten.
+
+**Meaning has to beat keywords.** "The pallet damage" and "the broken crates
+from the March shipment" are the same event with no words in common. Gmail
+search returns nothing and the agent asks a question it should not have had to
+ask. That is the whole reason this indexes rather than greps.
+
+Long documents are chunked, and the chunk index rides in `row_id` as
+`<id>#<n>` — no schema change, because `KbEmbedding` is keyed on
+(tenant, kind, row_id) and that is still unique per chunk. Without chunking a
+forty-page contract embeds as its title page and nothing in it is findable.
+"""
+from __future__ import annotations
+
+import logging
+
+from . import db, embed
+
+log = logging.getLogger("archive")
+
+#: Long enough to hold a real message or a page of a document, short enough
+#: that one chunk is about one thing. A chunk covering three topics retrieves
+#: for all of them and is precise about none.
+CHUNK_CHARS = 1800
+
+#: Bounded on the way in. The archive is for finding and quoting, not for
+#: replacing the mail store — the id is kept so the full thing is one fetch
+#: away when someone actually needs it.
+MAX_STORED = 12000
+
+
+def clean(text: str) -> str:
+    """Only what the sender actually typed, quoted history removed."""
+    try:
+        from .email_harvest import _own_words
+        return (_own_words(text or "") or "").strip()
+    except Exception:  # noqa: BLE001 — never fail indexing on a parse
+        return (text or "").strip()
+
+
+def chunks(text: str, size: int = CHUNK_CHARS) -> list[str]:
+    """Split on paragraphs, then hard-wrap anything still oversized."""
+    out, buf = [], ""
+    for para in (text or "").split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        if len(buf) + len(para) + 2 <= size:
+            buf = f"{buf}\n\n{para}" if buf else para
+        else:
+            if buf:
+                out.append(buf)
+            while len(para) > size:
+                out.append(para[:size])
+                para = para[size:]
+            buf = para
+    if buf:
+        out.append(buf)
+    return out or []
+
+
+def store_email(tenant: str, gmail_message_id: str, body: str) -> int:
+    """Keep what an email said. Returns characters stored."""
+    text = clean(body)[:MAX_STORED]
+    if not text:
+        return 0
+    with db.SessionLocal() as s:
+        row = (s.query(db.EmailLog)
+               .filter(db.EmailLog.gmail_message_id == gmail_message_id).first())
+        if not row:
+            return 0
+        row.body_excerpt = text
+        s.commit()
+    return len(text)
+
+
+def store_document(tenant: str, doc_id: str, text: str) -> int:
+    with db.SessionLocal() as s:
+        row = (s.query(db.DocIndex)
+               .filter(db.tenant_filter(db.DocIndex, tenant, include_unassigned=True),
+                       db.DocIndex.id == doc_id).first())
+        if not row:
+            return 0
+        row.text_excerpt = (text or "").strip()[:MAX_STORED]
+        s.commit()
+        return len(row.text_excerpt or "")
+
+
+def _index(tenant: str, kind: str, row_id: str, text: str) -> tuple[int, str]:
+    parts = chunks(text)
+    wrote, why = 0, ""
+    for i, part in enumerate(parts):
+        ok, note = embed.ensure(tenant, kind, f"{row_id}#{i}", part)
+        if ok:
+            wrote += 1
+        elif note not in ("unchanged", "nothing to embed"):
+            why = why or note
+    return wrote, why
+
+
+def index(tenant: str, kind: str = "thread", limit: int = 200) -> dict:
+    """Embed stored correspondence so it can be found by meaning.
+
+    Reports rather than raises, and counts `no_text` apart from `skipped`:
+    "nothing has been stored yet" and "already indexed" are opposite problems
+    and lumping them was a defect once already.
+    """
+    if kind not in ("thread", "document"):
+        return {"error": "kind must be thread or document"}
+
+    with db.SessionLocal() as s:
+        if kind == "thread":
+            rows = (s.query(db.EmailLog)
+                    .filter(db.tenant_filter(db.EmailLog, tenant))
+                    .order_by(db.EmailLog.seen_at.desc()).limit(limit).all())
+            items = [(r.id, f"{r.subject or ''}\n\n{r.body_excerpt or ''}".strip())
+                     for r in rows]
+        else:
+            rows = (s.query(db.DocIndex)
+                    .filter(db.tenant_filter(db.DocIndex, tenant))
+                    .order_by(db.DocIndex.created_at.desc()).limit(limit).all())
+            items = [(r.id, f"{r.filename or ''} {r.anchor or ''}\n\n"
+                            f"{r.text_excerpt or ''}".strip()) for r in rows]
+        s.expunge_all()
+
+    wrote = chunked = no_text = 0
+    why = ""
+    for row_id, text in items:
+        body = text.split("\n\n", 1)[1] if "\n\n" in text else ""
+        if not body.strip():
+            no_text += 1
+            continue
+        n, err = _index(tenant, kind, row_id, text)
+        wrote += n
+        chunked += 1
+        why = why or err
+    return {
+        "tenant": tenant, "kind": kind, "rows": len(items),
+        "indexed_rows": chunked, "chunks_written": wrote,
+        "no_text_stored": no_text, "why": why,
+        "note": ("" if not no_text else
+                 f"{no_text} rows are catalogued but hold no text — those are "
+                 f"findable by subject and unanswerable in content, which is "
+                 f"the gap this exists to close"),
+    }
+
+
+def search(tenant: str, query: str, kinds: tuple[str, ...] = ("thread", "document"),
+           limit: int = 5) -> dict:
+    """Find prior correspondence by meaning, and say how much was searched.
+
+    The coverage half is not decoration. The original failure was a search that
+    silently returned a fraction of the archive, so an agent reported an answer
+    with no idea it had seen a slice — which reads exactly like diligence.
+    """
+    # Coverage is tracked PER KIND. Collapsing it into one flag meant an
+    # un-indexed document store made a perfectly good thread search report as
+    # "NOT searched" — so a reader would conclude nothing had been looked at
+    # while holding the right answer. Absence collapsed into a value, again,
+    # and in the one field whose whole job is to be trustworthy.
+    hits, scanned, per_kind = [], 0, {}
+    for kind in kinds:
+        rows, why, stat = embed.search(tenant, kind, query, limit=limit * 2)
+        scanned += stat.get("scanned", 0)
+        per_kind[kind] = {"searched": not why, "why": why,
+                          "chunks": stat.get("scanned", 0)}
+        for h in rows:
+            base, _, part = h["row_id"].partition("#")
+            hits.append({**h, "row_id": base, "kind": kind,
+                         "chunk": int(part) if part.isdigit() else 0})
+
+    # One row, one hit: a long thread that chunks into six pieces should not
+    # crowd out five other threads because it happened to be long.
+    best: dict[str, dict] = {}
+    for h in hits:
+        key = f"{h['kind']}:{h['row_id']}"
+        if key not in best or h["score"] > best[key]["score"]:
+            best[key] = h
+    ranked = sorted(best.values(), key=lambda h: -h["score"])[:limit]
+
+    searched = [k for k, v in per_kind.items() if v["searched"]]
+    missed = {k: v["why"] for k, v in per_kind.items() if not v["searched"]}
+    return {
+        "hits": _hydrate(tenant, ranked),
+        "searched_kinds": searched,
+        "unsearched_kinds": missed,
+        # Kept for callers that only want a yes/no, but it now means "SOMETHING
+        # could not be searched", never "nothing was".
+        "degraded": "; ".join(f"{k}: {w}" for k, w in missed.items()),
+        "chunks_scanned": scanned,
+        "coverage": (
+            f"searched every indexed chunk of {', '.join(searched)}"
+            + (f"; did NOT search {', '.join(missed)}" if missed else "")
+            if searched else
+            f"NOT searched — {'; '.join(missed.values())}"),
+    }
+
+
+def _passage(text: str, n: int) -> str:
+    """The chunk that actually matched, not the start of the document.
+
+    Chunking found Clause 9 on page nine and hydration was handing back the
+    title page — which is the very failure this module exists to fix, rebuilt
+    one layer up. Re-chunking is deterministic, so index `n` is the same
+    passage that was embedded.
+    """
+    parts = chunks(text or "")
+    if 0 <= n < len(parts):
+        # The WHOLE chunk, not the first 600 characters of it. Truncating here
+        # rebuilt the exact bug this fixes: retrieval correctly found the chunk
+        # containing "Clause 9", and the excerpt cut it off before reaching it.
+        # A chunk is already bounded by CHUNK_CHARS — that IS the unit of
+        # relevance, and slicing it again just hides the answer more subtly.
+        return parts[n]
+    return (text or "")[:CHUNK_CHARS]
+
+
+def _hydrate(tenant: str, hits: list[dict]) -> list[dict]:
+    """Turn ids back into something a reader can act on."""
+    out = []
+    with db.SessionLocal() as s:
+        for h in hits:
+            if h["kind"] == "thread":
+                r = s.get(db.EmailLog, h["row_id"])
+                if not r or r.tenant != tenant:
+                    continue
+                out.append({
+                    "kind": "thread", "score": h["score"], "id": r.id,
+                    "subject": r.subject or "", "from": r.sender or "",
+                    "when": r.seen_at, "thread_id": r.thread_id or "",
+                    "excerpt": _passage(
+                        f"{r.subject or ''}\n\n{r.body_excerpt or ''}".strip(),
+                        h.get("chunk", 0)),
+                    "category": r.category or ""})
+            else:
+                r = s.get(db.DocIndex, h["row_id"])
+                if not r or (r.tenant or "") not in (tenant, ""):
+                    continue
+                out.append({
+                    "kind": "document", "score": h["score"], "id": r.id,
+                    "filename": r.filename, "doc_type": r.doc_type or "",
+                    "anchor": r.anchor or "", "link": r.link or "",
+                    "excerpt": _passage(
+                        f"{r.filename or ''} {r.anchor or ''}\n\n"
+                        f"{r.text_excerpt or ''}".strip(),
+                        h.get("chunk", 0))})
+    return out

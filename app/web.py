@@ -1676,6 +1676,46 @@ def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
     return doc
 
 
+@app.get("/admin/archive_index")
+def archive_index(key: str = Depends(admin_key), tenant: str = "",
+                  kind: str = "thread", limit: int = 200) -> dict:
+    """Make this account's correspondence answerable instead of catalogued.
+
+    `EmailLog` recorded that a message arrived and not a word of what it said;
+    `DocIndex` recorded that a bill of lading exists and not what was on it. So
+    an agent asked to reference a prior thread could only ask or guess — which
+    looks like a stupid model and is a storage problem.
+
+    Reports `no_text_stored` separately: rows that are catalogued but hold no
+    body are findable by subject and unanswerable in content, and that count is
+    the size of the remaining gap.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import archive
+    return archive.index(tenant, kind=kind, limit=limit)
+
+
+@app.get("/archive_search")
+def archive_search(request: Request, auth: str = Depends(read_key),
+                   tenant: str = "", q: str = "", limit: int = 5) -> dict:
+    """Find prior correspondence by MEANING, with coverage stated.
+
+    "The pallet damage" and "the broken crates from the March shipment" are the
+    same event with no words in common — the case keyword search returns
+    nothing for, and the agent then asks a question it should not have needed
+    to ask.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    if not (tenant and q):
+        return {"error": "need tenant= and q="}
+    from . import archive
+    return archive.search(tenant, q, limit=limit)
+
+
 @app.get("/readiness")
 def readiness(request: Request, auth: str = Depends(read_key),
               tenant: str = "") -> dict:
