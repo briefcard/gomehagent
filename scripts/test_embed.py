@@ -242,16 +242,49 @@ def main() -> int:
                f"{c['a']['situations']} vs {c['b']['situations']}")
             ck("the score is high enough to be a duplicate, not a topic",
                c["score"] >= 0.8, str(c["score"]))
-        agree = [x for x in kb.label_conflicts("baci", min_score=0.0)
-                 if set(x["a"]["situations"]) & set(x["b"]["situations"])]
-        ck("claims that already agree are never reported", agree == [],
+        same = [x for x in kb.label_conflicts("baci", min_score=0.0)
+                if set(x["a"]["situations"]) == set(x["b"]["situations"])]
+        ck("identically tagged claims are never reported", same == [],
            "this is a queue of decisions, not a list of similarities")
 
+        # The bug the empty production result exposed: requiring DISJOINT tags
+        # missed the case that actually costs a miss. Sharing a tag does not
+        # stop retrieval taking the top-scoring one and getting it wrong.
+        kb.add_claim("baci", "Arrives in a rigid presentation box, wedding ready.",
+                     "photographed", ["gifting", "durability"],
+                     proof_type="data", source="t", origin="human")
+        partial = [c for c in kb.label_conflicts("baci", min_score=0.8)
+                   if c["shared"]]
+        ck("a PARTIAL disagreement is reported too", partial,
+           "requiring disjoint sets reported zero on an account with a "
+           "known 0.9672 conflict")
+        if partial:
+            c = partial[0]
+            ck("it names what they agree on", c["shared"], str(c["shared"]))
+            ck("and what they do not",
+               c["a"]["only_here"] or c["b"]["only_here"],
+               f"{c['a']['only_here']} vs {c['b']['only_here']}")
+            ck("full disagreements are ranked above partial ones",
+               kb.label_conflicts("baci", min_score=0.8)[0]["disjoint"] is True
+               or all(not x["disjoint"] for x in
+                      kb.label_conflicts("baci", min_score=0.8)),
+               "worst first")
+
         print("\n— leave-one-out reaches the semantic path too —")
-        g = kb.suggest_tags("baci", GIFT, exclude_claim_id=approved[GIFT])
-        ck("a claim excluded cannot place itself",
-           "gifting" not in g["tags"] or g["path"] != "semantic",
-           f"{g['tags']} via {g['path']} — calibration depends on this")
+        # Asserting "gifting does not come back" was the wrong test: once a
+        # SECOND claim tagged gifting exists, gifting is the right answer and
+        # the check failed on correct behaviour. What exclusion has to do is
+        # remove the row's match against ITSELF, which is a near-perfect 1.0
+        # and would make every calibration result meaningless.
+        with_self = kb.suggest_tags("baci", GIFT)
+        without = kb.suggest_tags("baci", GIFT, exclude_claim_id=approved[GIFT])
+        ck("unexcluded, a claim matches itself almost perfectly",
+           with_self["path"] == "semantic" and with_self["score"] > 0.99,
+           str(with_self["score"]))
+        ck("excluded, that self-match is gone",
+           without["score"] is None or without["score"] < with_self["score"],
+           f"{without['score']} < {with_self['score']} — calibration depends "
+           f"on this being a real leave-one-out")
 
     print()
     if _fail:

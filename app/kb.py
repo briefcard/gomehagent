@@ -696,12 +696,13 @@ def calibration(tenant: str) -> dict:
     }
 
 
-#: Two claims this close are the same claim for tagging purposes. Measured
-#: rather than picked: on Baci, "This is sold as a set of 5 pieces" scored
-#: 0.9672 against a near-identical claim carrying completely different tags,
-#: and the pair below that sat around 0.76 — which is genuine topical
-#: similarity, not duplication.
-LABEL_CONFLICT_SCORE = 0.85
+#: Two claims this close are close enough that a tagger will confuse them.
+#: Measured, and then measured again after the first number found nothing: on
+#: Baci the outright duplicate scored 0.9672, but the pair that costs two
+#: misses under leave-one-out — "Designed in Milan by the Italian design
+#: house" against "Baci Milano is an Italian design house" — sits at 0.7641.
+#: A floor of 0.85 excluded the very pair the tool was built to find.
+LABEL_CONFLICT_SCORE = 0.75
 
 
 def label_conflicts(tenant: str, min_score: float = LABEL_CONFLICT_SCORE,
@@ -727,23 +728,43 @@ def label_conflicts(tenant: str, min_score: float = LABEL_CONFLICT_SCORE,
     from . import embed
     inv = {r.id: r for r in claim_inventory(tenant)["selectable"]}
     out = []
-    for p in embed.pairs(tenant, "claim", min_score=min_score, limit=limit * 4):
+    for p in embed.pairs(tenant, "claim", min_score=min_score, limit=limit * 8):
         a, b = inv.get(p["a"]), inv.get(p["b"])
         if not a or not b:
             continue                     # retired since indexing
         ta, tb = set(a.situations or []), set(b.situations or [])
-        if not ta or not tb or (ta & tb):
-            continue                     # they already agree on something
+        if not ta or not tb or ta == tb:
+            continue                     # identical labelling is not a conflict
+
+        # The predicate is DIFFER, not "share nothing", and the first version
+        # got that wrong — it required disjoint sets and so reported zero on an
+        # account with a known 0.9672 conflict. Sharing a tag does not stop the
+        # confusion: retrieval ranks by score and takes the top tag, so
+        # {collector, replacement_reorder} against {collector, gifting} still
+        # answers `gifting` and is still marked wrong. The overlap is what
+        # makes it subtle, not what makes it harmless.
+        shared, only_a, only_b = ta & tb, ta - tb, tb - ta
+        disjoint = not shared
         out.append({
             "score": p["score"],
+            "disjoint": disjoint,
+            "shared": sorted(shared),
             "a": {"id": a.id, "claim": a.claim[:110], "situations": sorted(ta),
-                  "entity_key": a.entity_key or ""},
+                  "only_here": sorted(only_a), "entity_key": a.entity_key or ""},
             "b": {"id": b.id, "claim": b.claim[:110], "situations": sorted(tb),
-                  "entity_key": b.entity_key or ""},
-            "why": (f"{int(p['score'] * 100)}% the same claim, and not one tag "
-                    f"in common — every future tagging decision inherits "
-                    f"whichever of these it happens to match first"),
+                  "only_here": sorted(only_b), "entity_key": b.entity_key or ""},
+            "why": (
+                f"{int(p['score'] * 100)}% the same claim"
+                + (", and not one tag in common" if disjoint
+                   else f", agreeing on {', '.join(sorted(shared))} and "
+                        f"disagreeing on "
+                        f"{', '.join(sorted(only_a | only_b))}")
+                + " — retrieval takes the top-scoring tag, so whichever of "
+                  "these a new claim matches first decides how it is filed"),
         })
+    # Worst first: no tags in common is a harder disagreement than a partial
+    # one, and a closer pair confuses a tagger more than a distant one.
+    out.sort(key=lambda c: (not c["disjoint"], -c["score"]))
     return out[:limit]
 
 
