@@ -1475,6 +1475,36 @@ def calibrate_classify(key: str = Depends(admin_key), tenant: str = "") -> dict:
             "read_only": True}
 
 
+@app.get("/admin/propose_voice")
+def propose_voice(key: str = Depends(admin_key), tenant: str = "",
+                  limit: int = 25) -> dict:
+    """Suggest a brand voice from what this account has already published.
+
+    Reads their site, measures the countable half (sentence length,
+    contractions, second person, questions), and asks for tone words backed by
+    **verbatim** exemplar sentences — every one checked against the source, so
+    a quote nobody wrote is discarded before you see it.
+
+    Samples are filtered through `banned_claims` first: deriving voice from a
+    page that says "hand-painted in Italy" would hand back exemplars the brand
+    is barred from using.
+
+    **Writes nothing.** `set_brand` is still the only way a voice lands, and a
+    person still types it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name a tenant — this one crawls, so it is per account"}
+    from . import voice as vc
+    texts, how = vc.gather(tenant, limit=limit)
+    if not texts:
+        return {"tenant": tenant, "error": how, "applied": False}
+    out = vc.propose(tenant, texts)
+    out["source"] = how
+    return out
+
+
 @app.get("/admin/repair_fingerprints")
 def repair_fingerprints(key: str = Depends(admin_key), tenant: str = "",
                         apply: int = 0) -> dict:
