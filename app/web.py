@@ -1614,6 +1614,55 @@ def label_conflicts(key: str = Depends(admin_key), tenant: str = "",
                      "cannot")}
 
 
+@app.get("/brand.md", response_class=PlainTextResponse)
+def brand_markdown(request: Request, auth: str = Depends(read_key),
+                   tenant: str = "", system: str = "") -> str:
+    """This account's knowledge base, compiled into a document you can paste.
+
+    The layer supporting the `.md` approach rather than competing with it. At
+    a corpus this size a cached document beats per-question retrieval — it is
+    nearly free after the first call and it cannot surface the wrong thing,
+    because everything is present.
+
+    What it adds over a hand-written file is that it is generated from
+    APPROVED rows only, regenerates itself, and carries the same ban list the
+    validator enforces on the way out — so what a drafter was told and what it
+    will be held to cannot drift apart.
+
+    `?system=service_desk|creative|campaign_email|lead_responder` narrows it.
+    Sections run stable-first so the prompt cache actually hits; the volatile
+    catalogue is last for the same reason.
+    """
+    if not auth:
+        return "unauthorized"
+    if not tenant:
+        return "name an account: /brand.md?tenant=baci"
+    from . import dossier
+    doc = dossier.build(tenant, system)
+    if doc.get("error"):
+        return doc["error"]
+    return doc["markdown"]
+
+
+@app.get("/brand_meta")
+def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
+                        tenant: str = "", system: str = "") -> dict:
+    """Size, etag and cache advice for the document, without the document.
+
+    The etag IS the cache key: re-fetch this, compare, and skip the model call
+    entirely when nothing has changed. `within_context_budget` is the crossover
+    signal — when it goes false, that surface should move to /resolve.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import dossier
+    doc = dossier.build(tenant, system)
+    doc.pop("markdown", None)
+    return doc
+
+
 @app.get("/readiness")
 def readiness(request: Request, auth: str = Depends(read_key),
               tenant: str = "") -> dict:

@@ -4,7 +4,7 @@ That is the right question to ask of it, and it deserves a measurement rather
 than an argument. Both arms get the same model, the same questions and the
 same scaffold. Only the context differs.
 
-    arm A   the whole brand .md in the prompt        (the honest baseline)
+    arm A   the GENERATED brand document                 (what you'd ship)
     arm B   resolve() for this question only         (this layer)
 
 **The validator scores both arms.** That is the part that makes this a real
@@ -44,7 +44,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import config, kb, resolve as rs, validator  # noqa: E402
+from app import config, dossier, kb, resolve as rs, validator  # noqa: E402
 
 SYSTEM = """You are answering a customer for this brand. Use only what the
 context supports. If you do not know something, say so plainly rather than
@@ -52,32 +52,15 @@ guessing. Answer in 2-4 sentences."""
 
 
 def brand_md(tenant: str) -> str:
-    """The baseline: everything about the brand, as one document.
+    """Arm A is now `dossier.build()` — the document this layer COMPILES.
 
-    This is a fair rendering of what a good .md file holds — the rules, the
-    positioning, the voice, every approved claim and every objection. It is
-    not a straw man, and on a small account it is a strong opponent.
+    It started as a hand-rolled baseline to beat, and that was the wrong
+    frame. The two arms are not layer-versus-document; they are two ways of
+    spending the same knowledge base. Arm A sends all of it, cached. Arm B
+    sends the part that bears on the question. Testing against a document
+    nobody would ship told us nothing about the choice actually in front of us.
     """
-    b = kb.brand(tenant)
-    inv = kb.claim_inventory(tenant)["selectable"]
-    objs = kb.objections(tenant, any_entity=True)
-    ents = kb.entities(tenant, available_only=False)
-    lines = [f"# {b.display_name if b else tenant}", ""]
-    if b:
-        lines += [f"Positioning: {b.positioning or '—'}",
-                  f"Voice: {', '.join((b.voice or {}).get('tone') or []) or '—'}",
-                  "", "## Never say", *[f"- {x}" for x in (b.banned_claims or [])]]
-    lines += ["", "## Claims"]
-    for c in inv:
-        lines.append(f"- {c.claim} ({c.evidence or 'no evidence'}) "
-                     f"[{c.entity_key or 'brand-wide'}]")
-    lines += ["", "## Objections"]
-    for o in objs:
-        lines.append(f"- Q: {o.objection}\n  A: {o.response}")
-    lines += ["", "## Products"]
-    for e in ents[:120]:
-        lines.append(f"- {e.name} ({e.key}) {e.price or ''} {e.availability}")
-    return "\n".join(lines)
+    return dossier.build(tenant)["markdown"]
 
 
 def bundle_text(tenant: str, q: str) -> tuple[str, dict]:
@@ -156,7 +139,9 @@ def main() -> int:
 
     md = brand_md(t)
     print(f"# A/B on {t}   {len(qs)} questions")
-    print(f"# arm A .md is {len(md)} chars\n")
+    meta = dossier.build(t)
+    print(f"# arm A document: {meta['approx_tokens']} tokens, "
+          f"etag {meta['etag']} — {meta['advice'][:70]}\n")
 
     totals = {"a": {"tok": 0, "viol": 0, "sec": 0.0},
               "b": {"tok": 0, "viol": 0, "sec": 0.0}}
