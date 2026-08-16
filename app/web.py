@@ -1716,6 +1716,31 @@ def archive_search(request: Request, auth: str = Depends(read_key),
     return archive.search(tenant, q, limit=limit)
 
 
+@app.get("/admin/tenant_reset")
+def tenant_reset(key: str = Depends(admin_key), tenant: str = "",
+                 groups: str = "knowledge,operations", apply: int = 0) -> dict:
+    """Empty ONE account, showing the damage before doing it.
+
+    Wiping the whole database to rehearse onboarding does not work:
+    `tenants.seed()` puts the five accounts back and `kb_seed` repopulates
+    three of them from hardcoded facts, ban lists included. You get a
+    pre-filled Baci, not a blank client.
+
+    Reports by default. `apply=1` deletes. `groups=` is any of
+    knowledge | operations | access — and **access is excluded by default**,
+    because deleting credentials makes your client redo OAuth rather than
+    making work for you.
+
+    Refuses an empty tenant: that is UNASSIGNED, and deleting on it would
+    erase every unattributed row in the system.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import reset as rs_reset
+    picked = tuple(g.strip() for g in groups.split(",") if g.strip())
+    return rs_reset.reset(tenant, groups=picked, apply=bool(apply))
+
+
 @app.get("/readiness")
 def readiness(request: Request, auth: str = Depends(read_key),
               tenant: str = "") -> dict:
