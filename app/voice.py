@@ -95,6 +95,69 @@ def measure(texts: list[str]) -> dict:
     }
 
 
+def describe(m: dict) -> list[dict]:
+    """Turn the measurements into words, deterministically.
+
+    Not an inference — a restatement. Each descriptor carries the number it
+    came from, so it can be disagreed with by looking rather than by trusting.
+    That is what separates this from the model half: no judgement is being
+    made, a threshold is being crossed.
+
+    It exists because the model half can be unavailable — an exhausted key, a
+    spend limit — and an account still needs a voice to unblock `/resolve`.
+    Measured-only has to be worth something on its own.
+    """
+    if not m.get("sentences"):
+        return []
+    out = []
+
+    def add(word, why):
+        out.append({"word": word, "because": why})
+
+    c = m["contractions_per_100w"]
+    if c < 0.5:
+        add("formal", f"{c} contractions per 100 words — it writes 'do not'")
+    elif c > 2.0:
+        add("conversational", f"{c} contractions per 100 words")
+
+    w = m["avg_sentence_words"]
+    if w < 12:
+        add("brisk", f"{w} words per sentence")
+    elif w > 20:
+        add("expansive", f"{w} words per sentence")
+
+    if m["exclamations_pct"] < 1:
+        add("understated", f"{m['exclamations_pct']}% of sentences exclaim")
+    elif m["exclamations_pct"] > 5:
+        add("energetic", f"{m['exclamations_pct']}% of sentences exclaim")
+
+    if m["second_person_per_100w"] > 2:
+        add("direct", f"{m['second_person_per_100w']} 'you' per 100 words")
+    if m["avg_word_length"] < 5.2:
+        add("plain", f"{m['avg_word_length']} letters per word")
+    return out[:MAX_TONE_WORDS]
+
+
+def sample_warnings(m: dict) -> list[str]:
+    """What about this sample would mislead a reader of the numbers.
+
+    A brand does not ask 13.9% of its sentences as questions — an FAQ page
+    does, and its headings are customer objections rather than brand voice.
+    Reporting the metric without this makes the sample look like a voice it is
+    not. (Those headings are worth mining as objections, which is a different
+    job for `extract.extract_qa`.)
+    """
+    out = []
+    if m.get("questions_pct", 0) > 8:
+        out.append(
+            f"{m['questions_pct']}% of sentences are questions — that is an "
+            f"FAQ in the sample, not a brand that asks things. The tone words "
+            f"are still fair; the question rate is not a voice trait here.")
+    if m.get("sentences", 0) < MIN_SENTENCES:
+        out.append(f"only {m['sentences']} sentences — too few to lean on")
+    return out
+
+
 def _drop_banned(tenant: str, sents: list[str]) -> tuple[list[str], list[str]]:
     """Remove anything the brand has barred itself from saying.
 
@@ -180,11 +243,20 @@ def propose(tenant: str, texts: list[str]) -> dict:
     stats = measure(kept)
     inferred, why = _infer(tenant, kept) if kept else ({}, "nothing to read")
 
-    tone = inferred.get("tone", [])
+    measured_words = describe(stats)
+    # The model's tone words when they exist, the measured ones when they do
+    # not. An account still needs a voice to unblock a draft, and an exhausted
+    # key is not a reason to leave the field empty when the arithmetic already
+    # said something defensible.
+    tone = inferred.get("tone", []) or [d["word"] for d in measured_words]
     return {
         "tenant": tenant,
         "measured": stats,
+        "measured_descriptors": measured_words,
+        "sample_warnings": sample_warnings(stats),
         "tone": tone,
+        "tone_from": ("model, with evidence" if inferred.get("tone")
+                      else "measurement only — no model ran"),
         "suggested_command": (
             f"set tone: {', '.join(tone)}" if tone else ""),
         "evidence": inferred.get("exemplars", []),

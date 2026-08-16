@@ -83,11 +83,34 @@ def main() -> int:
            str(dropped))
         ck("everything else survives", len(kept) == len(WARM))
 
+        print("\n— measured words stand on their own when no model runs —")
+        # Baci's real numbers, from 876 sentences of its own site.
+        real = {"sentences": 876, "enough": True, "avg_sentence_words": 9.7,
+                "avg_word_length": 5.0, "contractions_per_100w": 0.1,
+                "second_person_per_100w": 1.4,
+                "first_person_plural_per_100w": 1.1,
+                "questions_pct": 13.9, "exclamations_pct": 0.1, "why": ""}
+        d = voice.describe(real)
+        words = [x["word"] for x in d]
+        ck("0.1 contractions per 100 words reads as formal", "formal" in words,
+           str(words))
+        ck("9.7-word sentences read as brisk", "brisk" in words)
+        ck("and never exclaiming reads as understated", "understated" in words)
+        ck("every word carries the number it came from",
+           all(x["because"] for x in d), str(d[:1]))
+        ck("it stays inside set_brand's limit", len(d) <= voice.MAX_TONE_WORDS,
+           str(len(d)))
+
+        warn = voice.sample_warnings(real)
+        ck("a 13.9% question rate is called out as an FAQ, not a voice",
+           any("FAQ" in w for w in warn), str(warn))
+
         print("\n— with no model, it measures and says why —")
         out = voice.propose("baci", WARM + [BANNED_SENTENCE])
-        ck("no tone is invented", out["tone"] == [], str(out["tone"]))
-        ck("the reason is carried", "ANTHROPIC" in out["degraded"],
-           out["degraded"])
+        ck("no tone is INVENTED — what comes back is measured",
+           out["tone_from"].startswith("measurement"), out["tone_from"])
+        ck("the reason the model did not run is carried",
+           "ANTHROPIC" in out["degraded"], out["degraded"])
         ck("but the measurements still arrive",
            out["measured"]["sentences"] == 6)
         ck("and the banned sentence is accounted for",
