@@ -213,7 +213,14 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                 # this line missing: the body was in hand right here and was
                 # thrown away, so a later agent could name the thread and not
                 # quote a word of it. Quoted history is stripped on the way in.
-                body_excerpt=archive.clean(email.get("body") or "")[:archive.MAX_STORED],
+                # Filtered at WRITE time, not just at index time: a marketing
+                # blast should not occupy a row of the archive either. The
+                # bucket triage already assigned decides it, so this costs no
+                # extra classification.
+                body_excerpt=(
+                    archive.clean(email.get("body") or "")[:archive.MAX_STORED]
+                    if archive.indexable(bucket, email.get("from", ""),
+                                         email.get("body") or "")[0] else None),
             ))
             s.commit()
 
@@ -238,8 +245,12 @@ def bucket_backfill() -> None:
                         thread_id=email["threadId"], sender=email["from"],
                         subject=email["subject"], category=bucket,
                         action="labeled", detail="backfill",
-                        body_excerpt=archive.clean(
-                            email.get("body") or "")[:archive.MAX_STORED],
+                        body_excerpt=(
+                            archive.clean(
+                                email.get("body") or "")[:archive.MAX_STORED]
+                            if archive.indexable(
+                                bucket, email.get("from", ""),
+                                email.get("body") or "")[0] else None),
                     ))
                     s.commit()
                 total += 1

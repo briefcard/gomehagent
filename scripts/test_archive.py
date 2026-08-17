@@ -126,6 +126,51 @@ def main() -> int:
            "document" in found["unsearched_kinds"] and found["hits"],
            "one empty store made a good search read as 'nothing searched'")
 
+
+        print("\n— noise never reaches the index —")
+        with db.SessionLocal() as s:
+            s.add(db.EmailLog(tenant="baci", account="baci",
+                              gmail_message_id="m-promo", thread_id="t-p",
+                              sender="deals@brand.com", subject="50% OFF TODAY",
+                              category="promo",
+                              body_excerpt="Shop the pallet sale now! " * 20))
+            s.add(db.EmailLog(tenant="baci", account="baci",
+                              gmail_message_id="m-bot", thread_id="t-b",
+                              sender="no-reply@shopify.com",
+                              subject="Order confirmation",
+                              category="order_routine",
+                              body_excerpt="Your order shipped. " * 20))
+            s.add(db.EmailLog(tenant="baci", account="baci",
+                              gmail_message_id="m-thanks", thread_id="t-t",
+                              sender="real@customer.com", subject="Re: crates",
+                              category="client_comms",
+                              body_excerpt="Thanks!"))
+            s.commit()
+        r = archive.index("baci", kind="thread")
+        ck("a promo blast is declined", r["declined_total"] >= 3, str(r["declined"]))
+        ck("and the reason is legible, not a silent drop",
+           any("promo" in k for k in r["declined"]), str(list(r["declined"])))
+        ck("so is an automated sender",
+           any("automated" in k for k in r["declined"]), str(list(r["declined"])))
+        ck("and a two-word reply",
+           any("chars" in k for k in r["declined"]), str(list(r["declined"])))
+
+        promo = archive.search("baci", "pallet sale")
+        ck("the promo cannot be retrieved at all",
+           not any(h.get("subject") == "50% OFF TODAY" for h in promo["hits"]),
+           "it has content; it is content nobody will ever look for")
+        ck("but the real thread still is",
+           archive.search("baci", ASKED)["hits"], "the filter is not a mute")
+
+        print("\n— an order thread is KEPT, unlike mining —")
+        # email_harvest excludes sales_orders so a customer's words are not
+        # mined as brand claims. That says nothing about whether anyone will
+        # later ask what shipped on which order.
+        ck("sales_orders is not skipped by the archive",
+           "sales_orders" not in archive.SKIP_BUCKETS,
+           "mining and archiving exclude for different reasons")
+        ck("nor is urgent_money", "urgent_money" not in archive.SKIP_BUCKETS)
+
         print("\n— a long document is chunked, or only page one is findable —")
         # Genuinely past CHUNK_CHARS — the first version of this test was 300
         # characters and "proved" chunking by not needing it.

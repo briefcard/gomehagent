@@ -30,6 +30,7 @@ forty-page contract embeds as its title page and nothing in it is findable.
 from __future__ import annotations
 
 import logging
+import re
 
 from . import db, embed
 
@@ -44,6 +45,51 @@ CHUNK_CHARS = 1800
 #: replacing the mail store — the id is kept so the full thing is one fetch
 #: away when someone actually needs it.
 MAX_STORED = 12000
+
+#: Buckets nobody will ever ask a question about. Deliberately NARROWER than
+#: `email_harvest.EXCLUDED`, and the difference is the point: mining excludes
+#: `sales_orders` and `urgent_money` so a customer's words are not mined as
+#: brand claims, which says nothing about whether anyone will later ask "what
+#: did we ship on order 10432" or "what did the bank say". Those belong in an
+#: archive. A marketing blast does not — it has content, it is simply content
+#: nobody will ever look for, and indexing it spends money to make real threads
+#: harder to find.
+SKIP_BUCKETS = frozenset({"promo", "notifications", "subscriptions"})
+
+#: Only pure acknowledgements. This started at 120 and was wrong: the suite's
+#: own realistic thread — "Confirming the crates arrived broken on the March
+#: shipment. We agreed to credit the damaged units on the next invoice." — is
+#: 118 characters, and dropping it would have discarded a commitment while
+#: reporting success.
+#:
+#: The asymmetry decides the number. Keeping "Thanks!" costs one weak vector
+#: that will never outrank a substantive one; dropping "Yes, we can ship by
+#: Friday" (27 chars) loses a promise somebody made. So the floor removes
+#: acknowledgements and nothing else — bucket and sender do the real filtering.
+MIN_INDEXABLE_CHARS = 20
+
+#: Nothing sent from these is a conversation.
+AUTOMATED_SENDER = re.compile(
+    r"(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon|postmaster|"
+    r"bounce|notification[s]?@|automated@)", re.I)
+
+
+def indexable(bucket: str, sender: str, text: str) -> tuple[bool, str]:
+    """Is this worth keeping, and if not, why not.
+
+    Returns a REASON rather than a bare False so the backfill can report what
+    it declined and you can disagree with it. A filter that silently drops mail
+    is indistinguishable from one that is broken.
+    """
+    if (bucket or "").strip().lower() in SKIP_BUCKETS:
+        return False, f"{bucket} — nobody asks a question about this"
+    if sender and AUTOMATED_SENDER.search(sender):
+        return False, "automated sender — not a conversation"
+    body = (text or "").strip()
+    if len(body) < MIN_INDEXABLE_CHARS:
+        return False, (f"{len(body)} chars — too short to answer anything, "
+                       f"and it would dilute every search")
+    return True, ""
 
 
 def clean(text: str) -> str:
@@ -130,22 +176,31 @@ def index(tenant: str, kind: str = "thread", limit: int = 200) -> dict:
             rows = (s.query(db.EmailLog)
                     .filter(db.tenant_filter(db.EmailLog, tenant))
                     .order_by(db.EmailLog.seen_at.desc()).limit(limit).all())
-            items = [(r.id, f"{r.subject or ''}\n\n{r.body_excerpt or ''}".strip())
-                     for r in rows]
+            items = [(r.id, f"{r.subject or ''}\n\n{r.body_excerpt or ''}".strip(),
+                      r.category or "", r.sender or "") for r in rows]
         else:
             rows = (s.query(db.DocIndex)
                     .filter(db.tenant_filter(db.DocIndex, tenant))
                     .order_by(db.DocIndex.created_at.desc()).limit(limit).all())
+            # A filed document is there because somebody filed it — no bucket
+            # filter applies, only the length floor.
             items = [(r.id, f"{r.filename or ''} {r.anchor or ''}\n\n"
-                            f"{r.text_excerpt or ''}".strip()) for r in rows]
+                            f"{r.text_excerpt or ''}".strip(), "", "")
+                     for r in rows]
         s.expunge_all()
 
     wrote = chunked = no_text = 0
     why = ""
-    for row_id, text in items:
+    declined: dict[str, int] = {}
+    for row_id, text, bucket, sender in items:
         body = text.split("\n\n", 1)[1] if "\n\n" in text else ""
         if not body.strip():
             no_text += 1
+            continue
+        ok, reason = indexable(bucket, sender, body)
+        if not ok:
+            key = reason.split("—")[0].strip() or reason
+            declined[key] = declined.get(key, 0) + 1
             continue
         n, err = _index(tenant, kind, row_id, text)
         wrote += n
@@ -154,7 +209,8 @@ def index(tenant: str, kind: str = "thread", limit: int = 200) -> dict:
     return {
         "tenant": tenant, "kind": kind, "rows": len(items),
         "indexed_rows": chunked, "chunks_written": wrote,
-        "no_text_stored": no_text, "why": why,
+        "no_text_stored": no_text, "declined": declined,
+        "declined_total": sum(declined.values()), "why": why,
         "note": ("" if not no_text else
                  f"{no_text} rows are catalogued but hold no text — those are "
                  f"findable by subject and unanswerable in content, which is "
