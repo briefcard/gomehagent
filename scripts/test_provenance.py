@@ -331,6 +331,22 @@ ck("and it merges nothing",
    "nothing was merged" in rep["note"],
    "the surviving id is what every objection's claim_id points at")
 
+print("\n— approval freezes a row whatever wrote it first —")
+# may_write said "same origin may refresh", justified by "a human editing the
+# row makes its origin theirs". True of update_claim; NOT of approve(), which
+# leaves origin alone. So a machine-authored row a human APPROVED stayed
+# machine-origin and that machine could overwrite the sign-off for ever.
+ck("a proposed row is still refinable by its own source",
+   prov.may_write("response", "agent", prov.PROPOSED, "agent"))
+ck("but once approved, its author is locked out",
+   not prov.may_write("response", "agent", prov.APPROVED, "agent"),
+   "approve() does not change origin, so origin cannot be the guard")
+ck("a human may still correct it",
+   prov.may_write("response", "agent", prov.APPROVED, "human"))
+ck("and a store sync may still refresh its own approved rows",
+   prov.may_write("description", "store_sync", prov.APPROVED, "store_sync"),
+   "250 products through a review queue is a queue nobody opens")
+
 print()
 if _fail:
     print(f"{len(_fail)} FAILED: {_fail}")

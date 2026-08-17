@@ -4,7 +4,7 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from . import approvals, config, db, digest, gmail_client, triage, voice_learn, whatsapp
+from . import approvals, archive, config, db, digest, gmail_client, triage, voice_learn, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("worker")
@@ -208,6 +208,12 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                 account=alias, tenant=tenant, gmail_message_id=email["id"], thread_id=email["threadId"],
                 sender=email["from"], subject=email["subject"],
                 category=bucket, action=logged, detail=detail,
+                # What was SAID, not just that it arrived. Every draft that
+                # invented a detail or asked for one it should have had was
+                # this line missing: the body was in hand right here and was
+                # thrown away, so a later agent could name the thread and not
+                # quote a word of it. Quoted history is stripped on the way in.
+                body_excerpt=archive.clean(email.get("body") or "")[:archive.MAX_STORED],
             ))
             s.commit()
 
@@ -232,6 +238,8 @@ def bucket_backfill() -> None:
                         thread_id=email["threadId"], sender=email["from"],
                         subject=email["subject"], category=bucket,
                         action="labeled", detail="backfill",
+                        body_excerpt=archive.clean(
+                            email.get("body") or "")[:archive.MAX_STORED],
                     ))
                     s.commit()
                 total += 1

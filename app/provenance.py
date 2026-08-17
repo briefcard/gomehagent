@@ -163,11 +163,26 @@ def may_write(field: str, existing_origin: str, existing_review: str,
         return True                      # still a proposal — refine it freely
     if field in OWNED.get(incoming_origin, frozenset()):
         return True                      # this source owns the field outright
-    # A source may always refresh a row it created and no human has since
-    # taken over. Without this a nightly catalogue sync would raise a conflict
-    # every time a product description changed on the storefront — noise that
-    # would bury the conflicts that actually mean something. The moment a human
-    # edits the row its origin becomes theirs, and the sync is locked out.
+    # A source may refresh a row it created and no human has since taken over.
+    # Without this a nightly catalogue sync would raise a conflict every time a
+    # product description changed on the storefront — noise that would bury the
+    # conflicts that actually mean something.
+    #
+    # But ONLY a source whose rows land approved without review may do it. That
+    # restriction is the fix for a real hole: this line said "same origin wins"
+    # and its comment justified it with "the moment a human edits the row its
+    # origin becomes theirs" — which is true of `update_claim` and NOT of
+    # `approve()`, which leaves origin alone. So an agent-authored row that a
+    # human APPROVED still read as agent-origin, and the agent could overwrite
+    # a signed-off answer for ever, silently, with no conflict recorded.
+    #
+    # Found by proposing the same objection twice with an approval in between:
+    # "Yes 5-7 days." became "ACTUALLY 20 DAYS AND WE LOSE PARCELS" and stayed
+    # marked approved. Every other origin is PROPOSED on write, so the check
+    # above already lets it refine freely until somebody signs it off — after
+    # which the row is the human's, whatever wrote it first.
+    if incoming_origin not in AUTO_APPROVED:
+        return False
     return existing_origin == incoming_origin
 
 

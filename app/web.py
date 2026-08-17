@@ -1741,6 +1741,52 @@ def tenant_reset(key: str = Depends(admin_key), tenant: str = "",
     return rs_reset.reset(tenant, groups=picked, apply=bool(apply))
 
 
+@app.post("/propose")
+async def propose_row(request: Request, auth: str = Depends(read_key)) -> dict:
+    """An agent filing what it did NOT know, with its best answer attached.
+
+    POST because it writes, unlike most of this console — the GET-that-mutates
+    debt in DEFECTS is not worth adding to, and a browser prefetch must never
+    file a proposal.
+
+    Body: {tenant, kind: objection|claim|situation, ...fields}. Nothing lands
+    usable: `origin="agent"` is not in AUTO_APPROVED, so every row written here
+    is PROPOSED and invisible to selection until a human approves it.
+
+    This is the alternative to asking. A question in an inbox gets answered
+    once and kept nowhere; a proposal gets approved once and answers every
+    future system.
+    """
+    if not auth:
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return {"error": "send a JSON body"}
+
+    from . import propose as pr
+    tenant = (body.get("tenant") or "").strip()
+    kind = (body.get("kind") or "").strip()
+    if not tenant:
+        return {"error": "need tenant"}
+    ref = body.get("source_ref") or ""
+
+    if kind == "objection":
+        return pr.objection(tenant, body.get("question", ""),
+                            body.get("answer", ""), source_ref=ref,
+                            situations=body.get("situations") or [],
+                            entity_key=body.get("entity_key", ""))
+    if kind == "claim":
+        return pr.claim(tenant, body.get("claim", ""), body.get("evidence", ""),
+                        source_ref=ref,
+                        situations=body.get("situations") or [],
+                        entity_key=body.get("entity_key", ""))
+    if kind == "situation":
+        return pr.situation(tenant, body.get("tag", ""),
+                            body.get("description", ""), source_ref=ref)
+    return {"error": "kind must be objection, claim or situation"}
+
+
 @app.get("/readiness")
 def readiness(request: Request, auth: str = Depends(read_key),
               tenant: str = "") -> dict:
