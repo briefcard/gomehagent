@@ -1676,6 +1676,77 @@ def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
     return doc
 
 
+@app.get("/admin/threads")
+def admin_threads(key: str = Depends(admin_key), tenant: str = "",
+                  pick: str = "", q: str = "", limit: int = 25,
+                  full: int = 0) -> dict:
+    """What is actually in this inbox's archive, so you can look at it.
+
+    Search answers "find me the one about X" and `draft_test` shows the ones it
+    happened to choose. Neither lets you browse, and until you can see what is
+    in there you cannot tell a thin archive from a thin filter.
+
+    `by_bucket` first, because that is the shape of the account: it tells you
+    what `pick=` is worth trying and how much of the inbox is noise. Each row
+    carries its `message_id` so it can be handed straight to `draft_test`.
+
+    `indexed` is the one that matters — a row can hold a body and still be
+    unsearchable if nothing embedded it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import archive, embed
+
+    with db.SessionLocal() as s:
+        base = s.query(db.EmailLog).filter(db.tenant_filter(db.EmailLog, tenant))
+        by_bucket: dict[str, dict] = {}
+        for r in base.all():
+            b = by_bucket.setdefault(r.category or "(unclassified)",
+                                     {"total": 0, "with_body": 0})
+            b["total"] += 1
+            if (r.body_excerpt or "").strip():
+                b["with_body"] += 1
+
+        rows_q = base
+        if pick:
+            rows_q = rows_q.filter(db.EmailLog.category == pick)
+        if q:
+            like = f"%{q}%"
+            rows_q = rows_q.filter(db.EmailLog.subject.ilike(like))
+        rows = rows_q.order_by(db.EmailLog.seen_at.desc()).limit(limit).all()
+        s.expunge_all()
+
+    indexed = {e.row_id.split("#")[0] for e in embed.BACKEND.rows(tenant, "thread")}
+    out = []
+    for r in rows:
+        body = (r.body_excerpt or "").strip()
+        ok, why = archive.indexable(r.category or "", r.sender or "", body or "x" * 999)
+        out.append({
+            "message_id": r.gmail_message_id,
+            "subject": r.subject or "(no subject)",
+            "from": r.sender or "",
+            "bucket": r.category or "",
+            "when": r.seen_at,
+            "has_body": bool(body),
+            "indexed": r.id in indexed,
+            "would_keep": ok,
+            "skipped_because": "" if ok else why,
+            "excerpt": body if full else body[:220],
+        })
+
+    return {
+        "tenant": tenant,
+        "by_bucket": dict(sorted(by_bucket.items(),
+                                 key=lambda kv: -kv[1]["total"])),
+        "shown": len(out),
+        "threads": out,
+        "how_to": ("pass a message_id to /admin/draft_test to rehearse a reply "
+                   "to that exact thread; add full=1 here to read one whole"),
+    }
+
+
 @app.get("/admin/draft_test")
 def draft_test(key: str = Depends(admin_key), tenant: str = "",
                message_id: str = "", pick: str = "", limit: int = 3) -> dict:
