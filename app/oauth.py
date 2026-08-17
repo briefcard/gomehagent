@@ -60,6 +60,24 @@ def _google_client() -> tuple[str, str]:
     return config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET
 
 
+def _canva_client() -> tuple[str, str]:
+    return config.CANVA_CLIENT_ID, config.CANVA_CLIENT_SECRET
+
+
+def _identify_canva(access_token: str, payload: dict) -> dict:
+    import httpx
+    try:
+        r = httpx.get("https://api.canva.com/rest/v1/users/me",
+                      headers={"Authorization": f"Bearer {access_token}"},
+                      timeout=20)
+        if r.status_code >= 400:
+            return {}
+        d = (r.json() or {}).get("team_user") or {}
+        return {"label": d.get("user_id", ""), "team_id": d.get("team_id", "")}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
 def _meta_client() -> tuple[str, str]:
     return config.META_APP_ID, config.META_APP_SECRET
 
@@ -127,6 +145,23 @@ FLOWS: dict[str, dict] = {
         stores="long_lived",
         identify=_identify_meta,
     ),
+    "canva": dict(
+        authorize="https://www.canva.com/api/oauth/authorize",
+        token="https://api.canva.com/rest/v1/oauth/token",
+        # Asked for once. `folder:write` is not optional here: every design and
+        # asset this platform creates is filed into that account's own folder,
+        # and without it they land loose in a shared team space where one
+        # client's work sits next to another's.
+        scopes=["asset:read", "asset:write",
+                "design:content:read", "design:content:write",
+                "design:meta:read", "folder:read", "folder:write",
+                "brandtemplate:content:read", "profile:read"],
+        extra={},
+        client=_canva_client,
+        stores="refresh_token",
+        identify=_identify_canva,
+        pkce=True,
+    ),
 }
 
 
@@ -168,13 +203,53 @@ def _sig(body: str) -> str:
                          body.encode(), hashlib.sha256).digest())
 
 
+def _pkce_pair() -> tuple[str, str]:
+    """A PKCE verifier and its S256 challenge.
+
+    Canva Connect requires PKCE even for a confidential client, so this is not
+    optional for that provider.
+    """
+    import base64
+    import hashlib
+    import secrets as _secrets
+    verifier = _b64(_secrets.token_bytes(48))
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    return verifier, challenge
+
+
 def sign_state(tenant: str, provider: str, connect_token: str = "",
-               via: str = "connect") -> str:
-    body = _b64(json.dumps({"tenant": tenant, "p": provider,
-                            "t": connect_token, "via": via,
-                            "exp": int(time.time()) + STATE_TTL},
-                           separators=(",", ":"), sort_keys=True).encode())
+               via: str = "connect", verifier: str = "") -> str:
+    """Sign the round-trip payload. `verifier` rides ENCRYPTED, not merely signed.
+
+    The PKCE verifier has to survive a redirect through the provider and come
+    back, and it must stay secret while it does — a signed-but-readable state
+    would hand it to anyone who can see the URL, which is the interception PKCE
+    exists to stop. So it is encrypted with the credential key: the provider
+    and anything reading the address bar see ciphertext, and only this service
+    can recover it. That keeps the codebase's rule that sign-in state is never
+    a database row, without making the verifier public to buy it.
+    """
+    payload = {"tenant": tenant, "p": provider, "t": connect_token,
+               "via": via, "exp": int(time.time()) + STATE_TTL}
+    if verifier:
+        from . import credentials as _cred
+        payload["v"] = _cred._encrypt(verifier)
+    body = _b64(json.dumps(payload, separators=(",", ":"),
+                           sort_keys=True).encode())
     return f"{body}.{_sig(body)}"
+
+
+def state_verifier(data: dict) -> str:
+    """Recover the PKCE verifier from a validated state payload."""
+    blob = (data or {}).get("v") or ""
+    if not blob:
+        return ""
+    try:
+        from . import credentials as _cred
+        return _cred._decrypt(blob)
+    except Exception:                                            # noqa: BLE001
+        return ""
 
 
 def read_state(state: str) -> tuple[dict, str]:
@@ -198,7 +273,7 @@ def read_state(state: str) -> tuple[dict, str]:
 # The two legs.
 # ---------------------------------------------------------------------------
 
-def authorize_url(provider: str, state: str) -> str:
+def authorize_url(provider: str, state: str, challenge: str = "") -> str:
     from urllib.parse import urlencode
     spec = FLOWS[provider]
     cid, _ = spec["client"]()
@@ -210,10 +285,15 @@ def authorize_url(provider: str, state: str) -> str:
         "state": state,
         **spec["extra"],
     }
+    if spec.get("pkce"):
+        # Sent as S256 rather than plain: a `plain` challenge is the verifier
+        # itself, which would put it in the address bar and undo the point.
+        params["code_challenge"] = challenge
+        params["code_challenge_method"] = "S256"
     return f"{spec['authorize']}?{urlencode(params)}"
 
 
-def exchange(provider: str, code: str) -> dict:
+def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
     """Consent code -> the token we intend to keep, plus what was granted.
 
     Returns {ok, secret, kind, label, granted, missing, expires_at, error}.
@@ -231,7 +311,13 @@ def exchange(provider: str, code: str) -> dict:
     cid, secret = spec["client"]()
 
     try:
-        if provider == "google":
+        if provider == "canva":
+            r = httpx.post(spec["token"], timeout=30, data={
+                "grant_type": "authorization_code", "code": code,
+                "client_id": cid, "client_secret": secret,
+                "redirect_uri": redirect_uri(provider),
+                "code_verifier": code_verifier})
+        elif provider == "google":
             r = httpx.post(spec["token"], timeout=30, data={
                 "code": code, "client_id": cid, "client_secret": secret,
                 "redirect_uri": redirect_uri(provider),

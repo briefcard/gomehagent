@@ -92,6 +92,17 @@ PROVIDERS: dict[str, dict] = {
               "then Continue. Leave every permission ticked; unticking one "
               "switches off the part of the system that uses it.",
         starts=""),
+    "canva": dict(
+        name="Canva",
+        kind="oauth",
+        capability="design",
+        field="",
+        also={},
+        howto="Click Connect and sign in with Canva, then Allow. Leave every "
+              "permission ticked — folder access is what keeps this account's "
+              "designs in their own folder instead of loose in a shared team "
+              "workspace.",
+        starts=""),
     "meta_ads": dict(
         name="Meta Ads",
         kind="oauth",
@@ -117,6 +128,7 @@ GRANTS: dict[str, tuple[str, ...]] = {
     "klaviyo": ("esp",),
     "wordpress": ("cms",),
     "meta_ads": ("ads",),
+    "canva": ("design",),
 }
 
 

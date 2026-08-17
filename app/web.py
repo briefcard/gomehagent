@@ -1155,8 +1155,14 @@ def connect_oauth_start(token: str, provider: str):
     why = oauth.configured(provider)
     if why:
         return RedirectResponse(f"/connect/{token}?err={quote(why)}", 303)
-    state = oauth.sign_state(link.tenant, provider, connect_token=token)
-    return RedirectResponse(oauth.authorize_url(provider, state), 303)
+    # PKCE where the provider demands it. The verifier rides encrypted inside
+    # the signed state, so it survives the round trip without appearing in any
+    # address bar — see `oauth.sign_state`.
+    verifier, challenge = oauth._pkce_pair() if oauth.FLOWS.get(
+        provider, {}).get("pkce") else ("", "")
+    state = oauth.sign_state(link.tenant, provider, connect_token=token,
+                             verifier=verifier)
+    return RedirectResponse(oauth.authorize_url(provider, state, challenge), 303)
 
 
 @app.get("/admin/oauth/{provider}")
@@ -1178,8 +1184,10 @@ def admin_oauth_start(provider: str, request: Request,
     why = oauth.configured(provider)
     if why:
         return {"error": why}
-    state = oauth.sign_state(tenant, provider, via="admin")
-    return RedirectResponse(oauth.authorize_url(provider, state), 303)
+    verifier, challenge = oauth._pkce_pair() if oauth.FLOWS.get(
+        provider, {}).get("pkce") else ("", "")
+    state = oauth.sign_state(tenant, provider, via="admin", verifier=verifier)
+    return RedirectResponse(oauth.authorize_url(provider, state, challenge), 303)
 
 
 @app.get("/oauth/{provider}/callback", response_class=HTMLResponse)
@@ -1227,7 +1235,9 @@ def oauth_callback(provider: str, request: Request, code: str = "",
                 row.last_used_at = db.utcnow()
                 s.commit()
 
-    result = oauth.exchange(provider, code)
+    # The verifier comes back out of the state it went in with.
+    result = oauth.exchange(provider, code,
+                            code_verifier=oauth.state_verifier(data))
     if not result["ok"]:
         return RedirectResponse(f"{back}?err={quote(result['error'])}", 303)
     stored = cred.store_oauth(tenant, provider, result, granted_by=granted_by)

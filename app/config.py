@@ -22,6 +22,10 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 # signing in rather than by anyone creating anything.
 META_APP_ID = os.environ.get("META_APP_ID", "")
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
+# Canva Connect. Create the integration at canva.com/developers, and register
+# the redirect URI the console prints -- it must match byte for byte.
+CANVA_CLIENT_ID = os.environ.get("CANVA_CLIENT_ID", "")
+CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
 
 # How many sent threads one nightly backfill window reads. A mailbox holds
 # years and a request holds seconds, so history is walked on a schedule — a few

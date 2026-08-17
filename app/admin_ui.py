@@ -59,7 +59,9 @@ FIELD_HELP = {
         "Render and reference them here. HubSpot: a private app token."),
     "design": (
         "Canva assets for posts and flyers",
-        "NOT CONNECTED YET. Canva Connect is OAuth, so it needs the auth layer "
+        "Connect it on this tab. Canva Connect is OAuth with PKCE — set "
+        "CANVA_CLIENT_ID / CANVA_CLIENT_SECRET and register the redirect URI "
+        "shown beside the provider. Each account gets its own folder. "
         "built before this field does anything. Leave blank."),
     "systems": (
         "Which pipelines run for this account",

@@ -184,6 +184,42 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## Canva, and where each account's work lives
+
+Canva is a real provider now — OAuth **with PKCE**, which Canva Connect requires
+even of a confidential client. `oauth.py` gained generic PKCE rather than a
+Canva branch: `_pkce_pair()`, a `pkce` flag on the flow, and the verifier
+carried **encrypted** inside the signed state. Signing alone would not do — a
+readable state hands the verifier to anyone who can see the URL, which is the
+interception PKCE exists to prevent. Encrypting it keeps the codebase's rule
+that sign-in state is never a database row without making the secret public to
+buy it.
+
+**Every call is scoped to one account, structurally.** Nothing in `app/canva.py`
+takes a folder id from a caller; it is looked up from the tenant row and created
+on first use. A design cannot be filed into another client's folder because
+there is no argument for saying which folder to use — the same reasoning as
+`tool_scope` stripping the account parameter out of a tool's schema. Two levels:
+one root (`Client work — gomehagent`) so a team that also uses Canva by hand
+keeps its own work separate, and one folder per account inside it. The id is
+remembered on `Tenant.design`, not searched for by name — a name search
+eventually matches a renamed folder or creates a second one, and two folders
+called "Baci Milano USA" is exactly the state where work goes into the wrong one.
+
+**Both sides are written together.** `create_design` files the design in Canva
+AND records a `KbAsset` carrying `canva_design_id`, the entity it is about, and
+`rights="owned"`. A design nothing names is invisible to every skill — it cannot
+be selected, credited when used, or carry a result. `reconcile()` reports drift
+in both directions and says which one is dangerous: a row naming a design that
+no longer opens is worse than an unrecorded design, because a skill will select
+it and produce output pointing at nothing.
+
+`test_canva.py` (24 checks) holds all of it, including that a competitor
+reference uploaded through the same call stays unpublishable.
+
+**Unproven:** no call has been made against a real Canva account, and the OAuth
+leg has never run — same standing as Omnisend.
+
 ## Omnisend: the send path exists
 
 Connecting Omnisend used to switch on `esp` and nothing else — `campaign_email`
