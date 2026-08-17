@@ -43,7 +43,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import ledger, resolve as rs, systems, tenants, validator
+from . import kb, ledger, resolve as rs, systems, tenants, validator
 
 # ---------------------------------------------------------------------------
 # The contract
@@ -111,6 +111,56 @@ def catalogue(tenant: str = "") -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# How many times a failing draft may be handed its own failures and asked
+# again. Two, because the first repair fixes the ordinary case (a banned phrase
+# reworded) and the second catches a repair that introduced a new problem.
+# Beyond that the drafter is not converging, and more attempts buy latency and
+# API spend rather than a better answer.
+MAX_REPAIRS = 2
+
+# What each validator rule means the KNOWLEDGE BASE is missing. Repair rewrites
+# a draft; it cannot conjure a fact that was never recorded, and pretending
+# otherwise would just be inventing. So a terminal failure names the row an
+# operator should go and create — which fixes every future draft, not this one.
+#
+# Rules absent from this map are draft-level problems a rewrite genuinely can
+# solve (`banned_claim`, `repeat`), so they produce no knowledge task.
+_NEEDS = {
+    "uncited": ("an approved claim for this situation",
+                "there was no approved proof to cite, so the draft could only "
+                "assert. Add or approve a claim covering this."),
+    "claim_not_selectable": ("an approved, in-date claim",
+                             "the cited proof is retired, expired or still in "
+                             "review — approve it or replace it."),
+    "unknown_entity": ("this product or space on file",
+                       "the thing being written about is not in the entity "
+                       "list, so nothing about it can be verified."),
+    "entity_unavailable": ("current availability for this entity",
+                           "the entity is on file but marked unavailable."),
+    "no_ban_list": ("brand.banned_claims",
+                    "the validator has no rules to check against, so nothing "
+                    "here can be trusted."),
+    "unknown_account": ("a KB brand row for this account",
+                        "there is no brand record, so no rule, voice or claim "
+                        "exists to write from."),
+    "commitment_conflict": ("a resolved commitment for this conversation",
+                            "the draft contradicts something already promised "
+                            "to this contact."),
+}
+
+
+def _knowledge_needed(failures: list[dict]) -> list[dict]:
+    """The KB rows that would have prevented these failures, deduplicated."""
+    out, seen = [], set()
+    for f in failures:
+        hit = _NEEDS.get(f.get("rule", ""))
+        if not hit or hit[0] in seen:
+            continue
+        seen.add(hit[0])
+        out.append({"rule": f["rule"], "needs": hit[0], "why": hit[1]})
+    return out
+
+
 @dataclass
 class Context:
     """Everything a skill body is allowed to know, and the only way out.
@@ -153,25 +203,73 @@ class Context:
              entity_key: str = "", situation: str = "", audience_key: str = "",
              angle: str = "", fmt: str = "", destination: str = "",
              conversation_id: str = "", require_citation: bool | None = None,
-             meta: dict | None = None) -> dict:
-        """Validate one produced thing, file it, and return its disposition.
+             redraft=None, meta: dict | None = None) -> dict:
+        """Validate one produced thing, repair it if it fails, file it.
 
         The only exit. `require_citation` defaults to whether the skill claims
         to produce a draft — a compliance *report* quotes the site's own words
         back and has no claim to cite, whereas a draft that asserts something
         must say where it came from.
+
+        **`redraft` is what stops a rejection becoming a manual-review gap.**
+        Pass `redraft(previous_body, failures) -> str` and a failing draft is
+        handed its own failures — each of which already carries a `fix`, which
+        was never decoration — and asked again, up to `MAX_REPAIRS` times.
+
+        A validator that only says no teaches nothing and leaves a hole for a
+        human to patch one output at a time. The rule is not relaxed to achieve
+        this: every repaired attempt is re-validated by the same deterministic
+        check, and a draft that cannot be fixed is still blocked. What changes
+        is that the system explains and adjusts first, and that the attempt
+        history is on the record — so `repair_rate` is measurable and a rule
+        that fires constantly is visible as a rule to revisit rather than as
+        background noise.
         """
         cite = (self.skill.produces in ("draft", "proposal")
                 if require_citation is None else require_citation)
 
-        verdict = validator.check(
-            self.tenant, body, claim_ids=claim_ids or [],
-            entity_key=entity_key, conversation_id=conversation_id,
-            require_citation=cite)
+        def _check(text):
+            return validator.check(
+                self.tenant, text, claim_ids=claim_ids or [],
+                entity_key=entity_key, conversation_id=conversation_id,
+                require_citation=cite)
+
+        verdict = _check(body)
+        attempts = []          # every rejected draft, in order, with its reasons
+
+        while not verdict["ok"] and redraft and len(attempts) < MAX_REPAIRS:
+            attempts.append({"body": body, "failures": verdict["failures"]})
+            try:
+                fixed = (redraft(body, verdict["failures"]) or "").strip()
+            except Exception as exc:                             # noqa: BLE001
+                self.note(f"repair raised {exc.__class__.__name__} — keeping "
+                          f"the blocked draft rather than losing it")
+                break
+            if not fixed or fixed == body:
+                # No change is not a repair. Stopping here keeps the loop from
+                # spending attempts on a drafter that has nothing more to give.
+                break
+            body, verdict = fixed, _check(fixed)
 
         disposition = _disposition(self.autonomy, verdict["ok"],
                                    self.skill.writes)
         status = "blocked" if not verdict["ok"] else disposition
+
+        # The rejected attempts are filed too, as `repaired` when a later one
+        # succeeded. They are deliberately NOT `blocked`: `blocked` means an
+        # output was lost, and `blocked_reasons()` ranks the KB backlog by it —
+        # counting self-corrections there would inflate the backlog with
+        # problems the system already solved on its own.
+        for att in attempts:
+            ledger.record(
+                self.tenant, self.skill.system_key,
+                situation=situation, entity_key=entity_key,
+                audience_key=audience_key, claim_ids=claim_ids or [],
+                angle=angle, format=fmt or self.skill.produces,
+                status="repaired" if verdict["ok"] else "superseded",
+                blocked_on=[f["rule"] for f in att["failures"]],
+                body=att["body"], conversation_id=conversation_id,
+                run_id=self.run_id)
 
         row = ledger.record(
             self.tenant, self.skill.system_key,
@@ -183,11 +281,61 @@ class Context:
             destination=destination, body=body,
             conversation_id=conversation_id, run_id=self.run_id)
 
+        # An item that needs a human gets an approval linked to THIS RUN, which
+        # is the only way the decision can travel back and let the system earn
+        # its next rung.
+        #
+        # `notify=False` is not an optimisation. A skill emitting thirty items
+        # would otherwise fire thirty notifications, and this codebase has
+        # already had that incident once: a poller re-triggered a slow endpoint,
+        # ~200 queued drafts went out at 400 sends/minute, Meta rate-limited the
+        # pair and ~200 fallback emails landed in a minute. The existing digest
+        # poller batches and caps; nothing here should send directly.
+        if verdict["ok"] and disposition == "needs_approval":
+            try:
+                from . import approvals
+                sysrow = systems.find(self.tenant, self.skill.system_key)
+                approvals.request_approval(
+                    "skill_output",
+                    f"{self.skill.name} for {self.tenant}: {body[:80]}",
+                    {"tenant": self.tenant, "skill": self.skill.key,
+                     "output_id": row.id, "body": body[:2000]},
+                    notify=False, run_id=self.run_id,
+                    system_id=sysrow.id if sysrow else "")
+            except Exception as exc:                             # noqa: BLE001
+                self.note(f"could not queue an approval "
+                          f"({exc.__class__.__name__}) — the output is on the "
+                          f"ledger, but nothing will prompt you to decide it")
+
+        # Terminal failure is a knowledge problem, not a queue item. Say what
+        # would have prevented it, so the fix lands in the KB and holds for
+        # every future draft instead of being applied to this one by hand.
+        needs: list[dict] = []
+        if not verdict["ok"]:
+            needs = _knowledge_needed(verdict["failures"])
+            if needs:
+                try:
+                    kb.record_unknowns(
+                        self.tenant,
+                        [{"key": entity_key, "name": entity_key,
+                          "attribute": n["needs"]} for n in needs],
+                        asked_for=body[:300])
+                except Exception:                                # noqa: BLE001
+                    pass                    # never let bookkeeping lose output
+            self.note(
+                f"could not be said within the rules after "
+                f"{len(attempts)} repair attempt(s). "
+                + (needs[0]["why"] if needs else
+                   "; ".join(f["fix"] for f in verdict["failures"])[:200]))
+
         item = {"body": body, "ok": verdict["ok"],
                 "failures": verdict["failures"], "checked": verdict["checked"],
                 "disposition": disposition, "status": status,
                 "output_id": row.id, "entity_key": entity_key,
-                "claim_ids": list(claim_ids or []), "meta": meta or {}}
+                "claim_ids": list(claim_ids or []),
+                "repairs": len(attempts),
+                "repair_history": attempts,
+                "needs": needs, "meta": meta or {}}
         self.items.append(item)
         return item
 

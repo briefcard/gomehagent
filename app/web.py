@@ -2272,9 +2272,33 @@ async def agent_emit(request: Request, key: str = Depends(admin_key)) -> dict:
         status="draft" if result["ok"] else "blocked",
         blocked_on=[f["rule"] for f in result["failures"]])
 
+    # A refusal that just says no leaves the caller nothing to do but escalate,
+    # and a queue of human rewrites is not a QA layer — it is the same mistake
+    # made repeatedly with a person absorbing it. So a rejection carries the
+    # instruction to fix it, and, where a rewrite genuinely cannot (the proof
+    # does not exist), it names the KB row that would.
+    from . import skill as _skill
+    retry: dict = {}
+    if not result["ok"]:
+        needs = _skill._knowledge_needed(result["failures"])
+        retry = {
+            "action": "rewrite and POST again",
+            "attempts_advised": _skill.MAX_REPAIRS,
+            "changes": [f"{f['detail']} → {f['fix']}"
+                        for f in result["failures"]],
+            "do_not": "relax the rule, argue with it, or send this anyway — "
+                      "the same check runs on every attempt",
+            "knowledge_missing": needs,
+            "if_unfixable": ("stop rewriting and report the knowledge_missing "
+                             "entries — no wording satisfies a rule when the "
+                             "fact it needs was never recorded")
+            if needs else "",
+        }
+
     return {"ok": result["ok"], "may_send": may_send,
             "disposition": disposition, "autonomy": autonomy,
             "failures": result["failures"], "checked": result["checked"],
+            "retry": retry,
             "output_id": out.id, "system_installed": bool(row),
             "note": ("" if row else
                      f"no {system_key!r} system installed for {tenant!r} — the "

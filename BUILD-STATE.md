@@ -135,6 +135,55 @@ where it is not, saying which happened. Owner's call, and it unblocked the
 rewrite skill. §2.28 fixed the two `add_claim` silent losses carried as live
 since 14 Aug.
 
+## Rejection repairs itself — the QA layer
+
+A validator that only says no teaches nothing. It files a blocked item and
+leaves a hole for a human to patch, one output at a time, forever — and a queue
+of human rewrites is not quality assurance, it is the same mistake repeated with
+a person absorbing it.
+
+`Context.emit(redraft=...)` closes that. A failing draft is handed its own
+failures — each already carrying a `fix`, which was never decoration — and asked
+again, up to `MAX_REPAIRS` (2). **The rule is never relaxed to achieve this:**
+every repaired attempt goes through the same deterministic check, and a draft
+that cannot be fixed is still blocked. What changes is that the system explains
+and adjusts before giving up, and the attempt history is on the record.
+
+Three states now, not two. `repaired` marks a rejected attempt a later one
+fixed; `superseded` marks attempts on a run that failed anyway; `blocked` still
+means an output was lost. Keeping them apart matters because
+`blocked_reasons()` ranks the KB backlog by what actually cost output —
+counting self-corrections there would inflate it with problems already solved.
+
+**A terminal failure names missing knowledge, not a review task.** `_NEEDS` maps
+each validator rule to the KB row that would have prevented it, and the gap is
+filed through `kb.record_unknowns` so it surfaces in the queue the operator
+already works. Rules a rewrite genuinely can solve (`banned_claim`, `repeat`)
+are deliberately absent from that map and produce no knowledge task. The fix
+then holds for every future draft rather than being applied to one by hand.
+
+`/admin/agent_emit` returns the same thing as `retry` for an outside skill:
+what to change, how many attempts are advised, an explicit "do not relax the
+rule or send anyway", and — when no wording can work — the instruction to stop
+rewriting and report the missing knowledge.
+
+## The learning loop turns
+
+`SystemRun.decision` is written at last. `Approval` carried `system_id` and
+`run_id` from the start and **nothing ever populated either side**:
+`request_approval` did not accept them and `apply_decision` did not write back.
+So `systems.stats()` reported zero decided runs for every system forever,
+`can_promote` could never clear its 20-run gate, and the autonomy ladder was
+capped at `approve_all` in production. Both halves are now wired, and `emit`
+queues an approval against the run whenever the rung asks for one.
+
+That queueing is `notify=False` deliberately. A skill emitting thirty items
+would otherwise fire thirty notifications, and this codebase has had that
+incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
+400 sends/minute, Meta rate-limited the pair, ~200 fallback emails landed in a
+minute. The existing digest poller batches and caps; nothing in the substrate
+sends directly.
+
 ## The skill bridge
 
 Four routes so an outside Claude skill — the Coverings trio, the marketing pack

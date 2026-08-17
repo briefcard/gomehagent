@@ -362,6 +362,66 @@ def main():
        ledger.recent("baci", "ad_creative", 1)[0].status == "blocked")
     skill_pack.draft_ad = skill_pack._draft_ad_live
 
+    print("\n--- a rejection explains and adjusts, it does not queue a human ---")
+    # A model that says the banned thing once, then fixes it when told.
+    _tries = {"n": 0}
+
+    def _self_correcting(bundle, claim, angle, objections):
+        _tries["n"] += 1
+        if "previous attempt was rejected" in str(bundle.get("rules", {})):
+            return "Designed in Milan, made to be used every day.", ""
+        return "Every piece is hand-decorated by our artisans.", ""
+
+    skill_pack.draft_ad = _self_correcting
+    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    it = r["items"][0]
+    ck("a banned draft is repaired rather than left for someone to rewrite",
+       it["ok"] and it["repairs"] == 1, f"ok={it['ok']} repairs={it['repairs']}")
+    ck("  the rule was NOT relaxed — the final text is genuinely clean",
+       "hand-decorated" not in it["body"].lower(), it["body"][:60])
+    ck("  the rejected attempt is kept, so the repair is auditable",
+       it["repair_history"] and "hand-decorated"
+       in it["repair_history"][0]["body"].lower())
+    ck("  and it is filed as 'repaired', not 'blocked' — a self-correction "
+       "must not inflate the KB backlog",
+       ledger.recent("baci", "ad_creative", 5)[1].status == "repaired",
+       ledger.recent("baci", "ad_creative", 5)[1].status)
+
+    # A model that keeps rewording and keeps breaking the same rule.
+    _n = {"i": 0}
+
+    def _never_learns(bundle, claim, angle, objections):
+        _n["i"] += 1
+        return f"Truly hand-decorated, version {_n['i']}.", ""
+
+    skill_pack.draft_ad = _never_learns
+    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    it = r["items"][0]
+    ck("a draft that cannot be fixed is still blocked", it["status"] == "blocked")
+    ck("  and it gives up after MAX_REPAIRS, not forever",
+       it["repairs"] == skill.MAX_REPAIRS, str(it["repairs"]))
+
+    # A drafter that returns the same string is not repairing; spending the
+    # remaining attempt on it buys latency and API spend, not a better answer.
+    skill_pack.draft_ad = _fake_model("Truly hand-decorated, made in Italy.")
+    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    ck("an unchanged redraft stops the loop immediately",
+       r["items"][0]["repairs"] == 1, str(r["items"][0]["repairs"]))
+
+    # An unfixable-by-wording failure names the knowledge instead.
+    skill_pack.draft_ad = _fake_model("A plate we have no proof about at all.")
+    r = skill.run("ad_copy", "baci", entity_key="ghost-sku", variants=1)
+    if r["items"]:
+        it = r["items"][0]
+        ck("when no rewrite can work, it names the MISSING KNOWLEDGE",
+           bool(it["needs"]), str(it["failures"])[:90])
+        ck("  and says why, so the fix lands in the KB not in this one draft",
+           all(n.get("why") for n in it["needs"]),
+           str(it["needs"])[:110])
+        ck("  the operator note points at the gap, not at a review queue",
+           any("repair attempt" in n for n in r["notes"]), str(r["notes"])[-140:])
+    skill_pack.draft_ad = skill_pack._draft_ad_live
+
     print("\n--- every run is on the record, blocked ones included ---")
     runs = systems.runs(row.id, limit=100)
     ck("runs were recorded", len(runs) >= 5, f"{len(runs)} runs")

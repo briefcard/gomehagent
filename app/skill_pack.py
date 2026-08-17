@@ -532,8 +532,30 @@ def _run_ad_copy(ctx: Context) -> dict:
             degraded_note = why_not
 
         by_basis[basis.split(" (")[0]] = by_basis.get(basis.split(" (")[0], 0) + 1
+
+        def _repair(previous: str, failures: list, _c=claim, _a=angle) -> str:
+            """Hand the draft its own failures and ask again.
+
+            Only the model can repair — the composer is deterministic and would
+            return the identical string, which `emit` reads as "nothing more to
+            give" and stops on. That is the right behaviour, not a limitation:
+            with no API key there is nothing to reason about the failure with.
+            """
+            note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
+            fixed, _ = draft_ad(
+                {**ctx.bundle,
+                 "rules": {**ctx.bundle.get("rules", {}),
+                           "block": ctx.bundle.get("rules", {}).get("block", "")
+                           + f"\n\n## Your previous attempt was rejected\n"
+                             f"{previous}\n\n## Why, and what to change\n{note}\n"
+                             f"Rewrite it so none of these apply. Do not argue "
+                             f"with the rules and do not drop the claim."}},
+                _c, _a, objections)
+            return fixed
+
         ctx.emit(text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
                  audience_key=audience_key, angle=angle, fmt="ad_copy",
+                 redraft=_repair if basis == "model" else None,
                  meta={"needs_art_direction": True, "basis": basis})
 
     if degraded_note:

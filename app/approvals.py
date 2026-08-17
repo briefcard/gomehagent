@@ -12,9 +12,16 @@ from . import config, db, gmail_client, whatsapp
 _signer = URLSafeTimedSerializer(config.APPROVAL_SECRET)
 
 
-def request_approval(kind: str, summary: str, payload: dict, notify: bool = True) -> str:
+def request_approval(kind: str, summary: str, payload: dict, notify: bool = True,
+                     run_id: str = "", system_id: str = "") -> str:
     """Create a pending approval. notify=False lets the caller batch
-    notifications (one email per poll cycle instead of one per item)."""
+    notifications (one email per poll cycle instead of one per item).
+
+    `run_id` is what lets the decision travel back to the run that produced
+    this, which is how a system earns its next rung. The columns existed from
+    the start and no caller ever filled them, so `systems.stats()` reported
+    zero decided runs forever and `can_promote` could never clear its gate.
+    """
     # Attribute now, while the payload that names the client is in hand. Doing
     # it later is archaeology: the 330 approvals written before this line have
     # to be recovered from their payloads, and some of them cannot be.
@@ -22,6 +29,7 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
     with db.SessionLocal() as s:
         ap = db.Approval(kind=kind, summary=summary, payload=payload,
                          tenant=tenant_scope.resolve(payload=payload),
+                         run_id=run_id, system_id=system_id,
                          channel="whatsapp" if config.WHATSAPP_ENABLED else "email")
         s.add(ap)
         s.commit()
@@ -148,6 +156,19 @@ def apply_decision(ap_id: str, decision: str) -> str:
             return f"Already {ap.status}."
         ap.status = decision
         ap.decided_at = db.utcnow()
+        # Write the decision back onto the run that produced this.
+        #
+        # `Approval` has carried `system_id` and `run_id` since it was written
+        # and nothing ever populated the other side, so `systems.stats()`
+        # reported zero decided runs for every system forever — which meant
+        # `can_promote` could never clear its 20-run gate and the autonomy
+        # ladder was capped at `approve_all` in production. The gates, the
+        # approval rate and every "did this get better over time" question all
+        # read a field that was never written.
+        if ap.run_id:
+            run = s.get(db.SystemRun, ap.run_id)
+            if run and not run.decision:
+                run.decision = decision
         s.commit()
         if decision == "approved":
             _execute(ap)

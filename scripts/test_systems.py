@@ -69,6 +69,38 @@ def main() -> int:
     check("requires_any blocks only when NONE of the options are wired",
           any("at least one of" in b for b in systems.ready(reports)["blockers"]))
 
+    # ---- the decision has to reach the run ------------------------------
+    print("\n— deciding an output moves the system up the ladder —")
+    from app import approvals
+
+    dec = systems.find("baci", "reports") or systems.create("baci", "reports")
+    rid = systems.start_run(dec.id, "baci", trigger="test")
+    systems.finish_run(rid, "produced")
+    before = systems.stats(dec.id)
+    ap = approvals.request_approval("skill_output", "a draft to decide",
+                                    {"tenant": "baci"}, notify=False,
+                                    run_id=rid, system_id=dec.id)
+    check("an approval carries the run that produced it",
+          bool(ap), "nothing came back from request_approval")
+    check("before deciding, the run counts as undecided",
+          before["decided"] == 0, str(before))
+    approvals.apply_decision(ap, "approved")
+    after = systems.stats(dec.id)
+    check("APPROVING IT RECORDS THE DECISION ON THE RUN",
+          after["decided"] == 1 and after["approved"] == 1, str(after))
+    check("  so approval_rate is a real number, not a permanent zero",
+          after["approval_rate"] == 1.0, str(after["approval_rate"]))
+
+    rid2 = systems.start_run(dec.id, "baci", trigger="test")
+    systems.finish_run(rid2, "produced")
+    ap2 = approvals.request_approval("skill_output", "one to deny",
+                                     {"tenant": "baci"}, notify=False,
+                                     run_id=rid2, system_id=dec.id)
+    approvals.apply_decision(ap2, "denied")
+    check("a denial is recorded too — the gate needs both",
+          systems.stats(dec.id)["denied"] == 1,
+          str(systems.stats(dec.id)))
+
     # ---- the go-live gate ----------------------------------------------
     print("\n— the contract gate —")
     refused = systems.update(lead.id, status="live")
