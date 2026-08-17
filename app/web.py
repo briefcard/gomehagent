@@ -1676,6 +1676,26 @@ def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
     return doc
 
 
+@app.get("/admin/archive_fetch")
+def archive_fetch(key: str = Depends(admin_key), tenant: str = "",
+                  limit: int = 200) -> dict:
+    """Fetch what old threads said, for rows logged before there was a column.
+
+    `/admin/archive_index` finds nothing to embed on a mature account because
+    every historical `EmailLog` row holds sender and subject and no body. This
+    fills them from Gmail, then the index route embeds what landed.
+
+    The bucket filter runs BEFORE the network call — triage decided months ago
+    that a blast was a blast, and re-learning it costs an API round trip.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import archive
+    return archive.backfill_bodies(tenant, limit=limit)
+
+
 @app.get("/admin/archive_index")
 def archive_index(key: str = Depends(admin_key), tenant: str = "",
                   kind: str = "thread", limit: int = 200) -> dict:

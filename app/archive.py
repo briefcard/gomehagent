@@ -318,3 +318,61 @@ def _hydrate(tenant: str, hits: list[dict]) -> list[dict]:
                         f"{r.text_excerpt or ''}".strip(),
                         h.get("chunk", 0))})
     return out
+
+
+def backfill_bodies(tenant: str, limit: int = 200) -> dict:
+    """Fetch what old threads actually said, for rows logged before there was
+    anywhere to put it.
+
+    `EmailLog` has held sender and subject for months and no body, so the
+    archive backfill finds 104 rows and nothing to index. This is the job that
+    fills them.
+
+    **The bucket filter runs BEFORE the Gmail call, not after.** A promo's
+    bucket was decided by triage months ago, so declining it here costs one
+    dictionary lookup and saves a network round trip. Filtering after fetching
+    would work and would spend an API call per marketing blast to learn what
+    was already on the row.
+    """
+    from . import gmail_client
+
+    with db.SessionLocal() as s:
+        rows = (s.query(db.EmailLog)
+                .filter(db.tenant_filter(db.EmailLog, tenant))
+                .order_by(db.EmailLog.seen_at.desc()).limit(limit * 3).all())
+        s.expunge_all()
+
+    todo = [r for r in rows if not (r.body_excerpt or "").strip()]
+    fetched = stored = failed = 0
+    declined: dict[str, int] = {}
+    why = ""
+
+    for r in todo:
+        if fetched >= limit:
+            break
+        # Decided from what is already on the row — no network needed to know
+        # a marketing blast is a marketing blast.
+        ok, reason = indexable(r.category or "", r.sender or "", "x" * 999)
+        if not ok:
+            key = reason.split("—")[0].strip() or reason
+            declined[key] = declined.get(key, 0) + 1
+            continue
+        try:
+            body = gmail_client.fetch_body(r.account, r.gmail_message_id)
+            fetched += 1
+        except Exception as exc:  # noqa: BLE001 — one dead id is not a failure
+            failed += 1
+            why = why or f"{exc.__class__.__name__}: {str(exc)[:100]}"
+            continue
+        if store_email(tenant, r.gmail_message_id, body):
+            stored += 1
+
+    return {
+        "tenant": tenant, "considered": len(todo), "fetched": fetched,
+        "stored": stored, "declined": declined,
+        "declined_total": sum(declined.values()), "failed": failed, "why": why,
+        "remaining": max(0, len(todo) - fetched - sum(declined.values())),
+        "next": ("run /admin/archive_index?kind=thread to embed what was just "
+                 "stored — fetching and indexing are separate so a failed "
+                 "fetch does not look like a failed index"),
+    }

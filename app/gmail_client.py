@@ -312,6 +312,19 @@ def fetch_recent(alias: str, days: int, max_results: int = 200) -> list[dict]:
     return out
 
 
+def fetch_body(alias: str, message_id: str, limit: int = 12000) -> str:
+    """One message's plain text, by id.
+
+    For backfilling bodies onto `EmailLog` rows that were logged before there
+    was anywhere to put them. `format="full"` because metadata alone is what
+    left the archive catalogued and silent in the first place.
+    """
+    svc = service_for(alias)
+    msg = svc.users().messages().get(
+        userId="me", id=message_id, format="full").execute()
+    return _extract_text(msg.get("payload", {}))[:limit]
+
+
 def _extract_attachments(payload: dict) -> list[dict]:
     out = []
     if payload.get("filename") and payload.get("body", {}).get("attachmentId"):
