@@ -378,10 +378,35 @@ def backfill_bodies(tenant: str, limit: int = 200) -> dict:
     }
 
 
-#: What is worth extracting. A scanned image with no text layer is a document
-#: whose content nobody can read without OCR, and pretending otherwise stores
-#: an empty row that looks indexed.
-READABLE = (".pdf", ".txt", ".csv", ".md")
+#: What is worth extracting. `.xlsx` is here because openpyxl is already a
+#: dependency — a commercial invoice as a spreadsheet is exactly the document
+#: that matters, and skipping it was a gap rather than a decision.
+READABLE = (".pdf", ".txt", ".csv", ".md", ".xlsx", ".xlsm")
+
+#: Not documents at all. A corporate email carries its sender's logo and a
+#: tracking pixel as "attachments", so a logistics inbox reports 96 of them
+#: and 79 are signature furniture. Counting those beside a scanned bill of
+#: lading put "we ignored a logo" and "we could not read a real document" in
+#: one bucket — three meanings, one number, which is the reporting version of
+#: every other defect in this log.
+IGNORED_TYPES = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp",
+                 ".ico", ".tif", ".tiff")
+
+
+def _xlsx_text(data: bytes) -> str:
+    """Cells, row by row. A spreadsheet invoice is a document like any other."""
+    import io
+
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    lines = []
+    for ws in wb.worksheets[:5]:
+        lines.append(f"[{ws.title}]")
+        for row in ws.iter_rows(max_row=300, values_only=True):
+            cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+            if cells:
+                lines.append(" | ".join(cells))
+    return "\n".join(lines).strip()
 
 
 def fetch_attachments(tenant: str, limit: int = 50) -> dict:
@@ -408,6 +433,10 @@ def fetch_attachments(tenant: str, limit: int = 50) -> dict:
         s.expunge_all()
 
     found = stored = skipped = failed = 0
+    # Kept apart on purpose. `ignored` is "that was a logo, not a document";
+    # `unreadable` is "that was a document and we could not read it". Only the
+    # second is a gap worth acting on.
+    ignored: dict[str, int] = {}
     unreadable: dict[str, int] = {}
     why = ""
 
@@ -425,16 +454,23 @@ def fetch_attachments(tenant: str, limit: int = 50) -> dict:
         for a in atts:
             found += 1
             name = a.get("filename", "")
-            if not name.lower().endswith(READABLE):
-                key = name.rsplit(".", 1)[-1].lower() if "." in name else "no extension"
+            low = name.lower()
+            if low.endswith(IGNORED_TYPES):
+                key = low.rsplit(".", 1)[-1]
+                ignored[key] = ignored.get(key, 0) + 1
+                continue
+            if not low.endswith(READABLE):
+                key = low.rsplit(".", 1)[-1] if "." in low else "no extension"
                 unreadable[key] = unreadable.get(key, 0) + 1
                 continue
             try:
                 data = gmail_client.download_attachment(
                     r.account, r.gmail_message_id, a["attachment_id"])
-                if name.lower().endswith(".pdf"):
+                if low.endswith(".pdf"):
                     from .data_tools import _pdf_text
                     text = _pdf_text(data)
+                elif low.endswith((".xlsx", ".xlsm")):
+                    text = _xlsx_text(data)
                 else:
                     text = data.decode(errors="replace")
             except Exception as exc:  # noqa: BLE001
@@ -447,7 +483,11 @@ def fetch_attachments(tenant: str, limit: int = 50) -> dict:
                 # A scan with no text layer. Recorded as unreadable rather than
                 # stored empty — an empty row that looks indexed is worse than
                 # an absent one, because nothing will ever come back to it.
-                unreadable["no text layer"] = unreadable.get("no text layer", 0) + 1
+                # A scan. A real document whose content needs OCR, which this
+                # does not do — named as its own reason so the count is a
+                # decision to make rather than noise to scroll past.
+                unreadable["scanned, needs OCR"] = unreadable.get(
+                    "scanned, needs OCR", 0) + 1
                 skipped += 1
                 continue
 
@@ -477,7 +517,10 @@ def fetch_attachments(tenant: str, limit: int = 50) -> dict:
     return {
         "tenant": tenant, "threads_read": len(rows), "attachments_found": found,
         "stored": stored, "already_on_file": skipped, "failed": failed,
-        "unreadable": unreadable, "why": why,
+        "ignored_not_documents": ignored,
+        "ignored_total": sum(ignored.values()),
+        "unreadable": unreadable,
+        "unreadable_total": sum(unreadable.values()), "why": why,
         "next": ("run /admin/archive_index?kind=document to embed them — then "
                  "an invoice is findable by what it SAYS, not by its filename"),
     }

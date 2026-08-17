@@ -236,6 +236,27 @@ def main() -> int:
            any(h.get("attachments") for h in thread_hits),
            "'please see attached' is the least useful sentence in an inbox")
 
+
+        print("\n— a logo is not an unreadable document —")
+        ck("images are ignored, not reported as failures",
+           ".png" in archive.IGNORED_TYPES and ".jpg" in archive.IGNORED_TYPES,
+           "96 attachments on a logistics inbox, 79 of them signature furniture")
+        ck("and a spreadsheet IS a document",
+           ".xlsx" in archive.READABLE,
+           "openpyxl was already a dependency; skipping it was a gap")
+
+        import io
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["Invoice", "1256"])
+        ws.append(["Pallets", 6, "two crushed on arrival"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        text = archive._xlsx_text(buf.getvalue())
+        ck("its cells come out as text", "1256" in text and "crushed" in text,
+           text.replace(chr(10), " | ")[:70])
+
         print("\n— one account's mail is invisible to another —")
         ck("eien sees none of it",
            archive.search("eien", ASKED)["hits"] == [])
