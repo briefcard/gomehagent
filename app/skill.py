@@ -112,11 +112,12 @@ def catalogue(tenant: str = "") -> list[dict]:
 
 
 # How many times a failing draft may be handed its own failures and asked
-# again. Two, because the first repair fixes the ordinary case (a banned phrase
-# reworded) and the second catches a repair that introduced a new problem.
-# Beyond that the drafter is not converging, and more attempts buy latency and
-# API spend rather than a better answer.
-MAX_REPAIRS = 2
+# again. Three: the first repair fixes the ordinary case (a banned phrase
+# reworded), the second catches a repair that introduced a new problem, and the
+# third is the margin Gomeh asked for before anything is given up on. Past that
+# the drafter is not converging, and further attempts buy latency and API spend
+# rather than a better answer — so it is blocked and flagged, not retried on.
+MAX_REPAIRS = 3
 
 # What each validator rule means the KNOWLEDGE BASE is missing. Repair rewrites
 # a draft; it cannot conjure a fact that was never recorded, and pretending

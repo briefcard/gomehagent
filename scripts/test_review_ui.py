@@ -1,0 +1,167 @@
+"""Reviewing a harvest queue: batch decisions, duplicates, entity lookup.
+
+These are workflow defects, not logic ones, and they are the reason a queue of
+forty proposals stops being worked:
+
+  · one request per claim, each returning the reader to the top of the page
+  · the same fact filed once per product, when one brand-level row covers all
+  · an entity picker searchable only by slug, when the reviewer knows the name
+
+Run: python3 scripts/test_review_ui.py
+"""
+import os
+import sys
+import tempfile
+
+_tmp = os.path.join(tempfile.mkdtemp(), "review.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}"
+os.environ["APPROVAL_SECRET"] = "test-secret"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import db, kb, tenants  # noqa: E402
+from app.web import app  # noqa: E402
+
+KEY = "test-secret"
+_fails: list[str] = []
+
+
+def ck(label: str, cond: bool, detail: str = "") -> None:
+    print(f"[{'  ok  ' if cond else ' FAIL '}] {label}"
+          + (f"  — {detail}" if detail else ""))
+    if not cond:
+        _fails.append(label)
+
+
+def _pending(tenant="baci"):
+    return [e["row"] for e in kb.proposals(tenant, kind="claim").get("claim", [])]
+
+
+def main() -> int:
+    db.init_db()
+    tenants.seed()
+    client = TestClient(app)
+
+    kb.set_brand("baci", tone="Warm, precise.")
+    kb.add_banned("baci", "hand-decorated")
+    kb.add_situation("baci", "care", patterns=[["dishwasher"]], origin="human")
+    kb.add_entity("baci", "product", "bm-aq-din-25", "Aqua Dinner Plate",
+                  description="A dinner plate")
+    kb.add_entity("baci", "product", "bm-tu-mug-30", "Tulip Mug",
+                  description="A mug")
+
+    print("— finding the entity a claim belongs to —")
+    ck("by its display name", kb.resolve_entity_ref("baci", "Aqua Dinner Plate")
+       == ("bm-aq-din-25", ""))
+    ck("by a unique partial, in any order",
+       kb.resolve_entity_ref("baci", "plate aqua")[0] == "bm-aq-din-25")
+    ck("by the slug, which still works",
+       kb.resolve_entity_ref("baci", "bm-tu-mug-30")[0] == "bm-tu-mug-30")
+    ck("by what the picker actually submits",
+       kb.resolve_entity_ref("baci", "bm-tu-mug-30 — Tulip Mug")[0]
+       == "bm-tu-mug-30")
+    ck("blank stays blank — brand-level is a real answer, not a failure",
+       kb.resolve_entity_ref("baci", "") == ("", ""))
+    key, why = kb.resolve_entity_ref("baci", "nope")
+    ck("an unmatched entity is REFUSED, not written through", not key and why,
+       "a claim scoped to a thing that does not exist reads as 'not "
+       "selectable' much later, far from the cause")
+    kb.add_entity("baci", "product", "bm-aq-sal-21", "Aqua Salad Plate",
+                  description="A salad plate")
+    key, why = kb.resolve_entity_ref("baci", "aqua")
+    ck("an ambiguous one names the candidates instead of guessing",
+       not key and "matches 2" in why, why[:80])
+
+    print("\n— deciding a queue in one pass —")
+    kb.add_claim("baci", "Dishwasher and microwave safe throughout.",
+                 "EN 12875-1", ["care"], origin="human")          # approved
+    for i in range(4):
+        kb.add_claim("baci", f"Proposal number {i} about care.", "crawl",
+                     ["care"], status="pending", origin="crawl")
+    ids = [c.id for c in _pending()]
+    ck("four proposals are waiting", len(ids) == 4, str(len(ids)))
+
+    # `key` goes in the query string, not the body: `admin_key` resolves it
+    # from query, `x-admin-key`, or the session cookie a browser already has.
+    r = client.post("/admin/claims_decide", params={"key": KEY},
+                    data={"tenant": "baci", "action": "approve",
+                          "claim_ids": ids[:3]}, follow_redirects=False)
+    ck("a batch approve is accepted", r.status_code == 303, str(r.status_code))
+    ck("  three decided in ONE request, not three",
+       len(_pending()) == 1, f"{len(_pending())} still pending")
+    ck("  and it reports what it did", "ok=" in r.headers.get("location", ""),
+       r.headers.get("location", ""))
+
+    r = client.post("/admin/claims_decide", params={"key": KEY},
+                    data={"tenant": "baci", "action": "reject",
+                          "claim_ids": [ids[3]]}, follow_redirects=False)
+    ck("a batch reject works the same way", len(_pending()) == 0,
+       f"{len(_pending())} left")
+    r = client.post("/admin/claims_decide", params={"key": KEY},
+                    data={"tenant": "baci", "action": "approve"},
+                    follow_redirects=False)
+    ck("selecting nothing says so rather than silently succeeding",
+       "nothing+was+selected" in r.headers.get("location", "")
+       or "nothing%20was%20selected" in r.headers.get("location", ""),
+       r.headers.get("location", ""))
+
+    print("\n— the duplicates mass harvest leaves behind —")
+    kb.add_claim("baci", "Dishwasher and microwave safe throughout.",
+                 "aqua product page", ["care"], status="pending",
+                 origin="crawl", entity_key="bm-aq-din-25")
+    kb.add_claim("baci", "Dishwasher and microwave safe throughout.",
+                 "mug product page", ["care"], status="pending",
+                 origin="crawl", entity_key="bm-tu-mug-30")
+    kb.add_claim("baci", "Packed in recycled board.", "crawl", ["care"],
+                 status="pending", origin="crawl")
+    covered = kb.brand_level_duplicates("baci")
+    ck("per-entity copies of an approved brand-level claim are spotted",
+       len(covered) == 2, f"{len(covered)} found")
+    ck("  a genuinely new claim is NOT swept up with them",
+       len(_pending()) == 3 and len(covered) == 2)
+
+    r = client.post("/admin/claims_decide", params={"key": KEY},
+                    data={"tenant": "baci", "action": "reject_covered"},
+                    follow_redirects=False)
+    left = _pending()
+    ck("one action retires every covered copy", len(left) == 1, str(len(left)))
+    ck("  and leaves the one that adds something",
+       left and "recycled board" in left[0].claim, left[0].claim if left else "")
+
+    print("\n— not losing your place —")
+    kb.add_claim("baci", "First in the queue.", "crawl", ["care"],
+                 status="pending", origin="crawl")
+    q = _pending()
+    first = q[0].id
+    r = client.post("/admin/claim_edit", params={"key": KEY},
+                    data={"tenant": "baci", "claim_id": first,
+                          "next_id": "SOMEONE-ELSE", "claim": q[0].claim,
+                          "evidence": "crawl", "tags": ["care"],
+                          "entity_key": "", "action": "approve"},
+                    follow_redirects=False)
+    loc = r.headers.get("location", "")
+    ck("deciding one card returns you to the NEXT one, not the top",
+       loc.endswith("#c-SOMEONE-ELSE"), loc)
+
+    html = client.get("/admin/ui",
+                      params={"key": KEY, "tab": "content",
+                              "tenant": "baci"}).text
+    ck("the queue renders its bulk bar", 'id="bulk"' in html)
+    ck("  with a checkbox per card bound to it",
+       'name="claim_ids"' in html and 'form="bulk"' in html)
+    ck("  and the entity list is searchable by name",
+       "— Aqua Dinner Plate" in html)
+
+    print()
+    if _fails:
+        print(f"{len(_fails)} FAILED:")
+        for f in _fails:
+            print(f"  - {f}")
+        return 1
+    print("all green")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

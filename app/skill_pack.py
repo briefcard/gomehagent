@@ -361,13 +361,55 @@ def _run_inbound_reply(ctx: Context) -> dict:
         return {"summary": "blocked", "blocked_on": res.get("blocked_on", []),
                 "stage": res.get("stage", "")}
 
-    ctx.emit(res.get("draft") or "",
+    def _repair(previous: str, failures: list) -> str:
+        """Re-ask for the reply with its rejection attached.
+
+        A customer reply is the worst place to leave a blocked draft sitting in
+        a queue — the cost of the gap is a person waiting. So it self-corrects
+        on the same terms as everything else: the rules are unchanged and the
+        same check runs again.
+
+        Only the model can repair. `responder.answer` also has a deterministic
+        path that assembles an approved objection response verbatim, and asking
+        that to try again returns the identical text, which `emit` reads as
+        "nothing more to give" and stops on — correctly, because rewording an
+        approved answer is not this loop's job.
+        """
+        note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
+        fixed, _ = responder._draft(
+            ctx.tenant, utterance,
+            {**ctx.bundle,
+             "rules": {**ctx.bundle.get("rules", {}),
+                       "block": ctx.bundle.get("rules", {}).get("block", "")
+                       + f"\n\n## Your previous reply was rejected\n{previous}"
+                         f"\n\n## Why, and what to change\n{note}\n"
+                         f"Rewrite it so none of these apply. Keep it truthful "
+                         f"and keep the citation; do not argue with the rules."}})
+        return fixed
+
+    # A model draft the responder rejected is handed to `emit` anyway, so the
+    # repair loop gets something to work with. Without this the only outcomes
+    # were "send nothing" and "start from scratch" — and for a customer reply
+    # the cost of the first is a person waiting on an answer.
+    body = res.get("draft") or res.get("draft_rejected") or ""
+    if not body:
+        ctx.note("no reply was produced: "
+                 + (res.get("draft_blocked_by")
+                    or "no approved answer matched and no model was asked"))
+        return {"summary": "nothing to draft",
+                "grounding": (res.get("grounding") or {}).get("level", "")}
+
+    ctx.emit(body,
              claim_ids=[c.get("claim_id") for c in (res.get("evidence") or [])
                         if c.get("claim_id")],
              entity_key=str(ctx.params.get("entity_key") or ""),
              situation=res.get("situation") or "",
              conversation_id=res.get("conversation_id") or "",
-             angle="reply", fmt="reply")
+             angle="reply", fmt="reply",
+             # Only the model path can repair. The confident path assembles an
+             # objection response a human approved verbatim, and rewording that
+             # is not this loop's job.
+             redraft=_repair if res.get("mode") == "draft_from_context" else None)
     return {"summary": "one reply drafted",
             "grounding": (ctx.bundle.get("grounding") or {}).get("level", "")}
 

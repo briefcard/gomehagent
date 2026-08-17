@@ -1865,6 +1865,84 @@ REVIEWABLE = {
 }
 
 
+# What the entity picker puts between a key and its display name. Chosen
+# because it appears in neither slugs nor product names, so splitting on it
+# cannot truncate a real value.
+LABEL_SEP = " \u2014 "
+
+
+def resolve_entity_ref(tenant: str, text: str) -> tuple[str, str]:
+    """Turn whatever the reviewer typed into a real entity key.
+
+    Returns `(key, problem)` — an empty key with an empty problem means
+    "brand-level", which is a legitimate answer and not a failure.
+
+    A datalist filters on the option's VALUE, so a list of bare slugs could only
+    be searched by slug. A reviewer looking at a claim about the Aqua dinner
+    plate knows the words "aqua" and "plate" and does not know
+    `bm-aq-din-25`, which made relating a claim to its entity a scroll through
+    the whole catalogue. This accepts any of:
+
+      · the key exactly                     `aqua-plate`
+      · the display name                    `Aqua Dinner Plate`
+      · the combined label the picker emits `aqua-plate — Aqua Dinner Plate`
+      · a unique partial of either          `aqua din`
+
+    Ambiguity is reported rather than guessed: picking one of two matching
+    products would silently scope a claim to the wrong thing, and a claim
+    scoped wrong is worse than one left brand-level, because it will be
+    confidently used in content about the other product.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "", ""
+    if LABEL_SEP in text:                       # what the picker submits
+        text = text.split(LABEL_SEP)[0].strip()
+    rows = entities(tenant, available_only=False)
+    low = text.lower()
+    for e in rows:                              # exact key wins outright
+        if (e.key or "").lower() == low:
+            return e.key, ""
+    exact_name = [e for e in rows if (e.name or "").lower() == low]
+    if len(exact_name) == 1:
+        return exact_name[0].key, ""
+    words = [w for w in low.split() if w]
+    partial = [e for e in rows
+               if all(w in f"{e.key} {e.name}".lower() for w in words)]
+    if len(partial) == 1:
+        return partial[0].key, ""
+    if len(partial) > 1:
+        names = ", ".join(f"{e.name} ({e.key})" for e in partial[:4])
+        return "", (f"{text!r} matches {len(partial)} things — {names}"
+                    + (" …" if len(partial) > 4 else "")
+                    + ". Use the key, or leave it blank for brand-level.")
+    return "", (f"no entity matches {text!r}. Leave it blank to keep the claim "
+                f"brand-level, or add the product to the catalogue first.")
+
+
+def brand_level_duplicates(tenant: str) -> list[tuple[str, str]]:
+    """Proposed claims an APPROVED brand-level claim already covers.
+
+    Returns `(claim_id, why)`. The mass harvest filed the same fact once per
+    product page, so approving the brand-level copy leaves a dozen narrower
+    ones behind that add nothing — a brand-level claim is already usable in
+    content about every entity.
+
+    Computed here rather than passed in from the page, so a bulk reject acts on
+    what is true now instead of on a list the browser assembled before the last
+    approval landed.
+    """
+    entries = proposals(tenant, kind="claim").get("claim", [])
+    out = []
+    for e in entries:
+        covered = e.get("covered_by_brand_level") or []
+        if covered:
+            out.append((e["row"].id,
+                        f"covered by brand-level: "
+                        f"{(covered[0].claim or '')[:80]}"))
+    return out
+
+
 def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
     """Everything waiting for a human, by kind, newest table first.
 

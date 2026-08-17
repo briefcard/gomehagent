@@ -105,6 +105,14 @@ button{font:inherit;font-size:.82rem;font-weight:600;padding:6px 13px;border-rad
 border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.bulkbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap;background:var(--card);border:1px solid var(--rule);
+  border-radius:5px;padding:9px 12px;margin-bottom:10px}
+.bulkbar .grow{flex:1}
+.pick{display:inline-flex;gap:6px;align-items:center;font-size:.75rem;
+  color:var(--mut);cursor:pointer;user-select:none}
+/* Sticky bar is ~44px tall and would otherwise cover the card just jumped to. */
+.anchor{position:relative;top:-56px;display:block;height:0;visibility:hidden}
 code{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:var(--rule2);
 padding:.1em .35em;border-radius:3px}
 .cur{background:var(--accs);border-left:3px solid var(--acc)}
@@ -1198,7 +1206,7 @@ def _act(key: str, action: str, label: str, tenant: str = "",
 
 
 def render_content(key: str, tenant: str = "", started: str = "",
-                   err: str = "") -> str:
+                   err: str = "", msg: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     rows = tenants.all_tenants(include_paused=True)
@@ -1220,9 +1228,26 @@ def render_content(key: str, tenant: str = "", started: str = "",
     vocab = sorted(kbm.situations(tenant))
     cat = sorted(((e.key, e.name) for e in
                   kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
+    # The option VALUE is what a datalist filters on, so a list of bare slugs
+    # could only ever be searched by slug — and a reviewer looking at a claim
+    # about the Aqua dinner plate knows "aqua", not `bm-aq-din-25`. Putting
+    # both in the value makes either searchable; `kb.resolve_entity_ref` splits
+    # it back apart and also accepts a plain key, a plain name, or a unique
+    # partial of either.
     catlist = ('<datalist id="ents">'
-               + "".join(f'<option value="{_esc(k)}">{_esc(n)}</option>'
-                         for k, n in cat) + "</datalist>")
+               + "".join(f'<option value="{_esc(k + kbm.LABEL_SEP + n)}">'
+                         f'</option>' for k, n in cat) + "</datalist>")
+    # Where the reader lands after deciding one, so approving walks down the
+    # queue rather than returning to the top of it every time.
+    _order = [e["row"].id for e in entries]
+    _after = {cid: (_order[i + 1] if i + 1 < len(_order) else "")
+              for i, cid in enumerate(_order)}
+
+    def _next_of(cid: str) -> str:
+        return _after.get(cid, "")
+
+    _covered = kbm.brand_level_duplicates(tenant) if pending else []
+
     if pending:
         def _card(p) -> str:
             chosen = set(p.situations or [])
@@ -1269,9 +1294,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
                         'approval is refused without it, because an untagged '
                         'claim can never be selected.</div>')
             return f"""
+            <div class="anchor" id="c-{_esc(p.id)}"></div>
+            <label class="pick"><input type="checkbox" name="claim_ids"
+                   value="{_esc(p.id)}" form="bulk"> select</label>
             <form class="f" method="post" action="/admin/claim_edit">
               <input type="hidden" name="claim_id" value="{_esc(p.id)}">
               <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <input type="hidden" name="next_id" value="{_esc(_next_of(p.id))}">
               <label>{"Quoted — a customer's own words"
                       if verbatim else "Claim"}</label>
               <textarea name="claim" rows="2"{" readonly" if verbatim else ""
@@ -1318,7 +1347,39 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 <button class="sec" name="action" value="reject">Reject</button>
               </div>
             </form>"""
-        proposals = (catlist + '<div class="grid" style="grid-template-columns:1fr">'
+        # The checkboxes live inside each card but belong to THIS form via the
+        # HTML5 `form` attribute — forms cannot nest, and duplicating the queue
+        # into a separate compact list would mean deciding against a summary
+        # rather than against the claim.
+        covered_btn = ""
+        if _covered:
+            n = len(_covered)
+            covered_btn = (
+                f'<button form="bulk" name="action" value="reject_covered" '
+                f'class="sec" title="A brand-level claim is already usable in '
+                f'content about every product, so these narrower copies add '
+                f'nothing">Retire {n} already covered brand-level</button>')
+        bulk = f"""
+        <form id="bulk" method="post" action="/admin/claims_decide"></form>
+        <input type="hidden" name="tenant" value="{_esc(tenant)}" form="bulk">
+        <div class="bulkbar">
+          <label class="pick"><input type="checkbox" id="allbox"> select all
+            {len(pending)}</label>
+          <span class="grow"></span>
+          {covered_btn}
+          <button form="bulk" name="action" value="reject" class="sec">Reject
+            selected</button>
+          <button form="bulk" name="action" value="approve">Approve
+            selected</button>
+        </div>
+        <script>
+        document.getElementById('allbox').addEventListener('change', function(e) {{
+          document.querySelectorAll('input[name="claim_ids"]')
+                  .forEach(function(b) {{ b.checked = e.target.checked; }});
+        }});
+        </script>"""
+        proposals = (catlist + bulk
+                     + '<div class="grid" style="grid-template-columns:1fr">'
                      + "".join(_card(p) for p in pending) + "</div>")
     else:
         proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
@@ -1527,6 +1588,10 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 
     if err:
         banner = f'<div class="note">{_esc(err)}</div>' + banner
+    if msg:
+        # A bulk decision reports what it did, including what it refused. A
+        # count with no reasons reads as a partial success nobody can act on.
+        banner = f'<div class="when">{_esc(msg)}</div>' + banner
     return _shell(key, "content", "Content", f"""
 {banner}
 <div>

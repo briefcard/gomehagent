@@ -113,6 +113,7 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
     confident = (bundle.get("grounding") or {}).get("level") == "answered"
     if not confident:
         drafted, draft_note, verdict = "", "", None
+        rejected_draft = ""
         if draft_with_model:
             drafted, draft_note = _draft(tenant, utterance, bundle)
             if drafted:
@@ -125,7 +126,15 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
                     entity_key=entity_key, conversation_id=conversation_id,
                     require_citation=False)
                 if not verdict["ok"]:
-                    drafted, draft_note = "", "; ".join(
+                    # `draft` is emptied so nothing downstream can mistake a
+                    # rejected reply for a sendable one. The TEXT is kept
+                    # separately: a caller with a repair loop needs the thing
+                    # that failed in order to fix it, and discarding it forced
+                    # the only options to be "send nothing" or "start again
+                    # from scratch". It is not dangerous to hand back — every
+                    # path out of here re-validates.
+                    rejected_draft, drafted = drafted, ""
+                    draft_note = "; ".join(
                         f"{f['rule']}: {f['detail']}" for f in verdict["failures"])
         ledger.record(tenant, system_key, situation=situation,
                       entity_key=entity_key, status="draft_from_context",
@@ -136,6 +145,7 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
             "mode": "draft_from_context",
             "draft": drafted,
             "draft_blocked_by": draft_note,
+            "draft_rejected": rejected_draft,
             "validated": (verdict["ok"] if verdict else None),
             "checks_run": (verdict["checked"] if verdict else []),
             "grounding": bundle.get("grounding", {}),

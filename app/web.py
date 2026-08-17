@@ -980,7 +980,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_schema(link_key, tenant)
     if tab == "content":
         return ui.render_content(link_key, tenant, started=started,
-                                 err=request.query_params.get("err", ""))
+                                 err=request.query_params.get("err", ""),
+                                 msg=request.query_params.get("ok", ""))
     q = request.query_params
     return ui.render(link_key, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""))
@@ -2370,11 +2371,17 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     return kb_seed.seed_all()
 
 
-def _back_to_content(tenant: str, started: str = "", err: str = ""):
+def _back_to_content(tenant: str, started: str = "", err: str = "",
+                     msg: str = "", anchor: str = ""):
     """Return to the Content tab. No key in the URL: by the time an action has
     run, the session cookie is already set (the middleware sets it on any
     request carrying a valid key), so putting the secret back into the address
-    bar would undo the session for nothing."""
+    bar would undo the session for nothing.
+
+    `anchor` puts the reader back where they were. Deciding one claim in a
+    queue of forty used to return them to the top of the page, so every
+    decision cost a scroll — which is how a review queue stops being worked.
+    """
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
@@ -2383,6 +2390,10 @@ def _back_to_content(tenant: str, started: str = "", err: str = ""):
         q += f"&started={started}"
     if err:
         q += f"&err={quote(err)}"
+    if msg:
+        q += f"&ok={quote(msg)}"
+    if anchor:
+        q += f"#{anchor}"
     return RedirectResponse(q, status_code=303)
 
 
@@ -2730,6 +2741,60 @@ async def conflict_resolve(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant)
 
 
+@app.post("/admin/claims_decide", response_class=HTMLResponse)
+async def claims_decide(request: Request, key: str = Depends(admin_key)):
+    """Decide many proposals in one submit.
+
+    Reviewing was one request per claim, and every one of them reloaded the tab
+    and returned the reader to the top of a long queue — so working through
+    forty harvested claims meant forty scrolls back to where you were. That is
+    the whole reason the queue stopped being read.
+
+    `reject_covered` recomputes which proposals an approved brand-level claim
+    already covers, rather than trusting a list the browser built: the page may
+    have been rendered before the last approval landed, and acting on a stale
+    list would retire something nothing covers.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse('<h3>unauthorized</h3>')
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", ""))
+
+    if action == "reject_covered":
+        pairs = kbm.brand_level_duplicates(tenant)
+        for cid, _why in pairs:
+            kbm.review_claim(cid, approve=False)
+        n = len(pairs)
+        return _back_to_content(
+            tenant, msg=(f"retired {n} narrower cop{'y' if n == 1 else 'ies'} "
+                         f"of claims already approved brand-level"
+                         if n else "nothing was covered brand-level"))
+
+    ids = [str(i) for i in form.getlist("claim_ids") if str(i).strip()]
+    if not ids:
+        return _back_to_content(tenant, msg="nothing was selected")
+
+    approve = action == "approve"
+    done, refused = 0, []
+    for cid in ids:
+        res = kbm.review_claim(cid, approve=approve)
+        # `review_claim` refuses an untagged claim, and that refusal is the
+        # point of the whole review step — surfacing the count without the
+        # reasons would look like a partial success with no explanation.
+        if isinstance(res, str) and res.lower().startswith(("cannot", "needs",
+                                                            "refus")):
+            refused.append(res)
+        else:
+            done += 1
+    verb = "approved" if approve else "rejected"
+    msg = f"{verb} {done} of {len(ids)}"
+    if refused:
+        msg += f" — {len(refused)} refused: {refused[0][:120]}"
+    return _back_to_content(tenant, msg=msg)
+
+
 @app.post("/admin/claim_edit", response_class=HTMLResponse)
 async def claim_edit(request: Request, key: str = Depends(admin_key)):
     """Edit a proposal, then save / approve / reject it.
@@ -2747,15 +2812,29 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", "save"))
 
+    # The next card, so approving walks DOWN the queue instead of bouncing to
+    # the top of it. Read before the decision, while this row is still pending.
+    nxt = str(form.get("next_id", ""))
+
     if action == "reject":
         kbm.review_claim(claim_id, approve=False)
-        return _back_to_content(tenant)
+        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
+
+    # Whatever was typed into the entity box, resolved to a real key — by name,
+    # by slug, or by a unique partial of either. Refusing here rather than
+    # writing it through matters: `update_claim` would take an unknown key at
+    # face value and scope the claim to a thing that does not exist, which
+    # reads as "not selectable" much later and far from the cause.
+    ent_raw = str(form.get("entity_key", ""))
+    ent_key, ent_problem = kbm.resolve_entity_ref(tenant, ent_raw)
+    if ent_problem:
+        return _back_to_content(tenant, err=ent_problem, anchor=f"c-{claim_id}")
 
     msg = kbm.update_claim(
         claim_id,
         claim=str(form.get("claim", "")),
         evidence=str(form.get("evidence", "")),
-        entity_key=str(form.get("entity_key", "")),
+        entity_key=ent_key,
         proves=str(form.get("proves", "")),
         context=str(form.get("context", "")) if form.get("context") is not None else None,
         tags=[str(t) for t in form.getlist("tags")])
@@ -2765,8 +2844,12 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
     if action == "approve":
         # May refuse — an untagged claim cannot be approved, and the tab will
         # still show it with the reason.
-        kbm.review_claim(claim_id, approve=True)
-    return _back_to_content(tenant)
+        refusal = kbm.review_claim(claim_id, approve=True)
+        if isinstance(refusal, str) and refusal.lower().startswith(
+                ("cannot", "needs", "refus")):
+            return _back_to_content(tenant, err=refusal,
+                                    anchor=f"c-{claim_id}")
+    return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
 
 
 @app.get("/admin/harvest")

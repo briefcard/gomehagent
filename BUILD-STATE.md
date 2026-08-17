@@ -144,7 +144,7 @@ a person absorbing it.
 
 `Context.emit(redraft=...)` closes that. A failing draft is handed its own
 failures — each already carrying a `fix`, which was never decoration — and asked
-again, up to `MAX_REPAIRS` (2). **The rule is never relaxed to achieve this:**
+again, up to `MAX_REPAIRS` (3). **The rule is never relaxed to achieve this:**
 every repaired attempt goes through the same deterministic check, and a draft
 that cannot be fixed is still blocked. What changes is that the system explains
 and adjusts before giving up, and the attempt history is on the record.
@@ -183,6 +183,38 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 400 sends/minute, Meta rate-limited the pair, ~200 fallback emails landed in a
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
+
+## Working the review queue
+
+Three workflow defects, all of them reasons a queue of forty proposals stops
+being read rather than reasons it is wrong.
+
+**Deciding is now batched.** Every proposal card carries a checkbox bound to a
+single bulk form through the HTML5 `form` attribute — forms cannot nest, and
+duplicating the queue into a compact list would mean deciding against a summary
+instead of against the claim. Approve or reject any selection in one request.
+Individual decisions return to `#c-<next-id>`, so approving walks DOWN the queue
+instead of bouncing to the top of the page each time, which is what made forty
+decisions cost forty scrolls.
+
+**Brand-level duplicates collapse in one action.** The mass harvest filed the
+same fact once per product page, so approving the brand-level copy left a dozen
+narrower ones behind that add nothing — a brand-level claim is already usable in
+content about every entity. `kb.brand_level_duplicates` finds them and one
+button retires the lot. It recomputes server-side rather than trusting the list
+the browser assembled, because the page may have rendered before the last
+approval landed.
+
+**Entities are findable.** A datalist filters on the option VALUE, so a list of
+bare slugs could only ever be searched by slug — and a reviewer looking at a
+claim about the Aqua dinner plate knows "aqua", not `bm-aq-din-25`.
+`kb.resolve_entity_ref` accepts the key, the display name, the combined label
+the picker emits, or a unique partial of either, in any word order. Ambiguity is
+reported with the candidates named rather than guessed at: scoping a claim to
+the wrong product is worse than leaving it brand-level, because it will then be
+used confidently in content about something else. An unmatched entity is
+refused instead of written through, where it would have surfaced much later as
+"not selectable" far from its cause.
 
 ## The skill bridge
 
