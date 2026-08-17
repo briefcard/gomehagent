@@ -192,10 +192,29 @@ it is the schema having no way to say what is true: brand-wide would be false,
 because the porcelain lines are not acrylic. A dozen rows saying one thing was
 the only expressible answer.
 
-`KbEntity.parent_key` adds the middle. A collection is an entity in its own
+`KbEntity.parent_keys` adds the middle. A collection is an entity in its own
 right (`type="collection"`), members point at it, and `claims()` widens to the
 ancestor chain — so one row against `aqua` serves every member and never
 reaches Mamma Mia porcelain.
+
+**A LIST, not one parent**, and the live catalogue is why. Baci's 40 Shopify
+collections group along three independent axes at once: range (`aqua`,
+`mamma-mia`, `joke`…), material (`porcelain` 111, `melamine` 89,
+`acrylics-polycarbonate` 43) and type (`italian-pitchers-carafes`,
+`charcuterie-boards`…). A white Aqua pitcher is in all three, and the material
+claim belongs to the material group while a palette claim belongs to the range.
+A single parent would have forced choosing which kind of fact can be said once.
+Membership is additive: joining one group never evicts another.
+
+**Collection import is opt-in, and that is a safety property.** `sync_collections`
+files every Shopify collection as an entity — always safe — but only the ones
+named in `adopt` get members. Baci's list is half merchandising: `all` (341),
+`featured-items`, `baci-summer-collections` (210), and one literally titled
+"New! Shopify performance sharing is now turned on" (343). A group claim is
+asserted about every member and inherited silently, so auto-assigning parentage
+would have scoped material claims to a tracking collection with nothing to catch
+it. `/admin/collections_sync` with no `adopt` lists what is available;
+`/admin/entity_group` is the manual path for what the import cannot decide.
 
 **Precedence is relevance, then specificity, then strength.** Relevance leads
 because a claim answering the question asked beats a narrower one about

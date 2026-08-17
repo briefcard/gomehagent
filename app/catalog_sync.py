@@ -76,6 +76,93 @@ def check_compliance(tenant: str, text: str) -> list[str]:
     return [p for p in kb.banned_claims(tenant) if p and p.lower() in low]
 
 
+def sync_collections(tenant: str, adopt: list[str] | None = None,
+                     dry_run: bool = False) -> dict:
+    """Import Shopify collections as groups. Parentage is **opt-in**.
+
+    Every collection lands as a `type="collection"` entity, which is always
+    safe — it is a thing that exists. What does NOT happen automatically is
+    members being assigned to it, because a Shopify collection is as often a
+    merchandising bucket as a product range. "Sale", "New Arrivals" and "Under
+    $50" sit in the same list as "Aqua", and a claim scoped to a group is a
+    claim asserted about every member: "shatterproof acrylic" is true of the
+    Aqua range and meaningless of everything currently discounted.
+
+    So `adopt` names the collections that are real ranges, and only those get
+    parentage. Getting this wrong is not a tidiness problem — it would put a
+    material claim on the wrong products with nothing to catch it, because a
+    group claim is approved once and inherited silently.
+    """
+    t = tenants.get(tenant)
+    if not t:
+        return {"error": f"unknown tenant {tenant!r}"}
+    if not tenants.capabilities(tenant).get("commerce"):
+        return {"error": f"{tenant} has no commerce connection"}
+
+    from . import data_tools
+    adopt_set = {a.strip().lower() for a in (adopt or []) if a.strip()}
+
+    found: list[dict] = []
+    try:
+        for path, kind in (("custom_collections.json", "custom"),
+                           ("smart_collections.json", "smart")):
+            raw = data_tools._shopify(t.shopify_store, path, {"limit": 250})
+            for c in (raw.get(path.split(".")[0]) or []):
+                handle = (c.get("handle") or "").strip().lower()
+                if handle:
+                    found.append({"id": c.get("id"), "handle": handle,
+                                  "title": c.get("title") or handle,
+                                  "kind": kind})
+    except Exception as exc:                                     # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+
+    created, adopted, refused = 0, 0, []
+    for c in found:
+        if not dry_run:
+            kb.add_entity(tenant, "collection", c["handle"], c["title"],
+                          description=f"Shopify {c['kind']} collection",
+                          source=f"https://{t.domain}/collections/{c['handle']}",
+                          origin="store_sync")
+        created += 1
+        if c["handle"] not in adopt_set:
+            continue
+
+        try:
+            raw = data_tools._shopify(t.shopify_store, "products.json",
+                                      {"collection_id": c["id"], "limit": 250,
+                                       "fields": "id,handle"})
+        except Exception as exc:                                 # noqa: BLE001
+            refused.append(f"{c['handle']}: could not list members "
+                           f"({exc.__class__.__name__})")
+            continue
+        members = [(p.get("handle") or "").strip().lower()
+                   for p in (raw.get("products") or [])]
+        # Membership is additive. A product sitting in `aqua`, `acrylics-
+        # polycarbonate` and `italian-pitchers-carafes` belongs in all three,
+        # and adopting a second collection must not evict it from the first.
+        for m in [m for m in members if m]:
+            if dry_run:
+                adopted += 1
+                continue
+            msg = kb.join_group(tenant, m, c["handle"])
+            if "is now in" in msg or "already in" in msg:
+                adopted += 1
+            else:
+                refused.append(msg)
+
+    return {"collections_found": created,
+            "adopted": sorted(adopt_set),
+            "members_assigned": adopted,
+            "refused": refused,
+            "available_to_adopt": sorted(
+                c["handle"] for c in found if c["handle"] not in adopt_set),
+            "dry_run": dry_run,
+            "note": ("collections are imported as entities either way; only "
+                     "the ones named in `adopt` get members, because a group "
+                     "claim is asserted about every member and a merchandising "
+                     "bucket is not a range")}
+
+
 def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     """Pull the catalogue into the knowledge base. Idempotent.
 

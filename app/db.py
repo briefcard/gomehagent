@@ -1101,16 +1101,24 @@ class KbEntity(_Provenance, Base):
     type = Column(String, nullable=False)       # offer|product|space|service|program|collection
     key = Column(String, nullable=False)        # stable slug / SKU
     name = Column(String, nullable=False)
-    # The group this belongs to — another KbEntity's key, usually one of
+    # The groups this belongs to — other KbEntity keys, usually
     # `type="collection"`. It exists so a fact true of a whole range can be
-    # said once.
+    # said once instead of once per member.
     #
     # Claim scope used to be binary: one entity, or the whole brand. "Every
     # Aqua pitcher is acrylic" could then only be filed once per pitcher, which
     # is why a mass harvest leaves a dozen rows saying one thing — the schema
     # had no way to express what was actually true. Brand-wide was not an
     # option either, because the porcelain lines are not acrylic.
-    parent_key = Column(String, default="", index=True)
+    #
+    # A LIST, not one key, because a catalogue groups along several independent
+    # axes at once and different facts hang off different ones. Baci's own
+    # collections are the proof: a white Aqua pitcher is in `aqua` (its design
+    # range), `acrylics-polycarbonate` (its material) and
+    # `italian-pitchers-carafes` (its type). The material claim belongs to the
+    # material group and the palette claim to the range, so a single parent
+    # would force choosing which kind of fact can be said once.
+    parent_keys = Column(JSON, default=list)
     description = Column(Text)
     attributes = Column(JSON, default=dict)     # capacity, material, seats, deliverables...
     price = Column(String)                      # string: ranges and "from $X" are common

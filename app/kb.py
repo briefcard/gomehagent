@@ -1907,21 +1907,35 @@ REVIEWABLE = {
 _MAX_ANCESTRY = 6
 
 
-def ancestors(tenant: str, key: str) -> list[str]:
-    """Group keys above this entity, nearest first. Cycle-safe."""
-    key = (key or "").strip()
-    if not key:
-        return []
+def _parents(tenant: str) -> dict[str, list[str]]:
     with db.SessionLocal() as s:
-        rows = {e.key: (e.parent_key or "").strip()
+        return {e.key: [str(p) for p in (e.parent_keys or []) if p]
                 for e in s.query(db.KbEntity).filter(
                     db.KbEntity.tenant == tenant,
                     db.KbEntity.status == "active").all()}
-    out, seen, cur = [], {key}, rows.get(key, "")
-    while cur and cur not in seen and len(out) < _MAX_ANCESTRY:
-        out.append(cur)
-        seen.add(cur)
-        cur = rows.get(cur, "")
+
+
+def ancestors(tenant: str, key: str) -> list[str]:
+    """Every group above this entity, nearest first. Cycle-safe.
+
+    Breadth-first across ALL of an entity's groups, because a product belongs
+    to several at once — its range, its material, its type — and a claim scoped
+    to any of them is true of it.
+    """
+    key = (key or "").strip()
+    if not key:
+        return []
+    rows = _parents(tenant)
+    out, seen, frontier, hops = [], {key}, list(rows.get(key, [])), 0
+    while frontier and hops < _MAX_ANCESTRY:
+        nxt = []
+        for g in frontier:
+            if g in seen:
+                continue
+            seen.add(g)
+            out.append(g)
+            nxt.extend(rows.get(g, []))
+        frontier, hops = nxt, hops + 1
     return out
 
 
@@ -1936,64 +1950,83 @@ def scope_depth(entity_key: str, claim_entity_key: str,
     return 1 if ck in (chain or []) else 0
 
 
-def set_parent(tenant: str, key: str, parent_key: str) -> str:
-    """Put one entity in a group, or take it out with an empty parent."""
-    key, parent_key = (key or "").strip(), (parent_key or "").strip()
+def join_group(tenant: str, key: str, group_key: str) -> str:
+    """Add one entity to a group. Belonging to several at once is normal."""
+    key, group_key = (key or "").strip(), (group_key or "").strip()
+    if not group_key:
+        return "Name a group, or use leave_group to take it out of one."
+    if group_key == key:
+        return "An entity cannot be its own group."
     with db.SessionLocal() as s:
         row = (s.query(db.KbEntity)
                .filter(db.KbEntity.tenant == tenant,
                        db.KbEntity.key == key).first())
         if not row:
             return f"No entity keyed {key!r} for {tenant}."
-        if parent_key:
-            if parent_key == key:
-                return "An entity cannot be its own group."
-            parent = (s.query(db.KbEntity)
-                      .filter(db.KbEntity.tenant == tenant,
-                              db.KbEntity.key == parent_key).first())
-            if not parent:
-                return (f"No entity keyed {parent_key!r} — create the "
-                        f"collection first, then assign members to it.")
+        if not (s.query(db.KbEntity)
+                .filter(db.KbEntity.tenant == tenant,
+                        db.KbEntity.key == group_key).first()):
+            return (f"No entity keyed {group_key!r} — create the collection "
+                    f"first, then assign members to it.")
+        if group_key in (row.parent_keys or []):
+            return f"{key} is already in {group_key}."
 
-    # Asked BEFORE the write, and of the PROPOSED PARENT rather than of this
-    # row. Checking afterwards does not work: `ancestors` stops when it revisits
-    # a key, so a walk that ends because of a loop looks identical to one that
-    # ends at the top of the tree, and the guard silently passed.
-    if parent_key and key in ancestors(tenant, parent_key):
-        return (f"Refused: {parent_key!r} is already inside {key!r}, so this "
+    # Asked BEFORE the write, and of the PROPOSED GROUP rather than of this
+    # row. Checking afterwards does not work: the walk stops when it revisits a
+    # key, so a chain that ends because of a loop looks identical to one that
+    # ends at the top, and the guard passed silently.
+    if key in ancestors(tenant, group_key):
+        return (f"Refused: {group_key!r} is already inside {key!r}, so this "
                 f"would make a loop and no claim's audience could be resolved.")
 
     with db.SessionLocal() as s:
         row = (s.query(db.KbEntity)
                .filter(db.KbEntity.tenant == tenant,
                        db.KbEntity.key == key).first())
-        row.parent_key = parent_key
+        row.parent_keys = sorted(set(list(row.parent_keys or []) + [group_key]))
         s.commit()
-    return (f"{key} is now in {parent_key}." if parent_key
-            else f"{key} is no longer in a group.")
+    return f"{key} is now in {group_key}."
 
 
-def assign_to_group(tenant: str, parent_key: str, keys: list[str]) -> dict:
-    """Select many entities into one group. Reports what it could not do."""
-    done, refused = [], []
-    for k in keys:
-        msg = set_parent(tenant, k, parent_key)
-        (done if "is now in" in msg else refused).append(msg if k not in msg
-                                                         else k)
-        if "is now in" not in msg:
-            refused[-1] = msg
-    return {"assigned": len(done), "refused": refused}
-
-
-def group_members(tenant: str, parent_key: str) -> list[db.KbEntity]:
+def leave_group(tenant: str, key: str, group_key: str = "") -> str:
+    """Remove one entity from a group, or from all of them."""
     with db.SessionLocal() as s:
-        rows = (s.query(db.KbEntity)
-                .filter(db.KbEntity.tenant == tenant,
-                        db.KbEntity.parent_key == parent_key,
-                        db.KbEntity.status == "active")
-                .order_by(db.KbEntity.name).all())
+        row = (s.query(db.KbEntity)
+               .filter(db.KbEntity.tenant == tenant,
+                       db.KbEntity.key == key).first())
+        if not row:
+            return f"No entity keyed {key!r} for {tenant}."
+        before = list(row.parent_keys or [])
+        row.parent_keys = ([g for g in before if g != group_key]
+                           if group_key else [])
+        s.commit()
+        gone = len(before) - len(row.parent_keys)
+    return f"Removed from {gone} group(s)." if gone else "It was not in that group."
+
+
+def assign_to_group(tenant: str, group_key: str, keys: list[str]) -> dict:
+    """Select many entities into one group. Reports what it could not do."""
+    assigned, refused = 0, []
+    for k in keys:
+        msg = join_group(tenant, k, group_key)
+        if "is now in" in msg or "already in" in msg:
+            assigned += 1
+        else:
+            refused.append(msg)
+    return {"assigned": assigned, "refused": refused}
+
+
+def group_members(tenant: str, group_key: str) -> list[db.KbEntity]:
+    rows = _parents(tenant)
+    keys = {k for k, ps in rows.items() if group_key in ps}
+    with db.SessionLocal() as s:
+        out = (s.query(db.KbEntity)
+               .filter(db.KbEntity.tenant == tenant,
+                       db.KbEntity.key.in_(keys or [""]),
+                       db.KbEntity.status == "active")
+               .order_by(db.KbEntity.name).all())
         s.expunge_all()
-        return rows
+        return out
 
 
 def scope_conflicts(tenant: str) -> list[dict]:

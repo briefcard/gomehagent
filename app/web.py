@@ -2186,6 +2186,74 @@ def system_rule(key: str = Depends(admin_key), id: str = "", phrase: str = ""):
 # customer through here.
 # ---------------------------------------------------------------------------
 
+@app.get("/admin/collections_sync")
+def collections_sync(key: str = Depends(admin_key), tenant: str = "",
+                     adopt: str = "", dry_run: str = "") -> dict:
+    """Import Shopify collections as groups. `adopt` is a comma-separated list.
+
+    Call it once with no `adopt` to see what exists, then again naming the
+    collections that are genuine product ranges.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import catalog_sync
+    if not tenant:
+        return {"error": "tenant is required"}
+    return catalog_sync.sync_collections(
+        tenant, adopt=[a for a in adopt.split(",") if a.strip()],
+        dry_run=bool(dry_run))
+
+
+@app.get("/admin/entity_group")
+def entity_group(key: str = Depends(admin_key), tenant: str = "",
+                 entity: str = "", group: str = "") -> dict:
+    """Add one entity to a group by hand, or clear its groups with an empty one.
+
+    Membership is additive and an entity may sit in several: its range, its
+    material, its type. Adding one never removes another.
+
+    The manual path for what the collection import cannot decide: a product in
+    several collections, a range that is not a Shopify collection at all, or a
+    grouping that only makes sense to a person.
+
+    Both arguments go through `resolve_entity_ref`, so either can be given as a
+    key, a display name, or a unique partial of one.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    if not tenant or not entity:
+        return {"error": "tenant and entity are required"}
+    ekey, problem = kbm.resolve_entity_ref(tenant, entity)
+    if problem or not ekey:
+        return {"error": problem or f"no entity matched {entity!r}"}
+    gkey = ""
+    if group:
+        gkey, gproblem = kbm.resolve_entity_ref(tenant, group)
+        if gproblem or not gkey:
+            return {"error": gproblem or f"no group matched {group!r}"}
+    result = (kbm.join_group(tenant, ekey, gkey) if gkey
+              else kbm.leave_group(tenant, ekey))
+    return {"entity": ekey, "group": gkey, "result": result,
+            "groups": kbm.ancestors(tenant, ekey)}
+
+
+@app.get("/admin/scope_conflicts")
+def scope_conflicts_route(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Claims that answer the same situation at different scopes.
+
+    Reported, never resolved — the narrower one is selected either way, and
+    whether that is a refinement or a contradiction is a judgement.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    if not tenant:
+        return {"error": "tenant is required"}
+    rows = kbm.scope_conflicts(tenant)
+    return {"tenant": tenant, "count": len(rows), "conflicts": rows}
+
+
 @app.get("/admin/agent_context")
 def agent_context(key: str = Depends(admin_key), tenant: str = "",
                   system: str = "", utterance: str = "", entity_key: str = "",

@@ -49,7 +49,7 @@ def main() -> int:
     for k, n in [("white-acrylic-pitcher-aqua", "White Acrylic Pitcher"),
                  ("taupe-acrylic-pitcher-aqua", "Taupe Acrylic Pitcher")]:
         kb.add_entity("baci", "product", k, n)
-        kb.set_parent("baci", k, "aqua")
+        kb.join_group("baci", k, "aqua")
     kb.add_entity("baci", "product", "mamma-mia-plate", "Mamma Mia Plate")
 
     print("— selecting items into a group —")
@@ -61,15 +61,39 @@ def main() -> int:
     ck("an item outside it has no group",
        kb.ancestors("baci", "mamma-mia-plate") == [])
     ck("a group cannot contain itself",
-       "cannot be its own" in kb.set_parent("baci", "aqua", "aqua"))
+       "cannot be its own" in kb.join_group("baci", "aqua", "aqua"))
     ck("A LOOP IS REFUSED — a walk that stops at a cycle looks exactly like "
        "one that reached the top, so this is checked on the proposed parent",
-       "would make a loop" in kb.set_parent("baci", "aqua",
+       "would make a loop" in kb.join_group("baci", "aqua",
                                             "white-acrylic-pitcher-aqua"))
     ck("  and the refusal left the tree intact",
        kb.ancestors("baci", "white-acrylic-pitcher-aqua") == ["aqua"])
     ck("an unknown group is refused, not silently created",
-       "No entity keyed" in kb.set_parent("baci", "mamma-mia-plate", "nope"))
+       "No entity keyed" in kb.join_group("baci", "mamma-mia-plate", "nope"))
+
+    print("\n— several groups at once, because a catalogue has several axes —")
+    kb.add_entity("baci", "collection", "acrylics", "Acrylics")
+    kb.add_entity("baci", "collection", "pitchers", "Pitchers & Carafes")
+    for g in ("acrylics", "pitchers"):
+        kb.join_group("baci", "white-acrylic-pitcher-aqua", g)
+    ck("an entity belongs to its range, its material AND its type",
+       set(kb.ancestors("baci", "white-acrylic-pitcher-aqua"))
+       == {"aqua", "acrylics", "pitchers"},
+       str(sorted(kb.ancestors("baci", "white-acrylic-pitcher-aqua"))))
+    ck("  joining one group never evicts it from another",
+       "aqua" in kb.ancestors("baci", "white-acrylic-pitcher-aqua"))
+    kb.add_claim("baci", "Shatterproof acrylic, not glass.", "material sheet",
+                 ["material"], origin="human", entity_key="acrylics")
+    ck("  a claim on the MATERIAL group reaches it",
+       "acrylics" in _scopes("baci", "white-acrylic-pitcher-aqua"),
+       str(_scopes("baci", "white-acrylic-pitcher-aqua")))
+    ck("  and not the taupe pitcher, which was never added to it",
+       "acrylics" not in _scopes("baci", "taupe-acrylic-pitcher-aqua"),
+       str(_scopes("baci", "taupe-acrylic-pitcher-aqua")))
+    ck("leaving one group keeps the others",
+       "Removed from 1" in kb.leave_group("baci", "white-acrylic-pitcher-aqua",
+                                          "pitchers")
+       and "aqua" in kb.ancestors("baci", "white-acrylic-pitcher-aqua"))
 
     print("\n— one claim, said once, true of the whole range —")
     kb.add_claim("baci", "Shatterproof acrylic throughout.", "spec sheet",
@@ -90,9 +114,15 @@ def main() -> int:
 
     print("\n— precedence: individual, then group, then brand-wide —")
     got = _scopes("baci", "white-acrylic-pitcher-aqua")
-    ck("all three scopes are offered", len(got) == 3, str(got))
-    ck("  and in specificity order",
-       got == ["white-acrylic-pitcher-aqua", "aqua", "brand-wide"], str(got))
+    ck("every scope it belongs to is offered", len(got) == 4, str(got))
+    ck("  the individual claim leads", got[0] == "white-acrylic-pitcher-aqua",
+       str(got))
+    ck("  brand-wide comes last", got[-1] == "brand-wide", str(got))
+    # Two groups both sit at depth 1, so their order relative to each other is
+    # a tie and deliberately not asserted — pinning it would be pinning an
+    # implementation detail, which is how the insertion-order bug hid before.
+    ck("  both groups sit between them", set(got[1:-1]) == {"aqua", "acrylics"},
+       str(got))
     ck("a member with no claim of its own leads with the group's",
        _scopes("baci", "taupe-acrylic-pitcher-aqua")[0] == "aqua")
 
