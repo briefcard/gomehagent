@@ -434,6 +434,15 @@ class DocIndex(Base):
     source = Column(String, default="")  # email | whatsapp | sweep | refile
     content_hash = Column(String, default="", index=True)  # sha256 — dedup across runs
 
+    # WHICH CONVERSATION this arrived on. `anchor` is a business key —
+    # 'Primorous PO-2241' — and answers a different question. Without these two
+    # you can find the bill of lading and you can find the thread where the
+    # credit was agreed, and nothing joins them: "what was attached to that
+    # conversation" is unanswerable. Same shape as the email bodies —
+    # catalogued, not connected.
+    thread_id = Column(String, default="", index=True)
+    gmail_message_id = Column(String, default="", index=True)
+
     # The extracted text, so a document is answerable rather than merely
     # findable. `read_email_attachment` has been pulling this out of PDFs all
     # along and throwing it away — which is why "what did the BOL say" needed a

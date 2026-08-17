@@ -369,7 +369,17 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         if utterance:
             from . import archive
             found = archive.search(tenant, utterance, limit=3)
-            bundle["correspondence"] = found["hits"]
+            hits = found["hits"]
+            # A thread's attachments travel WITH it. The invoice is usually
+            # where the answer actually is, and a covering email that says
+            # "please see attached" is the least useful sentence in the inbox.
+            from . import archive as _ar
+            for h in hits:
+                if h.get("kind") == "thread" and h.get("thread_id"):
+                    docs = _ar.for_thread(tenant, h["thread_id"])
+                    if docs:
+                        h["attachments"] = docs
+            bundle["correspondence"] = hits
             bundle["correspondence_coverage"] = found["coverage"]
             searched.append("correspondence")
             if found["degraded"]:

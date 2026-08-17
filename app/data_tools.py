@@ -355,6 +355,12 @@ def read_email_attachment(account: str, message_id: str, filename: str = "") -> 
             if not text:
                 return (f"'{name}' has no text layer (likely a scanned image "
                         "PDF) — I can't read it here; flag it to Gomeh.")
+            # Keep it. This function has been extracting PDF text for months
+            # and returning it into a chat that ends — so the same document was
+            # re-downloaded and re-parsed for every question, and none of it was
+            # ever searchable. One call, and an on-demand read becomes a
+            # permanent one.
+            _remember(account, message_id, name, text)
             return f"[{name}, {len(data)} bytes]\n{text[:6500]}"
         if name.lower().endswith((".txt", ".csv")):
             return f"[{name}]\n{data.decode(errors='replace')[:6500]}"
@@ -698,3 +704,37 @@ def dispatch(name: str, args: dict, tenant: str = "") -> str:
         return _HANDLERS[name](**args)[:8000]
     except Exception as exc:  # noqa: BLE001
         return f"Tool error ({exc.__class__.__name__}): {exc}"
+
+
+def _remember(account: str, message_id: str, filename: str, text: str) -> None:
+    """File what an attachment said, against the thread it arrived on.
+
+    Best effort by design: a failure to remember must never turn a successful
+    read into an error for whoever asked.
+    """
+    try:
+        import hashlib
+
+        from . import archive, db
+        text = (text or "").strip()
+        if len(text) < archive.MIN_INDEXABLE_CHARS:
+            return
+        h = hashlib.sha256(text.encode()).hexdigest()[:32]
+        with db.SessionLocal() as s:
+            row = (s.query(db.EmailLog)
+                   .filter(db.EmailLog.gmail_message_id == message_id).first())
+            tenant = (row.tenant if row else "") or ""
+            if s.query(db.DocIndex).filter(
+                    db.DocIndex.tenant == tenant,
+                    db.DocIndex.content_hash == h).first():
+                return
+            s.add(db.DocIndex(
+                tenant=tenant, filename=filename, path="(email attachment)",
+                source="email", content_hash=h,
+                text_excerpt=text[:archive.MAX_STORED],
+                anchor=(row.subject if row else "")[:120] if row else "",
+                thread_id=(row.thread_id if row else "") or "",
+                gmail_message_id=message_id))
+            s.commit()
+    except Exception:  # noqa: BLE001 — never fail a read on bookkeeping
+        pass

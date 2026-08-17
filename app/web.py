@@ -1676,6 +1676,28 @@ def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
     return doc
 
 
+@app.get("/admin/archive_attachments")
+def archive_attachments(key: str = Depends(admin_key), tenant: str = "",
+                        limit: int = 50) -> dict:
+    """Pull the documents that arrived ON threads, and keep what they say.
+
+    `read_email_attachment` has extracted PDF text on demand for months and
+    returned it into a chat that ends — so the same bill of lading was
+    re-parsed for every question and none of it was searchable. Worse, an agent
+    had to SUSPECT an attachment mattered before it would look; if it did not,
+    it asked a human.
+
+    Filed against the thread it came on, so "what was attached to the
+    conversation where we agreed the credit" becomes a query.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import archive
+    return archive.fetch_attachments(tenant, limit=limit)
+
+
 @app.get("/admin/threads")
 def admin_threads(key: str = Depends(admin_key), tenant: str = "",
                   pick: str = "", q: str = "", limit: int = 25,

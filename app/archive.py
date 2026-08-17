@@ -376,3 +376,124 @@ def backfill_bodies(tenant: str, limit: int = 200) -> dict:
                  "stored — fetching and indexing are separate so a failed "
                  "fetch does not look like a failed index"),
     }
+
+
+#: What is worth extracting. A scanned image with no text layer is a document
+#: whose content nobody can read without OCR, and pretending otherwise stores
+#: an empty row that looks indexed.
+READABLE = (".pdf", ".txt", ".csv", ".md")
+
+
+def fetch_attachments(tenant: str, limit: int = 50) -> dict:
+    """Pull the documents that arrived ON threads, and keep what they say.
+
+    `read_email_attachment` has been extracting PDF text on demand for months
+    and RETURNING it — no store, no commit. So every question about the same
+    bill of lading re-downloaded and re-parsed it, nothing was searchable, and
+    an agent had to first SUSPECT an attachment mattered before it would look.
+    If it did not suspect, it asked a human instead. That is the same failure
+    as the missing email bodies, one layer down.
+
+    Filed against the thread it came on, so "what was attached to the
+    conversation where we agreed the credit" is a query rather than a memory.
+    """
+    from . import gmail_client
+    import hashlib
+
+    with db.SessionLocal() as s:
+        rows = (s.query(db.EmailLog)
+                .filter(db.tenant_filter(db.EmailLog, tenant),
+                        db.EmailLog.body_excerpt.isnot(None))
+                .order_by(db.EmailLog.seen_at.desc()).limit(limit).all())
+        s.expunge_all()
+
+    found = stored = skipped = failed = 0
+    unreadable: dict[str, int] = {}
+    why = ""
+
+    for r in rows:
+        try:
+            svc = gmail_client.service_for(r.account)
+            msg = svc.users().messages().get(
+                userId="me", id=r.gmail_message_id, format="full").execute()
+            atts = gmail_client._extract_attachments(msg.get("payload", {}))
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            why = why or f"{exc.__class__.__name__}: {str(exc)[:100]}"
+            continue
+
+        for a in atts:
+            found += 1
+            name = a.get("filename", "")
+            if not name.lower().endswith(READABLE):
+                key = name.rsplit(".", 1)[-1].lower() if "." in name else "no extension"
+                unreadable[key] = unreadable.get(key, 0) + 1
+                continue
+            try:
+                data = gmail_client.download_attachment(
+                    r.account, r.gmail_message_id, a["attachment_id"])
+                if name.lower().endswith(".pdf"):
+                    from .data_tools import _pdf_text
+                    text = _pdf_text(data)
+                else:
+                    text = data.decode(errors="replace")
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                why = why or f"{exc.__class__.__name__}: {str(exc)[:100]}"
+                continue
+
+            text = (text or "").strip()
+            if len(text) < MIN_INDEXABLE_CHARS:
+                # A scan with no text layer. Recorded as unreadable rather than
+                # stored empty — an empty row that looks indexed is worse than
+                # an absent one, because nothing will ever come back to it.
+                unreadable["no text layer"] = unreadable.get("no text layer", 0) + 1
+                skipped += 1
+                continue
+
+            h = hashlib.sha256(text.encode()).hexdigest()[:32]
+            with db.SessionLocal() as s:
+                existing = (s.query(db.DocIndex)
+                            .filter(db.DocIndex.tenant == tenant,
+                                    db.DocIndex.content_hash == h).first())
+                if existing:
+                    # Same document on a second thread: keep the link rather
+                    # than a duplicate row.
+                    if not existing.thread_id:
+                        existing.thread_id = r.thread_id or ""
+                        existing.gmail_message_id = r.gmail_message_id
+                        s.commit()
+                    skipped += 1
+                    continue
+                s.add(db.DocIndex(
+                    tenant=tenant, filename=name, path="(email attachment)",
+                    doc_type="", anchor=(r.subject or "")[:120], source="email",
+                    content_hash=h, text_excerpt=text[:MAX_STORED],
+                    thread_id=r.thread_id or "",
+                    gmail_message_id=r.gmail_message_id))
+                s.commit()
+            stored += 1
+
+    return {
+        "tenant": tenant, "threads_read": len(rows), "attachments_found": found,
+        "stored": stored, "already_on_file": skipped, "failed": failed,
+        "unreadable": unreadable, "why": why,
+        "next": ("run /admin/archive_index?kind=document to embed them — then "
+                 "an invoice is findable by what it SAYS, not by its filename"),
+    }
+
+
+def for_thread(tenant: str, thread_id: str) -> list[dict]:
+    """Every document that arrived on one conversation.
+
+    The join that did not exist. `anchor` is a business key and answers a
+    different question; this answers "what came with this thread".
+    """
+    with db.SessionLocal() as s:
+        rows = (s.query(db.DocIndex)
+                .filter(db.tenant_filter(db.DocIndex, tenant, include_unassigned=True),
+                        db.DocIndex.thread_id == thread_id).all())
+        s.expunge_all()
+    return [{"id": r.id, "filename": r.filename, "doc_type": r.doc_type or "",
+             "has_text": bool((r.text_excerpt or "").strip()),
+             "excerpt": (r.text_excerpt or "")[:300]} for r in rows]

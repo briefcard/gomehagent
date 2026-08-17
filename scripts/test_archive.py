@@ -205,6 +205,37 @@ def main() -> int:
         ck("and its coverage is on the receipt",
            "correspondence" in b["coverage"]["searched"])
 
+
+        print("\n— an attachment belongs to the thread it arrived on —")
+        # The join that did not exist: you could find the bill of lading and
+        # find the thread where the credit was agreed, and nothing connected
+        # them. `anchor` is a business key and answers a different question.
+        with db.SessionLocal() as s:
+            s.add(db.DocIndex(
+                tenant="baci", filename="commercial-invoice-2241.pdf",
+                path="(email attachment)", doc_type="invoice", source="email",
+                content_hash="h1", thread_id="t-1", gmail_message_id="m-1",
+                text_excerpt=("Commercial invoice for the March consignment. "
+                              "Six pallets, two recorded as crushed on arrival "
+                              "at the DHL hub. Credit note to follow.")))
+            s.commit()
+        docs = archive.for_thread("baci", "t-1")
+        ck("the document is reachable FROM the conversation",
+           docs and docs[0]["filename"].startswith("commercial-invoice"),
+           str([d["filename"] for d in docs]))
+        ck("and it carries what it says, not just its name",
+           docs[0]["has_text"] and "crushed" in docs[0]["excerpt"])
+        ck("another thread does not inherit it",
+           archive.for_thread("baci", "t-2") == [])
+
+        print("\n— and it rides along when the thread is retrieved —")
+        archive.index("baci", kind="document")
+        b2 = rs.resolve("baci", utterance=ASKED, tier=3)
+        thread_hits = [h for h in b2["correspondence"] if h["kind"] == "thread"]
+        ck("the retrieved thread carries its attachments",
+           any(h.get("attachments") for h in thread_hits),
+           "'please see attached' is the least useful sentence in an inbox")
+
         print("\n— one account's mail is invisible to another —")
         ck("eien sees none of it",
            archive.search("eien", ASKED)["hits"] == [])
