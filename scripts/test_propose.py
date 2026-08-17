@@ -26,7 +26,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import kb, propose, provenance as prov, tenants  # noqa: E402
+import re  # noqa: E402
+
+from app import embed, kb, propose, provenance as prov, tenants  # noqa: E402
+
+_CONCEPTS = [
+    {"when", "get", "here", "arrive", "ship", "shipping", "delivery", "days"},
+    {"duty", "customs", "import", "tax", "charge"},
+    {"gift", "wrap", "present", "packaging"},
+]
+
+
+def _stub(texts):
+    out = []
+    for t in texts:
+        w = set(re.findall(r"[a-z]+", (t or "").lower()))
+        out.append([float(len(w & c)) for c in _CONCEPTS] + [0.1])
+    return out, ""
 from app.web import app  # noqa: E402
 
 _fail = []
@@ -43,6 +59,7 @@ def ck(label, cond, detail=""):
 def main() -> int:
     with TestClient(app) as cl:
         tenants.seed()
+        embed.set_provider(_stub)
         kb.ensure_brand("baci", "Baci Milano USA")
         kb.add_banned("baci", "made in Italy")
         kb.add_situation("baci", "shipping_time", patterns=[],
@@ -123,14 +140,17 @@ def main() -> int:
            r.get("message", "")[:70])
         ck("and it points at the tag that already covers it",
            "already has" in r.get("message", ""), r.get("note", ""))
-        # HONEST LIMIT: the guard is lexical, so `delivery_time` against
-        # `shipping_time` slips through — different words, same meaning, no
-        # token overlap. Embeddings would catch it; situations are not indexed.
+        # `delivery_time` vs `shipping_time`: no shared token, one idea. This
+        # used to slip through and was written up as a known limit while
+        # `situation` was already a valid embedding kind and nothing indexed
+        # it. The stub gives the two descriptions an identical vector.
         slipped = propose.situation("baci", "delivery_time",
                                     "When will it get here?", source_ref=REF)
-        ck("but a true synonym with no shared words gets through",
-           slipped["ok"],
-           "lexical guard: known gap, and why situations should be embedded")
+        ck("a true synonym with NO shared words is caught semantically",
+           not slipped["ok"], slipped.get("message", "")[:70])
+        ck("and it names the tag that already covers it",
+           "shipping_time" in slipped.get("message", ""),
+           "lexical could not see this; the embedding can")
         r = propose.situation("baci", "customs_duty",
                               "Who pays the import duty?", source_ref=REF)
         ck("a genuinely new one is proposed", r["ok"], r["message"][:40])

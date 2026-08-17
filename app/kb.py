@@ -827,6 +827,12 @@ def situation_desc(tenant: str) -> dict[str, str]:
 #: a tag" and starts being "this account's vocabulary is wrong".
 MAX_NEW_SITUATIONS = 3
 
+#: Cosine above which two situations are one idea. Higher than
+#: `MIN_SEMANTIC_SCORE` on purpose: this guard REFUSES a new tag, and a wrong
+#: refusal means a real gap can never be named. Letting a near-synonym through
+#: costs a review; blocking a genuine one costs the vocabulary a concept.
+SITUATION_SYNONYM_SCORE = 0.80
+
 
 def similar_situation(tenant: str, tag: str) -> str:
     """An existing tag that already covers `tag`, or "".
@@ -859,7 +865,47 @@ def similar_situation(tenant: str, tag: str) -> str:
         desc = _tok(row.description or "")
         if words and len(words & desc) / len(words) >= 0.6:
             return row.tag
+
+    # Everything above is lexical, and lexical cannot see that `delivery_time`
+    # and `shipping_time` are one idea — different words, same meaning, no
+    # shared tokens. That gap was documented as a known limit while `situation`
+    # was already a valid embedding kind and nothing indexed it.
+    #
+    # The threshold is deliberately HIGHER than MIN_SEMANTIC_SCORE, because
+    # this guard REFUSES. A false positive here blocks a real gap from ever
+    # being named, which is worse than letting a near-synonym through — a
+    # proposal goes to a human either way.
+    try:
+        from . import embed
+        hits, why, _ = embed.search(tenant, "situation",
+                                    f"{want.replace('_', ' ')} {description_for(tenant, want)}".strip(),
+                                    limit=1, min_score=SITUATION_SYNONYM_SCORE)
+        if hits:
+            # Embeddings are keyed on the ROW id; the caller wants the tag.
+            by_id = {r.id: r.tag for r in situation_rows(tenant)}
+            near = by_id.get(hits[0]["row_id"], "")
+            if near and near != want:
+                return near
+    except Exception as exc:  # noqa: BLE001 — a guard must never break a write
+        log.debug("semantic synonym check unavailable for %s: %s", tenant, exc)
     return ""
+
+
+def description_for(tenant: str, tag: str) -> str:
+    """The proposed tag's own description, when the caller has already set it.
+
+    `similar_situation` is called from `add_situation` BEFORE the row is
+    written, so the meaning being compared has to come from the caller rather
+    than from storage.
+    """
+    return _PENDING_DESC.get((tenant, tag), "")
+
+
+#: Set by `add_situation` for the duration of one call so the synonym check can
+#: compare MEANINGS rather than two slugs. A slug carries almost no signal —
+#: `customs_duty` and `import_tax` share nothing — and the description is where
+#: the idea actually lives.
+_PENDING_DESC: dict[tuple, str] = {}
 
 
 def _situation_users(tenant: str) -> dict[str, set[str]]:
@@ -1037,7 +1083,14 @@ def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None
     # is already in it. A human still can — they may have a reason, and they
     # can see both.
     if not prov.lands_approved(origin):
-        near = similar_situation(tenant, tag)
+        # Hand the proposed MEANING to the guard, not just the slug. Two tags
+        # share almost no characters even when they are the same idea, and the
+        # description is where the idea lives.
+        _PENDING_DESC[(tenant, tag)] = description or ""
+        try:
+            near = similar_situation(tenant, tag)
+        finally:
+            _PENDING_DESC.pop((tenant, tag), None)
         if near and near != tag:
             return (f"Not added — {tenant} already has {near!r}, which covers "
                     f"{tag!r}. Use that instead.")
@@ -1067,6 +1120,19 @@ def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None
         if not existing:
             s.add(row)
         s.commit()
+        row_id, row_desc = row.id, row.description or ""
+
+    # Index it so the NEXT synonym check can be semantic. Without this the
+    # guard has nothing to compare against and silently falls back to lexical
+    # for ever — the shape of every other "a field exists and nothing reads it"
+    # defect in this log.
+    try:
+        from . import embed
+        embed.ensure(tenant, "situation", row_id,
+                     f"{tag.replace('_', ' ')} {row_desc}".strip())
+    except Exception as exc:  # noqa: BLE001 — indexing must not fail a write
+        log.warning("embed on add_situation failed for %s: %s", tag, exc)
+
     return f"{'Updated' if existing else 'Added'} situation {tag} for {tenant}."
 
 
