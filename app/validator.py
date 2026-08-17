@@ -24,6 +24,50 @@ import re
 from . import conversation as cv, kb, ledger
 
 
+# Hyphens, dashes and runs of whitespace all collapse to a single space before
+# matching, on BOTH the phrase and the text.
+#
+# Without this the ban list bans a SPELLING rather than a CLAIM: banning
+# "hand-decorated" left "hand decorated" and "hand — decorated" free to go out,
+# and Baci's own catalogue writes the same claim as "Hand-Finished" in one place
+# and could as easily write "hand finished" in the next.
+#
+# The repair loop makes this worse rather than academic. A model told "the draft
+# says 'hand-decorated' — reword it" is being invited to try the nearest
+# variant, and the nearest variant is the one that used to pass. A rule the
+# rewrite can walk around is not a rule.
+_SEP = re.compile(r"[\s‐-―-]+")
+# The separators a banned phrase may be written with, between its words.
+_SEP_CLASS = r"[\s‐-―-]+"
+_PATTERN_CACHE: dict[str, "re.Pattern"] = {}
+
+
+def _phrase_pattern(phrase: str) -> "re.Pattern | None":
+    """Compile one banned phrase into a matcher for the CLAIM, not a spelling.
+
+    The separator inside the phrase is flexible, so a ban on "hand-decorated"
+    also catches "hand decorated" and "hand — decorated". Written the other way
+    round — flattening the TEXT instead — destroys information that matters:
+    "a second-hand decorated box" would flatten to "second hand decorated" and
+    be flagged, and that is a false positive on copy which never made the claim.
+    Keeping the text intact lets the boundary reject a leading hyphen.
+
+    The boundaries therefore exclude hyphens as well as word characters, which
+    also fixes a pre-existing over-match: the old pattern flagged
+    "second-hand-decorated" for the same reason, just in the one spelling.
+    """
+    p = (phrase or "").strip().lower()
+    if not p:
+        return None
+    if p not in _PATTERN_CACHE:
+        parts = [re.escape(w) for w in _SEP.split(p) if w]
+        if not parts:
+            return None
+        _PATTERN_CACHE[p] = re.compile(
+            r"(?<![\w-])" + _SEP_CLASS.join(parts) + r"(?![\w-])")
+    return _PATTERN_CACHE[p]
+
+
 def _banned(tenant: str, text: str) -> list[dict]:
     """Barred phrases actually present in the text.
 
@@ -31,14 +75,17 @@ def _banned(tenant: str, text: str) -> list[dict]:
     "guaranteed" twice and, worse, flags real words that merely contain a
     banned one. The ban list is enforced, so a false positive is a blocked
     draft somebody has to argue with.
+
+    Only the separators between a phrase's own words are treated as
+    interchangeable, never other punctuation: "the hand, finished at last"
+    stays a miss, because the comma makes it two statements rather than the
+    claim being made.
     """
     out = []
     low = (text or "").lower()
     for phrase in kb.banned_claims(tenant) or []:
-        p = (phrase or "").strip().lower()
-        if not p:
-            continue
-        if re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", low):
+        pat = _phrase_pattern(phrase)
+        if pat and pat.search(low):
             out.append({"phrase": phrase})
     return out
 

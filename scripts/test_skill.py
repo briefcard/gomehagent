@@ -362,6 +362,23 @@ def main():
        ledger.recent("baci", "ad_creative", 1)[0].status == "blocked")
     skill_pack.draft_ad = skill_pack._draft_ad_live
 
+    print("\n--- the ban list bans a CLAIM, not a spelling ---")
+    # The repair loop makes this load-bearing rather than academic: a model told
+    # "the draft says 'hand-decorated'" is being invited to try the nearest
+    # variant, and the nearest variant used to pass.
+    from app import validator as _v
+    kb.add_banned("baci", "hand-finished")
+    for text, want, why in [
+            ("Every piece is hand-decorated.", True, "exact"),
+            ("Every piece is hand decorated.", True, "space, not hyphen"),
+            ("Hand-Finished Porcelain.", True, "the live Baci wording"),
+            ("Every piece is hand — decorated.", True, "em dash"),
+            ("A second-hand decorated box.", False, "must not over-match"),
+            ("A second-hand-decorated box.", False, "nor hyphenated"),
+            ("The hand, finished at last.", False, "a comma means two statements"),
+            ("Italian-designed acrylic glasses.", False, "compliant phrasing")]:
+        ck(f"  {why}", bool(_v._banned("baci", text)) is want, text[:46])
+
     print("\n--- a rejection explains and adjusts, it does not queue a human ---")
     # A model that says the banned thing once, then fixes it when told.
     _tries = {"n": 0}
