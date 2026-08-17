@@ -1301,6 +1301,50 @@ async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(result)}", 303)
 
 
+@app.post("/admin/connect_save")
+async def connect_save(request: Request, key: str = Depends(admin_key)):
+    """Connect one provider for one account, from the console.
+
+    The owner could not do this. Every API-key provider on the Accounts tab
+    said "client pastes this on their connect link" — so connecting your own
+    Shopify meant minting a client link and using it yourself, or hand-editing
+    a JSON blob in the Render environment.
+
+    The fields arrive one per input and the shape is assembled here, which is
+    what `credentials.store` has always wanted: it normalises the meta,
+    validates the prefix, probes the live API and refuses to save what fails.
+    Nobody should be composing `{"baci": {"domain": ..., "token": ...}}` by
+    hand to connect a store.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import credentials as cred
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    provider = str(form.get("provider", ""))
+    spec = cred.PROVIDERS.get(provider)
+    if not spec:
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&err={quote(f'unknown provider {provider}')}",
+            status_code=303)
+
+    meta = {f: str(form.get(f, "")) for f in spec["also"]}
+    res = cred.store(tenant, provider, str(form.get("secret", "")),
+                     meta=meta, granted_by="owner (console)")
+    if res.get("ok"):
+        msg = f"{spec['name']} connected for {tenant}"
+        if res.get("detail"):
+            msg += f" — {res['detail']}"
+        return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(msg)}",
+                                status_code=303)
+    return RedirectResponse(
+        f"/admin/ui?tab=accounts&err={quote(spec['name'] + ': ' + res['error'])}",
+        status_code=303)
+
+
 @app.post("/admin/connect_test")
 async def connect_test_post(request: Request, key: str = Depends(admin_key)):
     """Re-verify a stored API key against the live provider, and record it.

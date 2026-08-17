@@ -105,6 +105,10 @@ button{font:inherit;font-size:.82rem;font-weight:600;padding:6px 13px;border-rad
 border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.cform{margin-top:7px;border:1px solid var(--rule);border-radius:5px;padding:8px 11px}
+.cform summary{cursor:pointer;font-size:.8rem;color:var(--acc);font-weight:600}
+.cform .f{margin-top:9px}
+.cform input{width:100%}
 .inst{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
   margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
 .inst.ok{border-left:3px solid var(--ok)}
@@ -246,10 +250,18 @@ def _connections(tenant: str, key: str) -> str:
             # Named, not hidden: the thing standing in the way is an env var
             # someone can go and set, and saying which is the whole difference
             # between a blocker and a feature that reads as unbuilt.
-            action = f'<span class="mut">{_esc(r["blocked_by"])}</span>'
+            #
+            # And the redirect URI is shown, because it is the other half of the
+            # job and the half that fails silently: it must match the provider
+            # console byte for byte, and a mismatch surfaces as a consent screen
+            # rejecting you with no hint of why.
+            from . import oauth as _oauth
+            action = (f'<div class="mut">{_esc(r["blocked_by"])}</div>'
+                      f'<div class="when">Then register this redirect URI, '
+                      f'exactly:<br><code>{_esc(_oauth.redirect_uri(r["provider"]))}'
+                      f'</code></div>')
         else:
-            action = ('<span class="mut">client pastes this on their connect '
-                      'link</span>')
+            action = ""      # the form below IS the action for an API key
 
         if state in ("connected", "failed"):
             if r["kind"] == "api_key":
@@ -271,10 +283,47 @@ def _connections(tenant: str, key: str) -> str:
               <button class="sec">Disconnect</button>
             </form>"""
 
+        # The form for an API-key provider, with that provider's own
+        # click-by-click instructions above it. Those `howto` strings were
+        # written for the client connect page and shown nowhere else, so the
+        # owner — the person most likely to be connecting an account — was the
+        # one reading a runbook instead.
+        form = ""
+        spec = cred.PROVIDERS.get(r["provider"]) or {}
+        if r["kind"] == "api_key":
+            extra = "".join(
+                f'<label>{_esc(desc)}</label>'
+                f'<input name="{_esc(f)}" placeholder="{_esc(desc)}" required>'
+                for f, desc in (spec.get("also") or {}).items())
+            starts = spec.get("starts") or ""
+            hint = (f'<div class="when">It begins with <code>{_esc(starts)}</code>. '
+                    f'Checked against the live API before anything is saved — '
+                    f'a key with a trailing space is refused here, not silently '
+                    f'a week later.</div>' if starts else
+                    '<div class="when">Checked against the live API before '
+                    'anything is saved.</div>')
+            form = f"""
+            <details class="cform">
+              <summary>{"Replace" if state == "connected" else "Connect"} {_esc(r['name'])}</summary>
+              <div class="note">{_esc(spec.get('howto', ''))}</div>
+              <form method="post" action="/admin/connect_save" class="f">
+                <input type="hidden" name="key" value="{_esc(key)}">
+                <input type="hidden" name="tenant" value="{_esc(tenant)}">
+                <input type="hidden" name="provider" value="{_esc(r['provider'])}">
+                <label>{_esc(spec.get('field', 'Key'))}</label>
+                <input name="secret" type="password" autocomplete="off"
+                       placeholder="{_esc(spec.get('field', 'Key'))}" required>
+                {extra}
+                {hint}
+                <div class="row"><button>Connect</button></div>
+              </form>
+            </details>"""
+
         out.append(f"""
         <div class="conn">
           <div><strong>{_esc(r['name'])}</strong> {chip}{detail}</div>
           <div class="row">{action}</div>
+          {form}
         </div>""")
 
     return f"""

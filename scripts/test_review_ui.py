@@ -154,6 +154,7 @@ def main() -> int:
        "— Aqua Dinner Plate" in html)
 
     installer()
+    connecting()
 
     print()
     if _fails:
@@ -225,6 +226,58 @@ def installer() -> int:
        'class="pre yes"' in html and 'class="pre no"' in html)
     ck("  and an install link carrying the account",
        'system_add' in html and 'tenant=baci' in html)
+    return 0
+
+
+
+
+def connecting() -> int:
+    """Connecting an account from the console.
+
+    Every API-key provider used to say "client pastes this on their connect
+    link" — so the owner could not connect their own Shopify without minting a
+    client link, or hand-editing a JSON blob in the Render environment.
+    """
+    from app import credentials as cred
+
+    print("\n— connecting an account from the console —")
+    html = client.get("/admin/ui", params={"key": KEY, "tab": "accounts"}).text
+    ck("no provider tells the owner to go and use a client link",
+       "client pastes" not in html)
+
+    keyed = [p for p, s in cred.PROVIDERS.items() if s["kind"] == "api_key"]
+    ck(f"all {len(keyed)} API-key providers have a form",
+       all(f'value="{p}"' in html for p in keyed), str(keyed))
+    ck("  each asks for its own named field, not a generic 'key'",
+       "Admin API access token" in html and "Application password" in html)
+    ck("  and carries that provider's own instructions",
+       "Settings → Apps and sales channels" in html)
+    ck("  the extra fields a provider needs are separate inputs, so nobody "
+       "composes JSON by hand",
+       'name="domain"' in html and 'name="site"' in html
+       and 'name="username"' in html)
+    ck("OAuth says what is missing AND the redirect URI to register",
+       "not set in the env group" in html and "/oauth/google/callback" in html)
+
+    r = client.post("/admin/connect_save", params={"key": KEY},
+                    data={"tenant": "baci", "provider": "shopify",
+                          "secret": "not-a-real-token", "domain": "x.myshopify.com"},
+                    follow_redirects=False)
+    loc = r.headers.get("location", "")
+    ck("a key that fails its own format check is refused before saving",
+       "err=" in loc and "shpat_" in loc.replace("%5F", "_"), loc[:120])
+    ck("  and nothing was stored",
+       not any(s["state"] == "connected" and s["provider"] == "shopify"
+               for s in cred.status("baci")),
+       str([(s["provider"], s["state"]) for s in cred.status("baci")]))
+
+    r = client.post("/admin/connect_save", params={"key": KEY},
+                    data={"tenant": "baci", "provider": "shopify",
+                          "secret": "shpat_looksrightbutisnot"},
+                    follow_redirects=False)
+    ck("a missing required field is named, not swallowed",
+       "err=" in r.headers.get("location", ""),
+       r.headers.get("location", "")[:120])
     return 0
 
 
