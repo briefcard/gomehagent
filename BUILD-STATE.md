@@ -9,8 +9,8 @@ and do not create `HANDOFF-step-N.md` files. History lives in `DEFECTS.md`
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** `21fdb89` on `origin/main`, deployed and answering. This thread's work
-is **uncommitted** — see Commit below. `/health` reports `commit` and `routes` —
+**Live:** `21fdb89` on `origin/main`, deployed and answering. This thread's work is committed
+locally as `67625b7` and **not pushed** — see Commit below. `/health` reports `commit` and `routes` —
 use it, do not infer what is running.
 
 **Connections, verified live 2026-08-17 via `/health/connections`:** Shopify
@@ -187,18 +187,19 @@ beats a compiled `.md` is still unproven. One command:
 
 ## Commit
 
-**Uncommitted working tree** on `feat/context-architecture`, at base `21fdb89`
-== `origin/main` (confirmed by `git branch -vv` and by `/health`, which reports
-`21fdb8907d3d`). Nothing has been committed or pushed.
+`67625b7` on `feat/context-architecture`, one commit ahead of `origin/main`
+(`21fdb89`, which is what `/health` reports as live). **Committed, NOT pushed.**
+Verified a clean fast-forward with `git merge-base --is-ancestor` before
+committing.
 
 New: `app/skill.py`, `app/skill_pack.py`, `scripts/test_skill.py`.
 Modified: `app/kb.py`, `app/harvest.py`, `app/email_harvest.py`,
 `app/systems.py`, `app/responder.py`, `scripts/test_harvest.py`,
 `DEFECTS.md`, this file.
 
-When it is committed it is a clean fast-forward. Pushing deploys it — and
-`_fetch_products_live` has never made a real call, so push when somebody can
-watch the first sweep.
+Pushing deploys it. `_fetch_products_live` has never made a real call and no
+model call has been made either, so push when somebody can watch the first
+sweep rather than overnight.
 
 ## Next thread starts here
 
