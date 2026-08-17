@@ -105,8 +105,23 @@ button{font:inherit;font-size:.82rem;font-weight:600;padding:6px 13px;border-rad
 border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.inst{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
+  margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+.inst.ok{border-left:3px solid var(--ok)}
+.inst.gap{border-left:3px solid var(--gap)}
+.inst.done{border-left:3px solid var(--rule);opacity:.72}
+.insthead{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.insthead .grow{flex:1}
+.prereqs{display:flex;gap:6px;flex-wrap:wrap}
+.pre{font-size:.72rem;border-radius:100px;padding:2px 9px;border:1px solid var(--rule);
+  white-space:nowrap}
+.pre.yes{color:var(--ok)}
+.pre.no{color:var(--gap)}
+.btn{display:inline-block;font-size:.78rem;padding:4px 12px;border-radius:4px;
+  background:var(--acc);color:var(--panel);text-decoration:none}
+.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--rule)}
 .bulkbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
-  flex-wrap:wrap;background:var(--card);border:1px solid var(--rule);
+  flex-wrap:wrap;background:var(--panel);border:1px solid var(--rule);
   border-radius:5px;padding:9px 12px;margin-bottom:10px}
 .bulkbar .grow{flex:1}
 .pick{display:inline-flex;gap:6px;align-items:center;font-size:.75rem;
@@ -536,7 +551,7 @@ def _system_card(key: str, row) -> str:
     </div>"""
 
 
-def render_systems(key: str) -> str:
+def render_systems(key: str, tenant: str = "") -> str:
     rows = systems.all_systems()
 
     if not rows:
@@ -575,10 +590,55 @@ def render_systems(key: str) -> str:
           <ul class="bl">{items}</ul>
         </div>"""
 
-    opts = "".join(f'<option value="{k}">{v["name"]}</option>'
-                   for k, v in systems.CATALOG.items())
-    tenant_opts = "".join(f'<option value="{_esc(t.key)}">{_esc(t.name)}</option>'
-                          for t in tenants.all_tenants(include_paused=True))
+    # The installer, per account. The old version was two dropdowns and a
+    # button: it listed every system whether or not it was already installed,
+    # and said nothing about what any of them needed — so installing was a
+    # guess, and the refusal only arrived afterwards on the system's own card.
+    all_t = tenants.all_tenants(include_paused=True)
+    tenant = tenant or (all_t[0].key if all_t else "")
+    picker = "".join(
+        f'<a class="{"on" if t.key == tenant else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(t.key)}">'
+        f'{_esc(t.name)}</a>' for t in all_t)
+
+    def _pre_chip(i: dict) -> str:
+        mark = "✓" if i["met"] else "✗"
+        note = f' <span class="mut">{_esc(i["note"])}</span>' if i["note"] else ""
+        return (f'<span class="pre {"yes" if i["met"] else "no"}">{mark} '
+                f'{_esc(i["name"])}{note}</span>')
+
+    cards = ""
+    for p in (systems.installable(tenant) if tenant else []):
+        chips = "".join(_pre_chip(i) for i in p["items"]) or (
+            '<span class="pre yes">✓ nothing required</span>')
+        if p["installed"]:
+            action = (f'<span class="mut">installed &middot; '
+                      f'{_esc(p["status"] or "designed")} &middot; '
+                      f'{_esc(p["autonomy"] or "shadow")}</span>')
+        elif p["ready"]:
+            action = (f'<a class="btn" href="/admin/system_add?key={_esc(key)}'
+                      f'&amp;tenant={_esc(tenant)}&amp;system={_esc(p["key"])}">'
+                      f'Install</a>')
+        else:
+            # Installable anyway, and deliberately so: a system in shadow with
+            # a gap is a useful thing to look at, and blocking the button would
+            # hide the very list that says what to go and fix.
+            what = ", ".join(i["name"] for i in p["missing"])
+            action = (f'<a class="btn sec" href="/admin/system_add?key={_esc(key)}'
+                      f'&amp;tenant={_esc(tenant)}&amp;system={_esc(p["key"])}">'
+                      f'Install anyway</a>'
+                      f'<div class="when">will not run until: {_esc(what)}</div>')
+        cards += f"""
+        <div class="inst {"done" if p["installed"] else ("ok" if p["ready"] else "gap")}">
+          <div class="insthead">
+            <b>{_esc(p["name"])}</b>
+            <code>{_esc(p["key"])}</code>
+            <span class="grow"></span>
+            {action}
+          </div>
+          <div class="when">{_esc(p["does"])}</div>
+          <div class="prereqs">{chips}</div>
+        </div>"""
 
     return _shell(key, "systems", "Systems", f"""
 <div>
@@ -593,16 +653,12 @@ def render_systems(key: str) -> str:
 
 <div class="card">
   <div class="head"><h2>Install a system</h2></div>
-  <form method="get" action="/admin/system_add" class="grid">
-    <input type="hidden" name="key" value="{_esc(key)}">
-    <div class="f"><label>account</label>
-      <div class="what">Who it runs for</div>
-      <select name="tenant">{tenant_opts}</select></div>
-    <div class="f"><label>system</label>
-      <div class="what">Starts as designed / shadow — it records but sends nothing</div>
-      <select name="system">{opts}</select>
-      <div class="row"><button>Install</button></div></div>
-  </form>
+  <div class="picker">{picker}</div>
+  <p class="mut">Everything in the catalogue for this account, with what each one
+  needs and whether it has it. <b>✓</b> is wired or written, <b>✗</b> is not.
+  A system starts in <em>designed / shadow</em> — it records and sends nothing —
+  so the 8-part contract comes after installing, while you are looking at it.</p>
+  {cards}
 </div>
 
 {body}

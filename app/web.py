@@ -972,7 +972,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     # the cookie authenticates them.
     link_key = key if request.query_params.get("key") else ""
     if tab == "systems":
-        return ui.render_systems(link_key)
+        return ui.render_systems(link_key, tenant)
     if tab == "kb":
         return ui.render_kb(link_key, tenant,
                             err=request.query_params.get("err", ""))

@@ -24,6 +24,7 @@ from app import db, kb, tenants  # noqa: E402
 from app.web import app  # noqa: E402
 
 KEY = "test-secret"
+client = TestClient(app)
 _fails: list[str] = []
 
 
@@ -41,7 +42,6 @@ def _pending(tenant="baci"):
 def main() -> int:
     db.init_db()
     tenants.seed()
-    client = TestClient(app)
 
     kb.set_brand("baci", tone="Warm, precise.")
     kb.add_banned("baci", "hand-decorated")
@@ -153,6 +153,8 @@ def main() -> int:
     ck("  and the entity list is searchable by name",
        "— Aqua Dinner Plate" in html)
 
+    installer()
+
     print()
     if _fails:
         print(f"{len(_fails)} FAILED:")
@@ -160,6 +162,69 @@ def main() -> int:
             print(f"  - {f}")
         return 1
     print("all green")
+    return 0
+
+
+
+
+def installer() -> int:
+    """The Systems installer: per account, with prerequisites shown before you
+    commit. It used to be two blind dropdowns — every system whether or not it
+    was installed, and nothing about what any of them needed."""
+    from app import systems
+
+    print("\n— installing a system, with its prerequisites visible —")
+    rows = systems.installable("baci")
+    ck("the whole catalogue is offered for one account",
+       len(rows) == len(systems.CATALOG), f"{len(rows)} of {len(systems.CATALOG)}")
+    ck("  what can be switched on now comes first",
+       [r["ready"] for r in rows if not r["installed"]][:1] == [True],
+       str([(r["key"], r["ready"]) for r in rows[:3]]))
+
+    # This fixture wires no store, so the ready one is the compliance system
+    # that needs nothing but the ban list — DEFECTS section 3's "cheapest
+    # system to switch on was gated like the most expensive one".
+    comp = next(r for r in rows if r["key"] == "content_compliance")
+    ck("a system needing only the ban list reads as ready",
+       comp["ready"], str(comp["missing"]))
+    cat = next(r for r in rows if r["key"] == "catalog_compliance")
+    ck("  and one needing a store it does not have does not",
+       not cat["ready"]
+       and any(i["name"] == "commerce" for i in cat["missing"]),
+       str([i["name"] for i in cat["missing"]]))
+
+    camp = next(r for r in rows if r["key"] == "campaign_email")
+    ck("campaign_email is blocked, and says by what", not camp["ready"])
+    # Both kinds must be distinguishable somewhere in the list: a missing
+    # connection is a credential to go and wire, a missing knowledge field is
+    # something to go and write, and one sentence lumping them together is what
+    # made the old dropdown a guess.
+    kinds = {i["kind"] for r in rows for i in r["missing"]}
+    ck("  a missing CONNECTION and a missing KNOWLEDGE field are told apart",
+       kinds == {"connection", "knowledge"}, str(kinds))
+    ck("  esp is named as the missing connection",
+       any(i["name"] == "esp" for i in camp["missing"]),
+       str([i["name"] for i in camp["missing"]]))
+
+    ck("the contract is NOT a prerequisite to install — it is one to go live",
+       all(i["kind"] in ("connection", "knowledge")
+           for r in rows for i in r["items"]))
+
+    systems.create("baci", "content_compliance")
+    after = {r["key"]: r for r in systems.installable("baci")}
+    ck("an installed system reads as installed, not as available again",
+       after["content_compliance"]["installed"])
+    ck("  and carries its id so the contract can be filled",
+       bool(after["content_compliance"]["system_id"]))
+
+    html = client.get("/admin/ui", params={"key": KEY, "tab": "systems",
+                                           "tenant": "baci"}).text
+    ck("the tab renders per account", 'tab=systems&amp;tenant=baci' in html
+       or 'tab=systems&tenant=baci' in html)
+    ck("  with a met and an unmet prerequisite chip",
+       'class="pre yes"' in html and 'class="pre no"' in html)
+    ck("  and an install link carrying the account",
+       'system_add' in html and 'tenant=baci' in html)
     return 0
 
 

@@ -286,6 +286,34 @@ never created. Rule 4, met again.
 output to a channel's ad id (so `record_asset_outcome` is fed by hand today),
 and any UI for the library.
 
+## Installing a system is no longer a guess
+
+The Systems tab had an install form: two dropdowns and a button. It listed every
+catalogue system whether or not it was already installed, and said nothing about
+what any of them needed — so you picked one, installed it, and only then read
+the refusal on its own card.
+
+It is now a per-account list. Every catalogue system, sorted so what can be
+switched on now comes first, each showing its prerequisites as ✓/✗ chips before
+you commit. `systems.prerequisites()` answers the same question `ready()` does
+but for a system that is NOT yet installed, and returns the items separately
+rather than as prose — because a missing connection is a credential to go and
+wire and a missing knowledge field is something to go and write, and one
+sentence lumping them together is exactly what made the dropdown a guess.
+
+The 8-part contract is deliberately not a prerequisite. It gates going LIVE, not
+installing: a system starts in shadow with an empty contract on purpose, so the
+contract gets filled while looking at the thing rather than as a toll gate
+before seeing it. A blocked system can still be installed — "Install anyway",
+with what it is waiting on named underneath — because a system in shadow with a
+gap is a useful thing to look at, and greying the button out would hide the
+list that says what to fix.
+
+Found while building it: `.bulkbar` used `var(--card)`, which this stylesheet
+does not define. The sticky batch-approval bar had no background, so the review
+queue scrolled visibly behind it. All three tabs now sweep clean for undefined
+CSS variables.
+
 ## Working the review queue
 
 Three workflow defects, all of them reasons a queue of forty proposals stops

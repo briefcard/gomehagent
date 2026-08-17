@@ -138,6 +138,73 @@ def spec(key: str) -> dict:
                                  needs_kb=False, kb_needs=()))
 
 
+def prerequisites(tenant: str, key: str) -> dict:
+    """What one system needs for one account, item by item, met or not.
+
+    `ready()` answers the same question for a system that is already installed
+    and returns prose. This answers it BEFORE installing and returns the items
+    separately, because the two failures have different fixes and lumping them
+    into one sentence is what made the install dropdown a guess: a missing
+    connection is a credential to go and wire, a missing knowledge field is
+    something to go and write, and neither is visible until you have already
+    committed to the system.
+
+    The 8-part contract is deliberately absent. It is a prerequisite for going
+    LIVE, not for installing — a system starts in shadow with an empty contract
+    on purpose, so that filling it is a decision made while looking at the
+    thing rather than a toll gate before seeing it.
+    """
+    sp = spec(key)
+    caps = tenants.capabilities(tenant)
+    items: list[dict] = []
+
+    for c in sp["requires"]:
+        items.append({"kind": "connection", "name": c, "met": bool(caps.get(c)),
+                      "note": "required"})
+    if sp["requires_any"]:
+        met = any(caps.get(c) for c in sp["requires_any"])
+        items.append({"kind": "connection",
+                      "name": " or ".join(sp["requires_any"]),
+                      "met": met, "note": "at least one"})
+
+    needs = tuple(sp.get("kb_needs") or ())
+    if needs:
+        absent = set(kb.needs_met(tenant, needs))
+        for f in needs:
+            items.append({"kind": "knowledge", "name": f,
+                          "met": f not in absent, "note": ""})
+    elif sp["needs_kb"]:
+        c = kb.completeness(tenant)
+        items.append({"kind": "knowledge", "name": "knowledge base",
+                      "met": bool(c["ready"]),
+                      "note": ", ".join(c["missing"])[:80]})
+
+    missing = [i for i in items if not i["met"]]
+    return {"key": key, "name": sp["name"], "does": sp["does"],
+            "items": items, "missing": missing, "ready": not missing}
+
+
+def installable(tenant: str) -> list[dict]:
+    """Every catalogue system for this account, installed or not, with why.
+
+    Sorted so what can be switched on now comes first — the point of the list
+    is to answer "what can I turn on", and burying two ready systems under six
+    blocked ones answers it badly.
+    """
+    have = {r.key: r for r in for_tenant(tenant)}
+    out = []
+    for key in CATALOG:
+        pre = prerequisites(tenant, key)
+        row = have.get(key)
+        pre["installed"] = bool(row)
+        pre["system_id"] = row.id if row else ""
+        pre["status"] = row.status if row else ""
+        pre["autonomy"] = row.autonomy if row else ""
+        out.append(pre)
+    return sorted(out, key=lambda p: (p["installed"], not p["ready"],
+                                      p["name"]))
+
+
 def waiting_on(tenant: str) -> dict[str, list[str]]:
     """Which installed systems are blocked on each outstanding KB answer.
 
