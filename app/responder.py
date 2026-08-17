@@ -30,15 +30,21 @@ from . import conversation as cv, kb, ledger, resolve as rs, validator
 def answer(tenant: str, utterance: str, *, contact_id: str = "",
            entity_key: str = "", system_key: str = "service_desk",
            run_id: str = "", within_days: int = 30,
-           facts: dict | None = None, draft_with_model: bool = False) -> dict:
+           facts: dict | None = None, draft_with_model: bool = False,
+           bundle: dict | None = None) -> dict:
     """Answer one question from what this account actually knows.
 
     Returns the draft, the evidence behind it, the validator's verdict, and the
     ledger id — so what was said, why, and on whose authority are all one
     lookup rather than a reconstruction.
     """
-    bundle = rs.resolve(tenant, system=system_key, utterance=utterance,
-                        contact_id=contact_id, entity_key=entity_key, tier=3)
+    # A caller that already resolved passes its bundle in rather than paying
+    # for a second identical retrieval. `skill.run` always resolves first, to
+    # gate on coverage before a skill body runs at all; without this the reply
+    # path would resolve twice per question and the two could disagree.
+    bundle = bundle or rs.resolve(tenant, system=system_key,
+                                  utterance=utterance, contact_id=contact_id,
+                                  entity_key=entity_key, tier=3)
 
     conversation_id = (bundle.get("conversation") or {}).get("conversation_id", "")
     situation = (bundle.get("situations") or {}).get("detected") or []

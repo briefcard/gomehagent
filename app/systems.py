@@ -107,6 +107,23 @@ CATALOG = {
         # check against and the system says so rather than passing everything.
         requires=(), requires_any=(), needs_kb=True,
         kb_needs=("banned_claims",)),
+    "catalog_compliance": dict(
+        name="Catalogue compliance",
+        does="Checks product copy and SEO metadata in the store against the "
+             "brand's own banned claims, and proposes compliant replacements.",
+        # Distinct from content_compliance, which reads the public site. The
+        # crawler only ever sees rendered prose — `<head>` is stripped before
+        # matching — so an SEO meta description carrying a banned claim is
+        # invisible to it while being the field most likely to hold one,
+        # because meta descriptions get templated across a whole catalogue.
+        requires=("commerce",), requires_any=(), needs_kb=True,
+        kb_needs=("banned_claims",)),
+    "ad_creative": dict(
+        name="Ad creative",
+        does="Drafts grounded ad copy from approved claims against an audience "
+             "and an entity. Copy only — imagery waits on the media layer.",
+        requires=(), requires_any=("ads", "commerce"), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "audience", "claim", "entity")),
     "reports": dict(
         name="Reports",
         does="The weekly number, assembled from whatever is connected.",

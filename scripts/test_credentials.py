@@ -246,6 +246,81 @@ def main() -> int:
             ck("a connected client's token is what the store code now gets",
                cfg.get("token") == SECRET_VALUE, str(list(cfg)))
 
+        # --- declared is not connected -------------------------------------
+        #
+        # `capabilities()` promised "the tenant names it AND the credential
+        # exists" and delivered that for two of eight. `esp`, `cms`, `ads` and
+        # `crm` read a key out of the Tenant's own JSON column — and
+        # `credential_ref` ("OMNISEND_BACI") is dereferenced nowhere, with no
+        # Omnisend credential anywhere in the codebase. Both directions are
+        # pinned here: a declaration must not read as wired, and a real env
+        # registry entry must not stop reading as wired.
+        print("\n— a declaration is not a connection —")
+        # Disconnect what this fixture genuinely connected earlier, so what is
+        # left is the declaration alone. Omnisend was wired through the connect
+        # page above and `esp` was correctly reading True off a real credential.
+        cred.revoke("baci", "shopify")
+        cred.revoke("baci", "omnisend")
+        ck("with omnisend connected, esp was wired for a real reason —"
+           " it is only the declaration that must not count",
+           "omnisend" not in cred.connected_providers("baci"))
+
+        with db.SessionLocal() as s:
+            t = s.get(db.Tenant, "baci")
+            ck("baci still DECLARES an esp", bool((t.esp or {}).get("provider")),
+               str(t.esp))
+        ck("but esp does not read as wired, because no credential exists",
+           not tenants.capabilities("baci")["esp"])
+        ck("  and it is named as needing connecting, not silently absent",
+           tenants.capability_detail("baci")["esp"]["needs_connecting"])
+        ck("a credential_ref is still dereferenced nowhere",
+           not cred.resolve("baci", "omnisend").get("secret"))
+
+        with db.SessionLocal() as s:
+            cv = s.get(db.Tenant, "coverings")
+            declares_cms = bool((cv.cms or {}).get("platform"))
+        ck("coverings declares a cms with an empty creds_key", declares_cms)
+        ck("  and it does not read as wired either",
+           not tenants.capabilities("coverings")["cms"])
+
+        # The other direction, which matters just as much: membership in the
+        # env registry IS the credential. Testing the shape of the secret
+        # instead would report a live inbox as disconnected and strip the agent
+        # of its tools — the same error pointed the other way.
+        from app import config as _cfg
+        _cfg.GMAIL_ACCOUNTS.setdefault("baci", {"email": "b@example.com"})
+        ck("an env-group inbox still reads as wired",
+           tenants.capabilities("baci")["inbox"])
+        ck("  and says it came from the env group",
+           tenants.capability_detail("baci")["inbox"]["via"] == "env:google",
+           tenants.capability_detail("baci")["inbox"]["via"])
+        ck("an env inbox does NOT grant analytics — those scopes are unverified",
+           not tenants.capabilities("baci")["analytics"])
+
+        # A CMS that IS the store needs no second credential. The platform name
+        # only says which provider to look for; the grant still requires that
+        # provider to resolve, which is what keeps this from being the
+        # declaration-counts defect wearing a different hat.
+        _had_store = "baci" in _cfg.SHOPIFY_STORES
+        _cfg.SHOPIFY_STORES.setdefault("baci", {"domain": "b.myshopify.com",
+                                                "token": "shpat_x"})
+        try:
+            ck("baci's cms is wired by the Shopify credential it already has",
+               tenants.capabilities("baci")["cms"])
+            ck("  and it says which credential did it",
+               tenants.capability_detail("baci")["cms"]["via"].endswith("shopify"),
+               tenants.capability_detail("baci")["cms"]["via"])
+            ck("coverings declares shopify too, but has no store, so unwired",
+               not tenants.capabilities("coverings")["cms"])
+            ck("ironside's squarespace is in no provider map and stays unwired",
+               not tenants.capabilities("ironside")["cms"])
+        finally:
+            # Put the registry back. Leaving it set makes `resolve` fall through
+            # to the env blob, and the revoke assertion below — which checks the
+            # secret is gone — would pass on a stale value instead.
+            if not _had_store:
+                _cfg.SHOPIFY_STORES.pop("baci", None)
+
         # --- revoke ------------------------------------------------------
         print("\n— disconnecting —")
         cred.revoke("baci", "shopify")

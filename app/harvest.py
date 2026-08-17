@@ -361,6 +361,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
              for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
     proposed, rejected, untaggable, faqs = [], [], [], []
+    # What the writes actually did, as opposed to what was proposed. These are
+    # different numbers and conflating them hid a whole class of loss.
+    write_refused: list[dict] = []
+    write_filed = write_corroborated = 0
     not_verbatim: list[str] = []          # spans the model returned that the
                                           # page does not actually contain
     used_model = False
@@ -533,13 +537,25 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                      "similar_to_rejected": guess["similar_to_rejected"]}
             proposed.append(entry)
             if apply:
-                kb.add_claim(tenant, body, cand["evidence"], tags,
-                             proof_type=cand["proof_type"],
-                             source=cand["source"], status="pending",
-                             origin="crawl",
-                             entity_key=cand.get("entity_key", ""),
-                             proves=cand.get("proves", ""),
-                             context=cand.get("context", ""))
+                # The return is read. It used to go nowhere, which is DEFECTS
+                # §1 silent loss on the exact path that fills the knowledge
+                # base: `add_claim` refuses in-band (unknown tag) and reports
+                # corroboration in-band (already on file), and both looked
+                # identical to a successful write from here. A crawl could
+                # report 40 proposals and file none.
+                said = kb.add_claim(
+                    tenant, body, cand["evidence"], tags,
+                    proof_type=cand["proof_type"],
+                    source=cand["source"], status="pending", origin="crawl",
+                    entity_key=cand.get("entity_key", ""),
+                    proves=cand.get("proves", ""),
+                    context=cand.get("context", ""))
+                if said.startswith("Unknown tags"):
+                    write_refused.append({"text": body[:160], "why": said})
+                elif said.startswith("Already on file"):
+                    write_corroborated += 1
+                else:
+                    write_filed += 1
 
     # A tag the model reached for and could not find is the account telling us
     # its vocabulary is short. Filed as a PROPOSAL like everything else — it is
@@ -628,12 +644,23 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "rejected_for_banned_claim": rejected,
         "proposed_without_tags": untaggable[:15],
         "untagged_count": len(untaggable),
+        # `proposed_count` is what the crawl WANTED to file. These are what the
+        # knowledge base actually accepted. When apply is false they are zero
+        # by definition; when it is true and `filed` trails `proposed_count`,
+        # the difference is either corroboration or refusal and both are named.
+        "filed_count": write_filed,
+        "corroborated_count": write_corroborated,
+        "write_refused": write_refused[:15],
+        "write_refused_count": len(write_refused),
         "note": ("Proposals land as PENDING claims — invisible to selection "
                  "until approved at /admin/ui?tab=content. Anything using a "
                  "banned phrase was dropped, not queued. Candidates the tagger "
-                 "could not place are proposed untagged — approval refuses "
-                 "until a tag is chosen, so they are segmented by a human "
-                 "rather than guessed at or thrown away. `dropped_by_reason` "
+                 "could not place are proposed untagged and can still be "
+                 "approved — approval infers a situation where the classifier "
+                 "is confident and files the rest as brand-wide proof, which "
+                 "is selectable for anything that does not ask for a "
+                 "situation. `filed_count` is what actually landed. "
+                 "`dropped_by_reason` "
                  "and `skipped_examples` say what the crawl chose not to show "
                  "you, so a thin queue can be told apart from a broken read."),
     }

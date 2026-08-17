@@ -1,4 +1,4 @@
-# Build state — 2026-08-14
+# Build state — 2026-08-17, after the skill substrate
 
 The rolling state of the data-layer build. **This file is rewritten by every
 thread.** It is always current and never historical — do not add dated sections,
@@ -6,169 +6,225 @@ and do not create `HANDOFF-step-N.md` files. History lives in `DEFECTS.md`
 (append-only) and in the git log.
 
 `HANDOFF-content-platform.md` is the **historical** record up to 2026-08-13 and
-is no longer maintained. Parts of it are actively wrong now — it describes the
-execution half as tenant-blind, which stopped being true before this session
-started. Read it for background, never for state.
+is no longer maintained. Parts of it are actively wrong. Read it for background,
+never for state.
 
-**Live:** `93faab8` on `origin/main`, deployed, 92 routes.
-`/health` reports `commit` and `routes` — use it, do not infer what is running.
+**Live:** `21fdb89` on `origin/main`, deployed and answering. This thread's work
+is **uncommitted** — see Commit below. `/health` reports `commit` and `routes` —
+use it, do not infer what is running.
+
+**Connections, verified live 2026-08-17 via `/health/connections`:** Shopify
+`baci` and `eien` both ok; Gmail + Drive ok for `personal`, `baci`, `eien`. So
+Baci has `inbox` and `commerce` genuinely wired, which is everything the three
+ready skills need.
+
+`capabilities()` now tells the truth about the rest — see §2.29. It reported
+`esp`, `cms`, `ads` and `crm` as wired off a declaration in the Tenant JSON,
+with no credential behind them. Every capability resolves through
+`credentials.wired_capabilities` now, and `tenants.capability_detail` reports
+`wired` / `via` / `declared` / `needs_connecting`. Against the live env group
+that reads: **baci** inbox + commerce + cms (all `env:shopify`/`env:google`),
+declared-but-unconnected esp/ads · **eien** inbox · **agency** inbox ·
+**coverings** and **ironside** nothing wired.
+
+**Connected what was connectable.** `cms` is now granted by the provider the
+tenant's CMS platform names, when that provider's credential resolves — Baci's
+CMS *is* its Shopify store, published with the token it already has, so the blog
+system was blocked on a connection that already existed. Baci now sees 37/37
+agent tools, up from 34.
+
+**Two things need you, and cannot be done from code:** Omnisend (`esp`, both
+Baci and Eien — there is no Omnisend credential anywhere in the codebase and
+`credential_ref` was never a real one) and Meta (`ads` — `META_APP_ID/SECRET`
+are OAuth app credentials, not a per-tenant token). Both go through
+`/connect/{token}`. **Eien's store row:** `_SEED` now names `shopify_store="eien"`
+but `seed()` skips existing rows, so the live database needs
+`/admin/tenant_set?tenant=eien&field=shopify_store&value=eien` — the credential
+has been live in `SHOPIFY_STORES` all along and the row simply never claimed it,
+which is why `reorder_engine` could never go live.
 
 ---
 
-## What this layer is now
+## Where we are
 
-Three stores with different lifecycles, and everything else is a consumer.
+The data layer stopped being a retrieval library and became something an agent
+can be *given*. Before this thread, `resolve`, `validator`, `ledger` and
+`responder` all worked and none of them opened a run — `systems.start_run` had
+two callers, neither in the data layer. Anything built on top would have
+produced ungoverned output. `app/skill.py` closes that: a skill declares the
+context it needs, and the substrate resolves it once, gates on coverage, opens
+and closes a run, runs the validator on everything emitted, files it to the
+ledger, and applies the autonomy rung. Four skills are registered on it, three
+of which serve Baci with no new content.
 
-| | holds | key modules |
-|---|---|---|
-| **Knowledge** | brand, rules, claims, objections, entities, situations | `kb`, `provenance`, `embed` |
-| **State** | conversations, touches, commitments | `conversation` |
-| **Archive** | email bodies, attachment text, all searchable by meaning | `archive` |
-| **Ledger** | what was produced, from which brief | `ledger` |
-
-`resolve()` is the one call every consumer makes. `validator` is the one gate
-every output passes. `dossier` compiles the whole knowledge base into a
-cacheable brand document.
+**The contract is frozen.** Build-map steps 05, 06, 08, 10 and 11 are
+deliberately not built — they are the *visual and creative* chain, and nothing
+Baci needs first touches them.
 
 ## The five rules this codebase keeps re-learning
 
-Every one of these was a real defect, several of them twice. Read them before
-changing anything.
+Every one was a real defect, several of them twice. Read before changing
+anything.
 
-1. **Absence is a third state and must survive to the output.** Met five times
-   now: `fits: True` from a keyword match, one-word overlap asserting a tag,
-   coverage collapsed across kinds, `unreadable` holding three meanings,
-   `wrote:0 skipped:N` hiding whether rows were done or empty. If you are about
-   to return a bare `False` or an empty list, name the reason instead.
-2. **Enrich, do not gatekeep.** Refusing to *invent* belongs in `validator`, on
-   output, in code that fails closed. Refusing to hand over *context* just lets
-   a missing row veto a reader that had plenty to work with. `blocked_on` is
-   reserved for one case: no ban list, so nothing can check the output.
-3. **Approved is final, whatever wrote it first.** `approve()` does not change
-   `origin`, so origin cannot be the guard — an agent-authored row a human
-   approved was overwritable by that agent for ever until this session.
-4. **Derive lists from the schema, never by hand.** `reset.py` caught its own
-   `kb_brands` / `kb_brand` typo this way; a hand-kept list misses the model
-   somebody adds next month, silently.
+1. **Absence is a third state and must survive to the output.** Met seven times
+   now. This thread added two: `empty` versus `blocked` for a sweep that found
+   nothing, and a metafield that could not be read versus one that was clean.
+2. **Enrich, do not gatekeep.** `blocked_on` is reserved for output that would
+   be unsafe. §2.27 is this rule broken at its most expensive point — a gate
+   written against an *assumption* about `claims()` rather than against
+   `claims()`, which refused real proof from any account without a vocabulary.
+3. **Approved is final, whatever wrote it first.**
+4. **Derive lists from the schema, never by hand.**
 5. **Run it before claiming it works.** Every finding below came from running
-   against real Baci data, not from reading. Several were in code with passing
-   tests around it.
+   against real code. Four defects in this thread were found by the new suite,
+   two of them in code written the same hour.
 
-## Built and deployed this session
+## Built this session
 
-Steps 01–04, 07, 09 of the Build Map, plus a lot that was not on it.
+**`app/skill.py` — the substrate.** `Skill` declares `system_key`, `tier`,
+`needs`, `params`, `writes`, `produces`. `preflight()` answers "can this run for
+this account" cheaply and by name. `run()` is the only entry point.
+`Context.emit()` is the only exit, and it validates before the caller sees
+anything — the gate is structural, not remembered. `catalogue(tenant)` is what
+an agent should be shown instead of a tool list: every skill, and whether it can
+run here, with the missing field named.
 
-**Retrieval** — `resolve()` with tiered bundles, a coverage receipt, and
-`grounding.level` (answered / unranked / supported / rules_only). Semantic
-recall via `embed` (OpenAI `text-embedding-3-small`, 512 dims), stored as JSON
-in Postgres and scanned in process. `embed.Backend` is the seam; pgvector or a
-cluster is a subclass when `/embed_status` says `swap_backend_yet: true`
-(ceiling 20,000 vectors; Baci is at ~115 and scans in 3.6ms).
+**Autonomy is applied, and the validator outranks it.** `auto` means "do not ask
+about the things that passed", never "send the thing that failed". A skill that
+writes still needs approval at `approve_exceptions`.
 
-**Conversation state** — `Conversation` / `Touch` / `Commitment` on top of
-`Contact`. Two email chains with one person fold onto one row. An outbound
-touch without an idempotency key is refused.
+**`app/skill_pack.py` — four skills.** None is Baci-specific; each reads its
+client out of the KB.
 
-**The archive** — this is the big one, and it fixed the thing that made inbox
-drafts untrustworthy. `EmailLog.body_excerpt` and `DocIndex.text_excerpt` now
-hold what was *said*, not just that something arrived; `DocIndex.thread_id`
-joins a document to the conversation it came on; attachments ride along when a
-thread is retrieved.
+| skill | system | writes | state |
+|---|---|---|---|
+| `catalog_compliance` | catalog_compliance | no | ready |
+| `catalog_seo_rewrite` | catalog_compliance | proposes | ready |
+| `inbound_reply` | service_desk | no | ready, thin until objections exist |
+| `ad_copy` | ad_creative | no | model-drafted; copy only, no imagery |
 
-**Output** — `ledger` (anti-repeat, attribution, hygiene in one table),
-`validator` (pure code, fails closed, no model call in the file),
-`responder` (resolve → assemble → validate → ledger, and now `_draft` with the
-model behind the same gate).
+**Where the model actually writes.** `inbound_reply` and `ad_copy` are model
+calls — grounded on the bundle, with the validator as deterministic code behind
+them. `catalog_seo_rewrite` composes by code on purpose: a 155-character
+formulaic field where composing from an approved claim means the `claim_id` is
+carried by construction.
 
-**Knowledge growth** — `propose` lets an agent file a claim/objection/situation
-instead of asking; nothing lands usable (`origin="agent"` is not
-`AUTO_APPROVED`). `voice` proposes a tone from the site with verbatim evidence.
-`kb.calibration()` measures the classifier by leave-one-out.
-`kb.label_conflicts()` finds near-identical claims tagged differently.
+`ad_copy` makes **one call per claim**, not one call for N variants. Parsing
+which line came from which claim risks filing the wrong `claim_id`, and
+attribution that is wrong is worse than attribution that is missing — the
+anti-repeat and hygiene queries both trust it. Per-claim calls make attribution
+structural. With no key it degrades to a composer and every variant carries
+`basis="composed (…)"`, because a silent fallback is the extractor defect again.
 
-**Operations** — `dossier` (`/brand.md`), `reset` (scoped, dry-run),
-`/readiness`, `/admin/threads`, `/admin/draft_test`.
+**Why the sweep is not `compliance.scan` again.** The site crawler strips
+`<head>` before matching, so an SEO meta description is invisible to it — and
+that is the field a violation hides in, because it gets templated across a whole
+catalogue. Baci's own audit is that shape: 110 flagged strings, **96 of them one
+repeated SEO-meta template**, none of which the crawler could see.
 
-**32 offline suites, all green, none touching the network.** Full run is
-~2m30s — split it or a single shell call hits a 2-minute timeout.
-`test_sources` 52s, `test_harvest` 16s, `test_selection` 15s.
+**Two new `systems.CATALOG` entries:** `catalog_compliance` and `ad_creative`.
 
-## Verified against real Baci data
+**Five defects fixed** — §2.25 through §2.29 in `DEFECTS.md`. The one worth
+reading is **§2.27**: `add_claim` and `review_claim` both refused an untagged
+approved claim on the stated grounds that it "can never be selected". False —
+`claims()` filters on situation only when a caller asks for one. Both paths now
+infer a situation where the classifier is confident and file brand-wide proof
+where it is not, saying which happened. Owner's call, and it unblocked the
+rewrite skill. §2.28 fixed the two `add_claim` silent losses carried as live
+since 14 Aug.
 
-Not claims — these were run and the output read.
+## Verified vs assumed
 
-- **Archive:** 104 threads, 56 declined as noise (promo 27, notifications 23,
-  automated 5, subscriptions 1 — **54%**), 43 bodies stored, 47 vectors.
-- **Attachments:** 96 found across 43 threads, of which **79 were sender logos
-  and tracking pixels**. 12 real documents stored, 42 chunks indexed.
-- **Retrieval works:** `"problem with a damaged shipment"` returns a customs
-  clearance thread sharing no words with the query. `"customs clearance invoice"`
-  returns `rev Final_INVOICE_1256_BACI_MILANO_USA_LLC.pdf` — a PDF found by
-  what it says.
-- **Calibration:** patterns 8/8, semantic 8/11. All three misses are the same
-  defect — near-identical claims tagged differently, worst at **0.9672**, which
-  is higher than most correct placements. **No threshold fixes that**; the fix
-  is upstream, in the labels.
-- **Voice:** 876 sentences measured. Measured descriptors say formal / brisk /
-  understated / plain; the model says playful / stylish / whimsical. Both are
-  right — restrained construction, exuberant vocabulary. **23 sentences on the
-  live site break Baci's own ban list.**
+**Ran and confirmed.** All **33 offline suites pass**, none touching the
+network, including `test_tenant_isolation.py` **unmodified**.
+`scripts/test_skill.py` is new — 54 checks covering the gate, the rung, named
+refusals, `empty` vs `blocked`, unread vs clean, and every run reaching the
+ledger. It drives the model seam from both sides with a stub: the degraded path
+reports `basis="composed"`, and **a model that returns a banned phrase is
+blocked, not softened** — the check worth keeping. Full run is ~2m30s; split it
+or a single shell call hits a 2-minute timeout.
+
+**Three existing assertions in `test_harvest.py` were changed**, not worked
+around. They pinned the old approve-time tag refusal that §2.27 removes.
+
+**Built but unproven — read this before trusting anything above.** No skill has
+run against real Baci data. There was no `DATABASE_URL`, `APPROVAL_SECRET` or
+`ANTHROPIC_API_KEY` available in the session that wrote them, so:
+
+- `_fetch_products_live` has **never made a Shopify call.** Everything above it
+  is proven against fixtures. The REST shapes (`products.json`,
+  `products/{id}/metafields.json?namespace=global`) are the ones `shopify_seo`
+  already uses, but "the code is right" is not "it ran".
+- The 96-violation figure is from the prior audit, not from this sweep.
+- **No real model call was made.** `inbound_reply` and `ad_copy` were exercised
+  against a stub. The prompts, the grounding block and the shape of what comes
+  back are all unproven against the live API.
+- The N+1 metafield read is untimed against a real catalogue.
 
 ## Open, and honest about it
 
-**Never measured:** `scripts/ab_context.py` compares this layer against the
-compiled brand document, scored by the validator. It has never been run. The
-central claim — that this beats a `.md` file — is therefore unproven, and my
-prediction is that **at Baci's corpus size the document arm ties or wins**.
-That would validate the architecture rather than undermine it, which is why
-`dossier` compiles the document rather than competing with it.
+**Never measured:** `scripts/ab_context.py` — the central claim that this layer
+beats a compiled `.md` is still unproven. One command:
+`ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci`
 
 **Blocked on content, not code:**
-- Objections: 7 in review, 1 approved. This is the binding constraint on
-  everything — `/resolve` correctly blocks on "nothing on file to answer with".
-- `brand.voice.tone` still unset. `/admin/propose_voice` will hand you the words.
+- Objections: 7 in review, 1 approved. Binding constraint on `inbound_reply`.
+- `brand.voice.tone` unset. `/admin/propose_voice` will hand you the words.
 - 13 claim fingerprints unrepaired (`/admin/repair_fingerprints?apply=1`).
-- One duplicate claim pair unresolved — retiring one drops its vector and
-  should move `semantic.agreed` from 8/11 to 9/11 with no code change.
 
 **Known gaps:**
-- **2 scanned PDFs need OCR.** Not built. Counted under `scanned, needs OCR`.
-- **`archive_fetch` has reached everything `EmailLog` knows.** Going further
-  back means logging mail Gmail has and `EmailLog` does not — the cheap route
-  is reading the Gmail label `bucket_backfill` already applied, rather than
-  re-classifying at a model call each.
+- `ad_copy` has no imagery and does not pretend to. Every variant carries
+  `needs_art_direction`. Steps 05/06 are what fix this.
+- `ANTHROPIC_API_KEY` unset in the authoring session, so both model skills
+  degrade to composers today. Setting it is what turns `ad_copy` from a
+  grounded placeholder into ad copy.
+- `feedback_block` still has no caller.
+- 2 scanned PDFs need OCR. Not built.
 - `READ_KEY` unset, so `/resolve` and `/brand.md` answer only the admin secret.
-- `MIN_SEMANTIC_SCORE = 0.45` is unturned against real mail. Live hits score
-  0.48–0.56 — barely above the floor on a thin corpus.
 - `ops_jobs.py` is the last file in the execution half with zero tenant refs.
-- `email_harvest.py:314` and `harvest.py` ignore `add_claim`'s return (§1
-  silent loss, live).
+- No route or agent tool exposes the skills yet — `skill.run` is importable and
+  nothing calls it. That is the next thread.
+
+## Commit
+
+**Uncommitted working tree** on `feat/context-architecture`, at base `21fdb89`
+== `origin/main` (confirmed by `git branch -vv` and by `/health`, which reports
+`21fdb8907d3d`). Nothing has been committed or pushed.
+
+New: `app/skill.py`, `app/skill_pack.py`, `scripts/test_skill.py`.
+Modified: `app/kb.py`, `app/harvest.py`, `app/email_harvest.py`,
+`app/systems.py`, `app/responder.py`, `scripts/test_harvest.py`,
+`DEFECTS.md`, this file.
+
+When it is committed it is a clean fast-forward. Pushing deploys it — and
+`_fetch_products_live` has never made a real call, so push when somebody can
+watch the first sweep.
 
 ## Next thread starts here
 
-**Read, and only these:** this file, then `DEFECTS.md` §1 (the patterns), then
-the files named by whichever task you pick. Do not search the repo broadly — a
-cold thread that greps its way around this codebase burns a third of its budget
-before writing a line.
+**Read, and only these:** this file, then `DEFECTS.md` §1 and §2.25–2.28, then
+`app/skill.py`. Do not search the repo broadly.
 
 Highest value first:
 
-1. **Run the A/B.** It is the only unmeasured claim in the whole system, and it
-   is one command. `ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci`
-2. **Approve the 7 objections and set a voice tone.** Console work, no code, and
+1. **Run `catalog_compliance` against real Baci.** It is the only thing standing
+   between this and a client-facing artifact in week one, and it is the first
+   real exercise of the Shopify read. Expect to fix something in
+   `_fetch_products_live`.
+2. **Expose the skills.** A `/admin/skill/<key>` route and one agent tool
+   (`run_skill`) whose description is generated from `skill.catalogue(tenant)`,
+   so the agent picks a skill by name and never picks context.
+3. **Approve the 7 objections and set a voice tone.** Console work, no code, and
    it changes more about what the system can do than the last ten commits.
-3. **Step 05/06 of the Build Map** — visual identity + themes, then the media
-   layer. Both blocked on nothing.
-4. **OCR** for the scanned PDFs, if the logistics inbox turns out to need it.
+4. **Steps 05/06** — visual identity, then media. Only when Baci needs imagery.
 
 **Verify:** run the suites in two batches. `test_tenant_isolation.py` must pass
-**unmodified** — it is the mandatory rule as a test.
+**unmodified**.
 
 **Standing preamble for a new thread:** worktree
 `/Users/gomehsaias/Documents/gomehagent-build`, branch
-`feat/context-architecture`. The other clone
-(`~/Documents/gomehagent`) is on `feat/warehouse-picklist`, a pre-kernel base —
-**never push from there.** Render auto-deploys `main`; git needs the sandbox
-off; always fetch and verify a fast-forward before pushing. Deploys usually
-land in 60–90s but have taken 6+ minutes — check `/health` for the commit
-rather than theorising about failed builds.
+`feat/context-architecture`. The other clone (`~/Documents/gomehagent`) is on
+`feat/warehouse-picklist`, a pre-kernel base — **never push from there.** Render
+auto-deploys `main`; git needs the sandbox off; always fetch and verify a
+fast-forward before pushing. Deploys usually land in 60–90s but have taken 6+
+minutes — check `/health` for the commit rather than theorising.

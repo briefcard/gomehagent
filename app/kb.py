@@ -1606,15 +1606,33 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     if unknown:
         return (f"Unknown tags for {tenant}: {', '.join(unknown)}\n"
                 f"Valid: {', '.join(sorted(valid))}")
-    # A claim being REVIEWED may arrive untagged; a claim being USED may not.
-    # The requirement moved from write time to approve time so a derived
-    # candidate can be proposed and segmented by a human at the moment they
-    # look at it, rather than discarded for want of a tag a crawler could not
-    # infer. `claims()` only returns active rows, so an untagged pending claim
-    # is invisible to selection either way — and `review_claim` refuses to
-    # activate one.
+    # An untagged claim arriving approved gets its situations INFERRED, not
+    # refused.
+    #
+    # This used to return "Needs at least one situation tag, or it can never be
+    # selected." That premise was false and cost real proof: `claims()` filters
+    # on situation only when a caller ASKS for one (`if want and not overlap`),
+    # so an untagged claim is perfectly selectable as brand-wide evidence and is
+    # only skipped for situated queries. The gate was refusing to store a fact
+    # on the strength of a segmentation the writer had no way to supply — the
+    # "enrich, do not gatekeep" rule, broken at the one place it costs most.
+    #
+    # So: ask the classifier, apply what it is confident about, and otherwise
+    # keep the claim untagged and say so. Tagging is a retrieval optimisation;
+    # the claim is the asset.
+    inferred = ""
     if not tags and review == prov.APPROVED:
-        return "Needs at least one situation tag, or it can never be selected."
+        guess = suggest_tags(tenant, f"{claim} {evidence or ''}".strip(),
+                             entity_key=entity_key)
+        if guess.get("confident") and guess.get("tags"):
+            tags = list(guess["tags"])
+            inferred = (f"situations inferred by {guess['basis']}: "
+                        f"{', '.join(tags)} — retag if that is wrong")
+        else:
+            inferred = ("no situation matched confidently, so it is filed as "
+                        "brand-wide proof: selectable whenever a caller does "
+                        "not ask for a situation, and invisible to situated "
+                        "retrieval until it is tagged")
 
     # The entity is part of the identity: the same sentence about two products
     # is two facts, and collapsing them would attach one product's copy to
@@ -1675,7 +1693,8 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
         log.warning("embed on add failed for %s: %s", tenant, exc)
 
     return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
-            f"{claim}\n{evidence}\ntags: {', '.join(tags)}")
+            f"{claim}\n{evidence}\ntags: {', '.join(tags) or 'none'}"
+            + (f"\n{inferred}" if inferred else ""))
 
 
 def pending_claims(tenant: str = "") -> list[db.KbClaim]:
@@ -1701,12 +1720,24 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
         row = s.get(db.KbClaim, claim_id)
         if not row:
             return "No such claim."
+        inferred = ""
         if approve and not (row.situations or []):
-            # This is where the tag requirement is actually enforced. Letting an
-            # untagged claim go active would make it permanently unselectable
-            # while looking approved — worse than refusing.
-            return ("Give it at least one situation tag before approving — "
-                    "an untagged claim can never be selected.")
+            # Infer rather than refuse — same reasoning as `add_claim`. The old
+            # refusal claimed an untagged claim "can never be selected", which
+            # is not what `claims()` does: untagged proof is brand-wide proof
+            # and only drops out of *situated* queries. Blocking approval over
+            # it left real evidence sitting in review for want of a label.
+            guess = suggest_tags(
+                row.tenant, f"{row.claim} {row.evidence or ''}".strip(),
+                entity_key=row.entity_key or "", exclude_claim_id=claim_id)
+            if guess.get("confident") and guess.get("tags"):
+                row.situations = list(guess["tags"])
+                inferred = (f" Situations inferred by {guess['basis']}: "
+                            f"{', '.join(row.situations)}.")
+            else:
+                inferred = (" No situation matched confidently — approved as "
+                            "brand-wide proof, so situated retrieval will not "
+                            "surface it until it is tagged.")
         if approve:
             row.review, row.status = prov.APPROVED, "active"
             row.approved_by, row.approved_at = by, db.utcnow()
@@ -1733,7 +1764,7 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
     except Exception as exc:  # noqa: BLE001
         log.warning("embed sync on review failed for %s: %s", claim_id, exc)
 
-    return (f"Approved — now selectable, and final.\n{text}" if approve
+    return (f"Approved — now selectable, and final.{inferred}\n{text}" if approve
             else f"Rejected.\n{text}")
 
 

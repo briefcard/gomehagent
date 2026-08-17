@@ -161,6 +161,16 @@ def main() -> int:
        "a crawl must not change what the generator may say")
     ck("they are marked proposed, and attributed to the crawl",
        all(c.review == "proposed" and c.origin == "crawl" for c in pending))
+    # `add_claim`'s return used to go nowhere, so "proposed 40" and "wrote 40"
+    # were the same number whether or not anything landed. Every proposal must
+    # now be accounted for as filed, corroborated, or refused BY NAME.
+    accounted = (r2["filed_count"] + r2["corroborated_count"]
+                 + r2["write_refused_count"])
+    ck("every attempted write is accounted for",
+       accounted == r2["proposed_count"],
+       f"{accounted} accounted vs {r2['proposed_count']} proposed")
+    ck("and the count that landed is reported separately from the count mined",
+       r2["filed_count"] == len(pending), f"filed={r2['filed_count']}")
     ck("approving one makes it selectable",
        "Approved" in kb.review_claim(pending[0].id, approve=True)
        and len(kb.claims("baci")) == before_selectable + 1)
@@ -180,16 +190,27 @@ def main() -> int:
     row = [c for c in kb.pending_claims("baci")
            if c.claim.startswith("A claim no pattern")][0]
     msg = kb.review_claim(row.id, approve=True)
-    ck("but CANNOT be approved untagged", "tag before approving" in msg, msg[:70])
-    ck("and stays pending", kb.pending_claims("baci") and any(
-        c.id == row.id for c in kb.pending_claims("baci")))
+    # Approval no longer refuses an untagged claim. The old rule rested on
+    # "an untagged claim can never be selected", which `claims()` contradicts:
+    # it filters on situation only when a caller asks for one, so untagged
+    # proof is brand-wide proof. Approval now infers a situation where the
+    # classifier is confident and files it brand-wide where it is not — and
+    # says which happened, because a silent choice between those two is the
+    # absence-collapsed-into-a-value pattern all over again.
+    ck("an untagged claim CAN now be approved", "Approved" in msg, msg[:80])
+    ck("and it says how the situations were settled",
+       "inferred" in msg or "brand-wide proof" in msg, msg[:120])
+    ck("it is no longer pending",
+       not any(c.id == row.id for c in kb.pending_claims("baci")))
+    ck("and it is selectable as brand-wide proof",
+       any(c.id == row.id for c in kb.claims("baci")))
     tag = sorted(kb.situations("baci"))[0]
-    ck("editing it accepts a real tag",
+    ck("editing it still accepts a real tag",
        kb.update_claim(row.id, tags=[tag]) == "Saved.")
-    ck("an invented tag is refused",
+    ck("an invented tag is still refused",
        "Unknown tags" in kb.update_claim(row.id, tags=["not_a_real_tag"]))
-    ck("now it approves", "Approved" in kb.review_claim(row.id, approve=True))
-    ck("and is selectable", any(c.id == row.id for c in kb.claims("baci")))
+    ck("and now it answers a situated query too",
+       any(c.id == row.id for c in kb.claims("baci", situations=[tag])))
 
     # ---- the tagger learns from what was approved -------------------------
     print("\n— the tagger learns —")
@@ -256,8 +277,15 @@ def main() -> int:
     ck("and land as proposed, not approved", bare_pending
        and all(c.review == "proposed" for c in bare_pending))
     ck("none of them is selectable", not kb.claims("bare"))
-    ck("and none can be approved until it is tagged",
-       "tag before approving" in kb.review_claim(bare_pending[0].id, approve=True))
+    # An account with no vocabulary is the case the old approve-time gate hurt
+    # most: nothing could ever be tagged, so nothing could ever be approved,
+    # so a brand-new client's own website could not seed its knowledge base.
+    approved = kb.review_claim(bare_pending[0].id, approve=True)
+    ck("an account with NO vocabulary can still approve its proof",
+       "Approved" in approved, approved[:80])
+    ck("and it lands as brand-wide, which is the honest description",
+       "brand-wide proof" in approved, approved[:120])
+    ck("and is now selectable", bool(kb.claims("bare")))
 
     # ---- every client ------------------------------------------------------
     print("\n— all accounts —")

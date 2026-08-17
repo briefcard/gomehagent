@@ -46,43 +46,79 @@ def all_tenants(include_paused: bool = False) -> list[db.Tenant]:
         return rows
 
 
-def capabilities(key: str) -> dict:
-    """Which integrations this tenant actually has wired.
+def declared_capabilities(key: str) -> dict:
+    """What the Tenant row *claims* is set up. Intent, not evidence.
 
-    A capability is 'wired' only if the tenant names it AND the underlying
-    credential exists. Naming a Shopify store that isn't in SHOPIFY_STORES is
-    a misconfiguration that should surface here, not at publish time.
+    Kept because it is genuinely useful — it is the onboarding checklist, and
+    the gap between declared and wired is exactly the connect-page backlog. It
+    is NOT what `capabilities()` returns, and the two must never be conflated
+    again: see `capability_detail`.
     """
     t = get(key)
     if not t:
         return {c: False for c in CAPABILITIES}
-    # A credential the client connected themselves counts exactly as much as one
-    # Gomeh pasted into the env group. Without this, connecting Shopify through
-    # the connect page left the account reading "not wired" and the agent was
-    # never offered its tools — the connection worked and nothing could use it.
-    # `granted` is derived from credentials.GRANTS — one table saying what each
-    # provider turns on — rather than a clause per capability here. The clause
-    # version had drifted: `ads` and `analytics` checked only the Tenant JSON
-    # columns, so connecting Meta through the connect page stored a working
-    # credential and still read `ads: False`, and every ads source was skipped
-    # with "no ads connection" on an account that had just wired one.
-    from . import credentials as _cred
-    granted = _cred.granted_capabilities(key)
     return {
-        "inbox": bool(t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS)
-        or "inbox" in granted,
-        "commerce": bool(t.shopify_store and t.shopify_store in config.SHOPIFY_STORES)
-        or "commerce" in granted,
-        "esp": bool((t.esp or {}).get("provider")) or "esp" in granted,
-        "cms": bool((t.cms or {}).get("platform")) or "cms" in granted,
+        "inbox": bool(t.gmail_alias),
+        "commerce": bool(t.shopify_store),
+        "esp": bool((t.esp or {}).get("provider")),
+        "cms": bool((t.cms or {}).get("platform")),
         "ads": bool((t.ads or {}).get("meta_account_id")
-                    or (t.ads or {}).get("google_customer_id")) or "ads" in granted,
+                    or (t.ads or {}).get("google_customer_id")),
         "analytics": bool((t.analytics or {}).get("ga4_property")
-                          or (t.analytics or {}).get("gsc_site"))
-        or "analytics" in granted,
-        "design": bool((t.design or {}).get("canva_brand_id")) or "design" in granted,
-        "crm": bool((t.crm or {}).get("provider")) or "crm" in granted,
+                          or (t.analytics or {}).get("gsc_site")),
+        "design": bool((t.design or {}).get("canva_brand_id")),
+        "crm": bool((t.crm or {}).get("provider")),
     }
+
+
+def capabilities(key: str) -> dict:
+    """Which integrations this tenant actually has wired.
+
+    A capability is wired only if a credential granting it resolves — from the
+    client's own connection first, the env group second. `credentials.resolve`
+    already unifies those two, so this asks it rather than reimplementing the
+    question per capability.
+
+    **This used to lie for half of them.** The docstring promised "the tenant
+    names it AND the underlying credential exists", and delivered that for
+    `inbox` and `commerce` only. `esp`, `cms`, `ads` and `crm` checked nothing
+    but the presence of a key in the Tenant's own JSON column — and
+    `credential_ref` ("OMNISEND_BACI") is dereferenced nowhere in this codebase,
+    while there is no Omnisend credential anywhere in it. So Baci reported an
+    ESP it did not have, and Coverings reported a CMS and a CRM whose
+    `creds_key` was the empty string.
+
+    That is §1's *unknown collapsed into a value*: "declared" and "connected"
+    are different states and were being reported as one. It is also precisely
+    the failure the old docstring said the function existed to prevent — a
+    system requiring `esp` passed `systems.ready()`, went live, and would have
+    failed deep inside a publish call instead of refusing cleanly.
+
+    Declarations are still available, separately, from `declared_capabilities`.
+    """
+    from . import credentials as _cred
+    if not get(key):
+        return {c: False for c in CAPABILITIES}
+    wired = _cred.wired_capabilities(key)
+    return {c: c in wired for c in CAPABILITIES}
+
+
+def capability_detail(key: str) -> dict:
+    """Per capability: wired, how, declared — and the gap between them.
+
+    `needs_connecting` is the useful column: the client said they have an ESP
+    and no credential for one exists. That is a connect link to send, not a
+    mystery to debug at publish time.
+    """
+    wired = {}
+    if get(key):
+        from . import credentials as _cred
+        wired = _cred.wired_capabilities(key)
+    declared = declared_capabilities(key)
+    return {c: {"wired": c in wired, "via": wired.get(c, ""),
+                "declared": declared.get(c, False),
+                "needs_connecting": declared.get(c, False) and c not in wired}
+            for c in CAPABILITIES}
 
 
 def resolve(key: str) -> dict:
@@ -338,6 +374,13 @@ _SEED = [
          notes="Omnisend confirmed via app embed in published theme."),
     dict(key="eien", name="Eien Health", kind="own",
          domain="eienhealth.com", gmail_alias="eien",
+         # The store credential has been live in SHOPIFY_STORES all along
+         # (/health/connections reports "ok — Eien Health"); this row simply
+         # never named it, so `commerce` read unwired and `reorder_engine` —
+         # which requires it — could never go live. Seeding skips existing
+         # rows, so the deployed database needs the same change applied via
+         # /admin/tenant_set?tenant=eien&field=shopify_store&value=eien
+         shopify_store="eien",
          esp={"provider": "omnisend", "credential_ref": "OMNISEND_EIEN"},
          systems=["reorder_engine", "reports"],
          notes="84.9% one-time buyers, 33 active subs — reorder engine testbed."),

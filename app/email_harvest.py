@@ -254,6 +254,9 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:180]}"}
 
     claims, objections, rejected = [], [], []
+    # What the writes did, which is not the same number as what was mined.
+    write_refused: list[dict] = []
+    write_filed = write_corroborated = 0
     api_errors: list[str] = []
     model_ran = False
     not_verbatim: list[str] = []
@@ -311,10 +314,20 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
                            "evidence": c.get("evidence", ""),
                            "source": f"said in {ref}", "bucket": bucket})
             if apply:
-                kb.add_claim(tenant, body, c.get("evidence", ""), guess["tags"],
-                             proof_type=c["proof_type"],
-                             source=f"said in {ref}", status="pending",
-                             origin="email")
+                # Read the return. Discarding it here was DEFECTS §1 silent
+                # loss on the only derivable source of objections this platform
+                # has — a backfill could report hundreds of claims mined and
+                # have written none of them.
+                said = kb.add_claim(tenant, body, c.get("evidence", ""),
+                                    guess["tags"], proof_type=c["proof_type"],
+                                    source=f"said in {ref}", status="pending",
+                                    origin="email")
+                if said.startswith("Unknown tags"):
+                    write_refused.append({"text": body[:160], "why": said})
+                elif said.startswith("Already on file"):
+                    write_corroborated += 1
+                else:
+                    write_filed += 1
 
         # --- objections: their question, our answer ------------------------
         # The pair is the unit. An answer without the question it answers is
@@ -420,6 +433,11 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
         "objections": objections, "objections_count": len(objections),
         "rejected_for_banned_claim": rejected,
         "rejected_not_verbatim": not_verbatim[:10],
+        # Mined versus actually written. `claims_count` is the former.
+        "filed_count": write_filed,
+        "corroborated_count": write_corroborated,
+        "write_refused": write_refused[:15],
+        "write_refused_count": len(write_refused),
         "skipped_by_reason": dict(sorted(skipped.items(), key=lambda kv: -kv[1])),
         "buckets_mined": sorted(MINEABLE),
         "note": ("Reads SENT mail only — what this account said, not what it "

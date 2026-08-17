@@ -226,15 +226,14 @@ does. Verified in `test_tenant_scope.py`.
 
 ## 3. Still broken — in priority order
 
-Updated 2026-08-12. Everything here is measured, not assumed.
+Updated 2026-08-17. Everything here is measured, not assumed.
 
 ### Blocks producing anything a client sees
 
-**Nothing generates.** No generator, no validator, no send. `systems_tick`
-evaluates readiness daily and records "no generator yet" on every ready system.
-This is the whole of recommendation 4 and the only thing between the platform
-and an output. `feedback_block` also still has no caller — guidance written into
-a system thread is stored and never reaches a drafting prompt. Same slice.
+**~~Nothing generates.~~** Superseded 2026-08-17. `app/skill.py` plus the four
+skills in `app/skill_pack.py` produce, validate and ledger output inside the
+systems spine. Still true of the *visual* half: no imagery, because build-map
+steps 05 and 06 are unbuilt. `feedback_block` still has no caller.
 
 **Objections are 0 on all five accounts.** Human-authored, cannot be derived
 from a website, and half of what any real reply needs. `/next` is the only path.
@@ -883,9 +882,129 @@ anything routes live traffic through this.
 **Eien's `banned_claims` are conservative defaults, not established fact.** A
 supplement brand with a GLP-1 product. Read them on the Knowledge tab.
 
+### 2.29 Half of `capabilities()` reported "wired" on a declaration alone — fixed 2026-08-17
+
+`tenants.capabilities()` promised in its own docstring: *"A capability is 'wired'
+only if the tenant names it AND the underlying credential exists."* It kept that
+for two of eight. `inbox` and `commerce` checked membership in a real registry;
+`esp`, `cms`, `ads` and `crm` checked only that **a key was present in the
+Tenant's own JSON column**. `credential_ref` ("OMNISEND_BACI") is dereferenced
+nowhere in the codebase, and there is no Omnisend credential anywhere in it.
+
+Live at the time of the fix: Baci reported an ESP it did not have; Coverings
+reported a CMS *and* a CRM whose `creds_key` was the empty string; Ironside
+reported a CMS for Squarespace, a platform with no backend implemented.
+
+This is §1's *unknown collapsed into a value* — "declared" and "connected" are
+different states reported as one — and precisely the failure the docstring said
+the function existed to prevent: a system requiring `esp` passed
+`systems.ready()`, went live, and would have failed deep inside a publish call
+rather than refusing cleanly.
+
+**Fix:** every capability now resolves through `credentials.wired_capabilities`,
+which asks the credential store first and the env group second — the same two
+sources `credentials.resolve` already unified. Declarations moved to
+`tenants.declared_capabilities`, and `tenants.capability_detail` reports
+`wired` / `via` / `declared` / `needs_connecting` per capability, so the gap
+between intent and evidence is the connect-page backlog instead of a lie.
+
+**Two traps found while fixing it, both worth carrying:**
+
+1. *The env group is a registry, not a secret.* The first version tested
+   `_from_env(...)["secret"]` for truthiness. `data_tools._shopify_token` falls
+   back to a refreshed cached token when `cfg["token"]` is absent, and a
+   GMAIL_ACCOUNTS entry need not carry a `refresh_token` inline — so that
+   version reported live inboxes and stores as disconnected. Caught by
+   `test_systems`. **Membership in the registry is the credential**, because
+   membership is what every consumer resolves through.
+2. *An env Google is not a client Google.* `GRANTS["google"]` includes
+   `analytics`, because the OAuth path verifies consented scopes
+   (`oauth._missing_scopes`) before storing. The env-group Google is a pasted
+   refresh token whose `webmasters.readonly` / `analytics.readonly` re-consent
+   may never have happened, so `ENV_GRANTS["google"]` is `("inbox",)` only.
+   Granting `analytics` off it would have replaced one false positive with
+   another.
+
+Also extended `_from_env` to resolve `wordpress` through `WORDPRESS_SITES`,
+which was a real env registry that nothing read.
+
+**And connected what was already connectable.** `CMS_PLATFORM_PROVIDER` grants
+`cms` from the provider the tenant's CMS platform names, when that provider's
+credential resolves. Baci publishes pages through the same Shopify Admin API
+token that serves its catalogue — `shopify_seo.create_page` takes exactly that —
+so requiring a separate "cms credential" was blocking the blog system on a
+connection that already existed. The platform name still grants nothing on its
+own: Coverings declares `shopify` with no store and stays unwired, Ironside
+declares `squarespace`, which no backend implements and which is not in the map.
+
+### 2.25 A skill could produce output that no run row ever saw — fixed 2026-08-17
+
+The whole retrieval half of this layer was built with `systems.start_run` having
+exactly two callers, neither of them in it. `resolve`, `validator`, `ledger` and
+`responder` all worked, and none of them opened a run — so anything built on top
+would have produced output with no autonomy rung, no `blocked_on` recorded, and
+`feedback_block` still with no caller. The spine existed and the layer that
+needed it was wired past it.
+
+**Fix:** `app/skill.py`. A skill declares the context it needs; `run()` opens the
+run, resolves once, gates on coverage, and closes it. `Context.emit` is the only
+way for a skill body to return anything and it runs the validator first, so the
+gate is structural rather than remembered.
+
+### 2.26 A blocked skill left no trace, so the backlog could not see it — fixed 2026-08-17
+
+The first version of `skill.run` returned on a failed preflight *before*
+`start_run`. Every cheap, common, fixable refusal — system not installed,
+contract blank, no ban list — was therefore the only class of failure never
+recorded, and `blocked_reasons()` exists precisely to rank those. Found by the
+test asserting blocked runs carry a reason.
+
+**Fix:** a blocked preflight opens and closes a run, and files a ledger row.
+`refused` (unknown skill or account) stays unrecorded on purpose — a caller
+error is not something the account is missing, and filing it would put noise on
+the authoring backlog.
+
+### 2.27 A false premise refused real proof — fixed 2026-08-17
+
+`add_claim` refused an untagged approved claim with *"Needs at least one
+situation tag, or it can never be selected"*, and `review_claim` refused to
+approve one for the same stated reason. **The premise is false.** `claims()`
+filters on situation only when a caller asks for one (`if want and not
+overlap`), so an untagged claim is fully selectable as brand-wide proof and
+merely absent from *situated* retrieval.
+
+The cost was worst exactly where it hurt most: an account with no situation
+vocabulary yet — a brand-new client — could never tag anything, so could never
+approve anything, so its own website could not seed its knowledge base. It also
+blocked the catalogue rewrite skill, which needs brand-wide proof to compose a
+compliant meta description.
+
+**Fix:** infer, do not gatekeep. Both paths now call `suggest_tags`, apply what
+it is confident about, and otherwise file the claim untagged as brand-wide proof
+— saying which of the two happened, because silently choosing between them is
+§1's absence-collapsed-into-a-value all over again.
+
+*This is the second time a gate was written on an assumption about a selector's
+behaviour rather than on the selector. §2.20 was the first. Read the function
+you are guarding.*
+
+### 2.28 The two known `add_claim` silent losses — fixed 2026-08-17
+
+`harvest.py:536` and `email_harvest.py:314` both discarded `add_claim`'s return
+on the apply path. `add_claim` refuses in-band and reports corroboration
+in-band, so "proposed 40" and "wrote 40" were the same number whether or not a
+single row landed — on the only derivable source of objections the platform has.
+Carried in §3 as live since 2026-08-14.
+
+**Fix:** both now classify every attempted write as filed, corroborated or
+refused, and report `filed_count`, `corroborated_count` and `write_refused`
+alongside the proposed count. `test_harvest` asserts the three account for every
+proposal.
+
 ## 4. How to verify
 
 ```bash
+python3 scripts/test_skill.py       # the skill substrate: gate, rung, ledger, refusals
 python3 scripts/test_selection.py   # selection + the unknowns loop
 python3 scripts/test_systems.py     # registry, contract gate, autonomy ladder
 python3 scripts/test_kb.py          # KB writes + guided intake
@@ -912,7 +1031,8 @@ python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed
 ```
 
-All twenty-one suites pass as of 2026-08-14. None of them touch the network.
+All thirty-three suites pass as of 2026-08-17. None of them touch the network.
+Full run is ~2m30s — split it, or a single shell call hits a 2-minute timeout.
 
 Re-run all five after any change to `kb.py` — §2.15 is what happens when the
 claim in this section is trusted instead of re-checked.

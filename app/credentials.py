@@ -197,7 +197,106 @@ def _from_env(tenant: str, provider: str) -> dict:
         if acct:
             return {"secret": acct.get("refresh_token", ""),
                     "email": acct.get("email", ""), "source": "env"}
+    if provider == "wordpress":
+        ck = ((t.cms or {}).get("creds_key") or "").strip()
+        cfg = config.WORDPRESS_SITES.get(ck) or {}
+        if cfg:
+            return {"secret": cfg.get("app_password", ""),
+                    "site": cfg.get("base_url", ""),
+                    "username": cfg.get("user", ""), "source": "env"}
     return {}
+
+
+# Which capabilities an ENV-GROUP credential may be said to turn on. Narrower
+# than `GRANTS` for exactly one provider, and the difference is not an oversight:
+#
+#   The OAuth path verifies what was actually consented (`oauth._missing_scopes`)
+#   before storing anything, so a client-connected Google demonstrably carries
+#   Search Console and GA4 and may grant `analytics`. The env-group Google is a
+#   refresh token pasted in by hand, and `config.SEO_GOOGLE_ALIAS` documents that
+#   `webmasters.readonly` and `analytics.readonly` need a re-consent that may
+#   never have happened. Granting `analytics` off it would be inventing a
+#   capability — the same false-positive this whole function exists to remove.
+ENV_GRANTS: dict[str, tuple[str, ...]] = {
+    "shopify": ("commerce",),
+    "google": ("inbox",),
+    "wordpress": ("cms",),
+}
+
+
+def _env_registry_hit(t, provider: str) -> bool:
+    """Does the env group hold this provider for this tenant?
+
+    **Membership in the registry, not the shape of the secret inside it.** That
+    is deliberate and it matters: `data_tools._shopify_token` falls back to a
+    refreshed, cached token when `cfg["token"]` is absent, and `gmail_client`
+    reads the alias through `credentials.google_config`. Testing for a non-empty
+    `secret` here would report a working inbox or store as disconnected and
+    strip the agent of its tools on a live account — which is the same class of
+    error as the false positives being removed, pointed the other way.
+    """
+    if provider == "shopify":
+        return bool(t.shopify_store and t.shopify_store in config.SHOPIFY_STORES)
+    if provider == "google":
+        return bool(t.gmail_alias and t.gmail_alias in config.GMAIL_ACCOUNTS)
+    if provider == "wordpress":
+        ck = ((t.cms or {}).get("creds_key") or "").strip()
+        return bool(ck and ck in config.WORDPRESS_SITES)
+    return False
+
+
+# A CMS is not a second connection when it IS the store we already hold a token
+# for. Baci publishes pages through the same Shopify Admin API credential that
+# serves its catalogue — `shopify_seo.create_page` takes exactly that — so
+# demanding a separate "cms credential" would invent a connection that does not
+# exist and leave the blog system permanently blocked on nothing.
+#
+# This is NOT the declaration-counts defect returning. The platform name grants
+# nothing on its own; it only says WHICH provider to look for, and the grant
+# still requires that provider's credential to resolve for this tenant.
+# Coverings declares `shopify` with an empty `creds_key` and no store, and stays
+# unwired. Ironside declares `squarespace`, which no backend implements, and is
+# not in this map at all.
+CMS_PLATFORM_PROVIDER: dict[str, str] = {
+    "shopify": "shopify",
+    "wordpress": "wordpress",
+}
+
+
+def wired_capabilities(tenant: str) -> dict[str, str]:
+    """Capability -> how it is wired, for capabilities that REALLY are.
+
+    The single source of truth for "is this connected". A capability appears
+    here only when a provider granting it has a credential — the client's own
+    connection first, the env group second. A declaration on the Tenant row is
+    not a credential and never appears here.
+    """
+    from . import tenants
+    t = tenants.get(tenant)
+    if not t:
+        return {}
+    out: dict[str, str] = {}
+    client = connected_providers(tenant)
+    for prov in PROVIDERS:
+        if prov in client:
+            for cap in GRANTS.get(prov, ()):
+                out.setdefault(cap, f"client:{prov}")
+    for prov, caps in ENV_GRANTS.items():
+        if prov in client:
+            continue                       # the client's own connection wins
+        if _env_registry_hit(t, prov):
+            for cap in caps:
+                out.setdefault(cap, f"env:{prov}")
+
+    # The CMS the tenant named, if we already hold that provider's credential.
+    if "cms" not in out:
+        prov = CMS_PLATFORM_PROVIDER.get(
+            ((t.cms or {}).get("platform") or "").strip().lower())
+        if prov in client:
+            out["cms"] = f"client:{prov}"
+        elif prov and _env_registry_hit(t, prov):
+            out["cms"] = f"env:{prov}"
+    return out
 
 
 def status(tenant: str) -> list[dict]:
