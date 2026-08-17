@@ -2161,6 +2161,160 @@ def system_rule(key: str = Depends(admin_key), id: str = "", phrase: str = ""):
     return _back_to_systems(key)
 
 
+# ---------------------------------------------------------------------------
+# The skill bridge.
+#
+# These four routes exist so a Claude skill — the Coverings trio, the marketing
+# pack, anything authored later — can run on this data layer instead of on a
+# workbook it keeps its own copy of.
+#
+# The design constraint that shaped them: handing a skill the knowledge and
+# letting it draft in its own session takes the draft OUTSIDE `Context.emit`,
+# and `emit` is the only reason any of this is safe. The validator, the ledger
+# and the autonomy rung would all be bypassed silently — banned claims
+# unenforced, no record the output existed, nothing for anti-repeat to read.
+#
+# So the bridge is not "read the KB". It is read → draft → **come back through
+# the gate**. `/admin/agent_context` hands over the brief and states the
+# obligation in the payload; `/admin/agent_emit` is the gate, and returns
+# `may_send` rather than the draft, so a skill that skips it has nothing to
+# quote as permission.
+#
+# What the bundle contains is already safe: `kb.claims` and `kb.objections`
+# both filter on `review == APPROVED`, so nothing in review can reach a
+# customer through here.
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/agent_context")
+def agent_context(key: str = Depends(admin_key), tenant: str = "",
+                  system: str = "", utterance: str = "", entity_key: str = "",
+                  audience_key: str = "", contact_id: str = "",
+                  tier: int = 3, limit: int = 3) -> dict:
+    """The resolved brief for one request, as JSON, for a skill to draft from.
+
+    Read `blocked_on` before anything else: non-empty means this account cannot
+    safely produce output for this request, and each entry names the field to
+    go and fill.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import resolve as _resolve, tenants as _tenants
+    if not tenant:
+        return {"error": "tenant is required — name the client explicitly"}
+    row = _tenants.get(tenant)
+    bundle = _resolve.resolve(tenant, system=system, utterance=utterance,
+                              contact_id=contact_id, entity_key=entity_key,
+                              audience_key=audience_key, tier=tier, limit=limit)
+    if bundle.get("error"):
+        return bundle
+    return {
+        **bundle,
+        # Named back to the caller so a skill that resolved the wrong client
+        # says so in its own output instead of being quietly wrong about who
+        # it is speaking for.
+        "acting_for": {"tenant": tenant, "name": row.name if row else ""},
+        "obligation": {
+            "before_sending": "POST /admin/agent_emit",
+            "why": "the banned-claim rules in this bundle are enforced there, "
+                   "not here, and nothing you send is on the record until you "
+                   "do it",
+            "refuse_if": "blocked_on is non-empty, or a fact you need is "
+                         "absent — say you will check rather than guessing",
+        },
+    }
+
+
+@app.post("/admin/agent_emit")
+async def agent_emit(request: Request, key: str = Depends(admin_key)) -> dict:
+    """The gate. Validate a skill-written draft, file it, say whether it may go.
+
+    Deliberately returns `may_send` and not the draft. A skill cannot treat
+    calling this as a formality and send regardless — there is nothing here to
+    quote as permission unless it passed.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import ledger, systems, validator
+    body = await request.json()
+    tenant = str(body.get("tenant", "")).strip()
+    system_key = str(body.get("system_key", "")).strip()
+    text = str(body.get("body", "")).strip()
+    if not tenant or not system_key or not text:
+        return {"error": "tenant, system_key and body are all required"}
+
+    claim_ids = [str(c) for c in (body.get("claim_ids") or [])]
+    entity_key = str(body.get("entity_key", ""))
+    result = validator.check(
+        tenant, text, claim_ids=claim_ids, entity_key=entity_key,
+        conversation_id=str(body.get("conversation_id", "")),
+        require_citation=bool(body.get("require_citation", True)))
+
+    row = systems.find(tenant, system_key)
+    autonomy = (row.autonomy if row else "") or "shadow"
+    # The rung decides how far a PASSING draft travels; it never rescues a
+    # failing one. Same precedence as `skill._disposition` — the validator
+    # outranks the rung, and `auto` means "do not ask about what passed".
+    if not result["ok"]:
+        may_send, disposition = False, "blocked"
+    elif autonomy == "auto":
+        may_send, disposition = True, "send"
+    elif autonomy == "shadow":
+        may_send, disposition = False, "shadow — record only, send nothing"
+    else:
+        may_send, disposition = False, "needs approval"
+
+    out = ledger.record(
+        tenant, system_key, body=text, claim_ids=claim_ids,
+        entity_key=entity_key, audience_key=str(body.get("audience_key", "")),
+        situation=str(body.get("situation", "")),
+        angle=str(body.get("angle", "")), format=str(body.get("format", "")),
+        conversation_id=str(body.get("conversation_id", "")),
+        status="draft" if result["ok"] else "blocked",
+        blocked_on=[f["rule"] for f in result["failures"]])
+
+    return {"ok": result["ok"], "may_send": may_send,
+            "disposition": disposition, "autonomy": autonomy,
+            "failures": result["failures"], "checked": result["checked"],
+            "output_id": out.id, "system_installed": bool(row),
+            "note": ("" if row else
+                     f"no {system_key!r} system installed for {tenant!r} — the "
+                     f"draft is on the ledger but has no rung, so it is being "
+                     f"treated as shadow")}
+
+
+@app.get("/admin/skill_catalogue")
+def skill_catalogue(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Every registered skill and whether it can run for this account."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import skill, skill_pack  # noqa: F401 — import registers the pack
+    return {"tenant": tenant, "skills": skill.catalogue(tenant)}
+
+
+@app.post("/admin/skill_run")
+async def skill_run(request: Request, key: str = Depends(admin_key)) -> dict:
+    """Run one registered skill end to end, governed the whole way.
+
+    Preferred over context+emit when a registered skill already does the job:
+    `skill.run` opens a run, validates every emission and closes the run, so
+    nothing depends on the caller remembering to come back.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import skill, skill_pack  # noqa: F401 — import registers the pack
+    body = await request.json()
+    name = str(body.get("skill", "")).strip()
+    tenant = str(body.get("tenant", "")).strip()
+    if not name or not tenant:
+        return {"error": "skill and tenant are both required"}
+    if not skill.get(name):
+        return {"error": f"unknown skill {name!r}",
+                "available": [s["key"] for s in skill.catalogue(tenant)]}
+    params = {k: v for k, v in (body.get("params") or {}).items()}
+    return skill.run(name, tenant, trigger=str(body.get("trigger", "manual")),
+                     ref=str(body.get("ref", "")), **params)
+
+
 @app.get("/admin/verify")
 def verify_tenant(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Live-test a tenant's integrations. 'Configured' and 'working' are

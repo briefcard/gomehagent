@@ -226,7 +226,30 @@ does. Verified in `test_tenant_scope.py`.
 
 ## 3. Still broken — in priority order
 
-Updated 2026-08-17. Everything here is measured, not assumed.
+Updated 2026-08-17.
+
+### `add_claim` and `add_audience` disagree about what holds a row back — OPEN
+
+Two conventions for the same decision, in the same module:
+
+* `add_audience` derives review from **origin**:
+  `review or (prov.APPROVED if prov.lands_approved(origin) else prov.PROPOSED)`.
+* `add_claim` derives it from **status**: `prov.PROPOSED if status == "pending"
+  else prov.APPROVED`. `origin` is recorded but does not gate anything, so
+  `add_claim(..., origin="harvest")` with the default status lands **approved
+  and immediately selectable**, even though `prov.lands_approved("harvest")`
+  is `False`.
+
+Not a live leak: both real callers (`harvest.py:546`, `email_harvest.py:321`)
+pass `status="pending"` explicitly, and `claims()` filters on
+`review == APPROVED`, so nothing unapproved reaches a bundle today.
+
+It is a trap for the next caller, and it has already caught one — the first
+draft of `test_bridge.py` used `origin="harvest"` alone, got an approved row,
+and appeared to prove a leak in the bridge that did not exist. A convention
+that is right in one function and inverted in its neighbour will be got wrong
+again. Fix is to make `add_claim` consult `lands_approved(origin)` as well, so
+neither axis alone can wave a machine-written claim through. Everything here is measured, not assumed.
 
 ### Blocks producing anything a client sees
 

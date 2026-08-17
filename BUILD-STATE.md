@@ -9,9 +9,11 @@ and do not create `HANDOFF-step-N.md` files. History lives in `DEFECTS.md`
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** `21fdb89` on `origin/main`, deployed and answering. This thread's work is committed
-locally as `67625b7` and **not pushed** — see Commit below. `/health` reports `commit` and `routes` —
-use it, do not infer what is running.
+**Live:** `45ba6cf` on `origin/main` — pushed and confirmed serving (`/health`
+reported the swap after ~60s, and `/health/connections` still passes on both
+Shopify stores and all three Google accounts). The skill-bridge work below is a
+later commit, **not yet pushed**. `/health` reports `commit` and `routes` — use
+it, do not infer what is running.
 
 **Connections, verified live 2026-08-17 via `/health/connections`:** Shopify
 `baci` and `eien` both ok; Gmail + Drive ok for `personal`, `baci`, `eien`. So
@@ -132,6 +134,26 @@ infer a situation where the classifier is confident and file brand-wide proof
 where it is not, saying which happened. Owner's call, and it unblocked the
 rewrite skill. §2.28 fixed the two `add_claim` silent losses carried as live
 since 14 Aug.
+
+## The skill bridge
+
+Four routes so an outside Claude skill — the Coverings trio, the marketing pack
+— can run on this data layer instead of on its own workbook copy.
+
+`/admin/agent_context` hands over the resolved brief. `/admin/agent_emit` is the
+gate: it validates a skill-written draft, files it to the ledger passing or
+blocked, and returns `may_send` rather than the draft, so a skill that skips it
+has nothing to quote as permission. `/admin/skill_catalogue` and
+`/admin/skill_run` finally give the four registered skills an entry point —
+before this they were reachable only from Python.
+
+**The design constraint.** Letting a skill draft in its own session puts the
+draft outside `Context.emit`, and `emit` is the only reason any of this is safe
+— validator, ledger and rung all bypassed silently. So the bridge is not "read
+the KB", it is read → draft → come back through the gate. `test_bridge.py`
+(21 checks) holds that line: a skill writing a banned claim is blocked, on
+`auto` as well as on `shadow`; both drafts reach the ledger; and material in
+review never enters a bundle.
 
 ## Verified vs assumed
 
