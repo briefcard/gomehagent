@@ -108,8 +108,13 @@ def claims(tenant: str, situations: list[str] | None = None,
             db.KbClaim.review == prov.APPROVED,
             db.KbClaim.status == "active",
         )
+        # A group's claims come through too. "Every Aqua pitcher is acrylic"
+        # is filed once against the collection and is true of each member, so
+        # asking about one pitcher must reach it.
+        chain = ancestors(tenant, entity_key) if entity_key else []
         if entity_key:
-            q = q.filter(db.KbClaim.entity_key.in_(["", None, entity_key]))
+            q = q.filter(db.KbClaim.entity_key.in_(
+                ["", None, entity_key, *chain]))
         else:
             q = q.filter(db.KbClaim.entity_key.in_(["", None]))
         rows = q.all()
@@ -120,9 +125,25 @@ def claims(tenant: str, situations: list[str] | None = None,
             overlap = len(set(r.situations or []) & want)
             if want and not overlap:
                 continue
-            scored.append((-overlap, 0 if r.strength == "strong" else 1, r))
-        scored.sort(key=lambda t: (t[0], t[1]))
-        out = [r for _, _, r in scored]
+            # Ranked on RELEVANCE first, then SPECIFICITY, then strength.
+            #
+            # Relevance leads because a claim that answers the question asked
+            # beats a narrower one about something else — a brand-wide fact
+            # matching two of the buyer's situations is more use than a fact
+            # about this exact product matching none of them.
+            #
+            # Specificity decides everything after that, and it is a
+            # correctness rule rather than a preference: the narrower the
+            # scope, the more precisely the fact was checked against the thing
+            # being written about. It is also the tie that used to be broken by
+            # insertion order, so a product-specific claim and a brand-wide one
+            # answering the same question came back in whatever order the rows
+            # happened to be in.
+            depth = scope_depth(entity_key, r.entity_key, chain)
+            scored.append((-overlap, -depth,
+                           0 if r.strength == "strong" else 1, r))
+        scored.sort(key=lambda t: (t[0], t[1], t[2]))
+        out = [t[-1] for t in scored]
         s.expunge_all()
         return out[:limit] if limit else out
 
@@ -1870,6 +1891,182 @@ REVIEWABLE = {
     "entity": (db.KbEntity, "name"),
     "situation": (db.KbSituation, "tag"),
 }
+
+
+# ---------------------------------------------------------------------------
+# Scope — individual, group, brand-wide
+#
+# Precedence is by specificity, and that is a correctness rule rather than a
+# preference: the narrower a claim's scope, the more precisely it was checked
+# against the thing being written about. A fact about one pitcher was verified
+# on that pitcher; a fact about the range was verified on the range.
+# ---------------------------------------------------------------------------
+
+# How many links up the chain to look. Deep enough for product -> collection ->
+# house line, shallow enough that a cycle or a bad import cannot spin.
+_MAX_ANCESTRY = 6
+
+
+def ancestors(tenant: str, key: str) -> list[str]:
+    """Group keys above this entity, nearest first. Cycle-safe."""
+    key = (key or "").strip()
+    if not key:
+        return []
+    with db.SessionLocal() as s:
+        rows = {e.key: (e.parent_key or "").strip()
+                for e in s.query(db.KbEntity).filter(
+                    db.KbEntity.tenant == tenant,
+                    db.KbEntity.status == "active").all()}
+    out, seen, cur = [], {key}, rows.get(key, "")
+    while cur and cur not in seen and len(out) < _MAX_ANCESTRY:
+        out.append(cur)
+        seen.add(cur)
+        cur = rows.get(cur, "")
+    return out
+
+
+def scope_depth(entity_key: str, claim_entity_key: str,
+                chain: list[str] | None = None) -> int:
+    """2 = this exact thing, 1 = a group it belongs to, 0 = the whole brand."""
+    ck = (claim_entity_key or "").strip()
+    if not ck:
+        return 0
+    if ck == (entity_key or "").strip():
+        return 2
+    return 1 if ck in (chain or []) else 0
+
+
+def set_parent(tenant: str, key: str, parent_key: str) -> str:
+    """Put one entity in a group, or take it out with an empty parent."""
+    key, parent_key = (key or "").strip(), (parent_key or "").strip()
+    with db.SessionLocal() as s:
+        row = (s.query(db.KbEntity)
+               .filter(db.KbEntity.tenant == tenant,
+                       db.KbEntity.key == key).first())
+        if not row:
+            return f"No entity keyed {key!r} for {tenant}."
+        if parent_key:
+            if parent_key == key:
+                return "An entity cannot be its own group."
+            parent = (s.query(db.KbEntity)
+                      .filter(db.KbEntity.tenant == tenant,
+                              db.KbEntity.key == parent_key).first())
+            if not parent:
+                return (f"No entity keyed {parent_key!r} — create the "
+                        f"collection first, then assign members to it.")
+
+    # Asked BEFORE the write, and of the PROPOSED PARENT rather than of this
+    # row. Checking afterwards does not work: `ancestors` stops when it revisits
+    # a key, so a walk that ends because of a loop looks identical to one that
+    # ends at the top of the tree, and the guard silently passed.
+    if parent_key and key in ancestors(tenant, parent_key):
+        return (f"Refused: {parent_key!r} is already inside {key!r}, so this "
+                f"would make a loop and no claim's audience could be resolved.")
+
+    with db.SessionLocal() as s:
+        row = (s.query(db.KbEntity)
+               .filter(db.KbEntity.tenant == tenant,
+                       db.KbEntity.key == key).first())
+        row.parent_key = parent_key
+        s.commit()
+    return (f"{key} is now in {parent_key}." if parent_key
+            else f"{key} is no longer in a group.")
+
+
+def assign_to_group(tenant: str, parent_key: str, keys: list[str]) -> dict:
+    """Select many entities into one group. Reports what it could not do."""
+    done, refused = [], []
+    for k in keys:
+        msg = set_parent(tenant, k, parent_key)
+        (done if "is now in" in msg else refused).append(msg if k not in msg
+                                                         else k)
+        if "is now in" not in msg:
+            refused[-1] = msg
+    return {"assigned": len(done), "refused": refused}
+
+
+def group_members(tenant: str, parent_key: str) -> list[db.KbEntity]:
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbEntity)
+                .filter(db.KbEntity.tenant == tenant,
+                        db.KbEntity.parent_key == parent_key,
+                        db.KbEntity.status == "active")
+                .order_by(db.KbEntity.name).all())
+        s.expunge_all()
+        return rows
+
+
+def scope_conflicts(tenant: str) -> list[dict]:
+    """Approved claims that answer the same situation at different scopes.
+
+    Two claims covering one situation for one product is either a refinement —
+    the specific one is meant to win, which is the whole point of precedence —
+    or a genuine contradiction. **Code cannot tell those apart**, so this
+    reports the pair and names which would be selected, rather than resolving
+    it. Silently letting specificity win is right most of the time and wrong
+    invisibly the rest, which is the worst of both.
+
+    Computed, never stored: the pairs change the moment a claim is approved or
+    retired, so a saved row would be answering yesterday's question.
+    """
+    ents = entities(tenant, available_only=False)
+    # Every approved claim at EVERY scope. `claims()` cannot answer this:
+    # called without an entity it returns brand-wide rows only, which is right
+    # for selection and useless here — the first version of this function used
+    # it and reported no conflicts at all, because the group and product
+    # buckets were never filled.
+    now = dt.datetime.now(dt.timezone.utc)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim)
+                .filter(db.KbClaim.tenant == tenant,
+                        db.KbClaim.review == prov.APPROVED,
+                        db.KbClaim.status == "active").all())
+        s.expunge_all()
+    rows = [r for r in rows
+            if not (r.expires_at and db.as_utc(r.expires_at) < now)]
+    by_scope: dict[str, list] = {}
+    for c in rows:
+        by_scope.setdefault((c.entity_key or "").strip(), []).append(c)
+
+    # Keyed on the PAIR OF CLAIMS, not on the entity that revealed it. One
+    # collection-versus-brand overlap is true of every member, so reporting it
+    # per member turns a single decision into forty rows — and a queue that
+    # long is one nobody works, which is the failure this whole review surface
+    # was rebuilt to avoid. The affected entities ride along as evidence.
+    found: dict[tuple, dict] = {}
+    for e in ents:
+        chain = ancestors(tenant, e.key)
+        # Narrowest first, so the winner of any pair is the earlier one.
+        pools = [(2, by_scope.get(e.key, []))]
+        pools += [(1, by_scope.get(a, [])) for a in chain]
+        pools += [(0, by_scope.get("", []))]
+        flat = [(d, c) for d, pool in pools for c in pool]
+        for i, (d_a, a) in enumerate(flat):
+            for d_b, b in flat[i + 1:]:
+                if d_a == d_b:
+                    continue                    # same scope is not an overlap
+                shared = set(a.situations or []) & set(b.situations or [])
+                if not shared:
+                    continue
+                sig = (a.id, b.id)
+                if sig in found:
+                    found[sig]["affects"].append(e.key)
+                    continue
+                found[sig] = {
+                    "situations": sorted(shared),
+                    "affects": [e.key],
+                    "wins": {"claim_id": a.id, "claim": a.claim,
+                             "scope": a.entity_key or "brand-wide",
+                             "depth": d_a},
+                    "loses": {"claim_id": b.id, "claim": b.claim,
+                              "scope": b.entity_key or "brand-wide",
+                              "depth": d_b},
+                    "why": ("the narrower claim is selected — check that the "
+                            "broader one is a general truth it refines, not a "
+                            "statement it contradicts")}
+    # Widest blast radius first: the pair affecting forty products is the one
+    # worth a human's attention before the pair affecting one.
+    return sorted(found.values(), key=lambda c: -len(c["affects"]))
 
 
 # ---------------------------------------------------------------------------

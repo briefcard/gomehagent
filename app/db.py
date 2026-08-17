@@ -1098,9 +1098,19 @@ class KbEntity(_Provenance, Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     tenant = Column(String, nullable=False, index=True)
-    type = Column(String, nullable=False)       # offer | product | space | service | program
+    type = Column(String, nullable=False)       # offer|product|space|service|program|collection
     key = Column(String, nullable=False)        # stable slug / SKU
     name = Column(String, nullable=False)
+    # The group this belongs to — another KbEntity's key, usually one of
+    # `type="collection"`. It exists so a fact true of a whole range can be
+    # said once.
+    #
+    # Claim scope used to be binary: one entity, or the whole brand. "Every
+    # Aqua pitcher is acrylic" could then only be filed once per pitcher, which
+    # is why a mass harvest leaves a dozen rows saying one thing — the schema
+    # had no way to express what was actually true. Brand-wide was not an
+    # option either, because the porcelain lines are not acrylic.
+    parent_key = Column(String, default="", index=True)
     description = Column(Text)
     attributes = Column(JSON, default=dict)     # capacity, material, seats, deliverables...
     price = Column(String)                      # string: ranges and "from $X" are common

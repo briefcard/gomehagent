@@ -184,6 +184,43 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## Claim scope: individual, group, brand-wide
+
+Scope was binary — one entity or the whole brand — so "every Aqua pitcher is
+acrylic" could only be filed once per pitcher. That is not a review backlog,
+it is the schema having no way to say what is true: brand-wide would be false,
+because the porcelain lines are not acrylic. A dozen rows saying one thing was
+the only expressible answer.
+
+`KbEntity.parent_key` adds the middle. A collection is an entity in its own
+right (`type="collection"`), members point at it, and `claims()` widens to the
+ancestor chain — so one row against `aqua` serves every member and never
+reaches Mamma Mia porcelain.
+
+**Precedence is relevance, then specificity, then strength.** Relevance leads
+because a claim answering the question asked beats a narrower one about
+something else. Specificity decides everything after that, and it is a
+correctness rule rather than a preference: the narrower the scope, the more
+precisely the fact was checked against the thing being written about. It also
+replaces a tie that used to be broken by row insertion order.
+
+**Conflicts are flagged, never resolved.** Two claims covering one situation at
+different scopes is either a refinement — specificity winning, as designed — or
+a contradiction, and code cannot tell those apart. `scope_conflicts()` reports
+the pair, names which would be selected, and says to check. Keyed on the pair of
+claims rather than on the entity that revealed it: one collection-versus-brand
+overlap is true of every member, and reporting it per member turns a single
+decision into forty rows. Widest blast radius first. Computed, never stored, for
+the same reason the duplicate sweep is.
+
+Two bugs found by running it. The loop guard was checked *after* the write and
+against the row's own ancestry — but `ancestors` stops when it revisits a key,
+so a walk ending in a cycle looks identical to one reaching the top, and the
+guard silently passed. It now asks, before writing, whether the proposed parent
+already sits inside this row. And `scope_conflicts` first used `claims()`, which
+returns brand-wide rows only when called without an entity — right for
+selection, useless here, and it reported no conflicts at all.
+
 ## The creative library — foundation only
 
 Generative-with-references, as agreed. What landed is the substrate the
