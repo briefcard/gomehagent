@@ -708,6 +708,15 @@ class KbBrand(Base):
     positioning = Column(Text)
     elevator = Column(JSON, default=dict)      # {sentence, paragraph, page}
     voice = Column(JSON, default=dict)         # {tone[], do_say[], never_say[], examples[]}
+    # How the brand LOOKS, as rules a generator can be held to: {direction,
+    # do_show[], never_show[]}. Deliberately not colours, type or logos — those
+    # live in the Canva brand kit, which a designer already maintains, and
+    # duplicating them here would create two sources of truth that drift.
+    # What no brand kit holds is art direction: "always styled on a laid
+    # table", "never a face", "no props we do not sell". That is the visual
+    # equivalent of `voice.never_say`, and without it a generative creative
+    # path has nothing to be wrong against.
+    visual = Column(JSON, default=dict)
     # Hard compliance boundary. The validator rejects any draft containing one
     # of these strings — see Baci's origin/handcraft rules. Never advisory.
     banned_claims = Column(JSON, default=list)
@@ -1110,6 +1119,52 @@ class KbEntity(_Provenance, Base):
 # was safe to switch on, what it had produced, or whether it was working — which
 # is the question the whole platform exists to answer.
 # ---------------------------------------------------------------------------
+
+class KbAsset(_Provenance, Base):
+    """A creative asset — something the brand may publish, or may only look at.
+
+    `rights` is the axis that matters and it is not a label, it is a gate. A
+    competitor's ad saved for inspiration and a photograph the client owns are
+    the same shape: a URL, a thumbnail, some tags. Nothing about the row itself
+    tells them apart, so if convention is the only thing keeping the first out
+    of a published ad, it will eventually go out in one — the §1 pattern
+    (*unknown collapsed into a value*) with a legal bill attached.
+
+    So, like `review`, it has **no column default**. Every read treats anything
+    that is not exactly `owned` as not publishable, which means a row created
+    without an explicit answer is inspiration, not inventory. Auto-migration
+    stamping a default across existing rows is exactly what must not happen
+    here.
+
+    `uses` and `outcome` are the two feedback signals. Publishing an output
+    marks the assets behind it used; performance recorded against the channel
+    lands in `outcome`. Together they answer "what actually worked", which is
+    the only question that makes a creative library worth keeping.
+    """
+
+    __tablename__ = "kb_assets"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    kind = Column(String, default="image")     # image | video | design
+    # owned = the client's to publish. reference = inspiration only, never
+    # output. No default: absent means reference, which is the safe reading.
+    rights = Column(String, index=True)
+    title = Column(String)
+    url = Column(Text)                         # where the pixels live
+    thumbnail_url = Column(Text)
+    canva_design_id = Column(String)           # the editable handle, if any
+    source = Column(Text)                      # "generated", "competitor: X"…
+    prompt = Column(Text)                      # what produced it, if generated
+    derived_from = Column(JSON, default=list)  # asset ids used as inspiration
+    tags = Column(JSON, default=list)          # ["on-white", "lifestyle"]
+    entity_key = Column(String, default="")    # what it depicts, if anything
+    uses = Column(String, default="0")         # times published
+    last_used_at = Column(DateTime(timezone=True))
+    outcome = Column(JSON, default=dict)       # {"meta": {"roas": …}, …}
+    status = Column(String, default="active")  # active | retired
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
 
 class System(Base):
     """One pipeline installed for one tenant.

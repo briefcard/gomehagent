@@ -184,6 +184,52 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## The creative library — foundation only
+
+Generative-with-references, as agreed. What landed is the substrate the
+generator will stand on, not the generator.
+
+**`KbAsset`, and `rights` is a gate rather than a label.** A competitor's ad
+saved for inspiration and a photograph the client owns are the same shape — a
+URL with tags on it — so if convention is the only thing keeping the first out
+of a published campaign, it eventually goes out in one. `rights` has **no
+column default**, exactly like `review`: anything that is not literally
+`owned` reads as reference. `add_asset` refuses rather than guessing, the
+default read returns publishable assets only, and `ledger.publish` re-checks at
+the last moment it still can — the media on an output may have been chosen by a
+generator several steps upstream, so trusting whoever attached it is not enough.
+
+**Both feedback signals are wired.** Publishing an output credits the assets
+behind it (`uses`, `last_used_at`) — collected as a side effect rather than as
+its own step, because a signal that must be remembered is missing exactly when
+somebody asks which creative worked. Results land per channel via
+`record_asset_outcome`, never flattened to one score: a creative that earns its
+keep on Meta and dies in email has said something specific, and averaging
+destroys it. `proven_assets()` ranks by either.
+
+**`KbBrand.visual` — the half that was missing.** The brand row was entirely
+verbal: positioning, elevator, voice, banned claims. Colours, type and logos
+live in the Canva brand kit and are deliberately NOT duplicated here. What no
+brand kit holds is art direction — "styled on a laid table", "never a face",
+"no props we do not sell" — which is the visual equivalent of
+`voice.never_say`. Without it a generative path has nothing to be wrong
+against.
+
+**Canva, checked live:** connector authenticated, 1 brand kit, 1 brand template
+(*CM Post-Call Follow Up*, a presentation, unrelated), **0 autofill-capable
+templates**. So the template-driven path has connectivity and no substrate,
+which is why generative-first is the right call — templates become references
+as they get made.
+
+`set_brand` now derives its writable set from the model. The hand-written one
+had already gone stale on `visual`, and since its refusal is a return value
+most callers ignore, the field was silently unwritable and the brand row was
+never created. Rule 4, met again.
+
+**Not built:** the generator itself, the Canva/Ryze calls, the join from an
+output to a channel's ad id (so `record_asset_outcome` is fed by hand today),
+and any UI for the library.
+
 ## Working the review queue
 
 Three workflow defects, all of them reasons a queue of forty proposals stops

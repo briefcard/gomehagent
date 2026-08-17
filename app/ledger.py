@@ -58,17 +58,43 @@ def record(tenant: str, system_key: str, *, situation: str = "",
 
 
 def publish(tenant: str, output_id: str, destination: str = "") -> str:
+    """Mark an output as gone out, and credit the assets that carried it.
+
+    Refuses if any attached asset is reference-only. Publishing is the last
+    place the distinction can still be caught, and catching it here rather than
+    trusting whoever attached the media is the difference between a rule and a
+    convention — the media on an output may have been chosen by a generator
+    several steps upstream.
+
+    Usage is recorded as a side effect of publishing rather than as its own
+    step, because a signal that has to be remembered is a signal that will be
+    missing exactly when somebody asks which creative actually worked.
+    """
+    from . import kb
     with db.SessionLocal() as s:
         row = (s.query(db.Output)
                .filter(db.tenant_filter(db.Output, tenant),
                        db.Output.id == output_id).first())
         if not row:
             return "No such output for this account."
+        media = list(row.media_ids or [])
+
+    for aid in media:
+        ok, why = kb.may_publish(aid)
+        if not ok:
+            return (f"Not published — the attached asset cannot go out: {why}")
+
+    with db.SessionLocal() as s:
+        row = (s.query(db.Output)
+               .filter(db.tenant_filter(db.Output, tenant),
+                       db.Output.id == output_id).first())
         row.status, row.published_at = "published", db.utcnow()
         if destination:
             row.destination = destination
         s.commit()
-    return "Published."
+    for aid in media:
+        kb.mark_asset_used(aid, destination)
+    return "Published." + (f" {len(media)} asset(s) credited." if media else "")
 
 
 # ---------------------------------------------------------------------------

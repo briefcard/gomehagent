@@ -1551,9 +1551,16 @@ def ensure_brand(tenant: str, display_name: str = "") -> db.KbBrand:
 
 
 def set_brand(tenant: str, **fields) -> str:
-    """Update brand-level fields. `tone` is a convenience into voice.tone."""
-    allowed = {"display_name", "positioning", "elevator", "voice",
-               "banned_claims", "approval_policy", "selection", "next_steps"}
+    """Update brand-level fields. `tone` is a convenience into voice.tone.
+
+    The writable set is derived from the model rather than typed out, which is
+    rule 4 of this codebase's own list — and the hand-written version had
+    already gone stale: adding `visual` to `KbBrand` left it silently
+    unwritable, and because the refusal is a return value most callers ignore,
+    the field simply never got set and the brand row was never even created.
+    """
+    skip = {"tenant", "updated_at"}
+    allowed = {c.name for c in db.KbBrand.__table__.columns} - skip
     tone = fields.pop("tone", None)
     bad = set(fields) - allowed
     if bad:
@@ -1863,6 +1870,163 @@ REVIEWABLE = {
     "entity": (db.KbEntity, "name"),
     "situation": (db.KbSituation, "tag"),
 }
+
+
+# ---------------------------------------------------------------------------
+# The creative library
+#
+# Two kinds of thing live here and they must never be confused: assets the
+# client owns and may publish, and assets saved because they are worth looking
+# at — a competitor's ad, a reference shot, an example of a format. Both are a
+# URL with tags on it. The only thing separating them is `rights`, so `rights`
+# is enforced rather than displayed.
+# ---------------------------------------------------------------------------
+
+OWNED, REFERENCE = "owned", "reference"
+
+
+def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
+              kind: str = "image", source: str = "", prompt: str = "",
+              tags: list[str] | None = None, entity_key: str = "",
+              canva_design_id: str = "", thumbnail_url: str = "",
+              derived_from: list[str] | None = None,
+              origin: str = "human") -> str:
+    """File one asset. `rights` is required and has no safe guess.
+
+    Refusing rather than defaulting is the point: a caller that has not decided
+    whether the client owns this does not know, and "does not know" must not
+    resolve to "publish it".
+    """
+    url = (url or "").strip()
+    if not url:
+        return "An asset needs a URL."
+    if rights not in (OWNED, REFERENCE):
+        return (f"rights must be {OWNED!r} (the client's to publish) or "
+                f"{REFERENCE!r} (inspiration only). It has no default — "
+                f"guessing this wrong is how a competitor's ad ends up in "
+                f"a campaign.")
+    with db.SessionLocal() as s:
+        dupe = (s.query(db.KbAsset)
+                .filter(db.KbAsset.tenant == tenant,
+                        db.KbAsset.url == url).first())
+        if dupe:
+            return f"Already on file for {tenant} as {dupe.rights or REFERENCE}."
+        row = db.KbAsset(
+            tenant=tenant, url=url, rights=rights, title=title or "",
+            kind=kind, source=source, prompt=prompt,
+            tags=list(tags or []), entity_key=entity_key or "",
+            canva_design_id=canva_design_id, thumbnail_url=thumbnail_url,
+            derived_from=list(derived_from or []),
+            origin=origin, review=prov.APPROVED if prov.lands_approved(origin)
+            else prov.PROPOSED)
+        s.add(row)
+        s.commit()
+        aid = row.id
+    return (f"Filed as {rights}." if rights == OWNED else
+            "Filed as reference — it can inspire work, and can never be "
+            f"published as it stands. ({aid})")
+
+
+def assets(tenant: str, *, publishable_only: bool = True,
+           tags: list[str] | None = None, entity_key: str = "",
+           kind: str = "") -> list[db.KbAsset]:
+    """Assets for this account. Publishable by default, which is the safe read.
+
+    A caller that wants the inspiration shelf has to ask for it by name. The
+    default cannot be "everything" — a generator iterating assets would then
+    reach for a competitor's photograph without anything having gone wrong in
+    its own logic.
+    """
+    with db.SessionLocal() as s:
+        q = s.query(db.KbAsset).filter(db.KbAsset.tenant == tenant,
+                                       db.KbAsset.status == "active")
+        if publishable_only:
+            # Exactly `owned`, never "not reference" — a NULL from a migration
+            # or a typo must land on the safe side.
+            q = q.filter(db.KbAsset.rights == OWNED)
+        if kind:
+            q = q.filter(db.KbAsset.kind == kind)
+        if entity_key:
+            q = q.filter(db.KbAsset.entity_key.in_(["", None, entity_key]))
+        rows = q.order_by(db.KbAsset.created_at.desc()).all()
+        s.expunge_all()
+    if tags:
+        want = {t.lower() for t in tags}
+        rows = [r for r in rows if want & {str(t).lower() for t in (r.tags or [])}]
+    return rows
+
+
+def may_publish(asset_id: str) -> tuple[bool, str]:
+    """Whether this asset may go out, and if not, why not."""
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if not row:
+            return False, "no such asset"
+        if row.status != "active":
+            return False, f"asset is {row.status}"
+        if (row.rights or REFERENCE) != OWNED:
+            return False, ("reference only — saved for inspiration, not "
+                           "licensed for use. Generate something of our own "
+                           "from it instead.")
+        return True, ""
+
+
+def mark_asset_used(asset_id: str, destination: str = "") -> str:
+    """Record that an asset actually went out. Feedback signal one.
+
+    Being used in practice is a judgement somebody already made — it is the
+    cheapest true signal available, and it costs nothing to collect because
+    publishing is already an explicit act.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if not row:
+            return "No such asset."
+        row.uses = str(int(row.uses or "0") + 1)
+        row.last_used_at = db.utcnow()
+        s.commit()
+        n = row.uses
+    return f"Used {n}× {('· ' + destination) if destination else ''}".strip()
+
+
+def record_asset_outcome(asset_id: str, channel: str, metrics: dict) -> str:
+    """What an asset did once it ran. Feedback signal two.
+
+    Kept per channel rather than flattened to one score: a creative that earns
+    its keep on Meta and dies in email has told you something specific, and
+    averaging those two numbers destroys exactly that.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if not row:
+            return "No such asset."
+        current = dict(row.outcome or {})
+        current[channel] = {**(current.get(channel) or {}), **(metrics or {}),
+                            "recorded_at": db.utcnow().isoformat()}
+        row.outcome = current
+        s.commit()
+    return f"Recorded {channel} outcome."
+
+
+def proven_assets(tenant: str, channel: str = "", metric: str = "",
+                  limit: int = 10) -> list[db.KbAsset]:
+    """Owned assets ranked by what they actually did, used ones first.
+
+    This is what a generator should be shown before it invents something new:
+    the house's own record of what worked, rather than its guess about what
+    might.
+    """
+    rows = [r for r in assets(tenant) if int(r.uses or "0") > 0]
+
+    def _score(r):
+        if channel and metric:
+            try:
+                return float(((r.outcome or {}).get(channel) or {}).get(metric, 0))
+            except (TypeError, ValueError):
+                return 0.0
+        return float(int(r.uses or "0"))
+
+    return sorted(rows, key=_score, reverse=True)[:limit]
 
 
 # What the entity picker puts between a key and its display name. Chosen
