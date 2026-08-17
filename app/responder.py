@@ -30,7 +30,7 @@ from . import conversation as cv, kb, ledger, resolve as rs, validator
 def answer(tenant: str, utterance: str, *, contact_id: str = "",
            entity_key: str = "", system_key: str = "service_desk",
            run_id: str = "", within_days: int = 30,
-           facts: dict | None = None) -> dict:
+           facts: dict | None = None, draft_with_model: bool = False) -> dict:
     """Answer one question from what this account actually knows.
 
     Returns the draft, the evidence behind it, the validator's verdict, and the
@@ -106,6 +106,21 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
     # than being answered from here.
     confident = (bundle.get("grounding") or {}).get("level") == "answered"
     if not confident:
+        drafted, draft_note, verdict = "", "", None
+        if draft_with_model:
+            drafted, draft_note = _draft(tenant, utterance, bundle)
+            if drafted:
+                # Same gate as an approved answer. A model draft is exactly
+                # the case the validator exists for -- it is the only text in
+                # this system nobody signed off on.
+                verdict = validator.check(
+                    tenant, drafted, claim_ids=[c["claim_id"] for c
+                                                in bundle.get("claims", [])],
+                    entity_key=entity_key, conversation_id=conversation_id,
+                    require_citation=False)
+                if not verdict["ok"]:
+                    drafted, draft_note = "", "; ".join(
+                        f"{f['rule']}: {f['detail']}" for f in verdict["failures"])
         ledger.record(tenant, system_key, situation=situation,
                       entity_key=entity_key, status="draft_from_context",
                       run_id=run_id, conversation_id=conversation_id,
@@ -113,7 +128,10 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
         return {
             "ok": True,
             "mode": "draft_from_context",
-            "draft": "",
+            "draft": drafted,
+            "draft_blocked_by": draft_note,
+            "validated": (verdict["ok"] if verdict else None),
+            "checks_run": (verdict["checked"] if verdict else []),
             "grounding": bundle.get("grounding", {}),
             "context": {
                 "rules": bundle.get("rules", {}),
@@ -214,3 +232,65 @@ def send(tenant: str, output_id: str, *, conversation_id: str = "",
                     "touch_id": touch.id if touch else ""}
     return {"ok": True, "output_id": output_id,
             "touch_id": touch.id if touch else "", "note": msg}
+
+
+_DRAFT_SYSTEM = """You are drafting a reply on behalf of this brand.
+
+Use ONLY what the context supports. Where you do not know something, say so
+plainly rather than guessing — a customer would rather be told "let me check"
+than be told something wrong.
+
+Never state a price, a date or a policy that is not in the context. The hard
+rules are enforced in code after you write, so a draft breaking one is thrown
+away rather than softened.
+
+Match the house voice. 3-6 sentences. No subject line, no signature."""
+
+
+def _draft(tenant: str, utterance: str, bundle: dict) -> tuple[str, str]:
+    """Write a reply from the bundle. Returns (draft, why_not).
+
+    The ONLY model call in this file, and it sits exactly where the platform's
+    first locked decision puts one: content drafting, at the edge, with
+    selection and validation as deterministic code either side of it.
+    """
+    from . import config
+    if not config.ANTHROPIC_API_KEY:
+        return "", "ANTHROPIC_API_KEY is not set"
+    try:
+        import anthropic
+        parts = [bundle["rules"]["block"].strip()]
+        if bundle.get("claims"):
+            parts.append("\n## Proof you may lean on")
+            for c in bundle["claims"]:
+                parts.append(f"- {c['claim']} ({c['evidence']}) [{c['scope']}]")
+        if bundle.get("objections"):
+            parts.append("\n## Answers already approved for similar questions")
+            for o in bundle["objections"]:
+                parts.append(f"- Q: {o['objection']}\n  A: {o['response']}")
+        if bundle.get("correspondence"):
+            parts.append("\n## What we have said before, in prior threads")
+            for h in bundle["correspondence"]:
+                parts.append(f"- [{h['kind']}] {h.get('subject') or ''}\n"
+                             f"  {(h.get('excerpt') or '')[:400]}")
+        if bundle.get("conversation", {}).get("open_commitments"):
+            parts.append("\n## Already promised to THIS person — do not contradict")
+            for c in bundle["conversation"]["open_commitments"]:
+                parts.append(f"- {c['kind']}: {c['value']}")
+        parts.append(f"\n(grounding: {bundle['grounding']['level']})")
+
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=600,
+            system=_DRAFT_SYSTEM,
+            messages=[{"role": "user",
+                       "content": "\n".join(parts)
+                                  + f"\n\n---\nThey wrote:\n{utterance}"}])
+        try:
+            from . import usage
+            usage.log_usage("responder_draft", config.CLAUDE_MODEL, msg)
+        except Exception:  # noqa: BLE001
+            pass
+        return msg.content[0].text.strip(), ""
+    except Exception as exc:  # noqa: BLE001
+        return "", f"{exc.__class__.__name__}: {str(exc)[:120]}"

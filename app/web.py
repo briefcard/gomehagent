@@ -1676,6 +1676,67 @@ def brand_markdown_meta(request: Request, auth: str = Depends(read_key),
     return doc
 
 
+@app.get("/admin/draft_test")
+def draft_test(key: str = Depends(admin_key), tenant: str = "",
+               message_id: str = "", pick: str = "", limit: int = 3) -> dict:
+    """Draft a reply to a REAL thread from this inbox, and show the working.
+
+    The rehearsal that answers "would this have been any good". Names a
+    message, or `pick=` a bucket and it takes the most recent that has a body.
+
+    Nothing is sent and nothing is filed as a draft on the thread — this
+    produces text and the validator's verdict on it, so a rehearsal can be
+    read and thrown away.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "need tenant="}
+    from . import responder
+
+    with db.SessionLocal() as s:
+        q = (s.query(db.EmailLog)
+             .filter(db.tenant_filter(db.EmailLog, tenant),
+                     db.EmailLog.body_excerpt.isnot(None)))
+        if message_id:
+            q = q.filter(db.EmailLog.gmail_message_id == message_id)
+        if pick:
+            q = q.filter(db.EmailLog.category == pick)
+        rows = q.order_by(db.EmailLog.seen_at.desc()).limit(limit).all()
+        s.expunge_all()
+
+    if not rows:
+        return {"error": "no thread with a stored body matches — run "
+                         "/admin/archive_fetch first, or widen `pick`"}
+
+    out = []
+    for r in rows:
+        body = (r.body_excerpt or "").strip()
+        res = responder.answer(tenant, body[:2000],
+                               system_key="service_desk",
+                               draft_with_model=True)
+        out.append({
+            "thread": {"subject": r.subject, "from": r.sender,
+                       "bucket": r.category, "when": r.seen_at,
+                       "they_wrote": body[:400]},
+            "mode": res.get("mode") or res.get("stage") or "answered",
+            "grounding": (res.get("grounding") or {}).get("level"),
+            "draft": res.get("draft") or "",
+            "blocked": res.get("draft_blocked_by") or res.get("blocked_on") or "",
+            "validated": res.get("validated"),
+            "checks_run": res.get("checks_run", []),
+            "prior_threads_used": [
+                h.get("subject") for h in
+                ((res.get("bundle") or {}).get("correspondence")
+                 or (res.get("context") or {}).get("correspondence") or [])],
+            "gaps": [g.get("missing") for g in (res.get("gaps") or [])],
+        })
+    return {"tenant": tenant, "tested": len(out), "results": out,
+            "note": ("nothing was sent and nothing was filed on the thread. "
+                     "Read `blocked` — a draft the validator threw away is "
+                     "the system working, not failing.")}
+
+
 @app.get("/admin/archive_fetch")
 def archive_fetch(key: str = Depends(admin_key), tenant: str = "",
                   limit: int = 200) -> dict:
