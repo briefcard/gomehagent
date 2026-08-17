@@ -184,6 +184,35 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## Omnisend: the send path exists
+
+Connecting Omnisend used to switch on `esp` and nothing else — `campaign_email`
+could install, pass readiness, go live in shadow and have no way to put an email
+anywhere. `app/omnisend.py` closes that, built against the shapes read from the
+live Omnisend MCP rather than guessed.
+
+The API's shape happens to match the architecture: **a campaign is created as a
+draft and sending it is a different endpoint.** `draft_from_html` imports
+finished HTML as a template (required even for a draft — Omnisend rejects a
+create without one and saves nothing), then creates the campaign. Nothing sends
+as a side effect of producing something. `send_campaign` takes `confirm=True`
+and **the substrate never calls it**: an email campaign is irreversible and
+lands in thousands of inboxes at once, which is not what `auto` was ever
+supposed to mean.
+
+Two rules taken from Omnisend's own docs because getting them wrong is
+expensive: `senderEmail`/`replyToEmail` are always omitted so the brand's
+verified sender applies — an invented or copied address is rejected, and 422
+`sender-email-not-available` is surfaced as a question for the owner rather than
+retried; and `language` is left unset rather than guessed.
+
+`test_omnisend.py` (20 checks) drives a stubbed transport and asserts the
+REQUEST: template before campaign, fields nested under `content.email`, no
+sender address invented, no schedule, no locale, sending refused without
+confirmation, and a half-finished run naming the template it orphaned.
+
+**Unproven:** no call has been made against a real Omnisend account.
+
 ## Claim scope: individual, group, brand-wide
 
 Scope was binary — one entity or the whole brand — so "every Aqua pitcher is
