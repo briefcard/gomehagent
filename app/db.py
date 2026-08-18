@@ -300,6 +300,52 @@ class Output(Base):
     outcome = Column(JSON, default=dict)   # metrics, filled in later
 
 
+class AssuranceEvent(Base):
+    """One check the data layer performed, and what it caught.
+
+    Everything else in this schema records what was PRODUCED. Nothing records
+    what was CHECKED, so "is the layer actually doing anything" had no answer
+    except reading code — and a guarantee nobody can see is one nobody
+    maintains, which is §2.13 for the third time.
+
+    The row that matters most is a `banned_claim` catch. It is not a metric,
+    it is a counterfactual: the model wrote that phrase, deterministic code
+    stopped it, and without the layer it would have gone out. That is the only
+    honest evidence this is better than the model alone, and it is why
+    `caught` is stored as the rule names rather than a count.
+
+    `source` matters as much as the verdict. The substrate, the skill bridge
+    and the mail path all check drafts, and they are not equally good at it —
+    seeing them side by side is how you find out that the live path is using
+    the weaker matcher.
+    """
+
+    __tablename__ = "assurance_events"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    tenant = Column(String, default="", index=True)
+    system_key = Column(String, default="", index=True)
+    run_id = Column(String, default="", index=True)
+    output_id = Column(String, default="")
+
+    #: skill | bridge | mail | console — WHERE the check happened.
+    source = Column(String, default="", index=True)
+    #: Rules the validator actually ran. Absent rules are not passes.
+    checked = Column(JSON, default=list)
+    #: Rule names that failed. Empty list is a genuine pass; that distinction
+    #: is the whole point of storing both.
+    caught = Column(JSON, default=list, index=False)
+    #: 0 for the first draft, 1..n for each repair attempt.
+    attempt = Column(String, default="0")
+    #: passed | repaired | blocked — the outcome AFTER the repair loop.
+    verdict = Column(String, default="", index=True)
+    #: Whether the draft carried a claim_id. Grounding, not correctness.
+    grounded = Column(String, default="")
+    #: What the run was working without, if anything.
+    thin = Column(JSON, default=list)
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 
@@ -920,12 +966,21 @@ class Credential(Base):
     """
 
     __tablename__ = "credentials"
-    __table_args__ = (UniqueConstraint("tenant", "provider",
-                                       name="uq_credential_tenant_provider"),)
+    __table_args__ = (UniqueConstraint("tenant", "provider", "site",
+                                       name="uq_credential_tenant_provider_site"),)
 
     id = Column(String, primary_key=True, default=_uuid)
     tenant = Column(String, nullable=False, index=True)
     provider = Column(String, nullable=False)   # google | shopify | omnisend | ...
+    # WHICH property this credential opens, for providers where one client has
+    # more than one. Ironside's main site is Squarespace and its landing pages
+    # are WordPress; another client may have two WordPress installs. One row per
+    # (tenant, provider) could only ever hold one of them, so the second was
+    # unconnectable and the page said nothing about why.
+    #
+    # "" means "the client's single one", which is what every existing row is
+    # and what a provider like Shopify or Klaviyo always is.
+    site = Column(String, default="", index=True)
     kind = Column(String, default="api_key")    # api_key | oauth
     secret = Column(Text)                       # Fernet ciphertext — never rendered
     meta = Column(JSON, default=dict)           # non-secret: store domain, from_name…
@@ -1282,12 +1337,21 @@ def tenant_filter(model, tenant: str, include_unassigned: bool = False):
     return col == tenant
 
 
-# Uniqueness that used to be global and is now per client. Each entry is
-# (table, old single column) -> the composite that replaces it.
+# Uniqueness that has been regraded. Each entry is
+# (table, the columns the OLD constraint covered, new name, new columns).
+#
+# The old side is a tuple rather than one column name because the credential
+# regrade widens a constraint that was already composite — (tenant, provider)
+# becoming (tenant, provider, site). Written as a single column, that entry
+# would never match and the old constraint would survive, which surfaces as an
+# IntegrityError the first time a client connects their second WordPress site.
 _REGRADED_UNIQUES = (
-    ("contacts", "email", "uq_contact_tenant_email", ("tenant", "email")),
-    ("shipments", "name", "uq_shipment_tenant_name", ("tenant", "name")),
-    ("rfqs", "shipment_name", "uq_rfq_tenant_shipment", ("tenant", "shipment_name")),
+    ("contacts", ("email",), "uq_contact_tenant_email", ("tenant", "email")),
+    ("shipments", ("name",), "uq_shipment_tenant_name", ("tenant", "name")),
+    ("rfqs", ("shipment_name",), "uq_rfq_tenant_shipment",
+     ("tenant", "shipment_name")),
+    ("credentials", ("tenant", "provider"), "uq_credential_tenant_provider_site",
+     ("tenant", "provider", "site")),
 )
 
 
@@ -1310,7 +1374,7 @@ def _migrate_constraints() -> None:
     insp = sa_inspect(engine)
     tables = set(insp.get_table_names())
     with engine.begin() as conn:
-        for table, old_col, new_name, new_cols in _REGRADED_UNIQUES:
+        for table, old_cols, new_name, new_cols in _REGRADED_UNIQUES:
             if table not in tables:
                 continue
             have = {c["name"] for c in insp.get_columns(table)}
@@ -1319,7 +1383,7 @@ def _migrate_constraints() -> None:
             existing = {u["name"]: u.get("column_names") or []
                         for u in insp.get_unique_constraints(table)}
             for name, cols in existing.items():
-                if cols == [old_col] and name != new_name:
+                if list(cols) == list(old_cols) and name != new_name:
                     conn.execute(text(
                         f'ALTER TABLE "{table}" DROP CONSTRAINT "{name}"'))
             if new_name not in existing:

@@ -39,7 +39,18 @@ from . import db
 # avoid, found in the file itself.
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
-             "kb_embeddings", "harvested_pages"}
+             "kb_embeddings", "harvested_pages", "kb_assets"}
+# `kb_assets` was added with the creative library and classified nowhere, so the
+# unclassified report named it for weeks and a knowledge reset left an account's
+# entire picture library behind while reporting success — the `kb_brand` /
+# `kb_brands` near-miss above, arrived at from the other direction.
+#
+# Knowledge, because the library is rebuilt by a crawl and a catalogue sync,
+# which is what this group means. ONE THING IS LOST BY SAYING SO: `uses`,
+# `last_used_at` and the per-channel results from `record_asset_outcome` live on
+# the same row, they are the only record of which creative worked, and nothing
+# can rebuild them. That is a table doing two jobs rather than a bad grouping —
+# splitting outcomes into their own rows is the real fix and is not done here.
 
 #: Tables that hold what the account DID. Conversations, outputs, mail,
 #: documents, logistics. Rebuildable only from the source systems, and some of
@@ -49,7 +60,12 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "rfqs", "expenses", "doc_index", "systems", "system_runs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",
               "seo_snapshots", "voice_profiles", "follow_ups",
-              "seo_site_config", "system_docs"}
+              "seo_site_config", "system_docs", "assurance_events"}
+# `assurance_events` is operations, not knowledge: it records what the system
+# DID — which drafts were checked and what was caught — and no crawl or sync
+# can rebuild it. Classified in the same change that added the table, because
+# the unclassified report caught it one commit after it caught `kb_assets`,
+# which is the point of deriving the list from the schema.
 
 #: Deleting these makes work for the CLIENT, not for you. Opt in explicitly.
 # `users` is NOT here: it has `tenant_key`, not `tenant`, so it is not
