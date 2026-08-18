@@ -2374,6 +2374,58 @@ def creative(key: str = Depends(admin_key), tenant: str = "", asset: str = "",
                              "X-Caveat": "similarity is a diagnostic, not a gate"})
 
 
+@app.post("/admin/asset_add", response_class=HTMLResponse)
+async def asset_add(request: Request, key: str = Depends(admin_key)):
+    """Put a photograph into the creative library.
+
+    Until now the only way in was a Shopify sync, which is fine for Baci and
+    useless for every client that does not sell products — Ironside's venue
+    photographs and Coverings' installation shots have no store to come from,
+    so the creative path was unreachable for exactly the accounts the
+    photograph-based treatment was built for.
+
+    `rights` is required and has no default here either. The whole point of
+    that axis is that a competitor's shot and a client's own look identical.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    url = str(form.get("url", "")).strip()
+    rights = str(form.get("rights", ""))
+
+    subject = str(form.get("subject", "")).strip()
+    if url and not subject:
+        # Guess from the pixels rather than making somebody choose on every
+        # upload — a cutout is an object, anything else is safest as a scene.
+        try:
+            import httpx
+            got = httpx.get(url, timeout=30, follow_redirects=True)
+            got.raise_for_status()
+            subject = kbm.detect_subject(got.content)
+        except Exception:                                        # noqa: BLE001
+            subject = kbm.SCENE
+
+    ent = str(form.get("entity_key", "")).strip()
+    if ent:
+        ent, problem = kbm.resolve_entity_ref(tenant, ent)
+        if problem:
+            return _back_to_content(tenant, err=problem)
+
+    said = kbm.add_asset(tenant, url, rights=rights,
+                         title=str(form.get("title", "")),
+                         kind=str(form.get("kind", "image")),
+                         subject=subject, entity_key=ent,
+                         source=str(form.get("source", "")), origin="human")
+    bad = said.lower().startswith(("an asset needs", "rights must"))
+    return _back_to_content(tenant, err=said if bad else "",
+                            msg="" if bad else f"{said} ({subject})")
+
+
 @app.get("/admin/creative_assets")
 def creative_assets(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """The asset ids `/admin/creative` takes, so they can be found without SQL."""

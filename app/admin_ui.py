@@ -1355,6 +1355,38 @@ def render_content(key: str, tenant: str = "", started: str = "",
 
     _covered = kbm.brand_level_duplicates(tenant) if pending else []
 
+    # The creative library needs a way in that is not a Shopify sync: a venue
+    # photograph and a tile installation shot have no store behind them, so the
+    # whole photograph-based treatment was unreachable for precisely the
+    # accounts it was built for. Rendered outside the `if pending` branch,
+    # because an account with an empty review queue is the one most likely to
+    # be starting from nothing.
+    assets_form = f"""
+    <div class="card">
+      <div class="head"><h2>Creative library</h2></div>
+      <p class="mut">Photographs the creative pipeline may use.
+      <b>Owned</b> is the client&#39;s to publish; <b>reference</b> is
+      inspiration only and can never leave the building. What it depicts is
+      guessed from the file — a cutout is an object, anything else is treated
+      as a scene.</p>
+      <form class="f" method="post" action="/admin/asset_add">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <label>Image URL</label>
+        <input name="url" placeholder="https://…" required>
+        <label>What it is</label>
+        <input name="title" placeholder="e.g. Main hall, evening">
+        <label>Rights</label>
+        <select name="rights">
+          <option value="owned">owned — ours to publish</option>
+          <option value="reference">reference — inspiration only</option>
+        </select>
+        <label>Product or space it shows (optional)</label>
+        <input name="entity_key" placeholder="leave blank for brand-wide">
+        <div class="row"><button>Add to library</button></div>
+      </form>
+    </div>"""
+
     if pending:
         def _card(p) -> str:
             chosen = set(p.situations or [])
@@ -1485,11 +1517,11 @@ def render_content(key: str, tenant: str = "", started: str = "",
                   .forEach(function(b) {{ b.checked = e.target.checked; }});
         }});
         </script>"""
-        proposals = (catlist + bulk
+        proposals = (catlist + assets_form + bulk
                      + '<div class="grid" style="grid-template-columns:1fr">'
                      + "".join(_card(p) for p in pending) + "</div>")
     else:
-        proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
+        proposals = (assets_form + '<p class="mut">Nothing waiting. Harvest reads the account\'s '
                      'own site and files what it finds here — as proposals, never '
                      'as facts.</p>')
 
