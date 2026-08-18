@@ -249,6 +249,58 @@ def check_per_system_kb_gate(ck):
     ck("and one satisfied is not named",
        kb.needs_met("gatetest", ("banned_claims",)) == [])
 
+    # --- the two questions stay apart ----------------------------------
+    #
+    # `ready` gates GOING LIVE. `can_produce` gates whether work happens at
+    # all, and ONLY an absent connection belongs in it. These were one bar,
+    # which is how an unapproved objection came to stand between a customer
+    # and a reply.
+    #
+    # Asserted as invariants over the classification rather than as the state
+    # of one fixture: the first attempt checked `can_produce` on a tenant with
+    # no connections at all, where everything is legitimately impossible, and
+    # was testing the fixture instead of the rule.
+    for key in ("ad_creative", "reorder_engine", "campaign_email", "blog",
+                "lead_responder", "service_desk", "content_compliance",
+                "catalog_compliance", "reports"):
+        st = ready_for(key)
+        ck(f"{key}: knowledge is never a reason it cannot run",
+           not any("knowledge base" in b for b in st["impossible"]),
+           str(st["impossible"]))
+        ck(f"  {key}: only connections are",
+           all("not connected" in b or "at least one of" in b
+               for b in st["impossible"]), str(st["impossible"]))
+
+    # `reports` needs no connection and no knowledge, so a blank contract is
+    # the only thing left — which is exactly the case the owner overruled.
+    row = systems.find("gatetest", "reports")
+    with db.SessionLocal() as s_:
+        live = s_.get(db.System, row.id)
+        live.owner = ""
+        s_.commit()
+        blank = systems.ready(s_.get(db.System, live.id))
+    # This fixture has no connections, so `can_produce` is legitimately False
+    # for every system on it. The claim being locked is narrower and is the one
+    # that actually changed: a blank contract is not among the reasons.
+    ck("an incomplete contract is NOT a reason it cannot run",
+       not any(b.startswith("contract:") for b in blank["impossible"]),
+       str(blank["impossible"]))
+    ck("  it is carried as thin instead",
+       any(t.startswith("contract:") for t in blank["thin"]), str(blank["thin"]))
+    ck("  so it stops going live, and nothing else",
+       not blank["ready"] and blank["contract_complete"] is False)
+
+    # The classification must NOT be re-derived from the message text. The
+    # first version used `b.startswith("not connected:")` on prose this same
+    # function assembles — §1's string-matching pattern, written by the author
+    # of the rule. Rewording a blocker would have reclassified every
+    # connection gap as `thin`, and a system with no mailbox would have begun
+    # producing replies it had no way to send.
+    r = ready_for("ad_creative")
+    ck("every blocker lands in exactly one of the two lists",
+       sorted(r["blockers"]) == sorted(r["impossible"] + r["thin"]),
+       "neither list is parsed back out of the other")
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

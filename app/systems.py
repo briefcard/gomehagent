@@ -310,19 +310,30 @@ def update(system_id: str, **fields) -> dict:
 def ready(system: db.System) -> dict:
     """Can this system safely run? If not, exactly what is absent."""
     sp = spec(system.key)
-    blockers: list[str] = []
+    # Sorted as they are FOUND, never re-derived from the message text.
+    #
+    # The first version of this classified `impossible` with
+    # `b.startswith("not connected:")` — string-matching against prose this
+    # same function had assembled three lines earlier, which is §1's
+    # "string-matching instead of state-checking" written by the person who
+    # had just quoted that rule. Rewording a blocker, an innocuous edit,
+    # would have silently reclassified every connection gap as `thin`, and a
+    # system with no mailbox would have started producing replies it had no
+    # way to send. The two lists are built where the facts are known.
+    impossible: list[str] = []      # producing is not possible at all
+    thin: list[str] = []            # producing is possible, and worse
 
     missing_contract = [label for f, label, _ in CONTRACT
                         if not (getattr(system, f, "") or "").strip()]
     if missing_contract:
-        blockers.append("contract: " + ", ".join(missing_contract))
+        thin.append("contract: " + ", ".join(missing_contract))
 
     caps = tenants.capabilities(system.tenant)
     absent = [c for c in sp["requires"] if not caps.get(c)]
     if absent:
-        blockers.append("not connected: " + ", ".join(absent))
+        impossible.append("not connected: " + ", ".join(absent))
     if sp["requires_any"] and not any(caps.get(c) for c in sp["requires_any"]):
-        blockers.append("needs at least one of: " + ", ".join(sp["requires_any"]))
+        impossible.append("needs at least one of: " + ", ".join(sp["requires_any"]))
 
     # Gate on what THIS system declared it needs, not on a single global bar.
     # `kb_needs` was declared per system and read nowhere — `ready` called
@@ -334,13 +345,13 @@ def ready(system: db.System) -> dict:
     if needs:
         absent_kb = kb.needs_met(system.tenant, needs)
         if absent_kb:
-            blockers.append("knowledge base: " + ", ".join(absent_kb))
+            thin.append("knowledge base: " + ", ".join(absent_kb))
     elif sp["needs_kb"]:
         # Declares it needs the KB but names no fields — fall back to the old
         # global bar rather than silently letting it through.
         c = kb.completeness(system.tenant)
         if not c["ready"]:
-            blockers.append("knowledge base: " + ", ".join(c["missing"]))
+            thin.append("knowledge base: " + ", ".join(c["missing"]))
 
     # Two questions, and they are NOT the same question.
     #
@@ -357,12 +368,11 @@ def ready(system: db.System) -> dict:
     # Conflating them is why an approved objection was standing between a
     # customer and a reply. Owner's rule, and the one this file already claims
     # to follow: enrich, do not gatekeep.
-    impossible = [b for b in blockers
-                  if b.startswith("not connected:") or b.startswith("needs at least one of:")]
+    blockers = impossible + thin
     return {"ready": not blockers, "blockers": blockers,
             "contract_complete": not missing_contract,
             "can_produce": not impossible, "impossible": impossible,
-            "thin": [b for b in blockers if b not in impossible]}
+            "thin": thin}
 
 
 # ---------------------------------------------------------------------------

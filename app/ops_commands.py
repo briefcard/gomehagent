@@ -275,10 +275,17 @@ def _systems_for(tenant: str) -> str:
         state = systems.ready(r)
         st = systems.stats(r.id)
         head = f"{'▸' if r.status == 'live' else '·'} *{r.name}* — {r.status} / {r.autonomy}"
+        # Same three states as the console card. `/systems` on Telegram saying
+        # "blocked" about a system the worker is running every tick is the
+        # console lying about its own behaviour, in the surface Gomeh actually
+        # reads.
         if state["ready"]:
             body = f"   ready · {st['total']} runs, {st['approved']} approved"
+        elif not state["can_produce"]:
+            body = "   blocked, cannot run: " + "; ".join(state["impossible"])
         else:
-            body = "   blocked: " + "; ".join(state["blockers"])
+            body = ("   running thin · " + f"{st['total']} runs" +
+                    " · without: " + "; ".join(state["thin"]))
         out.append(f"{head}\n{body}")
     return "\n".join(out)
 

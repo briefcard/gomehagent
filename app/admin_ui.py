@@ -620,12 +620,27 @@ def _system_card(key: str, row) -> str:
     st = systems.stats(row.id)
     nxt = systems.can_promote(row)
 
+    # THREE states, not two. A system that cannot reach its connection is
+    # blocked; a system missing knowledge or a contract now PRODUCES, thinly,
+    # and calling that "blocked" would have the console contradicting the
+    # worker -- which is running it every tick.
     if r["ready"]:
-        gate = '<div class="ok">Ready. Everything it needs is connected and the contract is complete.</div>'
+        gate = ('<div class="ok">Ready. Everything it needs is connected and '
+                'the contract is complete.</div>')
+    elif not r["can_produce"]:
+        items = "".join(f"<li>{_esc(b)}</li>" for b in r["impossible"])
+        gate = ('<div class="note"><strong>Blocked &mdash; it cannot run at '
+                'all.</strong><ul class="bl">' + items + '</ul>'
+                '<div class="mut">A connection is missing. Nothing else stops '
+                'a system producing.</div></div>')
     else:
-        gate = ('<div class="note"><strong>Blocked.</strong><ul class="bl">'
-                + "".join(f"<li>{_esc(b)}</li>" for b in r["blockers"])
-                + "</ul></div>")
+        items = "".join(f"<li>{_esc(b)}</li>" for b in r["thin"])
+        gate = ('<div class="note"><strong>Running thin.</strong> It produces, '
+                'and says on every output what it was working without:'
+                '<ul class="bl">' + items + '</ul>'
+                '<div class="mut">These gate GOING LIVE, not producing. Each '
+                'one is filed as a knowledge task when a run hits it.</div>'
+                '</div>')
 
     if nxt["can"]:
         promo = (f'<a href="/admin/system_promote?key={_esc(key)}&amp;id={_esc(row.id)}">'

@@ -400,20 +400,33 @@ def systems_tick() -> None:
         run_id = systems.start_run(sysrow.id, sysrow.tenant, trigger="schedule")
         try:
             state = systems.ready(sysrow)
-            if not state["ready"]:
+            # `can_produce`, NOT `ready`. This is the unattended path, and it
+            # was still gating on the full go-live bar after `skill.run` had
+            # stopped — so a scheduled system with a blank contract or a thin
+            # knowledge base was skipped every tick, which is exactly the rule
+            # the owner overturned, running by itself all night.
+            #
+            # `ready` still decides go-live. It does not decide whether work
+            # happens.
+            if not state["can_produce"]:
                 blocked_count += 1
                 # A LIST, not a joined string: `blocked_reasons()` iterates this
                 # to rank the backlog, and a string iterates into characters —
                 # which ranked ' ' and 'e' as the two costliest gaps.
                 systems.finish_run(run_id, "blocked",
-                                   blocked_on=list(state["blockers"]))
+                                   blocked_on=list(state["impossible"]))
                 continue
             ready_count += 1
             # The generator lands here. Until it does, say so on the run rather
-            # than recording a success that never happened.
+            # than recording a success that never happened. What the run would
+            # have been working WITHOUT is recorded beside that, so the gap is
+            # already ranked in `blocked_reasons()` by the time there is
+            # something to block.
             systems.finish_run(
                 run_id, "blocked",
-                blocked_on=["no generator yet — system is otherwise ready to run"])
+                blocked_on=(["no generator yet — system is otherwise able to run"]
+                            + [f"would have run without: {t}"
+                               for t in state["thin"]]))
         except Exception as exc:  # noqa: BLE001 — one system must not stop the rest
             log.exception("systems tick failed for %s/%s", sysrow.tenant, sysrow.key)
             systems.finish_run(run_id, "failed",
