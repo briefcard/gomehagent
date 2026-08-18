@@ -184,6 +184,42 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## Generated scenes, with the product protected rather than checked
+
+`app/imagegen.py`, on OpenAI — the same `OPENAI_API_KEY` `embed.py` already
+uses, so no new credential.
+
+Two jobs. `plate()` generates scenery with **no product in it**; the empty-
+surface rule is appended to every prompt, because a plate with a jug already
+standing in it is the failure the whole approach exists to avoid. Inspiration
+is carried as **words**, never an uploaded reference: a scene generated from
+someone else's photograph is a derivative of it and would arrive with nothing
+saying so.
+
+`place_product()` is Gomeh's own technique — hand the model the cutout,
+describe the setting, let it build around the object — and it uses a **mask**,
+which is a decision that came from measuring the alternative. The first version
+generated freely then scored the result against the source to catch drift. That
+score was far too weak to gate on: the real product scored **0.433** and a
+different-coloured, handleless impostor scored **0.356** — a 0.077 gap ordinary
+lighting variation would swamp. Tuning the threshold until the test passed
+would have shipped a safety gate that does not gate.
+
+So the product is not verified afterwards, it is protected during. The mask is
+the product's own alpha silhouette, grown a few pixels so no rim of old
+background survives to read as cut out; the API repaints only outside it and
+the product's pixels return exactly as sent. Fidelity by construction, the same
+reasoning as `catalog_seo_rewrite` carrying its `claim_id` by construction.
+
+`similarity()` survives as a **reported** diagnostic and never a gate, and says
+so in its own output: a coarse screen that catches a wholly different object
+and misses a faithfully redrawn one.
+
+Generation happens at the model's native sizes; `compose` cuts the ad shapes,
+which is already its job for a photographic plate.
+
+**Unproven:** no call against the live image API.
+
 ## Creative that actually contains the product
 
 Canva's generator treats a supplied asset as **inspiration**. Tested against
