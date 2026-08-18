@@ -78,6 +78,32 @@ def _identify_canva(access_token: str, payload: dict) -> dict:
         return {}
 
 
+def _cc_client() -> tuple[str, str]:
+    return config.CONSTANT_CONTACT_CLIENT_ID, config.CONSTANT_CONTACT_CLIENT_SECRET
+
+
+def _identify_cc(access_token: str, payload: dict) -> dict:
+    """Which Constant Contact account this is.
+
+    `/account/summary` is the lightest authenticated read the API offers and it
+    needs `account_read`, which is asked for — so a token that cannot answer it
+    is a narrower grant than we requested and worth knowing about at connect
+    time rather than at send time.
+    """
+    import httpx
+    try:
+        r = httpx.get("https://api.cc.email/v3/account/summary",
+                      headers={"Authorization": f"Bearer {access_token}"},
+                      timeout=20)
+        if r.status_code >= 400:
+            return {}
+        d = r.json() or {}
+        return {"label": d.get("organization_name") or d.get("email", ""),
+                "granted": (payload.get("scope") or "").split()}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
 def _meta_client() -> tuple[str, str]:
     return config.META_APP_ID, config.META_APP_SECRET
 
@@ -133,6 +159,8 @@ FLOWS: dict[str, dict] = {
         extra={"access_type": "offline", "prompt": "consent",
                "include_granted_scopes": "true"},
         client=_google_client,
+        env="GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET",
+        token_style="post_body",
         stores="refresh_token",
         identify=_identify_google,
     ),
@@ -142,6 +170,8 @@ FLOWS: dict[str, dict] = {
         scopes=["ads_read", "ads_management", "business_management"],
         extra={},
         client=_meta_client,
+        env="META_APP_ID / META_APP_SECRET",
+        token_style="get_params",
         stores="long_lived",
         identify=_identify_meta,
     ),
@@ -158,11 +188,39 @@ FLOWS: dict[str, dict] = {
                 "brandtemplate:content:read", "profile:read"],
         extra={},
         client=_canva_client,
+        env="CANVA_CLIENT_ID / CANVA_CLIENT_SECRET",
+        token_style="post_body",
         stores="refresh_token",
         identify=_identify_canva,
         pkce=True,
     ),
+    "constant_contact": dict(
+        authorize="https://authz.constantcontact.com/oauth2/default/v1/authorize",
+        token="https://authz.constantcontact.com/oauth2/default/v1/token",
+        # `offline_access` is what makes this a connection rather than a
+        # session: without it Constant Contact returns an access token that
+        # dies in hours and no refresh token, so the account would read
+        # connected on the console and stop working the same afternoon. That is
+        # the exact failure `test_oauth` already refuses for Google.
+        scopes=["account_read", "contact_data", "campaign_data",
+                "offline_access"],
+        extra={"response_type": "code"},
+        client=_cc_client,
+        env="CONSTANT_CONTACT_CLIENT_ID / CONSTANT_CONTACT_CLIENT_SECRET",
+        token_style="basic_auth",
+        stores="refresh_token",
+        identify=_identify_cc,
+    ),
 }
+
+
+# A flow declaring no `env` would raise inside `configured()` at render time --
+# on the console, for the one person trying to connect it. Caught at import
+# instead, which is the only moment it is cheap.
+for _key, _spec in FLOWS.items():
+    assert _spec.get("env"), f"OAuth flow {_key!r} declares no env var names"
+    assert _spec.get("token_style") in ("post_body", "get_params", "basic_auth"), \
+        f"OAuth flow {_key!r} declares no token_style"
 
 
 def configured(provider: str) -> str:
@@ -172,9 +230,12 @@ def configured(provider: str) -> str:
         return f"unknown provider {provider!r}"
     cid, secret = spec["client"]()
     if not (cid and secret):
-        env = "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET" if provider == "google" \
-            else "META_APP_ID / META_APP_SECRET"
-        return f"{env} not set in the env group"
+        # Read off the flow, never a per-provider ternary. The ternary said
+        # "google or else META" and Canva arrived third, so the console told
+        # anyone trying to connect Canva to go and set the Meta app secret --
+        # a refusal that names the wrong missing thing is worse than one that
+        # names nothing, because it sends somebody to do the wrong work.
+        return f"{spec['env']} not set in the env group"
     if not config.PUBLIC_BASE_URL.startswith("https://"):
         return (f"PUBLIC_BASE_URL is {config.PUBLIC_BASE_URL!r} — OAuth "
                 f"redirects must be https, so consent will be rejected")
@@ -310,22 +371,34 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
         return {"ok": False, "error": why}
     cid, secret = spec["client"]()
 
+    # How the token endpoint wants to be called is a FACT ABOUT THE PROVIDER,
+    # so it is declared on the flow. This was an if/elif on the provider name
+    # ending in a bare `else`, which is the shape that produced the Canva
+    # blocker bug one function above: whatever is added next silently inherits
+    # the branch written for something else. Here that would mean a new
+    # provider's client secret going out as a URL query parameter — into access
+    # logs and proxy caches — because Meta happened to be the fallback.
     try:
-        if provider == "canva":
-            r = httpx.post(spec["token"], timeout=30, data={
-                "grant_type": "authorization_code", "code": code,
-                "client_id": cid, "client_secret": secret,
-                "redirect_uri": redirect_uri(provider),
-                "code_verifier": code_verifier})
-        elif provider == "google":
-            r = httpx.post(spec["token"], timeout=30, data={
-                "code": code, "client_id": cid, "client_secret": secret,
-                "redirect_uri": redirect_uri(provider),
-                "grant_type": "authorization_code"})
-        else:
+        style = spec["token_style"]
+        if style == "get_params":
             r = httpx.get(spec["token"], timeout=30, params={
                 "code": code, "client_id": cid, "client_secret": secret,
                 "redirect_uri": redirect_uri(provider)})
+        else:
+            form = {"grant_type": "authorization_code", "code": code,
+                    "redirect_uri": redirect_uri(provider)}
+            if spec.get("pkce") and code_verifier:
+                form["code_verifier"] = code_verifier
+            headers = {}
+            if style == "basic_auth":
+                # Constant Contact authenticates the client with an
+                # Authorization header rather than body fields, and rejects the
+                # exchange outright if the pair is posted in the form.
+                pair = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+                headers["Authorization"] = f"Basic {pair}"
+            else:
+                form["client_id"], form["client_secret"] = cid, secret
+            r = httpx.post(spec["token"], timeout=30, data=form, headers=headers)
         if r.status_code >= 400:
             return {"ok": False, "error": _provider_error(r)}
         payload = r.json()
@@ -424,6 +497,59 @@ def _meta_long_lived(short: str, cid: str, secret: str) -> tuple[str, int, str]:
     # users). Zero means "no known expiry", which the renewal job reads as
     # nothing to do — rather than as "expired in 1970".
     return token, int(time.time()) + int(body.get("expires_in", 0) or 0), ""
+
+
+def access_token(provider: str, refresh_token: str) -> dict:
+    """A short-lived access token from the long-lived one we stored.
+
+    `exchange` deliberately keeps only the refresh token — an access token that
+    expires in an hour is not worth a database row — so every caller that
+    actually talks to a provider needs this step. Nothing cached: a cached
+    token outlives the revocation that was supposed to end it, and the whole
+    point of the Disconnect button is that it takes effect.
+
+    Uses the flow's own `token_style`, so a provider whose token endpoint wants
+    Basic auth is not sent its client secret as a form field.
+    """
+    import httpx
+    spec = FLOWS.get(provider)
+    if not spec:
+        return {"ok": False, "error": f"unknown provider {provider!r}"}
+    if spec["stores"] != "refresh_token":
+        return {"ok": False,
+                "error": f"{provider} does not use refresh tokens"}
+    why = configured(provider)
+    if why:
+        return {"ok": False, "error": why}
+    if not refresh_token:
+        return {"ok": False, "error": f"no stored {provider} token"}
+    cid, secret = spec["client"]()
+    form = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    headers = {}
+    if spec["token_style"] == "basic_auth":
+        pair = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {pair}"
+    else:
+        form["client_id"], form["client_secret"] = cid, secret
+    try:
+        r = httpx.post(spec["token"], data=form, headers=headers, timeout=30)
+    except httpx.HTTPError as exc:
+        return {"ok": False,
+                "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+    if r.status_code >= 400:
+        return {"ok": False, "error": _provider_error(r)}
+    body = r.json()
+    tok = body.get("access_token", "")
+    if not tok:
+        return {"ok": False,
+                "error": f"{provider} returned no access token"}
+    # Some providers ROTATE the refresh token on every use and invalidate the
+    # old one. Handing it back means the caller can store it; dropping it would
+    # mean the connection works once and then dies, which looks exactly like a
+    # revocation and would be debugged as one.
+    return {"ok": True, "token": tok,
+            "new_refresh": body.get("refresh_token", "") or "",
+            "expires_in": body.get("expires_in", 0)}
 
 
 def renew(provider: str, token: str) -> dict:

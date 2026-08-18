@@ -69,6 +69,16 @@ def main() -> int:  # noqa: C901 — one suite, read top to bottom
         ck("a missing app credential names the env var it needs",
            "GOOGLE_CLIENT_ID" in oauth.configured("google"))
         oauth.config.GOOGLE_CLIENT_ID = real_id
+        # ...and names ITS OWN, for every flow. The old code was a ternary
+        # reading "google, or else Meta", so Canva -- added third -- told the
+        # operator on the console to go and set META_APP_SECRET. Every provider
+        # is checked here rather than the two that existed when it was written.
+        for prov, want in (("google", "GOOGLE_CLIENT_ID"),
+                           ("meta_ads", "META_APP_ID"),
+                           ("canva", "CANVA_CLIENT_ID")):
+            said = oauth.configured(prov)
+            ck(f"{prov} names its own env var when unconfigured",
+               said == "" or want in said, said)
         real_base = oauth.config.PUBLIC_BASE_URL
         oauth.config.PUBLIC_BASE_URL = "http://localhost:8000"
         ck("a non-https base URL is refused before the round trip",

@@ -103,6 +103,18 @@ PROVIDERS: dict[str, dict] = {
               "designs in their own folder instead of loose in a shared team "
               "workspace.",
         starts=""),
+    "constant_contact": dict(
+        name="Constant Contact",
+        kind="oauth",
+        capability="esp",
+        field="",
+        also={},
+        howto="Click Connect and sign in with Constant Contact, then Allow. "
+              "Leave every permission ticked — the campaign permission is what "
+              "lets us put a draft in your account for you to look at, and "
+              "without the offline one the connection stops working the same "
+              "day you make it.",
+        starts=""),
     "meta_ads": dict(
         name="Meta Ads",
         kind="oauth",
@@ -117,6 +129,16 @@ PROVIDERS: dict[str, dict] = {
 
 CONNECTABLE = tuple(k for k, v in PROVIDERS.items() if v["kind"] == "api_key")
 
+# Providers where one client may have SEVERAL, each its own connection.
+#
+# Derived from the spec — a provider that asks for a `site` is by definition
+# describing which of the client's properties this credential opens, so it can
+# describe a second. Ironside is the case that proved it: the main website is
+# Squarespace and the landing pages are WordPress, and other clients run more
+# than one WordPress install. A hand-written list here would have to be
+# remembered when the next such provider is added; this cannot fall behind.
+SITE_SCOPED = tuple(k for k, v in PROVIDERS.items() if "site" in (v.get("also") or {}))
+
 # Which capabilities each provider turns on. Most grant one; a Google sign-in
 # grants the mailbox AND Search Console AND GA4 in the same consent, so
 # reporting it as `inbox` alone left `analytics` reading "not wired" on an
@@ -126,6 +148,7 @@ GRANTS: dict[str, tuple[str, ...]] = {
     "shopify": ("commerce",),
     "omnisend": ("esp",),
     "klaviyo": ("esp",),
+    "constant_contact": ("esp",),
     "wordpress": ("cms",),
     "meta_ads": ("ads",),
     "canva": ("design",),
@@ -174,7 +197,52 @@ def _decrypt(blob: str) -> str:
 # Read.
 # --------------------------------------------------------------------------
 
-def resolve(tenant: str, provider: str) -> dict:
+# --------------------------------------------------------------------------
+# Providers the AGENCY may hold on every client's behalf.
+#
+# Canva is the only one, and the reason is what the credential is FOR. A
+# Shopify token reads that client's orders and a Gmail refresh token opens that
+# client's mailbox — falling back to the agency's would be reading one client's
+# data through another's connection, which is the thing `tool_scope` and
+# `test_tenant_isolation` exist to prevent. Canva holds no client data: it is
+# where OUR finished work is filed, and `canva.folder()` already puts each
+# account in its own folder inside one root, so one connection serving every
+# client is the design rather than a shortcut around it.
+#
+# The client's own connection still wins when they have one — a client who
+# wants their designs in their own Canva gets exactly that, and the fallback
+# never overrides it.
+AGENCY_TENANT = "agency"
+SHARED_PROVIDERS = ("canva",)
+
+
+def _site_key(provider: str, site: str) -> str:
+    """The identity of one property, normalised the same way every time.
+
+    A site arrives as whatever a person typed — `acme.com`, `https://acme.com/`,
+    `HTTPS://Acme.com`. Three spellings of one install would be three rows,
+    three connect forms and a client wondering why the one they just connected
+    still says missing, so the key is normalised through exactly the same code
+    that normalises the stored value.
+    """
+    if provider not in SITE_SCOPED or not site:
+        return ""
+    meta, _ = _normalize_meta(provider, {"site": site})
+    return (meta.get("site") or "").lower()
+
+
+def sites(tenant: str, provider: str) -> list[str]:
+    """Every site this client has connected for one provider, oldest first."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Credential)
+                .filter(db.Credential.tenant == tenant,
+                        db.Credential.provider == provider,
+                        db.Credential.status == "active")
+                .order_by(db.Credential.granted_at).all())
+        return [r.site or "" for r in rows if r.secret]
+
+
+def resolve(tenant: str, provider: str, site: str = "") -> dict:
     """The live credential for one client and provider, or {}.
 
     Database first, env blob second. The fallback is deliberate and load-bearing
@@ -182,15 +250,40 @@ def resolve(tenant: str, provider: str) -> dict:
     keeps running on the value Gomeh pasted into Render, and switches over the
     moment a connect link is used. Nothing needs a cutover.
     """
+    site = _site_key(provider, site)
     with db.SessionLocal() as s:
-        row = (s.query(db.Credential)
-               .filter(db.Credential.tenant == tenant,
-                       db.Credential.provider == provider,
-                       db.Credential.status == "active").first())
-        if row and row.secret:
+        q = (s.query(db.Credential)
+             .filter(db.Credential.tenant == tenant,
+                     db.Credential.provider == provider,
+                     db.Credential.status == "active"))
+        if site:
+            q = q.filter(db.Credential.site == site)
+        rows = [r for r in q.order_by(db.Credential.granted_at).all() if r.secret]
+        if not site and len(rows) > 1:
+            # Several, and the caller did not say which. Refusing is the only
+            # honest answer: picking the first would publish a landing page to
+            # whichever install happened to be connected first, and the client
+            # would find out by reading their own website.
+            return {"error": (
+                f"{tenant} has {len(rows)} {provider} connections — say which: "
+                + ", ".join(r.site or "(unnamed)" for r in rows)),
+                "sites": [r.site or "" for r in rows]}
+        if rows:
+            row = rows[0]
             return {"secret": _decrypt(row.secret), "source": "client",
-                    **(row.meta or {})}
-    return _from_env(tenant, provider)
+                    "site": row.site or "", **(row.meta or {})}
+    got = _from_env(tenant, provider)
+    if got.get("secret") or tenant == AGENCY_TENANT:
+        return got
+    if provider in SHARED_PROVIDERS:
+        # Named `agency`, never `client`. A caller that logs or renders the
+        # source must be able to say which account's connection did the work —
+        # a shared credential reported as this client's own is how "why is our
+        # design in their Canva" becomes unanswerable.
+        shared = resolve(AGENCY_TENANT, provider)
+        if shared.get("secret"):
+            return {**shared, "source": "agency"}
+    return got
 
 
 def _from_env(tenant: str, provider: str) -> dict:
@@ -317,13 +410,23 @@ def status(tenant: str) -> list[dict]:
     Never includes the secret. The owner does not need to see a client's API key
     and there is no screen on which showing it would be an improvement.
     """
+    # A dict keyed on provider alone collapsed a client's two WordPress installs
+    # into whichever row the query returned last — arbitrarily, and invisibly.
+    by_provider: dict[str, list] = {}
     with db.SessionLocal() as s:
-        rows = {r.provider: r for r in s.query(db.Credential).filter(
-            db.Credential.tenant == tenant).all()}
+        for r in (s.query(db.Credential)
+                  .filter(db.Credential.tenant == tenant)
+                  .order_by(db.Credential.granted_at).all()):
+            by_provider.setdefault(r.provider, []).append(r)
     from . import oauth
     out = []
     for key, spec in PROVIDERS.items():
-        row = rows.get(key)
+        held = by_provider.get(key) or []
+        live = [r for r in held if r.status == "active" and r.secret]
+        # The headline state describes the provider; `connections` below
+        # describes each property under it. For everything except WordPress
+        # they say the same thing, because there is only ever one.
+        row = (live[0] if live else (held[0] if held else None))
         env = _from_env(tenant, key)
         if row and row.status == "active" and row.last_error:
             # Still the credential in use — see `recheck`. "We could not verify
@@ -340,6 +443,14 @@ def status(tenant: str) -> list[dict]:
             state, detail = "failed", (row.last_error or "")[:120]
         elif env.get("secret"):
             state, detail = "connected", "from the env group (not yet moved over)"
+        elif (key in SHARED_PROVIDERS and tenant != AGENCY_TENANT
+              and resolve(AGENCY_TENANT, key).get("secret")):
+            # Connected, and it would be a lie to say otherwise — this account
+            # can create designs right now. But it is the agency's connection,
+            # and the console has to say so: an operator who reads "connected"
+            # and assumes the client owns it will one day revoke the agency's
+            # and wonder why five accounts went dark at once.
+            state, detail = "connected", "through the agency's own connection"
         else:
             state, detail = "missing", ""
         # An OAuth provider is self-serve once the app credentials exist. Before
@@ -353,7 +464,31 @@ def status(tenant: str) -> list[dict]:
                               if row and row.last_verified else ""),
             "self_serve": spec["kind"] == "api_key" or not blocked,
             "blocked_by": blocked,
+            "covered_by": "",
+            "site_scoped": key in SITE_SCOPED,
+            "connections": [{
+                "site": r.site or "",
+                "state": ("not verifying" if r.status == "active" and r.last_error
+                          else r.status),
+                "detail": (r.last_error or "")[:120] or
+                          f"by {r.granted_by or 'the client'}",
+                "last_verified": (db.as_utc(r.last_verified).date().isoformat()
+                                  if r.last_verified else ""),
+            } for r in held if r.status != "revoked"],
         })
+
+    # A client has ONE email platform, not two. Omnisend and Klaviyo both grant
+    # `esp`, so a client who finished connecting Klaviyo still read a page
+    # saying "Omnisend — missing" and reasonably concluded they were not done.
+    # The capability was satisfied the whole time; only the page disagreed.
+    #
+    # Derived by grouping PROVIDERS on `capability`, never a hand-written list
+    # of rivals — Constant Contact joins the same group by declaring `esp` and
+    # nothing here has to be edited to know about it.
+    done = {r["capability"]: r for r in out if r["state"] == "connected"}
+    for r in out:
+        if r["state"] == "missing" and r["capability"] in done:
+            r["covered_by"] = done[r["capability"]]["name"]
     return out
 
 
@@ -391,13 +526,18 @@ def store(tenant: str, provider: str, secret: str, meta: dict | None = None,
     if not probe["ok"]:
         return {"ok": False, "error": probe["error"]}
 
+    # Taken from the value the client typed, AFTER normalisation, so the same
+    # install connected twice replaces itself instead of appearing twice.
+    site = _site_key(provider, meta.get("site", ""))
     with db.SessionLocal() as s:
         row = (s.query(db.Credential)
                .filter(db.Credential.tenant == tenant,
-                       db.Credential.provider == provider).first())
+                       db.Credential.provider == provider,
+                       db.Credential.site == site).first())
         if not row:
-            row = db.Credential(tenant=tenant, provider=provider)
+            row = db.Credential(tenant=tenant, provider=provider, site=site)
             s.add(row)
+        row.site = site
         row.kind = spec["kind"]
         row.secret = _encrypt(secret)
         row.meta = meta
@@ -466,7 +606,7 @@ def store_oauth(tenant: str, provider: str, result: dict,
     return {"ok": True, "detail": detail, "missing": missing}
 
 
-def recheck(tenant: str, provider: str) -> dict:
+def recheck(tenant: str, provider: str, site: str = "") -> dict:
     """Re-probe a stored credential and record what happened.
 
     `store()` verifies once, at the moment of connection, and nothing has ever
@@ -488,14 +628,19 @@ def recheck(tenant: str, provider: str) -> dict:
         return {"ok": False, "checked": False,
                 "error": f"{spec['name']} is a sign-in, not a key — reconnect "
                          f"it to re-verify."}
+    site = _site_key(provider, site)
     with db.SessionLocal() as s:
-        row = (s.query(db.Credential)
-               .filter(db.Credential.tenant == tenant,
-                       db.Credential.provider == provider,
-                       db.Credential.status.in_(("active", "failed"))).first())
+        q = (s.query(db.Credential)
+             .filter(db.Credential.tenant == tenant,
+                     db.Credential.provider == provider,
+                     db.Credential.status.in_(("active", "failed"))))
+        if site:
+            q = q.filter(db.Credential.site == site)
+        row = q.order_by(db.Credential.granted_at).first()
         if not row or not row.secret:
             return {"ok": False, "checked": False,
-                    "error": f"Nothing stored for {spec['name']}."}
+                    "error": f"Nothing stored for {spec['name']}"
+                             + (f" at {site}." if site else ".")}
         secret, meta = _decrypt(row.secret), dict(row.meta or {})
 
     probe = _probe(provider, secret, meta)
@@ -520,17 +665,34 @@ def recheck(tenant: str, provider: str) -> dict:
             "detail": probe.get("detail", ""), "error": probe.get("error", "")}
 
 
-def revoke(tenant: str, provider: str) -> str:
+def revoke(tenant: str, provider: str, site: str = "") -> str:
+    """Disconnect one connection. With several, `site` says which.
+
+    Disconnecting every WordPress install because the caller named none would
+    be the worst possible reading of an ambiguous instruction, so it refuses
+    and lists them instead.
+    """
+    site = _site_key(provider, site)
     with db.SessionLocal() as s:
-        row = (s.query(db.Credential)
-               .filter(db.Credential.tenant == tenant,
-                       db.Credential.provider == provider).first())
-        if not row:
+        q = (s.query(db.Credential)
+             .filter(db.Credential.tenant == tenant,
+                     db.Credential.provider == provider,
+                     db.Credential.status == "active"))
+        if site:
+            q = q.filter(db.Credential.site == site)
+        rows = q.order_by(db.Credential.granted_at).all()
+        if not rows:
             return "Nothing connected."
+        if not site and len(rows) > 1:
+            return (f"{tenant} has {len(rows)} {PROVIDERS[provider]['name']} "
+                    f"connections — say which to disconnect: "
+                    + ", ".join(r.site or "(unnamed)" for r in rows))
+        row = rows[0]
+        where = f" ({row.site})" if row.site else ""
         row.status, row.secret = "revoked", ""
         s.commit()
     _invalidate(tenant, provider)
-    return f"{PROVIDERS[provider]['name']} disconnected."
+    return f"{PROVIDERS[provider]['name']}{where} disconnected."
 
 
 def _invalidate(tenant: str, provider: str) -> None:

@@ -976,6 +976,12 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "kb":
         return ui.render_kb(link_key, tenant,
                             err=request.query_params.get("err", ""))
+    if tab == "assurance":
+        try:
+            days = int(request.query_params.get("days", "30"))
+        except ValueError:
+            days = 30
+        return ui.render_assurance(link_key, tenant, days=max(1, min(days, 365)))
     if tab == "schema":
         return ui.render_schema(link_key, tenant)
     if tab == "content":
@@ -1094,8 +1100,13 @@ def connect_page(token: str, ok: str = "", err: str = "") -> str:
     link, problem = _connect_link(token)
     if problem:
         return problem
+    # `covered_by` is set on a provider whose capability a sibling already
+    # supplies — the second ESP, once they have one. It is dropped here rather
+    # than shown greyed out: this page is a client's to-do list, and the only
+    # honest length for it is the number of things still to do.
+    needed = cred.needed_for(link.tenant)
     rows = [r for r in cred.status(link.tenant)
-            if r["provider"] in cred.needed_for(link.tenant)]
+            if r["provider"] in needed and not r["covered_by"]]
     return ui.render_connect(link, link.tenant, rows, msg=ok, err=err)
 
 
@@ -1283,11 +1294,11 @@ def connections(key: str = Depends(admin_key), tenant: str = "") -> dict:
 
 @app.get("/admin/connect_revoke")
 def connect_revoke(key: str = Depends(admin_key), tenant: str = "",
-                   provider: str = "") -> dict:
+                   provider: str = "", site: str = "") -> dict:
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import credentials as cred
-    return {"result": cred.revoke(tenant, provider)}
+    return {"result": cred.revoke(tenant, provider, site)}
 
 
 @app.post("/admin/connect_revoke")
@@ -1307,7 +1318,8 @@ async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
         return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
     form = await request.form()
     result = cred.revoke(str(form.get("tenant", "")),
-                         str(form.get("provider", "")))
+                         str(form.get("provider", "")),
+                         str(form.get("site", "")))
     return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(result)}", 303)
 
 
@@ -1372,10 +1384,12 @@ async def connect_test_post(request: Request, key: str = Depends(admin_key)):
         return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
     form = await request.form()
     tenant, provider = str(form.get("tenant", "")), str(form.get("provider", ""))
-    r = cred.recheck(tenant, provider)
+    site = str(form.get("site", ""))
+    r = cred.recheck(tenant, provider, site)
     name = (cred.PROVIDERS.get(provider) or {}).get("name", provider)
     if r["ok"]:
-        msg = f"{name} still works" + (f" — {r['detail']}" if r.get("detail") else "")
+        msg = (f"{name}{f' ({site})' if site else ''} still works"
+               + (f" — {r['detail']}" if r.get("detail") else ""))
         return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(msg)}", 303)
     return RedirectResponse(
         f"/admin/ui?tab=accounts&err={quote(f'{name}: ' + r['error'])}", 303)
@@ -2543,6 +2557,14 @@ async def agent_emit(request: Request, key: str = Depends(admin_key)) -> dict:
     else:
         may_send, disposition = False, "needs approval"
 
+    from . import assurance
+    assurance.record(
+        tenant, source="bridge", system_key=system_key,
+        checked=result.get("checked") or [],
+        caught=[f["rule"] for f in result["failures"]],
+        verdict="passed" if result["ok"] else "blocked",
+        grounded=bool(claim_ids))
+
     out = ledger.record(
         tenant, system_key, body=text, claim_ids=claim_ids,
         entity_key=entity_key, audience_key=str(body.get("audience_key", "")),
@@ -2584,6 +2606,25 @@ async def agent_emit(request: Request, key: str = Depends(admin_key)) -> dict:
                      f"no {system_key!r} system installed for {tenant!r} — the "
                      f"draft is on the ledger but has no rung, so it is being "
                      f"treated as shadow")}
+
+
+@app.get("/admin/assurance")
+def assurance_report(key: str = Depends(admin_key), tenant: str = "",
+                     days: int = 30, catches: bool = False) -> dict:
+    """The same numbers the console renders, as data.
+
+    Separate from the tab because a weekly digest, a client report and a
+    console page should not each recompute this differently — the tab renders
+    exactly what this returns.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import assurance
+    days = max(1, min(int(days or 30), 365))
+    out = assurance.report(tenant, days)
+    if catches:
+        out["catch_list"] = assurance.catches(tenant, days)
+    return out
 
 
 @app.get("/admin/skill_catalogue")

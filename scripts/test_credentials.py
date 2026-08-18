@@ -400,6 +400,98 @@ def main() -> int:
                 db.Credential.provider == "shopify").first()
             ck("and the row keeps a record that it existed", row.status == "revoked")
 
+        # --- the agency's Canva serves every account ---------------------
+        #
+        # Canva is the ONLY provider allowed to do this, and the boundary is
+        # what the checks below are really for: a design tool holds our own
+        # finished work, a Shopify token holds the client's orders. Falling
+        # back on the second would read one client's data through another's
+        # connection.
+        print("\n— the agency's shared connection —")
+        with db.SessionLocal() as s:
+            s.add(db.Credential(tenant="agency", provider="canva", kind="oauth",
+                                secret=cred._encrypt("agency-canva-token"),
+                                meta={}, status="active", granted_by="gomeh"))
+            s.commit()
+        got = cred.resolve("ironside", "canva")
+        ck("a client with no Canva of its own uses the agency's",
+           got.get("secret") == "agency-canva-token")
+        ck("and it is reported as the agency's, never as the client's",
+           got.get("source") == "agency", got.get("source", ""))
+        ck("the console says connected, and says whose",
+           next(r for r in cred.status("ironside") if r["provider"] == "canva")
+           ["state"] == "connected")
+        ck("  naming the agency in the detail",
+           "agency" in next(r for r in cred.status("ironside")
+                            if r["provider"] == "canva")["detail"])
+        with db.SessionLocal() as s:
+            s.add(db.Credential(tenant="ironside", provider="canva", kind="oauth",
+                                secret=cred._encrypt("ironside-own-token"),
+                                meta={}, status="active", granted_by="client"))
+            s.commit()
+        own = cred.resolve("ironside", "canva")
+        ck("a client's own connection overrides the agency's",
+           own.get("secret") == "ironside-own-token" and own.get("source") == "client")
+
+        # --- one client, several installs of one provider ----------------
+        #
+        # Ironside's main site is Squarespace and its landing pages are
+        # WordPress; other clients run more than one WordPress install. One row
+        # per (tenant, provider) could hold exactly one of them, so the second
+        # was unconnectable and nothing on the page said why.
+        print("\n— several sites for one provider —")
+        for url, tok in (("https://lp.example.com", "wp-one"),
+                         ("https://events.example.com", "wp-two")):
+            with db.SessionLocal() as s:
+                s.add(db.Credential(
+                    tenant="ironside", provider="wordpress", kind="api_key",
+                    site=cred._site_key("wordpress", url),
+                    secret=cred._encrypt(tok),
+                    meta={"site": url, "username": "editor"},
+                    status="active", granted_by="client"))
+                s.commit()
+        ck("both installs are held, not one",
+           len(cred.sites("ironside", "wordpress")) == 2,
+           str(cred.sites("ironside", "wordpress")))
+        amb = cred.resolve("ironside", "wordpress")
+        ck("asking without saying which is REFUSED, not guessed",
+           not amb.get("secret") and "say which" in amb.get("error", ""),
+           amb.get("error", "")[:60])
+        ck("  and the refusal names them",
+           len(amb.get("sites", [])) == 2)
+        ck("each is reachable by name",
+           cred.resolve("ironside", "wordpress", "lp.example.com")["secret"]
+           == "wp-one")
+        ck("however the client spelled it",
+           cred.resolve("ironside", "wordpress",
+                        "HTTPS://Events.Example.com/")["secret"] == "wp-two",
+           "scheme, case and trailing slash all normalise to one key")
+        ck("disconnecting without saying which is refused too",
+           "say which" in cred.revoke("ironside", "wordpress"),
+           "severing both because the caller named neither is the worst reading")
+        cred.revoke("ironside", "wordpress", "lp.example.com")
+        ck("  and disconnecting one leaves the other",
+           cred.sites("ironside", "wordpress") == ["https://events.example.com"])
+        ck("with one left, no site is needed again",
+           cred.resolve("ironside", "wordpress")["secret"] == "wp-two")
+        st = next(r for r in cred.status("ironside") if r["provider"] == "wordpress")
+        ck("the console can address each one separately",
+           st["site_scoped"] and len(st["connections"]) == 1,
+           str([c["site"] for c in st["connections"]]))
+        ck("a single-site provider is unaffected",
+           not next(r for r in cred.status("baci")
+                    if r["provider"] == "klaviyo")["site_scoped"])
+
+        # The line that must not move.
+        with db.SessionLocal() as s:
+            s.add(db.Credential(tenant="agency", provider="shopify", kind="api_key",
+                                secret=cred._encrypt("shpat_agency"), meta={},
+                                status="active", granted_by="gomeh"))
+            s.commit()
+        ck("NO fallback for a provider holding client data",
+           cred.resolve("coverings", "shopify").get("secret", "") == "",
+           "coverings must never read Shopify through the agency's token")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

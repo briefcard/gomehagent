@@ -189,6 +189,19 @@ details.conns>summary{cursor:pointer;font-weight:600;font-size:.85rem;color:var(
 .conn{display:flex;justify-content:space-between;align-items:center;gap:12px;
 flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--rule)}
 .conn:first-of-type{border-top:0}
+/* Assurance tables. Added WITH the markup that uses them -- `.bulkbar` shipped
+   referencing var(--card), which this stylesheet does not define, and the
+   sticky bar had no background for weeks. */
+.tbl{width:100%;border-collapse:collapse;margin:6px 0;font-size:.85rem}
+.tbl th{text-align:left;font-weight:600;color:var(--acc);padding:5px 8px;
+border-bottom:1px solid var(--rule)}
+.tbl td{padding:5px 8px;border-bottom:1px solid var(--rule)}
+.tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+/* One line per connected install. `.conn` is a flex ROW, so these have to be
+   full-basis children or each site is squeezed into whatever column is left --
+   the same fault the WordPress connect form had, measured in a browser. */
+.conn-site{flex:1 0 100%;display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+padding:4px 0 4px 12px;border-left:2px solid var(--rule)}
 form.inl{display:inline}
 .mklink{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
 /* `size` is ignored once these are flex children, so both are pinned here or
@@ -207,7 +220,8 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 """
 
 _TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
-         ("content", "Content"), ("schema", "Data layer"))
+         ("content", "Content"), ("assurance", "Assurance"),
+         ("schema", "Data layer"))
 
 
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
@@ -250,9 +264,17 @@ def _connections(tenant: str, key: str) -> str:
     out = []
     for r in rows:
         state = r["state"]
-        chip = f'<span class="chip {"on" if state == "connected" else "off"}">' \
-               f'{_esc(state)}</span>'
+        # The console keeps the alternative visible where the client page drops
+        # it, because switching a client from one ESP to another is an owner's
+        # job and the form to do it has to be somewhere.
+        if r["covered_by"]:
+            chip = '<span class="chip nb">not needed</span>'
+        else:
+            chip = f'<span class="chip {"on" if state == "connected" else "off"}">' \
+                   f'{_esc(state)}</span>'
         bits = []
+        if r["covered_by"]:
+            bits.append(f'this account is on {_esc(r["covered_by"])}')
         if r["detail"]:
             bits.append(_esc(r["detail"]))
         if r["last_verified"]:
@@ -281,25 +303,45 @@ def _connections(tenant: str, key: str) -> str:
         else:
             action = ""      # the form below IS the action for an API key
 
-        if state in ("connected", "failed"):
+        # One set of buttons per CONNECTION, not per provider. A client with two
+        # WordPress installs had one Disconnect button between them, and it
+        # would have severed whichever row the query happened to return first.
+        def _buttons(site: str = "") -> str:
+            hidden = (f'<input type="hidden" name="key" value="{_esc(key)}">'
+                      f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                      f'<input type="hidden" name="provider" value="{_esc(r["provider"])}">'
+                      f'<input type="hidden" name="site" value="{_esc(site)}">')
+            out = ""
             if r["kind"] == "api_key":
                 # store() verifies once and nothing checked again, so a rotated
                 # or revoked key read "connected" forever off a last_verified
                 # date from whenever it was pasted.
-                action += f"""
-                <form method="post" action="/admin/connect_test" class="inl">
-                  <input type="hidden" name="key" value="{_esc(key)}">
-                  <input type="hidden" name="tenant" value="{_esc(tenant)}">
-                  <input type="hidden" name="provider" value="{_esc(r['provider'])}">
-                  <button class="sec">Re-check</button>
-                </form>"""
-            action += f"""
-            <form method="post" action="/admin/connect_revoke" class="inl">
-              <input type="hidden" name="key" value="{_esc(key)}">
-              <input type="hidden" name="tenant" value="{_esc(tenant)}">
-              <input type="hidden" name="provider" value="{_esc(r['provider'])}">
-              <button class="sec">Disconnect</button>
-            </form>"""
+                out += (f'<form method="post" action="/admin/connect_test" '
+                        f'class="inl">{hidden}<button class="sec">Re-check'
+                        f'</button></form>')
+            out += (f'<form method="post" action="/admin/connect_revoke" '
+                    f'class="inl">{hidden}<button class="sec">Disconnect'
+                    f'</button></form>')
+            return out
+
+        conns = [c for c in r["connections"] if c["state"] != "revoked"]
+        if r["site_scoped"] and conns:
+            # Each install named and addressed separately. The site IS the
+            # identity here, so showing the provider once with a single state
+            # would be describing two things with one word.
+            rows_html = "".join(
+                f'<div class="conn-site"><span class="mut">'
+                f'{_esc(c["site"] or "(no site recorded)")}</span> '
+                f'<span class="chip {"on" if c["state"] == "active" else "off"}">'
+                f'{_esc("connected" if c["state"] == "active" else c["state"])}'
+                f'</span>'
+                + (f'<span class="when">checked {_esc(c["last_verified"])}</span>'
+                   if c["last_verified"] else "")
+                + f'<span class="row">{_buttons(c["site"])}</span></div>'
+                for c in conns)
+            action += rows_html
+        elif state in ("connected", "failed"):
+            action += _buttons()
 
         # The form for an API-key provider, with that provider's own
         # click-by-click instructions above it. Those `howto` strings were
@@ -320,9 +362,19 @@ def _connections(tenant: str, key: str) -> str:
                     f'a week later.</div>' if starts else
                     '<div class="when">Checked against the live API before '
                     'anything is saved.</div>')
+            if r["site_scoped"]:
+                # "Replace" is wrong for a provider that can hold several: the
+                # client is adding their second landing-page install, not
+                # overwriting the first, and a summary saying Replace is how
+                # somebody decides not to click it.
+                label = (f"Connect another {r['name']} site"
+                         if conns else f"Connect {r['name']}")
+            else:
+                label = (f"Replace {r['name']}" if state == "connected"
+                         else f"Connect {r['name']}")
             form = f"""
             <details class="cform">
-              <summary>{"Replace" if state == "connected" else "Connect"} {_esc(r['name'])}</summary>
+              <summary>{_esc(label)}</summary>
               <div class="note">{_esc(spec.get('howto', ''))}</div>
               <form method="post" action="/admin/connect_save" class="f">
                 <input type="hidden" name="key" value="{_esc(key)}">
@@ -1957,6 +2009,16 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
         detail = (f'<div class="mut">{_esc(r["detail"])}'
                   + (f' · last checked {_esc(r["last_verified"])}'
                      if r["last_verified"] else "") + "</div>") if done else ""
+        # A client with more than one WordPress install needs to see the ones
+        # already connected, or they cannot tell whether the form below is for
+        # adding the next one or replacing the last one.
+        conns = [c for c in r.get("connections", []) if c["state"] != "revoked"]
+        if r.get("site_scoped") and conns:
+            detail = ('<div class="mut">connected: '
+                      + ", ".join(_esc(c["site"] or "(no site recorded)")
+                                  for c in conns) + "</div>")
+        verb = ("Add another" if (r.get("site_scoped") and conns)
+                else ("Replace" if done else "Connect"))
         blocks.append(f"""
         <div class="prov{' done' if done else ''}">
           <h3>{_esc(r['name'])} {chip}</h3>
@@ -1969,7 +2031,7 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
             <label>{_esc(spec['field'])}</label>
             <input name="secret" type="password" autocomplete="off"
                    placeholder="{_esc(spec['field'])}" required>
-            <div class="row"><button>{'Replace' if done else 'Connect'}</button></div>
+            <div class="row"><button>{_esc(verb)}</button></div>
           </form>
         </div>""")
 
@@ -2228,3 +2290,93 @@ def render_schema(key: str, tenant: str = "") -> str:
 {"".join(blocks)}
 {relational}
 """, suffix=f"&amp;tenant={_esc(tenant)}")
+
+
+def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
+    """What the layer checked, what it caught, and what cannot be measured yet.
+
+    Ordered by how much each number can be trusted: catches first because they
+    need no interpretation, then coverage, then the quality signal that is
+    still missing. A dashboard that leads with a rate computed from four events
+    teaches people to believe rates computed from four events.
+    """
+    from . import assurance
+    rep = assurance.report(tenant, days)
+    who = f" · {_esc(tenant)}" if tenant else " · all accounts"
+
+    if not rep["events"]:
+        body = (f'<div class="note"><strong>Nothing has been checked in the '
+                f'last {days} days.</strong><br>That is not the same as '
+                f'nothing being wrong — it means no draft passed through a '
+                f'validator, so this page has no evidence either way.</div>')
+        return _shell(key, "assurance", "Assurance", body)
+
+    catch_rows = "".join(
+        f'<tr><td><code>{_esc(r)}</code></td><td class="num">{n}</td></tr>'
+        for r, n in rep["caught"].items()) or \
+        '<tr><td colspan="2" class="mut">nothing caught in this window</td></tr>'
+
+    src_rows = "".join(
+        f'<tr><td>{_esc(src)}</td><td class="num">{d["checks"]}</td>'
+        f'<td class="num">{d["caught"]}</td><td class="num">{d["blocked"]}</td></tr>'
+        for src, d in sorted(rep["by_source"].items()))
+
+    g = rep["grounding"]
+    grate = ("not measured" if g["rate"] is None
+             else f'{g["rate"]:.0%} <span class="mut">of {g["measured"]}</span>')
+    rp = rep["repairs"]
+    ed = rep["edited"]
+    ed_line = (f'<strong>{ed["edited_rate"]:.0%}</strong> of {ed["decided_runs"]} '
+               f'decided runs were edited before sending'
+               if ed["edited_rate"] is not None else
+               f'<span class="mut">{_esc(ed["note"])}</span>')
+
+    thin_rows = "".join(
+        f'<tr><td>{_esc(t)}</td><td class="num">{n}</td></tr>'
+        for t, n in rep["thin"].items()) or \
+        '<tr><td colspan="2" class="mut">every run had what it needed</td></tr>'
+
+    body = f"""
+    <h2>Assurance{who}</h2>
+    <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
+
+    <details class="conns" open><summary>What was caught</summary>
+      <p class="mut">Each of these is a phrase the model wrote and
+      deterministic code stopped. Without the layer it would have gone out —
+      this is the one number here that needs no interpretation.</p>
+      <table class="tbl"><tr><th>rule</th><th>times</th></tr>
+      {catch_rows}</table>
+      <p class="when"><strong>{rep['caught_total']}</strong> total.</p>
+    </details>
+
+    <details class="conns" open><summary>Where the checking happens</summary>
+      <p class="mut">The mail path uses a plain substring test; the substrate
+      uses word-boundary matching. Same column, different strength.</p>
+      <table class="tbl">
+      <tr><th>source</th><th>checks</th><th>caught</th><th>blocked</th></tr>
+      {src_rows}</table>
+    </details>
+
+    <details class="conns" open><summary>Grounding and repair</summary>
+      <table class="tbl">
+        <tr><td>drafts carrying a claim_id</td><td class="num">{grate}</td></tr>
+        <tr><td>repair attempts</td><td class="num">{rp['attempted']}</td></tr>
+        <tr><td>&nbsp;&nbsp;fixed by a redraft</td><td class="num">{rp['succeeded']}</td></tr>
+        <tr><td>&nbsp;&nbsp;still blocked after repair</td><td class="num">{rp['still_blocked']}</td></tr>
+      </table>
+    </details>
+
+    <details class="conns" open><summary>Is it improving the output?</summary>
+      <p>{ed_line}</p>
+      <p class="mut">Catches and repairs prove the layer is doing something a
+      model alone would not. They do not prove the drafts are better — that is
+      a comparison, and it needs either the edit history above or a run of
+      <code>scripts/ab_context.py</code>, which has never been run.</p>
+    </details>
+
+    <details class="conns"><summary>What runs were missing</summary>
+      <table class="tbl"><tr><th>gap</th><th>runs affected</th></tr>
+      {thin_rows}</table>
+    </details>
+    """
+    return _shell(key, "assurance", "Assurance", body)

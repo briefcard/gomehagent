@@ -26,6 +26,8 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
 # the redirect URI the console prints -- it must match byte for byte.
 CANVA_CLIENT_ID = os.environ.get("CANVA_CLIENT_ID", "")
 CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
+CONSTANT_CONTACT_CLIENT_ID = os.environ.get("CONSTANT_CONTACT_CLIENT_ID", "")
+CONSTANT_CONTACT_CLIENT_SECRET = os.environ.get("CONSTANT_CONTACT_CLIENT_SECRET", "")
 
 # How many sent threads one nightly backfill window reads. A mailbox holds
 # years and a request holds seconds, so history is walked on a schedule — a few

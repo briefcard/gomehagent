@@ -32,12 +32,34 @@ ROOT_NAME = "Client work — gomehagent"
 
 
 def _token(tenant: str) -> tuple[str, str]:
+    """A live access token, minted from the refresh token we stored.
+
+    This used to hand the STORED secret to Canva as the bearer. `oauth.exchange`
+    keeps the refresh token for this provider — deliberately, an access token
+    dies in an hour and is not worth a row — so the value being sent was never
+    one Canva would accept. Every call would have come back 401 while the
+    console showed a green chip, which is the failure mode this codebase keeps
+    writing down: a positive claim that has stopped being tested. It survived
+    because no Canva call has ever been made for real.
+    """
     c = cred.resolve(tenant, "canva")
     secret = (c or {}).get("secret", "")
+    if secret:
+        from . import oauth
+        got = oauth.access_token("canva", secret)
+        if not got.get("ok"):
+            return "", (f"Canva would not renew the token for {tenant}: "
+                        f"{got.get('error', '')} — reconnect it on the "
+                        f"Accounts tab.")
+        return got["token"], ""
     if not secret:
-        return "", (f"{tenant} has no Canva connection — connect it on the "
-                    f"Accounts tab. Canva Connect is OAuth, so it needs "
-                    f"CANVA_CLIENT_ID / CANVA_CLIENT_SECRET set first.")
+        return "", (f"{tenant} has no Canva connection, and neither has the "
+                    f"agency — connect one on the Accounts tab. The agency's "
+                    f"own connection serves every account (each filed in its "
+                    f"own folder), so connecting it once is usually enough; a "
+                    f"client who connects their own overrides it. Canva "
+                    f"Connect is OAuth, so it needs CANVA_CLIENT_ID / "
+                    f"CANVA_CLIENT_SECRET set first.")
     return secret, ""
 
 
