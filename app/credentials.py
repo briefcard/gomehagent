@@ -649,13 +649,61 @@ def _probe(provider: str, secret: str, meta: dict) -> dict:
             return {"ok": True, "detail": "Klaviyo connected"}
         if provider == "wordpress":
             site = meta.get("site", "").rstrip("/")
-            r = httpx.get(f"{site}/wp-json/wp/v2/users/me",
-                          auth=(meta.get("username", ""), secret), timeout=20)
+            user = meta.get("username", "")
+            # An application password is issued with spaces in it and WordPress
+            # accepts it either way, so the spaces are left alone rather than
+            # stripped — a client copying it as shown must not be punished for
+            # following the instruction we gave them.
+            #
+            # Two endpoints, because a site with plain permalinks does not
+            # serve /wp-json/ at all and answers a 404 that looks exactly like
+            # a wrong address.
+            tried = []
+            r = None
+            for path in (f"{site}/wp-json/wp/v2/users/me",
+                         f"{site}/?rest_route=/wp/v2/users/me"):
+                tried.append(path)
+                # follow_redirects, because almost every WordPress site
+                # redirects http→https or www→apex, and without this the probe
+                # reads a 301 body as the API's answer and fails on a site that
+                # is configured perfectly.
+                r = httpx.get(path, auth=(user, secret), timeout=20,
+                              follow_redirects=True)
+                if r.status_code != 404:
+                    break
             if r.status_code in (401, 403):
-                return {"ok": False,
-                        "error": "WordPress rejected that username and password."}
+                body = r.text[:400].lower()
+                if "rest_not_logged_in" in body or "not currently logged in" in body:
+                    return {"ok": False, "error": (
+                        f"{site} received the request but no credentials with "
+                        f"it. That is usually the host stripping the "
+                        f"Authorization header, which some Apache and CGI "
+                        f"setups do by default — the username and password may "
+                        f"be perfectly correct. Ask the host to pass "
+                        f"Authorization through, or add "
+                        f"`SetEnvIf Authorization .+ HTTP_AUTHORIZATION=$0` to "
+                        f".htaccess.")}
+                return {"ok": False, "error": (
+                    f"{site} rejected that username and application password. "
+                    f"The username is the WordPress login name, not the display "
+                    f"name or the email, and the password is the generated one "
+                    f"rather than the account password.")}
+            if r.status_code == 404:
+                return {"ok": False, "error": (
+                    f"No WordPress REST API at {site}. Tried "
+                    f"{' and '.join(tried)}. Either the address is wrong or the "
+                    f"REST API is disabled by a plugin.")}
             r.raise_for_status()
-            return {"ok": True, "detail": r.json().get("name", "WordPress connected")}
+            try:
+                who = r.json()
+            except Exception:                                    # noqa: BLE001
+                return {"ok": False, "error": (
+                    f"{site} answered, but not with JSON — that is a page "
+                    f"rather than the API. Check the address points at the "
+                    f"WordPress root.")}
+            return {"ok": True,
+                    "detail": who.get("name") or who.get("slug")
+                    or "WordPress connected"}
     except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
         # The two causes are a typo in the address and an outage, and a client
         # can only act on the first — so name it first.

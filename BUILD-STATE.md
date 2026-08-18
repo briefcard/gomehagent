@@ -1,4 +1,4 @@
-# Build state — 2026-08-17, after the skill substrate
+# Build state — after the creative chain
 
 The rolling state of the data-layer build. **This file is rewritten by every
 thread.** It is always current and never historical — do not add dated sections,
@@ -9,41 +9,44 @@ and do not create `HANDOFF-step-N.md` files. History lives in `DEFECTS.md`
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** `45ba6cf` on `origin/main` — pushed and confirmed serving (`/health`
-reported the swap after ~60s, and `/health/connections` still passes on both
-Shopify stores and all three Google accounts). The skill-bridge work below is a
-later commit, **not yet pushed**. `/health` reports `commit` and `routes` — use
-it, do not infer what is running.
+**Live:** everything below is pushed and deployed. `/health` reports `commit`
+and `routes` — use it, never infer what is running. `/health/connections` is
+unauthenticated and live-tests Shopify and Google.
 
-**Connections, verified live 2026-08-17 via `/health/connections`:** Shopify
-`baci` and `eien` both ok; Gmail + Drive ok for `personal`, `baci`, `eien`. So
-Baci has `inbox` and `commerce` genuinely wired, which is everything the three
-ready skills need.
+## Start here if you are new to this thread
 
-`capabilities()` now tells the truth about the rest — see §2.29. It reported
-`esp`, `cms`, `ads` and `crm` as wired off a declaration in the Tenant JSON,
-with no credential behind them. Every capability resolves through
-`credentials.wired_capabilities` now, and `tenants.capability_detail` reports
-`wired` / `via` / `declared` / `needs_connecting`. Against the live env group
-that reads: **baci** inbox + commerce + cms (all `env:shopify`/`env:google`),
-declared-but-unconnected esp/ads · **eien** inbox · **agency** inbox ·
-**coverings** and **ironside** nothing wired.
+Read this file, then `DEFECTS.md` §1 (the recurring patterns) and §3 (what is
+still broken). Then run the suites — there are 41 and they all pass offline:
 
-**Connected what was connectable.** `cms` is now granted by the provider the
-tenant's CMS platform names, when that provider's credential resolves — Baci's
-CMS *is* its Shopify store, published with the token it already has, so the blog
-system was blocked on a connection that already existed. Baci now sees 37/37
-agent tools, up from 34.
+    for f in scripts/test_*.py; do python3 "$f" >/dev/null || echo "FAIL $f"; done
 
-**Two things need you, and cannot be done from code:** Omnisend (`esp`, both
-Baci and Eien — there is no Omnisend credential anywhere in the codebase and
-`credential_ref` was never a real one) and Meta (`ads` — `META_APP_ID/SECRET`
-are OAuth app credentials, not a per-tenant token). Both go through
-`/connect/{token}`. **Eien's store row:** `_SEED` now names `shopify_store="eien"`
-but `seed()` skips existing rows, so the live database needs
-`/admin/tenant_set?tenant=eien&field=shopify_store&value=eien` — the credential
-has been live in `SHOPIFY_STORES` all along and the row simply never claimed it,
-which is why `reorder_engine` could never go live.
+**Deploy is push-to-main.** SSH alias `github-gomehagent`, key
+`~/.ssh/gomehagent_deploy`, and git network calls need the sandbox disabled.
+Always `git fetch` and confirm a fast-forward first. Render swaps in ~90s.
+
+## The one thing to understand about this codebase
+
+Every layer refuses rather than guesses, and every refusal names the missing
+thing. That is not a style — it is the accumulated result of the defects in
+`DEFECTS.md`, most of which were an unknown quietly collapsing into a value.
+When you add something, the question to ask is "what does this do when it does
+not know", and the answer must survive all the way to the output.
+
+## What is proven and what is not
+
+**Proven against real systems:** Shopify reads (both stores), Google/Gmail/Drive
+(three accounts), the site crawler against miamiironside.com — 162 pages found,
+11 claims, 56 images, 3 new situation tags.
+
+**Built and NEVER called for real:** Omnisend, Canva, the OpenAI image API.
+Each needs a key and one live call. Every one of my assumptions that Gomeh has
+tested against a real API so far has been wrong in some detail, so expect the
+first live run of each to find something.
+
+**Gomeh's live tests have corrected this build three times.** Canva's generator
+invents products rather than using a supplied asset; `gpt-image-1`'s mask is
+advisory rather than binding; the logo filter was written against imagined
+filenames. All three are recorded in `DEFECTS.md`.
 
 ---
 
@@ -59,9 +62,10 @@ and closes a run, runs the validator on everything emitted, files it to the
 ledger, and applies the autonomy rung. Four skills are registered on it, three
 of which serve Baci with no new content.
 
-**The contract is frozen.** Build-map steps 05, 06, 08, 10 and 11 are
-deliberately not built — they are the *visual and creative* chain, and nothing
-Baci needs first touches them.
+**The visual chain is no longer frozen.** Build-map steps 05 and 06 were
+deliberately skipped and have since been built, because the clients need them:
+`compose` (deterministic imagery), `imagegen` (generated scenery), `canva` (the
+editable handoff) and the creative library in `KbAsset`.
 
 ## The five rules this codebase keeps re-learning
 
@@ -134,6 +138,37 @@ infer a situation where the classifier is confident and file brand-wide proof
 where it is not, saying which happened. Owner's call, and it unblocked the
 rewrite skill. §2.28 fixed the two `add_claim` silent losses carried as live
 since 14 Aug.
+
+## Onboarding a client from zero, through the UI
+
+No seed script is needed and this was checked by doing it. `/admin/tenant_add`
+creates the account; the brand row appears on first write; `add_situation`
+authors a vocabulary, and a crawl proposes its own tags on top;
+`/admin/asset_add` and the picture queue fill the creative library;
+the Accounts tab connects providers; the Systems installer shows each system's
+prerequisites as met/unmet before you commit to it.
+
+**One caveat worth knowing.** A tenant with no authored vocabulary falls back to
+a shared default set, so a new account appears to have 29 situations that are
+not its own. That fallback is deliberate and load-bearing for the existing
+accounts, but borrowed vocabulary currently looks identical to authored
+vocabulary — the §1 pattern again, unfixed.
+
+## The creative chain, and which route can be trusted
+
+Three treatments. They differ in what can be wrong, not in how they look.
+
+| route | product fidelity | scene |
+|---|---|---|
+| `compose.photo_with_headline` | the client's own photograph, untouched | n/a |
+| `compose.product_on_colour` / `product_on_scene` | drawn by us, cannot be wrong | flat or a supplied plate |
+| `imagegen.scene_with_real_product` | photograph composited on, cannot be wrong | generated |
+| `imagegen.place_product` | **the model may redraw it** | generated, best integrated |
+
+`photo_with_headline` is the only one that fits every client — Baci sells
+objects, Coverings sells surfaces (a tile IS the surface), Ironside sells places
+(a room cannot be cut out). `KbAsset.subject` records which of `object` /
+`surface` / `scene` / `logo` an asset is, because it does not generalise.
 
 ## Rejection repairs itself — the QA layer
 

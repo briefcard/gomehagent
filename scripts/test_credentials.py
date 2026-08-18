@@ -322,6 +322,74 @@ def main() -> int:
                 _cfg.SHOPIFY_STORES.pop("baci", None)
 
         # --- revoke ------------------------------------------------------
+            print("\n— connecting WordPress, which is where the real ones fail —")
+        import httpx as _httpx
+        calls: list[dict] = []
+
+        class _Resp:
+            def __init__(self, code=200, body=None, text=""):
+                self.status_code, self._b, self.text = code, body or {}, text
+
+            def json(self):
+                if self._b is None:
+                    raise ValueError("not json")
+                return self._b
+
+            def raise_for_status(self):
+                return None
+
+        def _fake_get(url, **kw):
+            calls.append({"url": url, "follow": kw.get("follow_redirects"),
+                          "auth": kw.get("auth")})
+            if "rest_route" in url:
+                return _Resp(200, {"name": "Editor"})
+            return _Resp(404, {}, "not found")
+
+        _real = _httpx.get
+        _httpx.get = _fake_get
+        try:
+            for raw, want in [("acme.com", "https://acme.com"),
+                              ("https://acme.com/", "https://acme.com"),
+                              ("https://acme.com/blog", "https://acme.com/blog")]:
+                m, _ = cred._normalize_meta("wordpress", {"site": raw})
+                ck(f"  {raw!r} becomes {want!r}", m["site"] == want, m["site"])
+
+            calls.clear()
+            res = cred._probe("wordpress", "abcd EFGH ijkl",
+                              {"site": "https://acme.com", "username": "editor"})
+            ck("REDIRECTS ARE FOLLOWED — nearly every WordPress site redirects "
+               "http→https or www→apex, and Basic auth dies silently at a 301",
+               all(c["follow"] for c in calls), str([c["follow"] for c in calls]))
+            ck("  a site with plain permalinks is still found via ?rest_route",
+               res["ok"] and len(calls) == 2, str(calls[-1]["url"] if calls else ""))
+            ck("  the application password keeps its spaces — we told them to copy "
+               "it that way", calls[0]["auth"][1] == "abcd EFGH ijkl",
+               str(calls[0]["auth"][1]))
+
+            _httpx.get = lambda url, **kw: _Resp(
+                401, {}, '{"code":"rest_not_logged_in"}')
+            res = cred._probe("wordpress", "x",
+                              {"site": "https://acme.com", "username": "editor"})
+            ck("a host that strips the Authorization header is NAMED as such, not "
+               "reported as a wrong password",
+               not res["ok"] and "Authorization header" in res["error"],
+               res["error"][:70])
+
+            _httpx.get = lambda url, **kw: _Resp(401, {}, "bad credentials")
+            res = cred._probe("wordpress", "x",
+                              {"site": "https://acme.com", "username": "editor"})
+            ck("  a genuine rejection says which username it wants",
+               not res["ok"] and "login name" in res["error"], res["error"][:70])
+
+            _httpx.get = lambda url, **kw: _Resp(404, {}, "nope")
+            res = cred._probe("wordpress", "x",
+                              {"site": "https://acme.com", "username": "editor"})
+            ck("  and no API at all lists what was tried",
+               not res["ok"] and "wp-json" in res["error"]
+               and "rest_route" in res["error"], res["error"][:80])
+        finally:
+            _httpx.get = _real
+
         print("\n— disconnecting —")
         cred.revoke("baci", "shopify")
         ck("revoke clears the stored secret",

@@ -107,10 +107,18 @@ button{font:inherit;font-size:.82rem;font-weight:600;padding:6px 13px;border-rad
 border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-.cform{margin-top:7px;border:1px solid var(--rule);border-radius:5px;padding:8px 11px}
+/* `.conn` is a flex ROW (name | state | actions) and this form is a third
+   child of it, so without a full-width basis it is squeezed into whatever
+   column is left over — the inputs collapse to a few pixels and cannot be
+   clicked into, let alone pasted into. `flex-basis:100%` puts it on its own
+   line under the row it belongs to. */
+.cform{flex:0 0 100%;margin-top:7px;border:1px solid var(--rule);
+  border-radius:5px;padding:8px 11px}
 .cform summary{cursor:pointer;font-size:.8rem;color:var(--acc);font-weight:600}
 .cform .f{margin-top:9px}
-.cform input{width:100%}
+.cform input,.cform select{width:100%;box-sizing:border-box}
+.cform .f{gap:4px}
+.cform label{font-size:.75rem;color:var(--mut)}
 .picgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
 .pic{position:relative;display:block;border:1px solid var(--rule);border-radius:5px;
   overflow:hidden;cursor:pointer;background:var(--panel)}
