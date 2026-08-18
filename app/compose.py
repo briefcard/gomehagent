@@ -138,22 +138,50 @@ def _wrap(draw, text: str, font, max_w: int) -> list[str]:
 
 
 def _draw_text(img, headline: str, subline: str, *, colour: str,
-               top_frac: float, margin_frac: float = 0.09) -> str:
-    from PIL import ImageDraw
-    d = ImageDraw.Draw(img)
+               top_frac: float, margin_frac: float = 0.09,
+               shadow: bool = False) -> str:
+    """Set the type. `shadow` is a whisper, not a panel.
+
+    An earlier version laid a gradient scrim behind the text so it would be
+    readable on anything. It worked and it looked like a template — a band
+    across every image regardless of what was underneath. Contrast does the
+    same job: the colour is already chosen from the brightness of the band the
+    text lands in, and where that is not quite enough a soft offset shadow at
+    low opacity carries it without putting a shape on the picture.
+    """
+    from PIL import Image, ImageDraw, ImageFilter
     W, H = img.size
     margin = int(W * margin_frac)
     h_font, fname = _font(int(W * 0.085))
     s_font, _ = _font(int(W * 0.036))
-    y = int(H * top_frac)
-    for line in _wrap(d, headline, h_font, W - margin * 2):
-        d.text((margin, y), line, font=h_font, fill=colour)
-        y += int(W * 0.098)
-    if subline:
-        y += int(W * 0.018)
-        for line in _wrap(d, subline, s_font, W - margin * 2):
-            d.text((margin, y), line, font=s_font, fill=colour)
-            y += int(W * 0.048)
+
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    def _lines():
+        y = int(H * top_frac)
+        for line in _wrap(d, headline, h_font, W - margin * 2):
+            yield line, h_font, y
+            y += int(W * 0.098)
+        if subline:
+            y += int(W * 0.018)
+            for line in _wrap(d, subline, s_font, W - margin * 2):
+                yield line, s_font, y
+                y += int(W * 0.048)
+
+    if shadow:
+        dark_text = colour.lower() in ("#16130f", "#1a1a1a", "#2a241c")
+        glow = (255, 255, 255, 90) if dark_text else (0, 0, 0, 95)
+        sl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sl)
+        off = max(1, int(W * 0.0022))
+        for line, font, y in _lines():
+            sd.text((margin + off, y + off), line, font=font, fill=glow)
+        img.alpha_composite(sl.filter(ImageFilter.GaussianBlur(off * 1.6)))
+
+    for line, font, y in _lines():
+        d.text((margin, y), line, font=font, fill=colour)
+    img.alpha_composite(layer)
     return fname
 
 
@@ -346,30 +374,6 @@ def _quiet_band(img, bands: int = 6, avoid_bottom: float = 0.12) -> int:
     return best
 
 
-def _scrim(img, top: int, height: int, dark: bool):
-    """A soft gradient behind the type, so it is readable on any photograph.
-
-    Not a design flourish — it is what makes one layout survive a white studio
-    sweep, a dim restaurant and a mid-grey tile without a human choosing a text
-    colour each time. It fades at both edges rather than sitting as a band,
-    because a hard-edged panel over a photograph reads as a sticker.
-    """
-    from PIL import Image
-    W, H = img.size
-    layer = Image.new("RGBA", (W, height), (0, 0, 0, 0))
-    base = (0, 0, 0) if dark else (255, 255, 255)
-    peak = 150 if dark else 165
-    px = layer.load()
-    for y in range(height):
-        t = y / max(1, height - 1)
-        fade = 1.0 - abs(t - 0.42) * 1.7
-        a = max(0, int(peak * max(0.0, min(1.0, fade))))
-        for x in range(W):
-            px[x, y] = (*base, a)
-    img.alpha_composite(layer, (0, top))
-    return img
-
-
 def photo_with_headline(photo: bytes, *, headline: str, subline: str = "",
                         formats: list[str] | None = None,
                         force_band: int | None = None) -> dict:
@@ -405,13 +409,19 @@ def photo_with_headline(photo: bytes, *, headline: str, subline: str = "",
                   max(0, int(H * (band / bands))))
 
         region = canvas.crop((0, top, W, min(H, top + block_h))).convert("L")
-        dark_bg = ImageStat.Stat(region).mean[0] < 128
-        canvas = _scrim(canvas, top, block_h, dark=not dark_bg)
+        stat = ImageStat.Stat(region)
+        dark_bg = stat.mean[0] < 128
         colour = "#FFFFFF" if dark_bg else "#16130F"
+        # A shadow only where contrast alone will not carry it: a busy or
+        # mid-toned band. On a clean sweep or a flat dark wall the type is
+        # legible unaided, and adding a shadow there is decoration.
+        busy = stat.stddev[0] > 34 or 92 < stat.mean[0] < 168
         font_used = _draw_text(canvas, headline, subline, colour=colour,
-                              top_frac=(top + int(H * 0.035)) / H)
+                               top_frac=(top + int(H * 0.035)) / H,
+                               shadow=busy)
         placements[k] = {"band": band, "dark_background": dark_bg,
-                         "text_colour": colour}
+                         "text_colour": colour, "shadow": busy,
+                         "contrast": round(stat.stddev[0], 1)}
         buf = io.BytesIO()
         canvas.convert("RGB").save(buf, format="PNG", optimize=True)
         out[k] = buf.getvalue()

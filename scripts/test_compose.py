@@ -162,6 +162,12 @@ def main() -> int:
                                        formats=["1:1", "9:16"])
     ck("a surface with no quiet area still renders readably",
        busy["ok"] and len(busy["images"]) == 2)
+    ck("  NO PANEL BEHIND THE TYPE — contrast carries it, and a gradient band "
+       "across every image looked like a template",
+       all("scrim" not in str(v) for v in busy["placement"].values()))
+    ck("  a clean sweep gets no shadow at all — it needs none",
+       light["placement"]["1:1"]["shadow"] is False,
+       str(light["placement"]["1:1"]))
     for k, (w, h) in [("1:1", compose.SIZES["1:1"]), ("9:16", compose.SIZES["9:16"])]:
         ck(f"  {k} is exactly {w}×{h}",
            Image.open(io.BytesIO(busy["images"][k])).size == (w, h))
@@ -178,6 +184,21 @@ def main() -> int:
        "band" in placed["placement"]["1:1"])
     ck("nothing is generated, so nothing can be the wrong product",
        "untouched" in placed["note"])
+
+    # The hard case: mid tones and clutter everywhere, no quiet band to find.
+    hard = Image.new("RGB", (900, 900))
+    hd = ImageDraw.Draw(hard)
+    for i in range(900):
+        for j in range(0, 900, 3):
+            hd.point((j, i), fill=(110 + (i * 7 + j * 5) % 90,
+                                   104 + (i * 3 + j * 11) % 90, 96))
+    hb = io.BytesIO()
+    hard.save(hb, format="PNG")
+    rough = compose.photo_with_headline(hb.getvalue(), headline="Surfaces.",
+                                        formats=["1:1"])
+    ck("where contrast alone will not carry it, a MINIMAL shadow appears",
+       rough["placement"]["1:1"]["shadow"] is True,
+       str(rough["placement"]["1:1"]))
     ck("an empty photograph is refused",
        not compose.photo_with_headline(b"", headline="X")["ok"])
 

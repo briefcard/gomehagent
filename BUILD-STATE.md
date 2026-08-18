@@ -208,11 +208,22 @@ Two things make it survive that range without a human tuning each client.
 `_quiet_band` measures the variance of each horizontal band and puts the type in
 the calmest one — where the quiet region sits is a fact about each photograph,
 not a house style, and a packed interior is quiet at the ceiling while a product
-sweep is quiet everywhere but the middle. `_scrim` lays a soft double-fading
-gradient behind the type and picks its polarity from that band's brightness, so
-one call produces white type on a dark restaurant and dark type on a white
-sweep. Verified across a dark venue, a mosaic with no quiet area, and a bright
-product sweep — readable in all three, from the same call.
+sweep is quiet everywhere but the middle. Text colour is picked
+from that band's brightness, so one call produces white type on a dark
+restaurant and dark type on a white sweep.
+
+**No panel behind the type.** An earlier version laid a gradient scrim there so
+the text would be readable on anything. It worked and it looked like a
+template — a band across every image regardless of what was underneath. Gomeh
+called it, and he was right. Contrast does the same job, and where it will not
+quite carry — a mid-toned band with real clutter in it — a soft offset shadow at
+low opacity lifts the type without putting a shape on the picture. It fires on
+measurement (`stddev > 34`, or a mean in the muddy middle), not on every render:
+a clean sweep and a flat dark wall get none.
+
+Verified across a dark venue, a mosaic, a bright product sweep — all readable
+with no shadow at all — and a deliberately hopeless mid-toned clutter field,
+where the shadow appears and carries it.
 
 ## Generated scenes, with the product protected rather than checked
 
