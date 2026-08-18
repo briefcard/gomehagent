@@ -2115,7 +2115,18 @@ def scope_conflicts(tenant: str) -> list[dict]:
 OWNED, REFERENCE = "owned", "reference"
 
 
-OBJECT, SURFACE, SCENE = "object", "surface", "scene"
+OBJECT, SURFACE, SCENE, LOGO = "object", "surface", "scene", "logo"
+
+
+def logos(tenant: str) -> list[db.KbAsset]:
+    """The brand marks, kept apart from the photography.
+
+    A creative that needs the logo needs THE logo, not whichever picture of a
+    building happened to sort first. Mixed into one library each buries the
+    other, so they are a subject of their own and asked for by name.
+    """
+    return [a for a in assets(tenant, publishable_only=False)
+            if (a.subject or "") == LOGO and a.status == "active"]
 
 
 def detect_subject(png_bytes: bytes) -> str:
@@ -2218,6 +2229,40 @@ def assets(tenant: str, *, publishable_only: bool = True,
     return rows
 
 
+def proposed_assets(tenant: str) -> list[db.KbAsset]:
+    """Pictures waiting on a human. The queue the crawler fills."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbAsset)
+                .filter(db.KbAsset.tenant == tenant,
+                        db.KbAsset.status == "active",
+                        db.KbAsset.review == prov.PROPOSED)
+                .order_by(db.KbAsset.created_at.desc()).all())
+        s.expunge_all()
+        return rows
+
+
+def review_asset(asset_id: str, approve: bool, by: str = "owner") -> str:
+    """Approve or reject one picture.
+
+    Rejecting RETIRES rather than deletes, so a second crawl of the same site
+    does not re-propose what somebody has already turned down — the dedupe in
+    `add_asset` is on the URL, and a deleted row would look like a new find
+    every time.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if not row:
+            return "No such asset."
+        row.review = prov.APPROVED if approve else prov.REJECTED
+        row.approved_by = by if approve else ""
+        row.approved_at = db.utcnow() if approve else None
+        if not approve:
+            row.status = "retired"
+        s.commit()
+        title = row.title or row.url
+    return f"{'Approved' if approve else 'Rejected'}: {title[:60]}"
+
+
 def may_publish(asset_id: str) -> tuple[bool, str]:
     """Whether this asset may go out, and if not, why not."""
     with db.SessionLocal() as s:
@@ -2226,6 +2271,9 @@ def may_publish(asset_id: str) -> tuple[bool, str]:
             return False, "no such asset"
         if row.status != "active":
             return False, f"asset is {row.status}"
+        if (row.review or "") == prov.PROPOSED:
+            return False, ("still waiting on review — a picture found by the "
+                           "crawler is a candidate, not a licence")
         if (row.rights or REFERENCE) != OWNED:
             return False, ("reference only — saved for inspiration, not "
                            "licensed for use. Generate something of our own "

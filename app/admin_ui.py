@@ -111,6 +111,14 @@ button.sec{background:transparent;color:var(--acc)}
 .cform summary{cursor:pointer;font-size:.8rem;color:var(--acc);font-weight:600}
 .cform .f{margin-top:9px}
 .cform input{width:100%}
+.picgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.pic{position:relative;display:block;border:1px solid var(--rule);border-radius:5px;
+  overflow:hidden;cursor:pointer;background:var(--panel)}
+.pic img{display:block;width:100%;height:112px;object-fit:cover;background:var(--rule2)}
+.pic input{position:absolute;top:7px;left:7px;z-index:2;transform:scale(1.25)}
+.pic:has(input:checked){outline:2px solid var(--acc);outline-offset:-2px}
+.picmeta{display:block;font-size:.68rem;color:var(--mut);padding:5px 7px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .inst{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
   margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
 .inst.ok{border-left:3px solid var(--ok)}
@@ -1361,7 +1369,55 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # accounts it was built for. Rendered outside the `if pending` branch,
     # because an account with an empty review queue is the one most likely to
     # be starting from nothing.
-    assets_form = f"""
+    # The picture queue. A crawl files dozens at a time and they are useless
+    # until somebody says which are the client's to publish — so the review has
+    # to be as quick as the claim queue, thumbnails and all. Seeing them is the
+    # whole job: nobody can judge a photograph from a CDN URL.
+    waiting = kbm.proposed_assets(tenant)
+    approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
+    marks = kbm.logos(tenant)
+    pic_cards = ""
+    for a in waiting[:60]:
+        is_logo = (a.subject or "") == kbm.LOGO
+        pic_cards += f"""
+        <label class="pic">
+          <input type="checkbox" name="asset_ids" value="{_esc(a.id)}" form="pics">
+          <img src="{_esc(a.url)}" loading="lazy" alt="">
+          <span class="picmeta">{'&#9679; logo' if is_logo else ''}
+            {_esc((a.title or '')[:38])}</span>
+        </label>"""
+    pics_html = ""
+    if waiting:
+        pics_html = f"""
+    <div class="anchor" id="pics"></div>
+    <div class="card">
+      <div class="head"><h2>Pictures waiting</h2>
+        <span class="mut">{len(waiting)} found by the crawler ·
+        {len(approved_pics)} approved · {len(marks)} logo(s)</span></div>
+      <p class="mut">A picture on a client&#39;s site is a <b>candidate, not a
+      licence</b> — plenty of sites carry stock licensed for the web and
+      nothing else. Approve what is genuinely theirs. Rejecting retires it, so
+      the next crawl will not offer it again.</p>
+      <form id="pics" method="post" action="/admin/assets_decide"></form>
+      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="pics">
+      <div class="bulkbar">
+        <label class="pick"><input type="checkbox" id="allpics"> select all
+          {len(waiting)}</label>
+        <span class="grow"></span>
+        <button form="pics" name="action" value="reject" class="sec">Reject
+          selected</button>
+        <button form="pics" name="action" value="approve">Approve selected</button>
+      </div>
+      <div class="picgrid">{pic_cards}</div>
+      <script>
+      document.getElementById('allpics').addEventListener('change', function(e) {{
+        document.querySelectorAll('input[name="asset_ids"]')
+                .forEach(function(b) {{ b.checked = e.target.checked; }});
+      }});
+      </script>
+    </div>"""
+
+    assets_form = pics_html + f"""
     <div class="card">
       <div class="head"><h2>Creative library</h2></div>
       <p class="mut">Photographs the creative pipeline may use.

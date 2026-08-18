@@ -326,9 +326,15 @@ def forget_pages(tenant: str) -> str:
 # `Logo.png` and `IRONSIDE+WHITE+LOGO.png`. A logo is a brand asset rather than
 # photography anyway — it belongs in the Canva brand kit, which is where the
 # colours and type already live.
-_IMG_SKIP = ("sprite", "icon", "favicon", "logo", "wordmark", "/icons/",
-             "pixel", "spacer", "1x1", "placeholder", "badge", "payment",
-             "trustpilot", "avatar", "arrow", "chevron")
+_IMG_SKIP = ("sprite", "icon", "favicon", "/icons/", "pixel", "spacer",
+             "1x1", "placeholder", "badge", "payment", "trustpilot",
+             "avatar", "arrow", "chevron")
+
+# Not junk — a different KIND. A logo is a brand asset rather than photography:
+# it is wanted wherever a creative needs the mark, and unwanted in a library of
+# venue and product shots. Dropping them lost something the brand needs; mixing
+# them in buried the photographs. So they are kept and labelled.
+_IMG_LOGO = ("logo", "wordmark", "brandmark", "-mark.", "/mark.")
 
 
 def _same_picture(url: str) -> str:
@@ -346,7 +352,7 @@ def _same_picture(url: str) -> str:
 
 
 def _images(html: str, page_url: str) -> list[tuple[str, str]]:
-    """Image URLs worth keeping, absolute, with whatever alt text they carry.
+    """Images worth keeping: `(url, alt, kind)` where kind is photo or logo.
 
     Deliberately conservative. A page carries payment badges, tracking pixels
     and social icons alongside the photography, and a library filled with
@@ -365,7 +371,8 @@ def _images(html: str, page_url: str) -> list[tuple[str, str]]:
         if fp in seen or any(bit in fp for bit in _IMG_SKIP):
             return
         seen.add(fp)
-        out.append((u, alt))
+        kind = "logo" if any(bit in fp for bit in _IMG_LOGO) else "photo"
+        out.append((u, alt, kind))
 
     og = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+'
                     r'content=["\']([^"\']+)', html, _re.I)
@@ -500,12 +507,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # shots and Coverings' installation photos have no product feed behind
         # them — and re-fetching every page later purely to look at the images
         # would double the crawl for something already on the wire.
-        for img_url, alt in _images(html, url):
+        for img_url, alt, img_kind in _images(html, url):
             fp = _same_picture(img_url)
             if fp in seen_images:
                 continue
             seen_images.add(fp)
-            images.append({"url": img_url, "alt": alt, "page": url})
+            images.append({"url": img_url, "alt": alt, "page": url,
+                           "kind": img_kind})
 
         page_truncated = False      # per page, never inherited from the last
         blocks = compliance.text_blocks(html)
@@ -693,7 +701,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         for im in images[:120]:
             said = kb.add_asset(
                 tenant, im["url"], rights=kb.OWNED, kind="image",
-                title=(im["alt"] or "").strip()[:120] or "from the website",
+                subject=(kb.LOGO if im["kind"] == "logo" else ""),
+                title=(im["alt"] or "").strip()[:120]
+                      or ("logo" if im["kind"] == "logo" else "from the website"),
                 source=f"crawled from {im['page']}", origin="crawl")
             if said.startswith("Filed"):
                 filed += 1
@@ -701,6 +711,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
         "images_found": len(images),
+        "logos_found": sum(1 for i in images if i["kind"] == "logo"),
         "images_filed": filed,
         "images": images[:20],
         "images_note": ("filed as PROPOSALS, unusable in a creative until "

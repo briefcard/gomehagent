@@ -2374,6 +2374,31 @@ def creative(key: str = Depends(admin_key), tenant: str = "", asset: str = "",
                              "X-Caveat": "similarity is a diagnostic, not a gate"})
 
 
+@app.post("/admin/assets_decide", response_class=HTMLResponse)
+async def assets_decide(request: Request, key: str = Depends(admin_key)):
+    """Approve or reject pictures, many at a time.
+
+    The crawler files fifty-six images from one site. Deciding those one
+    request at a time is the same failure the claim queue had, and the same
+    fix: a checkbox per card bound to one form.
+    """
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", ""))
+    ids = [str(i) for i in form.getlist("asset_ids") if str(i).strip()]
+    if not ids:
+        return _back_to_content(tenant, msg="no pictures were selected")
+    approve = action == "approve"
+    for aid in ids:
+        kbm.review_asset(aid, approve=approve)
+    verb = "approved" if approve else "rejected"
+    return _back_to_content(tenant, msg=f"{verb} {len(ids)} picture(s)",
+                            anchor="pics")
+
+
 @app.post("/admin/asset_add", response_class=HTMLResponse)
 async def asset_add(request: Request, key: str = Depends(admin_key)):
     """Put a photograph into the creative library.
