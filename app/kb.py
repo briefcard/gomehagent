@@ -2197,6 +2197,12 @@ def assets(tenant: str, *, publishable_only: bool = True,
         q = s.query(db.KbAsset).filter(db.KbAsset.tenant == tenant,
                                        db.KbAsset.status == "active")
         if publishable_only:
+            # Review state gates imagery exactly as it gates claims. A crawler
+            # can now file the pictures off a client's own website, and those
+            # arrive as proposals — without this line they would be publishable
+            # the moment they were scraped, which is the review gate intact and
+            # bypassed in the same breath.
+            q = q.filter(db.KbAsset.review != prov.PROPOSED)
             # Exactly `owned`, never "not reference" — a NULL from a migration
             # or a typo must land on the safe side.
             q = q.filter(db.KbAsset.rights == OWNED)

@@ -321,6 +321,50 @@ def forget_pages(tenant: str) -> str:
     return f"{tenant}: forgot {n} pages — the next harvest re-reads the site."
 
 
+_IMG_SKIP = ("sprite", "icon", "favicon", "logo-", "/icons/", "pixel",
+             "spacer", "1x1", "placeholder", "badge", "payment", "trustpilot")
+
+
+def _images(html: str, page_url: str) -> list[tuple[str, str]]:
+    """Image URLs worth keeping, absolute, with whatever alt text they carry.
+
+    Deliberately conservative. A page carries payment badges, tracking pixels
+    and social icons alongside the photography, and a library filled with
+    those is one nobody opens — the same failure as a review queue nobody
+    works, in a different table. `og:image` comes first because a page that
+    declares one has already answered "which picture is this page about".
+    """
+    import re as _re
+    from urllib.parse import urljoin
+
+    out: list[tuple[str, str]] = []
+
+    og = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+'
+                    r'content=["\']([^"\']+)', html, _re.I)
+    if og:
+        out.append((urljoin(page_url, og.group(1)), "og:image"))
+
+    for m in _re.finditer(r"<img\b[^>]*>", html, _re.I):
+        tag = m.group(0)
+        src = _re.search(r'\bsrc=["\']([^"\']+)', tag, _re.I)
+        if not src:
+            # Lazy-loaded images carry the real URL in data-src, and a crawler
+            # that only reads `src` collects a page of placeholders.
+            src = _re.search(r'\bdata-src=["\']([^"\']+)', tag, _re.I)
+        if not src:
+            continue
+        u = urljoin(page_url, src.group(1).strip())
+        if not u.lower().startswith(("http://", "https://")):
+            continue
+        if u.lower().rsplit("?", 1)[0].endswith((".svg", ".gif")):
+            continue
+        if any(bit in u.lower() for bit in _IMG_SKIP):
+            continue
+        alt = _re.search(r'\balt=["\']([^"\']*)', tag, _re.I)
+        out.append((u, (alt.group(1).strip() if alt else "")[:160]))
+    return out
+
+
 def harvest(tenant: str, limit: int = 25, apply: bool = False,
             use_model: bool | None = None, recrawl: bool = False) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
@@ -357,6 +401,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     # Matched on the shared normalised fingerprint rather than a lowercased
     # string: a re-crawl after someone fixed a typo, or the same sentence with
     # different punctuation, is the same claim and must not queue twice.
+    images: list[dict] = []
+    seen_images: set[str] = set()
     known = {prov.fingerprint(c.claim)
              for c in kb.claims(tenant) + kb.pending_claims(tenant)}
 
@@ -419,6 +465,17 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # One string per block, never one string for the page. Sentences are
         # only split WITHIN a block, so a spec cell and the FAQ heading beside
         # it can never become one candidate.
+        # Pictures, while the page is already in hand. A client's own site is
+        # usually where their photography actually lives — Ironside's venue
+        # shots and Coverings' installation photos have no product feed behind
+        # them — and re-fetching every page later purely to look at the images
+        # would double the crawl for something already on the wire.
+        for img_url, alt in _images(html, url):
+            if img_url in seen_images:
+                continue
+            seen_images.add(img_url)
+            images.append({"url": img_url, "alt": alt, "page": url})
+
         page_truncated = False      # per page, never inherited from the last
         blocks = compliance.text_blocks(html)
         text = " ".join(blocks)
@@ -594,8 +651,32 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             if msg.startswith("Added"):
                 filed_faqs += 1
 
+    # File the pictures, as PROPOSALS. `origin="crawl"` lands them unapproved,
+    # and `assets()` now excludes proposed rows from a publishable read — a
+    # picture found on a website is a candidate, not a licence. A client's own
+    # domain is a good signal and not a guarantee: plenty of sites carry stock
+    # photography licensed for the web and nothing else, and that distinction
+    # is invisible in the file.
+    filed = 0
+    if apply and images:
+        for im in images[:120]:
+            said = kb.add_asset(
+                tenant, im["url"], rights=kb.OWNED, kind="image",
+                title=(im["alt"] or "").strip()[:120] or "from the website",
+                source=f"crawled from {im['page']}", origin="crawl")
+            if said.startswith("Filed"):
+                filed += 1
+
     return {
         "tenant": tenant, "domain": t.domain, "applied": apply,
+        "images_found": len(images),
+        "images_filed": filed,
+        "images": images[:20],
+        "images_note": ("filed as PROPOSALS, unusable in a creative until "
+                        "approved — a picture on a client's site is a "
+                        "candidate, not a licence"
+                        if apply else
+                        "not filed: this was a dry run"),
         # Three different things used to report as "deterministic filter": the
         # key being absent, every page having nothing worth sending, and the
         # API failing mid-crawl. Only the first is a configuration problem, and

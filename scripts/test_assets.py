@@ -126,6 +126,44 @@ def main() -> int:
     ck("  and an unused asset is not in that list at all",
        all(int(a.uses or "0") > 0 for a in ranked))
 
+    print("\n— pictures off the client's own website —")
+    from app import harvest as hv
+    html = ("<html><head>"
+            "<meta property=\"og:image\" content=\"/img/hero.jpg\">"
+            "</head><body>"
+            "<img src=\"https://cdn.x.com/venue/hall.jpg\" alt=\"Main hall\">"
+            "<img data-src=\"/gallery/terrace.jpg\" alt=\"Terrace\">"
+            "<img src=\"/icons/facebook.svg\" alt=\"fb\">"
+            "<img src=\"/payment-badge.png\" alt=\"visa\">"
+            "<img src=\"/img/spacer.gif\">"
+            "<img src=\"/assets/logo-white.png\" alt=\"logo\">"
+            "</body></html>")
+    got = hv._images(html, "https://miamiironside.com/spaces")
+    urls = [u for u, _ in got]
+    ck("the page's declared og:image is taken first",
+       urls and urls[0].endswith("/img/hero.jpg"), str(urls[:1]))
+    ck("  relative paths are made absolute against the page",
+       all(u.startswith("http") for u in urls), str(urls))
+    ck("  LAZY-LOADED images are found — reading only src collects placeholders",
+       any("terrace" in u for u in urls), str(urls))
+    ck("  icons, payment badges, spacers and logos are left behind",
+       not any(bit in " ".join(urls)
+               for bit in ("facebook", "payment", "spacer", "logo-")),
+       str(urls))
+    ck("  alt text is kept, because it is the only caption a crawl ever gets",
+       any(a == "Main hall" for _, a in got), str([a for _, a in got]))
+
+    kb.add_asset("baci", "https://cdn.x.com/venue/hall.jpg", rights=kb.OWNED,
+                 kind="image", title="Main hall", source="crawled",
+                 origin="crawl")
+    crawled = [a for a in kb.assets("baci", publishable_only=False)
+               if a.title == "Main hall"]
+    ck("a crawled picture is filed", len(crawled) == 1)
+    ck("  BUT IT IS NOT PUBLISHABLE UNTIL APPROVED — a photograph on a "
+       "client's website is a candidate, not a licence",
+       not any(a.title == "Main hall" for a in kb.assets("baci")),
+       "plenty of sites carry stock licensed for the web and nothing else")
+
     print("\n— the brand's visual half —")
     kb.set_brand("baci", visual={"direction": "Styled on a laid table.",
                                  "do_show": ["the piece in use"],
