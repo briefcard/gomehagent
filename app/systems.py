@@ -342,8 +342,27 @@ def ready(system: db.System) -> dict:
         if not c["ready"]:
             blockers.append("knowledge base: " + ", ".join(c["missing"]))
 
+    # Two questions, and they are NOT the same question.
+    #
+    # `ready` answers "may this system act unsupervised" — go-live, promotion.
+    # A blank contract and a thin knowledge base belong there: both are reasons
+    # not to trust it loose.
+    #
+    # `can_produce` answers "may this system make something a human will read".
+    # Only an absent CONNECTION belongs there, because that is the one gap that
+    # makes producing impossible rather than merely thinner — you cannot answer
+    # mail you cannot fetch. Missing knowledge makes a draft worse, and a worse
+    # draft that says what it is missing beats no draft at all.
+    #
+    # Conflating them is why an approved objection was standing between a
+    # customer and a reply. Owner's rule, and the one this file already claims
+    # to follow: enrich, do not gatekeep.
+    impossible = [b for b in blockers
+                  if b.startswith("not connected:") or b.startswith("needs at least one of:")]
     return {"ready": not blockers, "blockers": blockers,
-            "contract_complete": not missing_contract}
+            "contract_complete": not missing_contract,
+            "can_produce": not impossible, "impossible": impossible,
+            "thin": [b for b in blockers if b not in impossible]}
 
 
 # ---------------------------------------------------------------------------

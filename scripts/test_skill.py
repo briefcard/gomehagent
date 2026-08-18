@@ -164,10 +164,22 @@ def main():
 
     row = seed("baci", banned=("made in Italy", "hand-decorated", "artisan"),
                claim="Designed in Milan and produced at scale")
+
+    # CHANGED, not worked around. These two assertions pinned the old rule that
+    # an incomplete 8-part contract stops a run. Owner overruled it: the
+    # contract is a governance form, and a blank one is not a reason to produce
+    # nothing. It still gates GO-LIVE — `systems.ready` keeps that bar, and the
+    # "cannot even go live" check further down proves it — but it no longer
+    # gates producing something a human is going to read anyway.
+    skill_pack.fetch_products = fake_fetch([CLEAN], total=1, complete=True)
     r = skill.run("catalog_compliance", "baci")
-    ck("an incomplete contract blocks the run", r["status"] == "blocked")
-    ck("  and names the contract, not 'error'",
-       any("contract" in b for b in r["blocked_on"]), str(r["blocked_on"]))
+    ck("an incomplete contract does NOT stop the work",
+       r["status"] != "blocked", r["status"])
+    ck("  but the run says what it was missing",
+       any("contract" in t for t in r.get("thin", [])), str(r.get("thin")))
+    ck("  and the gap is filed where the operator already works",
+       any("contract" in (u.attribute or "") for u in kb.unknowns("baci")),
+       "a gap nobody can see is a gap nobody fixes")
 
     row = contract(row)
     r = skill.run("catalog_compliance", "baci", nonsense=1)

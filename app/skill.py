@@ -43,7 +43,8 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import kb, ledger, resolve as rs, systems, tenants, validator
+from . import (assurance, kb, ledger, resolve as rs, systems, tenants,
+               validator)
 
 # ---------------------------------------------------------------------------
 # The contract
@@ -64,7 +65,21 @@ class Skill:
     does: str                       # one line — this becomes the tool description
     system_key: str
     tier: int = 3                   # the resolve() tier this work actually needs
-    needs: tuple = ()               # dotted bundle paths it cannot work without
+    needs: tuple = ()               # dotted bundle paths that make it THINNER
+    # Knowledge without which the output would be FALSE, not merely thinner.
+    #
+    # `needs` is a label; this is a gate, and the difference is whether the
+    # work still means anything. A reply drafted without an approved objection
+    # is a worse reply and worth having — the owner's rule, and the reason
+    # nothing else here blocks on absent data. A compliance sweep run against
+    # an empty ban list is not a worse report, it is a report that says CLEAN
+    # about a catalogue nobody checked, which is the false assurance
+    # `validator.check` refuses to give for the same reason.
+    #
+    # Almost always empty. If you are reaching for it, the question to answer
+    # is "would the output be a lie without this", and "it would be vaguer" is
+    # a no.
+    constitutive: tuple = ()        # kb fields whose absence makes output false
     params: tuple = ()              # accepted inputs; anything else is refused
     writes: bool = False            # does it mutate anything outside the ledger
     produces: str = "report"        # report | draft | proposal
@@ -177,6 +192,10 @@ class Context:
     params: dict
     run_id: str
     autonomy: str
+    #: What the bundle could not carry. Set by `run` and carried onto every
+    #: assurance row, so a clean check on a thin bundle is never mistaken for
+    #: a clean check on a complete one.
+    thin: list = field(default_factory=list)
     items: list = field(default_factory=list)
     notes: list = field(default_factory=list)
 
@@ -281,6 +300,27 @@ class Context:
             blocked_on=[f["rule"] for f in verdict["failures"]],
             destination=destination, body=body,
             conversation_id=conversation_id, run_id=self.run_id)
+
+        # Every attempt is filed as a CHECK, not just the ones that produced
+        # something. The ledger records what was produced; without this, "how
+        # many drafts did the validator clear" has no answer and a layer that
+        # is working looks identical to one that is switched off.
+        for i, att in enumerate(attempts):
+            assurance.record(
+                self.tenant, source="skill", system_key=self.skill.system_key,
+                run_id=self.run_id, attempt=i,
+                checked=verdict.get("checked") or [],
+                caught=[f["rule"] for f in att["failures"]],
+                verdict="repaired" if verdict["ok"] else "superseded",
+                grounded=bool(claim_ids), thin=self.thin)
+        assurance.record(
+            self.tenant, source="skill", system_key=self.skill.system_key,
+            run_id=self.run_id, output_id=row.id, attempt=len(attempts),
+            checked=verdict.get("checked") or [],
+            caught=[f["rule"] for f in verdict["failures"]],
+            verdict=("blocked" if not verdict["ok"]
+                     else ("repaired" if attempts else "passed")),
+            grounded=bool(claim_ids), thin=self.thin)
 
         # An item that needs a human gets an approval linked to THIS RUN, which
         # is the only way the decision can travel back and let the system earn
@@ -401,11 +441,15 @@ def preflight(key: str, tenant: str) -> dict:
                 "blocked_on": [f"the {sk.system_key} system is retired"]}
 
     gate = systems.ready(row)
-    if not gate["ready"]:
-        return {"status": "blocked", "blocked_on": gate["blockers"],
-                "autonomy": row.autonomy, "system_id": row.id}
+    if not gate["can_produce"]:
+        # The ONLY blocking case left: a connection that does not exist. Every
+        # other gap makes the output thinner, not impossible, and thinner is
+        # what `thin` carries down to the run so it can be said on the output.
+        return {"status": "blocked", "blocked_on": gate["impossible"],
+                "autonomy": row.autonomy, "system_id": row.id,
+                "thin": gate["thin"]}
     return {"status": "ready", "blocked_on": [], "autonomy": row.autonomy,
-            "system_id": row.id}
+            "system_id": row.id, "thin": gate["thin"]}
 
 
 def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
@@ -461,23 +505,52 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
                         entity_key=str(params.get("entity_key") or ""))
 
     coverage = bundle.get("coverage") or {}
-    blocked = list(bundle.get("blocked_on") or [])
+
+    # What the bundle could not carry is a LABEL on the work, never a reason to
+    # refuse it. This used to append `sk.needs` misses to `blocked` and return
+    # before the skill ever ran, so an account with no approved objection got
+    # silence instead of a reply — a gate built on absent data, which is §2.27
+    # in the one place it costs a customer an answer.
+    #
+    # The gap still has to survive to the output, or this trades a refusal for
+    # a confident-sounding draft with nothing behind it, which is worse. So it
+    # is carried three ways: a note the caller can read, `thin` on the result,
+    # and a knowledge task filed where the operator already works.
+    thin = list(bundle.get("blocked_on") or []) + list(pre.get("thin") or [])
     missing = [p for p in sk.needs if not _dig(bundle, p)]
     if missing:
-        blocked.append("the bundle carried nothing at: " + ", ".join(missing))
+        thin.append("nothing on file at: " + ", ".join(missing))
 
-    if blocked:
-        systems.finish_run(run_id, "blocked", blocked_on="; ".join(blocked))
+    # The one gate left that is about knowledge, and it is per skill rather
+    # than a global bar — see `constitutive`.
+    absent = kb.needs_met(tenant, sk.constitutive) if sk.constitutive else []
+    if absent:
+        why = [f"{sk.key} cannot say anything true without: " + ", ".join(absent)]
+        systems.finish_run(run_id, "blocked", blocked_on="; ".join(why))
         ledger.record(tenant, sk.system_key, status="blocked",
-                      blocked_on=blocked, run_id=run_id,
-                      format=sk.produces)
+                      blocked_on=why, run_id=run_id, format=sk.produces)
         return {"skill": key, "tenant": tenant, "status": "blocked",
-                "blocked_on": blocked, "items": [], "notes": [],
+                "blocked_on": why, "items": [], "notes": [], "thin": thin,
                 "coverage": coverage, "gaps": bundle.get("gaps") or [],
                 "run_id": run_id}
 
     ctx = Context(tenant=tenant, skill=sk, bundle=bundle, params=params,
-                  run_id=run_id, autonomy=pre["autonomy"])
+                  run_id=run_id, autonomy=pre["autonomy"], thin=thin)
+    for gap in thin:
+        ctx.note(f"working without: {gap}")
+    if thin:
+        # `basis="unknown"` and `attribute` are what record_unknowns FILTERS ON
+        # — the first version of this call passed `field`/`why` and would have
+        # recorded nothing at all while returning cleanly. Asserting the count
+        # rather than trusting the return is the §1 rule about bulk writes.
+        try:
+            filed = kb.record_unknowns(
+                tenant, [{"basis": "unknown", "attribute": g} for g in thin],
+                asked_for=f"{sk.system_key} produced without it")
+            if not filed:
+                ctx.note("this gap could not be filed as a knowledge task")
+        except Exception:                                       # noqa: BLE001
+            pass    # a knowledge task that cannot be filed must not lose the draft
 
     try:
         result = sk.run(ctx) or {}
@@ -504,5 +577,9 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     return {"skill": key, "tenant": tenant, "status": status,
             "blocked_on": [], "items": ctx.items, "notes": ctx.notes,
             "coverage": coverage, "gaps": bundle.get("gaps") or [],
+            # What it produced this WITHOUT. Empty means fully grounded; a
+            # caller rendering an item is expected to say so when it is not,
+            # the same way `ad_copy` carries `basis`.
+            "thin": thin,
             "autonomy": ctx.autonomy, "run_id": run_id,
             "summary": result.get("summary", ""), "detail": result}

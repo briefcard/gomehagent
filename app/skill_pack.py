@@ -229,6 +229,11 @@ register(Skill(
     system_key="catalog_compliance",
     tier=1,                       # rules are all it needs, and tier 1 is cheap
     needs=("rules.banned_claims",),
+    # The ONE constitutive declaration in the pack. Every other gap makes an
+    # output thinner; this one makes it false — a sweep against an empty ban
+    # list reports a catalogue CLEAN that nothing checked, and Baci's own audit
+    # is 110 violations that a sweep like that would have blessed.
+    constitutive=("banned_claims",),
     params=("site", "limit"),
     writes=False,
     produces="report",
