@@ -321,8 +321,28 @@ def forget_pages(tenant: str) -> str:
     return f"{tenant}: forgot {n} pages — the next harvest re-reads the site."
 
 
-_IMG_SKIP = ("sprite", "icon", "favicon", "logo-", "/icons/", "pixel",
-             "spacer", "1x1", "placeholder", "badge", "payment", "trustpilot")
+# Matched against the path with its query stripped and lowercased. "logo-" was
+# too literal and let every one of Ironside's through: the real filenames were
+# `Logo.png` and `IRONSIDE+WHITE+LOGO.png`. A logo is a brand asset rather than
+# photography anyway — it belongs in the Canva brand kit, which is where the
+# colours and type already live.
+_IMG_SKIP = ("sprite", "icon", "favicon", "logo", "wordmark", "/icons/",
+             "pixel", "spacer", "1x1", "placeholder", "badge", "payment",
+             "trustpilot", "avatar", "arrow", "chevron")
+
+
+def _same_picture(url: str) -> str:
+    """A key that treats one image at several sizes as one image.
+
+    A Squarespace CDN serves the same file as `…/Logo.png?format=1500w` and
+    `…/Logo.png?format=300w`, and the same asset appears on both
+    `static1.squarespace.com` and `images.squarespace-cdn.com`. Deduplicating
+    on the exact URL files it three times, and a review queue with the same
+    picture in it three times is one nobody finishes.
+    """
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    return parts.path.rstrip("/").lower()
 
 
 def _images(html: str, page_url: str) -> list[tuple[str, str]]:
@@ -338,11 +358,23 @@ def _images(html: str, page_url: str) -> list[tuple[str, str]]:
     from urllib.parse import urljoin
 
     out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _keep(u: str, alt: str) -> None:
+        fp = _same_picture(u)
+        if fp in seen or any(bit in fp for bit in _IMG_SKIP):
+            return
+        seen.add(fp)
+        out.append((u, alt))
 
     og = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+'
                     r'content=["\']([^"\']+)', html, _re.I)
     if og:
-        out.append((urljoin(page_url, og.group(1)), "og:image"))
+        u = urljoin(page_url, og.group(1))
+        # The declared og:image is often just the logo, as it is on every page
+        # of Ironside's site. Exempting it from the filter because a page
+        # "chose" it would file that logo once per page.
+        _keep(u, "og:image")
 
     for m in _re.finditer(r"<img\b[^>]*>", html, _re.I):
         tag = m.group(0)
@@ -358,10 +390,8 @@ def _images(html: str, page_url: str) -> list[tuple[str, str]]:
             continue
         if u.lower().rsplit("?", 1)[0].endswith((".svg", ".gif")):
             continue
-        if any(bit in u.lower() for bit in _IMG_SKIP):
-            continue
         alt = _re.search(r'\balt=["\']([^"\']*)', tag, _re.I)
-        out.append((u, (alt.group(1).strip() if alt else "")[:160]))
+        _keep(u, (alt.group(1).strip() if alt else "")[:160])
     return out
 
 
@@ -471,9 +501,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # them — and re-fetching every page later purely to look at the images
         # would double the crawl for something already on the wire.
         for img_url, alt in _images(html, url):
-            if img_url in seen_images:
+            fp = _same_picture(img_url)
+            if fp in seen_images:
                 continue
-            seen_images.add(img_url)
+            seen_images.add(fp)
             images.append({"url": img_url, "alt": alt, "page": url})
 
         page_truncated = False      # per page, never inherited from the last

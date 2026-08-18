@@ -147,9 +147,28 @@ def main() -> int:
     ck("  LAZY-LOADED images are found — reading only src collects placeholders",
        any("terrace" in u for u in urls), str(urls))
     ck("  icons, payment badges, spacers and logos are left behind",
-       not any(bit in " ".join(urls)
-               for bit in ("facebook", "payment", "spacer", "logo-")),
+       not any(bit in " ".join(urls).lower()
+               for bit in ("facebook", "payment", "spacer", "logo")),
        str(urls))
+    # The real Ironside markup, which the first filter let straight through:
+    # its files are `Logo.png` and `IRONSIDE+WHITE+LOGO.png`, and the skip list
+    # said "logo-" with a hyphen.
+    ironside = ('<html><head><meta property="og:image" '
+                'content="/t/5fb/Logo.png?format=1500w"></head><body>'
+                '<img src="/v1/540/1606/Logo.png?format=1500w" alt="MIAMI IRONSIDE">'
+                '<img src="/v1/540/d266/Ironside+Walls.webp" alt="Walls">'
+                '<img src="/v1/540/1781/cmd-56.jpg" alt="Community">'
+                '<img src="/540/c14a/IRONSIDE+WHITE+LOGO.png" alt="Miami Ironside">'
+                '<img src="/v1/540/1781/cmd-56.jpg?format=300w" alt="Community small">'
+                "</body></html>")
+    ir = hv._images(ironside, "https://www.miamiironside.com/home")
+    ir_urls = [u for u, _ in ir]
+    ck("  A LOGO IS NOT PHOTOGRAPHY — it belongs in the brand kit, and the "
+       "real filenames were Logo.png and IRONSIDE+WHITE+LOGO.png",
+       not any("logo" in u.lower() for u in ir_urls), str(ir_urls))
+    ck("  one picture at two sizes is one picture, not two review rows",
+       len([u for u in ir_urls if "cmd-56" in u]) == 1, str(ir_urls))
+    ck("  and the actual photographs survive", len(ir) == 2, str(ir_urls))
     ck("  alt text is kept, because it is the only caption a crawl ever gets",
        any(a == "Main hall" for _, a in got), str([a for _, a in got]))
 
