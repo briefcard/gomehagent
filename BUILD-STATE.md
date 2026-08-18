@@ -184,6 +184,46 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## Creative that actually contains the product
+
+Canva's generator treats a supplied asset as **inspiration**. Tested against
+Baci's own catalogue with `asset_id` set, it produced four ads with four
+invented pitchers — Gomeh confirmed none showed the product. No amount of
+prompt tightening makes that deterministic, so a compliance-gated skill cannot
+stand on it.
+
+`app/compose.py` places the product by drawing it, so there is nothing to
+verify afterwards. Two treatments, both wanted:
+
+* `product_on_colour` — cutout on a brand ground. Ships today, depends on
+  nothing generated.
+* `product_on_scene` — cutout composited onto a styled plate, **grounded with a
+  contact shadow**. That shadow is most of the difference between composited
+  and pasted, and the first version of it was invisible: a pitcher's footprint
+  is its narrow foot, so a shadow at the object's own width vanishes once
+  blurred — a real one spreads wider than what casts it — and the blur radius
+  was a constant rather than a fraction of the shadow's height.
+
+Baci's photography is already right for this: verified 1200×1200 PNGs with a
+real alpha channel and fully transparent corners.
+
+**Rights gate the imagery too.** `_guard` refuses to composite an asset that is
+not `owned`, and refuses one belonging to another account. A competitor's
+photograph composited into an ad is precisely what that axis exists to prevent,
+and it would be invisible in the output.
+
+**The font used is reported.** Rendering a brand's headline in whatever font
+happened to be installed is a brand violation that looks like a success — same
+reasoning as `ad_copy` reporting `basis`.
+
+Three ad shapes every time (1:1, 4:5, 9:16), so nothing is re-cropped by hand
+and the story version does not lose its headline off the top. `Pillow` added to
+requirements — it was installed locally and **not on the service**.
+
+**Still needed for scenes:** a plate. A generated background must contain NO
+product — asking a generator for a table with a pitcher on it and then pasting
+a second pitcher beside it is the failure this approach exists to avoid.
+
 ## Canva, and where each account's work lives
 
 Canva is a real provider now — OAuth **with PKCE**, which Canva Connect requires

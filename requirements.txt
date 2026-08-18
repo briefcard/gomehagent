@@ -24,3 +24,4 @@ cryptography>=42.0
 # slower. That difference does not matter at a few hundred vectors and does
 # matter inside a voice turn's latency budget.
 numpy>=1.26
+Pillow>=10.0
