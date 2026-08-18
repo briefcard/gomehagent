@@ -184,6 +184,36 @@ incident: a poller re-triggered a slow endpoint, ~200 queued drafts went out at
 minute. The existing digest poller batches and caps; nothing in the substrate
 sends directly.
 
+## One creative pipeline, three shapes of business
+
+The cutout pipeline only ever fitted one kind of client. Baci sells **objects**
+with a silhouette; Coverings sells **surfaces**, where the tile IS the surface
+and standing it on a table is meaningless; Ironside sells **places**, and a room
+cannot be cut out at all. A pipeline that assumes a product cutout is a Baci
+pipeline wearing a platform's clothes.
+
+`KbAsset.subject` records which — `object` / `surface` / `scene` — because it
+does not generalise and guessing it per render is how a venue photograph gets
+treated like a pitcher. `kb.detect_subject` offers a default from the one
+reliable signal, transparency: a cutout is a discrete thing somebody already
+isolated. With no alpha it returns `scene`, the treatment that is safe for a
+tiled wall and a restaurant alike, and says the caller should override it.
+
+`compose.photo_with_headline` is the treatment that fits all three, because it
+assumes nothing about what is in the picture: the client's own photograph, plus
+something to say. No cutout, no generation, nothing that can be the wrong
+product, tile or room.
+
+Two things make it survive that range without a human tuning each client.
+`_quiet_band` measures the variance of each horizontal band and puts the type in
+the calmest one — where the quiet region sits is a fact about each photograph,
+not a house style, and a packed interior is quiet at the ceiling while a product
+sweep is quiet everywhere but the middle. `_scrim` lays a soft double-fading
+gradient behind the type and picks its polarity from that band's brightness, so
+one call produces white type on a dark restaurant and dark type on a white
+sweep. Verified across a dark venue, a mosaic with no quiet area, and a bright
+product sweep — readable in all three, from the same call.
+
 ## Generated scenes, with the product protected rather than checked
 
 `app/imagegen.py`, on OpenAI — the same `OPENAI_API_KEY` `embed.py` already

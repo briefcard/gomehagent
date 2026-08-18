@@ -1165,6 +1165,16 @@ class KbAsset(_Provenance, Base):
     id = Column(String, primary_key=True, default=_uuid)
     tenant = Column(String, nullable=False, index=True)
     kind = Column(String, default="image")     # image | video | design
+    # WHAT the asset depicts, which decides how it can be used — and it does
+    # not generalise from one client to the next. Baci sells objects with a
+    # silhouette, Coverings sells surfaces, Ironside sells places. A cutout
+    # treatment is right for the first, meaningless for the second (a tile IS
+    # the surface, you do not stand it on a table) and impossible for the third
+    # (you cannot cut out a room). Storing it stops the pipeline guessing.
+    #   object  — a discrete thing, usually with transparency
+    #   surface — a material or texture: tile, stone, fabric, finish
+    #   scene   — a place or an installed context, photographed as-is
+    subject = Column(String, default="", index=True)
     # owned = the client's to publish. reference = inspiration only, never
     # output. No default: absent means reference, which is the safe reading.
     rights = Column(String, index=True)

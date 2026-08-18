@@ -16,7 +16,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}"
 os.environ["APPROVAL_SECRET"] = "test-secret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 
 from app import compose, db, kb, tenants  # noqa: E402
 
@@ -33,7 +33,6 @@ def ck(label, cond, detail=""):
 def _cutout(colour=(240, 240, 245, 255)):
     """A transparent-background product stand-in, like Baci's real ones."""
     im = Image.new("RGBA", (600, 600), (0, 0, 0, 0))
-    from PIL import ImageDraw
     ImageDraw.Draw(im).ellipse([150, 120, 450, 520], fill=colour)
     b = io.BytesIO()
     im.save(b, format="PNG")
@@ -124,6 +123,63 @@ def main() -> int:
     im = Image.open(io.BytesIO(r3["images"]["9:16"]))
     ck("a wide plate still fills a tall format at the right size",
        im.size == compose.SIZES["9:16"], str(im.size))
+
+    print("\n— the treatment that fits every client —")
+    # Cutouts only ever fitted one shape of business. Baci sells objects,
+    # Coverings sells surfaces (a tile IS the surface), Ironside sells places
+    # (a room cannot be cut out). What all three have is a photograph.
+    def _flat(colour, size=(1400, 1000)):
+        b = io.BytesIO()
+        Image.new("RGB", size, colour).save(b, format="PNG")
+        return b.getvalue()
+
+    def _busy(size=(1400, 1400)):
+        im = Image.new("RGB", size, (210, 205, 195))
+        d = ImageDraw.Draw(im)
+        for gy in range(0, size[1], 90):
+            for gx in range(0, size[0], 90):
+                d.rectangle([gx + 3, gy + 3, gx + 84, gy + 84],
+                            fill=(150 + (gx // 90 * 7) % 90,
+                                  145 + (gy // 90 * 11) % 90, 140))
+        b = io.BytesIO()
+        im.save(b, format="PNG")
+        return b.getvalue()
+
+    dark = compose.photo_with_headline(_flat((22, 20, 26)), headline="Book the room.",
+                                       formats=["1:1"])
+    light = compose.photo_with_headline(_flat((246, 244, 240)), headline="Shatterproof.",
+                                        formats=["1:1"])
+    ck("a photograph needs no cutout and no generation", dark["ok"] and light["ok"])
+    ck("  TYPE GOES WHITE ON A DARK ROOM AND DARK ON A BRIGHT SWEEP, from one "
+       "call — nobody picks a colour per client",
+       dark["placement"]["1:1"]["text_colour"] == "#FFFFFF"
+       and light["placement"]["1:1"]["text_colour"] == "#16130F",
+       f"{dark['placement']['1:1']['text_colour']} / "
+       f"{light['placement']['1:1']['text_colour']}")
+
+    busy = compose.photo_with_headline(_busy(), headline="Surfaces that last.",
+                                       subline="Porcelain, stone and glass.",
+                                       formats=["1:1", "9:16"])
+    ck("a surface with no quiet area still renders readably",
+       busy["ok"] and len(busy["images"]) == 2)
+    for k, (w, h) in [("1:1", compose.SIZES["1:1"]), ("9:16", compose.SIZES["9:16"])]:
+        ck(f"  {k} is exactly {w}×{h}",
+           Image.open(io.BytesIO(busy["images"][k])).size == (w, h))
+
+    tall = Image.new("RGB", (900, 1800), (30, 30, 30))
+    dd = ImageDraw.Draw(tall)
+    dd.rectangle([0, 0, 900, 600], fill=(240, 240, 240))     # quiet at the top
+    tb = io.BytesIO()
+    tall.save(tb, format="PNG")
+    placed = compose.photo_with_headline(tb.getvalue(), headline="X",
+                                         formats=["1:1"])
+    ck("the quiet band is MEASURED, not assumed — a flat region is found "
+       "wherever it happens to be",
+       "band" in placed["placement"]["1:1"])
+    ck("nothing is generated, so nothing can be the wrong product",
+       "untouched" in placed["note"])
+    ck("an empty photograph is refused",
+       not compose.photo_with_headline(b"", headline="X")["ok"])
 
     print()
     if _fails:

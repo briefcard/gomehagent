@@ -303,3 +303,121 @@ def composite_on_plate(product_png: bytes, plate_png: bytes, *, headline: str,
     return {"ok": True, "images": out, "font": font_used,
             "treatment": "real_product_on_generated_plate",
             "real_font": "NO REAL FONT" not in font_used}
+
+
+# ---------------------------------------------------------------------------
+# The treatment that works for every client
+#
+# Cutout compositing only ever fitted one shape of business. Baci sells objects
+# with a silhouette; Coverings sells surfaces, where the tile IS the surface and
+# standing it on a table is meaningless; Ironside sells places, and a room
+# cannot be cut out at all. What all three have is a photograph somebody took
+# on purpose, and a thing to say over it.
+# ---------------------------------------------------------------------------
+
+def _quiet_band(img, bands: int = 6, avoid_bottom: float = 0.12) -> int:
+    """Which horizontal band of the photograph is calmest, as an index.
+
+    Type over a busy region is unreadable, and where the calm region sits is
+    not a house style — it is a fact about each photograph. A packed venue
+    interior is quiet at the ceiling; a tiled wall may be quiet nowhere; a
+    product on a sweep is quiet everywhere but the middle. Measuring beats
+    choosing a corner and hoping.
+
+    Variance of a downsampled greyscale, which is cheap and good enough: it
+    finds flat sky, plain wall and empty tablecloth, and correctly refuses to
+    call a mosaic quiet.
+    """
+    from PIL import Image
+    g = img.convert("L").resize((64, 64 * bands // bands), Image.LANCZOS)
+    W, H = g.size
+    usable = int(H * (1 - avoid_bottom))          # keep clear of a logo strip
+    best, best_var = 0, None
+    for i in range(bands):
+        top = int(usable * i / bands)
+        bot = int(usable * (i + 1) / bands)
+        px = list(g.crop((0, top, W, max(top + 1, bot))).getdata())
+        if not px:
+            continue
+        mean = sum(px) / len(px)
+        var = sum((p - mean) ** 2 for p in px) / len(px)
+        if best_var is None or var < best_var:
+            best, best_var = i, var
+    return best
+
+
+def _scrim(img, top: int, height: int, dark: bool):
+    """A soft gradient behind the type, so it is readable on any photograph.
+
+    Not a design flourish — it is what makes one layout survive a white studio
+    sweep, a dim restaurant and a mid-grey tile without a human choosing a text
+    colour each time. It fades at both edges rather than sitting as a band,
+    because a hard-edged panel over a photograph reads as a sticker.
+    """
+    from PIL import Image
+    W, H = img.size
+    layer = Image.new("RGBA", (W, height), (0, 0, 0, 0))
+    base = (0, 0, 0) if dark else (255, 255, 255)
+    peak = 150 if dark else 165
+    px = layer.load()
+    for y in range(height):
+        t = y / max(1, height - 1)
+        fade = 1.0 - abs(t - 0.42) * 1.7
+        a = max(0, int(peak * max(0.0, min(1.0, fade))))
+        for x in range(W):
+            px[x, y] = (*base, a)
+    img.alpha_composite(layer, (0, top))
+    return img
+
+
+def photo_with_headline(photo: bytes, *, headline: str, subline: str = "",
+                        formats: list[str] | None = None,
+                        force_band: int | None = None) -> dict:
+    """Any photograph, any client, plus something to say.
+
+    The one treatment that fits a plate, a tile and a venue identically, because
+    it makes no assumption about what is in the picture. No cutout, no
+    generation, nothing to hallucinate — the image is the client's own.
+
+    Text lands in the calmest band of each crop and gets a scrim tuned to that
+    band's brightness, so the same call produces readable type over a white
+    studio sweep and a dark restaurant without anyone picking a colour.
+    """
+    if not photo:
+        return {"ok": False, "error": "No photograph supplied."}
+    from PIL import Image, ImageStat
+    out, font_used = {}, ""
+    placements = {}
+    for k in (formats or ["1:1", "4:5", "9:16"]):
+        if k not in SIZES:
+            return {"ok": False, "error": f"unknown format {k!r}"}
+        W, H = SIZES[k]
+        src = _load(photo)
+        r = max(W / src.width, H / src.height)
+        src = src.resize((int(src.width * r), int(src.height * r)), Image.LANCZOS)
+        canvas = Image.new("RGBA", (W, H))
+        canvas.paste(src, ((W - src.width) // 2, (H - src.height) // 2))
+
+        bands = 6
+        band = force_band if force_band is not None else _quiet_band(canvas, bands)
+        block_h = int(H * 0.30)
+        top = min(int(H * (1 - 0.12)) - block_h,
+                  max(0, int(H * (band / bands))))
+
+        region = canvas.crop((0, top, W, min(H, top + block_h))).convert("L")
+        dark_bg = ImageStat.Stat(region).mean[0] < 128
+        canvas = _scrim(canvas, top, block_h, dark=not dark_bg)
+        colour = "#FFFFFF" if dark_bg else "#16130F"
+        font_used = _draw_text(canvas, headline, subline, colour=colour,
+                              top_frac=(top + int(H * 0.035)) / H)
+        placements[k] = {"band": band, "dark_background": dark_bg,
+                         "text_colour": colour}
+        buf = io.BytesIO()
+        canvas.convert("RGB").save(buf, format="PNG", optimize=True)
+        out[k] = buf.getvalue()
+    return {"ok": True, "images": out, "font": font_used,
+            "treatment": "photo_with_headline", "placement": placements,
+            "real_font": "NO REAL FONT" not in font_used,
+            "note": "the photograph is the client's own and untouched — nothing "
+                    "was generated or composited, so there is nothing here that "
+                    "could be the wrong product, tile or room"}

@@ -2115,11 +2115,37 @@ def scope_conflicts(tenant: str) -> list[dict]:
 OWNED, REFERENCE = "owned", "reference"
 
 
+OBJECT, SURFACE, SCENE = "object", "surface", "scene"
+
+
+def detect_subject(png_bytes: bytes) -> str:
+    """Guess object / surface / scene from the pixels. A default, not a verdict.
+
+    Transparency is the one reliable signal: a cutout is a discrete thing
+    somebody has already isolated, which is exactly what `object` means. With
+    no alpha the honest answer is that we do not know — a photograph of a tiled
+    wall and a photograph of a restaurant are the same shape to a machine and
+    different to a buyer — so it returns `scene`, which is the treatment that
+    is safe for both. Callers who know should say so and override it.
+    """
+    try:
+        import io as _io
+
+        from PIL import Image
+        a = Image.open(_io.BytesIO(png_bytes)).convert("RGBA").getchannel("A")
+        lo, hi = a.getextrema()
+        if lo < 32 and hi > 200:
+            return OBJECT
+    except Exception:                                            # noqa: BLE001
+        pass
+    return SCENE
+
+
 def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
-              kind: str = "image", source: str = "", prompt: str = "",
-              tags: list[str] | None = None, entity_key: str = "",
-              canva_design_id: str = "", thumbnail_url: str = "",
-              derived_from: list[str] | None = None,
+              kind: str = "image", subject: str = "", source: str = "",
+              prompt: str = "", tags: list[str] | None = None,
+              entity_key: str = "", canva_design_id: str = "",
+              thumbnail_url: str = "", derived_from: list[str] | None = None,
               origin: str = "human") -> str:
     """File one asset. `rights` is required and has no safe guess.
 
@@ -2143,7 +2169,7 @@ def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
             return f"Already on file for {tenant} as {dupe.rights or REFERENCE}."
         row = db.KbAsset(
             tenant=tenant, url=url, rights=rights, title=title or "",
-            kind=kind, source=source, prompt=prompt,
+            kind=kind, subject=subject or "", source=source, prompt=prompt,
             tags=list(tags or []), entity_key=entity_key or "",
             canva_design_id=canva_design_id, thumbnail_url=thumbnail_url,
             derived_from=list(derived_from or []),
