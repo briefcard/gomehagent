@@ -71,7 +71,39 @@ def _call(tenant: str, method: str, path: str, *, payload: dict | None = None,
         return {"ok": True, "data": {}}
 
 
+def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
+    """Upload raw bytes. Canva takes the name base64'd in a header, not a form.
+
+    The URL variant is no use for anything this platform composes: a rendered
+    ad exists as bytes in memory, and putting it somewhere public purely so
+    Canva can fetch it back would mean publishing an unapproved draft to get it
+    reviewed.
+    """
+    import base64 as _b64
+
+    secret, why = _token(tenant)
+    if why:
+        return {"ok": False, "error": why}
+    import httpx
+    meta = _b64.b64encode(name[:120].encode()).decode()
+    try:
+        r = httpx.post(f"{BASE}{path}", timeout=TIMEOUT, content=blob,
+                       headers={"Authorization": f"Bearer {secret}",
+                                "Content-Type": "application/octet-stream",
+                                "Asset-Upload-Metadata":
+                                    '{"name_base64":"%s"}' % meta})
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+    if r.status_code >= 400:
+        return {"ok": False, "error": f"{r.status_code}: {r.text[:200]}"}
+    try:
+        return {"ok": True, "data": r.json()}
+    except Exception:                                            # noqa: BLE001
+        return {"ok": True, "data": {}}
+
+
 call = _call          # replaceable, so the suite can drive every path
+call_binary = _call_binary
 
 
 # ---------------------------------------------------------------------------
@@ -274,3 +306,82 @@ def reconcile(tenant: str) -> dict:
             "note": ("a recorded design missing from Canva is the dangerous "
                      "direction — a skill can still select it and produce "
                      "output pointing at nothing")}
+
+
+# ---------------------------------------------------------------------------
+# From a finished image to something a person can still change
+# ---------------------------------------------------------------------------
+
+def upload_bytes(tenant: str, blob: bytes, name: str, *,
+                 poll: int = 6) -> dict:
+    """Put a rendered image into Canva. Returns the asset id.
+
+    The upload is a job rather than an answer, so this waits for it — but only
+    a bounded number of times. A caller left holding "in_progress" has nothing
+    to do with it, and an unbounded poll turns a Canva outage into a hung
+    request.
+    """
+    if not blob:
+        return {"ok": False, "error": "No image to upload."}
+    res = call_binary(tenant, "/asset-uploads", blob, name)
+    if not res["ok"]:
+        return res
+    job = (res["data"] or {}).get("job") or {}
+    asset = job.get("asset") or {}
+    if asset.get("id"):
+        return {"ok": True, "asset_id": asset["id"]}
+
+    job_id = job.get("id", "")
+    if not job_id:
+        return {"ok": False, "error": "Canva accepted the upload but returned "
+                                      "neither an asset nor a job to follow."}
+    import time
+    for _ in range(max(1, poll)):
+        time.sleep(1.2)
+        got = call(tenant, "GET", f"/asset-uploads/{job_id}")
+        if not got["ok"]:
+            return got
+        j = (got["data"] or {}).get("job") or {}
+        if (j.get("status") or "") == "success":
+            aid = ((j.get("asset") or {}).get("id")) or ""
+            if aid:
+                return {"ok": True, "asset_id": aid}
+            return {"ok": False, "error": "upload finished with no asset id"}
+        if (j.get("status") or "") == "failed":
+            return {"ok": False,
+                    "error": (j.get("error") or {}).get("message", "upload failed")}
+    return {"ok": False, "error": "the upload was still processing after "
+                                  "several checks — try again rather than "
+                                  "assuming it failed", "job_id": job_id}
+
+
+def editable_from_image(tenant: str, blob: bytes, *, title: str,
+                        entity_key: str = "",
+                        design_type: str = "instagram-post") -> dict:
+    """A rendered base image, handed to Canva as something still editable.
+
+    This is the join between the two halves. Everything upstream exists to make
+    the picture *correct* — the real product, the client's own photograph, a
+    claim that passed the validator. None of that survives being retyped, and
+    none of it makes a layout a designer would sign off. So the base goes into
+    Canva as an asset inside a design, and the typography and composition are
+    done there by a person who can see it.
+
+    **Render the base WITHOUT text for this.** Baked type is a picture of
+    words: it cannot be corrected, re-weighted, translated or re-flowed for a
+    story crop, and the whole reason for handing off to Canva is that those are
+    the things a human will want to change. `compose.photo_with_headline` with
+    an empty headline gives exactly that.
+    """
+    up = upload_bytes(tenant, blob, title)
+    if not up["ok"]:
+        return {**up, "stage": "upload"}
+    made = create_design(tenant, title=title, design_type=design_type,
+                         asset_id=up["asset_id"], entity_key=entity_key)
+    if not made["ok"]:
+        return {**made, "stage": "design", "asset_id": up["asset_id"],
+                "orphan": f"asset {up['asset_id']} is in Canva and no design "
+                          f"references it"}
+    return {**made, "stage": "done", "asset_id": up["asset_id"],
+            "note": "the image is fixed and correct; the text and layout are "
+                    "editable in Canva. Nothing here is published."}

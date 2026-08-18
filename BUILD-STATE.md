@@ -301,6 +301,28 @@ requirements — it was installed locally and **not on the service**.
 product — asking a generator for a table with a pitcher on it and then pasting
 a second pitcher beside it is the failure this approach exists to avoid.
 
+## The handoff: correct image in, editable design out
+
+`canva.editable_from_image` is the join between the two halves. Everything
+upstream exists to make the picture **correct** — the real product, the client's
+own photograph, a claim that passed the validator. None of that survives being
+retyped by hand, and none of it makes a layout a designer would sign off. So the
+rendered base goes into Canva as an asset inside a design, filed in that
+account's folder and recorded in the library, and the typography and composition
+are done there by a person who can see it.
+
+**Render the base without text for this.** Baked type is a picture of words: it
+cannot be corrected, re-weighted, translated or re-flowed for a story crop — and
+those are precisely the things the handoff exists to allow.
+`compose.photo_with_headline` with an empty headline gives exactly that.
+
+`upload_bytes` uploads **binary**, not a URL. The URL variant is no use here: a
+rendered ad exists as bytes in memory, and putting it somewhere public purely so
+Canva can fetch it back would mean publishing an unapproved draft in order to
+get it reviewed. The upload is a job rather than an answer, so it is polled — a
+bounded number of times, because a caller holding "in_progress" has nothing to
+do with it and an unbounded poll turns a Canva outage into a hung request.
+
 ## Canva, and where each account's work lives
 
 Canva is a real provider now — OAuth **with PKCE**, which Canva Connect requires

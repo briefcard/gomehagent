@@ -11,6 +11,7 @@ drift somebody has to be told which direction.
 
 Run: python3 scripts/test_canva.py
 """
+import io
 import os
 import sys
 import tempfile
@@ -170,6 +171,60 @@ def main() -> int:
        str(rec["recorded_not_in_canva"]))
     ck("  and `agrees` is false while either side is short", not rec["agrees"])
 
+    print("\n— a finished base handed over as something still editable —")
+    _jobs = {"n": 0}
+
+    def _fake_bin(tenant, path, blob, name):
+        _jobs["n"] += 1
+        _jobs["bytes"] = len(blob)
+        _jobs["name"] = name
+        return {"ok": True, "data": {"job": {"id": "job1", "status": "in_progress"}}}
+
+    def _fake_poll(tenant, method, path, *, payload=None, params=None):
+        if path.startswith("/asset-uploads/"):
+            return {"ok": True, "data": {"job": {"status": "success",
+                                                 "asset": {"id": "AST_UP"}}}}
+        if path == "/designs":
+            return {"ok": True, "data": {"design": {
+                "id": "DES_ED",
+                "urls": {"edit_url": "https://canva/edit",
+                         "view_url": "https://canva/view"}}}}
+        return {"ok": True, "data": {}}
+
+    canva.call_binary = _fake_bin
+    canva.call = _fake_poll
+    from PIL import Image as _I
+    buf = io.BytesIO()
+    _I.new("RGB", (400, 400), (220, 210, 195)).save(buf, format="PNG")
+    r = canva.editable_from_image("baci", buf.getvalue(),
+                                  title="Aqua pitchers — base",
+                                  entity_key="white-acrylic-pitcher-aqua")
+    ck("a rendered image goes up as BYTES", _jobs["n"] == 1 and _jobs["bytes"] > 0,
+       "publishing a draft somewhere public just so Canva can fetch it back "
+       "would be publishing it to get it reviewed")
+    ck("  an async upload is waited on rather than returned half-done",
+       r["ok"] and r["asset_id"] == "AST_UP", str(r)[:90])
+    ck("  it becomes a design", r["design_id"] == "DES_ED")
+    ck("  filed in this account's folder, like anything else", r["filed"])
+    ck("  recorded in the library so a skill can find it later",
+       any(x.canva_design_id == "DES_ED"
+           for x in kb.assets("baci", publishable_only=False)))
+    ck("  and it hands back an EDIT url — the point is that a person can still "
+       "change it", r["edit_url"].startswith("https://"), r["edit_url"])
+    ck("  nothing was published", "Nothing here is published" in r["note"]
+       or "not published" in r["note"].lower(), r["note"][:70])
+
+    canva.call_binary = lambda *a, **k: {"ok": True, "data": {"job": {
+        "id": "j2", "status": "in_progress"}}}
+    canva.call = lambda t, m, p, **k: ({"ok": True, "data": {"job": {
+        "status": "in_progress"}}} if p.startswith("/asset-uploads/")
+        else {"ok": True, "data": {}})
+    slow = canva.upload_bytes("baci", b"x" * 10, "slow", poll=2)
+    ck("an upload that never finishes says so instead of hanging",
+       not slow["ok"] and "still processing" in slow["error"],
+       slow.get("error", "")[:60])
+
+    canva.call_binary = canva._call_binary
     canva.call = canva._call
     print()
     if _fails:
