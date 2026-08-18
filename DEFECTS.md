@@ -1055,6 +1055,112 @@ refused, and report `filed_count`, `corroborated_count` and `write_refused`
 alongside the proposed count. `test_harvest` asserts the three account for every
 proposal.
 
+### 2.30 A refusal that named the wrong missing thing — fixed 2026-08-18
+
+`oauth.configured` reported what was blocking an OAuth flow with a ternary:
+
+    env = "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET" if provider == "google" \
+        else "META_APP_ID / META_APP_SECRET"
+
+Canva arrived third and inherited the `else`, so the Accounts tab and the
+client connect page both told anyone trying to connect Canva to go and set
+**the Meta app secret**. Confirmed in the rendered HTML, not inferred.
+
+This is worse than a silent refusal. This codebase's whole posture is "name the
+missing thing"; naming the WRONG one sends somebody to do work that cannot
+help, and they will conclude the feature is broken rather than unconfigured.
+
+Fixed by declaring `env` on each flow and reading it off the spec, plus an
+import-time assert so the next flow cannot omit it. `test_oauth` now checks all
+three providers rather than the two that existed when it was written. §1 rule 4.
+
+### 2.31 A bare `else` that would have leaked a client secret into a URL — fixed 2026-08-18
+
+One function below §2.30, `exchange` dispatched the token call the same way:
+`if canva … elif google … else` — and the `else` branch was Meta's, an
+`httpx.get` carrying `client_id` and `client_secret` as **query parameters**.
+
+Nothing was leaking, because the three declared providers each matched a
+branch. But the next provider added would have inherited Meta's branch by
+default and put its client secret into every access log and proxy cache between
+here and the provider. The defect is the shape, not the current behaviour.
+
+`token_style` is now declared per flow (`post_body` / `get_params` /
+`basic_auth`) and asserted at import.
+
+### 2.32 Canva would have 401'd on every real call — fixed 2026-08-18
+
+`oauth.exchange` keeps the REFRESH token for providers declaring
+`stores="refresh_token"` — deliberately; an access token dies in an hour and is
+not worth a row. `canva._token` then handed that stored value to the Canva API
+as a `Bearer`.
+
+Every Canva call would have come back 401 while the console showed a green
+chip: a positive claim that has stopped being tested, which is §2.13's shape in
+a new subsystem. It survived because no Canva call has ever been made for real.
+
+Fixed with a general `oauth.access_token(provider, refresh_token)` that mints
+one through the flow's own `token_style`, and hands back a rotated refresh token
+when the provider issues one — dropping that would make a connection work once
+and then die, which looks exactly like a revocation and would be debugged as one.
+
+### 2.33 A gate built on absent data, one layer above §2.27 — fixed 2026-08-18
+
+`systems.ready()` was consulted for two incompatible questions: "may this system
+act unsupervised" and, via `skill.preflight`, "may this produce anything at
+all". So an unapproved objection, or a blank 8-part governance form, stopped a
+customer getting a reply.
+
+Owner's correction, and it is the rule this codebase already claimed to follow:
+*"there should be NO block because of a lack of data. If it's not there, then
+don't use it. The idea was never to stop the AI from responding, it's to guide
+it on how to answer correctly."*
+
+`can_produce` now blocks on an absent CONNECTION only. Everything else is
+`thin` — noted, returned, and filed as a knowledge task.
+
+Two things worth keeping from the fix. **The first version of the
+`kb.record_unknowns` call passed `field`/`why` and would have recorded nothing
+at all while returning cleanly** — that function filters on `basis == "unknown"`
+and `attribute`. §1 silent loss, caught only by asserting the count. And
+**`Skill.constitutive`** was needed to stop the fix going too far: a compliance
+sweep against an empty ban list reports a catalogue CLEAN that nothing checked,
+which is not a thinner output but a false one.
+
+### 2.34 A new table unclassified, one commit after the last one — fixed 2026-08-18
+
+`reset.py` derives its table list from the schema and reports what it cannot
+classify. It had been naming `kb_assets` since the creative library landed: a
+knowledge reset left an account's entire picture library behind while reporting
+success — the `kb_brand`/`kb_brands` near-miss arrived at from the other side.
+
+Classified as knowledge. **What that costs is recorded in the code rather than
+hidden:** `uses`, `last_used_at` and the per-channel results from
+`record_asset_outcome` live on the same row, are the only record of which
+creative worked, and nothing can rebuild them. A table doing two jobs; splitting
+outcomes out is the real fix and is not done.
+
+Then the same check caught `assurance_events` **one commit later**, added by the
+same session that had just written about the trap. That is the point of
+deriving the list from the schema instead of maintaining it by hand — the
+author of the rule is not exempt from the rule.
+
+### Wiring audit, 2026-08-18 — what reaches the data layer
+
+Not a defect; the survey the defects above came out of, kept here so the next
+one can be diffed against it. Full table in `BUILD-STATE.md`.
+
+The finding is an inversion: `shopify_seo`, `wordpress_seo` and `seo_tools`
+contain **zero** references to `banned_claims`, `validator` or `compliance`, and
+they are the only modules that write to live customer-facing properties. The
+subsystem that reports has every guarantee; the one that publishes has none.
+
+Also: two mail paths, only one guarded, and the guarded one uses a plain
+substring test where `validator._banned` matches on word boundaries — so
+"hand-decorated" is caught, "hand decorated" is not, and "artisan" false-fires
+inside "artisanal". Ten functions nothing can reach.
+`_fetch_products_live` raises `KeyError` instead of refusing by name.
+
 ## 4. How to verify
 
 ```bash

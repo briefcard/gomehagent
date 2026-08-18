@@ -1,28 +1,45 @@
-# Build state — after the creative chain
+# Build state — after the wiring audit
 
 The rolling state of the data-layer build. **This file is rewritten by every
 thread.** It is always current and never historical — do not add dated sections,
 and do not create `HANDOFF-step-N.md` files. History lives in `DEFECTS.md`
 (append-only) and in the git log.
 
+That rule was broken. The previous rewrite replaced the top five sections and
+left the tail, so this file simultaneously claimed 33 and 41 suites, named a
+commit that had been superseded, said "committed, NOT pushed" about work that
+was live, and listed a "next thread" of items already built. **If you are
+rewriting this file, replace the whole thing or say which sections you did
+not.** A stale handoff costs more than no handoff, because it is trusted.
+
 `HANDOFF-content-platform.md` is the **historical** record up to 2026-08-13 and
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed. `/health` reports `commit`
-and `routes` — use it, never infer what is running. `/health/connections` is
-unauthenticated and live-tests Shopify and Google.
+**Live:** everything below is pushed and deployed at `647502d`. `/health`
+reports `commit` and `routes` — use it, never infer what is running.
+`/health/connections` is unauthenticated and live-tests Shopify and Google.
 
 ## Start here if you are new to this thread
 
 Read this file, then `DEFECTS.md` §1 (the recurring patterns) and §3 (what is
-still broken). Then run the suites — there are 41 and they all pass offline:
+still broken). Then run the suites:
 
-    for f in scripts/test_*.py; do python3 "$f" >/dev/null || echo "FAIL $f"; done
+    for f in scripts/test_*.py; do
+      [ "$(basename $f)" = "test_brief.py" ] && continue
+      r=$(python3 "$f" 2>&1 | tail -3)
+      echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
+    done
+
+**42 suites, 42 pass.** Check the OUTPUT, not the exit code, and skip
+`test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
+the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
+claim in this file's history was counting a help screen as a passing test. The
+whole run takes ~4 minutes; a single shell call may time out at 2.
 
 **Deploy is push-to-main.** SSH alias `github-gomehagent`, key
 `~/.ssh/gomehagent_deploy`, and git network calls need the sandbox disabled.
-Always `git fetch` and confirm a fast-forward first. Render swaps in ~90s.
+Always `git fetch` and confirm a fast-forward first. Render swaps in ~2 minutes.
 
 ## The one thing to understand about this codebase
 
@@ -32,112 +49,216 @@ thing. That is not a style — it is the accumulated result of the defects in
 When you add something, the question to ask is "what does this do when it does
 not know", and the answer must survive all the way to the output.
 
+**With one correction the owner made on 2026-08-18, and it is load-bearing:**
+refusing is for output that would be UNSAFE or FALSE, never for output that
+would merely be thinner. *"There should be NO block because of a lack of data.
+If it's not there, then don't use it. The idea was never to stop the AI from
+responding, it's to guide it on how to answer correctly in an organized way."*
+Absent knowledge is now a label on the work, not a gate in front of it. See
+**Gating**.
+
 ## What is proven and what is not
 
 **Proven against real systems:** Shopify reads (both stores), Google/Gmail/Drive
-(three accounts), the site crawler against miamiironside.com — 162 pages found,
-11 claims, 56 images, 3 new situation tags.
+(three accounts), the site crawler against miamiironside.com — 162 pages, 11
+claims, 56 images, 3 new situation tags. The console rendered against a fresh
+instance with nothing configured, both connect surfaces.
 
-**Built and NEVER called for real:** Omnisend, Canva, the OpenAI image API.
-Each needs a key and one live call. Every one of my assumptions that Gomeh has
-tested against a real API so far has been wrong in some detail, so expect the
-first live run of each to find something.
+**Built and NEVER called for real:** Omnisend, Constant Contact, Canva, the
+OpenAI image API, and every OAuth leg. Each needs a key and one live call.
+Every assumption that has been tested against a real API so far has been wrong
+in some detail, so expect the first live run of each to find something.
 
-**Gomeh's live tests have corrected this build three times.** Canva's generator
+**Gomeh's live tests have corrected this build four times.** Canva's generator
 invents products rather than using a supplied asset; `gpt-image-1`'s mask is
 advisory rather than binding; the logo filter was written against imagined
-filenames. All three are recorded in `DEFECTS.md`.
-
----
+filenames; WordPress could not connect because the probe did not follow
+redirects. All four are in `DEFECTS.md` with the measurements.
 
 ## Where we are
 
-The data layer stopped being a retrieval library and became something an agent
-can be *given*. Before this thread, `resolve`, `validator`, `ledger` and
-`responder` all worked and none of them opened a run — `systems.start_run` had
-two callers, neither in the data layer. Anything built on top would have
-produced ungoverned output. `app/skill.py` closes that: a skill declares the
-context it needs, and the substrate resolves it once, gates on coverage, opens
-and closes a run, runs the validator on everything emitted, files it to the
-ledger, and applies the autonomy rung. Four skills are registered on it, three
-of which serve Baci with no new content.
-
-**The visual chain is no longer frozen.** Build-map steps 05 and 06 were
-deliberately skipped and have since been built, because the clients need them:
-`compose` (deterministic imagery), `imagegen` (generated scenery), `canva` (the
-editable handoff) and the creative library in `KbAsset`.
+The data layer is a substrate an agent can be given, it can be connected to
+without a runbook, and — new — it can now show what it did. What it still
+mostly is not is *wired into the things that run every day*. That gap is the
+subject of the audit below and should drive the next several threads.
 
 ## The five rules this codebase keeps re-learning
 
 Every one was a real defect, several of them twice. Read before changing
 anything.
 
-1. **Absence is a third state and must survive to the output.** Met seven times
-   now. This thread added two: `empty` versus `blocked` for a sweep that found
-   nothing, and a metafield that could not be read versus one that was clean.
-2. **Enrich, do not gatekeep.** `blocked_on` is reserved for output that would
-   be unsafe. §2.27 is this rule broken at its most expensive point — a gate
-   written against an *assumption* about `claims()` rather than against
-   `claims()`, which refused real proof from any account without a vocabulary.
+1. **Absence is a third state and must survive to the output.** Met eight times
+   now. The newest: an assurance window with no events reports "nothing has been
+   checked", never zeros — a clean system and an unmonitored one produce
+   identical zeros and mean opposite things.
+2. **Enrich, do not gatekeep.** §2.27 was this rule broken at its most
+   expensive point. The gating change below is the same rule applied one layer
+   up, and it took the owner to see it.
 3. **Approved is final, whatever wrote it first.**
-4. **Derive lists from the schema, never by hand.**
-5. **Run it before claiming it works.** Every finding below came from running
-   against real code. Four defects in this thread were found by the new suite,
-   two of them in code written the same hour.
+4. **Derive lists from the schema, never by hand.** Met twice more this session:
+   `oauth.configured` was a per-provider ternary that told Canva to set the
+   *Meta* app secret, and `reset.py`'s unclassified report caught a new table
+   one commit after it caught the last one.
+5. **Run it before claiming it works.** Including claims made in this file.
 
-## Built this session
+## Gating — the structural change of 2026-08-18
 
-**`app/skill.py` — the substrate.** `Skill` declares `system_key`, `tier`,
-`needs`, `params`, `writes`, `produces`. `preflight()` answers "can this run for
-this account" cheaply and by name. `run()` is the only entry point.
-`Context.emit()` is the only exit, and it validates before the caller sees
-anything — the gate is structural, not remembered. `catalogue(tenant)` is what
-an agent should be shown instead of a tool list: every skill, and whether it can
-run here, with the missing field named.
+`systems.ready()` was answering two different questions with one bar: "may this
+act unsupervised" (go-live, promotion) and, through `skill.preflight`, "may this
+produce anything at all". A blank 8-part contract and a thin knowledge base are
+correct blockers for the first and absurd for the second. That is why an
+unapproved objection stood between a customer and a reply.
 
-**Autonomy is applied, and the validator outranks it.** `auto` means "do not ask
-about the things that passed", never "send the thing that failed". A skill that
-writes still needs approval at `approve_exceptions`.
+* `ready()` keeps the full bar, for **go-live and promotion only**.
+* `can_produce` blocks on **an absent connection and nothing else** — the one
+  gap that makes producing impossible rather than thinner. You cannot answer
+  mail you cannot fetch.
+* Everything else becomes `thin`: noted on the run, returned on the result, and
+  filed through `kb.record_unknowns` so it lands in the queue the operator
+  already works.
 
-**`app/skill_pack.py` — four skills.** None is Baci-specific; each reads its
-client out of the KB.
+**One deliberate exception.** `Skill.constitutive` names knowledge whose absence
+makes an output FALSE rather than thinner. `catalog_compliance` declares
+`banned_claims`, because a sweep against an empty ban list reports a catalogue
+CLEAN that nothing checked — and Baci's own audit is 110 violations such a sweep
+would have blessed. Almost always empty. The test before reaching for it is
+"would the output be a LIE without this"; "it would be vaguer" is a no.
 
-| skill | system | writes | state |
-|---|---|---|---|
-| `catalog_compliance` | catalog_compliance | no | ready |
-| `catalog_seo_rewrite` | catalog_compliance | proposes | ready |
-| `inbound_reply` | service_desk | no | ready, thin until objections exist |
-| `ad_copy` | ad_creative | no | model-drafted; copy only, no imagery |
+**What this changes strategically.** Content is no longer a prerequisite for
+producing — it is a quality dial. A client can be onboarded and produce on day
+one, thinly and honestly labelled, and the knowledge queue fills from real runs
+instead of from an interview. The old order (fill the KB, then switch it on) is
+dead; the new order is switch it on, watch what it says it was missing, fill
+that.
 
-**Where the model actually writes.** `inbound_reply` and `ad_copy` are model
-calls — grounded on the bundle, with the validator as deterministic code behind
-them. `catalog_seo_rewrite` composes by code on purpose: a 155-character
-formulaic field where composing from an approved claim means the `claim_id` is
-carried by construction.
+## Assurance — can you tell it is doing anything?
 
-`ad_copy` makes **one call per claim**, not one call for N variants. Parsing
-which line came from which claim risks filing the wrong `claim_id`, and
-attribution that is wrong is worse than attribution that is missing — the
-anti-repeat and hygiene queries both trust it. Per-claim calls make attribution
-structural. With no key it degrades to a composer and every variant carries
-`basis="composed (…)"`, because a silent fallback is the extractor defect again.
+`app/assurance.py` and the Assurance tab. Every validation is recorded, pass or
+fail, at all three places a draft is actually checked: the substrate
+(`Context.emit`, including each repair attempt), the skill bridge, and
+`triage.py`. A log of only failures cannot show coverage.
 
-**Why the sweep is not `compliance.scan` again.** The site crawler strips
-`<head>` before matching, so an SEO meta description is invisible to it — and
-that is the field a violation hides in, because it gets templated across a whole
-catalogue. Baci's own audit is that shape: 110 flagged strings, **96 of them one
-repeated SEO-meta template**, none of which the crawler could see.
+The mail path's check is filed as `banned_claims_substring`, deliberately not
+`banned_claims` — see the audit below.
 
-**Two new `systems.CATALOG` entries:** `catalog_compliance` and `ad_creative`.
+**What it reports, ordered by how much each number can be trusted:**
 
-**Five defects fixed** — §2.25 through §2.29 in `DEFECTS.md`. The one worth
-reading is **§2.27**: `add_claim` and `review_claim` both refused an untagged
-approved claim on the stated grounds that it "can never be selected". False —
-`claims()` filters on situation only when a caller asks for one. Both paths now
-infer a situation where the classifier is confident and file brand-wide proof
-where it is not, saying which happened. Owner's call, and it unblocked the
-rewrite skill. §2.28 fixed the two `add_claim` silent losses carried as live
-since 14 Aug.
+1. **Catches.** A real counterfactual: the model wrote the phrase, deterministic
+   code stopped it, without the layer it goes out. Needs no interpretation.
+2. **Coverage** by source.
+3. **Grounding and repair** — share of drafts carrying a `claim_id`; repairs
+   attempted, fixed, still blocked.
+4. **"Is it improving the output?"** — and here it says plainly that it cannot
+   tell you yet.
+
+**The measurement gap, stated because hiding it is the whole failure mode.**
+`SystemRun.edit_diff` — whose own docstring calls it *"the highest-value column
+here… the only honest signal of where the generator is wrong"* — is declared,
+is on `finish_run`'s writable list, and **has never been written by anything**.
+So `edited_share()` reports coverage first and a NULL rate with a note calling
+it an instrumentation gap. Reporting 0% edited would be the lie that flatters
+this the most. Closing it needs either an editable body on the approval
+(`apply_decision` takes only a decision today) or, better, capturing sent-vs-
+draft in Gmail, which is where editing actually happens.
+
+`scripts/ab_context.py` is the real A/B and **has still never been run**:
+
+    ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci
+
+## The wiring audit — which entry points reach the data layer
+
+Traced mechanically on 2026-08-18. This is the most important table in the file.
+
+    entry point         reaches                    what it is
+    command_agent.py    — NOTHING —                the kernel tool loop
+    kernel.py           — NOTHING —                the model loop
+    ops_jobs.py         — NOTHING —                scheduled jobs
+    seo_tools.py        — NOTHING —                the SEO agent's tools
+    shopify_seo.py      — NOTHING —                WRITES to the live store
+    wordpress_seo.py    — NOTHING —                WRITES to the live site
+    digest.py           — NOTHING —                what reaches the owner
+    triage.py           kb                         inbound mail (weak check)
+    worker.py           systems                    the cron tick
+    skill.py            kb resolve validator ledger  the substrate
+    web.py              everything                 console + bridge
+
+**The inversion is the finding.** `grep -c "banned|validator|compliance"` across
+`shopify_seo.py`, `wordpress_seo.py` and `seo_tools.py` returns **0, 0, 0** —
+and those three are the only modules that write to live customer-facing
+properties. The subsystem that merely REPORTS has every guarantee; the one that
+PUBLISHES has none. Baci's 110 violations are SEO metadata, which is exactly
+what `shopify_seo.update_seo` writes.
+
+**Two mail paths, and only one is guarded.** `worker.py:108 → triage.triage_email`
+checks banned claims and escalates. `command_agent → queue_email_draft` — the
+model composing a draft in the tool loop — checks nothing. And the guarded one
+uses a plain substring test while `validator._banned` next door matches on word
+boundaries with flexible separators: today "hand-decorated" is caught, "hand
+decorated" walks through, and "artisan" false-fires inside "artisanal".
+
+**Smaller findings.** 10 functions nothing can reach (`approvals.pending_count`,
+`canva.export_result`, `credentials.granted_capabilities`, `kb.retire_claim`,
+`kb.assign_to_group`, `omnisend.upload_image`, `ops_jobs.file_whatsapp_document`,
+`propose.from_gap`, `seo_tools.seo_context_block`,
+`baci_backoffice.list_company_documents`) — `kb.assign_to_group` is the manual
+collection-grouping path `/admin/entity_group` was meant to expose.
+`_fetch_products_live` raises `KeyError` instead of refusing by name. Two orphan
+columns (`KbUnknown.first_seen`, `KbConflict.first_seen`). Otherwise the column
+layer is clean, all 37 kernel tools have handlers, and `_GOOGLE_TOOLS` has not
+drifted.
+
+## Connecting a client — now possible entirely from the console
+
+Seven providers, all rendered on both the Accounts tab and the client
+`/connect/<token>` page. Audited by booting a fresh instance with nothing
+configured and reading the rendered HTML.
+
+**Three OAuth providers are one env var each**, and nothing else blocks them.
+Register the redirect URI byte-for-byte in the provider console:
+
+| provider | env | redirect URI |
+|---|---|---|
+| Google | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `…/oauth/google/callback` |
+| Meta Ads | `META_APP_ID` / `META_APP_SECRET` | `…/oauth/meta_ads/callback` |
+| Canva | `CANVA_CLIENT_ID` / `CANVA_CLIENT_SECRET` | `…/oauth/canva/callback` |
+| Constant Contact | `CONSTANT_CONTACT_CLIENT_ID` / `_SECRET` | `…/oauth/constant_contact/callback` |
+
+`CREDENTIAL_KEY` and `PUBLIC_BASE_URL` are set and live. `CREDENTIAL_KEY` must
+never be rotated casually — every credential stored under the old one orphans.
+
+**ESP is pick-one.** Omnisend, Klaviyo and Constant Contact all grant `esp`;
+`covered_by` is derived by grouping `PROVIDERS` on capability, so a fourth ESP
+joins the group without an edit. The client page drops the alternatives; the
+console keeps them so an owner can switch a client.
+
+**Canva falls back to the agency's connection**, and is the only provider
+allowed to — it holds our own finished work, and `canva.folder()` already files
+each account separately. A client's own connection still wins. A test asserts
+Coverings can never reach Shopify through the agency's token.
+
+**WordPress can be connected more than once per client** — `Credential` is keyed
+`(tenant, provider, site)`. Resolving or revoking without naming the site
+REFUSES and lists them: picking the first would publish a landing page to
+whichever install was connected first, and the client would find out by reading
+their own website.
+
+**Still unconnectable:** Squarespace, which is Ironside's main site. No
+provider, no adapter, and the connect page offers it WordPress instead. Its
+`blog` system is blocked on something the UI cannot express.
+
+## Two bugs that would have failed on the first real call
+
+Both found while building the connect work, both the shape already in §1.
+
+* **`oauth.exchange` was an if/elif on provider name ending in a bare `else`**
+  that put `client_id` and `client_secret` in a URL QUERY STRING. Whatever was
+  added next inherited it — a new provider's client secret into access logs and
+  proxy caches. `token_style` is declared per flow now.
+* **Canva would have 401'd on every real call.** `exchange` stores the refresh
+  token for that provider, deliberately, and `canva._token` handed it to the API
+  as a Bearer. Green chip, dead connection. New `oauth.access_token()` mints a
+  real one and carries back a rotated refresh token — dropping that would make a
+  connection work once and then die, which looks exactly like a revocation.
 
 ## Onboarding a client from zero, through the UI
 
@@ -521,9 +642,11 @@ had already gone stale on `visual`, and since its refusal is a return value
 most callers ignore, the field was silently unwritable and the brand row was
 never created. Rule 4, met again.
 
-**Not built:** the generator itself, the Canva/Ryze calls, the join from an
-output to a channel's ad id (so `record_asset_outcome` is fed by hand today),
-and any UI for the library.
+**Not built:** the generator itself, the Canva/Ryze calls, and the join from an
+output to a channel's ad id (so `record_asset_outcome` is fed by hand today).
+The library DOES have a UI now — `/admin/asset_add` plus the picture-approval
+queue on the Content tab — added after Gomeh approved claims and found nowhere
+to approve the 56 images the Ironside crawl had filed.
 
 ## Installing a system is no longer a guess
 
@@ -607,97 +730,88 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **33 offline suites pass**, none touching the
-network, including `test_tenant_isolation.py` **unmodified**.
-`scripts/test_skill.py` is new — 54 checks covering the gate, the rung, named
-refusals, `empty` vs `blocked`, unread vs clean, and every run reaching the
-ledger. It drives the model seam from both sides with a stub: the degraded path
-reports `basis="composed"`, and **a model that returns a banned phrase is
-blocked, not softened** — the check worth keeping. Full run is ~2m30s; split it
-or a single shell call hits a 2-minute timeout.
+**Ran and confirmed.** All **42 suites pass**, none touching the network,
+including `test_tenant_isolation.py` **unmodified**. New this session:
+`test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
+transport, asserting the REQUEST). Deploy verified live: `/health` reports
+`647502d`, 106 routes, and `/health/connections` still resolves both Shopify
+stores and three Google accounts — which is the code path the credential
+constraint migration touches.
 
-**Three existing assertions in `test_harvest.py` were changed**, not worked
-around. They pinned the old approve-time tag refusal that §2.27 removes.
+**Assertions deliberately CHANGED, not worked around:** two in `test_skill.py`
+pinned the rule that an incomplete contract stops a run. Three in
+`test_harvest.py` (earlier) pinned the old tag gate.
 
-**Built but unproven — read this before trusting anything above.** No skill has
-run against real Baci data. There was no `DATABASE_URL`, `APPROVAL_SECRET` or
-`ANTHROPIC_API_KEY` available in the session that wrote them, so:
+**Built but unproven — read before trusting anything above.**
 
-- `_fetch_products_live` has **never made a Shopify call.** Everything above it
-  is proven against fixtures. The REST shapes (`products.json`,
-  `products/{id}/metafields.json?namespace=global`) are the ones `shopify_seo`
-  already uses, but "the code is right" is not "it ran".
-- The 96-violation figure is from the prior audit, not from this sweep.
-- **No real model call was made.** `inbound_reply` and `ad_copy` were exercised
-  against a stub. The prompts, the grounding block and the shape of what comes
-  back are all unproven against the live API.
-- The N+1 metafield read is untimed against a real catalogue.
+- **No skill has run against real Baci data.** `_fetch_products_live` has never
+  made a Shopify call. The REST shapes are the ones `shopify_seo` already uses,
+  but "the code is right" is not "it ran".
+- **No real model call has been made.** `inbound_reply` and `ad_copy` were
+  exercised against a stub, so the prompts and grounding blocks are unproven.
+- **No OAuth leg has ever run** against a real provider. The working Google is
+  the env-group path.
+- Omnisend, Constant Contact, Canva and the OpenAI image API: never called.
+- The 110-violation figure is from the prior audit, not from a sweep.
+- The credential constraint regrade is verified on SQLite and by the service
+  coming up healthy; the Postgres `DROP CONSTRAINT` path itself was not
+  observed. If a client's second WordPress site ever fails with an
+  IntegrityError, that is where to look.
 
-## Open, and honest about it
+## The build plan, revised
 
-**Never measured:** `scripts/ab_context.py` — the central claim that this layer
-beats a compiled `.md` is still unproven. One command:
-`ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci`
+The old plan assumed content had to be filled before anything could produce, and
+that the substrate was the risky part. Both premises changed this session. The
+substrate is governed, instrumented and connectable; the daily runtime is not
+governed at all. **Order by where an unguarded write reaches a customer.**
 
-**Blocked on content, not code:**
-- Objections: 7 in review, 1 approved. Binding constraint on `inbound_reply`.
-- `brand.voice.tone` unset. `/admin/propose_voice` will hand you the words.
-- 13 claim fingerprints unrepaired (`/admin/repair_fingerprints?apply=1`).
+**1 — Guard the SEO write path.** The highest-value fix in the codebase and the
+one with a live blast radius. `shopify_seo.update_seo`, `shopify_seo.create_page`,
+`wordpress_seo.update_seo` and `wordpress_seo.create_page` publish to customer-
+facing properties with zero compliance checks. Route them through
+`validator.check` (with `require_citation=False` — an SEO title has no claim to
+cite) and record through `assurance.record(source="seo")`. Baci's 110 known
+violations are exactly the field this writes.
 
-**Known gaps:**
-- `ad_copy` has no imagery and does not pretend to. Every variant carries
-  `needs_art_direction`. Steps 05/06 are what fix this.
-- `ANTHROPIC_API_KEY` unset in the authoring session, so both model skills
-  degrade to composers today. Setting it is what turns `ad_copy` from a
-  grounded placeholder into ad copy.
-- `feedback_block` still has no caller.
-- 2 scanned PDFs need OCR. Not built.
-- `READ_KEY` unset, so `/resolve` and `/brand.md` answer only the admin secret.
-- `ops_jobs.py` is the last file in the execution half with zero tenant refs.
-- No route or agent tool exposes the skills yet — `skill.run` is importable and
-  nothing calls it. That is the next thread.
+**2 — Close the second mail path and strengthen the first.** Give
+`queue_email_draft` the same check, and replace `triage.py`'s substring test
+with `validator._banned`. One is a hole; the other is a matcher that misses the
+spellings that matter. Both are small, and both are on the path that answers
+customers.
 
-## Commit
+**3 — Write `edit_diff`.** Until something does, "is this better than the AI
+alone" has no answer beyond catches. Capture sent-vs-draft in Gmail rather than
+adding a field to the approval — it measures what actually happens.
 
-`67625b7` on `feat/context-architecture`, one commit ahead of `origin/main`
-(`21fdb89`, which is what `/health` reports as live). **Committed, NOT pushed.**
-Verified a clean fast-forward with `git merge-base --is-ancestor` before
-committing.
+**4 — Run `catalog_compliance` against real Baci.** Still the first real
+exercise of the Shopify read, and now it can be watched on the Assurance tab
+while it runs. Expect to fix something in `_fetch_products_live`, which raises
+`KeyError` instead of refusing by name.
 
-New: `app/skill.py`, `app/skill_pack.py`, `scripts/test_skill.py`.
-Modified: `app/kb.py`, `app/harvest.py`, `app/email_harvest.py`,
-`app/systems.py`, `app/responder.py`, `scripts/test_harvest.py`,
-`DEFECTS.md`, this file.
+**5 — Expose the skills to the agent.** `/admin/skill_catalogue` and
+`/admin/skill_run` exist; no agent TOOL does. One `run_skill` tool whose
+description is generated from `skill.catalogue(tenant)`, so the agent picks a
+skill and never picks context.
 
-Pushing deploys it. `_fetch_products_live` has never made a real call and no
-model call has been made either, so push when somebody can watch the first
-sweep rather than overnight.
+**6 — Squarespace, or decide Ironside's blog is not a system.** It is installed
+and permanently blocked on a provider that does not exist.
+
+**Deliberately NOT next:** more knowledge authoring. It is no longer a
+prerequisite for producing, the queue now fills from real runs, and the
+unguarded write paths above are where the actual risk is.
 
 ## Next thread starts here
 
-**Read, and only these:** this file, then `DEFECTS.md` §1 and §2.25–2.28, then
-`app/skill.py`. Do not search the repo broadly.
+**Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
+`app/skill.py` and `app/assurance.py`. Do not search the repo broadly.
 
-Highest value first:
+Start at plan item 1. Verify by running the suites in two batches; check the
+OUTPUT, not the exit code; skip `test_brief.py`;
+`test_tenant_isolation.py` must pass **unmodified**.
 
-1. **Run `catalog_compliance` against real Baci.** It is the only thing standing
-   between this and a client-facing artifact in week one, and it is the first
-   real exercise of the Shopify read. Expect to fix something in
-   `_fetch_products_live`.
-2. **Expose the skills.** A `/admin/skill/<key>` route and one agent tool
-   (`run_skill`) whose description is generated from `skill.catalogue(tenant)`,
-   so the agent picks a skill by name and never picks context.
-3. **Approve the 7 objections and set a voice tone.** Console work, no code, and
-   it changes more about what the system can do than the last ten commits.
-4. **Steps 05/06** — visual identity, then media. Only when Baci needs imagery.
-
-**Verify:** run the suites in two batches. `test_tenant_isolation.py` must pass
-**unmodified**.
-
-**Standing preamble for a new thread:** worktree
-`/Users/gomehsaias/Documents/gomehagent-build`, branch
-`feat/context-architecture`. The other clone (`~/Documents/gomehagent`) is on
-`feat/warehouse-picklist`, a pre-kernel base — **never push from there.** Render
-auto-deploys `main`; git needs the sandbox off; always fetch and verify a
-fast-forward before pushing. Deploys usually land in 60–90s but have taken 6+
-minutes — check `/health` for the commit rather than theorising.
+**Standing preamble.** Worktree `/Users/gomehsaias/Documents/gomehagent-build`,
+branch `feat/context-architecture`, tracking `origin/main`. The other clone
+(`~/Documents/gomehagent`) is on `feat/warehouse-picklist`, a pre-kernel base —
+**never push from there.** Render auto-deploys `main`; git needs the sandbox
+off; always fetch and verify a fast-forward before pushing. Deploys land in
+about two minutes — check `/health` for the commit rather than theorising.
