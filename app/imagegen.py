@@ -220,7 +220,14 @@ def _protect_mask(product_png: bytes, canvas: tuple[int, int]) -> tuple[bytes, b
 
     silhouette = Image.new("L", (W, H), 0)
     silhouette.paste(src.getchannel("A"), (x, y))
-    grown = silhouette.filter(ImageFilter.MaxFilter(5))
+    # Erode, then dilate — a morphological opening. Product photography carries
+    # a few stray non-transparent pixels in its alpha (dust, a rescue-from-JPEG
+    # rim), and dilating those directly turns each speck into a protected island
+    # that survives as a white fleck in the middle of the generated scene. The
+    # erosion removes anything thinner than itself before the growth restores
+    # the real silhouette.
+    despeckled = silhouette.filter(ImageFilter.MinFilter(3))
+    grown = despeckled.filter(ImageFilter.MaxFilter(7))
     mask = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask.putalpha(grown.point(lambda v: 255 if v > 8 else 0))
 
