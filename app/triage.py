@@ -260,9 +260,24 @@ def _apply_guards(result: dict, tenant: str, sender_trusted: bool) -> dict:
     # in the prompt too (via agent_block), but a prompt mostly obeys and a check
     # always blocks. Locked decision #2 — a model may never validate a model.
     if tenant:
-        from . import kb
+        from . import assurance, kb
         draft = f"{result.get('reply_subject', '')} {result.get('reply_body', '')}".lower()
         hits = [p for p in kb.banned_claims(tenant) if p and p.lower() in draft]
+        # Logged whether it hit or not. A check that only records its failures
+        # cannot tell you it is running, and this is the path that actually
+        # answers customers — the one where "is the layer switched on" most
+        # needs an answer that is not a code reading.
+        #
+        # `checked` says `banned_claims_substring`, deliberately NOT
+        # `banned_claims`: this is a plain `in` test, while `validator._banned`
+        # matches on word boundaries with flexible separators. Recording them
+        # under one name would hide that the live path uses the weaker one.
+        assurance.record(
+            tenant, source="mail", system_key="inbox_triage",
+            checked=["banned_claims_substring"], caught=["banned_claim"] if hits else [],
+            verdict="blocked" if hits else "passed",
+            grounded=False,
+            thin=["the mail path drafts without the bundle"])
         if hits:
             result["action"] = "escalate" if result.get("action") == "auto_reply" \
                 else result.get("action", "draft")
