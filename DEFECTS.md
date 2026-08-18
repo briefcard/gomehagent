@@ -224,6 +224,37 @@ does. Verified in `test_tenant_scope.py`.
 
 ---
 
+### A mask is advisory to `gpt-image-1`, and this module said otherwise — FIXED
+
+`imagegen.place_product` was written asserting that masking the product meant
+"the product's pixels come back exactly as they were sent", and returned
+`protected: True` to say so. Gomeh ran it against the real API: the pitcher's
+clear acrylic handle came back **opaque white** and the body lost its depth.
+
+The alpha rules out the obvious explanations. Only **0.77%** of that image is
+partially transparent, so the handle is opaque pixels with pale RGB, sitting
+comfortably inside the protected region — it was not a flattening artefact and
+not a mask that missed. The endpoint regenerates the frame; it is not a
+classical inpaint, and a mask steers it rather than binding it.
+
+Two things were wrong and only one was code. The claim was wrong, and a claim
+in a docstring is load-bearing here — the next caller reads "fidelity by
+construction" and stops checking. `protected` is now `False`, the caveat names
+the measured failure rather than a hypothetical, and the assertion that pinned
+the original claim was rewritten to pin the correction.
+
+**The route that cannot be wrong** is `scene_with_real_product`: the model
+paints an empty plate, and the actual photograph is composited onto it by us.
+The clear handle survives because those are the photographed pixels and no
+model ever sees them. `compose._surface_tint` samples the plate where the
+product will stand and tints the contact shadow to it — a shadow is the surface
+with the light taken out, and a neutral grey one on warm linen is what makes a
+composite read as a sticker.
+
+What it still gives up, stated rather than hidden: the light on the product is
+the light from the product shoot, not from the generated scene. A shot taken
+under very different light will read as inserted no matter how good the shadow.
+
 ## 3. Still broken — in priority order
 
 Updated 2026-08-17.

@@ -19,12 +19,19 @@ turned out to be far too weak to gate on: the real product scored 0.433 and a
 different-coloured, handleless impostor scored 0.356, a gap of 0.077 that
 ordinary lighting variation would swamp.
 
-So the product is not verified afterwards, it is **protected during**. The mask
-is the product's own alpha silhouette: the API repaints only what falls outside
-it, and the product's pixels come back exactly as they were sent. Fidelity by
-construction rather than by inspection — the same reasoning as
-`catalog_seo_rewrite` carrying its `claim_id` by construction instead of
-parsing it back out afterwards.
+**That mask turned out to be advisory, and this module overclaimed.** It was
+written asserting the product's pixels come back exactly as sent. Gomeh tested
+it and they do not: the pitcher's clear acrylic handle came back opaque white
+and the body lost its depth. The alpha tells the story — only 0.77% of that
+image is partially transparent, so the handle is opaque pixels with pale RGB,
+comfortably inside the protected region. The model repainted it regardless.
+`gpt-image-1`'s edit endpoint regenerates a frame; it is not a classical
+inpaint that guarantees untouched pixels.
+
+So `place_product` is the *fast, integrated* route and it can be wrong about
+the product. `scene_with_real_product` is the one that cannot: the model paints
+an empty plate, and the real product is composited onto it by us. Guaranteed
+fidelity now costs a compositing step rather than a promise.
 
 `similarity()` survives as a REPORTED diagnostic, never a gate. It is honest
 about what it is: a coarse screen that catches a wholly different object and
@@ -275,10 +282,43 @@ def place_product(product_png: bytes, prompt: str, *, shape: str = "square",
     return {
         "ok": True, "candidates": out,
         "best": max((c["similarity"] for c in out), default=0.0),
-        "protected": True,
-        "note": "the product was masked, so the model repainted only around "
-                "it — the product pixels are the ones that were sent",
-        "caveat": "the similarity score is reported, not enforced: it is a "
-                  "coarse screen that catches a wholly different object and "
-                  "misses a faithfully redrawn one. The mask is the guarantee.",
+        "protected": False,
+        "note": "the mask is ADVISORY to this endpoint, not binding — it "
+                "regenerates the frame rather than preserving pixels. Check "
+                "every candidate against the real product.",
+        "caveat": "measured failure: a clear acrylic handle came back opaque "
+                  "white and the form lost its depth. For guaranteed fidelity "
+                  "use scene_with_real_product(), which composites the actual "
+                  "photograph onto a generated empty plate.",
     }
+
+
+def scene_with_real_product(product_png: bytes, prompt: str, *,
+                            headline: str = "", subline: str = "",
+                            inspiration: str = "", shape: str = "square",
+                            text_colour: str = "#2A241C",
+                            formats: list[str] | None = None) -> dict:
+    """A generated setting with the ACTUAL product photograph composited on.
+
+    The route that cannot be wrong about the product, because no model ever
+    sees it: `plate()` paints an empty table, and `compose` alpha-composites
+    the real cutout onto it. The clear handle stays clear because those are the
+    photographed pixels.
+
+    What it gives up is integration — the light on the product is the light
+    from the product shoot, not from the generated scene. `compose` grounds it
+    with a contact shadow tinted to the plate, which carries most of the way;
+    a product shot under very different light will still read as inserted.
+    """
+    from . import compose
+    made = plate(prompt, shape=shape, inspiration=inspiration, n=1)
+    if not made["ok"]:
+        return made
+    out = compose.composite_on_plate(
+        product_png, made["images"][0], headline=headline, subline=subline,
+        text_colour=text_colour, formats=formats)
+    if not out["ok"]:
+        return out
+    return {**out, "plate_generated": True,
+            "note": "the product is the photograph, pixel for pixel — no model "
+                    "drew it. Only the setting was generated."}

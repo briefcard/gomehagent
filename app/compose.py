@@ -70,7 +70,24 @@ def _font(size: int) -> tuple[object, str]:
     return ImageFont.load_default(), "PIL default (NO REAL FONT FOUND)"
 
 
-def _contact_shadow(product, opacity: int = 150):
+def _surface_tint(plate, baseline: float) -> tuple[int, int, int]:
+    """The colour of the surface the product will stand on.
+
+    A shadow is not black, it is the surface with the light taken out of it.
+    Tinting to the actual plate is what stops a composite reading as a sticker
+    on a photograph — a neutral grey shadow on a warm linen table is the giveaway.
+    """
+    W, H = plate.size
+    y = max(0, min(H - 2, int(H * baseline)))
+    strip = plate.convert("RGB").crop((int(W * 0.25), y, int(W * 0.75),
+                                       min(H, y + max(2, int(H * 0.04)))))
+    small = strip.resize((1, 1))
+    r, g, b = small.getpixel((0, 0))
+    return int(r * 0.42), int(g * 0.40), int(b * 0.38)
+
+
+def _contact_shadow(product, opacity: int = 150,
+                    tint: tuple[int, int, int] = (28, 22, 16)):
     """A soft shadow under the product's footprint, from its own silhouette.
 
     Taking the bottom slice of the alpha mask rather than the whole shape is
@@ -93,7 +110,7 @@ def _contact_shadow(product, opacity: int = 150):
     sw, sh = int(w * 1.25), max(14, int(h * 0.085))
     foot = foot.resize((sw, sh), Image.LANCZOS)
     foot = foot.point(lambda v: int(min(255, v) * opacity / 255))
-    shadow = Image.new("RGBA", (sw, sh), (28, 22, 16, 0))
+    shadow = Image.new("RGBA", (sw, sh), (*tint, 0))
     shadow.putalpha(foot)
     pad = int(sh * 1.2)
     canvas = Image.new("RGBA", (sw + pad * 2, sh + pad * 2), (0, 0, 0, 0))
@@ -141,7 +158,7 @@ def _draw_text(img, headline: str, subline: str, *, colour: str,
 
 
 def _place_product(canvas, product, *, width_frac: float, baseline: float,
-                   shadow: bool):
+                   shadow: bool, tint: tuple[int, int, int] | None = None):
     """Scale the cutout, ground it, paste it. Bottom-anchored, not centred.
 
     Anchoring to where the object MEETS THE SURFACE is why this takes a
@@ -156,7 +173,7 @@ def _place_product(canvas, product, *, width_frac: float, baseline: float,
     x = (W - p.width) // 2
     bottom = int(H * baseline)
     if shadow:
-        sh = _contact_shadow(p)
+        sh = _contact_shadow(p, tint=tint or (28, 22, 16))
         canvas.alpha_composite(
             sh, (x - (sh.width - p.width) // 2,
                  bottom - sh.height // 2 - int(sh.height * 0.06)))
@@ -181,8 +198,9 @@ def _render(size_key: str, *, product: bytes, headline: str, subline: str,
     else:
         canvas = Image.new("RGBA", (W, H), background)
 
+    tint = _surface_tint(canvas, baseline) if shadow else None
     canvas = _place_product(canvas, _load(product), width_frac=width_frac,
-                            baseline=baseline, shadow=shadow)
+                            baseline=baseline, shadow=shadow, tint=tint)
     fname = _draw_text(canvas, headline, subline, colour=text_colour,
                        top_frac=top_frac)
     out = io.BytesIO()
@@ -259,4 +277,29 @@ def product_on_scene(tenant: str, asset_id: str, plate: bytes, *,
             width_frac=0.52, baseline=0.86, shadow=True, top_frac=0.07)
     return {"ok": True, "images": out, "font": font_used,
             "treatment": "product_on_scene",
+            "real_font": "NO REAL FONT" not in font_used}
+
+
+def composite_on_plate(product_png: bytes, plate_png: bytes, *, headline: str,
+                       subline: str = "", text_colour: str = "#2A241C",
+                       formats: list[str] | None = None) -> dict:
+    """The real product photograph onto a supplied plate. No KB lookup.
+
+    Separate from `product_on_scene` because that one resolves an asset id and
+    enforces rights, which is right when a skill calls it and wrong when the
+    caller already holds the bytes — as `imagegen.scene_with_real_product`
+    does, having just generated the plate itself.
+    """
+    if not product_png or not plate_png:
+        return {"ok": False, "error": "Both a product and a plate are needed."}
+    out, font_used = {}, ""
+    for k in (formats or ["1:1", "4:5", "9:16"]):
+        if k not in SIZES:
+            return {"ok": False, "error": f"unknown format {k!r}"}
+        out[k], font_used = _render(
+            k, product=product_png, headline=headline, subline=subline,
+            background=plate_png, text_colour=text_colour,
+            width_frac=0.52, baseline=0.86, shadow=True, top_frac=0.07)
+    return {"ok": True, "images": out, "font": font_used,
+            "treatment": "real_product_on_generated_plate",
             "real_font": "NO REAL FONT" not in font_used}

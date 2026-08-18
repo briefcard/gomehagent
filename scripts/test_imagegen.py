@@ -121,7 +121,15 @@ def main() -> int:
        "the surface", "contact shadow" in _sent[-1]["data"]["prompt"])
     ck("  and warns against a second copy of the item appearing",
        "second one" in _sent[-1]["data"]["prompt"])
-    ck("it reports that the product was protected", r["protected"])
+    # Was: "it reports that the product was protected". Gomeh tested it against
+    # the real API and the clear acrylic handle came back opaque white with the
+    # depth flattened, so the mask is advisory to this endpoint rather than
+    # binding. The assertion now pins the correction, not the original claim.
+    ck("IT DOES NOT CLAIM THE PRODUCT IS PROTECTED — the mask is advisory to "
+       "this endpoint and a measured run redrew the handle",
+       r["protected"] is False)
+    ck("  and it points at the route that cannot be wrong",
+       "scene_with_real_product" in r["caveat"], r["caveat"][:80])
 
     print("\n— the score is reported, never enforced —")
     impostor = Image.new("RGBA", (700, 700), (0, 0, 0, 0))
@@ -135,7 +143,8 @@ def main() -> int:
        "the strength of it — the measurement was too weak to gate on and the "
        "mask is what guarantees the product",
        r["ok"] and all("similarity" in c for c in r["candidates"]))
-    ck("  and the caveat says exactly that", "not enforced" in r["caveat"])
+    ck("  the caveat names the measured failure, not a hypothetical",
+       "clear acrylic handle" in r["caveat"])
 
     imagegen.post = lambda *a, **k: {"ok": False, "error": "429: slow down"}
     ck("an API failure is passed through, not swallowed",

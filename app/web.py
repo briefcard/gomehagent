@@ -2308,6 +2308,86 @@ def scope_conflicts_route(key: str = Depends(admin_key), tenant: str = "") -> di
     return {"tenant": tenant, "count": len(rows), "conflicts": rows}
 
 
+@app.get("/admin/creative")
+def creative(key: str = Depends(admin_key), tenant: str = "", asset: str = "",
+             prompt: str = "", shape: str = "square", mode: str = "scene",
+             headline: str = "", subline: str = "", inspiration: str = "",
+             background: str = "#EFEAE3", fmt: str = "1:1"):
+    """Make one creative and return the PNG itself, so curl can save it.
+
+    Returning the image rather than JSON is the point: a 1024px frame as a
+    base64 blob in a terminal is something you cannot look at, and looking at
+    it is the entire test.
+
+        curl "…/admin/creative?key=…&tenant=baci&asset=<id>&prompt=…" -o ad.png
+
+    `mode=scene`  generates the surroundings with the product masked, so its
+                  pixels come back as sent.
+    `mode=flat`   composites the product onto a brand colour. No model, no key,
+                  nothing to go wrong.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from fastapi.responses import Response
+
+    from . import compose, imagegen, kb as kbm
+    if not tenant or not asset:
+        return {"error": "tenant and asset are both required — asset is a "
+                         "KbAsset id from the creative library"}
+
+    if mode == "flat":
+        res = compose.product_on_colour(
+            tenant, asset, headline=headline or prompt, subline=subline,
+            background=background, formats=[fmt])
+        if not res["ok"]:
+            return {"error": res["error"]}
+        return Response(content=res["images"][fmt], media_type="image/png",
+                        headers={"X-Font-Used": res["font"],
+                                 "X-Treatment": "product_on_colour"})
+
+    # Scene: the product's own pixels, generated surroundings.
+    ok, why = kbm.may_publish(asset)
+    if not ok:
+        return {"error": f"that asset cannot be used: {why}"}
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset)
+        if not row or row.tenant != tenant:
+            return {"error": "no such asset for this account"}
+        url = row.url
+    import httpx
+    try:
+        got = httpx.get(url, timeout=60, follow_redirects=True)
+        got.raise_for_status()
+    except Exception as exc:                                     # noqa: BLE001
+        return {"error": f"could not fetch the product image: "
+                         f"{exc.__class__.__name__}"}
+
+    res = imagegen.place_product(got.content, prompt or "a bright, simple "
+                                 "table setting", shape=shape, n=1,
+                                 inspiration=inspiration)
+    if not res["ok"]:
+        return {"error": res.get("error", "generation failed")}
+    best = res["candidates"][0]
+    return Response(content=best["image"], media_type="image/png",
+                    headers={"X-Similarity": str(best["similarity"]),
+                             "X-Protected": "product masked — pixels as sent",
+                             "X-Caveat": "similarity is a diagnostic, not a gate"})
+
+
+@app.get("/admin/creative_assets")
+def creative_assets(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """The asset ids `/admin/creative` takes, so they can be found without SQL."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    rows = kbm.assets(tenant, publishable_only=False)
+    return {"tenant": tenant, "assets": [
+        {"id": a.id, "title": a.title, "kind": a.kind,
+         "rights": a.rights or "reference (no answer stored)",
+         "usable_in_a_creative": (a.rights or "") == kbm.OWNED,
+         "entity_key": a.entity_key, "uses": a.uses} for a in rows]}
+
+
 @app.get("/admin/agent_context")
 def agent_context(key: str = Depends(admin_key), tenant: str = "",
                   system: str = "", utterance: str = "", entity_key: str = "",
