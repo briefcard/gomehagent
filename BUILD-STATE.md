@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**48 suites, 48 pass.** Check the OUTPUT, not the exit code, and skip
+**49 suites, 49 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -396,12 +396,16 @@ Traced mechanically on 2026-08-18. This is the most important table in the file.
     skill.py            kb resolve validator ledger  the substrate
     web.py              everything                 console + bridge
 
-**The inversion is the finding.** `grep -c "banned|validator|compliance"` across
-`shopify_seo.py`, `wordpress_seo.py` and `seo_tools.py` returns **0, 0, 0** —
-and those three are the only modules that write to live customer-facing
-properties. The subsystem that merely REPORTS has every guarantee; the one that
-PUBLISHES has none. Baci's 110 violations are SEO metadata, which is exactly
-what `shopify_seo.update_seo` writes.
+**The inversion — FIXED 2026-08-19, and it was worse than described.**
+`grep -c "banned|validator|compliance"` across `shopify_seo`, `wordpress_seo`
+and `seo_tools` returned **0, 0, 0**, and those three are the only modules that
+write to live customer-facing properties.
+
+"SEO metadata" was the wrong description and it understated it. `update_seo`
+writes `body_html` — real description copy — and on WordPress with
+`resource="post"` it replaces an article's ENTIRE `content`. See **The blog
+path** below; `app/seo_guard.py` now stands in front of all of it, and the same
+grep returns 10 and 8.
 
 **Two mail paths, and only one is guarded.** `worker.py:108 → triage.triage_email`
 checks banned claims and escalates. `command_agent → queue_email_draft` — the
@@ -431,6 +435,37 @@ Corrected list, five remaining after this session wired one and deleted two:
 deleting them throws away real work. Note both halves of the Canva export path
 (`export` and `export_result`) are unwired, so it is incomplete rather than
 broken.
+
+## The blog path
+
+Owner: *"we need to go through the blog path for shopify and we should have a
+path to both review and revise existing articles and to extend our articles by
+writing new ones"*.
+
+Nothing in `shopify_seo` had ever touched `blogs/{id}/articles.json`, so the
+entire content half of an SEO plan had no publish path on Shopify at all.
+`list_blogs`, `list_articles`, `get_article`, `create_article`,
+`update_article`.
+
+**WordPress could revise but never create.** `update_seo(resource="post")`
+revises an existing post; `create_page` writes to the `pages` endpoint. So the
+`blog` system — declared in `CATALOG`, installed on Ironside — had no way to
+publish a new article. It has the same five functions now, in the same shape,
+because `sites.backend()` is duck-typed and a missing one is an AttributeError
+mid-publish. The suite checks all five exist on both.
+
+Three decisions worth keeping:
+
+* **`get_article` returns the full body.** A revision that has not read the
+  current text is a rewrite, and rewriting a page that already ranks is how a
+  site loses the position it had.
+* **`update_article` is partial.** A revision that sends every field rewrites
+  the ones it was not asked to change, and an untouched `body_html` arriving as
+  `""` would blank a live page.
+* **A new article is a DRAFT unless `published` is explicitly true.** This is
+  the one call that can put prose nobody has read on a public site. Note
+  `create_page` beside it still publishes immediately — a separate pre-existing
+  decision, left alone rather than changed quietly.
 
 ## Connecting a client — now possible entirely from the console
 
@@ -955,7 +990,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **48 suites pass**, none touching the network,
+**Ran and confirmed.** All **49 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
@@ -993,13 +1028,13 @@ that the substrate was the risky part. Both premises changed this session. The
 substrate is governed, instrumented and connectable; the daily runtime is not
 governed at all. **Order by where an unguarded write reaches a customer.**
 
-**1 — Guard the SEO write path.** The highest-value fix in the codebase and the
-one with a live blast radius. `shopify_seo.update_seo`, `shopify_seo.create_page`,
-`wordpress_seo.update_seo` and `wordpress_seo.create_page` publish to customer-
-facing properties with zero compliance checks. Route them through
-`validator.check` (with `require_citation=False` — an SEO title has no claim to
-cite) and record through `assurance.record(source="seo")`. Baci's 110 known
-violations are exactly the field this writes.
+**1 — ~~Guard the SEO write path.~~ DONE.** `app/seo_guard.py` stands in front
+of all five existing writers and the four new article ones. Ban list only,
+`require_citation=False` — an SEO title has no claim to cite, and a guard that
+fires on everything is a guard somebody removes. It names the FIELD rather than
+just the rule, refuses when no tenant matches the domain (a site with no ban
+list is the same hole one layer down), and records every check — pass or catch —
+to `assurance` under source `seo`.
 
 **2 — Close the second mail path and strengthen the first.** Give
 `queue_email_draft` the same check, and replace `triage.py`'s substring test

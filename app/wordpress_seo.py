@@ -148,6 +148,9 @@ def get_seo(profile: dict, resource: str, resource_id: str) -> str:
 # Write — called ONLY by the approval executor, after Gomeh approves
 # ---------------------------------------------------------------------------
 def update_seo(profile: dict, resource: str, resource_id, fields: dict) -> str:
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="SEO update")):
+        return refusal
     ptype = "posts" if resource == "post" else "pages"
     body: dict = {}
     if fields.get("title") is not None:
@@ -164,6 +167,9 @@ def update_seo(profile: dict, resource: str, resource_id, fields: dict) -> str:
 
 
 def create_page(profile: dict, fields: dict) -> str:
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="new page")):
+        return refusal
     body = {"title": fields["title"], "content": fields.get("body_html", ""),
             "status": "publish"}
     if fields.get("handle"):
@@ -173,6 +179,90 @@ def create_page(profile: dict, fields: dict) -> str:
     obj = _send(profile, "POST", "pages", body)
     _apply_plugin_meta(profile, "pages", obj.get("id"), fields)
     return obj.get("link", "(created)")
+
+
+def list_articles(profile: dict, blog_id=None, limit: int = 20) -> str:
+    """Published posts, newest first. `blog_id` is accepted and ignored —
+    WordPress has one post type where Shopify has many blogs, and keeping the
+    signatures identical is what lets `sites.backend()` stay duck-typed."""
+    posts = _send(profile, "GET", "posts",
+                  params={"per_page": min(int(limit or 20), 100),
+                          "status": "publish,draft"}) or []
+    if not posts:
+        return "No posts."
+    return "\n".join(
+        f"{p.get('id')}  [{p.get('status')}]  "
+        f"{(p.get('title') or {}).get('rendered', '')}  {p.get('link', '')}"
+        for p in posts)
+
+
+def get_article(profile: dict, blog_id=None, article_id=None) -> str:
+    """The full post, body included — a revision that has not read the current
+    text is a rewrite, and rewriting a page that ranks loses the position."""
+    post = _send(profile, "GET", f"posts/{article_id}", params={"context": "edit"})
+    if not post:
+        return f"No post {article_id}."
+    return json.dumps({
+        "id": post.get("id"), "status": post.get("status"),
+        "title": (post.get("title") or {}).get("raw")
+                 or (post.get("title") or {}).get("rendered", ""),
+        "handle": post.get("slug"), "link": post.get("link"),
+        "seo_description": (post.get("excerpt") or {}).get("raw", ""),
+        "body_html": (post.get("content") or {}).get("raw")
+                     or (post.get("content") or {}).get("rendered", ""),
+    }, indent=2)
+
+
+def create_article(profile: dict, blog_id=None, fields: dict | None = None) -> str:
+    """Write a NEW post. DRAFT unless `published` is explicitly true.
+
+    Nothing here could create one before: `update_seo(resource="post")` revises
+    an existing post and `create_page` writes to the `pages` endpoint, so the
+    `blog` system — declared in `systems.CATALOG`, installed on Ironside — had
+    no way to publish a new article at all.
+
+    Note `create_page` next to this publishes immediately. That is a separate
+    decision and left alone; an article defaults to draft because it is the
+    longest piece of prose this platform writes and the one nobody skims.
+    """
+    fields = fields or {}
+    if not (fields.get("title") or "").strip():
+        return "A post needs a title."
+    if not (fields.get("body_html") or "").strip():
+        return "A post needs a body — an empty post is worse than none."
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="new post")):
+        return refusal
+
+    body = {"title": fields["title"], "content": fields["body_html"],
+            "status": "publish" if fields.get("published") else "draft"}
+    if fields.get("handle"):
+        body["slug"] = fields["handle"]
+    if fields.get("seo_description") is not None:
+        body["excerpt"] = fields["seo_description"]
+    obj = _send(profile, "POST", "posts", body)
+    _apply_plugin_meta(profile, "posts", obj.get("id"), fields)
+    return (f"{obj.get('link', '(created)')} — "
+            + ("published" if fields.get("published") else
+               "saved as a draft (pass published=true to publish)"))
+
+
+def update_article(profile: dict, blog_id=None, article_id=None,
+                   fields: dict | None = None) -> str:
+    """Revise an existing post, through the same guard as everything else."""
+    fields = fields or {}
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="post revision")):
+        return refusal
+    return update_seo(profile, "post", article_id, fields)
+
+
+def list_blogs(profile: dict) -> str:
+    """WordPress has one stream of posts, not several blogs. Answered rather
+    than raising, so an agent written against the Shopify shape gets a sentence
+    instead of an AttributeError."""
+    return ("WordPress has a single posts stream — no blog id is needed. "
+            "Use list_articles directly.")
 
 
 def create_collection(profile: dict, fields: dict, item_ids: list | None = None) -> str:

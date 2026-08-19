@@ -144,6 +144,9 @@ def _collection_endpoint(store: str, collection_id) -> tuple[str, str]:
 
 
 def update_seo(profile: dict, resource: str, resource_id, fields: dict) -> str:
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="SEO update")):
+        return refusal
     store = _store(profile)
     if resource == "product":
         endpoint, root, kind = "products", "product", "products"
@@ -162,6 +165,9 @@ def update_seo(profile: dict, resource: str, resource_id, fields: dict) -> str:
 
 
 def create_collection(profile: dict, fields: dict, item_ids: list | None = None) -> str:
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="new collection")):
+        return refusal
     store = _store(profile)
     body = {"custom_collection": {"title": fields["title"]}}
     for k in ("handle", "body_html"):
@@ -179,6 +185,9 @@ def create_collection(profile: dict, fields: dict, item_ids: list | None = None)
 
 
 def create_page(profile: dict, fields: dict) -> str:
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="new page")):
+        return refusal
     store = _store(profile)
     body = {"page": {"title": fields["title"], "body_html": fields.get("body_html", "")}}
     if fields.get("handle"):
@@ -188,6 +197,135 @@ def create_page(profile: dict, fields: dict) -> str:
         body["page"]["metafields"] = mfs
     page = _send(store, "POST", "pages.json", body).get("page", {})
     return f"{_store_url(store)}/pages/{page.get('handle')}"
+
+
+# ---------------------------------------------------------------------------
+# The blog. Articles were missing entirely: `update_seo` reaches products and
+# collections, `create_page` makes a PAGE, and nothing in this file had ever
+# touched `blogs/{id}/articles.json`. A store's blog is where most SEO copy
+# actually lives, so the whole content half of the plan had no publish path.
+# ---------------------------------------------------------------------------
+
+def list_blogs(profile: dict) -> str:
+    """A store can have several blogs ("News", "Guides"); the id is needed for
+    everything else here, and guessing it publishes into the wrong one."""
+    if (why := _ok(profile)):
+        return why
+    store = _store(profile)
+    blogs = _get(store, "blogs.json").get("blogs", [])
+    if not blogs:
+        return ("This store has no blog. Shopify creates one named 'News' by "
+                "default — if it was deleted, add one in admin before "
+                "publishing articles.")
+    return "\n".join(f"{b['id']}  {b['title']}  /blogs/{b['handle']}"
+                      for b in blogs)
+
+
+def list_articles(profile: dict, blog_id, limit: int = 20) -> str:
+    """What is already published, so a revision starts from the real text."""
+    if (why := _ok(profile)):
+        return why
+    store = _store(profile)
+    arts = _get(store, f"blogs/{blog_id}/articles.json",
+                {"limit": min(int(limit or 20), 250)}).get("articles", [])
+    if not arts:
+        return f"No articles on blog {blog_id}."
+    out = []
+    for a in arts:
+        state = "published" if a.get("published_at") else "DRAFT"
+        out.append(f"{a['id']}  [{state}]  {a.get('title', '')}  "
+                   f"/blogs/{a.get('handle', '')}")
+    return "\n".join(out)
+
+
+def get_article(profile: dict, blog_id, article_id) -> str:
+    """The full article, INCLUDING its body.
+
+    The body is returned rather than summarised because a revision that has not
+    read the current text is a rewrite, and a rewrite of a page that already
+    ranks is how a site loses positions it had.
+    """
+    if (why := _ok(profile)):
+        return why
+    store = _store(profile)
+    a = _get(store, f"blogs/{blog_id}/articles/{article_id}.json").get("article", {})
+    if not a:
+        return f"No article {article_id} on blog {blog_id}."
+    mf = _get(store, f"articles/{article_id}/metafields.json",
+              {"namespace": "global"}).get("metafields", [])
+    seo = {m["key"]: m.get("value", "") for m in mf}
+    return json.dumps({
+        "id": a.get("id"), "title": a.get("title"), "handle": a.get("handle"),
+        "author": a.get("author"), "tags": a.get("tags"),
+        "published_at": a.get("published_at"),
+        "summary_html": a.get("summary_html"),
+        "seo_title": seo.get("title_tag", ""),
+        "seo_description": seo.get("description_tag", ""),
+        "body_html": a.get("body_html", ""),
+    }, indent=2)
+
+
+def create_article(profile: dict, blog_id, fields: dict) -> str:
+    """Write a NEW article. Unpublished unless `published` is explicitly true.
+
+    A draft by default is the whole point: this is the one call here that can
+    put prose nobody has read on a public site, and `published=True` has to be
+    a decision somebody made rather than the absence of one.
+    """
+    if (why := _ok(profile)):
+        return why
+    if not (fields.get("title") or "").strip():
+        return "An article needs a title."
+    if not (fields.get("body_html") or "").strip():
+        return "An article needs a body — an empty post is worse than none."
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="new article")):
+        return refusal
+
+    store = _store(profile)
+    art = {"title": fields["title"], "body_html": fields["body_html"],
+           "published": bool(fields.get("published"))}
+    for k in ("handle", "author", "tags", "summary_html"):
+        if fields.get(k):
+            art[k] = fields[k]
+    mfs = _seo_metafields(fields)
+    if mfs:
+        art["metafields"] = mfs
+    res = _send(store, "POST", f"blogs/{blog_id}/articles.json",
+                {"article": art}).get("article", {})
+    state = "published" if res.get("published_at") else "saved as a draft"
+    return (f"{_store_url(store)}/blogs/{res.get('handle')} — {state}"
+            + ("" if res.get("published_at") else
+               " (publish it from admin, or pass published=true)"))
+
+
+def update_article(profile: dict, blog_id, article_id, fields: dict) -> str:
+    """Revise an existing article. Only the fields given are touched.
+
+    Partial by design: a revision that sends every field rewrites the ones it
+    was not asked to change, and an untouched `body_html` arriving as an empty
+    string would blank a live page.
+    """
+    if (why := _ok(profile)):
+        return why
+    from . import seo_guard
+    if (refusal := seo_guard.check(profile, fields, what="article revision")):
+        return refusal
+
+    store = _store(profile)
+    art = {"id": article_id}
+    for k in ("title", "handle", "body_html", "author", "tags",
+              "summary_html", "published"):
+        if fields.get(k) is not None:
+            art[k] = fields[k]
+    mfs = _seo_metafields(fields)
+    if mfs:
+        art["metafields"] = mfs
+    if len(art) == 1 and not mfs:
+        return "Nothing to change — give a title, body_html, tags or SEO fields."
+    res = _send(store, "PUT", f"blogs/{blog_id}/articles/{article_id}.json",
+                {"article": art}).get("article", {})
+    return f"{_store_url(store)}/blogs/{res.get('handle')} — updated"
 
 
 # ---------------------------------------------------------------------------
