@@ -103,7 +103,15 @@ def assemble(tenant: str, days: int = 30) -> dict:
             "awaiting_review": len(inv.get("pending", [])),
             "expired": len(inv.get("expired", [])),
         },
+        # Per system, split by AUDIENCE. Technical answers "is it working" and
+        # belongs to us; business answers "what did it do for me" and is what
+        # the client is paying for. A report that leads with validator counts
+        # is a report about ourselves.
+        "systems": _per_system(tenant, days),
         "blocked_on": [{"reason": why, "cost": n} for why, n in gaps[:8]],
+        # Figures only the client can give us — the privacy path. One message
+        # asks for all of them; see `metrics.request_email`.
+        "awaiting_client": _asks(tenant, days),
         # Named, not omitted. A client report that silently leaves out revenue
         # reads as "we did not move revenue"; one that says the figure is not
         # wired reads as what it is.
@@ -140,3 +148,26 @@ def _unmeasured(tenant: str) -> list[dict]:
                         "why": f"{cap} is not connected for this account",
                         "fix": "connect it on the Accounts tab"})
     return out
+
+
+def _per_system(tenant: str, days: int) -> list[dict]:
+    from . import metrics, systems
+    out = []
+    for row in systems.for_tenant(tenant):
+        vals = metrics.compute(tenant, row.key, days)
+        if not vals:
+            continue
+        out.append({
+            "system": row.key, "name": row.name or row.key,
+            "status": row.status, "autonomy": row.autonomy,
+            "business": [m for m in vals if m["kind"] == "business"],
+            "technical": [m for m in vals if m["kind"] == "technical"],
+        })
+    return out
+
+
+def _asks(tenant: str, days: int) -> list[dict]:
+    from . import metrics
+    return [{"system": m["system"], "metric": m["key"], "label": m["label"],
+             "ask": m.get("ask", ""), "why": m.get("why", "")}
+            for m in metrics.asks(tenant, days)]

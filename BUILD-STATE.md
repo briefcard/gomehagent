@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**47 suites, 47 pass.** Check the OUTPUT, not the exit code, and skip
+**48 suites, 48 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -289,6 +289,52 @@ somebody deletes, rather than a paragraph nobody updates.
 — need the `reports` system, which is declared in `systems.CATALOG` and still
 unbuilt. That is the next real piece if these reports are to carry a number the
 client already believes.
+
+### Two audiences, declared per system
+
+Owner's framing: *"for each of these systems there are technical reports and
+business reports"*. Technical answers "is this working" and belongs to us;
+business answers "what did it do for me" and is what the client pays for. A
+report leading with validator counts is a report about ourselves.
+
+`metrics.CATALOG` is a row per metric with a `kind` and a `source`, so adding
+one is data and the assembler never grows a clause. Four sources, and the last
+two are the honest ones:
+
+* `ledger` / `kb` / `assurance` — we compute it from our own record.
+* `provider` — their platform holds it; needs the unbuilt `reports` system.
+* `blocked` — computable if something upstream existed. **`% drafts sent as-is`
+  needs `edit_diff`**, which nothing writes: the metric the owner named is
+  exactly what the missing column was for.
+* `asked` — NOT OURS TO COMPUTE. What a support reply costs in staff time is a
+  fact about the client's business, and guessing it puts an invented number in
+  a document the client forwards to somebody else.
+
+Nothing unmeasurable is dropped from the output. Skipping it makes a short
+report look complete.
+
+### The privacy path is the same mechanism
+
+A client who declines to connect is not a client with a hole in their report —
+their figures move to `asked`, and `metrics.request_email` composes ONE message
+rather than one per figure. Somebody already choosing friction will not answer
+five emails. Every ask carries WHY, because "what does a support reply cost you
+in staff time" reads as odd until it is followed by "we multiply it by the
+replies we answered", and it closes by offering to connect instead so the ask is
+not permanent. **Composed, never sent** — `queue=True` puts it in the approval
+queue.
+
+Two rules the suite pins. A supplied figure is stored **as given, never
+coerced**: "about £18, maybe £20 at peak" tells us something a float destroys,
+and a report can say "£18 (their estimate)" but cannot say that from `18.0`.
+And **the period is part of a figure's identity** — a supplied number whose
+period has lapsed returns to unanswered rather than being carried forward,
+because carrying it is how a report becomes fiction the client signed off on.
+
+`service_desk` is worked through against the owner's own list.
+`catalog_compliance`, `campaign_email` and `ad_creative` have starter
+declarations and want the same pass — their business metrics are the owner's to
+name.
 
 ## The wiring audit — which entry points reach the data layer
 
@@ -866,7 +912,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **47 suites pass**, none touching the network,
+**Ran and confirmed.** All **48 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and

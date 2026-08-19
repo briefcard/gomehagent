@@ -393,6 +393,39 @@ class ToolCall(Base):
     ref = Column(String, default="")         # run id / message id, when known
 
 
+class ReportedFigure(Base):
+    """A number the CLIENT supplied, because we cannot read it.
+
+    Some figures are not ours to compute. What a support reply costs in staff
+    time, what a saved sale was worth, what their margin is — those are facts
+    about their business, and a platform that guesses them puts an invented
+    number in a document the client will forward to somebody else.
+
+    Others we could compute but are not allowed to: a client with privacy
+    concerns may decline to connect their store at all, and the choice then is
+    a report with a hole in it or a report built from what they send us.
+
+    Stored WITH provenance — who said it, when, and for which period — because
+    a client-supplied number in a client-facing report has to be attributable
+    back to the client who supplied it. `period_start`/`period_end` are part of
+    the identity: last quarter's average order value is not this quarter's, and
+    silently carrying one forward is how a report becomes fiction.
+    """
+
+    __tablename__ = "reported_figures"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    metric_key = Column(String, nullable=False, index=True)
+    period_start = Column(String, default="")     # YYYY-MM-DD
+    period_end = Column(String, default="")
+    value = Column(String, default="")            # as given, never coerced
+    unit = Column(String, default="")
+    supplied_by = Column(String, default="")      # who said so
+    at = Column(DateTime(timezone=True), default=utcnow)
+    note = Column(Text, default="")
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 

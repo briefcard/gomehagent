@@ -61,7 +61,7 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",
               "seo_snapshots", "voice_profiles", "follow_ups",
               "seo_site_config", "system_docs", "assurance_events",
-              "tool_calls"}
+              "tool_calls", "reported_figures"}
 # `assurance_events` is operations, not knowledge: it records what the system
 # DID — which drafts were checked and what was caught — and no crawl or sync
 # can rebuild it. Classified in the same change that added the table, because

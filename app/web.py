@@ -2702,6 +2702,50 @@ def tool_calls_route(key: str = Depends(admin_key), tenant: str = "",
     return toolcalls.report(tenant, max(1, min(int(days or 30), 365)))
 
 
+@app.post("/admin/report_figure")
+async def report_figure(request: Request, key: str = Depends(admin_key)):
+    """Record a number the client sent back.
+
+    POST because it writes, and stored AS GIVEN rather than coerced: a client
+    who answers "about £18, maybe £20 at peak" has told us something a float
+    would destroy, and a report that says "£18 (their estimate)" is more honest
+    than one that says 18.0.
+    """
+    from fastapi.responses import JSONResponse
+
+    from . import metrics
+    if key != config.APPROVAL_SECRET:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    form = await request.form()
+    return {"result": metrics.record_figure(
+        str(form.get("tenant", "")), str(form.get("metric", "")),
+        str(form.get("value", "")),
+        period_start=str(form.get("period_start", "")),
+        period_end=str(form.get("period_end", "")),
+        unit=str(form.get("unit", "")),
+        supplied_by=str(form.get("supplied_by", "")),
+        note=str(form.get("note", "")))}
+
+
+@app.get("/admin/report_request")
+def report_request(key: str = Depends(admin_key), tenant: str = "",
+                   days: int = 30, to: str = "", queue: bool = False) -> dict:
+    """Compose the ask for what only the client can tell us.
+
+    `queue=true` puts it in the approval queue. It is never sent from here —
+    nothing in this system sends as a side effect of producing something, and a
+    request going out under Gomeh's name without him reading it would be the
+    first.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "tenant is required"}
+    from . import metrics
+    return metrics.request_email(tenant, max(1, min(int(days or 30), 365)),
+                                 to=to, queue=bool(queue))
+
+
 @app.get("/admin/skill_catalogue")
 def skill_catalogue(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Every registered skill and whether it can run for this account."""
