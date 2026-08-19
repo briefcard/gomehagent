@@ -57,9 +57,9 @@ CATALOG: dict[str, list[dict]] = {
          "how": "the model wrote it, deterministic code stopped it — without "
                 "this the phrase goes out"},
         {"key": "sent_as_is", "label": "Drafts sent without an edit",
-         "kind": "business", "source": "blocked",
-         "needs": "SystemRun.edit_diff, which nothing writes yet",
-         "fix": "capture sent-vs-draft in Gmail"},
+         "kind": "business", "source": "ledger",
+         "how": "approvals whose sent text matched the drafted text — measured "
+                "from the Gmail draft that actually went out, not from a copy"},
     ],
     "catalog_compliance": [
         {"key": "violations_found", "label": "Barred claims found in the catalogue",
@@ -317,6 +317,22 @@ def _from_record(tenant: str, system_key: str, m: dict, since):
         return len({o.objection_id for o in sent if o.objection_id})
     if key in ("drafts", "violations_found"):
         return len(rows)
+    if key == "sent_as_is":
+        # Unblocked by the draft/approval sync: the delta is recorded on the
+        # approval when the draft is sent, so this is a count rather than an
+        # apology. Reported as "n of m" rather than a bare percentage — a
+        # percentage of three replies is not a rate, and rounding it to one
+        # looks like a measurement.
+        with db.SessionLocal() as s2:
+            aps = [a for a in s2.query(db.Approval)
+                   .filter(db.Approval.tenant == tenant,
+                           db.Approval.kind == "send_email",
+                           db.Approval.created_at >= since).all()
+                   if (a.payload or {}).get("edit")]
+        if not aps:
+            return None
+        clean = sum(1 for a in aps if (a.payload or {})["edit"].get("as_is"))
+        return f"{clean} of {len(aps)}"
     return None
 
 

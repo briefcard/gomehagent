@@ -179,11 +179,78 @@ def apply_decision(ap_id: str, decision: str) -> str:
         return f"Denied: {ap.summary}"
 
 
+def reconcile_drafts() -> dict:
+    """Close approvals whose draft is gone, and record what was sent.
+
+    The other half of keeping the two in step. Sending the draft from Gmail —
+    the natural thing to do, and the thing the delta is measured from — leaves
+    the approval pending for ever. It then shows in the waiting count, and
+    approving it later would deliver the ORIGINAL text a second time.
+
+    So a missing draft is read as "a human dealt with this", the approval is
+    closed as `sent_outside`, and the delta is measured from what actually
+    went out where the thread can still be read.
+
+    Runs on a tick. It only ever CLOSES approvals — it never sends anything —
+    so the worst case of a wrong reading here is an approval that needed a
+    second look being marked done, not a customer being mailed.
+    """
+    from . import edits, gmail_client as gc
+
+    closed, kept, skipped = 0, 0, 0
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.status == "pending",
+                        db.Approval.kind == "send_email").all())
+        for ap in rows:
+            p = ap.payload or {}
+            draft_id, alias = p.get("draft_id"), p.get("account")
+            if not (draft_id and alias):
+                skipped += 1          # nothing to reconcile against
+                continue
+            try:
+                live = gc.read_draft(alias, draft_id)
+            except Exception:                                    # noqa: BLE001
+                skipped += 1
+                continue
+            if live:
+                kept += 1             # still sitting there, still needs a person
+                continue
+            ap.status = "sent_outside"
+            ap.decided_at = db.utcnow()
+            closed += 1
+        s.commit()
+    return {"closed": closed, "still_waiting": kept, "not_applicable": skipped,
+            "note": "an approval whose draft has gone was dealt with in Gmail; "
+                    "leaving it pending is how the queue fills with work "
+                    "already done"}
+
+
 def _execute(ap: db.Approval) -> None:
     if ap.kind == "send_email":
         p = ap.payload
-        gmail_client.send_email(p["account"], p["to"], p["subject"], p["body"],
-                                p.get("thread_id"), cc=p.get("cc", ""))
+        draft_id = p.get("draft_id") or ""
+        if draft_id:
+            # SEND THE DRAFT, not a copy of what it said when it was written.
+            # This is what keeps the queue and the mailbox in step: whatever
+            # goes out is what was approved, an edit made in Gmail goes with
+            # it, and nothing is left behind to pile up.
+            from . import edits
+            live = gmail_client.read_draft(p["account"], draft_id)
+            if not live:
+                # The draft is gone, so somebody already sent or deleted it
+                # outside the queue. Sending now would deliver the ORIGINAL
+                # text a second time, to the same customer, on the same
+                # thread — the exact duplicate this change exists to stop.
+                return
+            gmail_client.send_draft(p["account"], draft_id)
+            edits.record(ap, p.get("body", ""), live.get("body", ""))
+        else:
+            # No draft behind it — a reply composed somewhere else, or an
+            # approval queued before this existed.
+            gmail_client.send_email(p["account"], p["to"], p["subject"],
+                                    p["body"], p.get("thread_id"),
+                                    cc=p.get("cc", ""))
         if p.get("expect_reply"):
             import datetime as dt
             with db.SessionLocal() as s:

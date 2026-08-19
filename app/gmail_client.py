@@ -390,6 +390,43 @@ def create_draft(alias: str, to: str, subject: str, body: str,
     return draft["id"]
 
 
+def read_draft(alias: str, draft_id: str) -> dict:
+    """The draft AS IT STANDS NOW, so an edit made in Gmail can be seen.
+
+    Returns {} when the draft is gone — already sent, or deleted — which is a
+    meaningful answer rather than an error: it means a human dealt with this
+    outside the queue, and the approval waiting on it must not fire.
+    """
+    try:
+        d = (service_for(alias).users().drafts()
+             .get(userId="me", id=draft_id, format="full").execute())
+    except Exception:                                            # noqa: BLE001
+        return {}
+    msg = d.get("message") or {}
+    headers = {h["name"].lower(): h["value"]
+               for h in (msg.get("payload") or {}).get("headers", [])}
+    return {"draft_id": draft_id, "thread_id": msg.get("threadId", ""),
+            "subject": headers.get("subject", ""), "to": headers.get("to", ""),
+            "body": _extract_text(msg.get("payload") or {})}
+
+
+def send_draft(alias: str, draft_id: str) -> str:
+    """Send THE DRAFT, not a copy of what it said when it was written.
+
+    This is the difference between the queue and the mailbox staying in step.
+    Composing a fresh message from the stored payload means an edit made in
+    Gmail is silently discarded, and leaves the draft behind to accumulate —
+    both of which happened before this existed.
+    """
+    sent = (service_for(alias).users().drafts()
+            .send(userId="me", body={"id": draft_id}).execute())
+    return sent.get("id", "")
+
+
+def draft_exists(alias: str, draft_id: str) -> bool:
+    return bool(read_draft(alias, draft_id))
+
+
 def send_email(alias: str, to: str, subject: str, body: str,
                thread_id: str | None = None, html: str | None = None,
                cc: str = "") -> str:

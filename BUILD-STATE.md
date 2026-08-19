@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**52 suites, 52 pass.** Check the OUTPUT, not the exit code, and skip
+**53 suites, 53 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -457,6 +457,53 @@ second such test this session; the other was the portal cookie over http.
 over http silently sends nothing and a test reads the signed-out page while
 appearing to pass. `test_portal.py` pins `base_url="https://testserver"` and
 says why.
+
+## Drafts and approvals are one thing now
+
+Owner: *"they should be in sync so that it's not a constant build up, whatever
+gets sent in the end is approved, and we track the delta."*
+
+A drafted reply used to produce TWO artefacts that never spoke: a Gmail draft,
+and an approval built from a COPY of what that draft said when it was written.
+Approving composed a THIRD message from that copy. So editing the draft in Gmail
+changed nothing anybody sent; approving left the draft behind to accumulate; and
+sending it yourself left the approval pending, where approving it later would
+deliver the original text A SECOND TIME to the same customer on the same thread.
+
+Now the draft id is kept on the approval and **approving sends the draft
+itself**. Whatever goes out is what was approved, an edit made in Gmail travels
+with it, and nothing is left behind.
+
+The reverse is handled by `approvals.reconcile_drafts`, on a 20-minute tick: an
+approval whose draft has vanished was dealt with in Gmail, so it closes as
+`sent_outside` — not `approved`, which would claim we did something the owner
+did. It only ever CLOSES approvals and never sends, so the worst case of a
+misread is a closed approval rather than a mailed customer.
+
+**`app/edits.py` records the delta**: `as_is`, `similarity`, `lines_changed`,
+and a CAPPED sample — not the full text, because a second copy of every customer
+reply is a data store nobody asked for. It writes `SystemRun.edit_diff`, the
+last of the three declared-and-dead columns.
+
+Two things the diff deliberately ignores. **Quoted history** — Gmail appends the
+original to every reply, and counting it would make every send look wholly
+rewritten. And **whitespace** — a stray space is not a correction, and treating
+it as one reports the generator as worse than it is.
+
+`% drafts sent as-is` is therefore no longer blocked, and reports as "7 of 9"
+rather than a percentage: a percentage of three replies is not a rate, and
+rounding it to one looks like a measurement.
+
+**Unproven:** `read_draft` and `send_draft` are written against Gmail's
+`drafts().get/send` and are STUBBED in the suite. No real Gmail call has been
+made. Given this codebase's record with untested API assumptions, watch the
+first real approval after drafts resume.
+
+**Measured, NOT yet learned from.** This closes the measurement gap and nothing
+more. No drafting path reads a delta, and `systems.feedback_block` — which
+renders per-system Guidance for injection at drafting — STILL HAS NO CALLER, so
+the Guidance box on the Systems card saves text that never reaches a prompt.
+See plan item 1.
 
 ## The wiring audit — which entry points reach the data layer
 
@@ -1069,7 +1116,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **52 suites pass**, none touching the network,
+**Ran and confirmed.** All **53 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
@@ -1121,7 +1168,16 @@ with `validator._banned`. One is a hole; the other is a matcher that misses the
 spellings that matter. Both are small, and both are on the path that answers
 customers.
 
-**3 — Write `edit_diff`.** Until something does, "is this better than the AI
+**1 — Close the learning loop.** Everything now MEASURES and nothing LEARNS.
+`systems.feedback_block()` renders a system's standing guidance for injection at
+drafting time and has no caller — the Guidance field on the Systems card is
+saved, displayed, and read by nothing. And the new edit deltas are recorded and
+consumed by nothing. Two small wirings, and together they are the difference
+between a system that reports on itself and one that improves: `ctx` already
+carries the tenant and system key, so folding `feedback_block` into the bundle
+is a few lines plus a test that a note actually reaches a draft.
+
+**~~3 — Write `edit_diff`.~~ DONE for capture, see above.** Was: Until something does, "is this better than the AI
 alone" has no answer beyond catches. Capture sent-vs-draft in Gmail rather than
 adding a field to the approval — it measures what actually happens. This is now
 the LAST unwritten column of the three that were declared and dead; `expires_at`
@@ -1182,15 +1238,67 @@ unguarded write paths above are where the actual risk is.
 ## Next thread starts here
 
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
-`app/skill.py` and `app/assurance.py`. Do not search the repo broadly.
+`app/skill.py`. Do not search the repo broadly.
 
-Start at plan item 1. Verify by running the suites in two batches; check the
-OUTPUT, not the exit code; skip `test_brief.py`;
-`test_tenant_isolation.py` must pass **unmodified**.
+**Run the suites first, before changing anything.** 53 of them, all offline:
 
-**Standing preamble.** Worktree `/Users/gomehsaias/Documents/gomehagent-build`,
-branch `feat/context-architecture`, tracking `origin/main`. The other clone
+    for f in scripts/test_*.py; do
+      [ "$(basename $f)" = "test_brief.py" ] && continue
+      r=$(python3 "$f" 2>&1 | tail -3)
+      echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
+    done
+
+Check the OUTPUT, not the exit code, and skip `test_brief.py` — it is an
+argparse CLI that exits 0 whatever happens, and counting it as a passing test is
+a mistake this file made for weeks.
+
+**Start at plan item 1** — close the learning loop. It is the smallest change
+with the largest gap behind it: everything in this system now measures itself
+and nothing learns from what it measured.
+
+### Three habits this session earned the hard way
+
+**A test that cannot fail for its stated reason is worse than no test.** Three
+were found this session, each passing for the wrong reason and only admitting it
+under an unrelated change: the portal cookie is `secure=True`, so `TestClient`
+over http silently sends nothing and every assertion read the signed-out page;
+`test_oauth` checked "a connected provider says so" against a page that stacked
+every account, so a credential on ANY of them satisfied it; and a hand-built
+fixture used literal `\n` characters, so every diff scored 0.0 similarity and
+looked correct. When an assertion passes first time, ask what would make it
+fail.
+
+**A survey that under-reads its corpus produces confident nonsense.** The wiring
+audit globbed `app/*.py`, never recursed into `app/roles/`, and reported a
+function as unreachable that its own docstring said was injected every turn.
+67 files of 123. Use `**/*.py`, say how many files were read, diff against the
+last one.
+
+**Declared and never written is this codebase's signature defect.** Met five
+times: `Approval.system_id`, `SystemRun.edit_diff`, `KbClaim.expires_at`,
+`Usage.tenant`, `Output.lookups`. Every one made a question look answered while
+having no answer in it. When adding a column, write the reader and the writer in
+the same change, and assert the value LANDS rather than that the parameter was
+accepted.
+
+### Standing preamble
+
+Worktree `/Users/gomehsaias/Documents/gomehagent-build`, branch
+`feat/context-architecture`, tracking `origin/main`. The other clone
 (`~/Documents/gomehagent`) is on `feat/warehouse-picklist`, a pre-kernel base —
 **never push from there.** Render auto-deploys `main`; git needs the sandbox
 off; always fetch and verify a fast-forward before pushing. Deploys land in
 about two minutes — check `/health` for the commit rather than theorising.
+
+### What to watch rather than build
+
+* **The first Monday after this deploy**, the claim-expiry sweep reports without
+  moving anything, once per account. A knowledge base nobody has dated finds
+  every claim older than a year at that moment.
+* **The first real approval** once drafts resume — `send_draft` has never made a
+  real Gmail call.
+* **The Anthropic spend limit.** It is what stopped drafts on 18 Aug, and
+  `triage` is 93% of spend at $0.035 per email against `classify` at $0.0009.
+  The cheap classifier routes but does not filter: every email gets the
+  expensive agentic pass, including the ~50% that are promo and notifications
+  and never draft. Gating triage on the bucket is roughly half of $55/month.

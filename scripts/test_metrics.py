@@ -70,12 +70,18 @@ def main() -> int:
        "three replies drew on two objections")
 
     print("\n— what we cannot, we NAME —")
+    # CHANGED, not worked around. This asserted that "% sent as-is" was
+    # unmeasurable and named `edit_diff` as the reason. That stopped being true
+    # when the Gmail draft became the thing that sends: the delta between what
+    # was drafted and what actually went out is now recorded on the approval,
+    # so the metric is computed rather than apologised for.
     m = find(vals, "sent_as_is")
-    ck("'% sent as-is' is reported as not measurable",
-       m["value"] is None and m["unavailable"] == "not measurable yet")
-    ck("  naming the column that would fix it",
-       "edit_diff" in m["why"], m["why"])
-    ck("  and how to fix it", "Gmail" in m.get("fix", ""))
+    ck("'% sent as-is' is no longer blocked",
+       m.get("unavailable") is None and m.get("source") == "our record",
+       str(m.get("unavailable") or m.get("source")))
+    ck("  with nothing measured yet it says so rather than claiming 100%",
+       m["value"] is None,
+       "no approvals carry a delta in this fixture, and 0-of-0 is not a rate")
     # Money moved OUT of the system metrics entirely — it is an account-level
     # outcome that depends on the business model, not a service-desk figure.
     rev = next((o for o in metrics.outcomes("baci", 30)

@@ -162,7 +162,12 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             logged = "auto_replied"
         elif action == "draft":
             reply_cc = result.get("reply_cc", "")  # reply-all: preserve original CCs
-            gmail_client.create_draft(
+            # The draft id is KEPT. It was thrown away, which is why the queue
+            # and the mailbox could not stay in step: approving composed a
+            # third message from a copy of what the draft said when it was
+            # written, so an edit made in Gmail was silently discarded and the
+            # draft itself was left to accumulate.
+            draft_id = gmail_client.create_draft(
                 alias, email["from"], result["reply_subject"] or f"Re: {email['subject']}",
                 result["reply_body"], email["threadId"], cc=reply_cc,
             )
@@ -172,6 +177,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                 + (" ⚠️ NEEDS FACTS" if detail.startswith("NEEDS-FACTS") else ""),
                 {
                     "account": alias, "to": email["from"],
+                    "draft_id": draft_id,
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
                     "body": result["reply_body"], "thread_id": email["threadId"],
                     "cc": reply_cc,
@@ -591,6 +597,11 @@ def main() -> None:
     # Wednesday, and a queue that grows every morning stops being read.
     sched.add_job(_safe(claim_expiry_sweep, "claim expiry"), "cron",
                   day_of_week="mon", hour=8, minute=30)
+    # Keep the queue and the mailbox in step. Frequent, because the window
+    # being closed is "Gomeh sent it from Gmail and the approval is still
+    # sitting in the waiting count".
+    sched.add_job(_safe(approvals.reconcile_drafts, "draft reconciliation"),
+                  "interval", minutes=20)
     sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
                   hour=9, minute=30)
     # Meta long-lived tokens expire at ~60 days and cannot refresh; they must be

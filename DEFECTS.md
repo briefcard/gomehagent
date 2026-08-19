@@ -1276,6 +1276,49 @@ verdict:
     `ops_jobs.file_whatsapp_document`, `propose.from_gap`. Both halves of the
     Canva export path are unwired, so it is incomplete rather than broken.
 
+### 2.38 The draft and the approval were two copies that drifted — fixed 2026-08-19
+
+One drafted reply produced two artefacts that never spoke to each other: a Gmail
+draft, and an approval built from a COPY of what that draft said at the moment
+it was written. `_execute` then composed a THIRD message from that copy.
+
+Three consequences, and the third is the one that reaches a customer:
+
+  · Editing the draft in Gmail changed nothing anybody sent. That is also why
+    `SystemRun.edit_diff` could never be written — the edit was invisible to
+    every path that mattered.
+  · Approving left the draft behind. Nothing deleted it, so they accumulated on
+    the thread, each looking unsent.
+  · Sending it yourself from Gmail — the natural thing to do — left the
+    approval pending. Approving it later delivered the ORIGINAL, unedited text
+    a second time, to the same customer, on the same thread.
+
+Fixed by keeping the draft id and making approval send THE DRAFT. Whatever goes
+out is what was approved; an edit travels with it; nothing is left over. A
+vanished draft sends nothing at all.
+
+`reconcile_drafts` closes the other direction on a tick, marking such approvals
+`sent_outside` rather than `approved` — the second would claim we did something
+the owner did. It only ever closes and never sends: the worst case of a misread
+must be a closed approval, not a mailed customer.
+
+Note what made this findable: the owner asked whether drafts appear in the UI or
+in the email. The answer was "both", and "both" was the defect.
+
+### 2.39 A fixture that made every diff score zero — caught 2026-08-19
+
+`test_draft_sync.py` was written with doubled escapes, so its fixture strings
+carried literal backslash-n rather than newlines. `edits._norm` therefore saw one
+long line, every comparison scored 0.0 similarity, and the "a human changed it"
+assertion passed — for entirely the wrong reason, while the quoted-history
+assertion failed and exposed it.
+
+Third instance this session of a test passing for the wrong reason: the portal
+cookie over http, `test_oauth` against an all-accounts page, and this.
+
+*Rule: when an assertion passes first time, ask what would make it fail. All
+three of these would have passed against broken code.*
+
 ## 4. How to verify
 
 ```bash
