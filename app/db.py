@@ -426,6 +426,30 @@ class ReportedFigure(Base):
     note = Column(Text, default="")
 
 
+class PortalLink(Base):
+    """A single-use sign-in link for one client user.
+
+    Same shape as `ConnectLink` and `IntakeLink`, deliberately — this codebase
+    already had two scoped, expiring, key-free links and inventing a third
+    mechanism for the same job is how they drift apart.
+
+    SINGLE USE, unlike those two. A connect link is a task somebody may come
+    back to; a sign-in link is a credential, and one that stays valid after use
+    sits in a mailbox forever waiting to be forwarded. `used_at` is set on
+    redemption and checked before anything is issued.
+    """
+
+    __tablename__ = "portal_links"
+
+    token = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    tenant = Column(String, default="", index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    expires_at = Column(DateTime(timezone=True))
+    used_at = Column(DateTime(timezone=True))
+    issued_by = Column(String, default="")
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 
@@ -781,7 +805,15 @@ class User(Base):
     role = Column(String, default="client")        # owner | client | freelancer
     tenant_key = Column(String)                    # null for owner = all tenants
     active_tenant = Column(String)                 # current context, per user
-    status = Column(String, default="active")
+    status = Column(String, default="active")   # active | revoked
+    #: What this person may DO in the portal — "read_only" | "full".
+    #:
+    #: Defaults to read_only, and that is the whole point: least privilege for
+    #: a surface that shows a client's own commercial data and lets them hand
+    #: us figures we will print in a report. Somebody who gains portal access
+    #: without an explicit grant should get the lesser of the two, not the
+    #: greater, and an upgrade should be a decision somebody made.
+    access = Column(String, default="read_only")
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 

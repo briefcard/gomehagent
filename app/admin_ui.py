@@ -447,6 +447,80 @@ def _connections(tenant: str, key: str) -> str:
         <button class="sec">Create a connect link</button>
         <span class="mut">for the client to connect their own accounts</span>
       </form>
+    </details>
+    """ + _people(tenant, key)
+
+
+def _people(tenant: str, key: str) -> str:
+    """Who from this client can sign in, and with what.
+
+    Read-only is the DEFAULT and is shown as the plain state rather than as a
+    restriction, because that is what it is: the portal shows a client their
+    own commercial data and lets them hand us figures we will print in a
+    report, and full access is the thing that should need a decision.
+    """
+    from . import portal as _p
+    rows = ""
+    for u in _p.people(tenant):
+        full = u["access"] == "full"
+        revoked = u["status"] != "active"
+        chip = ('<span class="chip off">revoked</span>' if revoked
+                else f'<span class="chip {"on" if full else "nb"}">'
+                     f'{"full access" if full else "read only"}</span>')
+        hidden = (f'<input type="hidden" name="key" value="{_esc(key)}">'
+                  f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                  f'<input type="hidden" name="user_id" value="{_esc(u["id"])}">')
+        buttons = ""
+        if not revoked:
+            nxt = "read_only" if full else "full"
+            buttons = (
+                f'<form method="post" action="/admin/person_access" class="inl">'
+                f'{hidden}<button class="sec" name="action" value="{nxt}">'
+                f'{"Make read only" if full else "Give full access"}</button></form>'
+                f'<form method="post" action="/admin/person_access" class="inl">'
+                f'{hidden}<button class="sec" name="action" value="revoke">'
+                f'Revoke</button></form>')
+            if u["can_sign_in"]:
+                buttons += (f'<a href="/admin/portal_link?key={_esc(key)}'
+                            f'&amp;email={_esc(u["email"])}">'
+                            f'<button class="sec" type="button">Sign-in link'
+                            f'</button></a>')
+        note = ""
+        if u["unused_links"]:
+            note = (f'<div class="when">{u["unused_links"]} unused sign-in '
+                    f'link(s) outstanding &mdash; revoking kills them</div>')
+        elif not u["email"]:
+            note = ('<div class="when">No email, so they cannot sign in to the '
+                    'portal &mdash; this is a chat-only user</div>')
+        rows += (f'<div class="conn"><div><strong>{_esc(u["name"])}</strong> '
+                 f'{chip}<div class="mut">{_esc(u["email"]) or "no email"}</div>'
+                 f'{note}</div><div class="row">{buttons}</div></div>')
+
+    return f"""
+    <div class="anchor" id="people"></div>
+    <details class="conns" open>
+      <summary>People who can sign in</summary>
+      <p class="mut">The portal shows this client their own numbers and lets
+      them send us figures we will print in a report. <b>Read only</b> is the
+      default; full access is a decision. Revoking also kills any sign-in link
+      they have not used yet &mdash; without that, one already sitting in a
+      mailbox still works.</p>
+      {rows or '<div class="mut" style="padding:8px 0">Nobody yet.</div>'}
+      <form method="post" action="/admin/person_save" class="f"
+            style="margin-top:12px">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <label>Their email</label>
+        <input name="email" type="email" placeholder="name@client.com" required>
+        <label>Their name</label>
+        <input name="name" placeholder="Ellis">
+        <label>Access</label>
+        <select name="access">
+          <option value="read_only">read only &mdash; can look, cannot change</option>
+          <option value="full">full &mdash; can send us figures and connect tools</option>
+        </select>
+        <div class="row"><button>Add them</button></div>
+      </form>
     </details>"""
 
 

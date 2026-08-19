@@ -2776,6 +2776,188 @@ def report_request(key: str = Depends(admin_key), tenant: str = "",
                                  to=to, queue=bool(queue))
 
 
+# ---------------------------------------------------------------------------
+# The client portal. Every view here goes through `portal.resolve_tenant`,
+# which takes the account from the SESSION and refuses a mismatched `tenant=`
+# rather than substituting the right one.
+# ---------------------------------------------------------------------------
+
+@app.get("/portal", response_class=HTMLResponse)
+def portal_home(request: Request, tab: str = "overview", days: int = 30) -> str:
+    from . import portal, portal_ui
+    asked = request.query_params.get("tenant", "")
+    tenant, refusal = portal.resolve_tenant(request, asked)
+    if refusal == "sign in first":
+        return portal_ui.render_signin()
+    if refusal:
+        # Signed in, but reaching for an account that is not theirs. Showing a
+        # SIGN-IN form here would be nonsense — they are signed in — and would
+        # read as "your session broke" rather than "that is not yours".
+        who = portal.principal(request)
+        return portal_ui.render(who["tenant"], tab=tab, days=days, who=who,
+                                notice=refusal)
+    if not tenant:
+        return portal_ui.render_signin("Pick an account with ?tenant=")
+    who = portal.principal(request)
+    who["may_write"] = portal.can_write(request)
+    return portal_ui.render(tenant, tab=tab, days=max(1, min(int(days or 30), 365)),
+                            who=who)
+
+
+@app.get("/portal/signin", response_class=HTMLResponse)
+def portal_signin() -> str:
+    from . import portal_ui
+    return portal_ui.render_signin()
+
+
+@app.post("/portal/signin")
+async def portal_signin_post(request: Request):
+    """Ask for a sign-in link.
+
+    Answers the SAME way whether or not the address is known. Telling a
+    stranger which addresses have accounts turns a login form into a customer
+    list, and this one is on the open internet.
+    """
+    from fastapi.responses import HTMLResponse as _H
+
+    from . import channel, portal, portal_ui
+    form = await request.form()
+    email = str(form.get("email", "")).strip()
+    got = portal.issue_link(email)
+
+    # Nothing sends the link, by the owner's choice — so the REQUEST has to
+    # reach him, or it dies in a log line and the client waits for an email
+    # that was never going to arrive. This is the whole difference between
+    # "manual" and "broken".
+    if got.get("ok"):
+        note = (f"🔑 Portal access requested by {email} ({got['for']}). "
+                f"Mint and send their link from the Accounts tab → People, "
+                f"or use:\n{got['url']}")
+    else:
+        # An unknown address is worth seeing too: it is either a client using
+        # a different address from the one on file — the commonest real cause —
+        # or somebody probing. Both want a human to look.
+        note = (f"🔑 Portal access requested by {email}, which is not on file. "
+                f"Either add them under Accounts → People, or ignore it.")
+    try:
+        channel.send_text(note)
+    except Exception:                                            # noqa: BLE001
+        log.exception("could not notify ops about a portal sign-in request")
+    return _H(portal_ui.render_signin(sent=True))
+
+
+@app.get("/portal/in/{token}")
+def portal_in(token: str):
+    from fastapi.responses import RedirectResponse
+
+    from . import portal, portal_ui
+    got = portal.redeem(token)
+    if not got.get("ok"):
+        return HTMLResponse(portal_ui.render_signin(got.get("error", "")))
+    resp = RedirectResponse("/portal", status_code=303)
+    resp.set_cookie(portal.PORTAL_COOKIE, got["cookie"], max_age=60 * 60 * 24 * 14,
+                    httponly=True, secure=True, samesite="lax")
+    return resp
+
+
+@app.post("/portal/figure")
+async def portal_figure(request: Request):
+    """A client sending us one of the numbers only they have.
+
+    Gated on `can_write`, which is the whole reason read-only exists: this
+    figure is printed in a report with their name on it, so who may supply one
+    is a real permission rather than a UI preference.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from . import metrics, portal
+    tenant, refusal = portal.resolve_tenant(request, "")
+    if refusal or not tenant:
+        return RedirectResponse("/portal/signin", status_code=303)
+    if not portal.can_write(request):
+        # Refused server-side as well as hidden in the UI. A form nobody is
+        # shown is still a form somebody can post to.
+        return RedirectResponse("/portal?tab=requests", status_code=303)
+    form = await request.form()
+    who = portal.principal(request)
+    name = ""
+    with db.SessionLocal() as s:
+        u = s.get(db.User, who.get("user_id") or "")
+        name = (u.name or u.email or "") if u else ""
+    metrics.record_figure(
+        tenant, str(form.get("metric", "")), str(form.get("value", "")),
+        period_end=db.utcnow().date().isoformat(),
+        supplied_by=name or "the client")
+    return RedirectResponse("/portal?tab=requests", status_code=303)
+
+
+@app.get("/portal/out")
+def portal_out():
+    from fastapi.responses import RedirectResponse
+
+    from . import portal
+    resp = RedirectResponse("/portal/signin", status_code=303)
+    resp.delete_cookie(portal.PORTAL_COOKIE)
+    return resp
+
+
+@app.post("/admin/person_save")
+async def person_save(request: Request, key: str = Depends(admin_key)):
+    """Add or update somebody who can sign in to a client's portal."""
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import portal
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    got = portal.save_person(
+        email=str(form.get("email", "")), name=str(form.get("name", "")),
+        tenant=tenant, access=str(form.get("access", "read_only")))
+    q = (f"&ok={quote(got['email'] + ' can sign in (' + got['access'].replace('_', ' ') + ')')}"
+         if got.get("ok") else f"&err={quote(got.get('error', ''))}")
+    return RedirectResponse(f"/admin/ui?tab=accounts&tenant={quote(tenant)}{q}#people",
+                            status_code=303)
+
+
+@app.post("/admin/person_access")
+async def person_access(request: Request, key: str = Depends(admin_key)):
+    """Move somebody between read-only and full, or revoke them outright."""
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import portal
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", ""))
+    uid = str(form.get("user_id", ""))
+    if action == "revoke":
+        msg = portal.revoke(uid)
+    elif action in ("read_only", "full"):
+        msg = portal.set_access(uid, action)
+    else:
+        msg = "unknown action"
+    return RedirectResponse(
+        f"/admin/ui?tab=accounts&tenant={quote(tenant)}&ok={quote(msg)}#people",
+        status_code=303)
+
+
+@app.get("/admin/portal_link")
+def portal_link(key: str = Depends(admin_key), email: str = "") -> dict:
+    """Mint a sign-in link for a client, to send them yourself.
+
+    Returned rather than sent, on purpose: a login link is a credential, and
+    this system has never sent anything as a side effect of producing it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import portal
+    return portal.issue_link(email, issued_by="owner")
+
+
 @app.get("/admin/skill_catalogue")
 def skill_catalogue(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Every registered skill and whether it can run for this account."""

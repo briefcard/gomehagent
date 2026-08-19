@@ -72,7 +72,7 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
 # `users` is NOT here: it has `tenant_key`, not `tenant`, so it is not
 # discovered — and deleting a client's login is a separate decision from
 # clearing their data anyway.
-ACCESS = {"credentials", "connect_links", "intake_links"}
+ACCESS = {"credentials", "connect_links", "intake_links", "portal_links"}
 
 GROUPS = {"knowledge": KNOWLEDGE, "operations": OPERATIONS, "access": ACCESS}
 

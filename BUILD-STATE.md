@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**49 suites, 49 pass.** Check the OUTPUT, not the exit code, and skip
+**51 suites, 51 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -378,6 +378,62 @@ because carrying it is how a report becomes fiction the client signed off on.
 `catalog_compliance`, `campaign_email` and `ad_creative` have starter
 declarations and want the same pass — their business metrics are the owner's to
 name.
+
+## The client portal, and the boundary under it
+
+Owner is putting clients into a UI. The console had exactly two credentials —
+`APPROVAL_SECRET` and `READ_KEY` — and NEITHER is scoped to a client: `tenant=`
+is a filter, not a permission, so anyone holding either could switch it and read
+every account. `DEFECTS` has carried that as debt since the credential layer
+landed. It stopped being theoretical the moment a client would log in, so the
+boundary was built BEFORE any visual work; no amount of design makes an
+unscoped console safe.
+
+**The rule everything rests on:** a client's account comes from their SESSION,
+never from the URL. `portal.resolve_tenant` is the one function every portal
+view goes through, and a mismatched `tenant=` is REFUSED BY NAME rather than
+silently corrected — a substitution makes reading somebody else's data look
+exactly like a stale bookmark, and only one of those is worth seeing. The tenant
+sits inside the signature, so a hand-written cookie cannot move it.
+
+**Sign-in is a single-use expiring link**, the same shape as `ConnectLink` and
+`IntakeLink` — there were already two scoped, key-free links, and a third
+mechanism for the same job is how they drift. No password store: the mailbox is
+already the recovery channel for any such system.
+
+Three refusals worth keeping: an unknown address gets nothing (self-registration
+on a portal showing commercial data is not a feature), a user with no
+`tenant_key` is refused (they would inherit the owner's unscoped view), and the
+form ANSWERS IDENTICALLY for known and unknown addresses — a login page on the
+open internet that confirms which addresses exist is a customer list.
+
+**People management** is on the Accounts tab per client: add by email, toggle
+read-only/full, revoke, mint a link. `User.access` defaults to `read_only`,
+deliberately — the portal shows a client their own commercial data and lets them
+send figures we print in a report, so access is something ADDED rather than
+something forgotten to remove. Revoking also expires every unused link that
+person holds; without that, one already in a mailbox outlives the revocation,
+which is precisely the window somebody would use.
+
+Read-only is enforced on BOTH sides: the field is hidden and `/portal/figure`
+refuses server-side, because a form nobody is shown is still a form somebody can
+post to.
+
+**Sending is MANUAL, by the owner's choice**, and the copy says so. The page
+reads "Request received — we have passed this to your account manager" rather
+than "check your email", which would be a promise nothing keeps. The request
+pings the ops channel WITH THE LINK READY, because otherwise it dies in a log
+line and the client waits for mail that was never coming. An unknown address
+pings too, differently — either a client using another address or somebody
+probing, and both want a human to look.
+
+**Not done:** the owner console is untouched. That was the other half of the
+ask, and it is now a clean separate piece.
+
+**A trap worth knowing:** the session cookie is `secure=True`, so a `TestClient`
+over http silently sends nothing and a test reads the signed-out page while
+appearing to pass. `test_portal.py` pins `base_url="https://testserver"` and
+says why.
 
 ## The wiring audit — which entry points reach the data layer
 
@@ -990,7 +1046,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **49 suites pass**, none touching the network,
+**Ran and confirmed.** All **51 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
