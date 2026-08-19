@@ -1241,6 +1241,41 @@ every reply drafted from context — the half with no approved objection behind
 it, which leans hardest on live data. A column written by one of two writers is
 a column written by none.
 
+### The wiring audit under-read its own corpus — corrected 2026-08-18
+
+The audit that produced §2.30-2.34 reported ten unreachable functions. It was
+eight, and one of the two extras is the instructive one.
+
+The scan globbed `app/*.py`. It never recursed into `app/roles/` — which is
+exactly where each role wires its tools and its per-turn context block. So
+`seo_tools.seo_context_block` was reported as having no caller when
+`roles/seo.py:103` passes it as `extra_context=` and it is injected into the SEO
+agent every single turn. The function's own docstring says so; the scan
+contradicted it and the scan was believed, because a number looks more like
+evidence than a sentence does.
+
+67 files read, 123 in the repo. A survey that under-reads its own corpus
+produces confident findings about code it never opened, and those findings then
+go into a handoff and get acted on.
+
+*Rule: any repo-wide sweep uses `**/*.py`, states how many files it read, and is
+diffed against the previous one rather than replacing it.*
+
+Triage of the corrected eight, recorded because "unreachable" is not one
+verdict:
+
+  · DELETED — `credentials.granted_capabilities` (sees only client connections,
+    not the env group, so reaching for it reintroduces §2.29) and
+    `kb.retire_claim` (a one-line alias for `review_claim(approve=False)`; two
+    names for one decision is the `add_claim`/`add_audience` trap in miniature).
+  · WIRED — `approvals.pending_count` into the console tab bar, and
+    `kb.assign_to_group` into a bulk grouping form.
+  · LEFT, as unfinished features rather than dead weight —
+    `canva.export_result`, `omnisend.upload_image`,
+    `baci_backoffice.list_company_documents`,
+    `ops_jobs.file_whatsapp_document`, `propose.from_gap`. Both halves of the
+    Canva export path are unwired, so it is incomplete rather than broken.
+
 ## 4. How to verify
 
 ```bash

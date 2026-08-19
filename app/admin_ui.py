@@ -146,6 +146,9 @@ button.sec{background:transparent;color:var(--acc)}
   flex-wrap:wrap;background:var(--panel);border:1px solid var(--rule);
   border-radius:5px;padding:9px 12px;margin-bottom:10px}
 .bulkbar .grow{flex:1}
+/* The waiting-decisions counter in the tab bar. Defined WITH the markup. */
+.tabs a.pend{margin-left:auto;color:var(--acc);border-color:var(--acc);
+font-weight:600}
 .pick{display:inline-flex;gap:6px;align-items:center;font-size:.75rem;
   color:var(--mut);cursor:pointer;user-select:none}
 /* Sticky bar is ~44px tall and would otherwise cover the card just jumped to. */
@@ -229,6 +232,20 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
         f'<a class="{"on" if t == tab else ""}" '
         f'href="/admin/ui?key={_esc(key)}&amp;tab={t}{suffix if t == tab else ""}">{label}</a>'
         for t, label in _TABS)
+    # How many decisions are waiting, on every page.
+    #
+    # `approvals.pending_count` was written and never called, so the one number
+    # that says whether this system is waiting on a person was visible nowhere.
+    # A queue nobody can see the depth of is a queue that stops being worked --
+    # which this codebase has already lived through once, at ~200 drafts.
+    try:
+        from . import approvals as _ap
+        _n = _ap.pending_count()
+    except Exception:                                            # noqa: BLE001
+        _n = 0                 # never let a counter break the console
+    if _n:
+        nav += (f'<a class="pend" href="/admin/pending?key={_esc(key)}">'
+                f'{_n} waiting</a>')
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)} — Saias Ops</title><style>{_CSS}</style></head><body><div class="w">

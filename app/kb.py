@@ -2026,11 +2026,6 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
     return "Saved."
 
 
-def retire_claim(claim_id: str) -> str:
-    """Take a claim out of selection without deleting the record of it."""
-    return review_claim(claim_id, approve=False)
-
-
 # --------------------------------------------------------------------------
 # The review queue, for every table rather than just claims.
 #

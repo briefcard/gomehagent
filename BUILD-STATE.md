@@ -271,16 +271,27 @@ uses a plain substring test while `validator._banned` next door matches on word
 boundaries with flexible separators: today "hand-decorated" is caught, "hand
 decorated" walks through, and "artisan" false-fires inside "artisanal".
 
-**Smaller findings.** 10 functions nothing can reach (`approvals.pending_count`,
-`canva.export_result`, `credentials.granted_capabilities`, `kb.retire_claim`,
-`kb.assign_to_group`, `omnisend.upload_image`, `ops_jobs.file_whatsapp_document`,
-`propose.from_gap`, `seo_tools.seo_context_block`,
-`baci_backoffice.list_company_documents`) — `kb.assign_to_group` is the manual
-collection-grouping path `/admin/entity_group` was meant to expose.
-`_fetch_products_live` raises `KeyError` instead of refusing by name. Two orphan
-columns (`KbUnknown.first_seen`, `KbConflict.first_seen`). Otherwise the column
-layer is clean, all 37 kernel tools have handlers, and `_GOOGLE_TOOLS` has not
-drifted.
+**Smaller findings.** `_fetch_products_live` raises `KeyError` instead of
+refusing by name. Two orphan columns (`KbUnknown.first_seen`,
+`KbConflict.first_seen`). Otherwise the column layer is clean, all kernel tools
+have handlers, and `_GOOGLE_TOOLS` has not drifted.
+
+**The unreachable-function count was WRONG the first time, and how it was wrong
+is the useful part.** The first pass globbed `app/*.py` and never recursed into
+`app/roles/` — which is exactly where the roles wire their tools and context
+blocks. So `seo_tools.seo_context_block` was reported as dead when
+`roles/seo.py` passes it as `extra_context=` and it is injected every turn. Redo
+any repo-wide sweep with `app/**/*.py` and diff it against the last one; a
+survey that under-reads its own corpus produces confident findings about code it
+never looked at.
+
+Corrected list, five remaining after this session wired one and deleted two:
+`canva.export_result`, `omnisend.upload_image`,
+`baci_backoffice.list_company_documents`, `ops_jobs.file_whatsapp_document`,
+`propose.from_gap`. These are unfinished features rather than dead weight —
+deleting them throws away real work. Note both halves of the Canva export path
+(`export` and `export_result`) are unwired, so it is incomplete rather than
+broken.
 
 ## Connecting a client — now possible entirely from the console
 
@@ -891,14 +902,22 @@ asserted about every member and inherited silently, and the manual alternative
 was one GET per entity — forty URLs by hand for a forty-item range. The safe
 default had no usable alternative.
 
-Still with no caller at all: `kb.retire_claim`,
-`credentials.granted_capabilities`, `canva.export_result`,
-`omnisend.upload_image`, `approvals.pending_count`, `propose.from_gap`,
-`seo_tools.seo_context_block`, `ops_jobs.file_whatsapp_document`,
-`baci_backoffice.list_company_documents`. Each is either a missing route or dead
-weight; deciding which is a morning, and DELETING the dead ones is as valuable
-as wiring the live ones — an unreachable function reads as a feature to the
-next person who greps for one.
+`approvals.pending_count` is DONE too — the console shows "N waiting" in the tab
+bar on every page. The one number that says whether this system is waiting on a
+person was visible nowhere, and a queue whose depth nobody can see is one that
+stops being worked; this codebase has lived that at ~200 drafts.
+
+Two were DELETED rather than wired, because leaving them was worse than the work
+they represented. `credentials.granted_capabilities` sees only client
+connections and not the env group, so anyone reaching for it reintroduces §2.29
+— env-connected accounts reading as unwired. `kb.retire_claim` was a one-line
+alias for `review_claim(approve=False)`, and two names for one decision is the
+`add_claim`/`add_audience` trap in miniature.
+
+Five left, all unfinished features rather than dead weight (see the audit
+section for the list). Deleting the dead ones is as valuable as wiring the live
+ones — an unreachable function reads as a feature to the next person who greps
+for one.
 
 **6 — Squarespace, or decide Ironside's blog is not a system.** It is installed
 and permanently blocked on a provider that does not exist.

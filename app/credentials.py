@@ -1012,17 +1012,6 @@ def google_config(alias: str) -> dict:
     return dict(config.GMAIL_ACCOUNTS.get(alias) or {})
 
 
-def granted_capabilities(tenant: str) -> set[str]:
-    """Every capability this client's own connections turn on.
-
-    `capabilities()` used to ask "is provider X connected" per capability, which
-    meant each new provider needed a new clause and `ads`/`analytics` never got
-    one. Asking the provider what it grants keeps that in one table.
-    """
-    return {cap for prov in connected_providers(tenant)
-            for cap in GRANTS.get(prov, ())}
-
-
 def needed_for(tenant: str) -> list[str]:
     """Which providers this account should connect, from the systems installed.
 
