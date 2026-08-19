@@ -280,6 +280,19 @@ class Output(Base):
     objection_id = Column(String, default="", index=True)
     claim_ids = Column(JSON, default=list)
     media_ids = Column(JSON, default=list)
+    #: Which LIVE lookups fed this output — `["shopify_inventory", …]`.
+    #:
+    #: A claim is true until somebody changes it; a lookup was true at the
+    #: moment it was read. Both end up as sentences in the same reply, and once
+    #: written they are indistinguishable — which is how a reply saying "that
+    #: cup is out of stock", entirely correct in August, gets pulled into the
+    #: bundle for a September follow-up and read as though it still holds.
+    #:
+    #: Recording which lookups fed a body is what lets a later run say "this
+    #: one contained a stock reading, re-check before repeating it" instead of
+    #: quoting it forward. Empty means no live data went in, which is the
+    #: common case and is genuinely different from unknown.
+    lookups = Column(JSON, default=list)
     theme = Column(String, default="")
     angle = Column(String, default="")
     format = Column(String, default="")
@@ -829,6 +842,15 @@ class KbClaim(_Provenance, Base):
     strength = Column(String, default="strong") # strong | supporting — caps how many per asset
     verified_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))  # stale claims stop being selectable
+    #: "" (expires on the default interval) | "never" (someone said it is timeless)
+    #:
+    #: Owner's rule: claims expire BY DEFAULT, and only an explicit decision
+    #: makes one permanent. The default is the empty string rather than
+    #: "dated", because auto-migration writes a column default onto every
+    #: existing row and a value nobody chose must not read as a value somebody
+    #: did -- the same reason `origin` and `review` have no default. Empty here
+    #: means "expires, on the usual interval"; it never means "unknown".
+    expiry_policy = Column(String, default="")
     status = Column(String, default="active")   # active | retired | conflicted
 
 
