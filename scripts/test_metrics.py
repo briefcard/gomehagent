@@ -197,6 +197,54 @@ def main() -> int:
     ck("  in ITS vocabulary, not a shop's",
        "Projects won" in metrics.request_email("coverings")["body"])
 
+    print("\n— a new account is ASKED what kind of business it is —")
+    # The gap this closes: `business_model` was a new column with no backfill
+    # beyond the five seeded accounts, so a sixth added through the console
+    # got "" and its first report said "business model not set" in front of
+    # the client. Asked at creation, validated on both write paths.
+    from fastapi.testclient import TestClient
+    from app import web
+    c = TestClient(web.app)
+
+    page = c.get("/admin/ui?key=s3cret&tab=accounts").text
+    ck("the create form asks for it", 'name="business_model"' in page)
+    ck("  and its options come from metrics.OUTCOMES, not a second list",
+       all(m in page for m in metrics.OUTCOMES),
+       "a model in the dropdown the report has no vocabulary for creates an "
+       "account whose first report says 'no outcomes for x'")
+    ck("  the blank option says what leaving it costs",
+       "carries no outcomes" in page)
+
+    r = c.get("/admin/tenant_add?key=s3cret&tenant=acme&name=Acme"
+              "&business_model=local_venue").json()
+    ck("creating with a model stores it", r.get("ok")
+       and tenants.get("acme").business_model == "local_venue")
+    ck("  and the account reports in that vocabulary",
+       any(o["key"] == "events_booked" for o in metrics.outcomes("acme", 30)))
+
+    bad = c.get("/admin/tenant_add?key=s3cret&tenant=b1&name=B"
+                "&business_model=ecomm_inventory").json()
+    ck("a typo is REFUSED, not stored", "unknown business_model" in bad.get("error", ""))
+    ck("  the account is not created either", tenants.get("b1") is None,
+       "a typo here is silent: the account looks fine and the report fails "
+       "weeks later in front of the client")
+    ck("  and the valid models are listed", len(bad.get("known", [])) >= 8)
+
+    none = c.get("/admin/tenant_add?key=s3cret&tenant=c1&name=C").json()
+    ck("omitting it warns but does not block",
+       none.get("ok") and "no business_model set" in none.get("warning", ""),
+       "refusing here would block onboarding on a question that can wait an "
+       "hour; saying nothing is how it waits for ever")
+
+    ck("tenant_set can fix it later",
+       c.get("/admin/tenant_set?key=s3cret&tenant=c1&field=business_model"
+             "&value=b2b_spec").json().get("ok"))
+    ck("  and validates on that path too, not only on create",
+       "unknown business_model" in
+       c.get("/admin/tenant_set?key=s3cret&tenant=c1&field=business_model"
+             "&value=nope").json().get("error", ""),
+       "a field settable two ways and checked on one gets set wrong the other")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

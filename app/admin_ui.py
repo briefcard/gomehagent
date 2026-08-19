@@ -227,6 +227,28 @@ _TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
          ("schema", "Data layer"))
 
 
+def _model_options() -> str:
+    """The business models a report knows how to speak, from the one list.
+
+    Read off `metrics.OUTCOMES` rather than typed here: a model in this dropdown
+    that the report has no vocabulary for creates an account whose first report
+    says "no outcomes for 'x'", and a hand-kept second list is how that happens.
+    """
+    from . import metrics
+    label = {"ecom_inventory": "shop — sells stock it holds",
+             "ecom_dtc": "shop — direct to consumer",
+             "local_venue": "venue, events or a local service",
+             "b2b_spec": "sells into trade or specification",
+             "digital_products": "courses, software, info products",
+             "coaching": "coaching or consulting",
+             "real_estate": "property",
+             "food_bev": "food and drink"}
+    opts = ['<option value="">— not set (their report carries no outcomes) —</option>']
+    opts += [f'<option value="{m}">{label.get(m, m)}</option>'
+             for m in sorted(metrics.OUTCOMES)]
+    return "".join(opts)
+
+
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
@@ -512,7 +534,11 @@ def render(key: str, msg: str = "", err: str = "", link: str = "") -> str:
     <div class="f"><label>kind</label>
       <div class="what">'own' for your businesses, 'client' otherwise</div>
       <select name="kind"><option value="client">client</option>
-        <option value="own">own</option></select>
+        <option value="own">own</option></select></div>
+    <div class="f"><label>what kind of business</label>
+      <div class="what">Decides which numbers their report carries &mdash; a
+        venue is measured in events booked, a store in average order value</div>
+      <select name="business_model">{_model_options()}</select>
       <div class="row"><button>Create</button></div></div>
   </form>
 </div>

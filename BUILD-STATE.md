@@ -339,6 +339,16 @@ Outcomes are account-level and do NOT depend on which systems are installed: a
 client's headline numbers are facts about their business. Coverings has nothing
 installed and is still a b2b_spec business with projects won.
 
+**The create form asks for it**, with options read off `metrics.OUTCOMES`
+rather than typed into the template — a hand-kept second list is how a model
+reaches the dropdown that the report has no vocabulary for. Validated on BOTH
+write paths (`tenant_add` and `tenant_set`), because a field settable two ways
+and checked on one gets set wrong through the other. A typo is refused and the
+account is NOT created: a bad value here is silent, and the account looks fine
+on every screen until a report fails in a document already sent. Omitting it
+warns rather than blocks — refusing would stop onboarding over a question that
+can wait an hour, and saying nothing is how it waits for ever.
+
 **We never ask for what we could read.** Three states, and the middle one is
 the point: `asked` (no connection could answer it), `not wired` (the capability
 IS connected, so this is OURS and the missing `reports` system is our gap —

@@ -879,9 +879,17 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
     from . import tenants
     JSON_FIELDS = {"esp", "ads", "cms", "analytics", "design", "crm", "systems"}
     SCALAR = {"name", "kind", "status", "domain", "timezone",
-              "gmail_alias", "shopify_store", "notes"}
+              "gmail_alias", "shopify_store", "notes", "business_model"}
     if field not in JSON_FIELDS | SCALAR:
         return {"error": f"unknown field; allowed: {sorted(JSON_FIELDS | SCALAR)}"}
+    if field == "business_model" and value:
+        # Validated here as well as on create. A field settable through two
+        # paths and checked on one is a field that will be set wrong through
+        # the other, and a typo is silent until a client reads the report.
+        from . import metrics
+        if value not in metrics.OUTCOMES:
+            return {"error": f"unknown business_model {value!r}",
+                    "known": sorted(metrics.OUTCOMES)}
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, tenant)
         if not t:
@@ -900,11 +908,18 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
 
 @app.get("/admin/tenant_add")
 def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
-               kind: str = "client", domain: str = "") -> dict:
+               kind: str = "client", domain: str = "",
+               business_model: str = "") -> dict:
     """Create a new account. Seeding only covers the original five.
 
     /admin/tenant_add?key=SECRET&tenant=acme&name=Acme+Co&domain=acme.com
     Connections are attached afterwards with /admin/tenant_set.
+
+    `business_model` decides which headline numbers this account's reports
+    carry — a venue is measured in events booked, a store in average order
+    value. Asked at CREATION rather than left to be noticed later, because the
+    account that never gets one is the account whose first report says
+    "business model not set" in front of the client.
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -913,15 +928,29 @@ def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
         return {"error": "tenant must be a short alphanumeric key, e.g. 'acme'"}
     if not name:
         return {"error": "name required"}
-    from . import tenants
+    from . import metrics, tenants
+    business_model = (business_model or "").strip()
+    if business_model and business_model not in metrics.OUTCOMES:
+        # Refused rather than stored. A typo here is silent: the account is
+        # created, looks fine, and its first report says "no outcomes for
+        # 'ecomm_inventory'" weeks later in front of the client.
+        return {"error": f"unknown business_model {business_model!r}",
+                "known": sorted(metrics.OUTCOMES)}
     with db.SessionLocal() as s:
         if s.get(db.Tenant, tenant):
             return {"error": f"{tenant!r} already exists — use /admin/tenant_set"}
         s.add(db.Tenant(key=tenant, name=name, kind=kind, domain=domain,
+                        business_model=business_model,
                         systems=[], notes="created via /admin/tenant_add"))
         s.commit()
-    return {"ok": True, "created": tenant, **tenants.resolve(tenant),
-            "next": "attach connections with /admin/tenant_set, then seed its KB"}
+    out = {"ok": True, "created": tenant, **tenants.resolve(tenant),
+           "next": "attach connections with /admin/tenant_set, then seed its KB"}
+    if not business_model:
+        out["warning"] = (
+            "no business_model set, so this account's reports carry no "
+            "headline outcomes — set it with /admin/tenant_set")
+        out["known_models"] = sorted(metrics.OUTCOMES)
+    return out
 
 
 @app.get("/admin/user_add")
