@@ -273,7 +273,7 @@ def _verify(candidates: list[dict], blocks: list[str],
     return kept, rejected
 
 
-def _call(system: str, user: str) -> str:
+def _call(system: str, user: str, tenant: str = "") -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     msg = client.messages.create(
@@ -282,7 +282,8 @@ def _call(system: str, user: str) -> str:
     )
     try:
         from . import usage
-        usage.log_usage("harvest_extract", config.CLAUDE_MODEL, msg)
+        usage.log_usage("harvest_extract", config.CLAUDE_MODEL, msg,
+                        tenant=tenant)
     except Exception:  # noqa: BLE001 — never fail a crawl on accounting
         pass
     return {"text": msg.content[0].text.strip(),
@@ -352,7 +353,7 @@ def extract(tenant: str, url: str, blocks: list[str],
     user = (_context(tenant, url, entity_key) + "\n\nBLOCKS:\n"
             + "\n".join(f"- {b}" for b in body))
     try:
-        got = _call(_SYSTEM, user)
+        got = _call(_SYSTEM, user, tenant)
     except Exception as exc:  # noqa: BLE001
         return {"claims": [], "rejected_not_verbatim": [],
                 "used": "error", "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
@@ -408,7 +409,7 @@ def extract_qa(tenant: str, inbound: str, reply: str, ref: str = "") -> dict:
     user = (f"INBOUND (what the customer sent):\n{inbound[:4000]}\n\n"
             f"REPLY (what the business sent back):\n{reply[:4000]}")
     try:
-        raw = _call(_QA_SYSTEM, user)["text"]
+        raw = _call(_QA_SYSTEM, user, tenant)["text"]
     except Exception as exc:  # noqa: BLE001 — one thread must not stop the run
         # Returned rather than swallowed. A silent {} here is indistinguishable
         # from "this exchange held no question", which is how an out-of-credit
@@ -491,7 +492,7 @@ def review_vocabulary(tenant: str) -> dict:
         for r in rows)
     try:
         raw = _call(_VOCAB_SYSTEM,
-                    f"Account: {tenant}\n\nTags:\n{listing}")["text"]
+                    f"Account: {tenant}\n\nTags:\n{listing}", tenant)["text"]
     except Exception as exc:  # noqa: BLE001
         return {"pairs": [], "used": "error",
                 "note": f"{exc.__class__.__name__}: {str(exc)[:160]}"}

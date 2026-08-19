@@ -383,13 +383,14 @@ def stats(key: str = Depends(admin_key)) -> dict:
 
 
 @app.get("/admin/usage")
-def usage_report(key: str = Depends(admin_key), days: int = 7) -> dict:
+def usage_report(key: str = Depends(admin_key), days: int = 7,
+                 tenant: str = "") -> dict:
     """Cost + cache-hit audit. Open in a browser:
     /admin/usage?key=SECRET&days=7"""
     from . import usage
     if key != config.APPROVAL_SECRET:
         return {"error": "bad key"}
-    return usage.report(days)
+    return usage.report(days, tenant)
 
 
 @app.get("/admin/whatsapp_diag")

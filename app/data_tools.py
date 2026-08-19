@@ -165,7 +165,8 @@ _SEARCH_MAX_DEEP = 25     # full-body reads per search (tier 3)
 _SEARCH_OUT_BUDGET = 7200  # chars — the kernel truncates tool results at 8000
 
 
-def _relevance_filter(intent: str, metas: list[dict]) -> list[int] | None:
+def _relevance_filter(intent: str, metas: list[dict],
+                      tenant: str = "") -> list[int] | None:
     """Tier 2: one cheap classify call — which matches plausibly serve the
     intent? Returns indexes, or None on any failure (caller keeps everything:
     fail OPEN, never silently drop matches)."""
@@ -184,7 +185,8 @@ def _relevance_filter(intent: str, metas: list[dict]) -> list[int] | None:
                    "Keep borderline cases (recall over precision).",
             messages=[{"role": "user",
                        "content": f"GOAL: {intent}\n\nLINES (idx|date|from|subject|snippet):\n{lines}"}])
-        usage.log_usage("search_filter", config.CLASSIFY_MODEL, msg)
+        usage.log_usage("search_filter", config.CLASSIFY_MODEL, msg,
+                        tenant=tenant)
         text = next((b.text for b in msg.content if b.type == "text"), "")
         arr = json.loads(text[text.index("["):text.rindex("]") + 1])
         keep = sorted({int(i) for i in arr if 0 <= int(i) < len(metas)})
@@ -235,7 +237,12 @@ def email_history_search(account: str, query: str, window_days: int = 0,
         keep = list(range(len(metas)))
         filtered = False
         if intent and len(metas) > 12:
-            f = _relevance_filter(intent, metas)
+            # The alias is what this tool is given; `tenant_scope` already
+            # maps one to the other, so cost lands on the right client
+            # rather than adding a parameter to a widely-called tool.
+            from . import tenant_scope
+            f = _relevance_filter(intent, metas,
+                                  tenant_scope.resolve(alias=account))
             if f is not None:
                 keep, filtered = f, True
 

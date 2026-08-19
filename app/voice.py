@@ -207,7 +207,8 @@ def _infer(tenant: str, sents: list[str]) -> tuple[dict, str]:
         raw = msg.content[0].text.strip()
         try:
             from . import usage
-            usage.log_usage("voice_propose", config.CLAUDE_MODEL, msg)
+            usage.log_usage("voice_propose", config.CLAUDE_MODEL, msg,
+                            tenant=tenant)
         except Exception:  # noqa: BLE001 — never fail on accounting
             pass
 

@@ -328,9 +328,14 @@ def _draft(tenant: str, utterance: str, bundle: dict) -> tuple[str, str]:
                                   + f"\n\n---\nThey wrote:\n{utterance}"}])
         try:
             from . import usage
-            usage.log_usage("responder_draft", config.CLAUDE_MODEL, msg)
+            usage.log_usage("responder_draft", config.CLAUDE_MODEL, msg,
+                            tenant=tenant)
         except Exception:  # noqa: BLE001
             pass
         return msg.content[0].text.strip(), ""
     except Exception as exc:  # noqa: BLE001
-        return "", f"{exc.__class__.__name__}: {str(exc)[:120]}"
+        # Classified, not truncated. A 120-character cap once cut "You have
+        # reached your specified..." one word before the cause, and a spend
+        # limit was investigated as a code regression for an afternoon.
+        from . import model_error
+        return "", model_error.explain(exc)

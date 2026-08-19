@@ -178,8 +178,13 @@ CLASSIFY_SYSTEM = (
 )
 
 
-def classify_only(email: dict, account_alias: str) -> str:
-    """Cheap bucket classification (no drafting) — used for backfill labeling."""
+def classify_only(email: dict, account_alias: str, tenant: str = "") -> str:
+    """Cheap bucket classification (no drafting) — used for backfill labeling.
+
+    `tenant` is optional because the backfill path genuinely does not have one;
+    the main path does and passes it. Half of all logged calls come through
+    here, so leaving it unattributed would leave half the spend report blank.
+    """
     msg = client.messages.create(
         model=config.CLASSIFY_MODEL,
         max_tokens=20,
@@ -189,7 +194,7 @@ def classify_only(email: dict, account_alias: str) -> str:
                    f"Subject: {email['subject']}\n\n{email['body'][:1200]}"}],
     )
     from . import usage
-    usage.log_usage("classify", config.CLASSIFY_MODEL, msg)
+    usage.log_usage("classify", config.CLASSIFY_MODEL, msg, tenant=tenant)
     cat = msg.content[0].text.strip().lower()
     return cat if cat in config.BUCKETS else "notifications"
 
@@ -366,7 +371,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     # Model routing: cheap pre-classification picks the bucket, the bucket
     # picks the brain (logistics -> Opus; everything else -> Sonnet).
     try:
-        bucket_hint = classify_only(email, account_alias)
+        bucket_hint = classify_only(email, account_alias, tenant)
     except Exception:  # noqa: BLE001
         bucket_hint = ""
     model = config.BUCKET_MODELS.get(bucket_hint, config.CLAUDE_MODEL)
@@ -382,7 +387,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
             messages=messages,
         )
         from . import usage
-        usage.log_usage("triage", model, msg)
+        usage.log_usage("triage", model, msg, tenant=tenant)
         if msg.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": msg.content})
             results = []

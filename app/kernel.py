@@ -255,7 +255,7 @@ def run(role: Role, text: str, attachments: list[dict] | None = None,
             model=role.model, max_tokens=role.max_tokens,
             system=system, tools=triage._cached_tools(tools), messages=messages,
         )
-        usage.log_usage(role.usage_purpose, role.model, msg)
+        usage.log_usage(role.usage_purpose, role.model, msg, tenant=tenant)
         if msg.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": msg.content})
             results = []

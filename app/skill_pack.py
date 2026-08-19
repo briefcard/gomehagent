@@ -532,12 +532,20 @@ def _draft_ad_live(bundle: dict, claim: dict, angle: str,
             messages=[{"role": "user", "content": "\n".join(parts)}])
         try:
             from . import usage
-            usage.log_usage("ad_copy_draft", config.CLAUDE_MODEL, msg)
+            # The bundle carries its own account (`resolve` puts it there),
+            # so this needs no extra parameter threaded through the pack.
+            usage.log_usage("ad_copy_draft", config.CLAUDE_MODEL, msg,
+                            tenant=str(bundle.get("tenant") or ""))
         except Exception:                                        # noqa: BLE001
             pass
         return msg.content[0].text.strip(), ""
     except Exception as exc:                                     # noqa: BLE001
-        return "", f"{exc.__class__.__name__}: {str(exc)[:120]}"
+        # Classified, not truncated — see app/model_error.py. `ad_copy`
+        # degrades to a composer when the model is unavailable, and a spend
+        # limit reported as "BadRequestError" makes that look like a code
+        # fault rather than an account one.
+        from . import model_error
+        return "", model_error.explain(exc)
 
 
 # Replaceable so the offline suite can drive both halves — including a model
