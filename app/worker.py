@@ -373,6 +373,40 @@ def credential_renewal() -> None:
             + "\n\nThe client needs to reconnect it from their connect link.")
 
 
+def claim_expiry_sweep() -> None:
+    """Weekly: return claims that have come due to the approval queue.
+
+    Owner's rule — claims expire by default, and an expired one goes back to be
+    asked about rather than silently dropping out of selection.
+
+    **Reports before it moves anything, once.** The first run on a knowledge
+    base nobody has ever dated will find every claim older than a year at the
+    same moment, and forty approved claims quietly reopening overnight is a
+    surprise even when it is correct. So the first sweep on each account is a
+    dry run that says what it WOULD do, and the `Setting` marker means the next
+    one applies. This codebase has had the other kind of incident: a poller
+    re-triggered a slow endpoint and 200 queued drafts went out at 400 sends a
+    minute.
+    """
+    from . import kb, tenants
+    for t in tenants.all_tenants(include_paused=True):
+        marker = f"claim_expiry_warned:{t.key}"
+        dry = kb.expire_due(t.key)
+        if not dry["expired"]:
+            continue
+        with db.SessionLocal() as s:
+            warned = s.get(db.Setting, marker)
+            if not warned:
+                s.add(db.Setting(key=marker, value=db.utcnow().isoformat()))
+                s.commit()
+                log.info("claim expiry: %s has %d claim(s) due — reporting "
+                         "only on this first pass", t.key, dry["expired"])
+                continue
+        applied = kb.expire_due(t.key, apply=True)
+        log.info("claim expiry: returned %d claim(s) to the queue for %s",
+                 applied["expired"], t.key)
+
+
 def systems_tick() -> None:
     """Evaluate every installed system once, and record what happened.
 
@@ -553,6 +587,10 @@ def main() -> None:
     # Its own slot, not chained to polling: a slow system evaluation must never
     # delay the inbox loop, and vice versa.
     sched.add_job(_safe(systems_tick, "systems tick"), "cron", hour=7, minute=0)
+    # Weekly, not daily: a claim that came due on Tuesday is not more true on
+    # Wednesday, and a queue that grows every morning stops being read.
+    sched.add_job(_safe(claim_expiry_sweep, "claim expiry"), "cron",
+                  day_of_week="mon", hour=8, minute=30)
     sched.add_job(_safe(follow_up_chase, "follow-up chasing"), "cron",
                   hour=9, minute=30)
     # Meta long-lived tokens expire at ~60 days and cannot refresh; they must be

@@ -3140,6 +3140,15 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         kbm.review_claim(claim_id, approve=False)
         return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
 
+    if action == "never":
+        # Timeless, and approved in the same move. Marking a claim permanent
+        # while leaving it in the queue would be an odd half-decision — the
+        # reviewer is looking at it and saying "this one does not go stale",
+        # which is an approval with an extra fact attached.
+        kbm.set_claim_expiry(claim_id, never=True)
+        kbm.review_claim(claim_id, approve=True)
+        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
+
     # Whatever was typed into the entity box, resolved to a real key — by name,
     # by slug, or by a unique partial of either. Refusing here rather than
     # writing it through matters: `update_claim` would take an unknown key at

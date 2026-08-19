@@ -1558,6 +1558,27 @@ def render_content(key: str, tenant: str = "", started: str = "",
                         f'&ldquo;{_esc((d.claim or "")[:90])}&rdquo; — not a '
                         'duplicate; both can be true.</div>')
 
+            # An expired claim is back in this queue because it CAME DUE, not
+            # because somebody proposed it. Rendering it identically to a new
+            # proposal throws away the whole advantage of returning it here —
+            # "you approved this a year ago, is it still true" is a far easier
+            # question than "is this true", asked cold.
+            reconfirm = ""
+            if p.approved_at:
+                _e = kbm.claim_expiry(p)
+                reconfirm = (
+                    '<div class="note"><strong>Came due &mdash; you approved '
+                    f'this on {_esc(_date(p.approved_at))}.</strong> '
+                    f'{_esc(_e["why"])}. Nothing is wrong with it; claims '
+                    'expire so somebody confirms they are still true. '
+                    'Approving re-dates it for another year.'
+                    '<div class="row">'
+                    f'<button class="sec" name="action" value="never" '
+                    f'title="Some facts do not go stale — brand origin, a '
+                    f'material, a permanent placement. Marked timeless, this '
+                    f'claim will never come back here.">This one never '
+                    f'expires</button></div></div>')
+
             warn = ""
             if not chosen:
                 warn = ('<div class="note">No tag matched. Pick at least one — '
@@ -1608,6 +1629,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
                   "Brand-level &mdash; usable in any content for this account."
               }</div>
               {dup}
+              {reconfirm}
               {warn}
               <label>Situations</label>
               <div class="tags">{tagbox}</div>

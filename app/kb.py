@@ -120,7 +120,11 @@ def claims(tenant: str, situations: list[str] | None = None,
         rows = q.all()
         scored = []
         for r in rows:
-            if r.expires_at and db.as_utc(r.expires_at) < now:
+            # Was `r.expires_at and ... < now`, which read the column
+            # directly and so could not see a default interval or a timeless
+            # mark. One calculation, three callers: here, the inventory, and
+            # the sweep that returns expired claims to the queue.
+            if claim_expiry(r)["expired"]:
                 continue  # stale proof is not selectable
             overlap = len(set(r.situations or []) & want)
             if want and not overlap:
@@ -169,7 +173,7 @@ def claim_inventory(tenant: str) -> dict[str, list[db.KbClaim]]:
             out["pending"].append(r)
         elif review == prov.REJECTED or r.status != "active":
             out["retired"].append(r)          # rejected | retired | conflicted
-        elif r.expires_at and db.as_utc(r.expires_at) < now:
+        elif claim_expiry(r)["expired"]:
             out["expired"].append(r)
         else:
             out["selectable"].append(r)
@@ -1616,6 +1620,152 @@ def add_banned(tenant: str, phrase: str) -> str:
     return f"Banned for {tenant} ({n} rules): “{phrase}”"
 
 
+#: How long an approved claim stands before somebody has to say it is still
+#: true. Owner's rule: claims expire BY DEFAULT.
+#:
+#: A year, because that is a governance cadence rather than a chore -- a brand
+#: fact that has quietly stopped being true has usually stopped within a year,
+#: and re-confirming a dozen claims annually is a morning. Per-proof-type
+#: intervals (a certification renews, a dimension rarely moves) are a
+#: refinement, not a reason to leave this unset.
+CLAIM_TTL_DAYS = 365
+
+
+def claim_expiry(row) -> dict:
+    """When this claim stops standing, and how confidently we can say.
+
+    THREE states, because two would collapse the interesting one:
+
+      `timeless`   somebody decided it never expires.
+      `dated`      it has, or can be given, a due date.
+      `undatable`  it expires by default like everything else, and nothing on
+                   the row says when it was last verified -- so the due date
+                   cannot be computed at all.
+
+    `undatable` is not `expired`. An old row whose date nobody recorded is a
+    gap in our bookkeeping, not evidence that the claim went false, and
+    dropping it from selection would destroy real proof to punish a missing
+    timestamp. It stays selectable and goes in the queue asking for a date.
+    """
+    import datetime as _dt
+    if (getattr(row, "expiry_policy", "") or "") == "never":
+        return {"state": "timeless", "due": None, "expired": False,
+                "why": "marked as never expiring"}
+    now = db.utcnow()
+    due = db.as_utc(row.expires_at) if row.expires_at else None
+    if due is None:
+        base = row.verified_at or getattr(row, "approved_at", None)
+        if not base:
+            return {"state": "undatable", "due": None, "expired": False,
+                    "why": "no verified_at or approved_at on the row, so the "
+                           "due date cannot be worked out"}
+        due = db.as_utc(base) + _dt.timedelta(days=CLAIM_TTL_DAYS)
+    return {"state": "dated", "due": due, "expired": due < now,
+            "why": (f"due {due.date().isoformat()}"
+                    + ("" if row.expires_at else
+                       f" ({CLAIM_TTL_DAYS} days after it was last verified)"))}
+
+
+def expire_due(tenant: str = "", apply: bool = False) -> dict:
+    """Return expired claims to the approval queue. Owner's rule.
+
+    The old behaviour was to skip an expired claim in selection and say
+    nothing. That is proof vanishing with nobody told — the drafts quietly get
+    thinner, the claim is still on the Knowledge tab looking approved, and
+    there is no moment at which anyone is asked whether it is still true.
+
+    So an expired claim goes back to `proposed`. It reappears in the queue the
+    operator already works, next to the new proposals, and re-approving it is
+    one click. `approved_at` is deliberately NOT cleared: the queue can then
+    say "you approved this on 12 August and it came due on 12 August next
+    year", which is a different and much easier question than "is this claim
+    true", asked cold.
+
+    Nothing is deleted, and a timeless claim is never touched.
+
+    `apply=False` reports what WOULD move, because a sweep that silently
+    re-opens forty approved claims the first time it runs is a surprise, and
+    this one runs on a schedule.
+    """
+    moved, seen = [], 0
+    with db.SessionLocal() as s:
+        q = s.query(db.KbClaim).filter(db.KbClaim.review == prov.APPROVED,
+                                       db.KbClaim.status == "active")
+        if tenant:
+            q = q.filter(db.KbClaim.tenant == tenant)
+        for r in q.all():
+            seen += 1
+            exp = claim_expiry(r)
+            if not exp["expired"]:
+                continue
+            moved.append({"claim_id": r.id, "tenant": r.tenant,
+                          "claim": (r.claim or "")[:90],
+                          "due": exp["due"].date().isoformat() if exp["due"] else "",
+                          "approved_at": (db.as_utc(r.approved_at).date().isoformat()
+                                          if r.approved_at else "")})
+            if apply:
+                r.review = prov.PROPOSED
+        if apply:
+            s.commit()
+    return {"checked": seen, "expired": len(moved), "applied": apply,
+            "claims": moved,
+            "note": ("" if apply else
+                     "nothing was changed — call with apply=True to return "
+                     "these to the queue")}
+
+
+def undatable_claims(tenant: str = "") -> list[dict]:
+    """Approved claims whose due date cannot be worked out at all.
+
+    Separated from `expire_due` on purpose. These are not expired and must not
+    be treated as though they were — the row is missing a timestamp, which is a
+    gap in our bookkeeping rather than evidence the claim went false. They stay
+    selectable; they just need somebody to say when they were last true.
+    """
+    with db.SessionLocal() as s:
+        q = s.query(db.KbClaim).filter(db.KbClaim.review == prov.APPROVED,
+                                       db.KbClaim.status == "active")
+        if tenant:
+            q = q.filter(db.KbClaim.tenant == tenant)
+        return [{"claim_id": r.id, "tenant": r.tenant,
+                 "claim": (r.claim or "")[:90]}
+                for r in q.all() if claim_expiry(r)["state"] == "undatable"]
+
+
+def set_claim_expiry(claim_id: str, *, never: bool = False,
+                     on: str = "") -> str:
+    """Mark a claim timeless, or give it an explicit due date.
+
+    `never` is the only way a claim stops expiring. Everything else expires on
+    the default interval, which is the owner's rule and the reason the policy
+    column's empty value means "expires" rather than "undecided".
+    """
+    import datetime as _dt
+    with db.SessionLocal() as s:
+        r = s.get(db.KbClaim, claim_id)
+        if not r:
+            return f"No claim {claim_id!r}."
+        if never:
+            r.expiry_policy, r.expires_at = "never", None
+            s.commit()
+            return f"{(r.claim or '')[:60]} — marked as never expiring."
+        if on:
+            try:
+                due = _dt.datetime.fromisoformat(on)
+            except ValueError:
+                return f"{on!r} is not a date — use YYYY-MM-DD."
+            r.expiry_policy, r.expires_at = "", due.replace(tzinfo=_dt.timezone.utc)
+            s.commit()
+            return f"{(r.claim or '')[:60]} — due {due.date().isoformat()}."
+        # Re-confirming with neither: it expires again on the usual interval
+        # from now, which is what "still true" means.
+        r.expiry_policy, r.expires_at = "", None
+        r.verified_at = db.utcnow()
+        s.commit()
+        return (f"{(r.claim or '')[:60]} — verified today, due again in "
+                f"{CLAIM_TTL_DAYS} days.")
+
+
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
               strength: str = "strong", status: str = "active",
@@ -1769,6 +1919,13 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
         if approve:
             row.review, row.status = prov.APPROVED, "active"
             row.approved_by, row.approved_at = by, db.utcnow()
+            # ...and RE-DATE it. `claim_expiry` derives the due date from
+            # `verified_at` first, so approving a claim that had come due would
+            # otherwise leave the old timestamp in place: the sweep would find
+            # it expired again on the next run and return it to the queue for
+            # ever. Approving IS the act of saying it is still true, which is
+            # exactly what `verified_at` records.
+            row.verified_at = db.utcnow()
         else:
             row.review, row.status = prov.REJECTED, "retired"
         s.commit()
@@ -2056,7 +2213,7 @@ def scope_conflicts(tenant: str) -> list[dict]:
                         db.KbClaim.status == "active").all())
         s.expunge_all()
     rows = [r for r in rows
-            if not (r.expires_at and db.as_utc(r.expires_at) < now)]
+            if not claim_expiry(r)["expired"]]
     by_scope: dict[str, list] = {}
     for c in rows:
         by_scope.setdefault((c.entity_key or "").strip(), []).append(c)
