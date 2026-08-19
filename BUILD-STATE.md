@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**42 suites, 42 pass.** Check the OUTPUT, not the exit code, and skip
+**44 suites, 44 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -87,10 +87,12 @@ subject of the audit below and should drive the next several threads.
 Every one was a real defect, several of them twice. Read before changing
 anything.
 
-1. **Absence is a third state and must survive to the output.** Met eight times
-   now. The newest: an assurance window with no events reports "nothing has been
-   checked", never zeros — a clean system and an unmonitored one produce
-   identical zeros and mean opposite things.
+1. **Absence is a third state and must survive to the output.** Met nine times
+   now. Two more this session: an assurance window with no events reports
+   "nothing has been checked", never zeros — a clean system and an unmonitored
+   one produce identical zeros and mean opposite things — and a claim with no
+   timestamp is `undatable`, which is neither current nor expired, because a
+   gap in our bookkeeping is not evidence the claim went false.
 2. **Enrich, do not gatekeep.** §2.27 was this rule broken at its most
    expensive point. The gating change below is the same rule applied one layer
    up, and it took the owner to see it.
@@ -164,6 +166,79 @@ draft in Gmail, which is where editing actually happens.
 `scripts/ab_context.py` is the real A/B and **has still never been run**:
 
     ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci
+
+## Time — claims expire, and so do answers
+
+Two problems that look like one. Owner raised them together and they need
+opposite treatments, which is the whole reason this section exists.
+
+### Claims expire by default
+
+`KbClaim.expires_at` had existed since the knowledge layer was built, was
+honoured by three readers, and **could not be set by anything** — no parameter,
+no route, no form. Every claim in every account lived for ever behind a gate
+that looked like it worked. §2.35.
+
+`kb.claim_expiry(row)` is now the single calculation all three readers share, so
+no caller can disagree about whether a claim still stands. THREE states:
+
+* **`dated`** — the default. Due `CLAIM_TTL_DAYS` (365) after it was last
+  verified, **even with `expires_at` unset**. That derived interval is what
+  makes "expires by default" real rather than aspirational.
+* **`timeless`** — only via `set_claim_expiry(id, never=True)`. Somebody
+  decided. The empty policy value means "expires normally", never "undecided",
+  which is why the column has no default: auto-migration writes a default onto
+  every existing row and a value nobody chose must not read as one somebody did.
+* **`undatable`** — approved, but no `verified_at` and no `approved_at`, so the
+  date cannot be worked out. **Not expired.** A missing timestamp is our
+  bookkeeping gap, not evidence the claim went false; dropping it would destroy
+  real proof to punish that. Stays selectable, listed for somebody to date.
+
+**Expiring means being asked, not vanishing.** `kb.expire_due` returns due
+claims to `proposed`, keeping `approved_at` — so the queue asks "you approved
+this on 12 August and it came due, still true?" rather than "is this true?"
+asked cold. The card renders that instead of showing a came-due claim as a fresh
+proposal, with a "This one never expires" button that marks it timeless and
+approves in one move.
+
+**The sweep reports before it moves anything, once per account.** A knowledge
+base nobody has dated finds every claim older than a year at the same moment,
+and forty approved claims quietly reopening overnight is a surprise even when it
+is correct. This codebase has had the other kind of incident.
+
+§2.36 is worth reading: approving a due claim stamped `approved_at` but not
+`verified_at`, and expiry reads `verified_at` first — so the same claims would
+have returned to the queue every week for ever. A state machine that moves a row
+between two states needs a test that runs the cycle twice.
+
+### Answers expire too, and that is a different mechanism
+
+The owner's case was a cup answered out-of-stock, and the instinct was to date
+the claim. But stock was never a claim: `resolve` declares it in `needs_lookup`
+and `responder` refuses to answer it from knowledge, so it is read from the
+store at the moment of asking.
+
+The gap was the REPLY. It sits in the ledger, comes back as prior correspondence
+for a follow-up, and reads exactly as true in September as it was in August —
+nothing in a sentence marks which half was a reading and which half was a brand
+fact.
+
+So the OUTPUT is asked instead of the sentence. `lookups.STALE_AFTER_HOURS`
+makes the registry's own prose ("stock is true at the moment of asking and stale
+by lunchtime") into a value with an import-time guard; `Output.lookups` records
+which lookups fed a body; `ledger.perishable` flags a reply whose live facts
+have aged; `resolve` files it beside the correspondence.
+
+**Flagged, never hidden or corrected.** What was said is a fact about the
+conversation and stays true whatever the stock does now.
+
+Written by **four** call sites, because a column written by one of two writers
+is a column written by none: both of `responder`'s ledger writes (the approved
+path AND draft-from-context, which leans hardest on live data), `Context.emit`,
+and `skill_pack.inbound_reply`. The tools recorded are the ones the bundle
+DECLARED rather than the keys of `facts` — sound rather than convenient, because
+the responder refuses to proceed while a declared lookup is unanswered, so
+arriving there with facts means those lookups were called.
 
 ## The wiring audit — which entry points reach the data layer
 
@@ -730,10 +805,13 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **42 suites pass**, none touching the network,
+**Ran and confirmed.** All **44 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
-transport, asserting the REQUEST). Deploy verified live: `/health` reports
+transport, asserting the REQUEST), `test_claim_expiry.py` and
+`test_perishable.py` — the last of which drives `responder.answer` for real and
+then asks the DATABASE what landed, because a column accepting a value proves
+nothing. Deploy verified live: `/health` reports
 `647502d`, 106 routes, and `/health/connections` still resolves both Shopify
 stores and three Google accounts — which is the code path the credential
 constraint migration touches.
@@ -781,7 +859,14 @@ customers.
 
 **3 — Write `edit_diff`.** Until something does, "is this better than the AI
 alone" has no answer beyond catches. Capture sent-vs-draft in Gmail rather than
-adding a field to the approval — it measures what actually happens.
+adding a field to the approval — it measures what actually happens. This is now
+the LAST unwritten column of the three that were declared and dead; `expires_at`
+and `Output.lookups` both got writers this session.
+
+**3b — Watch the first claim-expiry sweep.** It runs Mondays and reports
+without moving anything on its first pass per account, so the first Monday after
+deploy is the one to read. Every claim older than a year comes due at once on a
+knowledge base nobody has dated.
 
 **4 — Run `catalog_compliance` against real Baci.** Still the first real
 exercise of the Shopify read, and now it can be watched on the Assurance tab
@@ -789,9 +874,19 @@ while it runs. Expect to fix something in `_fetch_products_live`, which raises
 `KeyError` instead of refusing by name.
 
 **5 — Expose the skills to the agent.** `/admin/skill_catalogue` and
-`/admin/skill_run` exist; no agent TOOL does. One `run_skill` tool whose
-description is generated from `skill.catalogue(tenant)`, so the agent picks a
-skill and never picks context.
+`/admin/skill_run` exist; no agent TOOL does, so the four skills are reachable
+only from Python and two admin routes. One `run_skill` tool whose description is
+generated from `skill.catalogue(tenant)`, so the agent picks a skill and never
+picks context. **This is the next thread's first job** — it is the largest
+gap between "built" and "usable" left in the repo.
+
+**5b — The rest of the built-but-unreachable list.** `kb.assign_to_group` is the
+manual collection-grouping path `/admin/entity_group` was meant to expose;
+`kb.retire_claim`, `credentials.granted_capabilities`, `canva.export_result`,
+`omnisend.upload_image`, `approvals.pending_count`, `propose.from_gap`,
+`seo_tools.seo_context_block`, `ops_jobs.file_whatsapp_document` and
+`baci_backoffice.list_company_documents` have no caller at all. Each is either a
+missing route or dead weight, and deciding which is a morning's work.
 
 **6 — Squarespace, or decide Ironside's blog is not a system.** It is installed
 and permanently blocked on a provider that does not exist.

@@ -1161,6 +1161,86 @@ substring test where `validator._banned` matches on word boundaries — so
 inside "artisanal". Ten functions nothing can reach.
 `_fetch_products_live` raises `KeyError` instead of refusing by name.
 
+### 2.35 An expiry gate enforced on read and unsettable on write — fixed 2026-08-18
+
+`KbClaim.expires_at` has existed since the knowledge layer was built, with the
+comment "stale claims stop being selectable", and THREE readers honoured it:
+`claims()` skipped expired rows, `claim_inventory` bucketed them, the console
+rendered the date.
+
+**Nothing could set it.** `add_claim` had no `expires_at` parameter and no route
+or form wrote one, so every claim in every account had `expires_at = NULL` and
+lived for ever. A gate that is enforced by every reader and reachable by no
+writer looks exactly like a working feature — the same shape as
+`Approval.system_id`, `SystemRun.edit_diff` and `KbAsset` rights before it.
+
+Owner's rule when it surfaced: *"we should just require expired claims to go
+back into the approval queue and some claims can be set as unexpirable"*, and
+*"but by default they expire"*.
+
+So: one shared `kb.claim_expiry()` that all three readers now call instead of
+reading the column raw, a default TTL so "expires by default" is real even when
+nothing set a date, `set_claim_expiry` to mark one timeless, and `expire_due` to
+return the rest to the queue.
+
+THREE states, not two. `undatable` — approved, but with no `verified_at` and no
+`approved_at`, so the due date cannot be computed — is deliberately NOT
+`expired`. A missing timestamp is a gap in our bookkeeping, not evidence the
+claim went false, and dropping it from selection would destroy real proof to
+punish that. It stays selectable and is listed for somebody to date.
+
+### 2.36 An approval loop caught before it shipped — 2026-08-18
+
+Found by asking what happens on the run AFTER the fix in §2.35.
+
+`expire_due` returns a due claim to `proposed`; the operator approves it;
+`review_claim` stamps `approved_by` and `approved_at`. But `claim_expiry`
+derives the due date from `verified_at` FIRST, and nothing was touching that —
+so the claim was still expired the moment it was re-approved, and the next
+weekly sweep would return it to the queue. For ever, every week, the same
+claims.
+
+Approving IS the act of saying a claim is still true, which is exactly what
+`verified_at` records, so `review_claim` now writes it. `test_claim_expiry.py`
+carries the check under its own heading.
+
+The general point: a state machine that moves a row between two states needs a
+test that runs the cycle twice. One pass proved the fix worked and would have
+shipped the loop.
+
+### 2.37 A perishable answer read as permanent — fixed 2026-08-18
+
+Owner's case: *"an email about a cup that's out of stock is answered now and we
+save that context for follow up emails. What about when it's back in stock?
+That response is no longer valid."*
+
+Half of this was already right, and worth recording because it is the part that
+usually gets built wrong. Stock was never stored as a claim: `resolve` declares
+it in `needs_lookup` and `responder` refuses to answer it from knowledge at all,
+returning "this needs live data, not more knowledge". The FACT is read from the
+store at the moment of asking.
+
+The gap was the REPLY. It goes in the ledger, and `resolve` pulls prior
+correspondence into the bundle for a follow-up, where it arrives as prose and
+reads uniformly true — nothing in a sentence marks which half was a reading from
+a store and which half was a fact about the brand.
+
+Fixed by asking the OUTPUT instead of the sentence. `lookups.STALE_AFTER_HOURS`
+turns what the registry already said in prose ("stock is true at the moment of
+asking and stale by lunchtime") into a value with an import-time guard;
+`Output.lookups` records which fed a body; `ledger.perishable` flags a reply
+whose live facts have aged, and `resolve` files it beside the correspondence.
+
+**Flagged, never hidden or rewritten.** What was said is a fact about the
+conversation and stays true whatever the stock does now — the drafter needs to
+know both that it was said and that it has aged.
+
+Two writers, not one: `responder` files an output on the approved-answer path
+AND on the draft-from-context path, and wiring only the first would have missed
+every reply drafted from context — the half with no approved objection behind
+it, which leans hardest on live data. A column written by one of two writers is
+a column written by none.
+
 ## 4. How to verify
 
 ```bash
