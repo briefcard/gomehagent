@@ -2675,6 +2675,33 @@ def assurance_report(key: str = Depends(admin_key), tenant: str = "",
     return out
 
 
+@app.get("/admin/client_report")
+def client_report_route(key: str = Depends(admin_key), tenant: str = "",
+                        days: int = 30) -> dict:
+    """One period, one client — everything on record, and what is not.
+
+    Deliberately reads only what is already stored. Assembling a report must
+    not be the moment a dead Shopify token is discovered, and a report that
+    takes forty seconds and half-fails is worse than one built from the record.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "tenant is required"}
+    from . import client_report
+    return client_report.assemble(tenant, max(1, min(int(days or 30), 365)))
+
+
+@app.get("/admin/tool_calls")
+def tool_calls_route(key: str = Depends(admin_key), tenant: str = "",
+                     days: int = 30) -> dict:
+    """Which tools ran, which failed, and how slow they were."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import toolcalls
+    return toolcalls.report(tenant, max(1, min(int(days or 30), 365)))
+
+
 @app.get("/admin/skill_catalogue")
 def skill_catalogue(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Every registered skill and whether it can run for this account."""

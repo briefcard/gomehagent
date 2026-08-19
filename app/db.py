@@ -359,6 +359,40 @@ class AssuranceEvent(Base):
     thin = Column(JSON, default=list)
 
 
+class ToolCall(Base):
+    """One tool call, and whether the thing on the other end answered.
+
+    `Usage` records what the MODEL cost. Nothing recorded what the tools DID —
+    so "is this client's Shopify actually being read", "did their Search
+    Console start failing three weeks ago", and "what did we do for them this
+    month" were all unanswerable, and a client report would have had to be
+    written from memory.
+
+    The result is recorded as a SIZE and a verdict, never a payload. A tool
+    result is the client's own data — orders, mail, customers — and a ledger
+    that copies it becomes a second place their data lives, with none of the
+    scoping the first one has. Size and success are what a report needs; the
+    body is not.
+    """
+
+    __tablename__ = "tool_calls"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    tenant = Column(String, default="", index=True)
+    tool = Column(String, default="", index=True)
+    #: kernel (an agent tool) | adapter (a platform client called from code)
+    source = Column(String, default="", index=True)
+    #: Which of the client's platforms this reached, when it reached one.
+    #: Empty for tools that only touch our own tables.
+    provider = Column(String, default="", index=True)
+    ok = Column(String, default="")          # "yes" | "no" — never a bare bool
+    error = Column(Text, default="")         # the provider's own words, capped
+    ms = Column(String, default="")          # round trip, for the slow ones
+    bytes_back = Column(String, default="")  # size, never the payload itself
+    ref = Column(String, default="")         # run id / message id, when known
+
+
 class Deadline(Base):
     """Anything with a date that costs money if missed."""
 

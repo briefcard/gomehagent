@@ -92,7 +92,8 @@ def _call(tenant: str, method: str, path: str, *, payload: dict | None = None,
 
 # Replaceable so the suite can drive every path — including the ones that would
 # otherwise need a live account and a real send.
-call = _call
+from . import toolcalls as _tc  # noqa: E402
+call = _tc.instrument('omnisend', _call)
 
 
 def segments(tenant: str) -> dict:

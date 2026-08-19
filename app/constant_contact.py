@@ -125,7 +125,8 @@ def _error_text(r) -> str:
 #: name rather than `_call` directly, so the tests can assert the REQUEST this
 #: module builds without reaching Constant Contact — which is the only part of
 #: the behaviour that is ours to get right.
-call = _call
+from . import toolcalls as _tc  # noqa: E402
+call = _tc.instrument('constant_contact', _call)
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**46 suites, 46 pass.** Check the OUTPUT, not the exit code, and skip
+**47 suites, 47 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -239,6 +239,56 @@ and `skill_pack.inbound_reply`. The tools recorded are the ones the bundle
 DECLARED rather than the keys of `facts` — sound rather than convenient, because
 the responder refuses to proceed while a declared lookup is unanswered, so
 arriving there with facts means those lookups were called.
+
+## Reporting — what the tools did, and what a client is told
+
+Built for the client report Gomeh will send, which is a higher bar than an
+internal dashboard: every number needs a source, and anything unmeasurable has
+to SAY SO rather than be quietly left out. A report with a visible hole is
+recoverable; one that implies completeness it does not have is not.
+
+**`ToolCall` is the ledger that was missing.** `Usage` recorded what the model
+cost; nothing recorded what the tools DID — so "is this client's Shopify
+actually being read", "when did their Search Console start failing" and "what
+did we do for them in October" were answerable only from memory.
+
+Instrumented at TWO chokepoints, not sprinkled:
+
+* `kernel._dispatch` — every agent tool, tenant already resolved. A
+  `tool_scope` REFUSAL is recorded as a failed call: "this account asked for a
+  capability it has not connected" is exactly what a report should surface, and
+  dropping it makes a blocked account look idle.
+* The three adapters' `call` seams, via `toolcalls.instrument()`. One wrapper
+  rather than three patched bodies — and because the suites replace that same
+  seam, an instrumented build under test records nothing, so the tests stay
+  honest about what they drive.
+
+**Two privacy decisions, both asserted by the suite.** The ledger stores a SIZE
+and a verdict, never a payload — a tool result is the client's own orders and
+mail, and a second copy here would have none of the scoping the first one has;
+the test checks there is no column a body could go into. And paths are stripped
+of id-bearing segments, so `/orders/1234` records as `GET /orders` — otherwise
+every call is unique, ungroupable, and carries the client's order numbers.
+
+**`client_report.assemble()`** at `/admin/client_report`. Work (runs, produced,
+blocked, self-corrected), reach (which platforms were READ — a fact about the
+work, where "connected" is a fact about a settings page), and blocked, ranked by
+what it cost.
+
+It **calls nothing**. Assembling a report must not be the moment a dead Shopify
+token is discovered, and a report that takes forty seconds and half-fails is
+worse than one built from the record.
+
+The section to read is `not_yet_measured`: every figure we cannot produce,
+named IN THE OUTPUT with its reason and its fix. A report that silently omits
+revenue reads as "we did not move revenue"; one that says the figure is not
+wired reads as what it is. Kept as data so the console can render it as a to-do
+somebody deletes, rather than a paragraph nobody updates.
+
+**The honest gap:** live platform figures — revenue, sessions, ad spend, sends
+— need the `reports` system, which is declared in `systems.CATALOG` and still
+unbuilt. That is the next real piece if these reports are to carry a number the
+client already believes.
 
 ## The wiring audit — which entry points reach the data layer
 
@@ -816,7 +866,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **46 suites pass**, none touching the network,
+**Ran and confirmed.** All **47 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and

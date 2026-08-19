@@ -124,7 +124,8 @@ def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
         return {"ok": True, "data": {}}
 
 
-call = _call          # replaceable, so the suite can drive every path
+from . import toolcalls as _tc  # noqa: E402
+call = _tc.instrument('canva', _call)          # replaceable, so the suite can drive every path
 call_binary = _call_binary
 
 
