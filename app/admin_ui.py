@@ -162,6 +162,74 @@ color:var(--ink2);font-size:.88rem;text-decoration:none}
 .side .dot{width:7px;height:7px;border-radius:99px;background:var(--rule);
 flex:0 0 7px}
 .side a.on .dot{background:var(--acc)}
+/* --- one account, told apart at a glance --------------------------------
+   The pill said which account you were on and nothing else did, so two tabs
+   of two clients looked identical until you read the name. `--tint` is a hue
+   derived from the account key (see `_accent`), applied to the one selected
+   row, the page pill and a rule under the heading. Hue only: saturation and
+   lightness are fixed here so no account can render illegibly or alarmingly,
+   and an account added tomorrow gets its colour without an edit. */
+body{--tone:hsl(var(--tint,214) 42% 38%);--tones:hsl(var(--tint,214) 46% 94%)}
+@media(prefers-color-scheme:dark){body{--tone:hsl(var(--tint,214) 52% 72%);
+--tones:hsl(var(--tint,214) 34% 17%)}}
+body.every{--tone:var(--acc);--tones:var(--accs)}
+/* Every account's dot in ITS OWN colour, not just the selected one -- each
+   row carries a `--tint` of its own, so the mapping is learnable from the
+   list rather than only visible once you have already switched. */
+.side .switch a .dot{background:hsl(var(--tint,214) 44% 52%);opacity:.5}
+.side .switch a.on{background:var(--tones);color:var(--tone)}
+.side .switch a.on .dot{opacity:1}
+.side .switch a.every .dot{background:var(--rule);opacity:1}
+.side .switch a.every{border-top:1px solid var(--rule);margin-top:5px;
+padding-top:10px;color:var(--mut);font-size:.82rem}
+.side .switch a.every.on{color:var(--acc);background:var(--accs)}
+.pagehead{border-bottom:2px solid var(--tone);padding-bottom:10px}
+.pagehead .who{color:var(--tone);background:var(--tones)}
+/* Cross-account is a deliberate view and says so on the page it produces --
+   never a state you can arrive in without having asked for it. */
+.everynote{background:var(--accs);border-left:3px solid var(--acc);
+padding:9px 13px;border-radius:0 4px 4px 0;font-size:.83rem;color:var(--ink2);
+margin-bottom:14px}
+.everynote b{color:var(--acc)}
+/* --- the diagnostics log -------------------------------------------------
+   A dense, scannable timeline: level in the gutter so failures are found by
+   colour before they are read, and the layer named on every row because
+   "broken" and "refused on purpose" look identical until something says so. */
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px}
+.filters a{font-size:.78rem;padding:4px 11px;border-radius:99px;
+border:1px solid var(--rule);color:var(--ink2);text-decoration:none}
+.filters a.on{background:var(--tones);border-color:var(--tone);color:var(--tone);
+font-weight:600}
+.filters .sep{width:1px;height:18px;background:var(--rule);margin:0 4px}
+.log{border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.log .ev{display:flex;gap:10px;padding:8px 12px;border-top:1px solid var(--rule2);
+font-size:.83rem;align-items:baseline}
+.log .ev:first-child{border-top:0}
+.log .ev .lv{flex:0 0 6px;align-self:stretch;border-radius:99px;margin-top:2px}
+.log .ev.fail .lv{background:#b4443a}
+.log .ev.warn .lv{background:var(--gap)}
+.log .ev.ok .lv{background:var(--ok)}
+.log .ev.info .lv{background:var(--rule)}
+.log .ev .when{flex:0 0 118px;color:var(--mut);font-size:.76rem;
+font-family:ui-monospace,Menlo,monospace}
+.log .ev .kind{flex:0 0 74px;color:var(--mut);font-size:.74rem;
+text-transform:uppercase;letter-spacing:.05em}
+.log .ev .what{flex:1;min-width:0}
+.log .ev .what b{font-weight:600}
+.log .ev .det{color:var(--ink2);display:block;font-size:.8rem;
+word-break:break-word}
+.log .ev .layer{flex:0 0 auto;font-size:.7rem;color:var(--mut);
+border:1px solid var(--rule);border-radius:99px;padding:1px 8px}
+.log .ev .acct{flex:0 0 auto;font-size:.7rem;color:var(--mut)}
+.sysrow{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+padding:9px 0;border-top:1px solid var(--rule2)}
+.sysrow:first-child{border-top:0}
+.sysrow .nm{flex:0 0 190px;font-weight:600}
+.sysrow .vd{flex:1;min-width:200px;color:var(--ink2);font-size:.85rem}
+.sysrow .n{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;
+color:var(--mut)}
+.sysrow.bad .vd{color:#b4443a}
+.sysrow.warn .vd{color:var(--gap)}
 .side .foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--rule);
 display:flex;flex-direction:column;gap:1px}
 .side .foot a{font-size:.82rem;color:var(--mut)}
@@ -266,6 +334,7 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 #: connected to, then the plumbing.
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("systems", "Systems", "◧"), ("assurance", "Assurance", "◉"),
+         ("diagnostics", "Diagnostics", "⚕"),
          ("accounts", "Connections", "⚯"), ("schema", "Data layer", "⛁"))
 
 
@@ -291,8 +360,83 @@ def _model_options() -> str:
     return "".join(opts)
 
 
+#: The account a page is about when the URL names none. Every render_* and the
+#: frame itself go through `_account`, so the pill above the fold and the
+#: numbers below it cannot disagree -- which they did: the Assurance tab with
+#: no `tenant=` reported every account's checks under the first account's name.
+ALL = "*"          # the deliberate cross-account view, never the default
+
+
+def _account(tenant: str = "") -> tuple[str, object, list]:
+    """Resolve the selected account ONCE, for the frame and the body alike.
+
+    Returns `(key, row, all_rows)`. `key` is `ALL` only when the caller asked
+    for it by name -- an empty `tenant=` falls back to the first account rather
+    than to everything, because a page showing five accounts' data under one
+    account's heading is worse than either view on its own.
+
+    `row` is None for `ALL` and for an account key that does not exist; callers
+    render the key rather than 500ing, because a stale bookmark should show an
+    empty page and not an error.
+    """
+    from . import tenants as _t
+    try:
+        rows = _t.all_tenants(include_paused=True)
+    except Exception:                                            # noqa: BLE001
+        rows = []
+    if tenant == ALL:
+        return ALL, None, rows
+    key = tenant or (rows[0].key if rows else "")
+    return key, next((r for r in rows if r.key == key), None), rows
+
+
+def _account_name(tenant: str, row=None) -> str:
+    """What to call the selected account in a heading."""
+    if tenant == ALL:
+        return "All accounts"
+    return (row.name if row is not None else "") or tenant or "no account"
+
+
+def _hues(rows: list) -> dict[str, str]:
+    """A hue per account, spread as far apart as the number of accounts allows.
+
+    Derived rather than configured, for the same reason `metrics.OUTCOMES`
+    drives its own dropdown: a hand-kept colour table is a second list to
+    forget. Hue only -- saturation and lightness are fixed in the stylesheet,
+    so every account stays legible in both themes and none can be handed an
+    alarming red by accident.
+
+    **Spaced by position, not hashed from the key**, and the first version was
+    hashed. With five accounts, five samples out of 360 collide by chance:
+    `ironside` landed on 231 and `coverings` on 256, twenty-five degrees apart
+    and the same blue to anybody not comparing them side by side. A cue nobody
+    can tell apart is not a cue.
+
+    The cost, stated because it is real: adding an account re-colours the set.
+    That is a one-off on a list that gains a client every few months, against
+    two indistinguishable blues every day -- and the name is on the screen
+    either way, so the colour is the second signal and never the identifier.
+    """
+    keys = sorted(r.key for r in rows)
+    n = len(keys) or 1
+    # Offset so the first account is not the same blue as the house accent,
+    # which would make "selected" and "chrome" read as one thing.
+    return {k: str(round((i * 360 / n + 25) % 360)) for i, k in enumerate(keys)}
+
+
+def _every_note(every: bool, what: str) -> str:
+    """Say, on the page itself, that this one is about every account.
+
+    A cross-account screen that looks like a single-account screen is the whole
+    defect this session fixed; the banner is what stops the fixed version from
+    quietly becoming it again.
+    """
+    return (f'<div class="everynote"><b>All accounts.</b> {_esc(what)}</div>'
+            if every else "")
+
+
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
-           tenant: str = "") -> str:
+           tenant: str = "", head: str = "") -> str:
     """Sidebar, client switcher, then the page.
 
     The console used a horizontal tab bar and a SEPARATE client picker inside
@@ -306,19 +450,19 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     portal uses, because switching between the two should not mean learning a
     second layout.
     """
-    from . import tenants as _t
+    tenant, here, rows = _account(tenant)
 
-    try:
-        rows = _t.all_tenants(include_paused=True)
-    except Exception:                                            # noqa: BLE001
-        rows = []
-    tenant = tenant or (rows[0].key if rows else "")
-    here = next((r for r in rows if r.key == tenant), None)
-
+    hues = _hues(rows)
     switch = "".join(
         f'<a class="{"on" if r.key == tenant else ""}" '
+        f'style="--tint:{hues.get(r.key, "")}" '
         f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={_esc(r.key)}">'
         f'<span class="dot"></span>{_esc(r.name)}</a>' for r in rows)
+    # Cross-account is a place you go on purpose, listed apart from the clients
+    # so it can never be the account you are on without having chosen it.
+    switch += (f'<a class="every {"on" if tenant == ALL else ""}" '
+               f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={ALL}">'
+               f'<span class="dot"></span>All accounts</a>')
 
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
@@ -326,24 +470,36 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
         f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}</a>'
         for t, label, i in _TABS)
 
-    # How many decisions are waiting, on every page.
+    # How many decisions are waiting, FOR THIS ACCOUNT, on every page.
     #
     # `approvals.pending_count` was written and never called, so the one number
     # that says whether this system is waiting on a person was visible nowhere.
     # A queue nobody can see the depth of is a queue that stops being worked --
     # which this codebase has already lived through once, at ~200 drafts.
+    #
+    # It counted every account, so the number beside one client's name was
+    # another client's backlog. Scoped now, and the link carries the account
+    # through, so clicking it does not silently widen what you are looking at.
     try:
         from . import approvals as _ap
-        _n = _ap.pending_count()
+        _n = _ap.pending_count("" if tenant == ALL else tenant)
     except Exception:                                            # noqa: BLE001
         _n = 0                 # never let a counter break the console
-    waiting = (f'<a class="pend" href="/admin/pending?key={_esc(key)}">'
+    waiting = (f'<a class="pend" href="/admin/pending?key={_esc(key)}'
+               f'&amp;tenant={_esc(tenant)}">'
                f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
+
+    who = _account_name(tenant, here)
+    # The client view is one account's page; there is no portal for "all".
+    client_view = ("" if tenant == ALL else
+                   f'<a href="/portal?tenant={_esc(tenant)}&amp;key={_esc(key)}">'
+                   f'Client view &rarr;</a>')
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_esc(title)} — {_esc(here.name if here else "Saias Ops")}</title>
-<style>{_CSS}</style></head><body>
+<title>{_esc(title)} — {_esc(who)}</title>
+<style>{_CSS}</style>{head}</head><body class="{"every" if tenant == ALL else ""}"
+ style="--tint:{hues.get(tenant, "")}">
 <div class="shell">
   <div class="side">
     <div class="brand">Saias Ops</div>
@@ -351,13 +507,11 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     <div class="switch">{switch}</div>
     <div class="navlabel">Manage</div>
     {nav}
-    <div class="foot">{waiting}
-      <a href="/portal?tenant={_esc(tenant)}&amp;key={_esc(key)}">Client view &rarr;</a>
-    </div>
+    <div class="foot">{waiting}{client_view}</div>
   </div>
   <div class="main">
     <div class="pagehead"><h1>{_esc(title)}</h1>
-      <span class="who">{_esc(here.name if here else "no account")}</span></div>
+      <span class="who">{_esc(who)}</span></div>
     {body}
   </div>
 </div></body></html>"""
@@ -638,8 +792,12 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
     it revoke credentials and mint links. One account at a time, named in the
     frame, is the point of the whole rearrangement.
     """
-    rows = tenants.all_tenants(include_paused=True)
-    tenant = tenant or (rows[0].key if rows else "")
+    tenant, _here, rows = _account(tenant)
+    if tenant == ALL:
+        return _shell(key, "accounts", "Connections", tenant=tenant,
+                      body=_every_note(True, "These buttons revoke credentials "
+                                       "and mint client links, so they are only "
+                                       "ever offered for one named account."))
     rows = [r for r in rows if r.key == tenant]
     if not rows:
         body = ('<div class="note">No accounts yet. Run '
@@ -901,19 +1059,32 @@ def _system_card(key: str, row) -> str:
 
 
 def render_systems(key: str, tenant: str = "") -> str:
-    rows = systems.all_systems()
+    """One account's pipelines.
+
+    This tab used to render `systems.all_systems()` grouped by client, so the
+    account chosen in the sidebar picked which INSTALLER you saw while the
+    cards below it were every account's -- five clients' autonomy rungs, kill
+    criteria and Guidance boxes stacked on one page, each with a form that
+    writes to a different account. The frame said "Miami Ironside" and the
+    third card down was Baci's.
+    """
+    tenant, here, all_t = _account(tenant)
+    every = tenant == ALL
+    rows = systems.all_systems() if every else systems.for_tenant(tenant)
 
     if not rows:
-        body = ('<div class="note">No systems yet. '
+        body = ('<div class="note">No systems on this account yet. '
                 '<a href="/admin/systems_seed?key=' + _esc(key) + '">Adopt the ones already '
                 'named on each account</a> — it reads <code>Tenant.systems</code> and '
                 'creates a row for each, with an empty contract.</div>')
-    else:
+    elif every:
+        # Grouped by client, and ONLY here -- the one screen you reach by
+        # asking for it. Each group names its account above its own cards.
         by_tenant: dict[str, list] = {}
         for r in rows:
             by_tenant.setdefault(r.tenant, []).append(r)
         body = ""
-        for tkey, group in by_tenant.items():
+        for tkey, group in sorted(by_tenant.items()):
             t = tenants.get(tkey)
             cards = "".join(_system_card(key, r) for r in group)
             live = sum(1 for r in group if r.status == "live")
@@ -923,11 +1094,25 @@ def render_systems(key: str, tenant: str = "") -> str:
                 <h2>{_esc(t.name if t else tkey)}</h2>
                 <code>{_esc(tkey)}</code>
                 <span class="mut">{live} of {len(group)} live</span>
+                <a class="btn sec" href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tkey)}">Open this account</a>
               </div>
               {cards}
             </div>"""
+    else:
+        live = sum(1 for r in rows if r.status == "live")
+        body = f"""
+        <div>
+          <div class="head" style="margin-bottom:12px">
+            <h2>Installed</h2>
+            <span class="mut">{live} of {len(rows)} live</span>
+          </div>
+          {"".join(_system_card(key, r) for r in rows)}
+        </div>"""
 
-    backlog = systems.blocked_reasons()
+    # Scoped to the account too. An unscoped backlog ranks another client's
+    # missing knowledge above this one's, and the fix it points at is filed
+    # against a knowledge base this page cannot reach.
+    backlog = systems.blocked_reasons("" if every else tenant)
     backlog_html = ""
     if backlog:
         items = "".join(f"<li><b>{n}×</b> {_esc(reason)}</li>" for reason, n in backlog[:10])
@@ -943,13 +1128,6 @@ def render_systems(key: str, tenant: str = "") -> str:
     # button: it listed every system whether or not it was already installed,
     # and said nothing about what any of them needed — so installing was a
     # guess, and the refusal only arrived afterwards on the system's own card.
-    all_t = tenants.all_tenants(include_paused=True)
-    tenant = tenant or (all_t[0].key if all_t else "")
-    picker = "".join(
-        f'<a class="{"on" if t.key == tenant else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(t.key)}">'
-        f'{_esc(t.name)}</a>' for t in all_t)
-
     def _pre_chip(i: dict) -> str:
         mark = "✓" if i["met"] else "✗"
         note = f' <span class="mut">{_esc(i["note"])}</span>' if i["note"] else ""
@@ -957,7 +1135,7 @@ def render_systems(key: str, tenant: str = "") -> str:
                 f'{_esc(i["name"])}{note}</span>')
 
     cards = ""
-    for p in (systems.installable(tenant) if tenant else []):
+    for p in ([] if every else (systems.installable(tenant) if tenant else [])):
         chips = "".join(_pre_chip(i) for i in p["items"]) or (
             '<span class="pre yes">✓ nothing required</span>')
         if p["installed"]:
@@ -989,7 +1167,21 @@ def render_systems(key: str, tenant: str = "") -> str:
           <div class="prereqs">{chips}</div>
         </div>"""
 
+    # Installing writes to ONE account, so the form is not offered on a screen
+    # that is about all of them -- there would be no account for it to mean.
+    installer = "" if every else f"""
+<div class="card">
+  <div class="head"><h2>Install a system</h2></div>
+  <p class="mut">Everything in the catalogue for this account, with what each one
+  needs and whether it has it. <b>✓</b> is wired or written, <b>✗</b> is not.
+  A system starts in <em>designed / shadow</em> — it records and sends nothing —
+  so the 8-part contract comes after installing, while you are looking at it.</p>
+  {cards}
+</div>"""
+
     return _shell(key, "systems", "Systems", tenant=tenant, body=f"""
+{_every_note(every, "Every account's pipelines, grouped by client. "
+             "Installing and the contract forms are on an account's own page.")}
 <div>
   <h1>Systems</h1>
   <p class="mut">One row per installed pipeline. A system is not on because it has a
@@ -1000,14 +1192,7 @@ def render_systems(key: str, tenant: str = "") -> str:
 
 {backlog_html}
 
-<div class="card">
-  <div class="head"><h2>Install a system</h2></div>
-  <p class="mut">Everything in the catalogue for this account, with what each one
-  needs and whether it has it. <b>✓</b> is wired or written, <b>✗</b> is not.
-  A system starts in <em>designed / shadow</em> — it records and sends nothing —
-  so the 8-part contract comes after installing, while you are looking at it.</p>
-  {cards}
-</div>
+{installer}
 
 {body}
 
@@ -1143,18 +1328,16 @@ def _next_steps_line(steps: dict) -> str:
 
 
 def render_kb(key: str, tenant: str = "", err: str = "") -> str:
-    rows = tenants.all_tenants(include_paused=True)
-    tenant = tenant or (rows[0].key if rows else "")
-    t = tenants.get(tenant)
+    # One resolver for the frame and the body, so the pill cannot name an
+    # account the numbers below it are not about.
+    tenant, t, rows = _account(tenant)
 
-    picker = "".join(
-        f'<a class="{"on" if r.key == tenant else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;tenant={_esc(r.key)}">'
-        f'{_esc(r.name)}</a>' for r in rows)
-
-    if not t:
+    if t is None:
         return _shell(key, "kb", "Knowledge", tenant=tenant, body=
-                      '<div class="note">No accounts yet. Run '
+                      _every_note(tenant == ALL,
+                                  "Knowledge is authored per client — there is "
+                                  "no pooled knowledge base. Pick an account.")
+                      or '<div class="note">No accounts yet. Run '
                       '<code>/admin/register_owner</code> first.</div>')
 
     c = kb.completeness(tenant)
@@ -1646,17 +1829,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
                    err: str = "", msg: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
-    rows = tenants.all_tenants(include_paused=True)
-    tenant = tenant or (rows[0].key if rows else "")
-    t = tenants.get(tenant)
-    if not t:
+    tenant, t, rows = _account(tenant)
+    if t is None:
         return _shell(key, "content", "Review", tenant=tenant, body=
-                      '<div class="note">No accounts yet.</div>')
-
-    picker = "".join(
-        f'<a class="{"on" if r.key == tenant else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;tenant={_esc(r.key)}">'
-        f'{_esc(r.name)}</a>' for r in rows)
+                      _every_note(tenant == ALL,
+                                  "Every decision on this queue writes to one "
+                                  "client's knowledge base. Pick an account.")
+                      or '<div class="note">No accounts yet.</div>')
 
     # --- proposals ---------------------------------------------------------
     entries = kbm.proposals(tenant, kind="claim").get("claim", [])
@@ -2433,13 +2612,11 @@ def _fill_bar(pct: int) -> str:
 def render_schema(key: str, tenant: str = "") -> str:
     from . import db as _db, kb as kbm, provenance as prov
 
-    rows_t = tenants.all_tenants(include_paused=True)
-    tenant = tenant or (rows_t[0].key if rows_t else "")
-    picker = "".join(
-        f'<a class="{"on" if r.key == tenant else ""}" '
-        f'href="/admin/ui?tab=schema&amp;tenant={_esc(r.key)}">{_esc(r.name)}</a>'
-        for r in rows_t)
-
+    tenant, _here, rows_t = _account(tenant)
+    if tenant == ALL:
+        return _shell(key, "schema", "Data layer", tenant=tenant,
+                      body=_every_note(True, "Row counts are per client. "
+                                       "Pick an account to read its tables."))
     blocks = []
     for cls_name, table, headline, why in _KB_TABLES:
         model = getattr(_db, cls_name)
@@ -2583,12 +2760,22 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
     teaches people to believe rates computed from four events.
     """
     from . import assurance
-    rep = assurance.report(tenant, days)
-    who = f" · {_esc(tenant)}" if tenant else " · all accounts"
+    # `tenant=""` used to reach `assurance.report()` unchanged, which reports
+    # EVERY account -- while the frame beside it named the first account,
+    # because `_shell` fell back to it. So the one page whose whole job is to
+    # be believed showed five clients' catches under one client's name. The
+    # resolver runs first now, and "all accounts" is only ever what was asked
+    # for by name.
+    tenant, here, _rows = _account(tenant)
+    every = tenant == ALL
+    rep = assurance.report("" if every else tenant, days)
+    who = f" · {_esc(_account_name(tenant, here))}"
 
     if not rep["events"]:
-        body = (f'<div class="note"><strong>Nothing has been checked in the '
-                f'last {days} days.</strong><br>That is not the same as '
+        body = (_every_note(every, "Checks recorded across every account.")
+                + f'<div class="note"><strong>Nothing has been checked for '
+                f'{_esc(_account_name(tenant, here))} in the last {days} '
+                f'days.</strong><br>That is not the same as '
                 f'nothing being wrong — it means no draft passed through a '
                 f'validator, so this page has no evidence either way.</div>')
         return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
@@ -2619,6 +2806,8 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
         '<tr><td colspan="2" class="mut">every run had what it needed</td></tr>'
 
     body = f"""
+    {_every_note(every, "Checks recorded across every account, pooled. "
+                 "Pick a client to see only theirs.")}
     <h2>Assurance{who}</h2>
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
 
@@ -2662,3 +2851,260 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
     </details>
     """
     return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics tab
+#
+# Assurance says whether the output was safe. This says whether the thing RAN,
+# and where it stopped if it did not. They are different questions and were
+# answerable only by reading four tables by hand, which meant "something is
+# wrong with Baci's mail" was diagnosed by opening the code.
+# ---------------------------------------------------------------------------
+
+_LEVEL_WORD = {"fail": "failures", "warn": "warnings", "ok": "clean",
+               "info": "notes"}
+
+
+def _dur(ms) -> str:
+    """A duration a reader believes. `0s` for everything sub-second reads as a
+    broken clock, so the unit follows the magnitude."""
+    if ms is None:
+        return "—"
+    if ms < 1000:
+        return f"{ms} ms"
+    if ms < 60000:
+        return f"{ms / 1000:.1f}s"
+    return f"{ms // 60000}m {ms % 60000 // 1000}s"
+
+
+#: Auto-refresh intervals offered, in seconds. 0 is off and is the default:
+#: a page that reloads itself while somebody is reading a stack trace is worse
+#: than one they refresh themselves.
+LIVE_EVERY = (0, 15, 60)
+
+
+def render_diagnostics(key: str, tenant: str = "", days: int = 7,
+                       level: str = "", system: str = "",
+                       limit: int = 200, live: int = 0) -> str:
+    """Live reports and logs for one account's systems.
+
+    Ordered by what a person triaging actually does: the per-system verdict
+    first (is anything broken at all), then the platforms (did their stack
+    answer), then the log (what happened, in order). Spend sits with latency
+    because slow and expensive are the two ways a working system is still a
+    problem.
+    """
+    from . import diagnostics as diag
+
+    tenant, here, _rows = _account(tenant)
+    every = tenant == ALL
+    scope = "" if every else tenant
+    rep = diag.report(scope, days, level=level, system=system, limit=limit)
+
+    def _link(**over) -> str:
+        q = {"key": key, "tab": "diagnostics", "tenant": tenant,
+             "days": days, "level": level, "system": system, "live": live}
+        q.update(over)
+        return "/admin/ui?" + "&amp;".join(
+            f"{k}={_esc(v)}" for k, v in q.items() if v not in ("", None))
+
+    windows = "".join(
+        f'<a class="{"on" if days == d else ""}" href="{_link(days=d)}">{lbl}</a>'
+        for d, lbl in ((1, "24h"), (7, "7d"), (30, "30d"), (90, "90d")))
+
+    # Counts have to come from the UNFILTERED window, or every filter reports
+    # its own size and the chips agree with nothing: pick "failures" and the
+    # warnings chip would read 0 because there are no warnings among failures.
+    counts = rep["counts"]           # of the whole window, never of the filter
+    problems = counts.get("fail", 0) + counts.get("warn", 0)
+    levels = (f'<a class="{"on" if level == "problems" else ""}" '
+              f'href="{_link(level="problems")}">problems only '
+              f'<span class="mut">{problems}</span></a>'
+              f'<a class="{"on" if not level else ""}" '
+              f'href="{_link(level="")}">everything</a>')
+    levels += "".join(
+        f'<a class="{"on" if level == lv else ""}" href="{_link(level=lv)}">'
+        f'{_LEVEL_WORD[lv]} <span class="mut">{counts.get(lv, 0)}</span></a>'
+        for lv in diag.LEVELS)
+
+    # --- per-system health -------------------------------------------------
+    h = rep["health"]
+    if h["note"]:
+        sysrows = f'<p class="mut">{_esc(h["note"])}</p>'
+    else:
+        sysrows = ""
+        for row in h["systems"]:
+            bad = row["failed"] or row["unfinished"]
+            cls = "bad" if bad else ("warn" if row["blocked"] else "")
+            timing = (f'{_dur(row["median_ms"])} median · '
+                      f'{_dur(row["slowest_ms"])} slowest'
+                      if row["median_ms"] is not None
+                      else f'<span class="mut">{_esc(row["timing_note"])}</span>')
+            acct = (f'<span class="acct">{_esc(row["tenant"])}</span>'
+                    if every else "")
+            sysrows += f"""
+            <div class="sysrow {cls}">
+              <span class="nm">{_esc(row["name"])}</span>{acct}
+              <span class="n">{row["runs"]} runs · {row["blocked"]} blocked ·
+                {row["failed"]} failed · {row["decided"]} decided</span>
+              <span class="vd">{_esc(row["verdict"])}</span>
+              <span class="n">{timing}</span>
+            </div>"""
+            if row["last_error"]:
+                sysrows += (f'<div class="sysrow" style="border:0;padding-top:0">'
+                            f'<span class="nm"></span><span class="vd">'
+                            f'<code>{_esc(row["last_error"])}</code></span></div>')
+
+    orphans = ""
+    if h["orphan_runs"]:
+        items = "".join(
+            f'<li><code>{_esc(o["system_id"])}</code> — {o["runs"]} run(s), '
+            f'last {_esc(o["last"][:16])}</li>' for o in h["orphan_runs"])
+        orphans = f"""
+        <div class="note"><strong>Runs filed against a system that no longer
+        exists.</strong> Either a system row was deleted under a live pipeline,
+        or something is writing runs with the wrong id. Neither is harmless.
+        <ul>{items}</ul></div>"""
+
+    # --- platforms and spend ------------------------------------------------
+    pf = rep["platforms"]
+    if pf["note"]:
+        pf_html = f'<p class="mut">{_esc(pf["note"])}</p>'
+    else:
+        prow = "".join(
+            f'<tr><td>{_esc(p["provider"])}</td>'
+            f'<td class="num">{p["calls"]}</td>'
+            f'<td class="num">{p["failed"]}</td>'
+            f'<td class="num">{p["failure_rate"]:.0%}</td>'
+            f'<td class="num">{p["median_ms"] if p["median_ms"] is not None else "—"}</td>'
+            f'<td class="num">{p["slowest_ms"] if p["slowest_ms"] is not None else "—"}</td>'
+            f'<td>{_esc(p["last_error"])}</td></tr>'
+            for p in pf["providers"]) or (
+            '<tr><td colspan="7" class="mut">every call this window was to our '
+            'own tables — nothing reached a client platform</td></tr>')
+        slow = "".join(
+            f'<tr><td><code>{_esc(t["tool"])}</code></td>'
+            f'<td class="num">{t["calls"]}</td>'
+            f'<td class="num">{t["median_ms"]}</td>'
+            f'<td class="num">{t["slowest_ms"]}</td></tr>'
+            for t in pf["slow"]) or (
+            f'<tr><td colspan="4" class="mut">nothing had a median over '
+            f'{pf["slow_after_ms"]} ms</td></tr>')
+        pf_html = f"""
+        <table class="tbl">
+          <tr><th>platform</th><th>calls</th><th>failed</th><th>rate</th>
+              <th>median ms</th><th>slowest</th><th>last error</th></tr>
+          {prow}
+        </table>
+        <p class="when">Failure <em>rate</em> leads, not count: a platform
+        failing most of the time is a broken connection, one failing
+        occasionally is the internet.</p>
+        <h3 style="font-size:.9rem;margin:16px 0 6px">Slow tools</h3>
+        <table class="tbl">
+          <tr><th>tool</th><th>calls</th><th>median ms</th><th>slowest</th></tr>
+          {slow}
+        </table>
+        <p class="when">A round trip, not a queue wait — a slow tool and a slow
+        provider are indistinguishable from here.</p>"""
+
+    sp = rep["spend"]
+    spend_html = (f'<p class="mut">{_esc(sp["note"])}</p>' if sp["note"] else f"""
+        <table class="tbl">
+          <tr><td>model calls</td><td class="num">{sp["calls"]}</td></tr>
+          <tr><td>cost in window</td><td class="num">${sp["cost_usd"]}</td></tr>
+          <tr><td>projected / month</td><td class="num">${sp["projected_monthly_usd"]}</td></tr>
+          <tr><td>cache hit rate</td><td class="num">{sp["cache_hit_rate_pct"]}%</td></tr>
+        </table>""")
+
+    # --- the log ------------------------------------------------------------
+    if rep["silent"]:
+        log = f'<div class="note">{_esc(rep["note"])}</div>'
+    else:
+        rowsh = ""
+        for e in rep["events"]:
+            when = e["at"][:16].replace("T", " ")
+            acct = (f'<span class="acct">{_esc(e["tenant"] or "—")}</span>'
+                    if every else "")
+            rowsh += f"""
+            <div class="ev {e["level"]}">
+              <span class="lv"></span>
+              <span class="when">{_esc(when)}</span>
+              <span class="kind">{_esc(e["kind"])}</span>
+              <span class="what"><b>{_esc(e["summary"])}</b>
+                <span class="det">{_esc(e["detail"])}</span></span>
+              {acct}
+              <span class="layer">{_esc(e["layer"])}</span>
+            </div>"""
+        more = ('<p class="when">Showing the most recent '
+                f'{len(rep["events"])} — the window holds more.</p>'
+                if rep["truncated"] else "")
+        log = f'<div class="log">{rowsh}</div>{more}'
+
+    sysfilter = ""
+    if h["systems"]:
+        sysfilter = ('<span class="sep"></span>'
+                     f'<a class="{"on" if not system else ""}" '
+                     f'href="{_link(system="")}">all systems</a>')
+        seen = []
+        for row in h["systems"]:
+            if row["key"] in seen:
+                continue
+            seen.append(row["key"])
+            sysfilter += (f'<a class="{"on" if system == row["key"] else ""}" '
+                          f'href="{_link(system=row["key"])}">'
+                          f'{_esc(row["key"])}</a>')
+
+    # Watching it happen, and OFF unless asked for.
+    #
+    # Safe to poll here in a way this codebase learned the hard way that most
+    # endpoints are not: `report()` is a pure read that calls nothing and
+    # writes nothing, so a reload cannot re-trigger work. The incident that
+    # taught that -- a poller re-firing a slow side-effectful endpoint until
+    # ~200 queued drafts went out at 400 sends/minute -- is why this note is
+    # here rather than in a commit message.
+    livebar = "".join(
+        f'<a class="{"on" if live == v else ""}" href="{_link(live=v)}">'
+        f'{"live off" if not v else f"every {v}s"}</a>' for v in LIVE_EVERY)
+    refresh = (f'<meta http-equiv="refresh" content="{live}">' if live else "")
+
+    lay = rep["layers"]
+    body = f"""
+{_every_note(every, "Every account's runs, calls and checks in one timeline. "
+             "Each row names the client it belongs to.")}
+<p class="mut">Where a system is breaking, and at which layer.
+<b>functionality</b> is the call not coming back, <b>logic</b> is it working
+and refusing or being caught, <b>performance</b> is it working and being slow.
+They need different fixes and are constantly mistaken for each other — a
+blocked run is the system doing its job.</p>
+
+<div class="card">
+  <div class="head"><h2>Systems</h2>
+    <span class="mut">last {days} days</span></div>
+  {sysrows}
+</div>
+{orphans}
+
+<div class="card">
+  <div class="head"><h2>Platforms and cost</h2></div>
+  {pf_html}
+  <h3 style="font-size:.9rem;margin:16px 0 6px">Model spend</h3>
+  {spend_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Log</h2>
+    <span class="mut">{lay["functionality"]} functionality ·
+      {lay["logic"]} logic · {lay["performance"]} performance</span></div>
+  <div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
+    <span class="sep"></span>{livebar}</div>
+  {log}
+</div>
+
+<p class="mut">Everything here is computed from rows other layers already
+wrote — this page calls nothing. Opening it must not be the moment a dead token
+is discovered, and a diagnostics screen that half-fails while reporting on
+failures is worse than one built from the record.</p>
+"""
+    return _shell(key, "diagnostics", "Diagnostics", body=body, tenant=tenant,
+                  head=refresh, suffix=f"&amp;days={days}")

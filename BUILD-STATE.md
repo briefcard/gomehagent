@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**53 suites, 53 pass.** Check the OUTPUT, not the exit code, and skip
+**54 suites, 54 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -166,6 +166,84 @@ draft in Gmail, which is where editing actually happens.
 `scripts/ab_context.py` is the real A/B and **has still never been run**:
 
     ANTHROPIC_API_KEY=… DATABASE_URL=… python3 scripts/ab_context.py baci
+
+## Diagnostics — where it broke, and at which layer
+
+New tab, new `app/diagnostics.py`, 2026-08-19. Assurance answers *is the output
+safe*. Nothing answered *is this running, and if not where did it stop* — the
+question you actually have when something is wrong, and it was spread across
+four tables nobody joined: `SystemRun` (what the pipeline did), `ToolCall` (what
+their platforms said), `AssuranceEvent` (what the validator did to the draft),
+`Approval` (whether a person ever decided). One of those tells you an outcome;
+the four in time order tell you a cause.
+
+**Three layers, and they are constantly mistaken for each other.**
+
+* **functionality** — the call did not come back. Dead token, 500, or a
+  `tool_scope` refusal because the account never connected that platform.
+* **logic** — everything worked and the result was still refused or caught: a
+  run blocked on missing knowledge, a validator catch, a repair that could not.
+* **performance** — it worked, and it was slow or expensive.
+
+Every event is classified into one on the record rather than in the reader's
+head, because *"the system is broken"* is usually a blocked run, which is the
+system working exactly as designed. `blocked` and `failed` are counted apart for
+the same reason: one sends you to the knowledge queue and the other to the code
+or a connection, and a single pass-rate covering both sends you to neither.
+
+**What it shows, in the order somebody triaging works.** Per-system verdict
+(did it run, did it finish, what refused), then the platforms (failure RATE
+first — a provider failing most of the time is a broken connection, one failing
+occasionally is the internet), then model spend beside latency because slow and
+expensive are the two ways a working system is still a problem, then the log.
+The log is chronological because a log must be, with a **problems only** filter
+that takes failures AND warnings together — "failures" alone hides the blocked
+runs, which is where most breakdowns surface first. Filter counts are computed
+from the unfiltered window, or every chip would describe itself.
+
+**It stores nothing and calls nothing.** Every figure is computed from rows
+other layers already wrote, so it can be wrong about an interpretation and never
+about a fact, and switching it off loses no data. Same rule as
+`client_report.assemble`: opening a diagnostics page must not be the moment a
+dead token is discovered, and a page that half-fails while reporting on failures
+is worse than one built from the record.
+
+**Absence, again.** A silent account reports *nothing at all was recorded — no
+run, no tool call, no check, no approval; that is a finding about the plumbing,
+not a clean report*. A system with no finished run says duration cannot be
+computed rather than showing a blank that reads as fast. A run open past
+`STALE_RUN_HOURS` with no terminal stage is `unfinished` and points at the
+worker — which is a different finding from `failed`, since that at least
+recorded why. And runs filed against a system id nothing owns are surfaced as
+their own warning rather than dropped: a system deleted under a live pipeline
+and a run written with the wrong id are both worth knowing.
+
+**Two things deliberately NOT measured, named in the output.** There is no
+per-step timing inside a run — `SystemRun` has `created_at` and `finished_at`
+and nothing between — so "which stage was slow" is unanswerable, only "the run
+took this long". And a tool call records a round trip, not a queue wait, so a
+slow tool and a slow provider are indistinguishable from here.
+
+**Live is opt-in and off by default** — `live=15|60` sets a meta refresh, and
+the filters travel with it so a reload does not undo the narrowing you just
+did. Safe to poll here in a way this codebase learned the hard way most
+endpoints are not: `report()` calls nothing and writes nothing, so a reload
+cannot re-trigger work. The suite asserts that reading it twice changes
+nothing, because the incident behind that rule — a poller re-firing a slow
+side-effectful endpoint until ~200 queued drafts went out at 400 sends/minute —
+started as a page that looked exactly this harmless.
+
+Also at `/admin/diagnostics` as JSON, where `tenant` is REQUIRED and `*` is the
+explicit all-accounts value: an absent account would have to mean either "all"
+or "the first one", and a monitoring feed guessing between those watches the
+wrong client. `scripts/test_diagnostics.py`, 46 checks, seeded on two accounts
+so a leak fails rather than passing an empty table — verified by removing the
+scope clause and watching fourteen assertions fail.
+
+**Unproven:** built and read against seeded data only. No real breakdown has
+been diagnosed with it yet, and the first one will find something — every
+assumption in this codebase tested against reality so far has been wrong in some
+detail.
 
 ## Time — claims expire, and so do answers
 
@@ -440,11 +518,58 @@ The account is now chosen once in the sidebar, travels on every link, and is
 named in a pill at the top of every page. Connections renders ONE account where
 it used to stack all five. The four duplicate pickers are gone — two controls
 for one decision is how they disagree. Nav is ordered the way a day runs:
-Review, Knowledge, Systems, Assurance, Connections, Data layer, with a "Client
-view →" link to the portal for the selected account.
+Review, Knowledge, Systems, Assurance, Diagnostics, Connections, Data layer,
+with a "Client view →" link to the portal for the selected account.
 
 Same visual language as the portal, deliberately: switching between them should
 not mean learning a second layout.
+
+**The frame was moved and the bodies were not — finished 2026-08-19.** Three
+tabs were still answering the "which account" question their own way, and the
+Systems tab was answering it with "all of them": it rendered
+`systems.all_systems()` grouped by client, so the sidebar picked which INSTALLER
+you saw while the cards under it were five clients' autonomy rungs, kill
+criteria and Guidance boxes, each with a form writing to a different account.
+Assurance did the reverse — handed `tenant=""` whenever the URL carried none, it
+reported every account's catches under the first account's name, on the one page
+whose entire job is to be believed. And the "N waiting" counter counted every
+account, so the number beside one client was another client's backlog and the
+link opened everybody's queue. §2.40.
+
+`admin_ui._account()` is now the single resolver, used by the frame AND by every
+render — the pill and the numbers below it are computed from one value, so they
+cannot disagree. The three leftover `picker = …` builds (constructed every
+render, rendered nowhere since the duplicate pickers were deleted) are gone;
+dead code that still reads plausible is how one comes back.
+
+**Cross-account is a place you go on purpose.** `admin_ui.ALL` ("*") is an
+explicit entry in the switcher, kept below a rule and apart from the clients.
+An empty `tenant=` falls back to the FIRST ACCOUNT, never to everything — "all
+accounts" and "the account I did not name" are different requests, and
+answering the second with the first is the whole defect. Every all-accounts page
+says so in a banner and in the pill, every row on one names the client it
+belongs to, and the two screens whose forms write to a single account
+(Connections, and the Systems installer) refuse to render on it at all.
+
+**And an account is told apart by more than its name.** Each gets a hue —
+spaced evenly across the accounts that exist rather than hashed from the key,
+because five hashed samples out of 360 collided (`ironside` 231 and `coverings`
+256 is the same blue to anybody not comparing them). It tints the selected row,
+the pill and the rule under the page heading, and every account's dot carries
+its own colour so the mapping is learnable from the list. The cost is stated
+rather than hidden: adding a client re-colours the set. That is a one-off on a
+list that gains a client every few months, against two indistinguishable blues
+every day — and the name is on screen either way, so the colour is the second
+signal and never the identifier.
+
+**The test that said all of this was already true.** `test_console_frame.py`
+asserted "the body is single-account" for every tab against a database holding a
+brand row and nothing else — no system, no run, no approval, no assurance event.
+The assertion was true of empty tables and passed for months while the Systems
+tab leaked. Every account is now seeded with a row in each table a tab reads,
+each carrying a marker only that account can produce; putting the old
+`all_systems()` call back fails the suite by name. §2.41, and the fourth test
+this codebase has caught passing for the wrong reason.
 
 **A test that could not fail for its stated reason.** `test_oauth` fetched the
 Accounts tab with no tenant and asserted a connected provider showed a green
@@ -1116,16 +1241,26 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **53 suites pass**, none touching the network,
-including `test_tenant_isolation.py` **unmodified**. New this session:
-`test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
-transport, asserting the REQUEST), `test_claim_expiry.py` and
-`test_perishable.py` — the last of which drives `responder.answer` for real and
-then asks the DATABASE what landed, because a column accepting a value proves
-nothing. Deploy verified live: `/health` reports
-`647502d`, 106 routes, and `/health/connections` still resolves both Shopify
-stores and three Google accounts — which is the code path the credential
-constraint migration touches.
+**Ran and confirmed.** All **54 suites pass**, none touching the network,
+including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
+(42 checks). `test_console_frame.py` was rewritten rather than extended — see
+§2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
+`test_constant_contact.py` (30 checks against a stubbed transport, asserting the
+REQUEST), `test_claim_expiry.py` and `test_perishable.py` — the last of which
+drives `responder.answer` for real and then asks the DATABASE what landed,
+because a column accepting a value proves nothing.
+
+**Two sabotage runs, because a suite that has never failed has never been
+tested.** Removing `diagnostics._scope`'s filter fails fourteen assertions by
+name; putting the old `systems.all_systems()` call back fails
+`test_console_frame` with `systems body is single-account — Baci Milano USA,
+BACIMARK`. Both were restored immediately.
+
+Deploy verified live at `647502d` BEFORE this session's console work: `/health`
+reported 106 routes and `/health/connections` still resolved both Shopify stores
+and three Google accounts. **The console-scoping and diagnostics work is in the
+worktree, NOT committed and NOT pushed** — it has never run on the service, and
+`/health` will not report it. Committing and deploying it is the owner's call.
 
 **Assertions deliberately CHANGED, not worked around:** two in `test_skill.py`
 pinned the rule that an incomplete contract stops a run. Three in
@@ -1240,7 +1375,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 53 of them, all offline:
+**Run the suites first, before changing anything.** 54 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue
@@ -1254,7 +1389,18 @@ a mistake this file made for weeks.
 
 **Start at plan item 1** — close the learning loop. It is the smallest change
 with the largest gap behind it: everything in this system now measures itself
-and nothing learns from what it measured.
+and nothing learns from what it measured. The Diagnostics tab makes that gap
+visible rather than closing it: it can now show you that a system blocked on the
+same missing field forty times, and nothing still feeds that back into drafting.
+
+**Then watch the Diagnostics tab against a real breakdown.** It has only ever
+been read against seeded rows. The first real one will find something — every
+assumption in this codebase tested against reality so far has been wrong in some
+detail. Two known blind spots to check first: `ToolCall.ms` is only written at
+the kernel dispatch and the three adapter seams, so anything reaching a platform
+another way records no duration and reads as untimed rather than as fast; and
+`Usage.tenant` is blank on every row written before attribution was wired, so an
+account's spend in a long window is understated and the note says so.
 
 ### Three habits this session earned the hard way
 

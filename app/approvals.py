@@ -335,9 +335,19 @@ def autonomy_stats(days: int = 30) -> dict:
     return stats
 
 
-def pending_count() -> int:
+def pending_count(tenant: str = "") -> int:
+    """How many decisions are waiting — for one client, or for everyone.
+
+    `Approval.tenant` has been filled since attribution was wired, and this
+    counted every row regardless, so the "N waiting" beside one client's name
+    in the console was another client's backlog. `tenant=""` still means every
+    account, because the digest and the ops channel genuinely want that number.
+    """
     with db.SessionLocal() as s:
-        return s.query(db.Approval).filter(db.Approval.status == "pending").count()
+        q = s.query(db.Approval).filter(db.Approval.status == "pending")
+        if tenant:
+            q = q.filter(db.Approval.tenant == tenant)
+        return q.count()
 
 
 def _fmt(payload: dict) -> str:

@@ -1319,6 +1319,50 @@ cookie over http, `test_oauth` against an all-accounts page, and this.
 *Rule: when an assertion passes first time, ask what would make it fail. All
 three of these would have passed against broken code.*
 
+### 2.40 The console named one client and showed another's — fixed 2026-08-19
+
+Three separate leaks, one shape. The Systems tab rendered
+`systems.all_systems()` grouped by client, so the account chosen in the sidebar
+picked which INSTALLER you saw while the cards below it were every account's —
+five clients' autonomy rungs and kill criteria stacked on one page, each with a
+form writing to a different account. `assurance.report` was handed `tenant=""`
+whenever the URL carried none, which reports every account, while `_shell` fell
+back to the FIRST account for the pill — so the one page whose whole job is to
+be believed showed five clients' catches under one client's name. And
+`approvals.pending_count()` counted every account, so the "N waiting" beside one
+client was another client's backlog, and the link opened everybody's queue.
+
+**Fix:** `admin_ui._account()` resolves the account ONCE, for the frame and the
+body alike, so the two cannot disagree; every tab goes through it. `ALL` ("*")
+is the cross-account view and is reachable only by asking for it by name — it
+is never where an unset value lands, and the page it produces says so on
+itself. `pending_count` and `/admin/pending` take a tenant.
+
+*Rule (new instance of §1's "unknown collapsed into a value"): an empty scope
+must not fall through to "everything". "All accounts" and "the account I did
+not name" are different requests, and answering the second with the first is
+how one client's data reaches another.*
+
+### 2.41 The test that said it was scoped, on an empty table — caught 2026-08-19
+
+`test_console_frame.py` asserted "the body is single-account" for every tab, on
+a database seeded with a brand row and nothing else. No system, no run, no
+approval, no assurance event — so the assertion was true of empty tables, and it
+passed for months while §2.40 rendered every client's pipelines on one page.
+
+**Fix:** every account is seeded with a row in each table a tab reads, each
+carrying a marker string only that account can produce. Verified by putting the
+old `all_systems()` call back: the suite now fails with
+`systems body is single-account — Baci Milano USA, BACIMARK`.
+
+Fourth instance of a test passing for the wrong reason (portal cookie over http,
+`test_oauth` against an all-accounts page, the doubled-escape fixture, this).
+The tell is the same every time: **the assertion was about absence, and nothing
+had been put there for it to find.**
+
+*Rule: an assertion that something is NOT on a page must be run against a
+database where it WOULD be, or it is testing the fixture.*
+
 ## 4. How to verify
 
 ```bash
@@ -1344,6 +1388,8 @@ python3 scripts/test_sources.py           # the registry; a fill is a rehearsal
 python3 scripts/test_oauth.py             # signing in, scope narrowness, renewal
 python3 scripts/test_objection_scope.py   # an answer about one product stays about it
 python3 scripts/test_claim_tagging.py     # a claim knows when it applies, and what it proves
+python3 scripts/test_console_frame.py     # one account per page, seeded so a leak fails here
+python3 scripts/test_diagnostics.py       # the run/tool/check log, classified and scoped
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

@@ -419,32 +419,57 @@ def whatsapp_diag(key: str = Depends(admin_key)) -> dict:
 
 
 @app.get("/admin/pending", response_class=HTMLResponse)
-def pending_page(key: str = Depends(admin_key)) -> str:
-    """Browser fallback for the whole approval queue: every pending approval
-    with working Approve/Deny links (relative URLs, so they work no matter
-    what PUBLIC_BASE_URL says)."""
+def pending_page(key: str = Depends(admin_key), tenant: str = "") -> str:
+    """Browser fallback for the approval queue: every pending approval with
+    working Approve/Deny links (relative URLs, so they work no matter what
+    PUBLIC_BASE_URL says).
+
+    Scoped by `tenant=` — the console's "N waiting" links here carrying the
+    selected account, and a page that widened back to every client on the way
+    in is how one client's reply gets approved while looking at another's
+    console. `*` and an absent value both mean every account; which one you
+    are reading is stated in the heading rather than inferred from the URL.
+    """
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
-    from . import approvals as ap_mod
+    from . import approvals as ap_mod, tenants as t_mod
+    scoped = tenant and tenant != "*"
+    who = tenant if scoped else ""
+    if scoped:
+        row = t_mod.get(tenant)
+        who = (row.name if row else tenant)
     with db.SessionLocal() as s:
-        aps = (s.query(db.Approval).filter(db.Approval.status == "pending")
-               .order_by(db.Approval.created_at.desc()).all())
+        q = s.query(db.Approval).filter(db.Approval.status == "pending")
+        if scoped:
+            q = q.filter(db.Approval.tenant == tenant)
+        aps = q.order_by(db.Approval.created_at.desc()).all()
         rows = []
         for ap in aps:
             approve = "/decide/" + ap_mod._signer.dumps([ap.id, "approved"])
             deny = "/decide/" + ap_mod._signer.dumps([ap.id, "denied"])
             body = (ap.payload or {}).get("body") or (ap.payload or {}).get("content", "")
+            # Which client this belongs to, on every row. An approval whose
+            # account was never resolved says so rather than reading as this
+            # one's -- an unattributed row folded into whoever is looking is
+            # exactly the leak this page is being scoped to close.
+            owner = (ap.tenant or "").strip() or "unattributed"
             rows.append(
-                f"<li style='margin:0 0 14px'><b>{ap.created_at:%b %d}</b> — "
-                f"{ap.summary}"
+                f"<li style='margin:0 0 14px'><b>{ap.created_at:%b %d}</b> "
+                f"<span style='font-size:.8em;background:#eef0f4;padding:1px 7px;"
+                f"border-radius:99px'>{owner}</span> — {ap.summary}"
                 + (f"<details><summary>details</summary><pre style='white-space:"
                    f"pre-wrap;background:#f6f6f6;padding:8px'>{body[:1500]}</pre>"
                    f"</details>" if body else "")
                 + f" &nbsp;<a href='{approve}'>✅ Approve</a> · "
                   f"<a href='{deny}'>❌ Deny</a></li>")
+    head = (f"Pending approvals — {who} ({len(rows)})" if scoped
+            else f"Pending approvals — all accounts ({len(rows)})")
+    other = ("" if scoped else
+             "<p style='font-size:.85em;color:#6e7686'>Every account. "
+             "Each row names the client it belongs to.</p>")
     return ("<html><body style='font-family:sans-serif;max-width:760px;"
-            "margin:2em auto'><h2>Pending approvals ("
-            f"{len(rows)})</h2><ul style='list-style:none;padding:0'>"
+            f"margin:2em auto'><h2>{head}</h2>{other}"
+            "<ul style='list-style:none;padding:0'>"
             + "".join(rows) + "</ul></body></html>")
 
 
@@ -1012,6 +1037,19 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         except ValueError:
             days = 30
         return ui.render_assurance(link_key, tenant, days=max(1, min(days, 365)))
+    if tab == "diagnostics":
+        def _int(name: str, default: int, lo: int, hi: int) -> int:
+            try:
+                return max(lo, min(int(request.query_params.get(name, default)), hi))
+            except ValueError:
+                return default
+        return ui.render_diagnostics(
+            link_key, tenant,
+            days=_int("days", 7, 1, 365),
+            level=request.query_params.get("level", ""),
+            system=request.query_params.get("system", ""),
+            limit=_int("limit", 200, 10, 1000),
+            live=_int("live", 0, 0, 300))
     if tab == "schema":
         return ui.render_schema(link_key, tenant)
     if tab == "content":
@@ -2703,6 +2741,28 @@ def assurance_report(key: str = Depends(admin_key), tenant: str = "",
     if catches:
         out["catch_list"] = assurance.catches(tenant, days)
     return out
+
+
+@app.get("/admin/diagnostics")
+def diagnostics_route(key: str = Depends(admin_key), tenant: str = "",
+                      days: int = 7, level: str = "", system: str = "",
+                      limit: int = 200) -> dict:
+    """The Diagnostics tab as JSON — same assembler, no rendering.
+
+    `tenant` is REQUIRED and `*` is the explicit cross-account value, matching
+    the console: an absent account here would have to mean either "all" or
+    "the first one", and a diagnostics feed guessing between those is how a
+    monitor ends up watching the wrong client. Reads only what is on record
+    and calls nothing.
+    """
+    from . import diagnostics
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "tenant is required — pass a key, or * for every account"}
+    return diagnostics.report("" if tenant == "*" else tenant,
+                              days=max(1, min(days, 365)), level=level,
+                              system=system, limit=max(10, min(limit, 1000)))
 
 
 @app.get("/admin/client_report")
