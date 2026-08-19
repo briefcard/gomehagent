@@ -1019,7 +1019,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
                                  err=request.query_params.get("err", ""),
                                  msg=request.query_params.get("ok", ""))
     q = request.query_params
-    return ui.render(link_key, msg=q.get("ok", ""), err=q.get("err", ""),
+    return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""))
 
 

@@ -142,6 +142,45 @@ button.sec{background:transparent;color:var(--acc)}
 .btn{display:inline-block;font-size:.78rem;padding:4px 12px;border-radius:4px;
   background:var(--acc);color:var(--panel);text-decoration:none}
 .btn.sec{background:transparent;color:var(--ink);border:1px solid var(--rule)}
+/* --- the frame: sidebar, client switcher, page ---------------------------
+   Same shape as the client portal on purpose. Switching between the two
+   should not mean learning a second layout, and the account is chosen once
+   in the frame rather than re-picked inside four separate tabs. */
+.shell{display:flex;min-height:100vh;align-items:stretch}
+.side{width:224px;flex:0 0 224px;background:var(--panel);
+border-right:1px solid var(--rule);padding:18px 12px;display:flex;
+flex-direction:column;gap:1px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.side .brand{font-weight:700;font-size:.98rem;padding:0 10px 14px}
+.side .swlabel,.side .navlabel{font-size:.68rem;text-transform:uppercase;
+letter-spacing:.08em;color:var(--mut);padding:12px 10px 6px;font-weight:600}
+.side .switch{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
+.side a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;
+color:var(--ink2);font-size:.88rem;text-decoration:none}
+.side a:hover{background:var(--rule2)}
+.side a.on{background:var(--accs);color:var(--acc);font-weight:600}
+.side .ico{width:16px;text-align:center;opacity:.8;font-size:.9em}
+.side .dot{width:7px;height:7px;border-radius:99px;background:var(--rule);
+flex:0 0 7px}
+.side a.on .dot{background:var(--acc)}
+.side .foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--rule);
+display:flex;flex-direction:column;gap:1px}
+.side .foot a{font-size:.82rem;color:var(--mut)}
+.side a.pend{color:var(--acc);font-weight:600}
+.main{flex:1;min-width:0;padding:22px 28px 60px;max-width:1180px}
+.pagehead{display:flex;align-items:baseline;gap:12px;margin-bottom:18px;
+flex-wrap:wrap}
+.pagehead h1{font-size:1.3rem;margin:0;letter-spacing:-.02em}
+/* Whose data this is, on every page. Below the fold it was possible to read a
+   whole screen without ever seeing the account name. */
+.pagehead .who{font-size:.82rem;color:var(--acc);background:var(--accs);
+padding:3px 10px;border-radius:99px;font-weight:600}
+@media(max-width:820px){.shell{flex-direction:column}
+.side{width:auto;flex:none;height:auto;position:static;flex-direction:row;
+flex-wrap:wrap;padding:10px;gap:4px}
+.side .brand,.side .swlabel,.side .navlabel{display:none}
+.side .switch{flex-direction:row;flex-wrap:wrap}
+.side .foot{margin:0;border:0;flex-direction:row;padding:0}
+.main{padding:16px}}
 .bulkbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
   flex-wrap:wrap;background:var(--panel);border:1px solid var(--rule);
   border-radius:5px;padding:9px 12px;margin-bottom:10px}
@@ -222,9 +261,12 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 .msg.esc{border-left-color:var(--gap)}\n.tags{display:flex;flex-wrap:wrap;gap:4px 10px}\n.tags .tag{font-size:.78rem;color:var(--ink2);display:flex;align-items:center;gap:4px;white-space:nowrap}\n.tags input{width:auto}
 """
 
-_TABS = (("accounts", "Accounts"), ("systems", "Systems"), ("kb", "Knowledge"),
-         ("content", "Content"), ("assurance", "Assurance"),
-         ("schema", "Data layer"))
+#: (key, label, icon). Ordered the way a day runs rather than the way the code
+#: is arranged: what needs deciding, then what it knows, then what it is
+#: connected to, then the plumbing.
+_TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
+         ("systems", "Systems", "◧"), ("assurance", "Assurance", "◉"),
+         ("accounts", "Connections", "⚯"), ("schema", "Data layer", "⛁"))
 
 
 def _model_options() -> str:
@@ -249,11 +291,41 @@ def _model_options() -> str:
     return "".join(opts)
 
 
-def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
+def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
+           tenant: str = "") -> str:
+    """Sidebar, client switcher, then the page.
+
+    The console used a horizontal tab bar and a SEPARATE client picker inside
+    four of the five tabs. Two consequences, both daily: the nav links carried
+    no tenant, so moving between tabs silently dropped you back to the first
+    account; and with the picker below the fold you could read a whole screen
+    without ever seeing whose data it was.
+
+    So the account moves into the frame. It is chosen once, it travels on every
+    link, and it is named at the top of every page — the same shape the client
+    portal uses, because switching between the two should not mean learning a
+    second layout.
+    """
+    from . import tenants as _t
+
+    try:
+        rows = _t.all_tenants(include_paused=True)
+    except Exception:                                            # noqa: BLE001
+        rows = []
+    tenant = tenant or (rows[0].key if rows else "")
+    here = next((r for r in rows if r.key == tenant), None)
+
+    switch = "".join(
+        f'<a class="{"on" if r.key == tenant else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={_esc(r.key)}">'
+        f'<span class="dot"></span>{_esc(r.name)}</a>' for r in rows)
+
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}{suffix if t == tab else ""}">{label}</a>'
-        for t, label in _TABS)
+        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}&amp;tenant={_esc(tenant)}'
+        f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}</a>'
+        for t, label, i in _TABS)
+
     # How many decisions are waiting, on every page.
     #
     # `approvals.pending_count` was written and never called, so the one number
@@ -265,14 +337,29 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "") -> str:
         _n = _ap.pending_count()
     except Exception:                                            # noqa: BLE001
         _n = 0                 # never let a counter break the console
-    if _n:
-        nav += (f'<a class="pend" href="/admin/pending?key={_esc(key)}">'
-                f'{_n} waiting</a>')
+    waiting = (f'<a class="pend" href="/admin/pending?key={_esc(key)}">'
+               f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
+
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_esc(title)} — Saias Ops</title><style>{_CSS}</style></head><body><div class="w">
-<div class="tabs">{nav}</div>
-{body}
+<title>{_esc(title)} — {_esc(here.name if here else "Saias Ops")}</title>
+<style>{_CSS}</style></head><body>
+<div class="shell">
+  <div class="side">
+    <div class="brand">Saias Ops</div>
+    <div class="swlabel">Account</div>
+    <div class="switch">{switch}</div>
+    <div class="navlabel">Manage</div>
+    {nav}
+    <div class="foot">{waiting}
+      <a href="/portal?tenant={_esc(tenant)}&amp;key={_esc(key)}">Client view &rarr;</a>
+    </div>
+  </div>
+  <div class="main">
+    <div class="pagehead"><h1>{_esc(title)}</h1>
+      <span class="who">{_esc(here.name if here else "no account")}</span></div>
+    {body}
+  </div>
 </div></body></html>"""
 
 
@@ -541,8 +628,19 @@ def _field(t, key: str, name: str) -> str:
     </form>"""
 
 
-def render(key: str, msg: str = "", err: str = "", link: str = "") -> str:
+def render(key: str, tenant: str = "", msg: str = "", err: str = "",
+           link: str = "") -> str:
+    """Connections for ONE account.
+
+    This used to render every account stacked on one page, which is how it
+    stayed while the console had no client switcher — but it is the screen
+    where getting the wrong account is most expensive, because the buttons on
+    it revoke credentials and mint links. One account at a time, named in the
+    frame, is the point of the whole rearrangement.
+    """
     rows = tenants.all_tenants(include_paused=True)
+    tenant = tenant or (rows[0].key if rows else "")
+    rows = [r for r in rows if r.key == tenant]
     if not rows:
         body = ('<div class="note">No accounts yet. Run '
                 '<code>/admin/register_owner</code> first — it seeds the five.</div>')
@@ -582,7 +680,7 @@ def render(key: str, msg: str = "", err: str = "", link: str = "") -> str:
           <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
         </div>"""
 
-    return _shell(key, "accounts", "Accounts", f"""
+    return _shell(key, "accounts", "Connections", tenant=tenant, body=f"""
 <div>
   <h1>Accounts</h1>
   <p class="mut">The fields on each card are <strong>keys into</strong> credential
@@ -891,7 +989,7 @@ def render_systems(key: str, tenant: str = "") -> str:
           <div class="prereqs">{chips}</div>
         </div>"""
 
-    return _shell(key, "systems", "Systems", f"""
+    return _shell(key, "systems", "Systems", tenant=tenant, body=f"""
 <div>
   <h1>Systems</h1>
   <p class="mut">One row per installed pipeline. A system is not on because it has a
@@ -904,7 +1002,6 @@ def render_systems(key: str, tenant: str = "") -> str:
 
 <div class="card">
   <div class="head"><h2>Install a system</h2></div>
-  <div class="picker">{picker}</div>
   <p class="mut">Everything in the catalogue for this account, with what each one
   needs and whether it has it. <b>✓</b> is wired or written, <b>✗</b> is not.
   A system starts in <em>designed / shadow</em> — it records and sends nothing —
@@ -1056,7 +1153,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         f'{_esc(r.name)}</a>' for r in rows)
 
     if not t:
-        return _shell(key, "kb", "Knowledge",
+        return _shell(key, "kb", "Knowledge", tenant=tenant, body=
                       '<div class="note">No accounts yet. Run '
                       '<code>/admin/register_owner</code> first.</div>')
 
@@ -1365,7 +1462,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                        "three or four words, comma separated", 1))
 
     warn = f'<div class="note">{_esc(err)}</div>' if err else ""
-    return _shell(key, "kb", "Knowledge", f"""
+    return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
 <div>
   <h1>Knowledge</h1>
@@ -1374,7 +1471,6 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
   is a blocked pipeline there, not a cosmetic gap.</p>
 </div>
 
-<div class="tabs">{picker}</div>
 
 
 <div class="card">
@@ -1554,7 +1650,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
     tenant = tenant or (rows[0].key if rows else "")
     t = tenants.get(tenant)
     if not t:
-        return _shell(key, "content", "Content",
+        return _shell(key, "content", "Review", tenant=tenant, body=
                       '<div class="note">No accounts yet.</div>')
 
     picker = "".join(
@@ -2035,7 +2131,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         # A bulk decision reports what it did, including what it refused. A
         # count with no reasons reads as a partial success nobody can act on.
         banner = f'<div class="when">{_esc(msg)}</div>' + banner
-    return _shell(key, "content", "Content", f"""
+    return _shell(key, "content", "Review", tenant=tenant, body=f"""
 {banner}
 <div>
   <h1>Content</h1>
@@ -2044,7 +2140,6 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   it is the difference between what the brand allows and what is live.</p>
 </div>
 
-<div class="tabs">{picker}</div>
 <div class="card danger">
   <div class="head"><h2>Start this account's machine-read half over</h2></div>
   <p class="mut">Deletes every claim and objection that came from a crawl or a
@@ -2457,7 +2552,7 @@ def render_schema(key: str, tenant: str = "") -> str:
     missing = ("".join(f'<span class="chip off">{_esc(m)}</span>'
                        for m in comp.get("missing", []))) or ""
 
-    return _shell(key, "schema", "Data layer", f"""
+    return _shell(key, "schema", "Data layer", tenant=tenant, body=f"""
 <div>
   <h1>Data layer</h1>
   <p class="mut">What the knowledge base holds for this account, table by table.
@@ -2466,7 +2561,6 @@ def render_schema(key: str, tenant: str = "") -> str:
   whether a human has approved them. Read from the models, so a new column shows
   up here on its own.</p>
 </div>
-<div class="tabs">{picker}</div>
 <div class="card">
   <div class="head"><h2>This account at a glance</h2></div>
   {top}
@@ -2497,7 +2591,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
                 f'last {days} days.</strong><br>That is not the same as '
                 f'nothing being wrong — it means no draft passed through a '
                 f'validator, so this page has no evidence either way.</div>')
-        return _shell(key, "assurance", "Assurance", body)
+        return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
 
     catch_rows = "".join(
         f'<tr><td><code>{_esc(r)}</code></td><td class="num">{n}</td></tr>'
@@ -2567,4 +2661,4 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
       {thin_rows}</table>
     </details>
     """
-    return _shell(key, "assurance", "Assurance", body)
+    return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)

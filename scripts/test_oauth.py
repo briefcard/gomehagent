@@ -313,7 +313,13 @@ def main() -> int:  # noqa: C901 — one suite, read top to bottom
         # `status()` returned all of this and nothing rendered any of it, so
         # every connection action was a curl from the runbook.
         print("\n— the console —")
-        page = cl.get("/admin/ui?tab=accounts").text
+        # CHANGED with the console rebuild, not worked around. The Accounts
+        # tab used to stack every account on one page, so a connected provider
+        # ANYWHERE satisfied this. It now renders one account at a time —
+        # which is the point of the rearrangement, because that page has
+        # buttons that revoke credentials — so the test names the account
+        # whose credential it stored.
+        page = cl.get("/admin/ui?tab=accounts&tenant=baci").text
         ck("the Accounts tab has a Connections section", "Connections" in page)
         ck("every provider is listed by name",
            all(cred.PROVIDERS[p]["name"].split(" (")[0] in page

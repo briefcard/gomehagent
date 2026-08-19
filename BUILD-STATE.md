@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**51 suites, 51 pass.** Check the OUTPUT, not the exit code, and skip
+**52 suites, 52 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -427,8 +427,31 @@ line and the client waits for mail that was never coming. An unknown address
 pings too, differently — either a client using another address or somebody
 probing, and both want a human to look.
 
-**Not done:** the owner console is untouched. That was the other half of the
-ask, and it is now a clean separate piece.
+### The owner console, same shape
+
+Done too. The console used a horizontal tab bar and a SEPARATE client picker
+inside four of the five tabs, which cost two things every day: the nav links
+carried NO tenant, so moving between tabs silently dropped you back to the first
+account and nothing said so; and with the picker below the fold you could read a
+whole screen without seeing whose data it was — including the Connections
+screen, whose buttons revoke credentials and mint client links.
+
+The account is now chosen once in the sidebar, travels on every link, and is
+named in a pill at the top of every page. Connections renders ONE account where
+it used to stack all five. The four duplicate pickers are gone — two controls
+for one decision is how they disagree. Nav is ordered the way a day runs:
+Review, Knowledge, Systems, Assurance, Connections, Data layer, with a "Client
+view →" link to the portal for the selected account.
+
+Same visual language as the portal, deliberately: switching between them should
+not mean learning a second layout.
+
+**A test that could not fail for its stated reason.** `test_oauth` fetched the
+Accounts tab with no tenant and asserted a connected provider showed a green
+chip — which passed only because the page stacked every account, so a credential
+on ANY of them satisfied it. It was checking "some account somewhere is
+connected". Retargeted at the account it actually stores one on. That is the
+second such test this session; the other was the portal cookie over http.
 
 **A trap worth knowing:** the session cookie is `secure=True`, so a `TestClient`
 over http silently sends nothing and a test reads the signed-out page while
@@ -1046,7 +1069,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **51 suites pass**, none touching the network,
+**Ran and confirmed.** All **52 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
