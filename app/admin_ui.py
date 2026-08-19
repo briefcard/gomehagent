@@ -1141,6 +1141,40 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         for r in ents],
         "Nothing catalogued. Selection has nothing to offer.")
 
+    # --- grouping, in the console rather than one URL per product ------------
+    #
+    # `kb.assign_to_group` has existed since the scope work with no caller. The
+    # only manual path was one `/admin/entity_group?...` GET per entity, which
+    # for a forty-item range is forty URLs pasted by hand — so the path the
+    # collection import deliberately leaves to a person was one nobody could
+    # actually walk.
+    groups = [r for r in ents if (r.type or "") == "collection"]
+    if groups and len(ents) > len(groups):
+        opts = "".join(f'<option value="{_esc(g.key)}">{_esc(g.name)}</option>'
+                       for g in groups)
+        picks = "".join(
+            f'<label class="pick"><input type="checkbox" name="entity_keys" '
+            f'value="{_esc(r.key)}" form="grp"> {_esc(r.name)}</label>'
+            for r in ents if (r.type or "") != "collection")
+        ent_html += f"""
+    <div class="anchor" id="groups"></div>
+    <div class="card">
+      <div class="head"><h2>Put things in a group</h2></div>
+      <p class="mut">A claim filed against a group is true of every member and
+      is inherited silently, so this is deliberately a decision rather than an
+      import. Membership is <b>additive</b> — a white Aqua pitcher can be in its
+      range, its material and its type at once, and adding one never removes
+      another.</p>
+      <form id="grp" method="post" action="/admin/entity_group"></form>
+      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="grp">
+      <div class="bulkbar">
+        <select name="group" form="grp">{opts}</select>
+        <span class="grow"></span>
+        <button form="grp">Add selected to this group</button>
+      </div>
+      <div class="tags">{picks}</div>
+    </div>"""
+
     # --- the tenant's own diagnostic vocabulary ------------------------------
     sits = kb.situation_rows(tenant)
     if sits:

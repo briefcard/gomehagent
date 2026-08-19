@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**45 suites, 45 pass.** Check the OUTPUT, not the exit code, and skip
+**46 suites, 46 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -805,7 +805,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **45 suites pass**, none touching the network,
+**Ran and confirmed.** All **46 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
@@ -884,13 +884,21 @@ instead, and a thin run reports what it worked without. `tenant` joined
 `ACCOUNT_PARAMS`, so any future tool naming one must register in `SCOPED` or
 `test_tenant_isolation` fails by name.
 
-**5b — The rest of the built-but-unreachable list.** `kb.assign_to_group` is the
-manual collection-grouping path `/admin/entity_group` was meant to expose;
-`kb.retire_claim`, `credentials.granted_capabilities`, `canva.export_result`,
+**5b — The rest of the built-but-unreachable list.** `kb.assign_to_group` is
+DONE — a bulk POST plus a form on the Knowledge tab. It mattered more than its
+size suggests: collection import is opt-in on purpose, because a group claim is
+asserted about every member and inherited silently, and the manual alternative
+was one GET per entity — forty URLs by hand for a forty-item range. The safe
+default had no usable alternative.
+
+Still with no caller at all: `kb.retire_claim`,
+`credentials.granted_capabilities`, `canva.export_result`,
 `omnisend.upload_image`, `approvals.pending_count`, `propose.from_gap`,
-`seo_tools.seo_context_block`, `ops_jobs.file_whatsapp_document` and
-`baci_backoffice.list_company_documents` have no caller at all. Each is either a
-missing route or dead weight, and deciding which is a morning's work.
+`seo_tools.seo_context_block`, `ops_jobs.file_whatsapp_document`,
+`baci_backoffice.list_company_documents`. Each is either a missing route or dead
+weight; deciding which is a morning, and DELETING the dead ones is as valuable
+as wiring the live ones — an unreachable function reads as a feature to the
+next person who greps for one.
 
 **6 — Squarespace, or decide Ironside's blog is not a system.** It is installed
 and permanently blocked on a provider that does not exist.

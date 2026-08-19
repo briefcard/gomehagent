@@ -2306,6 +2306,54 @@ def entity_group(key: str = Depends(admin_key), tenant: str = "",
             "groups": kbm.ancestors(tenant, ekey)}
 
 
+@app.post("/admin/entity_group")
+async def entity_group_post(request: Request, key: str = Depends(admin_key)):
+    """Put SEVERAL entities into one group, from the console.
+
+    `kb.assign_to_group` has existed since the scope work and had no caller at
+    all — the only way to group anything was one `/admin/entity_group?...` GET
+    per product, which for a forty-item range is forty URLs pasted by hand, and
+    is why the manual path was never actually used.
+
+    POST because this mutates. The GET twin stays for the runbook, but a
+    console write on a GET can be fired by a browser prefetch or a link
+    preview, and this one rewrites what claims apply to what.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    group = str(form.get("group", "")).strip()
+    keys = [str(k) for k in form.getlist("entity_keys") if str(k).strip()]
+
+    def back(msg: str = "", err: str = "") -> RedirectResponse:
+        q = f"&ok={quote(msg)}" if msg else (f"&err={quote(err)}" if err else "")
+        return RedirectResponse(
+            f"/admin/ui?tab=kb&tenant={quote(tenant)}{q}#groups", 303)
+
+    if not tenant or not group:
+        return back(err="Pick a group first.")
+    if not keys:
+        return back(err="Nothing was selected, so nothing was grouped.")
+
+    gkey, problem = kbm.resolve_entity_ref(tenant, group)
+    if problem or not gkey:
+        return back(err=problem or f"no group matched {group!r}")
+
+    res = kbm.assign_to_group(tenant, gkey, keys)
+    # The refusals are the interesting half — a loop guard, a missing entity, a
+    # row already in the group — and dropping them would report a partial
+    # success as a whole one.
+    msg = f"{res['assigned']} of {len(keys)} added to {gkey}"
+    if res["refused"]:
+        return back(err=msg + " — " + "; ".join(res["refused"][:3]))
+    return back(msg=msg + ".")
+
+
 @app.get("/admin/scope_conflicts")
 def scope_conflicts_route(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Claims that answer the same situation at different scopes.
