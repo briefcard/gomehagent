@@ -422,6 +422,47 @@ def _dig(bundle: dict, path: str):
     return cur
 
 
+def tool_description(tenant: str = "") -> str:
+    """What the agent is shown instead of a list of tools.
+
+    This is the point of `catalogue()`. A tool list makes the model choose the
+    work AND assemble the context for it, and it will assemble the context
+    wrong — with the wrong client, the wrong tier, unapproved material — in
+    ways nothing downstream can see. Here it picks a NAME, and the substrate
+    resolves everything else.
+
+    Blocked skills are listed WITH what they are waiting on rather than hidden.
+    A model that cannot see `catalog_compliance` concludes the system cannot
+    check a catalogue; one that sees "blocked: not connected: commerce" can say
+    so to the person asking, which is the answer they actually needed.
+    """
+    from . import skill_pack  # noqa: F401 — importing registers the pack
+    rows = catalogue(tenant) if tenant else []
+    if not rows:
+        return ("Run one of the data layer's skills. No account is active, so "
+                "there is nothing to list — switch to a client first.")
+
+    ready = [r for r in rows if r["status"] == "ready"]
+    blocked = [r for r in rows if r["status"] != "ready"]
+
+    lines = ["Run one governed piece of work from the data layer. You pick the "
+             "SKILL; the substrate resolves the context, validates whatever is "
+             "produced, files it to the ledger and applies the autonomy rung. "
+             "Never assemble a brief yourself and never pick an account."]
+    if ready:
+        lines.append("\nReady now:")
+        for r in ready:
+            params = ", ".join(r["params"]) or "no parameters"
+            lines.append(f"  · {r['key']} — {r['does']} (accepts: {params})")
+    if blocked:
+        lines.append("\nInstalled but waiting — say what each is waiting on if "
+                     "somebody asks for it:")
+        for r in blocked:
+            why = "; ".join(r.get("blocked_on") or []) or r["status"]
+            lines.append(f"  · {r['key']} — {why}")
+    return "\n".join(lines)
+
+
 def preflight(key: str, tenant: str) -> dict:
     """Can this skill run for this account, and if not exactly what is absent.
 

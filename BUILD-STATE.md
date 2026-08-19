@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**44 suites, 44 pass.** Check the OUTPUT, not the exit code, and skip
+**45 suites, 45 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -805,7 +805,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **44 suites pass**, none touching the network,
+**Ran and confirmed.** All **45 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New this session:
 `test_assurance.py`, `test_constant_contact.py` (30 checks against a stubbed
 transport, asserting the REQUEST), `test_claim_expiry.py` and
@@ -873,12 +873,16 @@ exercise of the Shopify read, and now it can be watched on the Assurance tab
 while it runs. Expect to fix something in `_fetch_products_live`, which raises
 `KeyError` instead of refusing by name.
 
-**5 — Expose the skills to the agent.** `/admin/skill_catalogue` and
-`/admin/skill_run` exist; no agent TOOL does, so the four skills are reachable
-only from Python and two admin routes. One `run_skill` tool whose description is
-generated from `skill.catalogue(tenant)`, so the agent picks a skill and never
-picks context. **This is the next thread's first job** — it is the largest
-gap between "built" and "usable" left in the repo.
+**5 — ~~Expose the skills to the agent.~~ DONE.** `run_skill` is a kernel tool.
+`tool_scope` strips `tenant` from the schema and injects it at dispatch, and
+`skill.catalogue(tenant)` IS the description, regenerated per account — so the
+model picks a name and never picks a client or a brief. Blocked skills are
+listed with what they are waiting on rather than hidden, because a model that
+cannot see `catalog_compliance` concludes the system cannot check a catalogue.
+The refusal path tells the agent explicitly not to draft the thing by hand
+instead, and a thin run reports what it worked without. `tenant` joined
+`ACCOUNT_PARAMS`, so any future tool naming one must register in `SCOPED` or
+`test_tenant_isolation` fails by name.
 
 **5b — The rest of the built-but-unreachable list.** `kb.assign_to_group` is the
 manual collection-grouping path `/admin/entity_group` was meant to expose;

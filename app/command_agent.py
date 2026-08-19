@@ -21,6 +21,21 @@ log = logging.getLogger("cmd")
 # bottom is a thin shim that runs this role through the kernel.
 
 ACTION_TOOLS = [
+    # The data layer, as one tool. The description is REPLACED per account by
+    # `tool_scope.filter_tools` with the live catalogue — what is written here
+    # is only the fallback for a turn with no active client. `tenant` is
+    # stripped from the schema the model sees and injected at dispatch, so the
+    # agent picks a skill and never picks a client.
+    {"name": "run_skill",
+     "description": "Run one governed piece of work from the data layer.",
+     "input_schema": {"type": "object", "properties": {
+         "tenant": {"type": "string", "description": "injected — never supply"},
+         "skill": {"type": "string",
+                   "description": "the skill key, exactly as listed above"},
+         "params": {"type": "object",
+                    "description": "only the parameters that skill accepts; "
+                                   "anything else is refused by name"}},
+         "required": ["skill"]}},
     {"name": "run_job",
      "description": "Run a maintenance job asynchronously. Jobs: doc_sweep "
                     "(file email attachments into the B2B Drive structure), "
@@ -675,10 +690,65 @@ def _bo_status(args: dict) -> str:
     return head + "\n\n".join(lines)
 
 
+def _run_skill(args: dict) -> str:
+    """Run one skill and report what happened, including what it lacked.
+
+    Everything interesting is in the return value rather than the text: a run
+    that produced something thin has to SAY so, or the agent reports a
+    confident answer built on a bundle that was missing half its grounding.
+    """
+    from . import skill, skill_pack  # noqa: F401 — importing registers the pack
+
+    tenant = str(args.get("tenant") or "")
+    key = str(args.get("skill") or "").strip()
+    if not tenant:
+        return ("No client is active, so there is nothing to run this against. "
+                "Switch to one first.")
+    if not key:
+        avail = [r["key"] for r in skill.catalogue(tenant)
+                 if r["status"] == "ready"]
+        return ("Which skill? Ready now: " + (", ".join(avail) or "none")) + "."
+
+    params = args.get("params") or {}
+    if not isinstance(params, dict):
+        return "params must be an object of that skill's own parameters."
+
+    res = skill.run(key, tenant, trigger="agent", **params)
+    status = res.get("status", "")
+
+    if status in ("refused", "blocked"):
+        why = "; ".join(res.get("blocked_on") or ["no reason recorded"])
+        return (f"{key} did not run for {tenant}: {why}\n\n"
+                f"That is a connection or a caller error, not something to "
+                f"work around — do not draft this by hand instead.")
+
+    bits = [f"{key} ran for {tenant} — {status}."]
+    if res.get("summary"):
+        bits.append(res["summary"])
+    items = res.get("items") or []
+    if items:
+        held = sum(1 for i in items if i.get("status") == "blocked")
+        bits.append(f"{len(items)} item(s) produced"
+                    + (f", {held} of them blocked by the validator" if held else ""))
+    # The half that must not be dropped. A thin run is a real answer built on
+    # an incomplete bundle, and reporting it as a clean one is exactly the
+    # confident-sounding-draft-with-nothing-behind-it this layer exists to stop.
+    if res.get("thin"):
+        bits.append("It worked WITHOUT: " + "; ".join(res["thin"])
+                    + " — say so if you pass this on.")
+    for n in (res.get("notes") or [])[:4]:
+        bits.append(f"note: {n}")
+    if res.get("run_id"):
+        bits.append(f"run {res['run_id']}")
+    return "\n".join(bits)
+
+
 def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
     """Execute one admin tool call. ``session_files`` carries any attachments
     from the current exchange (the kernel passes them in)."""
     try:
+        if name == "run_skill":
+            return _run_skill(args)
         if name == "run_job":
             return _run_job_async(args["job"])
         # ---- Baci Backoffice inbound-logistics tools ----

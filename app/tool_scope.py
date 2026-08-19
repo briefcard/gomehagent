@@ -24,7 +24,7 @@ from __future__ import annotations
 
 # Parameter names that mean "which account". A tool exposing one of these and
 # not appearing in SCOPED is a hole, and the test says so by name.
-ACCOUNT_PARAMS = ("store", "account", "alias", "site")
+ACCOUNT_PARAMS = ("store", "account", "alias", "site", "tenant")
 
 # How to turn a tenant into the value each parameter expects. Three vocabularies
 # exist for the same idea — an inbox alias, a Shopify store key, and an SEO site
@@ -33,6 +33,10 @@ _RESOLVERS = {
     "account": lambda t: t.gmail_alias or "",
     "alias": lambda t: t.gmail_alias or "",
     "store": lambda t: t.shopify_store or "",
+    # The account itself, for tools that work on the client rather than on one
+    # of its connected properties. Same rule as the other three: the model
+    # never sees this parameter and never chooses a value for it.
+    "tenant": lambda t: t.key or "",
 }
 
 
@@ -118,7 +122,25 @@ SCOPED: dict[str, tuple[str, str]] = {
     "propose_new_collection":        ("site", ""),
     "propose_content_page":          ("site", ""),
     "propose_theme_schema_renderer": ("site", ""),
+    # --- the data layer, as one tool ---------------------------------------
+    "run_skill":            ("tenant", ""),
 }
+
+
+#: Tools whose DESCRIPTION depends on the account.
+#:
+#: `run_skill` is the only one, and it has to be: the whole point is that the
+#: agent is shown which skills can run for THIS client and what each blocked
+#: one is waiting on, instead of a static list it has to guess against. A
+#: registry rather than an `if name == ...` in the loop, because the second
+#: entry is where that pattern goes wrong and this file has watched it happen
+#: twice (`oauth.configured`, `capabilities`).
+DYNAMIC_DESCRIPTION: dict = {}
+
+
+def _register_dynamic() -> None:
+    from . import skill, skill_pack  # noqa: F401 — importing registers the pack
+    DYNAMIC_DESCRIPTION["run_skill"] = skill.tool_description
 
 
 def account_for(tenant: str, param: str) -> str:
@@ -139,6 +161,12 @@ def filter_tools(tools: list[dict], tenant: str) -> list[dict]:
     caps = tenants.capabilities(tenant)
     out = []
     for spec in tools:
+        if spec.get("name") in DYNAMIC_DESCRIPTION or spec.get("name") == "run_skill":
+            if not DYNAMIC_DESCRIPTION:
+                _register_dynamic()
+            fn = DYNAMIC_DESCRIPTION.get(spec.get("name"))
+            if fn:
+                spec = {**spec, "description": fn(tenant)}
         scoped = SCOPED.get(spec.get("name", ""))
         if not scoped:
             out.append(spec)
