@@ -28,6 +28,27 @@ import re
 #: named, exactly as a claim cannot carry a situation tag outside the
 #: tenant's vocabulary — a declaration nothing can satisfy is worse than none,
 #: because it reads as a route.
+#: How long an answer built on each lookup stays quotable, in hours.
+#:
+#: Every entry here already said this in prose -- "stock is true at the moment
+#: of asking and stale by lunchtime" -- and prose cannot be checked. A reply we
+#: sent a fortnight ago is still in the thread, still gets pulled into the
+#: bundle for a follow-up, and reads exactly as true as the day it was written.
+#: That is Gomeh's cup: answered out of stock, correctly, and the answer rots
+#: while the sentence does not.
+#:
+#: These are half-lives for QUOTING A PAST ANSWER, not cache TTLs -- nothing
+#: here is cached. `0` would mean "never quotable", which no lookup is; the
+#: shortest is stock, which can change between two emails on the same morning.
+STALE_AFTER_HOURS = {
+    "shopify_inventory": 6,        # can change between two emails in a morning
+    "shopify_order": 24,           # fulfilment moves daily
+    "tracking": 12,                # a scan lands and the answer is wrong
+    "shopify_customer": 24 * 30,   # who someone is changes slowly
+    "calendar_availability": 4,    # a booking lands and the slot is gone
+}
+
+
 TOOLS: dict[str, dict] = {
     "shopify_order": {
         "capability": "commerce",
@@ -88,6 +109,13 @@ def extract_params(utterance: str, wanted: list[str]) -> dict:
         if m:
             found[name] = m.group(1) if m.groups() else m.group(0)
     return found
+
+
+# A tool with no half-life would be treated as never going stale, which is the
+# silent-default failure this codebase keeps meeting. Caught at import.
+for _t in TOOLS:
+    assert _t in STALE_AFTER_HOURS, f"lookup {_t!r} declares no STALE_AFTER_HOURS"
+
 
 
 def needed_for(tenant: str, situation_tags: list[str], utterance: str = "",

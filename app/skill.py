@@ -223,7 +223,8 @@ class Context:
              entity_key: str = "", situation: str = "", audience_key: str = "",
              angle: str = "", fmt: str = "", destination: str = "",
              conversation_id: str = "", require_citation: bool | None = None,
-             redraft=None, meta: dict | None = None) -> dict:
+             redraft=None, meta: dict | None = None,
+             lookups: list | None = None) -> dict:
         """Validate one produced thing, repair it if it fails, file it.
 
         The only exit. `require_citation` defaults to whether the skill claims
@@ -289,7 +290,7 @@ class Context:
                 status="repaired" if verdict["ok"] else "superseded",
                 blocked_on=[f["rule"] for f in att["failures"]],
                 body=att["body"], conversation_id=conversation_id,
-                run_id=self.run_id)
+                lookups=list(lookups or []), run_id=self.run_id)
 
         row = ledger.record(
             self.tenant, self.skill.system_key,
@@ -299,6 +300,11 @@ class Context:
             status=status,
             blocked_on=[f["rule"] for f in verdict["failures"]],
             destination=destination, body=body,
+            # Which LIVE lookups fed this. A skill that answered partly from a
+            # stock reading produces a sentence that stops being true; the
+            # ledger has to know which, or `ledger.perishable` cannot tell a
+            # brand fact from a reading a fortnight later.
+            lookups=list(lookups or []),
             conversation_id=conversation_id, run_id=self.run_id)
 
         # Every attempt is filed as a CHECK, not just the ones that produced

@@ -29,7 +29,7 @@ def record(tenant: str, system_key: str, *, situation: str = "",
            angle: str = "", format: str = "", status: str = "draft",
            blocked_on: list[str] | None = None, destination: str = "",
            body: str = "", conversation_id: str = "", touch_id: str = "",
-           run_id: str = "") -> db.Output:
+           run_id: str = "", lookups: list[str] | None = None) -> db.Output:
     """File one output and the brief behind it.
 
     A **blocked** run is recorded too, and that is the point of taking
@@ -43,6 +43,7 @@ def record(tenant: str, system_key: str, *, situation: str = "",
         tenant=tenant, system_key=system_key, run_id=run_id,
         situation=situation, entity_key=entity_key, audience_key=audience_key,
         objection_id=objection_id, claim_ids=list(claim_ids or []),
+        lookups=list(lookups or []),
         media_ids=list(media_ids or []), theme=theme, angle=angle,
         format=format, status=status, blocked_on=list(blocked_on or []),
         destination=destination, body=body[:2000],
@@ -100,6 +101,54 @@ def publish(tenant: str, output_id: str, destination: str = "") -> str:
 # ---------------------------------------------------------------------------
 # 1. Anti-repeat
 # ---------------------------------------------------------------------------
+
+def perishable(tenant: str, conversation_id: str = "",
+               within_days: int = 90) -> list[dict]:
+    """Past replies whose live facts have gone stale, and which ones.
+
+    This is the join that closes Gomeh's cup. `resolve` pulls prior
+    correspondence into the bundle for a follow-up, and it arrives as prose —
+    "we told them it is out of stock" reads exactly as true in September as it
+    was in August. Nothing in a sentence says which half of it was a reading
+    from a store and which half was a fact about the brand.
+
+    So the OUTPUT is asked instead of the sentence. Every lookup that fed a
+    body has a half-life declared in `lookups.STALE_AFTER_HOURS`; past it, that
+    reply may not be repeated without checking. The reply is not hidden and not
+    corrected — it is flagged, because what was said is a fact about the
+    conversation and stays true no matter what the stock does now.
+    """
+    from .lookups import STALE_AFTER_HOURS
+    since = db.utcnow() - dt.timedelta(days=within_days)
+    out = []
+    with db.SessionLocal() as s:
+        q = (s.query(db.Output)
+             .filter(db.Output.tenant == tenant,
+                     db.Output.created_at >= since)
+             .order_by(db.Output.created_at.desc()))
+        if conversation_id:
+            q = q.filter(db.Output.conversation_id == conversation_id)
+        for row in q.limit(50).all():
+            used = list(row.lookups or [])
+            if not used:
+                continue        # nothing live went in; the reply keeps
+            age_h = (db.utcnow() - db.as_utc(row.created_at)).total_seconds() / 3600
+            stale = [t for t in used
+                     if age_h > STALE_AFTER_HOURS.get(t, float("inf"))]
+            if not stale:
+                continue
+            out.append({
+                "output_id": row.id,
+                "said_on": db.as_utc(row.created_at).date().isoformat(),
+                "hours_old": round(age_h),
+                "stale_lookups": stale,
+                "body": (row.body or "")[:160],
+                "warning": ("this reply quoted "
+                            + ", ".join(t.replace("_", " ") for t in stale)
+                            + " — true when it was sent, and not to be "
+                              "repeated without reading it again")})
+    return out
+
 
 def used_recently(tenant: str, claim_id: str, entity_key: str = "",
                   within_days: int = 30, limit: int = 5) -> list[db.Output]:

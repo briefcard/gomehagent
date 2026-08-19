@@ -397,6 +397,24 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     bundle["conversation"] = convo
     bundle.setdefault("correspondence", [])
 
+    # What we already said, that may no longer be true.
+    #
+    # Correspondence comes back as prose and reads uniformly true: a reply
+    # saying a cup is out of stock is as confident in September as it was in
+    # August, and nothing in the sentence marks which half was a reading from
+    # the store. `ledger.perishable` asks the OUTPUT instead of the sentence —
+    # every lookup that fed a body has a half-life, and past it the reply must
+    # not be repeated without checking.
+    #
+    # Filed beside the correspondence rather than removed from it. What was
+    # said is a fact about the conversation and stays true whatever the stock
+    # does now; the drafter needs to know it was said AND that it has aged.
+    from . import ledger as _ledger
+    bundle["perishable"] = _ledger.perishable(
+        tenant, conversation_id=(convo or {}).get("id", "") if isinstance(convo, dict) else "")
+    if bundle["perishable"]:
+        searched.append("perishable facts")
+
     # --- the receipt ----------------------------------------------------
     comp = kb.completeness(tenant)
     bundle["blocked_on"] = blocked

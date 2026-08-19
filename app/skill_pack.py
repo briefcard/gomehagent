@@ -411,6 +411,11 @@ def _run_inbound_reply(ctx: Context) -> dict:
              situation=res.get("situation") or "",
              conversation_id=res.get("conversation_id") or "",
              angle="reply", fmt="reply",
+             # Which live lookups fed this reply, so a follow-up weeks later
+             # can tell a brand fact from a stock reading. The responder
+             # declares them; passing them on is what stops `Output.lookups`
+             # being written by one writer and missed by the other.
+             lookups=res.get("lookups_used") or [],
              # Only the model path can repair. The confident path assembles an
              # objection response a human approved verbatim, and rewording that
              # is not this loop's job.

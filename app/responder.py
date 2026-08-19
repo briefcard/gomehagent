@@ -136,13 +136,21 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
                     rejected_draft, drafted = drafted, ""
                     draft_note = "; ".join(
                         f"{f['rule']}: {f['detail']}" for f in verdict["failures"])
+        # This path files an output too, so it records its lookups too. A
+        # column written by one of two writers is the same as a column written
+        # by none: `perishable` would silently miss every reply drafted from
+        # context, which is the half that has no approved objection behind it
+        # and leans hardest on live data.
         ledger.record(tenant, system_key, situation=situation,
                       entity_key=entity_key, status="draft_from_context",
                       run_id=run_id, conversation_id=conversation_id,
+                      lookups=[n["tool"] for n in declared] if facts else [],
+                      body=drafted or rejected_draft or "",
                       format="reply", blocked_on=[])
         return {
             "ok": True,
             "mode": "draft_from_context",
+            "lookups_used": [n["tool"] for n in declared] if facts else [],
             "draft": drafted,
             "draft_blocked_by": draft_note,
             "draft_rejected": rejected_draft,
@@ -202,15 +210,31 @@ def answer(tenant: str, utterance: str, *, contact_id: str = "",
                         "validate") | {"verdict": verdict}
 
     # --- 4. file it -------------------------------------------------------
+    #
+    # WHICH live lookups fed this, recorded beside the claim ids. A claim is
+    # true until somebody changes it; a lookup was true at the moment it was
+    # read, and once both are sentences in the same reply they are
+    # indistinguishable — which is how "that cup is out of stock", correct in
+    # August, gets quoted back in September.
+    #
+    # The tools are taken from what the bundle DECLARED, not from the keys of
+    # `facts`, and that is sound rather than convenient: step 1 above refuses
+    # to go any further while a declared lookup is unanswered, so reaching this
+    # line with facts in hand means those lookups were called. The caller's
+    # own key names are free-form and would have to be guessed at.
+    used_lookups = [n["tool"] for n in declared] if facts else []
+
     row = ledger.record(
         tenant, system_key, situation=situation, entity_key=entity_key,
         objection_id=top.get("objection_id", ""), claim_ids=claim_ids,
         status="draft", body=body, format="reply", run_id=run_id,
+        lookups=used_lookups,
         conversation_id=conversation_id, angle=top.get("objection", "")[:80])
 
     return {
         "ok": True,
         "draft": body,
+        "lookups_used": used_lookups,
         "answers": top.get("objection", ""),
         "situation": situation,
         "evidence": top.get("support", []),
