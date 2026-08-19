@@ -1363,6 +1363,92 @@ had been put there for it to find.**
 *Rule: an assertion that something is NOT on a page must be run against a
 database where it WOULD be, or it is testing the fixture.*
 
+### 2.42 The knowledge base could not reach the drafts — fixed 2026-08-19
+
+`resolve.resolve` had exactly ONE caller in the codebase: the skill substrate.
+So the claims, objections and brand guidance the owner had been approving for
+months reached work that ran through a registered skill, and nothing else — the
+inbound mail path, which drafts the replies he reads every morning, worked from
+a hardcoded prompt and a substring ban-list test.
+
+Not a bug in any line. Every part worked; nothing joined them, and the console
+gave no way to notice — approving a claim looked identical whether or not
+anything would ever read it.
+
+**Fix:** `app/grounding.py` resolves a bundle per inbound email and renders it
+for the prompt; `triage` injects it and reports `claim_ids`, intersected with
+what was offered so a model cannot introduce one.
+
+*Rule: a capability with one caller is one refactor away from having none.
+When something is built to be read by "every system", assert the callers exist
+— `grep -c` for the function name is a test, and it would have caught this and
+`feedback_block` on the day each landed.*
+
+### 2.43 Two guards, two strengths, and the weak one was on the live path — fixed 2026-08-19
+
+`triage` tested banned claims with a plain `in` while `validator._banned` next
+door matched on word boundaries with flexible separators. So on the ONE path
+that answers customers, `hand-decorated` was caught and `hand decorated` walked
+through — and `artisan` false-fired inside `artisanal`. Worse,
+`command_agent.queue_email_draft` checked nothing at all: it composed a reply in
+the tool loop, wrote a real Gmail draft and queued it for approval, where the
+owner might simply approve it.
+
+To its credit the codebase KNEW: the assurance record deliberately said
+`banned_claims_substring` rather than `banned_claims` so the weaker check could
+not hide behind the stronger one's name. It was labelled honestly for a session
+and shipped anyway.
+
+**Fix:** both paths call `validator`. `triage` uses
+`check(require_citation=False)` and escalates if the validator itself raises —
+"we could not check this" warrants a human, not a pass. `queue_email_draft`
+refuses BEFORE the write and names the phrase.
+
+*Rule: two implementations of one rule is one implementation and one bug. If
+the weaker one has to be labelled to stay honest, that is the signal to delete
+it, not to document it.*
+
+### 2.44 A reason prefix is an interface — caught 2026-08-19
+
+Swapping `triage`'s substring test for `validator.check` (§2.43) also replaced
+the reason marker `BANNED CLAIM:` with a generic `BLOCKED:`. The guard still
+fired and still escalated; only the string changed. `test_tenant_isolation`
+failed on it immediately — the assertion had been holding that marker since the
+guard was written.
+
+It matters because these prefixes are read by CODE, not only by a person:
+`emailfmt` and `worker` both branch on `NEEDS-FACTS` in the same field. And one
+marker covering two different rules (banned claim, unavailable entity) makes a
+grep for either one lie.
+
+**Fix:** the marker names the rule that fired and keeps `BANNED CLAIM`
+verbatim.
+
+*Rule: a string another module matches on is an interface. Changing it is an
+API change, however much it looks like copy — grep for the literal before
+editing it, and if a test is the only consumer, that test is the contract.*
+
+### 2.45 The guidance reached every consumer except the one it was for — caught 2026-08-19
+
+`resolve._rules` appends a system's standing guidance and edit lessons to
+`rules["block"]`, which every SKILL injects at the top of its prompt. The mail
+path does not inject that block — it builds its own identity prose from
+`tenants.agent_block`, and `grounding.render` deliberately skipped the rules
+block to avoid duplicating it. So the guidance was wired, was in the bundle,
+passed every unit assertion, and never reached the drafts it was written for.
+
+Every piece tested green in isolation. What caught it was the first test to
+drive `triage_email` itself against a stubbed model and assert on the SYSTEM
+PROMPT that came out.
+
+**Fix:** `render` emits `rules["guidance"]` — that half only, since the caller
+already has the identity prose and injecting it twice is how a prompt starts
+contradicting itself.
+
+*Rule: testing the pieces of an assembly does not test the assembly. When
+something is wired to reach "everything", one test must drive the real entry
+point and assert on what actually came out the far end.*
+
 ## 4. How to verify
 
 ```bash
@@ -1390,6 +1476,7 @@ python3 scripts/test_objection_scope.py   # an answer about one product stays ab
 python3 scripts/test_claim_tagging.py     # a claim knows when it applies, and what it proves
 python3 scripts/test_console_frame.py     # one account per page, seeded so a leak fails here
 python3 scripts/test_diagnostics.py       # the run/tool/check log, classified and scoped
+python3 scripts/test_grounding.py         # the KB reaches the mail path, and guards it
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

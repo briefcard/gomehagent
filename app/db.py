@@ -1442,7 +1442,10 @@ class SystemRun(Base):
 
     trigger = Column(String)          # inbound_email | schedule | manual
     ref = Column(String)              # source identifier, e.g. a gmail message id
-    stage = Column(String, default="brief")  # brief | draft | validated | approved | sent | blocked | failed
+    # brief | draft | validated | approved | sent | blocked | failed | skipped
+    # `draft` is WAITING on a person, not finished. `skipped` is finished with
+    # nothing produced, and correctly so — half of inbound mail needs no reply.
+    stage = Column(String, default="brief")
     blocked_on = Column(JSON, default=list)  # named missing fields — refuse-don't-invent, recorded
 
     brief = Column(JSON, default=dict)

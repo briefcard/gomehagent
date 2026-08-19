@@ -959,6 +959,42 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
                                 "amount": r.amount, "account": r.account}
                                for r in rows]) or "none"
         if name == "queue_email_draft":
+            # THE HARD RULES, on the second mail path.
+            #
+            # This one checked nothing. `triage` at least had a ban-list test;
+            # this branch composed a reply in the tool loop, wrote a real Gmail
+            # draft and queued it for approval, and a phrase the account has
+            # barred went through untouched — the owner's own standing rule,
+            # unenforced on the channel he uses to dictate replies.
+            #
+            # It REFUSES rather than escalating, and that is the difference
+            # from triage: there, a customer is waiting and a human reviewing a
+            # flagged draft is the better outcome. Here the instruction came
+            # from the owner seconds ago, so handing the refusal straight back
+            # gets it reworded now, by the only person who can also decide the
+            # rule no longer applies. The phrase is named, because "blocked"
+            # without it is a dead end.
+            from . import tenant_scope
+            _tenant = tenant_scope.resolve(alias=args.get("account", ""))
+            if _tenant:
+                from . import assurance, validator
+                _body = f"{args.get('subject', '')} {args.get('body', '')}"
+                _hits = validator._banned(_tenant, _body)
+                assurance.record(
+                    _tenant, source="command", system_key="command_draft",
+                    checked=["banned_claims"],
+                    caught=["banned_claim"] if _hits else [],
+                    verdict="blocked" if _hits else "passed",
+                    grounded=False,
+                    thin=["the command path drafts from the instruction, not "
+                          "from a resolved bundle"])
+                if _hits:
+                    barred = ", ".join(repr(h["phrase"]) for h in _hits)
+                    return ("Not drafted. That reply says " + barred
+                            + f", which is on {_tenant}'s banned-claims list, "
+                            "so no draft was created and nothing was queued. "
+                            "Reword it and ask again — or retire the rule on "
+                            "the Knowledge tab if it no longer holds.")
             # Actually create the Gmail draft so Gomeh gets a real link + it's
             # editable in his inbox; queue it for approval too.
             draft_id = gmail_client.create_draft(

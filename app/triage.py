@@ -159,6 +159,7 @@ Respond with JSON only:
  "reply_subject": "<subject or empty>",
  "reply_body": "<full reply text or empty>",
  "reply_cc": "<comma-separated CC addresses to preserve/add, or empty>",
+ "claim_ids": ["<id of each APPROVED CLAIM you actually used, or empty list>"],
  "deadline": null OR {{"due_date": "YYYY-MM-DD", "amount": "<$ or 'unknown'>",
                       "what": "<one line>"}},
  "expense": null OR {{"vendor": "<company>", "amount": "<$>",
@@ -238,7 +239,9 @@ def _parse_verdict(text: str) -> dict | None:
         return None
 
 
-def _apply_guards(result: dict, tenant: str, sender_trusted: bool) -> dict:
+def _apply_guards(result: dict, tenant: str, sender_trusted: bool,
+                  offered_claim_ids: list | None = None,
+                  thin: list | None = None) -> dict:
     """The deterministic checks a model verdict must survive before it can send.
 
     Extracted from the triage loop so they are testable on their own and
@@ -265,29 +268,73 @@ def _apply_guards(result: dict, tenant: str, sender_trusted: bool) -> dict:
     # in the prompt too (via agent_block), but a prompt mostly obeys and a check
     # always blocks. Locked decision #2 — a model may never validate a model.
     if tenant:
-        from . import assurance, kb
-        draft = f"{result.get('reply_subject', '')} {result.get('reply_body', '')}".lower()
-        hits = [p for p in kb.banned_claims(tenant) if p and p.lower() in draft]
+        from . import assurance, grounding, validator
+        draft = f"{result.get('reply_subject', '')} {result.get('reply_body', '')}"
+
+        # The SAME matcher the substrate uses, at last.
+        #
+        # This was a plain `in` test while `validator._banned` next door matched
+        # on word boundaries with flexible separators — so on the one path that
+        # answers customers, "hand-decorated" was caught and "hand decorated"
+        # walked straight through, and "artisan" false-fired inside
+        # "artisanal". Two strengths of the same rule, and the weaker one was
+        # guarding the live path.
+        #
+        # `require_citation=False` deliberately: an email answering "where is
+        # my order" has no claim to cite, and a guard that fires on every reply
+        # is a guard somebody switches off. Only the rules that make an output
+        # FALSE are enforced here.
+        cited = grounding.verify(offered_claim_ids or [], result.get("claim_ids"))
+        result["claim_ids"] = cited
+        try:
+            report = validator.check(
+                tenant, draft, claim_ids=cited,
+                entity_key=result.get("entity_key", ""),
+                require_citation=False)
+        except Exception as exc:                                 # noqa: BLE001
+            # A validator that cannot run must not pass the draft. It escalates
+            # instead: a human reads it, which is what "we could not check
+            # this" actually warrants.
+            result["action"] = "escalate"
+            result["reason"] = (f"UNCHECKED: the validator raised "
+                                f"({exc.__class__.__name__}) — read this one "
+                                f"yourself. " + (result.get("reason") or ""))
+            return result
+
+        hard = [f for f in report["failures"]
+                if f["rule"] in ("banned_claim", "entity_unavailable")]
         # Logged whether it hit or not. A check that only records its failures
         # cannot tell you it is running, and this is the path that actually
         # answers customers — the one where "is the layer switched on" most
         # needs an answer that is not a code reading.
-        #
-        # `checked` says `banned_claims_substring`, deliberately NOT
-        # `banned_claims`: this is a plain `in` test, while `validator._banned`
-        # matches on word boundaries with flexible separators. Recording them
-        # under one name would hide that the live path uses the weaker one.
         assurance.record(
-            tenant, source="mail", system_key="inbox_triage",
-            checked=["banned_claims_substring"], caught=["banned_claim"] if hits else [],
-            verdict="blocked" if hits else "passed",
-            grounded=False,
-            thin=["the mail path drafts without the bundle"])
-        if hits:
+            tenant, source="mail", system_key=grounding.SYSTEM_KEY,
+            checked=report["checked"],
+            caught=[f["rule"] for f in hard],
+            verdict="blocked" if hard else "passed",
+            grounded=bool(cited),
+            thin=list(thin or []))
+        if hard:
             result["action"] = "escalate" if result.get("action") == "auto_reply" \
                 else result.get("action", "draft")
-            result["reason"] = (f"BANNED CLAIM: the draft says {', '.join(hits)} "
-                                f"— barred for {tenant}. " + (result.get("reason") or ""))
+            # The marker NAMES THE RULE that fired, and `BANNED CLAIM` is kept
+            # verbatim from before the validator swap.
+            #
+            # These prefixes are an interface, not prose: `emailfmt` and
+            # `worker` both branch on `NEEDS-FACTS` in exactly this field, so a
+            # reason string is read by code as well as by a person. Replacing
+            # them with a generic "BLOCKED" quietly widened one marker into two
+            # rules and broke the one assertion that had been holding the
+            # banned-claim guard since it was written. A rule that fires should
+            # say which rule it was, at the front, where a grep finds it.
+            marker = {"banned_claim": "BANNED CLAIM",
+                      "entity_unavailable": "UNAVAILABLE"}
+            head = ", ".join(dict.fromkeys(
+                marker.get(f["rule"], f["rule"].upper()) for f in hard))
+            result["reason"] = (f"{head}: "
+                                + "; ".join(f["detail"] for f in hard)
+                                + f" — barred for {tenant}. "
+                                + (result.get("reason") or ""))
 
     # Placeholder guard: a draft containing fill-in-the-blank text must never
     # auto-send, and gets flagged so Gomeh sees it needs his input.
@@ -311,7 +358,7 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     auto-send with no idea whose voice it is writing in — which is the same hole
     the agent had, in the half that runs unattended.
     """
-    from . import tenants
+    from . import grounding, tenants
     tenant = tenant or tenants.for_alias(account_alias)
     # Static prefix (identical every call) is cached; dynamic suffix is not.
     dynamic = (
@@ -329,6 +376,37 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     from . import memory
     dynamic += (memory.lessons_block("admin", tenant)
                 + memory.memory_block("", tenant))
+
+    # THE KNOWLEDGE BASE, on the path that answers customers.
+    #
+    # `resolve.resolve` had exactly one caller — the skill substrate — so every
+    # claim, objection and piece of brand guidance the owner had approved
+    # reached registered skills and nothing else. This path, which drafts the
+    # replies he actually reads each morning, drafted from a hardcoded prompt.
+    # The bundle also carries this system's standing guidance and the edits a
+    # human made to its recent drafts (see `resolve._rules`), so the loop that
+    # measured itself now feeds itself.
+    #
+    # The cheap classifier runs FIRST here, not because drafting needs it but
+    # because a bucket that never replies must not pay for a bundle: a tier-3
+    # resolve runs a semantic search over the archive, and roughly half of
+    # inbound is a newsletter. It was already being computed a few lines below
+    # to route the model; it is simply computed once, earlier.
+    try:
+        bucket_hint = classify_only(email, account_alias, tenant)
+    except Exception:                                            # noqa: BLE001
+        bucket_hint = ""
+    ground = grounding.for_mail(tenant, email, bucket=bucket_hint)
+    dynamic += ground["text"]
+    if ground["thin"]:
+        # The gap survives to the prompt rather than being silently absent. A
+        # model that does not know it is working without the objections file
+        # writes with the same confidence either way.
+        dynamic += ("\n\nWHAT THIS ACCOUNT COULD NOT GIVE YOU for this mail: "
+                    + "; ".join(ground["thin"][:6])
+                    + "\nWrite the reply anyway — thinner and more careful, "
+                      "never blocked. Say you will confirm rather than "
+                      "asserting anything this did not cover.")
     system = [
         {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": dynamic},
@@ -368,12 +446,10 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     # before producing its final JSON verdict.
     from . import data_tools  # local import avoids circular dependency
 
-    # Model routing: cheap pre-classification picks the bucket, the bucket
-    # picks the brain (logistics -> Opus; everything else -> Sonnet).
-    try:
-        bucket_hint = classify_only(email, account_alias, tenant)
-    except Exception:  # noqa: BLE001
-        bucket_hint = ""
+    # Model routing: the bucket picked above also picks the brain (logistics ->
+    # Opus; everything else -> Sonnet). It used to be classified again here —
+    # two calls to the same cheap classifier for one email, and two chances for
+    # them to disagree about what the mail was.
     model = config.BUCKET_MODELS.get(bucket_hint, config.CLAUDE_MODEL)
 
     messages: list[dict] = [{"role": "user", "content": content_blocks}]
@@ -412,7 +488,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
                 messages=[{"role": "user", "content":
                            "Convert this triage verdict into the required JSON "
                            "object ONLY (keys: category, action, reason, "
-                           "reply_subject, reply_body, deadline). No prose, no "
+                           "reply_subject, reply_body, claim_ids, deadline). "
+                           "No prose, no "
                            "code fences. If truncated, complete it sensibly:\n\n"
                            + text[:4000]}],
             )
@@ -423,4 +500,6 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
         result = {"category": "other", "action": "escalate",
                   "reason": "triage parse failure (after retry)",
                   "reply_subject": "", "reply_body": ""}
-    return _apply_guards(result, tenant, sender_trusted)
+    return _apply_guards(result, tenant, sender_trusted,
+                         offered_claim_ids=ground["claim_ids"],
+                         thin=ground["thin"])

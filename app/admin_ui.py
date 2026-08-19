@@ -948,8 +948,37 @@ def _thread(key: str, row) -> str:
     else:
         body = ('<p class="mut">Nothing yet. Corrections you write here are injected '
                 'into this system\'s drafting prompt — and only this one.</p>')
+
+    # Proof that the promise above is kept.
+    #
+    # That sentence was written when `feedback_block` had no caller anywhere in
+    # the codebase: guidance was saved, displayed, and read by nothing. It is
+    # wired now, and the card says so with the actual size of what reaches the
+    # prompt — because "it is injected" is exactly the kind of claim this
+    # console exists to stop taking on trust.
+    live = ""
+    try:
+        note_txt = systems.feedback_block(row.tenant, row.key)
+        edit_txt = systems.edit_lessons(row.tenant, row.key)
+        bits = []
+        if note_txt:
+            bits.append(f"{len(msgs)} correction(s) you wrote")
+        if edit_txt:
+            bits.append("plus the edits you made to recent drafts")
+        if bits:
+            live = (f'<div class="ok" style="margin:10px 0">In the prompt now: '
+                    f'{_esc(" — ".join(bits))}. Injected on every draft this '
+                    f'system writes, and on no other system.</div>')
+        else:
+            live = ('<div class="note" style="margin:10px 0">Nothing is being '
+                    'injected yet. Guidance appears here once written; edits '
+                    'appear once you approve a draft you changed.</div>')
+    except Exception:                                            # noqa: BLE001
+        pass
+
     return f"""
     <details><summary>Thread — guidance and corrections ({len(msgs)})</summary>
+      {live}
       <div class="thread" style="margin-top:10px">{body}</div>
       <form method="get" action="/admin/system_note" style="margin-top:12px">
         <input type="hidden" name="key" value="{_esc(key)}">
@@ -2947,7 +2976,9 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
             <div class="sysrow {cls}">
               <span class="nm">{_esc(row["name"])}</span>{acct}
               <span class="n">{row["runs"]} runs · {row["blocked"]} blocked ·
-                {row["failed"]} failed · {row["decided"]} decided</span>
+                {row["failed"]} failed · {row["decided"]} decided{
+                f' · {row["waiting"]} waiting' if row.get("waiting") else ""}{
+                f' · {row["skipped"]} needed no reply' if row.get("skipped") else ""}</span>
               <span class="vd">{_esc(row["verdict"])}</span>
               <span class="n">{timing}</span>
             </div>"""

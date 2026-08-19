@@ -64,7 +64,14 @@ LEVELS = ("fail", "warn", "ok", "info")
 #: gets reported for a system that is refusing exactly as designed.
 LAYERS = ("functionality", "logic", "performance")
 
-_TERMINAL = ("sent", "approved", "blocked", "failed")
+#: A run in one of these is over. `skipped` belongs here: a run that correctly
+#: produced nothing has finished, and leaving it out reports it later as lost.
+_TERMINAL = ("sent", "approved", "blocked", "failed", "skipped")
+
+#: Open, and legitimately so — waiting on a person rather than on us. Counting
+#: these as unfinished would report the approval queue as a dead worker, which
+#: is the opposite of what is happening.
+_WAITING = ("draft", "validated")
 
 
 def _since(days: int) -> dt.datetime:
@@ -128,8 +135,11 @@ def health(tenant: str = "", days: int = 30) -> dict:
         # A run with no terminal stage and no finish, older than the window
         # that any real run takes, did not end — it was lost. That is a
         # different finding from "failed", which at least recorded why.
+        waiting = [r for r in mine if (r.stage or "") in _WAITING
+                   and not r.finished_at]
         stuck = [r for r in mine
-                 if (r.stage or "") not in _TERMINAL and not r.finished_at
+                 if (r.stage or "") not in _TERMINAL
+                 and (r.stage or "") not in _WAITING and not r.finished_at
                  and (now - db.as_utc(r.created_at)).total_seconds()
                  > STALE_RUN_HOURS * 3600]
         last = max((db.as_utc(r.created_at) for r in mine), default=None)
@@ -146,6 +156,8 @@ def health(tenant: str = "", days: int = 30) -> dict:
             "failed": stages.get("failed", 0),
             "decided": sum(1 for r in mine if r.decision),
             "unfinished": len(stuck),
+            "waiting": len(waiting),
+            "skipped": stages.get("skipped", 0),
             "last_run": last.isoformat() if last else None,
             "last_error": (errs[-1].error or "")[:200] if errs else "",
             "median_ms": (sorted(durations)[len(durations) // 2]
@@ -156,7 +168,7 @@ def health(tenant: str = "", days: int = 30) -> dict:
             "timing_note": ("" if durations else
                             "no run in this window reached a finish, so "
                             "duration cannot be computed"),
-            "verdict": _verdict(len(mine), stages, len(stuck)),
+            "verdict": _verdict(len(mine), stages, len(stuck), len(waiting)),
         })
 
     # Runs whose system row is gone. Never silently dropped: a run filed
@@ -174,7 +186,7 @@ def health(tenant: str = "", days: int = 30) -> dict:
                      "nothing here to be working or broken")}
 
 
-def _verdict(n: int, stages: dict, stuck: int) -> str:
+def _verdict(n: int, stages: dict, stuck: int, waiting: int = 0) -> str:
     """One line a person can act on, or an admission that there is none."""
     if not n:
         return "nothing ran in this window — this is not a clean bill of health"
@@ -185,6 +197,11 @@ def _verdict(n: int, stages: dict, stuck: int) -> str:
     if stages.get("blocked"):
         return (f"{stages['blocked']} run(s) refused on something missing — "
                 f"working as designed, fix from the knowledge queue")
+    if waiting:
+        # Not a fault, and named rather than folded into "ran clean": a queue
+        # nobody is working looks identical to a healthy system from every
+        # other number on this page.
+        return f"ran clean · {waiting} waiting on you"
     return "ran clean"
 
 
@@ -317,6 +334,12 @@ def events(tenant: str = "", days: int = 7, level: str = "",
             elif stage in ("sent", "approved"):
                 lvl, layer = "ok", "logic"
                 detail = f"decision: {r.decision or 'none recorded'}"
+            elif stage == "skipped":
+                lvl, layer = "info", "logic"
+                detail = "nothing to produce — correctly did not answer"
+            elif stage in _WAITING:
+                lvl, layer = "info", "logic"
+                detail = "waiting on a person"
             else:
                 lvl, layer = "info", "logic"
                 detail = f"stage: {stage}"

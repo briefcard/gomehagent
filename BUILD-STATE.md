@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**54 suites, 54 pass.** Check the OUTPUT, not the exit code, and skip
+**55 suites, 55 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -624,28 +624,120 @@ rounding it to one looks like a measurement.
 made. Given this codebase's record with untested API assumptions, watch the
 first real approval after drafts resume.
 
-**Measured, NOT yet learned from.** This closes the measurement gap and nothing
-more. No drafting path reads a delta, and `systems.feedback_block` — which
-renders per-system Guidance for injection at drafting — STILL HAS NO CALLER, so
-the Guidance box on the Systems card saves text that never reaches a prompt.
-See plan item 1.
+**~~Measured, NOT yet learned from.~~ LEARNED FROM, 2026-08-19.** Was: no
+drafting path read a delta and `systems.feedback_block` had no caller anywhere,
+so the Guidance box saved text that never reached a prompt. Both are wired
+through `resolve._rules` now — see **The mail path is grounded and guarded**.
+The edits fed back are only those a human actually made, labelled as observed
+rather than as instruction.
 
 ## The wiring audit — which entry points reach the data layer
 
 Traced mechanically on 2026-08-18. This is the most important table in the file.
 
     entry point         reaches                    what it is
-    command_agent.py    — NOTHING —                the kernel tool loop
+    command_agent.py    validator                  the kernel tool loop — GUARDED, not grounded
     kernel.py           — NOTHING —                the model loop
     ops_jobs.py         — NOTHING —                scheduled jobs
     seo_tools.py        — NOTHING —                the SEO agent's tools
-    shopify_seo.py      — NOTHING —                WRITES to the live store
-    wordpress_seo.py    — NOTHING —                WRITES to the live site
+    shopify_seo.py      seo_guard                  WRITES to the live store
+    wordpress_seo.py    seo_guard                  WRITES to the live site
     digest.py           — NOTHING —                what reaches the owner
-    triage.py           kb                         inbound mail (weak check)
-    worker.py           systems                    the cron tick
+    triage.py           resolve kb validator assurance   inbound mail — GROUNDED
+    worker.py           systems (runs per email)   the cron tick
     skill.py            kb resolve validator ledger  the substrate
     web.py              everything                 console + bridge
+
+**The mail path is grounded and guarded — 2026-08-19.** The audit's worst
+finding was not a bug but an absence: `resolve.resolve` had exactly ONE caller,
+the skill substrate. So every claim, objection and piece of brand guidance the
+owner had approved reached registered skills and nothing else, while the
+inbound path — the one drafting the replies he reads each morning — worked from
+a hardcoded prompt. Months of approved knowledge could not reach the drafts.
+
+`app/grounding.py` is the join: it resolves a bundle per inbound email, renders
+it for the prompt (objections first — a pre-approved answer beats anything the
+model composes — then claims WITH THEIR IDS, catalogue, live-lookup warnings,
+perishable replies, and the correspondence and documents on file), and checks
+what comes back. `triage` injects it and now reports `claim_ids`; a model may
+not invent one, so what it cites is intersected with what was offered
+(`grounding.verify`) — an id that was never handed over is either a
+hallucination or a stale bundle, and a draft carrying an unresolvable id is
+worse than an uncited one because it LOOKS traceable.
+
+**Enrich, never gatekeep**, and it matters most here. A thin bundle produces a
+thinner block and a labelled draft — the prompt is TOLD what the account could
+not give it, so a model working without the objections file does not write with
+the same confidence as one that has it. The only thing that stops a reply is a
+phrase the account has banned.
+
+**Both mail paths now check, with the same matcher.** `triage` used a plain
+`in` test while `validator._banned` next door matched on word boundaries — so
+on the live path "hand-decorated" was caught and "hand decorated" walked
+through. It calls `validator.check(require_citation=False)` now: an email
+answering "where is my order" has no claim to cite, and a guard that fires on
+every reply is a guard somebody switches off. A validator that RAISES escalates
+rather than passing the draft. And `command_agent.queue_email_draft` — the
+owner dictating a reply over WhatsApp — checked nothing at all, wrote a real
+Gmail draft and queued it. It REFUSES now, before the write, naming the phrase:
+there the instruction came from the owner seconds ago, so handing the refusal
+straight back gets it reworded by the only person who can also retire the rule.
+
+**The learning loop turns.** `systems.feedback_block` had NO CALLER in the
+whole codebase — the Guidance box on every Systems card was saved, displayed
+and read by nothing — and `edit_diff` was written and read only by two reports.
+Both are wired through `resolve._rules`, which is the one function every
+consumer of a bundle already reads; the alternative was a render added to each
+skill by hand, which is exactly why it went unwired for so long. `edit_lessons`
+feeds back only runs a human actually EDITED (a run sent as-is teaches nothing),
+labelled as OBSERVED rather than as instruction — a model told it was corrected
+over-fits to the last rewrite — with the pointer that anything which must hold
+every time belongs in `promote_rule`, where a validator enforces it. Scoped per
+system, so a lesson from support mail cannot change how the ads read, and per
+account, because the samples are the client's own correspondence.
+
+**And the mail path finally has a ledger.** `worker` opens a `SystemRun` per
+inbound email against an auto-created `inbox_triage` system, and the approval
+carries `run_id` — which nothing on this path ever set, so `edits.record` had
+no run to write `edit_diff` onto and every rewrite the owner made was measured
+against nothing. That is the circle: run → approval → the owner's edit → the
+delta on the run → guidance on the next draft.
+
+Two stage decisions came out of it. `draft` is WAITING on a person, not
+finished — Diagnostics would otherwise report the approval queue as a dead
+worker, which is the opposite finding. And `ignore` files as `skipped` rather
+than `sent`: roughly half of inbound is promo that correctly produces nothing,
+and counting it as a send makes the success rate a measure of how much junk
+arrived that day.
+
+**A newsletter does not pay for a bundle.** A tier-3 resolve runs a semantic
+search over the archive — an embedding call — plus a dozen queries, and roughly
+half of inbound is promo or a platform notification that never replies.
+Grounding those would have doubled down on the exact problem already on the
+watch list. `NO_REPLY_BUCKETS` skips them, using the bucket the cheap
+classifier had already computed for model routing. It is a list of what to SKIP
+rather than what to ground, deliberately: a bucket added next week defaults to
+grounded, because a thinner reply is a bad day and silently dropping the
+knowledge base from a new bucket is the defect this pass exists to close. A
+skip is reported as a skip and NOT as `thin` — "we did not ground a newsletter"
+must not sit on the knowledge backlog for ever.
+
+Found while doing it: **`classify_only` was being called twice per email** —
+once for the model routing and once (as of this change) for the gate. One call
+now, which is also one fewer chance for the two to disagree about what the mail
+was.
+
+**One test drives the real entry point**, and it earned its place immediately:
+`triage_email` against a stubbed model, asserting on the system prompt that
+comes out. Every piece above passed in isolation while the GUIDANCE never
+reached the mail path at all — it rides on `rules["block"]`, which skills
+inject and triage does not. §2.45. That test also pins the classifier running
+once rather than twice, and a promo email getting no bundle.
+
+**Still NOT grounded:** the WhatsApp command agent drafts from the instruction
+rather than from a bundle (it is guarded, not grounded), and `digest`,
+`ops_jobs` and `seo_tools` reach neither. `scripts/test_grounding.py`, 68
+checks.
 
 **The inversion — FIXED 2026-08-19, and it was worse than described.**
 `grep -c "banned|validator|compliance"` across `shopify_seo`, `wordpress_seo`
@@ -658,12 +750,12 @@ writes `body_html` — real description copy — and on WordPress with
 path** below; `app/seo_guard.py` now stands in front of all of it, and the same
 grep returns 10 and 8.
 
-**Two mail paths, and only one is guarded.** `worker.py:108 → triage.triage_email`
-checks banned claims and escalates. `command_agent → queue_email_draft` — the
-model composing a draft in the tool loop — checks nothing. And the guarded one
-uses a plain substring test while `validator._banned` next door matches on word
-boundaries with flexible separators: today "hand-decorated" is caught, "hand
-decorated" walks through, and "artisan" false-fires inside "artisanal".
+**~~Two mail paths, and only one is guarded.~~ BOTH GUARDED, same matcher.**
+Was: `command_agent → queue_email_draft` checked nothing, and the guarded path
+used a plain substring test while `validator._banned` next door matched on word
+boundaries — "hand-decorated" caught, "hand decorated" through, "artisan"
+false-firing inside "artisanal". Both now go through `validator`; see **The
+mail path is grounded and guarded** above.
 
 **Smaller findings.** `_fetch_products_live` raises `KeyError` instead of
 refusing by name. Two orphan columns (`KbUnknown.first_seen`,
@@ -1241,7 +1333,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **54 suites pass**, none touching the network,
+**Ran and confirmed.** All **55 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1297,20 +1389,17 @@ just the rule, refuses when no tenant matches the domain (a site with no ban
 list is the same hole one layer down), and records every check — pass or catch —
 to `assurance` under source `seo`.
 
-**2 — Close the second mail path and strengthen the first.** Give
-`queue_email_draft` the same check, and replace `triage.py`'s substring test
-with `validator._banned`. One is a hole; the other is a matcher that misses the
-spellings that matter. Both are small, and both are on the path that answers
-customers.
+**2 — ~~Close the second mail path and strengthen the first.~~ DONE.** Both go
+through `validator` now, and `queue_email_draft` refuses BEFORE it writes the
+Gmail draft.
 
-**1 — Close the learning loop.** Everything now MEASURES and nothing LEARNS.
-`systems.feedback_block()` renders a system's standing guidance for injection at
-drafting time and has no caller — the Guidance field on the Systems card is
-saved, displayed, and read by nothing. And the new edit deltas are recorded and
-consumed by nothing. Two small wirings, and together they are the difference
-between a system that reports on itself and one that improves: `ctx` already
-carries the tenant and system key, so folding `feedback_block` into the bundle
-is a few lines plus a test that a note actually reaches a draft.
+**1 — ~~Close the learning loop.~~ DONE, and the mail path was grounded with
+it.** Folded into `resolve._rules` rather than into each skill by hand — one
+append, and every consumer of a bundle drafts with the guidance and with what a
+human last changed. The remaining gap is that the drafts are not yet PROVEN
+better: `scripts/ab_context.py` has still never been run, and `edit_diff` needs
+a few weeks of real approvals before "is this improving" has an answer rather
+than a method.
 
 **~~3 — Write `edit_diff`.~~ DONE for capture, see above.** Was: Until something does, "is this better than the AI
 alone" has no answer beyond catches. Capture sent-vs-draft in Gmail rather than
@@ -1375,7 +1464,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 54 of them, all offline:
+**Run the suites first, before changing anything.** 55 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue
@@ -1445,6 +1534,16 @@ about two minutes — check `/health` for the commit rather than theorising.
   real Gmail call.
 * **The Anthropic spend limit.** It is what stopped drafts on 18 Aug, and
   `triage` is 93% of spend at $0.035 per email against `classify` at $0.0009.
-  The cheap classifier routes but does not filter: every email gets the
+  The cheap classifier routes but does not filter: every email still gets the
   expensive agentic pass, including the ~50% that are promo and notifications
-  and never draft. Gating triage on the bucket is roughly half of $55/month.
+  and never draft. Gating triage itself on the bucket is roughly half of
+  $55/month and is STILL NOT DONE — what the grounding work did was stop those
+  buckets paying for a bundle on top, and remove a duplicate `classify_only`
+  call. The big saving is still on the table, and the bucket gate is now
+  written and proven in `grounding.NO_REPLY_BUCKETS`, so applying the same list
+  one layer up is a small change.
+* **The first grounded drafts.** Watch what `claim_ids` comes back as. The
+  model is asked to cite and the citations are intersected with what was
+  offered — if the Assurance tab's grounding rate stays at zero, the prompt is
+  being ignored rather than the knowledge being absent, and those are opposite
+  fixes.

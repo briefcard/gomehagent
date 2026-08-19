@@ -130,17 +130,41 @@ def readiness(tenant: str) -> dict:
     }
 
 
-def _rules(tenant: str) -> dict:
+def _rules(tenant: str, system: str = "") -> dict:
     """Tier 1. Identity and the constraints that must never be violated.
 
     Two shapes on purpose. `block` is the prose already written for injection —
     `tenants.agent_block` was built for exactly this and is the right size. The
     structured fields beside it are what a deterministic validator reads, and a
     validator cannot parse prose.
+
+    **What this pipeline has been taught rides along with it.**
+    `systems.guidance_block` renders a system's standing guidance and the edits
+    humans made to its recent drafts. It is appended HERE, in the one function
+    every consumer of a bundle already reads, because the alternative was
+    adding a render to each skill by hand — and `feedback_block` spent its
+    whole life with no caller precisely because wiring it meant touching seven
+    places. One append, and every skill, the responder and the mail path all
+    draft with it.
+
+    Scoped to `system`, never tenant-wide: a lesson learned answering support
+    mail must not quietly change how the ad copy reads. With no system named,
+    there is no guidance — a bundle that does not know which pipeline it is for
+    has no business carrying one pipeline's corrections.
+
+    Kept as its own key as well as appended, so a caller that renders the parts
+    separately can still show it under its own heading rather than buried in
+    the identity prose.
     """
     b = kb.brand(tenant)
+    block = tenants.agent_block(tenant)
+    guidance = ""
+    if system:
+        from . import systems as _sys
+        guidance = _sys.guidance_block(tenant, system)
     return {
-        "block": tenants.agent_block(tenant),
+        "block": block + guidance,
+        "guidance": guidance,
         "positioning": (b.positioning if b else "") or "",
         "voice_tone": list((b.voice or {}).get("tone") or []) if b else [],
         "banned_claims": list(b.banned_claims or []) if b else [],
@@ -235,8 +259,10 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     searched, skipped, blocked = [], [], []
 
     # --- tier 1 ---------------------------------------------------------
-    rules = _rules(tenant)
+    rules = _rules(tenant, system)
     searched.append("rules")
+    if rules["guidance"]:
+        searched.append("guidance")
     # `blocked` is now reserved for the one thing that makes OUTPUT unsafe:
     # without a ban list, the validator has nothing to check against and
     # "clean" would be a false assurance. Everything else that used to live

@@ -72,6 +72,70 @@ def _sender_email(sender: str) -> str:
     return sender.split("<")[-1].rstrip(">").strip().lower()
 
 
+def _mail_system_id(tenant: str) -> str:
+    """The `inbox_triage` system row for this account, created on first sight.
+
+    Auto-created rather than seeded, deliberately. Every account with a mapped
+    inbox is already running this pipeline whether or not somebody installed
+    it on the Systems tab, and a run filed against a system that does not exist
+    is the orphan the Diagnostics tab reports. It lands in `designed / shadow`
+    like every other install, so appearing here grants it nothing — the send
+    path is unchanged and still gated on the approval queue.
+    """
+    if not tenant:
+        return ""
+    try:
+        from . import grounding, systems
+        row = systems.find(tenant, grounding.SYSTEM_KEY)
+        if not row:
+            row = systems.create(tenant, grounding.SYSTEM_KEY, "Inbox triage")
+        return row.id
+    except Exception:                                            # noqa: BLE001
+        return ""       # bookkeeping must never stop the inbox
+
+
+def _mail_run(tenant: str, email: dict) -> str:
+    """Open a run for one inbound email. Returns "" if it could not be opened."""
+    sid = _mail_system_id(tenant)
+    if not sid:
+        return ""
+    try:
+        from . import systems
+        return systems.start_run(sid, tenant, trigger="inbound_email",
+                                 ref=email.get("id", ""))
+    except Exception:                                            # noqa: BLE001
+        return ""
+
+
+def _finish_mail_run(run_id: str, action: str, result: dict) -> None:
+    """Close the run out with what actually happened to the draft.
+
+    The stage is the ACTION, not the model's confidence: `escalate` is where a
+    guard caught something or the mail needed a person, and recording it as a
+    normal draft would hide every catch from `systems.stats` and from the
+    Diagnostics verdict. `blocked_on` carries the reason so the backlog ranks
+    by what actually cost an output.
+    """
+    if not run_id:
+        return
+    # `ignore` is `skipped`, NOT `sent`. Roughly half of inbound mail is promo
+    # and notifications that correctly produce nothing, and counting those as
+    # sends would make the pipeline's success rate mostly an artefact of how
+    # much junk arrived that day. `draft` stays open on purpose — it is waiting
+    # on a person, which is a different state from having finished.
+    stage = {"auto_reply": "sent", "draft": "draft",
+             "escalate": "blocked", "ignore": "skipped"}.get(action, "draft")
+    reason = (result.get("reason") or "")
+    fields = {"output": (result.get("reply_body") or "")[:2000]}
+    if stage == "blocked":
+        fields["blocked_on"] = [reason[:300]] if reason else ["escalated"]
+    try:
+        from . import systems
+        systems.finish_run(run_id, stage, **fields)
+    except Exception:                                            # noqa: BLE001
+        pass
+
+
 def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                    tenant: str = "") -> None:
     """Triage a batch from one inbox. `tenant` is resolved once by the caller
@@ -105,6 +169,20 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             except Exception:  # noqa: BLE001
                 log.exception("pdf download failed: %s", att["filename"])
         trusted = is_trusted(email["from"], alias)
+
+        # One run per triaged email, so the mail path finally has a ledger.
+        #
+        # `systems.stats` reported nothing for the pipeline that does most of
+        # the work, the Diagnostics tab could not show a mail failure, and —
+        # the one that matters most — `edits.record` writes the delta onto
+        # `SystemRun.edit_diff` VIA the approval's `run_id`, which nothing on
+        # this path ever set. So every rewrite the owner made was measured
+        # against nothing and could never come back as guidance. Threading the
+        # run is what closes that circle.
+        #
+        # Wrapped throughout: bookkeeping that can stop the inbox is worse than
+        # no bookkeeping, and this runs against live customer mail.
+        run_id = _mail_run(tenant, email)
         result = triage.triage_email(email, alias, trusted, tenant=tenant)
         action = result["action"]
         detail = result.get("reason", "")
@@ -175,7 +253,9 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                 "send_email",
                 f"Reply drafted in [{alias}] to {email['from']}: {email['subject']}"
                 + (" ⚠️ NEEDS FACTS" if detail.startswith("NEEDS-FACTS") else ""),
-                {
+                run_id=run_id,
+                system_id=_mail_system_id(tenant),
+                payload={
                     "account": alias, "to": email["from"],
                     "draft_id": draft_id,
                     "subject": result["reply_subject"] or f"Re: {email['subject']}",
@@ -208,6 +288,8 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             if bucket != "sales_orders":
                 gmail_client.mark_read(alias, email["id"])
             logged = "ignored"
+
+        _finish_mail_run(run_id, action, result)
 
         with db.SessionLocal() as s:
             s.add(db.EmailLog(

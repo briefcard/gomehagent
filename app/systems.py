@@ -481,7 +481,10 @@ def finish_run(run_id: str, stage: str, **fields) -> None:
         for k, v in fields.items():
             if k in allowed:
                 setattr(row, k, v)
-        if stage in ("sent", "blocked", "failed", "approved"):
+        # `skipped` joins the terminal set: a run that correctly produced
+        # nothing (promo mail, a notification) is FINISHED, and leaving it open
+        # would have it reported later as a run that died.
+        if stage in ("sent", "blocked", "failed", "approved", "skipped"):
             row.finished_at = db.utcnow()
         s.commit()
 
@@ -578,6 +581,77 @@ def feedback_block(tenant: str, key: str) -> str:
     lines = [f"- {r.content} ({r.created_at:%b %d})" for r in rows]
     return ("\n\nSTANDING GUIDANCE for this system (corrections you were given; "
             "treat as current instruction):\n" + "\n".join(lines))
+
+
+def edit_lessons(tenant: str, key: str, limit: int = 5) -> str:
+    """What a human actually changed, fed back to the thing that wrote it.
+
+    `SystemRun.edit_diff` was the last of the declared-and-dead columns; it is
+    written now, and until this it was read only by two REPORTS. A system that
+    measures how much it gets rewritten and never sees the rewrites is not
+    learning, it is keeping score.
+
+    Three decisions, and the second is the one that keeps this honest.
+
+    **Only edited runs.** A run sent as-is teaches nothing and would dilute the
+    signal with confirmation.
+
+    **Labelled as OBSERVED, never as instruction.** One person's one-off tidy
+    is not a rule, and a model told "you were corrected" will over-fit to it —
+    it will start writing every reply the way the last one was rewritten. The
+    wording says these are the lines a human changed and asks it to notice the
+    pattern, which is what a person reading their own edits would do. Anything
+    that must hold EVERY time belongs in `promote_rule`, where a validator
+    enforces it and no prompt is involved.
+
+    **Scoped to the account and capped.** The samples are the client's own
+    correspondence; they may inform that client's next draft and no other's.
+    """
+    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=60)
+    with db.SessionLocal() as s:
+        ids = [r.id for r in s.query(db.System).filter(
+            db.System.tenant == tenant, db.System.key == key).all()]
+        if not ids:
+            return ""
+        rows = (s.query(db.SystemRun)
+                .filter(db.SystemRun.system_id.in_(ids),
+                        db.SystemRun.tenant == tenant,
+                        db.SystemRun.created_at >= since,
+                        db.SystemRun.edit_diff != None,      # noqa: E711
+                        db.SystemRun.edit_diff != "",
+                        db.SystemRun.decision == "edited")
+                .order_by(db.SystemRun.created_at.desc())
+                .limit(max(1, limit)).all())
+        samples = [(r.created_at, (r.edit_diff or "").strip()) for r in rows]
+    samples = [(w, t) for w, t in samples if t and t != "sent unchanged"]
+    if not samples:
+        return ""
+    lines = []
+    for when, text in samples:
+        # One block per run, already capped by `edits.delta` at 12 lines/1200
+        # chars. Trimmed again here because several of them share a prompt.
+        lines.append(f"--- {when:%b %d} ---\n{text[:600]}")
+    return ("\n\nWHAT A HUMAN CHANGED in your recent drafts for this system "
+            "(observed, not instructions — read them for the pattern and write "
+            "the next one closer to it; if something must hold every single "
+            "time it belongs in the rules, not here):\n" + "\n".join(lines))
+
+
+def guidance_block(tenant: str, key: str) -> str:
+    """Everything this pipeline has been taught, for injection at drafting.
+
+    The two halves answer to different authorities and are kept apart in the
+    text for that reason: `feedback_block` is what somebody TOLD this system,
+    `edit_lessons` is what somebody DID to its output. A correction that was
+    stated is a stronger signal than one inferred from a diff, and collapsing
+    them would hide which is which from the only reader that matters.
+    """
+    if not tenant or not key:
+        return ""
+    try:
+        return feedback_block(tenant, key) + edit_lessons(tenant, key)
+    except Exception:                                            # noqa: BLE001
+        return ""       # guidance that cannot be read must not lose the draft
 
 
 def promote_rule(tenant: str, phrase: str) -> str:
