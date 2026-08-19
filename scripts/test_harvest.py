@@ -369,7 +369,15 @@ def main() -> int:
     ck("a fresh account has read nothing", not _hv._page_state("baci"))
 
     first = harvest.harvest("baci", limit=2, apply=True)
-    ck("a run reads pages", first["pages_read"] > 0, str(first["pages_read"]))
+    # `harvest` returns {"error": ...} with NO `pages_read` when the tenant is
+    # unknown or has no domain, so indexing straight into it turns a real
+    # finding into a bare KeyError that names nothing. This fired once in a
+    # full-suite run and passed nine times in isolation; when it next happens
+    # the log should say WHICH refusal it was rather than which line crashed.
+    ck("the harvest ran at all", "error" not in first,
+       first.get("error", ""))
+    ck("a run reads pages", first.get("pages_read", 0) > 0,
+       str(first.get("pages_read")))
     ck("and remembers them", len(_hv._page_state("baci")) == first["pages_read"])
 
     first_urls = set(_hv._page_state("baci"))

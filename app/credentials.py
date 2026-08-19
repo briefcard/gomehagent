@@ -50,6 +50,12 @@ PROVIDERS: dict[str, dict] = {
         howto="In Shopify admin: Settings → Apps and sales channels → Develop apps "
               "→ Create an app → Configure Admin API scopes (tick read_products, "
               "read_orders, read_inventory) → Install app → Reveal token once.",
+        wrong_key_howto=(
+            "The one to paste is on the app's API credentials tab under "
+            "\u201cAdmin API access token\u201d, and it begins shpat_ — not the "
+            "API key or secret key below it. It can only be revealed ONCE, "
+            "right after you install the app; if it has already been revealed "
+            "and lost, uninstall and reinstall the app to issue a new one."),
         starts="shpat_"),
     "omnisend": dict(
         name="Omnisend",
@@ -518,9 +524,21 @@ def store(tenant: str, provider: str, secret: str, meta: dict | None = None,
         if not meta.get(field):
             return {"ok": False, "error": f"{spec['also'][field]}"}
     if spec["starts"] and not secret.startswith(spec["starts"]):
+        # Name what they DID paste, when we can recognise it.
+        #
+        # "they begin with shpat_" is true and nearly useless: a Shopify custom
+        # app shows four credentials on one screen and only one of them is the
+        # right one, so a person who picked the wrong one reads that message
+        # and picks another wrong one. The prefixes are unambiguous, so the
+        # refusal can say which credential is in the box and where the real one
+        # is — the difference between a dead end and a fix.
+        got = _identify(provider, secret)
         return {"ok": False,
-                "error": f"That does not look like a {spec['name']} "
-                         f"{spec['field']} — they begin with {spec['starts']}."}
+                "error": (f"That is {got}. " if got else
+                          f"That does not look like a {spec['name']} "
+                          f"{spec['field']} — they begin with "
+                          f"{spec['starts']}. ")
+                         + (spec.get("wrong_key_howto") or "")}
 
     probe = _probe(provider, secret, meta)
     if not probe["ok"]:
@@ -723,6 +741,35 @@ SHOPIFY_API_VERSION = "2026-01"   # set 2026-08; Shopify supports each for 12mo
 KLAVIYO_REVISION = "2024-10-15"   # Klaviyo keeps dated revisions working
 
 
+#: Credentials that are commonly pasted INSTEAD of the right one, by prefix.
+#: Every one of these is a real thing the provider shows on the same screen as
+#: the credential we want, which is exactly why they get picked.
+#:
+#: Only prefixes whose meaning is CERTAIN belong here. An entry that names a
+#: string wrongly is worse than no entry: the fallback message still points at
+#: the right prefix and sends somebody to look, whereas "that is a theme token"
+#: about a working credential sends them to undo a correct setup. `shpca_` was
+#: drafted here and removed for exactly that reason — it may be a legitimate
+#: custom-app access token, and asserting otherwise was a guess.
+_LOOKALIKES = {
+    "shopify": {
+        "shpss_": "the API secret key — the app's client secret, used for "
+                  "OAuth and webhook signing, not for calling the API",
+        "shppa_": "an old private-app password — private apps were replaced by "
+                  "custom apps, and the token is issued differently now",
+        "shptka_": "a Theme access token, which only reaches the theme editor",
+    },
+}
+
+
+def _identify(provider: str, secret: str) -> str:
+    """What the pasted string actually is, if we recognise it."""
+    for prefix, what in (_LOOKALIKES.get(provider) or {}).items():
+        if secret.startswith(prefix):
+            return what
+    return ""
+
+
 def _normalize_meta(provider: str, meta: dict) -> tuple[dict, str]:
     """Fix what a person actually types, and refuse what cannot be fixed.
 
@@ -747,12 +794,42 @@ def _normalize_meta(provider: str, meta: dict) -> tuple[dict, str]:
     if provider == "shopify":
         raw = (meta.get("domain") or "").strip().lower()
         raw = raw.split("://", 1)[-1]          # paste from the browser bar
-        raw = raw.split("/", 1)[0].strip()     # any path, any trailing slash
+        raw, _, path = raw.partition("/")      # keep the path; see below
+        raw = raw.strip()
+        path = path.strip("/")
+
+        # `admin.shopify.com/store/<handle>` is what the browser bar SAYS.
+        #
+        # It is the address a merchant is looking at while reading our
+        # instructions, so it is the first thing they paste — and stripping the
+        # path left `admin.shopify.com`, which failed the check below and was
+        # then told it was "the storefront domain" and to look in Settings →
+        # Domains. Wrong on both counts, and the handle we needed was sitting
+        # in the path we had just discarded.
+        #
+        # Derived rather than refused: `<handle>.myshopify.com` IS the admin
+        # domain for that handle, so there is nothing to guess.
+        if raw == "admin.shopify.com":
+            handle = path.split("/", 1)[-1] if path.startswith("store/") else ""
+            handle = handle.split("/", 1)[0].strip()
+            if not handle:
+                return meta, (
+                    "That is the Shopify admin address without a store in it. "
+                    "Paste the whole thing — it looks like "
+                    "admin.shopify.com/store/your-handle — or give the "
+                    "your-handle.myshopify.com domain directly.")
+            raw = f"{handle}.myshopify.com"
+
         if raw and not raw.endswith(".myshopify.com"):
+            # Two ways to find it, because they suit different moments: the
+            # browser bar is already open, and Settings → Domains is where it
+            # is written down. The old message gave only the second.
             return meta, (
-                f"{raw} is the storefront domain. Shopify's API needs the admin "
-                f"one, which ends in .myshopify.com — it is in Shopify admin "
-                f"under Settings → Domains, and it may be a number rather than "
+                f"{raw} is not the domain Shopify's API answers on. It needs "
+                f"the .myshopify.com one: it is in your browser bar right now "
+                f"as admin.shopify.com/store/<handle>, so the domain is "
+                f"<handle>.myshopify.com — and it is also under Settings → "
+                f"Domains in Shopify admin. It may be a number rather than "
                 f"your brand name.")
         meta["domain"] = raw
 

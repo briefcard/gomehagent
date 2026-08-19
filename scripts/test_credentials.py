@@ -68,6 +68,50 @@ def main() -> int:
             "shopify", {"domain": "769684-2.MyShopify.com"})
         ck("case does not matter", norm["domain"] == "769684-2.myshopify.com")
 
+        # The address a merchant is ACTUALLY looking at while reading our
+        # instructions. Stripping the path left `admin.shopify.com`, which was
+        # then told it was "the storefront domain" and sent to Settings →
+        # Domains — wrong on both counts, with the handle we needed sitting in
+        # the path we had just thrown away.
+        norm, why = cred._normalize_meta(
+            "shopify", {"domain": "https://admin.shopify.com/store/baci-milano-usa"})
+        ck("the admin URL from the browser bar is understood, not refused",
+           not why and norm["domain"] == "baci-milano-usa.myshopify.com", str(norm))
+        norm, why = cred._normalize_meta(
+            "shopify", {"domain": "admin.shopify.com/store/acme/products/123"})
+        ck("  even with a deeper path on it",
+           not why and norm["domain"] == "acme.myshopify.com", str(norm))
+        _, why = cred._normalize_meta("shopify", {"domain": "admin.shopify.com"})
+        ck("  and the bare admin host asks for the whole address",
+           bool(why) and "store/your-handle" in why, why)
+
+        # A Shopify custom app shows FOUR credentials on one screen and only
+        # one of them works. "they begin with shpat_" is true and nearly
+        # useless — a person who picked the wrong one reads it and picks
+        # another wrong one. The owner hit this with the API secret key.
+        bad = cred.store("baci", "shopify", "shpss_deadbeef",
+                         meta={"domain": "acme.myshopify.com"})
+        ck("the API secret key is named, not just refused",
+           not bad["ok"] and "API secret key" in bad["error"], bad.get("error", ""))
+        ck("  and the refusal says where the real one is",
+           "Admin API access token" in bad["error"])
+        ck("  and that it is revealed only once",
+           "ONCE" in bad["error"],
+           "a token that cannot be re-revealed is the next question they hit")
+        for tok, expect in (("shptka_x", "Theme access token"),
+                            ("shppa_x", "private-app password")):
+            r = cred.store("baci", "shopify", tok,
+                           meta={"domain": "acme.myshopify.com"})
+            ck(f"  {tok.split('_')[0]}_ is recognised too", expect in r["error"],
+               r.get("error", ""))
+        unknown = cred.store("baci", "shopify", "nonsense",
+                             meta={"domain": "acme.myshopify.com"})
+        ck("  and an unrecognised string still names the right prefix",
+           "shpat_" in unknown["error"], unknown.get("error", ""))
+        ck("  while nothing was stored either way",
+           not cred.resolve("baci", "shopify").get("secret"),
+           "a credential that failed the shape check must never reach the table")
+
         _, why = cred._normalize_meta("shopify", {"domain": "bacimilanousa.com"})
         ck("the storefront domain — the one a merchant knows — is refused",
            bool(why), "it was accepted")
