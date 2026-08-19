@@ -360,11 +360,11 @@ def summary_line(key: str) -> str:
 # ---------------------------------------------------------------------------
 
 _SEED = [
-    dict(key="agency", name="MarketingThatWorks.co", kind="own",
+    dict(key="agency", name="MarketingThatWorks.co", kind="own", business_model="digital_products",
          domain="marketingthatworks.co", gmail_alias="personal",
          systems=["lead_responder", "reports"],
          notes="Tenant zero. Owner is both operator and approver."),
-    dict(key="baci", name="Baci Milano USA", kind="own",
+    dict(key="baci", name="Baci Milano USA", kind="own", business_model="ecom_inventory",
          domain="bacimilanousa.com", gmail_alias="baci", shopify_store="baci",
          esp={"provider": "omnisend", "credential_ref": "OMNISEND_BACI"},
          cms={"platform": "shopify", "creds_key": "baci"},
@@ -372,7 +372,7 @@ _SEED = [
          analytics={"semrush_db": "us"},
          systems=["campaign_email", "service_desk", "reports"],
          notes="Omnisend confirmed via app embed in published theme."),
-    dict(key="eien", name="Eien Health", kind="own",
+    dict(key="eien", name="Eien Health", kind="own", business_model="ecom_inventory",
          domain="eienhealth.com", gmail_alias="eien",
          # The store credential has been live in SHOPIFY_STORES all along
          # (/health/connections reports "ok — Eien Health"); this row simply
@@ -384,14 +384,14 @@ _SEED = [
          esp={"provider": "omnisend", "credential_ref": "OMNISEND_EIEN"},
          systems=["reorder_engine", "reports"],
          notes="84.9% one-time buyers, 33 active subs — reorder engine testbed."),
-    dict(key="coverings", name="Coverings Etc", kind="client",
+    dict(key="coverings", name="Coverings Etc", kind="client", business_model="b2b_spec",
          domain="coveringsetc.com",
          cms={"platform": "shopify", "creds_key": ""},
          crm={"provider": "salesforce", "creds_key": ""},
          analytics={"semrush_db": "us"},
          systems=["blog", "reports"],
          notes="Shopify in build; ESP unnamed; no inbox connected yet."),
-    dict(key="ironside", name="Miami Ironside", kind="client",
+    dict(key="ironside", name="Miami Ironside", kind="client", business_model="local_venue",
          domain="miamiironside.com",
          cms={"platform": "squarespace", "creds_key": ""},
          systems=["lead_responder", "reports"],

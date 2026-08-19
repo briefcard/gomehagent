@@ -107,6 +107,11 @@ def assemble(tenant: str, days: int = 30) -> dict:
         # belongs to us; business answers "what did it do for me" and is what
         # the client is paying for. A report that leads with validator counts
         # is a report about ourselves.
+        # The headline numbers, chosen by what this business IS. A venue is
+        # measured in events booked and a store in average order value;
+        # reporting the wrong vocabulary is the client concluding we do not
+        # know what their business is.
+        "outcomes": _outcomes(tenant, days),
         "systems": _per_system(tenant, days),
         "blocked_on": [{"reason": why, "cost": n} for why, n in gaps[:8]],
         # Figures only the client can give us — the privacy path. One message
@@ -171,3 +176,10 @@ def _asks(tenant: str, days: int) -> list[dict]:
     return [{"system": m["system"], "metric": m["key"], "label": m["label"],
              "ask": m.get("ask", ""), "why": m.get("why", "")}
             for m in metrics.asks(tenant, days)]
+
+
+def _outcomes(tenant: str, days: int) -> dict:
+    from . import metrics, tenants
+    t = tenants.get(tenant)
+    return {"model": (getattr(t, "business_model", "") or "") if t else "",
+            "figures": metrics.outcomes(tenant, days)}

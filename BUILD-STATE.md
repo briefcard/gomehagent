@@ -306,12 +306,45 @@ two are the honest ones:
 * `blocked` — computable if something upstream existed. **`% drafts sent as-is`
   needs `edit_diff`**, which nothing writes: the metric the owner named is
   exactly what the missing column was for.
-* `asked` — NOT OURS TO COMPUTE. What a support reply costs in staff time is a
-  fact about the client's business, and guessing it puts an invented number in
-  a document the client forwards to somebody else.
+* `asked` — no connection could answer it, so it is genuinely theirs.
+
+The first version of `asked` was WRONG and the correction is worth keeping.
+It asked "what does one support reply cost you in staff time" — owner:
+*"they won't have that answer"*. Right, and the mistake has a name: that is an
+ops-accounting question we wanted answered so we could derive a number
+OURSELVES. Asking a client to do our arithmetic gets no reply and deserves
+none. What a client can recite from memory is their top line: revenue, AOV,
+booked calls, closed leads.
 
 Nothing unmeasurable is dropped from the output. Skipping it makes a short
 report look complete.
+
+### Outcomes belong to the business, not the system
+
+`Tenant.business_model` decides which headline numbers a report carries —
+vocabulary reused from `kb.SITUATIONS`' "who they are" set rather than a second
+taxonomy. The five accounts are classified.
+
+    baci       ecom_inventory    revenue · orders · AOV · returning share
+    ironside   local_venue       enquiries · calls · events · avg event value
+    coverings  b2b_spec          samples · quotes · projects won · avg value
+    agency     digital_products  leads · calls · closed · avg contract value
+
+The suite asserts the venue and shop vocabularies DO NOT OVERLAP. Reporting a
+venue's "average order value" is not a small error — it is the client
+concluding we do not know what their business is. An unclassified account
+reports that, rather than being handed a shop's vocabulary by default.
+
+Outcomes are account-level and do NOT depend on which systems are installed: a
+client's headline numbers are facts about their business. Coverings has nothing
+installed and is still a b2b_spec business with projects won.
+
+**We never ask for what we could read.** Three states, and the middle one is
+the point: `asked` (no connection could answer it), `not wired` (the capability
+IS connected, so this is OURS and the missing `reports` system is our gap —
+never asked), and supplied. With Shopify connected, Baci's revenue moves to
+"ours to read" and drops off the ask list entirely. Asking a client for a
+number we already have access to is asking them to do our work.
 
 ### The privacy path is the same mechanism
 

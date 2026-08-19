@@ -60,21 +60,6 @@ CATALOG: dict[str, list[dict]] = {
          "kind": "business", "source": "blocked",
          "needs": "SystemRun.edit_diff, which nothing writes yet",
          "fix": "capture sent-vs-draft in Gmail"},
-        {"key": "revenue_saved", "label": "Value of replies not handled by a person",
-         "kind": "business", "source": "asked",
-         "unit": "currency per reply",
-         "ask": "What does one support reply cost you in staff time, roughly? "
-                "We multiply it by the replies we answered.",
-         "why": "what an hour of your team costs is a fact about your "
-                "business, not ours"},
-        {"key": "revenue_generated", "label": "Sales that followed a reply",
-         "kind": "business", "source": "asked",
-         "unit": "currency",
-         "ask": "Did any orders follow our replies in this period, and roughly "
-                "what were they worth?",
-         "why": "attributing an order to a reply needs your store and ours "
-                "joined, which is not built — until it is, your figure is "
-                "better than our guess"},
     ],
     "catalog_compliance": [
         {"key": "violations_found", "label": "Barred claims found in the catalogue",
@@ -105,6 +90,132 @@ CATALOG: dict[str, list[dict]] = {
          "needs": "the reports system, which is declared and not built"},
     ],
 }
+
+
+#: The headline numbers a report is judged on, per business model.
+#:
+#: These are ACCOUNT-level, not system-level, and they are deliberately the
+#: figures a client already tracks and could recite from memory. The first
+#: version of this asked "what does one support reply cost you in staff time" —
+#: owner's correction: *"they won't have that answer"*. He is right, and the
+#: mistake is worth naming: that is an ops-accounting question we wanted the
+#: answer to in order to derive a number OURSELVES. Asking a client to do our
+#: arithmetic gets no reply, and deserves none.
+#:
+#: The model decides the vocabulary. A venue is measured in enquiries and events
+#: booked; a store in revenue and average order value. Reporting a venue's
+#: "average order value" is not a small error — it is the client concluding we
+#: do not know what their business is.
+#:
+#: Vocabulary reused from `kb.SITUATIONS`' "who they are" set rather than a
+#: second taxonomy invented here.
+OUTCOMES: dict[str, list[dict]] = {
+    "ecom_inventory": [
+        {"key": "revenue", "label": "Revenue", "capability": "commerce"},
+        {"key": "orders", "label": "Orders", "capability": "commerce"},
+        {"key": "aov", "label": "Average order value", "capability": "commerce"},
+        {"key": "returning_rate", "label": "Share of orders from returning customers",
+         "capability": "commerce"},
+    ],
+    "ecom_dtc": [
+        {"key": "revenue", "label": "Revenue", "capability": "commerce"},
+        {"key": "orders", "label": "Orders", "capability": "commerce"},
+        {"key": "aov", "label": "Average order value", "capability": "commerce"},
+    ],
+    "local_venue": [
+        {"key": "enquiries", "label": "Enquiries received"},
+        {"key": "calls_booked", "label": "Calls or site visits booked"},
+        {"key": "events_booked", "label": "Events booked"},
+        {"key": "avg_event_value", "label": "Average event value"},
+    ],
+    "b2b_spec": [
+        {"key": "samples_requested", "label": "Samples or specs requested"},
+        {"key": "quotes_issued", "label": "Quotes issued"},
+        {"key": "projects_won", "label": "Projects won"},
+        {"key": "avg_project_value", "label": "Average project value"},
+    ],
+    "digital_products": [
+        {"key": "leads", "label": "New leads"},
+        {"key": "calls_booked", "label": "Calls booked"},
+        {"key": "closed", "label": "Clients closed"},
+        {"key": "avg_contract_value", "label": "Average contract value"},
+    ],
+    "coaching": [
+        {"key": "leads", "label": "New leads"},
+        {"key": "calls_booked", "label": "Calls booked"},
+        {"key": "closed", "label": "Clients closed"},
+    ],
+    "real_estate": [
+        {"key": "viewings", "label": "Viewings booked"},
+        {"key": "offers", "label": "Offers received"},
+        {"key": "closed", "label": "Deals closed"},
+    ],
+    "food_bev": [
+        {"key": "covers", "label": "Covers served"},
+        {"key": "bookings", "label": "Bookings taken"},
+        {"key": "avg_spend", "label": "Average spend per cover"},
+    ],
+}
+
+
+def outcomes(tenant: str, days: int = 30) -> list[dict]:
+    """The client's headline numbers, resolved to where each must come from.
+
+    Three states, and keeping them apart is what stops us asking a client for
+    something we could already read:
+
+      `our record`  not used yet — no outcome is computed from our tables.
+      `not wired`   the capability IS connected, so this is OURS to read and
+                    the `reports` system is what is missing. NEVER asked.
+      `asked`       there is no connection that could answer it, so it is the
+                    client's to tell us.
+
+    An account nobody has classified reports that, rather than being handed a
+    shop's vocabulary by default.
+    """
+    from . import credentials as cred, tenants
+
+    t = tenants.get(tenant)
+    if not t:
+        return []
+    model = (getattr(t, "business_model", "") or "").strip()
+    if not model:
+        return [{"key": "_unclassified", "label": "Business model not set",
+                 "value": None, "unavailable": "unknown business model",
+                 "why": "outcomes depend on what the business IS — a venue is "
+                        "measured in events booked, a store in average order "
+                        "value",
+                 "fix": "set business_model on the account"}]
+    if model not in OUTCOMES:
+        return [{"key": "_unknown_model", "label": f"No outcomes for {model!r}",
+                 "value": None, "unavailable": "model not in OUTCOMES",
+                 "why": "nobody has said what this kind of business is judged "
+                        "on", "fix": "add it to metrics.OUTCOMES"}]
+
+    wired = cred.wired_capabilities(tenant)
+    out = []
+    for o in OUTCOMES[model]:
+        row = {"key": o["key"], "label": o["label"], "kind": "business",
+               "model": model}
+        cap = o.get("capability", "")
+        supplied = _supplied(tenant, o["key"],
+                             db.utcnow() - dt.timedelta(days=days))
+        if supplied:
+            row.update(value=supplied.value, unit=supplied.unit or "",
+                       source=f"supplied by {supplied.supplied_by or 'the client'}")
+        elif cap and cap in wired:
+            # OURS to read. Asking for it would be asking a client to do work
+            # we have already been given access to do.
+            row.update(value=None, unavailable="not wired",
+                       why=f"{cap} is connected, so this is ours to read — the "
+                           f"reports system is what is missing",
+                       fix="build the reports system")
+        else:
+            row.update(value=None, unavailable="waiting on the client",
+                       why=(f"no {cap} connection" if cap
+                            else "nothing we can connect to holds this"))
+        out.append(row)
+    return out
 
 
 def for_system(key: str) -> list[dict]:
@@ -222,6 +333,13 @@ def asks(tenant: str, days: int = 30) -> list[dict]:
         for m in compute(tenant, row.key, days):
             if m.get("unavailable") == "waiting on the client":
                 out.append({**m, "system": row.key})
+    # The headline outcomes, and ONLY the ones no connection could answer.
+    # A figure marked "not wired" is ours to read and must never be asked for:
+    # asking a client for a number we already have access to is asking them to
+    # do our work, and it is how a report request stops being answered.
+    for o in outcomes(tenant, days):
+        if o.get("unavailable") == "waiting on the client":
+            out.append({**o, "system": "outcomes"})
     return out
 
 
@@ -278,23 +396,20 @@ def request_email(tenant: str, days: int = 30, *, to: str = "",
         f"Hello,",
         "",
         f"I am putting together the {start.isoformat()} to {end.isoformat()} "
-        f"report for {t.name}. Most of it comes from our own records, but "
-        f"{len(wanted)} figure(s) are yours rather than ours — either because "
-        f"they are facts about your business, or because we do not have a "
-        f"direct connection to the system that holds them.",
+        f"report for {t.name}. Most of it comes from our own records. These "
+        f"{len(wanted)} are the headline numbers we cannot see from here, "
+        f"because we are not connected to the system that holds them:",
         "",
     ]
     for i, m in enumerate(wanted, 1):
         lines.append(f"{i}. {m['label']}")
         if m.get("ask"):
             lines.append(f"   {m['ask']}")
-        if m.get("why"):
-            lines.append(f"   (Why we ask: {m['why']}.)")
         lines.append("")
     lines += [
-        "A rough figure is genuinely more useful than none — the report says "
-        "where each number came from, so an estimate is reported as an "
-        "estimate rather than presented as measured.",
+        "Round numbers are fine. The report says where each figure came from, "
+        "so an estimate is shown as an estimate rather than presented as "
+        "measured.",
         "",
         "If you would rather we read any of these directly, we can connect to "
         "the system that holds them and stop asking.",

@@ -731,6 +731,18 @@ class Tenant(Base):
     key = Column(String, primary_key=True)   # agency | baci | eien | coverings | ironside
     name = Column(String, nullable=False)
     kind = Column(String, default="client")  # client | own — 'own' = Gomeh's own P&L
+    #: What this business IS, from `kb.SITUATIONS`' "who they are" set —
+    #: ecom_inventory | local_venue | b2b_spec | digital_products | coaching |
+    #: real_estate | food_bev | ecom_dtc.
+    #:
+    #: It decides which OUTCOMES a report carries. A venue is measured in
+    #: enquiries and events booked; a store in revenue and average order value.
+    #: Reporting a venue's "average order value" is not a small error — it is
+    #: the client concluding we do not know what their business is.
+    #:
+    #: No default, so an account nobody has classified reads as unknown rather
+    #: than as a shop.
+    business_model = Column(String, default="")
     status = Column(String, default="active")  # active | paused | offboarded
     domain = Column(String)
     timezone = Column(String, default="America/New_York")
