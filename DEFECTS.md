@@ -1702,46 +1702,44 @@ harness after adding a guard, and read a STALE line as loudly as a MISSED one.*
 
 ## 4. How to verify
 
+**Run them all. The list that used to live here was hand-kept and had drifted
+to naming 35 of 61 suites** — which is worse than naming none, because somebody
+reading it concludes they have covered the suite. Derive it, the same rule this
+codebase keeps re-learning about lists:
+
 ```bash
-python3 scripts/test_skill.py       # the skill substrate: gate, rung, ledger, refusals
-python3 scripts/test_selection.py   # selection + the unknowns loop
-python3 scripts/test_systems.py     # registry, contract gate, autonomy ladder
-python3 scripts/test_kb.py          # KB writes + guided intake
-python3 scripts/test_intake.py      # client intake links, scoping, fail-closed guards
-python3 scripts/test_kb_ui.py       # every KB field reaches the Knowledge tab
-python3 scripts/test_tenant_scope.py  # per-client uniqueness, backfill, trust boundary
-python3 scripts/test_migration.py     # the same migration over a database with rows
-python3 scripts/test_console_auth.py  # console session: key once, then a cookie
-python3 scripts/test_credentials.py    # client-connected credentials, encrypted
-python3 scripts/test_tenant_isolation.py  # MANDATORY: every feature is tenant-scoped
-python3 scripts/test_worker_systems.py    # the tick that fills the run ledger
-python3 scripts/test_catalog_sync.py      # Shopify -> KbEntity, banned claims win
-python3 scripts/test_compliance.py        # the live site vs the brand's own rules
-python3 scripts/test_harvest.py           # site -> PENDING proposals, never facts
-python3 scripts/test_provenance.py        # origin, review, conflict-on-disagreement
-python3 scripts/test_extract.py           # spans are selected, then verified in code
-python3 scripts/test_email_harvest.py     # sent mail -> claims and objections
-python3 scripts/test_sources.py           # the registry; a fill is a rehearsal
-python3 scripts/test_oauth.py             # signing in, scope narrowness, renewal
-python3 scripts/test_objection_scope.py   # an answer about one product stays about it
-python3 scripts/test_claim_tagging.py     # a claim knows when it applies, and what it proves
-python3 scripts/test_console_frame.py     # one account per page, seeded so a leak fails here
-python3 scripts/test_diagnostics.py       # the run/tool/check log, classified and scoped
-python3 scripts/test_grounding.py         # the KB reaches the mail path, and guards it
-python3 scripts/test_shopify_oauth.py     # client-store sign-in; the shop gate and its attacks
-python3 scripts/test_shopify_compliance.py # the mandatory privacy webhooks
-python3 scripts/test_craft.py             # cross-client lessons and the leak guard
-python3 scripts/test_correlate.py         # the nightly sweep, incl. with no model at all
-python3 scripts/test_allclear.py          # escalation is success; "that was me" sticks
-python3 scripts/test_replies.py           # one reply per thread, across both entry points
-python3 scripts/sabotage.py               # turn each guard off; the suites must notice
-python3 scripts/test_brief.py --demo
-python3 scripts/seed_kb.py --report      # what each account still needs
-python3 scripts/tenant_scope.py --report # what is still unattributed
+for f in scripts/test_*.py; do
+  [ "$(basename $f)" = "test_brief.py" ] && continue
+  r=$(python3 "$f" 2>&1 | tail -3)
+  echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
+done
 ```
 
-All thirty-three suites pass as of 2026-08-17. None of them touch the network.
-Full run is ~2m30s — split it, or a single shell call hits a 2-minute timeout.
+**Check the OUTPUT, not the exit code**, and skip `test_brief.py` — it is an
+argparse CLI that exits 0 whatever happens, and counting it as a passing test
+is a mistake this project made for weeks. 61 suites, none touching the network,
+~7 minutes; a single shell call may hit a 2-minute timeout, so background it.
 
-Re-run all five after any change to `kb.py` — §2.15 is what happens when the
-claim in this section is trusted instead of re-checked.
+**Then check the suite would notice a guard going:**
+
+```bash
+python3 scripts/sabotage.py
+```
+
+Ten guards, each disabled in turn against the suites that claim to cover it.
+Read a `STALE` line as loudly as a `MISSED` one — it means the code moved and
+that entry has been covering nothing since.
+
+**The two that are not optional.** `test_tenant_isolation.py` is the standard,
+not a preference: a model that holds client data carries `tenant`, or it is
+declared in `PLATFORM_MODELS` with a reason. And re-run everything after
+touching `kb.py`, `brief.py`, `systems.py` or `resolve.py` — §2.15 is what
+happens when the claim in this section is trusted instead of re-checked, and
+§2.42 is what happens when one function quietly has a single caller.
+
+Two reports rather than tests, worth running after data work:
+
+```bash
+python3 scripts/seed_kb.py --report       # what each account still needs
+python3 scripts/tenant_scope.py --report  # what is still unattributed
+```

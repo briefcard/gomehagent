@@ -16,8 +16,8 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `647502d`. `/health`
-reports `commit` and `routes` — use it, never infer what is running.
+**Live:** everything below is pushed and deployed at `70de037` (130 routes).
+`/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
 ## Start here if you are new to this thread
@@ -357,6 +357,21 @@ files its own `SystemRun`. The first version of the sweep filed another, so
 every scan would have been recorded TWICE — halving every rate computed from
 the ledger. Pinned by a test asserting "exactly one run, not two", and by a
 `sabotage.py` entry that re-introduces the double-file.
+
+**Turning it on is one call.** `system_set` takes a system's uuid, so switching
+one thing on for five accounts was five lookups and five calls — friction that
+is not academic, since it is how a working scanner sat switched off.
+`/admin/system_on?system=content_compliance&install=1` addresses systems by
+NAME, reports per account, and REFUSES BY NAME:
+
+    {"baci": "live",
+     "ironside": "not ready to go live: knowledge base: banned_claims"}
+
+The refusals are the useful half — the per-account list of what to fix, which
+is otherwise assembled by hand from five console pages. And the gate is right:
+a compliance sweep against zero rules reports a site CLEAN that nothing
+checked. `install=1` is opt-in (a route that quietly installs everywhere is how
+somebody finds a pipeline they never chose) and `off=1` reverses it.
 
 **`reports` is still unbuilt** and was not tacked onto this. `client_report`
 reads only our own record; every live platform figure — revenue, sessions, ad
@@ -915,8 +930,8 @@ Traced mechanically on 2026-08-18. This is the most important table in the file.
     wordpress_seo.py    seo_guard                  WRITES to the live site
     digest.py           — NOTHING —                what reaches the owner
     triage.py           resolve kb validator assurance   inbound mail — GROUNDED
-    worker.py           systems (runs per email)   the cron tick
-    skill.py            kb resolve validator ledger  the substrate
+    worker.py           systems replies compliance skill   the cron tick
+    skill.py            kb resolve validator ledger replies   the substrate
     web.py              everything                 console + bridge
 
 **The mail path is grounded and guarded — 2026-08-19.** The audit's worst
@@ -1762,11 +1777,18 @@ name; putting the old `systems.all_systems()` call back fails
 `test_console_frame` with `systems body is single-account — Baci Milano USA,
 BACIMARK`. Both were restored immediately.
 
-Deploy verified live at `647502d` BEFORE this session's console work: `/health`
-reported 106 routes and `/health/connections` still resolved both Shopify stores
-and three Google accounts. **The console-scoping and diagnostics work is in the
-worktree, NOT committed and NOT pushed** — it has never run on the service, and
-`/health` will not report it. Committing and deploying it is the owner's call.
+**All of it is deployed.** `/health` reports `70de037` and 130 routes, and
+`/health/connections` still resolves both Shopify stores and three Google
+accounts. Eleven commits went out across 2026-08-19/20: console scoping and
+Diagnostics, mail grounding and both guards, the Shopify connect fixes, Shopify
+OAuth and its shop-host gate, the privacy webhooks, craft and the nightly
+sweep, the escalation/stage corrections, one-reply-per-thread, the switch,
+`sabotage.py`, the compliance schedule, and `system_on`.
+
+*(This paragraph said "NOT committed and NOT pushed" for several commits after
+it stopped being true. That is the exact failure the preamble warns about, in
+the file that warns about it — a deploy line has to be rewritten by whoever
+deploys, not left for whoever notices.)*
 
 **Assertions deliberately CHANGED, not worked around:** two in `test_skill.py`
 pinned the rule that an incomplete contract stops a run. Three in
@@ -1962,20 +1984,37 @@ Check the OUTPUT, not the exit code, and skip `test_brief.py` — it is an
 argparse CLI that exits 0 whatever happens, and counting it as a passing test is
 a mistake this file made for weeks.
 
-**Start at plan item 1** — close the learning loop. It is the smallest change
-with the largest gap behind it: everything in this system now measures itself
-and nothing learns from what it measured. The Diagnostics tab makes that gap
-visible rather than closing it: it can now show you that a system blocked on the
-same missing field forty times, and nothing still feeds that back into drafting.
+**Do not start by building. Start by watching.**
 
-**Then watch the Diagnostics tab against a real breakdown.** It has only ever
-been read against seeded rows. The first real one will find something — every
-assumption in this codebase tested against reality so far has been wrong in some
-detail. Two known blind spots to check first: `ToolCall.ms` is only written at
+The learning loop is closed, the mail path is grounded and guarded, compliance
+is scheduled, the switch means something, and none of it has met a real model,
+a real provider or a real breakdown. Everything shipped on 19–20 August is
+stub-proven, and every assumption in this codebase tested against reality so
+far has been wrong in some detail. The most valuable next hours are spent
+reading what the live system actually does, in this order:
+
+1. **The Assurance tab's grounding rate**, once real mail has flowed. Claims on
+   file and none cited means the prompt is being ignored rather than the
+   knowledge being absent — opposite fixes, and `correlate._grounding_not_landing`
+   now says which.
+2. **The first Monday 04:30 compliance sweep**, which is a full crawl per
+   account and the first time `compliance.scan` has ever run unattended.
+3. **The first Shopify OAuth sign-in and the first webhook delivery.** No OAuth
+   leg in this codebase has ever run against a real provider.
+4. **`/admin/memory`** — a stale note about a possible breach was inflating
+   every security-shaped email for weeks, and nothing surfaced it until it was
+   asked for by name.
+
+Two known blind spots when reading Diagnostics: `ToolCall.ms` is written only at
 the kernel dispatch and the three adapter seams, so anything reaching a platform
-another way records no duration and reads as untimed rather than as fast; and
+another way records no duration and reads as untimed rather than fast; and
 `Usage.tenant` is blank on every row written before attribution was wired, so an
-account's spend in a long window is understated and the note says so.
+account's spend in a long window is understated — the note says so.
+
+**When there IS something to build:** `reports` is the largest declared-and-
+empty thing left, and it is the one that would let a client report carry a
+number the client already believes. After that, the join from an accepted sweep
+finding into `craft.propose` — the carrier exists and is empty.
 
 ### Three habits this session earned the hard way
 
