@@ -1449,6 +1449,46 @@ contradicting itself.
 something is wired to reach "everything", one test must drive the real entry
 point and assert on what actually came out the far end.*
 
+### 2.46 A third `stores` value would have run Meta's token swap — caught 2026-08-19
+
+`oauth.exchange` chose what to keep with `if stores == "refresh_token": … else:
+_meta_long_lived(...)`. Two providers, two arms, and the second was Meta's.
+Adding Shopify — whose offline token IS the credential and which issues no
+refresh token — would have sent it through Meta's long-lived exchange and
+failed inside a function named for another platform.
+
+This is §2.31's shape in the function DIRECTLY BELOW §2.31: the `token_style`
+bare `else` that would have put a client secret in a URL query string. The
+docstring warning against it was three lines above the code repeating it.
+
+**Fix:** an explicit arm per value, and an unimplemented one refuses by name
+rather than taking whichever arm is last.
+
+*Rule: in a per-provider switch, `else` is not a default — it is the branch
+written for whoever came second, silently inherited by whoever comes third.
+Enumerate, and refuse the unknown.*
+
+### 2.47 The one flow whose endpoint a caller supplies — built 2026-08-19
+
+Not a defect found, a hazard designed against, recorded because the next person
+adding a provider needs to know it exists. Every OAuth flow here posts its
+client secret to a host compiled into `FLOWS`. Shopify's authorize and token
+URLs are per shop, built from a domain that arrives in a form field and, at the
+callback, in a query parameter anyone can write.
+
+`shop=evil.example.com` would POST `client_id` + `client_secret` to an
+attacker's server. One link, full credential disclosure, and it would look
+exactly like a failed sign-in.
+
+`oauth.shop_host` is an allowlist (anchored regex, userinfo and port stripped
+first so `acme.myshopify.com@evil.com` cannot pass), enforced again in
+`endpoint()` where the URL is built rather than trusted from the caller. The
+suite asserts the attacks, and removing the gate fails six checks by name.
+
+*Rule: when a URL is assembled from anything a request supplied, validate at
+the point of assembly, not only at the door. A caller that already validated is
+a caller you are trusting.*
+
 ## 4. How to verify
 
 ```bash
@@ -1477,6 +1517,7 @@ python3 scripts/test_claim_tagging.py     # a claim knows when it applies, and w
 python3 scripts/test_console_frame.py     # one account per page, seeded so a leak fails here
 python3 scripts/test_diagnostics.py       # the run/tool/check log, classified and scoped
 python3 scripts/test_grounding.py         # the KB reaches the mail path, and guards it
+python3 scripts/test_shopify_oauth.py     # client-store sign-in; the shop gate and its attacks
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

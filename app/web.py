@@ -1216,8 +1216,32 @@ async def connect_submit(token: str, request: Request):
     return RedirectResponse(f"/connect/{token}?err={quote(result['error'])}", 303)
 
 
+def _oauth_shop(request: Request) -> tuple[str, str]:
+    """The shop a shop-scoped flow is for, validated, or a reason it is not.
+
+    Read from the query rather than a body because the connect page links here
+    with the domain the client typed. Validation is `oauth.shop_host`, and the
+    refusal names the shape rather than echoing the value back — an error page
+    that reflects arbitrary input is its own small problem.
+    """
+    from . import credentials as _cred, oauth
+    raw = str(request.query_params.get("shop", "")).strip()
+    if not raw:
+        return "", ("This connection needs the store's .myshopify.com domain. "
+                    "Go back and enter it, then try again.")
+    # The same normalisation a person gets when pasting into the API-key form,
+    # so `admin.shopify.com/store/<handle>` works here too — then the gate.
+    fixed, _why = _cred._normalize_meta("shopify", {"domain": raw})
+    shop = oauth.shop_host(fixed.get("domain") or raw)
+    if not shop:
+        return "", ("That is not a myshopify.com store domain. It looks like "
+                    "your-handle.myshopify.com — visible in your browser bar "
+                    "as admin.shopify.com/store/your-handle.")
+    return shop, ""
+
+
 @app.get("/connect/{token}/oauth/{provider}")
-def connect_oauth_start(token: str, provider: str):
+def connect_oauth_start(token: str, provider: str, request: Request):
     """Send the client to the provider's consent screen.
 
     The connect token is the capability, so it is checked here rather than
@@ -1234,14 +1258,22 @@ def connect_oauth_start(token: str, provider: str):
     why = oauth.configured(provider)
     if why:
         return RedirectResponse(f"/connect/{token}?err={quote(why)}", 303)
+    # A shop-scoped flow needs to know WHICH shop before it can send anyone
+    # anywhere — the consent screen lives on the merchant's own domain.
+    shop = ""
+    if oauth.FLOWS.get(provider, {}).get("shop_scoped"):
+        shop, why = _oauth_shop(request)
+        if why:
+            return RedirectResponse(f"/connect/{token}?err={quote(why)}", 303)
     # PKCE where the provider demands it. The verifier rides encrypted inside
     # the signed state, so it survives the round trip without appearing in any
     # address bar — see `oauth.sign_state`.
     verifier, challenge = oauth._pkce_pair() if oauth.FLOWS.get(
         provider, {}).get("pkce") else ("", "")
     state = oauth.sign_state(link.tenant, provider, connect_token=token,
-                             verifier=verifier)
-    return RedirectResponse(oauth.authorize_url(provider, state, challenge), 303)
+                             verifier=verifier, shop=shop)
+    return RedirectResponse(
+        oauth.authorize_url(provider, state, challenge, shop=shop), 303)
 
 
 @app.get("/admin/oauth/{provider}")
@@ -1263,10 +1295,17 @@ def admin_oauth_start(provider: str, request: Request,
     why = oauth.configured(provider)
     if why:
         return {"error": why}
+    shop = ""
+    if oauth.FLOWS.get(provider, {}).get("shop_scoped"):
+        shop, why = _oauth_shop(request)
+        if why:
+            return {"error": why}
     verifier, challenge = oauth._pkce_pair() if oauth.FLOWS.get(
         provider, {}).get("pkce") else ("", "")
-    state = oauth.sign_state(tenant, provider, via="admin", verifier=verifier)
-    return RedirectResponse(oauth.authorize_url(provider, state, challenge), 303)
+    state = oauth.sign_state(tenant, provider, via="admin", verifier=verifier,
+                             shop=shop)
+    return RedirectResponse(
+        oauth.authorize_url(provider, state, challenge, shop=shop), 303)
 
 
 @app.get("/oauth/{provider}/callback", response_class=HTMLResponse)
@@ -1288,6 +1327,29 @@ def oauth_callback(provider: str, request: Request, code: str = "",
     data, why = oauth.read_state(state)
     if why:
         return HTMLResponse(f"<h3>{html.escape(why)}</h3>", status_code=400)
+
+    # The provider's OWN signature, where the provider signs.
+    #
+    # `state` proves we started this flow; it does not prove who finished it.
+    # It is a bearer value travelling in an address bar, through browser
+    # history and any referrer, so replaying it with a chosen `code` is exactly
+    # what the provider's signature closes. Checked before the code is spent.
+    why = oauth.verify_callback(provider, dict(request.query_params))
+    if why:
+        return HTMLResponse(f"<h3>{html.escape(why)}</h3>", status_code=400)
+
+    # A shop-scoped flow completes against the shop it STARTED with. Shopify
+    # sends `shop` on the callback too, and taking it from there would let a
+    # forged link begin for one store and finish against another — the token
+    # would then be filed under a client who never authorised it.
+    shop = str(data.get("shop") or "")
+    if oauth.FLOWS.get(provider, {}).get("shop_scoped"):
+        came_back = oauth.shop_host(str(request.query_params.get("shop", "")))
+        if not shop or (came_back and came_back != shop):
+            return HTMLResponse(
+                "<h3>That sign-in came back for a different store than it "
+                "started for. Nothing was connected — start again from the "
+                "connect page.</h3>", status_code=400)
     back = (f"/connect/{data['t']}" if data.get("t")
             else f"/admin/ui?tab=accounts&tenant={quote(data.get('tenant', ''))}")
 
@@ -1316,7 +1378,8 @@ def oauth_callback(provider: str, request: Request, code: str = "",
 
     # The verifier comes back out of the state it went in with.
     result = oauth.exchange(provider, code,
-                            code_verifier=oauth.state_verifier(data))
+                            code_verifier=oauth.state_verifier(data),
+                            shop=shop)
     if not result["ok"]:
         return RedirectResponse(f"{back}?err={quote(result['error'])}", 303)
     stored = cred.store_oauth(tenant, provider, result, granted_by=granted_by)

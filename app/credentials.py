@@ -47,6 +47,11 @@ PROVIDERS: dict[str, dict] = {
         capability="commerce",
         field="Admin API access token",
         also={"domain": "Your myshopify.com domain, e.g. acme.myshopify.com"},
+        # Shopify can also be connected by OAuth — see `oauth.FLOWS`. Declared
+        # on the provider rather than hardcoded in the console so the button
+        # appears wherever providers are rendered, and only when the app
+        # credentials exist.
+        oauth_optional=True,
         howto="In Shopify admin: Settings → Apps and sales channels → Develop apps "
               "→ Create an app → Configure Admin API scopes (tick read_products, "
               "read_orders, read_inventory) → Install app → Reveal token once.",
@@ -463,6 +468,15 @@ def status(tenant: str) -> list[dict]:
         # that it is not "coming soon", it is one env var away, and saying which
         # is the difference between a blocker someone can clear and a mystery.
         blocked = oauth.configured(key) if spec["kind"] == "oauth" else ""
+        # Shopify is the one provider where BOTH flows are correct, and which
+        # is right depends on whose store it is: a custom-app token is five
+        # minutes for a store you own, while OAuth is what lets a client
+        # connect theirs without being walked through Shopify's developer
+        # settings. Offering both is not indecision — removing either would
+        # break a real case. `oauth_too` says the button belongs beside the
+        # paste form; it is empty when the app credentials are not set, so an
+        # unconfigured flow shows nothing rather than a button that cannot work.
+        oauth_too = (spec.get("oauth_optional") and not oauth.configured(key))
         out.append({
             "provider": key, "name": spec["name"], "kind": spec["kind"],
             "capability": spec["capability"], "state": state, "detail": detail,
@@ -470,6 +484,8 @@ def status(tenant: str) -> list[dict]:
                               if row and row.last_verified else ""),
             "self_serve": spec["kind"] == "api_key" or not blocked,
             "blocked_by": blocked,
+            "oauth_too": bool(oauth_too),
+            "shop_scoped": bool(oauth.FLOWS.get(key, {}).get("shop_scoped")),
             "covered_by": "",
             "site_scoped": key in SITE_SCOPED,
             "connections": [{
@@ -596,6 +612,13 @@ def store_oauth(tenant: str, provider: str, result: dict,
         "label": result.get("label", ""),
         "missing_scopes": missing,
         "expires_at": int(result.get("expires_at") or 0),
+        # Whatever the flow needs to ADDRESS the account, not just authenticate
+        # to it. Shopify's token is useless without the shop it belongs to —
+        # `resolve` spreads meta into its result and `shopify_config` reads
+        # `domain` from there, so an OAuth connection that omitted this would
+        # store a working token that every caller then failed to use, and the
+        # console would show it green throughout.
+        **(result.get("meta") or {}),
     }.items() if v}
 
     with db.SessionLocal() as s:

@@ -669,6 +669,26 @@ def _connections(tenant: str, key: str) -> str:
               </form>
             </details>"""
 
+        # The same two-ways choice the client page offers, for the owner
+        # connecting an account himself.
+        if r.get("oauth_too"):
+            shop_field = ('<input name="shop" placeholder="your-handle.myshopify.com"'
+                          ' required>' if r.get("shop_scoped") else "")
+            form = f"""
+            <details class="cform">
+              <summary>Sign in with {_esc(r['name'])}</summary>
+              <div class="note">One click, and the merchant approves the
+              permissions on {_esc(r['name'])}'s own screen. Use this for a
+              client's store; the token form below is for one you already
+              hold a key for.</div>
+              <form method="get" action="/admin/oauth/{_esc(r['provider'])}" class="f">
+                <input type="hidden" name="key" value="{_esc(key)}">
+                <input type="hidden" name="tenant" value="{_esc(tenant)}">
+                {shop_field}
+                <div class="row"><button>Sign in</button></div>
+              </form>
+            </details>{form}"""
+
         out.append(f"""
         <div class="conn">
           <div><strong>{_esc(r['name'])}</strong> {chip}{detail}</div>
@@ -2510,10 +2530,36 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
                                   for c in conns) + "</div>")
         verb = ("Add another" if (r.get("site_scoped") and conns)
                 else ("Replace" if done else "Connect"))
+
+        # The one-click path, offered FIRST where it exists.
+        #
+        # Shopify can be connected two ways and only one of them is reasonable
+        # to ask a client for: signing in is a button, while a custom app means
+        # walking a merchant through developer settings, ticking API scopes and
+        # copying a token that is shown exactly once. So the button leads and
+        # the paste form stays underneath for anyone who prefers it — removing
+        # it would break connecting a store you already hold a token for.
+        oauth_block = ""
+        if r.get("oauth_too"):
+            shop_field = ('<label>Your store domain</label>'
+                          '<input name="shop" placeholder="your-handle.myshopify.com"'
+                          ' required>' if r.get("shop_scoped") else "")
+            oauth_block = f"""
+            <form class="f" method="get"
+                  action="/connect/{_esc(link.token)}/oauth/{_esc(r['provider'])}">
+              {shop_field}
+              <div class="row"><button>Sign in with {_esc(spec['name'])}</button></div>
+              <div class="mut">Recommended — you approve the permissions on
+              {_esc(spec['name'])}'s own screen and nothing is copied by hand.</div>
+            </form>
+            <details class="how" style="margin-top:10px">
+              <summary>Or paste a token instead</summary>"""
+
         blocks.append(f"""
         <div class="prov{' done' if done else ''}">
           <h3>{_esc(r['name'])} {chip}</h3>
           {detail}
+          {oauth_block}
           <details class="how"><summary>Where do I find this?</summary>
             <p>{_esc(spec['howto'])}</p></details>
           <form class="f" method="post" action="/connect/{_esc(link.token)}">
@@ -2524,6 +2570,7 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
                    placeholder="{_esc(spec['field'])}" required>
             <div class="row"><button>{_esc(verb)}</button></div>
           </form>
+          {"</details>" if r.get("oauth_too") else ""}
         </div>""")
 
     note = f'<div class="ok">{_esc(msg)}</div>' if msg else ""

@@ -24,6 +24,12 @@ META_APP_ID = os.environ.get("META_APP_ID", "")
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
 # Canva Connect. Create the integration at canva.com/developers, and register
 # the redirect URI the console prints -- it must match byte for byte.
+# Shopify OAuth — for onboarding CLIENT stores without each owner hand-making a
+# custom app. Distinct from SHOPIFY_STORES_JSON, which holds tokens pasted for
+# our own stores; both paths coexist and `credentials.resolve` prefers the
+# client's own connection.
+SHOPIFY_CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 CANVA_CLIENT_ID = os.environ.get("CANVA_CLIENT_ID", "")
 CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
 CONSTANT_CONTACT_CLIENT_ID = os.environ.get("CONSTANT_CONTACT_CLIENT_ID", "")

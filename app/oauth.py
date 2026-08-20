@@ -45,6 +45,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 
 from . import config
@@ -108,6 +109,52 @@ def _meta_client() -> tuple[str, str]:
     return config.META_APP_ID, config.META_APP_SECRET
 
 
+def _shopify_client() -> tuple[str, str]:
+    return config.SHOPIFY_CLIENT_ID, config.SHOPIFY_CLIENT_SECRET
+
+
+#: A Shopify shop domain and nothing else. Anchored, lowercase, no port, no
+#: path, no credentials, no unicode.
+_SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}\.myshopify\.com$")
+
+
+def shop_host(raw: str) -> str:
+    """A validated `<handle>.myshopify.com`, or "" — and this one is a GATE.
+
+    Shopify is the only flow whose endpoints live on a host the caller supplies:
+    every other provider posts its client secret to a constant we compiled in,
+    while here the authorize and token URLs are built from a shop domain that
+    arrives in a form field and, at the callback, in a query parameter anyone
+    can write. Without this, `shop=evil.example.com` makes us POST
+    `client_id` + `client_secret` to an attacker's server — a full credential
+    disclosure from one link, and it would look exactly like a failed sign-in.
+
+    So the rule is allowlist, not sanitise: the value must match the shape
+    Shopify itself guarantees, and anything else is refused rather than
+    repaired. The normalisation that DOES happen (scheme, path, admin URL) runs
+    in `credentials._normalize_meta`, which is a convenience for a human typing
+    into a form; this is the security boundary and it accepts one shape.
+    """
+    host = (raw or "").strip().lower()
+    host = host.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+    host = host.split("@")[-1].split(":", 1)[0]      # no userinfo, no port
+    return host if _SHOP_RE.match(host) else ""
+
+
+def _identify_shopify(access_token: str, payload: dict) -> dict:
+    """What was connected, and what Shopify actually granted.
+
+    Shopify returns the granted scopes on the token response itself, so this
+    needs no extra call — and `scope` is authoritative in a way an app's
+    configured scopes are not: a merchant can be shown one set and approve it
+    while the app was later reconfigured, and only the response says which
+    happened.
+    """
+    granted = [s.strip() for s in (payload.get("scope") or "").split(",")
+               if s.strip()]
+    return {"label": payload.get("_shop", ""), "granted": granted}
+
+
 def _identify_google(access_token: str, payload: dict) -> dict:
     """Which mailbox this is, and what it actually granted.
 
@@ -163,6 +210,34 @@ FLOWS: dict[str, dict] = {
         token_style="post_body",
         stores="refresh_token",
         identify=_identify_google,
+    ),
+    # Shopify. The one flow whose endpoints are PER SHOP -- `{shop}` is filled
+    # from a validated `shop_host`, never from a raw form value. See that
+    # function for why this is a security boundary rather than a formatting
+    # convenience.
+    #
+    # Offline access by default: no `access_mode` in `extra` means the token
+    # does not expire and is not tied to a logged-in session, which is what a
+    # background worker reading orders at 3am needs. An online token would die
+    # with the merchant's browser session.
+    "shopify": dict(
+        authorize="https://{shop}/admin/oauth/authorize",
+        token="https://{shop}/admin/oauth/access_token",
+        # The same set the custom-app path asks for, so a store connected
+        # either way can do the same work. `write_content` is deliberately NOT
+        # here: the blog path can publish, and asking a client for write access
+        # they have not been told about is how a connect page loses trust.
+        scopes=["read_products", "read_orders", "read_inventory"],
+        extra={},
+        client=_shopify_client,
+        env="SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET",
+        token_style="post_body",
+        stores="access_token",
+        identify=_identify_shopify,
+        shop_scoped=True,
+        # Shopify signs the callback query with the client secret. Verified
+        # before the code is spent -- see `verify_callback`.
+        signed_callback=True,
     ),
     "meta_ads": dict(
         authorize="https://www.facebook.com/v21.0/dialog/oauth",
@@ -280,7 +355,7 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 def sign_state(tenant: str, provider: str, connect_token: str = "",
-               via: str = "connect", verifier: str = "") -> str:
+               via: str = "connect", verifier: str = "", shop: str = "") -> str:
     """Sign the round-trip payload. `verifier` rides ENCRYPTED, not merely signed.
 
     The PKCE verifier has to survive a redirect through the provider and come
@@ -293,6 +368,13 @@ def sign_state(tenant: str, provider: str, connect_token: str = "",
     """
     payload = {"tenant": tenant, "p": provider, "t": connect_token,
                "via": via, "exp": int(time.time()) + STATE_TTL}
+    if shop:
+        # Carried SIGNED rather than read back off the callback's own `shop`
+        # parameter. Shopify does send one, but taking it from there would let
+        # a forged link start a flow for one shop and complete it against
+        # another -- and the two are compared at the callback for exactly that
+        # reason.
+        payload["shop"] = shop
     if verifier:
         from . import credentials as _cred
         payload["v"] = _cred._encrypt(verifier)
@@ -311,6 +393,42 @@ def state_verifier(data: dict) -> str:
         return _cred._decrypt(blob)
     except Exception:                                            # noqa: BLE001
         return ""
+
+
+def verify_callback(provider: str, params: dict) -> str:
+    """"" if this callback really came from the provider, else why not.
+
+    Shopify signs the callback's query string with the app's client secret.
+    Our own `state` already proves WE started the flow, but it does not prove
+    who finished it: a signed state is a bearer value that travels in an
+    address bar, through the merchant's browser history and any referrer, and
+    replaying it with a `code` of somebody's choosing is exactly the attack the
+    provider's own signature closes.
+
+    The digest is over every query parameter except `hmac` and `signature`,
+    sorted by key and joined as a query string — Shopify's documented rule.
+    Compared with `compare_digest`, because a byte-at-a-time comparison on a
+    signature check is a timing oracle.
+
+    A flow that does not sign its callback returns "" — absent is not failed,
+    and treating it as failed would break Google and Meta, which do not sign.
+    """
+    spec = FLOWS.get(provider) or {}
+    if not spec.get("signed_callback"):
+        return ""
+    from urllib.parse import urlencode
+    got = str(params.get("hmac") or "")
+    if not got:
+        return "that sign-in carried no signature"
+    _cid, secret = spec["client"]()
+    if not secret:
+        return "cannot verify the sign-in: the client secret is not set"
+    body = urlencode(sorted(
+        (k, v) for k, v in params.items() if k not in ("hmac", "signature")))
+    want = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, got):
+        return "that sign-in did not come from the provider"
+    return ""
 
 
 def read_state(state: str) -> tuple[dict, str]:
@@ -334,7 +452,26 @@ def read_state(state: str) -> tuple[dict, str]:
 # The two legs.
 # ---------------------------------------------------------------------------
 
-def authorize_url(provider: str, state: str, challenge: str = "") -> str:
+def endpoint(provider: str, which: str, shop: str = "") -> str:
+    """The authorize or token URL, with a shop-scoped flow's host filled in.
+
+    Refuses rather than formatting a bad host into a URL: an unvalidated shop
+    reaching `{shop}` is the credential-disclosure hole `shop_host` exists to
+    close, so the check is repeated at the point of use rather than trusted
+    from the caller.
+    """
+    spec = FLOWS[provider]
+    url = spec[which]
+    if not spec.get("shop_scoped"):
+        return url
+    host = shop_host(shop)
+    if not host:
+        raise ValueError(f"{shop!r} is not a myshopify.com shop domain")
+    return url.format(shop=host)
+
+
+def authorize_url(provider: str, state: str, challenge: str = "",
+                  shop: str = "") -> str:
     from urllib.parse import urlencode
     spec = FLOWS[provider]
     cid, _ = spec["client"]()
@@ -351,10 +488,14 @@ def authorize_url(provider: str, state: str, challenge: str = "") -> str:
         # itself, which would put it in the address bar and undo the point.
         params["code_challenge"] = challenge
         params["code_challenge_method"] = "S256"
-    return f"{spec['authorize']}?{urlencode(params)}"
+    if spec.get("shop_scoped"):
+        # Shopify wants them comma-separated under `scope`, not space-joined.
+        params["scope"] = ",".join(spec["scopes"])
+    return f"{endpoint(provider, 'authorize', shop)}?{urlencode(params)}"
 
 
-def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
+def exchange(provider: str, code: str, code_verifier: str = "",
+             shop: str = "") -> dict:
     """Consent code -> the token we intend to keep, plus what was granted.
 
     Returns {ok, secret, kind, label, granted, missing, expires_at, error}.
@@ -381,12 +522,18 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
     try:
         style = spec["token_style"]
         if style == "get_params":
-            r = httpx.get(spec["token"], timeout=30, params={
+            r = httpx.get(endpoint(provider, "token", shop), timeout=30, params={
                 "code": code, "client_id": cid, "client_secret": secret,
                 "redirect_uri": redirect_uri(provider)})
         else:
             form = {"grant_type": "authorization_code", "code": code,
                     "redirect_uri": redirect_uri(provider)}
+            if spec.get("shop_scoped"):
+                # Shopify's token endpoint takes client_id/client_secret/code
+                # and nothing else; it has no grant_type and no redirect_uri,
+                # and sending them is how the exchange 400s on a flow that is
+                # otherwise correct.
+                form = {"code": code}
             if spec.get("pkce") and code_verifier:
                 form["code_verifier"] = code_verifier
             headers = {}
@@ -398,7 +545,8 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
                 headers["Authorization"] = f"Basic {pair}"
             else:
                 form["client_id"], form["client_secret"] = cid, secret
-            r = httpx.post(spec["token"], timeout=30, data=form, headers=headers)
+            r = httpx.post(endpoint(provider, "token", shop), timeout=30,
+                           data=form, headers=headers)
         if r.status_code >= 400:
             return {"ok": False, "error": _provider_error(r)}
         payload = r.json()
@@ -411,7 +559,20 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
         return {"ok": False, "error": "No access token came back."}
 
     expires_at = 0
-    if spec["stores"] == "refresh_token":
+    kept = spec["stores"]
+    if kept == "access_token":
+        # The token IS the credential and does not expire. Shopify issues no
+        # refresh token for offline access, so there is nothing else to keep.
+        #
+        # This arm exists because the branch below used to end in a bare
+        # `else` that ran Meta's long-lived exchange — so a third provider
+        # inherited Meta's token swap and would have failed inside a function
+        # named for another platform. Same shape as the `token_style` else that
+        # would have leaked a client secret into a URL (§2.31); an `else` in a
+        # per-provider switch is a defect waiting for the next provider.
+        keep = access
+        payload = {**payload, "_shop": shop_host(shop)}
+    elif kept == "refresh_token":
         keep = payload.get("refresh_token", "")
         if not keep:
             # Storing the access token here would produce a connection that
@@ -421,12 +582,19 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
                              "means the account was already connected to this "
                              "app — remove it at "
                              "myaccount.google.com/permissions and try again."}
-    else:
+    elif kept == "long_lived":
         long_lived, expires_at, err = _meta_long_lived(access, cid, secret)
         if err:
             return {"ok": False, "error": err}
         keep = long_lived
         access = long_lived
+    else:
+        # Named, not guessed. A flow declaring a `stores` nobody implemented
+        # must refuse loudly here rather than take whichever arm happens to be
+        # last.
+        return {"ok": False,
+                "error": f"{provider} declares stores={kept!r}, which this "
+                         f"exchange does not implement"}
 
     try:
         who = spec["identify"](access, payload)
@@ -436,7 +604,9 @@ def exchange(provider: str, code: str, code_verifier: str = "") -> dict:
 
     granted = who.get("granted") or []
     missing = _missing_scopes(spec["scopes"], granted)
-    return {"ok": True, "secret": keep, "kind": "oauth",
+    # What the credential needs to be USED, beyond the secret itself.
+    extra_meta = {"domain": shop_host(shop)} if spec.get("shop_scoped") else {}
+    return {"ok": True, "secret": keep, "kind": "oauth", "meta": extra_meta,
             "label": who.get("label", ""), "granted": granted,
             "missing": missing, "expires_at": expires_at}
 

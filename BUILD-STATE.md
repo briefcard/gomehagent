@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**55 suites, 55 pass.** Check the OUTPUT, not the exit code, and skip
+**56 suites, 56 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -816,6 +816,75 @@ Seven providers, all rendered on both the Accounts tab and the client
 `/connect/<token>` page. Audited by booting a fresh instance with nothing
 configured and reading the rendered HTML.
 
+### Shopify by OAuth — onboarding a client's store
+
+Built 2026-08-19, because a custom app is five minutes for a store you OWN and
+an unreasonable ask for a client's: it means walking a merchant through
+developer settings, ticking API scopes, and copying a token shown exactly once.
+
+**Both paths stay open, and that is deliberate.** `kind` is still `api_key`, so
+the paste form and its live probe work unchanged; `oauth_optional=True` puts a
+Sign-in button beside it, and only when `SHOPIFY_CLIENT_ID`/`_SECRET` are set —
+an unconfigured flow renders nothing rather than a button that cannot work.
+Which path is right depends on whose store it is, and removing either breaks a
+real case.
+
+**This is the first flow whose endpoints are not a constant, and that is the
+whole risk.** Every other provider posts its client secret to a host compiled
+into `FLOWS`; Shopify's authorize and token URLs are built from a shop domain
+that arrives in a form field and, at the callback, in a query parameter anyone
+can write. `shop=evil.example.com` would POST `client_id` + `client_secret` to
+an attacker's server, from one link, looking exactly like a failed sign-in.
+
+`oauth.shop_host` is therefore an ALLOWLIST, not a sanitiser: anchored regex on
+`<handle>.myshopify.com`, with userinfo and port stripped first so
+`acme.myshopify.com@evil.com` cannot pass as the shop. It is enforced again in
+`endpoint()`, at the point the URL is built, rather than trusted from the
+caller. The normalisation that repairs what a human types
+(`admin.shopify.com/store/<handle>`, schemes, paths) lives in
+`credentials._normalize_meta` and is a convenience; this is the boundary and it
+accepts one shape.
+
+**Three more things the flow does that the others do not.**
+
+* **Verifies the provider's own signature.** `state` proves WE started the
+  flow; it does not prove who finished it. It is a bearer value travelling
+  through an address bar, browser history and any referrer, so replaying it
+  with a chosen `code` is exactly what Shopify's `hmac` closes.
+  `verify_callback` is generic and returns "" for flows that do not sign, so
+  Google and Meta are unaffected.
+* **Pins the shop across the round trip.** The shop rides SIGNED inside the
+  state and the callback's own `shop` parameter must match it — otherwise a
+  forged link could start for one store and complete against another, filing a
+  token under a client who never authorised it.
+* **Stores the shop with the token.** `store_oauth` now carries `result.meta`
+  through, because `shopify_config` reads `domain` from there. Without it we
+  would store a working token that every caller then failed to use, and the
+  console would read green throughout — the declared-and-never-written shape,
+  one layer along.
+
+**A latent defect found and fixed while doing it.** `exchange`'s `stores`
+branch was `if refresh_token / else`, and the `else` ran META's long-lived
+token swap. A third provider inherited it silently. That is §2.31's shape
+exactly — the `token_style` bare `else` that would have leaked a client secret
+into a URL — in the function directly below it. Each value has its own arm now
+and an unimplemented one refuses by name.
+
+**Offline access, deliberately.** No `access_mode` in `extra` means the token
+does not expire and is not tied to a browser session, which is what a worker
+reading orders at 3am needs. `write_content` is deliberately NOT in the scope
+set: asking a client for write access they were not told about is how a connect
+page loses trust.
+
+**Unproven, and this is the part to watch.** No OAuth leg in this codebase has
+ever run against a real provider, and this one has only met a stub. Before it
+can run at all, the owner must set `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET`
+from a Partner app and register the redirect URI **byte for byte**:
+`https://assistant-web-zm2d.onrender.com/oauth/shopify/callback`. The app also
+needs custom distribution to a named store, or to be published — a Partner app
+in neither state has nothing to install. `scripts/test_shopify_oauth.py`, 37
+checks, including the six that fail the moment the shop gate is removed.
+
 **Three OAuth providers are one env var each**, and nothing else blocks them.
 Register the redirect URI byte-for-byte in the provider console:
 
@@ -1333,7 +1402,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **55 suites pass**, none touching the network,
+**Ran and confirmed.** All **56 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1464,7 +1533,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 55 of them, all offline:
+**Run the suites first, before changing anything.** 56 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue
