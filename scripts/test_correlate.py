@@ -70,6 +70,36 @@ def main() -> int:
        "dead_connection" not in kinds(correlate.sweep("ironside", 7)),
        "reporting the internet nightly teaches people to ignore the sweep")
 
+    print("\n— what is published under the client's name outranks nearly all of it —")
+    # The weekly sweep records violations and nothing announced them. A
+    # compliance check whose findings sit in a table is a check nobody acts on.
+    from app import compliance
+    cc = systems.create("baci", "content_compliance", "Website content")
+    compliance.record_scan("baci", {
+        "pages_checked": 42,
+        "violations": [{"url": "https://x/p1",
+                        "hits": [{"phrase": "hand-decorated", "context": "..."}]},
+                       {"url": "https://x/p2",
+                        "hits": [{"phrase": "made in Italy", "context": "..."}]}],
+        "by_phrase": {"hand-decorated": 5, "made in Italy": 2}})
+    f = correlate.sweep("baci", 7)
+    site = [x for x in f if x["kind"] == "site_violations"]
+    ck("live-site violations are reported", site, str(kinds(f)))
+    ck("  naming which bans were breached, and how often",
+       any("hand-decorated (5" in e for e in site[0]["evidence"]),
+       str(site[0]["evidence"]))
+    ck("  and saying they are already published",
+       "published under the client's name" in site[0]["suggests"])
+    ck("  outranking everything except a dead connection",
+       site[0]["weight"] > 80 and f[0]["kind"] == "dead_connection",
+       f"{site[0]['weight']} vs {f[0]['kind']}")
+
+    print("\n— a clean site is not a finding —")
+    compliance.record_scan("ironside", {"pages_checked": 10, "violations": [],
+                                        "by_phrase": {}})
+    ck("nothing is reported when there is nothing wrong",
+       "site_violations" not in kinds(correlate.sweep("ironside", 7)))
+
     print("\n— the gap that cost the most output —")
     sysrow = systems.create("baci", "lead_responder", "Lead responder")
     for _ in range(4):
@@ -151,6 +181,47 @@ def main() -> int:
        any(x["kind"] == "sweep_error" for x in f),
        "a sweep that silently skips half its checks reads as a clean night")
 
+    print("\n— the compliance sweep runs on a schedule at last —")
+    # Both checks existed and NEITHER was scheduled. `compliance.scan` says in
+    # its own docstring that `since` is "what makes this cheap enough to run on
+    # a schedule", and nothing ever ran it.
+    from app import compliance as _c, worker
+    calls = {"scan": 0, "since": None}
+    real_scan = _c.scan
+
+    def _fake_scan(tenant, limit=60, since=""):
+        calls["scan"] += 1
+        calls["since"] = since
+        return {"pages_checked": 3, "violations": [], "by_phrase": {}}
+
+    _c.scan = _fake_scan
+    try:
+        switch_on("baci", "content_compliance")
+        before = _runs("baci", "content_compliance")
+        worker.compliance_sweep()
+        after = _runs("baci", "content_compliance")
+        ck("it scans a switched-on account", calls["scan"] >= 1)
+        ck("  filing exactly ONE run, not two", after == before + 1,
+           f"{after - before} runs — `record_scan` files its own; a second "
+           f"here would double every scan and halve every rate from it")
+        ck("  and the next pass only walks what changed",
+           bool(calls["since"]), f"since={calls['since']!r}")
+
+        # And the switch, again — it is the dictator everywhere.
+        switch_off("baci", "content_compliance")
+        n = calls["scan"]
+        worker.compliance_sweep()
+        ck("a switched-off account is not scanned", calls["scan"] == n)
+    finally:
+        _c.scan = real_scan
+
+    print("\n— and the tick stops calling it un-built —")
+    ck("content_compliance is scheduled elsewhere",
+       "content_compliance" in systems.externally_driven())
+    ck("  as is catalog_compliance",
+       "catalog_compliance" in systems.externally_driven(),
+       "a daily 'no generator yet' five days after it swept the whole site")
+
     print("\n— on demand, and read-only unless asked —")
     c = TestClient(web.app)
     before = _sweeps()
@@ -173,6 +244,32 @@ def main() -> int:
         return 1
     print("all checks passed")
     return 0
+
+
+def switch_on(tenant, key):
+    _set_status(tenant, key, "live")
+
+
+def switch_off(tenant, key):
+    _set_status(tenant, key, "paused")
+
+
+def _set_status(tenant, key, status):
+    """Directly, because `update(status="live")` is gated on readiness — a
+    different rule from the one under test."""
+    with db.SessionLocal() as s:
+        row = (s.query(db.System).filter(db.System.tenant == tenant,
+                                         db.System.key == key).first())
+        row.status = status
+        s.commit()
+
+
+def _runs(tenant, key) -> int:
+    with db.SessionLocal() as s:
+        row = (s.query(db.System).filter(db.System.tenant == tenant,
+                                         db.System.key == key).first())
+        return s.query(db.SystemRun).filter(
+            db.SystemRun.system_id == row.id).count() if row else 0
 
 
 def _sweeps() -> int:

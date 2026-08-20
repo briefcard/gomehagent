@@ -108,6 +108,17 @@ SABOTAGES = [
         "why": "a paused system keeps running — the off switch does nothing",
     },
     {
+        "name": "compliance_double_run",
+        "file": "app/worker.py",
+        "find": "                compliance.record_scan(\n                    t.key, compliance.scan(t.key, limit=60, since=since))",
+        "replace": ("                compliance.record_scan(\n"
+                    "                    t.key, compliance.scan(t.key, limit=60, since=since))\n"
+                    "                systems.start_run(site.id, t.key, trigger='schedule')  # SABOTAGE"),
+        "suites": ["test_correlate.py"],
+        "why": "every compliance scan is recorded twice, halving every rate "
+               "computed from the ledger",
+    },
+    {
         "name": "sweep_survives_no_model",
         "file": "app/correlate.py",
         "find": '    if not config.ANTHROPIC_API_KEY:\n        return ""',

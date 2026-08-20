@@ -290,17 +290,31 @@ def is_on(system) -> bool:
     return (getattr(system, "status", "") or "") == "live"
 
 
-def externally_driven() -> frozenset:
-    """Systems whose runs are filed by a pipeline of its own.
+#: Systems with a generator that runs on a schedule of its OWN, not the tick.
+#:
+#: `compliance_sweep` runs both of these weekly. Before it existed they were
+#: genuinely un-run, and the tick's "no generator yet" was true; now it would
+#: be a daily row claiming a check does not exist five days after it swept the
+#: whole site.
+SCHEDULED_ELSEWHERE = ("content_compliance", "catalog_compliance")
 
-    Read from `replies.HANDLED_BY_MAIL` rather than listed here, so the routing
-    table is the single place that decides. A system receiving triage's runs is
-    NOT missing a generator — its work is being done — and evaluating it in
-    `systems_tick` would file "no generator yet" against a pipeline that
-    answered nine emails that morning.
+
+def externally_driven() -> frozenset:
+    """Systems whose runs are filed by something other than `systems_tick`.
+
+    Two kinds, and neither is missing a generator:
+
+    * the mail path's — read from `replies.HANDLED_BY_MAIL` so the routing
+      table is the single place that decides. A system receiving triage's runs
+      is having its work done, and evaluating it here would file "no generator
+      yet" against a pipeline that answered nine emails that morning.
+    * `SCHEDULED_ELSEWHERE` — a generator with its own weekly slot.
+
+    The tick evaluates what is left: systems whose generator genuinely does not
+    exist yet, which is the honest use of that message.
     """
     from . import replies
-    return replies.HANDLED_BY_MAIL
+    return replies.HANDLED_BY_MAIL | frozenset(SCHEDULED_ELSEWHERE)
 
 
 #: Kept for callers that want the plain name. See `externally_driven()`.

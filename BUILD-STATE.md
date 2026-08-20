@@ -319,6 +319,51 @@ inflating everything for weeks. `/admin/forget_note` retires one.
 
 `scripts/test_allclear.py`, 34 checks. **Nine assertions across four suites pinned the old behaviour and were CHANGED deliberately** — four in `test_systems`, two in `test_skill` (already changed once for the earlier half of this rule), two in `test_grounding` (mine, from wiring the mail ledger) and one in `test_worker_systems`. That spread is the measure of how far a single mislabelled stage had reached.
 
+## Compliance runs on a clock at last
+
+Owner asked how often the website compliance check and reports run. The answer
+was **never, unless somebody pressed a button** — and finding that out was the
+point of the question.
+
+Both checks existed. `compliance.scan` says in its own docstring that `since`
+is *"what makes this cheap enough to run on a schedule"*, and nothing had ever
+run it; `catalog_compliance` is a registered skill reachable only from WhatsApp
+or a URL. Meanwhile `systems_tick` evaluated both daily and filed `not_built`,
+so the scanner and the system meant to govern it were never connected to each
+other.
+
+`worker.compliance_sweep`, **Monday 04:30**. Weekly and overnight because a
+full crawl is the expensive kind of job, site copy does not change hourly, and
+a violations queue that grows every morning stops being read — the same
+reasoning `claim_expiry_sweep` already uses. Incremental after the first pass:
+`since` is the date of the last scan, so a site is walked in full once and then
+only where it changed. Gated on the switch like everything else.
+
+**The findings reach the owner.** A compliance check whose results sit in a
+table is a check nobody acts on, so the nightly sweep reports them at weight
+90 — above everything except a dead connection — naming which bans were
+breached and how often, from `by_phrase`, which says what to go and reword
+rather than merely how many pages are wrong. These are the highest-consequence
+findings the system produces, because they are already published under the
+client's name.
+
+`SCHEDULED_ELSEWHERE` keeps the tick from calling them un-built: they have
+generators, on their own slot. `externally_driven()` now covers two kinds —
+the mail path's, and these — leaving the tick evaluating only systems whose
+generator genuinely does not exist, which is the honest use of that message.
+
+**A bug caught while reading the function being called:** `record_scan` already
+files its own `SystemRun`. The first version of the sweep filed another, so
+every scan would have been recorded TWICE — halving every rate computed from
+the ledger. Pinned by a test asserting "exactly one run, not two", and by a
+`sabotage.py` entry that re-introduces the double-file.
+
+**`reports` is still unbuilt** and was not tacked onto this. `client_report`
+reads only our own record; every live platform figure — revenue, sessions, ad
+spend, sends — sits in its `not_yet_measured` section, named with its reason.
+Building it means adapters pulling live figures per platform, which is a
+session of its own.
+
 ## The switch is the dictator
 
 Owner, 2026-08-20: *"The off/on mechanism needs to be the dictator of whether a

@@ -56,8 +56,9 @@ def sweep(tenant: str, days: int = 7) -> list[dict]:
     outranks a knowledge gap, which outranks a queue nobody has worked.
     """
     out: list[dict] = []
-    for fn in (_dead_connection, _knowledge_gap_cost, _rule_keeps_firing,
-               _queue_not_worked, _spend_without_output, _grounding_not_landing):
+    for fn in (_dead_connection, _site_violations, _knowledge_gap_cost,
+               _rule_keeps_firing, _queue_not_worked, _spend_without_output,
+               _grounding_not_landing):
         try:
             out.extend(fn(tenant, days) or [])
         except Exception as exc:                                 # noqa: BLE001
@@ -95,6 +96,37 @@ def _dead_connection(tenant: str, days: int) -> list[dict]:
                         "reads this platform is producing thinner work until "
                         "it is fixed"})
     return out
+
+
+def _site_violations(tenant: str, days: int) -> list[dict]:
+    """Banned claims found on the client's own live website.
+
+    The weekly sweep records these and nothing announced them. A compliance
+    check whose findings sit in a table is a check nobody acts on — and these
+    are the highest-consequence findings the system produces, because they are
+    already published under the client's name.
+    """
+    from . import compliance
+    scan = compliance.last_scan(tenant) or {}
+    n = int(scan.get("violations") or 0)
+    if not n:
+        return []
+    at = scan.get("at")
+    when = at.date().isoformat() if at else ""
+    # `by_phrase` is what the scan actually records — which bans were breached
+    # and how often — and it is more use than a page count: it says what to go
+    # and reword.
+    worst = sorted((scan.get("by_phrase") or {}).items(),
+                   key=lambda kv: -kv[1])[:3]
+    return [{
+        "kind": "site_violations", "weight": 90, "account": tenant,
+        "headline": f"{n} banned claim(s) on the live website",
+        "evidence": ([f"last scanned {when}"] if when else [])
+                    + ([f"{p} ({c}×)" for p, c in worst] if worst else [])
+                    + [f"{scan.get('pages_checked', 0)} pages checked"],
+        "suggests": "these are published under the client's name right now — "
+                    "the Review tab lists each with its URL and the sentence "
+                    "around it"}]
 
 
 def _knowledge_gap_cost(tenant: str, days: int) -> list[dict]:

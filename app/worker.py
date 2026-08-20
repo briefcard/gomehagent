@@ -639,6 +639,65 @@ def claim_expiry_sweep() -> None:
                  applied["expired"], t.key)
 
 
+def compliance_sweep() -> None:
+    """Check every switched-on account's site and catalogue against its rules.
+
+    Both checks existed and NEITHER was scheduled. `compliance.scan` says in
+    its own docstring that `since` is "what makes this cheap enough to run on a
+    schedule", and nothing ever ran it; `catalog_compliance` is a registered
+    skill reachable only from WhatsApp or a URL. So the answer to "how often do
+    we check compliance" was "whenever somebody remembers", which for the check
+    that would have caught Baci's 110 banned-claim violations is not an answer.
+
+    Weekly, not daily. A site's copy does not change hourly, a full crawl is
+    the expensive kind of job, and a violations queue that grows every morning
+    stops being read — the same reasoning the claim-expiry sweep already uses.
+
+    Incremental after the first pass: `since` is the date of the last scan, so
+    a site is walked in full once and then only where it changed.
+
+    Nothing is rewritten and nothing is sent. A violation is a URL and the
+    sentence around it, which is what makes it fixable.
+    """
+    from . import compliance, skill, systems, tenants as tn
+
+    for t in tn.all_tenants():
+        # --- the live website ------------------------------------------
+        site = systems.find(t.key, "content_compliance")
+        if site and systems.is_on(site):
+            # `record_scan` files the run ITSELF, including the refusal case —
+            # no domain, or no ban list to check against, which matters because
+            # a sweep reporting CLEAN when it had no rules is exactly the false
+            # assurance `catalog_compliance` declares `banned_claims`
+            # constitutive to prevent. Filing a second run here would double
+            # every scan in the ledger and halve every rate computed from it.
+            try:
+                prev = compliance.last_scan(t.key) or {}
+                at = prev.get("at")
+                since = at.date().isoformat() if at else ""
+                compliance.record_scan(
+                    t.key, compliance.scan(t.key, limit=60, since=since))
+            except Exception as exc:                             # noqa: BLE001
+                # Only reached if the scan RAISED, which `record_scan` never
+                # sees. Recorded rather than swallowed: a sweep that fails
+                # silently reads as a clean site.
+                log.exception("compliance scan failed for %s", t.key)
+                run_id = systems.start_run(site.id, t.key, trigger="schedule")
+                systems.finish_run(
+                    run_id, "failed",
+                    error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
+
+        # --- the catalogue ---------------------------------------------
+        # A registered skill, so `skill.run` files its own run, applies the
+        # switch and carries its own refusals. Nothing to wrap but the call.
+        cat = systems.find(t.key, "catalog_compliance")
+        if cat and systems.is_on(cat):
+            try:
+                skill.run("catalog_compliance", t.key, trigger="schedule")
+            except Exception:                                    # noqa: BLE001
+                log.exception("catalog compliance failed for %s", t.key)
+
+
 def systems_tick() -> None:
     """Evaluate every installed system once, and record what happened.
 
@@ -861,6 +920,12 @@ def main() -> None:
     from . import correlate
     sched.add_job(_safe(correlate.nightly, "nightly sweep"), "cron",
                   hour=config.SWEEP_HOUR, minute=10)
+    # Weekly and overnight: a full site crawl is the expensive kind of job, a
+    # site's copy does not change hourly, and a violations queue that grows
+    # every morning stops being read. After the first pass it only walks what
+    # changed. Monday early, clear of the other weekly jobs.
+    sched.add_job(_safe(compliance_sweep, "compliance sweep"), "cron",
+                  day_of_week="mon", hour=4, minute=30)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'
