@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**59 suites, 59 pass.** Check the OUTPUT, not the exit code, and skip
+**60 suites, 60 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -244,6 +244,80 @@ scope clause and watching fourteen assertions fail.
 been diagnosed with it yet, and the first one will find something — every
 assumption in this codebase tested against reality so far has been wrong in some
 detail.
+
+## What a "problem" is — the owner's correction, 2026-08-20
+
+He read a real week of Diagnostics and found it listing as blocked every fraud
+alert, MFA warning and verification deadline the mail path had correctly routed
+to him. His rule, adopted verbatim:
+
+> A problem is a log showing that a response was required and failed to happen.
+
+Three things were collapsing into `blocked`, and each now has its own stage:
+
+* **`escalated`** — routing a carding attack or an MFA change to a person IS
+  the response, and a deliberate one. `_finish_mail_run` mapped `escalate` to
+  `blocked`, conflating two opposite outcomes inside its own comment.
+* **`not_built`** — "no generator yet" is OUR build queue, not the account's
+  gap.
+* **the contract** — no longer a gap at all; see below.
+
+The damage was not cosmetic. Each escalation's reasoning landed in
+`blocked_on`, so `blocked_reasons()` — which ranks *what to go and write into
+the knowledge base* — filled with rows like "requires immediate out-of-band
+verification with TD Bank". On the week he sent, **eight of the top ten backlog
+rows were not knowledge gaps at all.** `diagnostics` counts only `failed` and
+genuine `blocked` as problems now, and reports `escalated` / `skipped` /
+`worked` beside them.
+
+**And one of those rows was self-inflicted.** Giving the mail path a run ledger
+auto-created an `inbox_triage` System row, which `systems_tick` then swept up
+and evaluated for generation — so the one pipeline actually answering his email
+was reported daily as having no generator while it drafted replies all day.
+`systems.EXTERNALLY_DRIVEN` names the difference: that row exists to HOLD a
+ledger, not to declare the substrate should generate for it.
+
+**Two pipelines, and only one produces.** Worth stating plainly because the
+logs made it ambiguous: `worker.process_emails → triage.triage_email` is what
+answers mail, and always has been. The `systems` catalogue (`lead_responder`,
+`service_desk`, `blog`, `content_compliance`) is the intended future home and
+has no generator, so it produces nothing and says so once a day.
+
+### The contract is advisory
+
+Owner: *"Every system currently has to fill in the contract otherwise the
+system fails. That doesn't need to happen."* Eight prose answers stood between
+a system and running, and were reported every tick as something the ACCOUNT was
+missing — three of the top four rows in that week's backlog.
+
+Computed and visible as `contract_complete`, in neither `thin` nor `blockers`.
+It gates exactly one thing: promotion to `auto`, the rung where nobody reads
+the output, which is the case *kill criteria* and *failure mode* were written
+for. Four assertions in `test_systems.py` pinned the old rule and were CHANGED
+deliberately, the same treatment the two in `test_skill.py` got.
+
+### "That was me" — clearing a concern
+
+The same concerns were escalated five times because nothing could tell the
+model a person had already looked, while a stale working-memory note about a
+possible breach inflated every security-shaped email after it — the Klaviyo
+escalation cited that note as its reason.
+
+`memory.clear_concern` records an all-clear as a Memory under a reserved
+`cleared:` topic (memory is already injected into triage, already scoped, and
+already worded as current truth), rendered in its own labelled block. **It
+clears the EVENT, never the category** — "the MFA change was me" must not
+become "MFA changes are fine", and the block says so explicitly, because there
+is a real carding attack in the same list. A new instance is still raised, with
+a note that a previous one was cleared.
+
+The escalation now carries its own all-clear link, because one somebody cannot
+answer from where they read it gets answered by ignoring it. `/admin/memory`
+shows what the agent currently believes and what has been cleared — none of
+which was visible anywhere before, which is how a stale breach note went on
+inflating everything for weeks. `/admin/forget_note` retires one.
+
+`scripts/test_allclear.py`, 34 checks. **Nine assertions across four suites pinned the old behaviour and were CHANGED deliberately** — four in `test_systems`, two in `test_skill` (already changed once for the earlier half of this rule), two in `test_grounding` (mine, from wiring the mail ledger) and one in `test_worker_systems`. That spread is the measure of how far a single mislabelled stage had reached.
 
 ## Craft — the one thing that crosses the tenant boundary
 
@@ -1530,7 +1604,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **59 suites pass**, none touching the network,
+**Ran and confirmed.** All **60 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1723,7 +1797,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 59 of them, all offline:
+**Run the suites first, before changing anything.** 60 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue

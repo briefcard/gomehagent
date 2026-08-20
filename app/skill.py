@@ -482,7 +482,7 @@ def preflight(key: str, tenant: str) -> dict:
     if not row:
         return {"status": "blocked", "blocked_on": [
             f"the {sk.system_key} system is not installed for {tenant} — "
-            f"install it on the Systems tab, then fill its 8-part contract"]}
+            f"install it on the Systems tab — the contract is optional"]}
     if row.status == "retired":
         return {"status": "blocked",
                 "blocked_on": [f"the {sk.system_key} system is retired"]}

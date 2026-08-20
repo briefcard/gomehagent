@@ -97,6 +97,121 @@ def memory_block(role: str = "", tenant: str = "") -> str:
             + "\n".join(lines))
 
 
+# ---------------------------------------------------------------------------
+# All-clears: "that was me, stop raising it"
+#
+# The mail path escalated the same concerns five times because nothing could
+# tell it a person had already looked. Worse, one working-memory note about a
+# possible breach was inflating every security-shaped email that arrived after
+# it — the Klaviyo escalation cited that note as its reason.
+#
+# A cleared concern is stored as a Memory under a reserved topic prefix rather
+# than in a table of its own: memory is ALREADY injected into triage, already
+# scoped per tenant and role, and already worded as current truth. What it
+# lacked was a way to say "and this particular worry is answered".
+# ---------------------------------------------------------------------------
+
+CLEARED = "cleared:"
+
+
+def clear_concern(what: str, because: str = "", scope: str = "global",
+                  tenant: str = "") -> str:
+    """Record that a person looked at something and it is fine.
+
+    Deliberately about an EVENT, not a category. "The Klaviyo TOTP MFA added on
+    20 Aug was me" is a fact that stays true; "ignore Authorize.net alerts"
+    would suppress the carding attack that is actually happening. The block
+    below tells the model exactly that, because the difference between the two
+    is the difference between a quiet inbox and a missed breach.
+    """
+    what = (what or "").strip()
+    if not what:
+        return "An all-clear needs to say what is cleared."
+    topic = CLEARED + what[:80]
+    body = what + (f" — {because}" if because else "")
+    with db.SessionLocal() as s:
+        row = (s.query(db.Memory)
+               .filter(db.Memory.topic == topic,
+                       db.Memory.status == "active").first())
+        if row:
+            row.content, row.created_at = body, db.utcnow()
+        else:
+            s.add(db.Memory(topic=topic, content=body, scope=scope,
+                            tenant=tenant or ""))
+        s.commit()
+    return f"Cleared: {what[:120]}"
+
+
+def concerns(tenant: str = "") -> list[dict]:
+    """Everything currently marked as looked-at-and-fine."""
+    with db.SessionLocal() as s:
+        q = (s.query(db.Memory)
+             .filter(db.Memory.status == "active",
+                     db.Memory.topic.like(CLEARED + "%")))
+        if tenant:
+            q = q.filter(db.tenant_filter(db.Memory, tenant,
+                                          include_unassigned=True))
+        return [{"topic": r.topic[len(CLEARED):], "content": r.content,
+                 "when": db.as_utc(r.created_at).date().isoformat(),
+                 "scope": r.scope, "tenant": r.tenant or ""}
+                for r in q.order_by(db.Memory.created_at.desc()).all()]
+
+
+def cleared_block(tenant: str = "") -> str:
+    """The all-clears, for injection — with the one caveat that keeps them safe.
+
+    Rendered apart from working memory rather than inside it, because these say
+    something different: not "here is a fact" but "this particular worry has
+    been answered". The caveat is load-bearing. Without it a model reads "the
+    MFA change was fine" as "MFA changes are fine", and the next one — the real
+    one — goes out as routine.
+    """
+    rows = concerns(tenant)
+    if not rows:
+        return ""
+    lines = [f"- {r['content']} (cleared {r['when']})" for r in rows]
+    return ("\n\nALREADY LOOKED AT AND FINE — Gomeh has personally accounted "
+            "for each of these. Do NOT escalate them again, and do not treat "
+            "them as evidence that something is wrong.\n"
+            + "\n".join(lines)
+            + "\nEach line clears THAT EVENT, not the category it belongs to. "
+              "A NEW instance of the same kind of thing is still worth raising "
+              "— say plainly that a previous one was cleared, and raise it "
+              "anyway.")
+
+
+def working_notes(tenant: str = "") -> list[dict]:
+    """Active working memory, for a person to read and prune.
+
+    None of this was visible anywhere. A note saying a breach may be under way
+    is injected into every triage as current truth, and it goes on inflating
+    every security-shaped email until somebody retires it — which nobody could
+    do without first being able to see it.
+    """
+    with db.SessionLocal() as s:
+        q = (s.query(db.Memory)
+             .filter(db.Memory.status == "active",
+                     ~db.Memory.topic.like(CLEARED + "%")))
+        if tenant:
+            q = q.filter(db.tenant_filter(db.Memory, tenant,
+                                          include_unassigned=True))
+        return [{"id": r.id, "topic": r.topic, "content": r.content,
+                 "scope": r.scope, "tenant": r.tenant or "",
+                 "when": db.as_utc(r.created_at).date().isoformat()}
+                for r in q.order_by(db.Memory.created_at.desc()).all()]
+
+
+def retire(note_id: str) -> str:
+    """Drop one working-memory note by id."""
+    with db.SessionLocal() as s:
+        row = s.get(db.Memory, note_id)
+        if not row:
+            return f"No note {note_id!r}."
+        row.status = "retired"
+        s.commit()
+        return f"Retired: {row.topic}"
+
+
 def shipments_block() -> str:
     """Open shipment records — injected into triage and chat prompts."""
     with db.SessionLocal() as s:

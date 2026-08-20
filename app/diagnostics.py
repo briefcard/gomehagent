@@ -64,9 +64,19 @@ LEVELS = ("fail", "warn", "ok", "info")
 #: gets reported for a system that is refusing exactly as designed.
 LAYERS = ("functionality", "logic", "performance")
 
-#: A run in one of these is over. `skipped` belongs here: a run that correctly
-#: produced nothing has finished, and leaving it out reports it later as lost.
-_TERMINAL = ("sent", "approved", "blocked", "failed", "skipped")
+#: A run in one of these is over. `skipped`, `escalated` and `not_built` belong
+#: here: each has finished, and leaving one out reports it later as lost.
+_TERMINAL = ("sent", "approved", "blocked", "failed", "skipped",
+             "escalated", "not_built")
+
+#: Stages that are the system WORKING, whatever they are called.
+#:
+#: The owner's rule, and it is the right one: *"Problem should be reserved for
+#: logs that show that a response was required and failed to do so."* An
+#: escalation is a response — to him — and a deliberate one. Mail that needed
+#: no reply got the correct treatment. Neither is a fault, and listing them as
+#: faults trains somebody to stop reading the log, which costs the real ones.
+_WORKED = ("sent", "approved", "escalated", "skipped")
 
 #: Open, and legitimately so — waiting on a person rather than on us. Counting
 #: these as unfinished would report the approval queue as a dead worker, which
@@ -158,6 +168,9 @@ def health(tenant: str = "", days: int = 30) -> dict:
             "unfinished": len(stuck),
             "waiting": len(waiting),
             "skipped": stages.get("skipped", 0),
+            "escalated": stages.get("escalated", 0),
+            "not_built": stages.get("not_built", 0),
+            "worked": sum(stages.get(k, 0) for k in _WORKED),
             "last_run": last.isoformat() if last else None,
             "last_error": (errs[-1].error or "")[:200] if errs else "",
             "median_ms": (sorted(durations)[len(durations) // 2]
@@ -169,6 +182,9 @@ def health(tenant: str = "", days: int = 30) -> dict:
                             "no run in this window reached a finish, so "
                             "duration cannot be computed"),
             "verdict": _verdict(len(mine), stages, len(stuck), len(waiting)),
+            # Only a `failed` or a genuine `blocked` is a problem. Named here
+            # so the console and the sweep agree on the word.
+            "problems": stages.get("failed", 0) + stages.get("blocked", 0),
         })
 
     # Runs whose system row is gone. Never silently dropped: a run filed
@@ -197,6 +213,11 @@ def _verdict(n: int, stages: dict, stuck: int, waiting: int = 0) -> str:
     if stages.get("blocked"):
         return (f"{stages['blocked']} run(s) refused on something missing — "
                 f"working as designed, fix from the knowledge queue")
+    if stages.get("not_built"):
+        return (f"ready, and {stages['not_built']} run(s) had no generator to "
+                f"run — that is our build queue, not this account's")
+    if stages.get("escalated") and not waiting:
+        return (f"ran clean · {stages['escalated']} raised for you on purpose")
     if waiting:
         # Not a fault, and named rather than folded into "ran clean": a queue
         # nobody is working looks identical to a healthy system from every
@@ -334,9 +355,19 @@ def events(tenant: str = "", days: int = 7, level: str = "",
             elif stage in ("sent", "approved"):
                 lvl, layer = "ok", "logic"
                 detail = f"decision: {r.decision or 'none recorded'}"
+            elif stage == "escalated":
+                # The system doing its job. The reason is worth reading and is
+                # NOT a refusal, so it goes in the detail rather than being
+                # rendered as something that was blocked.
+                lvl, layer = "ok", "logic"
+                detail = ("raised for you: "
+                          + (r.output or "no reason recorded")[:300])
             elif stage == "skipped":
-                lvl, layer = "info", "logic"
+                lvl, layer = "ok", "logic"
                 detail = "nothing to produce — correctly did not answer"
+            elif stage == "not_built":
+                lvl, layer = "info", "logic"
+                detail = (r.error or "no generator yet")[:300]
             elif stage in _WAITING:
                 lvl, layer = "info", "logic"
                 detail = "waiting on a person"

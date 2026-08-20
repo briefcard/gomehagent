@@ -165,21 +165,25 @@ def main():
     row = seed("baci", banned=("made in Italy", "hand-decorated", "artisan"),
                claim="Designed in Milan and produced at scale")
 
-    # CHANGED, not worked around. These two assertions pinned the old rule that
-    # an incomplete 8-part contract stops a run. Owner overruled it: the
-    # contract is a governance form, and a blank one is not a reason to produce
-    # nothing. It still gates GO-LIVE — `systems.ready` keeps that bar, and the
-    # "cannot even go live" check further down proves it — but it no longer
-    # gates producing something a human is going to read anyway.
+    # CHANGED TWICE, and both times deliberately. First these pinned that an
+    # incomplete contract STOPS a run; the owner overruled that and they became
+    # "it does not stop the work, but it is reported as thin and filed onto the
+    # knowledge queue". On 2026-08-20 he overruled the remainder: a contract
+    # field is not knowledge, and filing it as an account's gap put three of
+    # the top four rows in a real week's backlog on questions no amount of
+    # writing about the client could answer.
+    #
+    # The contract is advisory now. It gates one thing — promotion to `auto` —
+    # and is otherwise a form on the card.
     skill_pack.fetch_products = fake_fetch([CLEAN], total=1, complete=True)
     r = skill.run("catalog_compliance", "baci")
     ck("an incomplete contract does NOT stop the work",
        r["status"] != "blocked", r["status"])
-    ck("  but the run says what it was missing",
-       any("contract" in t for t in r.get("thin", [])), str(r.get("thin")))
-    ck("  and the gap is filed where the operator already works",
-       any("contract" in (u.attribute or "") for u in kb.unknowns("baci")),
-       "a gap nobody can see is a gap nobody fixes")
+    ck("  and is not reported as a gap in the work",
+       not any("contract" in t for t in r.get("thin", [])), str(r.get("thin")))
+    ck("  nor filed onto the knowledge queue",
+       not any("contract" in (u.attribute or "") for u in kb.unknowns("baci")),
+       "a contract field is not something to go and learn about the client")
 
     row = contract(row)
     r = skill.run("catalog_compliance", "baci", nonsense=1)
@@ -296,8 +300,9 @@ def main():
 
     print("\n--- an account with no ban list cannot be swept at all ---")
     # It cannot even go live: `catalog_compliance` declares banned_claims as a
-    # kb_need, so the go-live gate refuses first. That is the earlier and
-    # better refusal, and it is asserted here rather than worked around.
+    # kb_need, so the go-live gate refuses on KNOWLEDGE — which is still a
+    # blocker, and the right one. (The contract no longer is; see above.) That
+    # is the earlier and better refusal, asserted rather than worked around.
     nrow = seed("eien")
     live = systems.update(nrow.id, status="live")
     ck("an account with no ban list cannot even go live",

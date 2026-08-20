@@ -1388,6 +1388,55 @@ def oauth_callback(provider: str, request: Request, code: str = "",
     return RedirectResponse(f"{back}?ok={quote(stored['detail'])}", 303)
 
 
+@app.get("/admin/memory")
+def admin_memory(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """What the agent currently believes, and what has been cleared.
+
+    None of this was visible anywhere, which is how a stale note saying a
+    breach may be under way went on inflating every security-shaped email for
+    weeks. It is injected into every triage as current truth; a person has to
+    be able to read it before they can retire it.
+    """
+    from . import memory
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return {"tenant": tenant or "all",
+            "working_memory": memory.working_notes(tenant),
+            "cleared": memory.concerns(tenant),
+            "note": "retire a note with /admin/forget_note?id=… — it stops "
+                    "being injected immediately"}
+
+
+@app.get("/admin/allclear")
+def admin_allclear(key: str = Depends(admin_key), what: str = "",
+                   because: str = "", tenant: str = "") -> dict:
+    """"That was me / I have looked at it." Stops the same escalation recurring.
+
+    Describe the EVENT, not the category: "the Klaviyo TOTP MFA added on 20 Aug
+    was me" stays true for ever, while "ignore Authorize.net alerts" would
+    suppress the carding attack that is actually happening. The injected block
+    says so explicitly, so a new instance of the same kind of thing is still
+    raised.
+    """
+    from . import memory
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not what:
+        return {"error": "say what is cleared, e.g. "
+                         "what=Klaviyo+TOTP+MFA+added+20+Aug&because=that+was+me"}
+    return {"ok": True, "result": memory.clear_concern(what, because,
+                                                       tenant=tenant)}
+
+
+@app.get("/admin/forget_note")
+def admin_forget_note(key: str = Depends(admin_key), id: str = "") -> dict:
+    """Retire one working-memory note so it stops being injected."""
+    from . import memory
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return {"ok": True, "result": memory.retire(id)}
+
+
 @app.get("/admin/sweep")
 def admin_sweep(key: str = Depends(admin_key), tenant: str = "",
                 days: int = 7, run: int = 0) -> dict:

@@ -1557,6 +1557,70 @@ half its checks reads as a clean night.
 silence. Ask what it prints when its most expensive dependency is gone, and
 make that the tested path.*
 
+### 2.51 The system's best work, filed as failure — fixed 2026-08-20
+
+The owner read a real week of Diagnostics and found it listing as "blocked"
+every fraud alert, MFA warning and verification deadline the mail path had
+correctly routed to him. `_finish_mail_run` mapped `escalate` -> `blocked`,
+which I wrote and justified as "escalate is where a guard caught something or
+the mail needed a person" — conflating two opposite outcomes in one line of
+its own comment.
+
+Worse than cosmetic. Each escalation's reasoning went into `blocked_on`, so
+`blocked_reasons()` — the ranking of what to go and WRITE into the knowledge
+base — filled with rows like "requires immediate out-of-band verification with
+TD Bank", which no amount of writing about a client could ever satisfy. On a
+real week, eight of the top ten backlog rows were not knowledge gaps at all.
+
+Three separate collapses, all into `blocked`:
+* `escalate` -> now `escalated`. Routing to a person IS the response.
+* "no generator yet" (`systems_tick`) -> now `not_built`. Our build queue, not
+  the account's gap.
+* an unfilled contract -> no longer a gap at all; see §2.52.
+
+**The owner's rule, adopted verbatim:** *a problem is a log showing that a
+response was required and failed to happen.* `diagnostics` now counts only
+`failed` and genuine `blocked` as problems.
+
+*Rule: when one column encodes an outcome, every distinct outcome needs its
+own value. A vocabulary that collapses success into failure does not just
+mislabel a row — it poisons every ranking computed from it.*
+
+### 2.52 A pipeline reported as broken while it was doing the work — fixed 2026-08-20
+
+Giving the mail path a run ledger meant auto-creating an `inbox_triage` System
+row. `systems_tick` walks every System row and evaluates it for generation — so
+the one pipeline actually answering the owner's email was reported daily as
+having no generator, and sat at the top of the backlog claiming it could not
+run, while it drafted replies all day.
+
+The System row exists to HOLD that ledger, not to declare the substrate should
+generate for it. `systems.EXTERNALLY_DRIVEN` names the difference and the tick
+skips those.
+
+*Rule: adding a row to a table that something else iterates is joining that
+loop. Ask what the loop will now do with it.*
+
+### 2.53 The contract, demoted — 2026-08-20
+
+Owner: *"Every system currently has to fill in the contract otherwise the
+system fails. That doesn't need to happen."* Eight prose answers stood between
+a system and running, were reported on every tick as something the ACCOUNT was
+missing, and were filed onto the knowledge queue through `record_unknowns`.
+
+Now advisory: computed, visible on the card as `contract_complete`, in neither
+`thin` nor `blockers`. It gates ONE thing — promotion to `auto`, the rung where
+nobody reads the output, which is the case *kill criteria* and *failure mode*
+were written for.
+
+Four assertions in `test_systems.py` pinned the old rule and were CHANGED
+deliberately rather than worked around, which is the same treatment the two in
+`test_skill.py` got when the gating rule changed.
+
+*Rule: a quality checklist that blocks work gets filled with placeholder text
+or resented. Make it visible, make it optional, and gate only the case where
+its absence is genuinely dangerous.*
+
 ## 4. How to verify
 
 ```bash
@@ -1589,6 +1653,7 @@ python3 scripts/test_shopify_oauth.py     # client-store sign-in; the shop gate 
 python3 scripts/test_shopify_compliance.py # the mandatory privacy webhooks
 python3 scripts/test_craft.py             # cross-client lessons and the leak guard
 python3 scripts/test_correlate.py         # the nightly sweep, incl. with no model at all
+python3 scripts/test_allclear.py          # escalation is success; "that was me" sticks
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

@@ -375,7 +375,11 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
         )
     from . import memory
     dynamic += (memory.lessons_block("admin", tenant)
-                + memory.memory_block("", tenant))
+                + memory.memory_block("", tenant)
+                # What a person has already looked at and accounted for. This
+                # is why the same concern was escalated five times: nothing
+                # could tell the model somebody had checked.
+                + memory.cleared_block(tenant))
 
     # THE KNOWLEDGE BASE, on the path that answers customers.
     #

@@ -105,6 +105,10 @@ def _knowledge_gap_cost(tenant: str, days: int) -> list[dict]:
     it merely occurred once.
     """
     from . import systems
+    # `blocked_reasons` reads stage == "blocked" only, so escalations and
+    # not-yet-built generators no longer reach here — see `db.SystemRun.stage`.
+    # Before that fix this finding was dominated by "no generator yet", which
+    # no amount of writing into the knowledge base could ever satisfy.
     rows = systems.blocked_reasons(tenant, days)
     out = []
     for reason, n in rows[:3]:

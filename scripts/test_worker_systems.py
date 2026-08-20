@@ -111,8 +111,17 @@ def main() -> int:
                run.stage == "blocked" and bool(run.blocked_on),
                (run.blocked_on or "")[:80])
         else:
-            ck(f"{s.tenant}/{s.key} is ready and says the generator is missing",
-               "no generator" in (run.blocked_on or ""), run.blocked_on or "")
+            # CHANGED 2026-08-20. This pinned "no generator yet" as a BLOCKED
+            # run with the reason in `blocked_on`. The owner read a week of it
+            # and was right: our missing generator is not the account's gap,
+            # and `blocked_on` feeds `blocked_reasons()` — the ranking of what
+            # to go and WRITE — where it sat at the top for ever, unanswerable
+            # by any amount of writing about the client.
+            ck(f"{s.tenant}/{s.key} is ready and is filed as not_built",
+               run.stage == "not_built", run.stage)
+            ck(f"  and says so without claiming the account is missing it",
+               "no generator" in (run.error or "") and not (run.blocked_on or []),
+               (run.error or "")[:70])
 
     # ---- re-running is safe ------------------------------------------------
     print("\n— running it again —")

@@ -41,7 +41,11 @@ AUTONOMY_MEANING = {
     "auto": "Sends without asking. Alerts on anomaly. Kill criteria are armed.",
 }
 
-# The 8-part contract. A system without these does not get built — decision #8.
+# The 8-part contract. ADVISORY since 2026-08-20 (owner's call): it is
+# computed, shown on the card, and gates promotion to `auto` — the rung where
+# nobody reads the output — and nothing else. Requiring eight prose answers
+# before a system may run stopped work it did not protect, and filed those
+# answers onto the knowledge queue as gaps the ACCOUNT was missing.
 CONTRACT = (
     ("job_replaced", "Job replaced", "The human task this removes. If nobody was doing it, this is a feature, not a system."),
     ("owner", "Owner", "Who is accountable when it misbehaves. A name, not a team."),
@@ -149,8 +153,9 @@ def prerequisites(tenant: str, key: str) -> dict:
     something to go and write, and neither is visible until you have already
     committed to the system.
 
-    The 8-part contract is deliberately absent. It is a prerequisite for going
-    LIVE, not for installing — a system starts in shadow with an empty contract
+    The 8-part contract is deliberately absent here, and is no longer a
+    prerequisite for going live either — it is advisory, and gates only
+    promotion to `auto`. A system starts in shadow with an empty contract
     on purpose, so that filling it is a decision made while looking at the
     thing rather than a toll gate before seeing it.
     """
@@ -254,6 +259,20 @@ def for_tenant(tenant: str) -> list[db.System]:
         return rows
 
 
+#: Systems whose work is done by a pipeline of its own, not by the substrate.
+#:
+#: `inbox_triage` is the mail path: `worker.process_emails` calls
+#: `triage.triage_email`, which drafts, guards and files its OWN runs. Its
+#: System row exists to hold that ledger, not to declare that the substrate
+#: should generate for it.
+#:
+#: Without this it was swept up by `systems_tick` — the loop that evaluates the
+#: catalogue — and reported "no generator yet" every day, so the one pipeline
+#: actually answering the owner's email was the loudest thing in the backlog
+#: claiming it could not run. It had been drafting all along.
+EXTERNALLY_DRIVEN = ("inbox_triage",)
+
+
 def all_systems() -> list[db.System]:
     with db.SessionLocal() as s:
         rows = (s.query(db.System)
@@ -290,8 +309,11 @@ def update(system_id: str, **fields) -> dict:
             return {"error": f"status must be one of {STATUSES}"}
         if "autonomy" in fields and fields["autonomy"] not in AUTONOMY:
             return {"error": f"autonomy must be one of {AUTONOMY}"}
-        # Going live is gated on readiness — the whole point of the contract is
-        # that it can't be skipped by editing a dropdown.
+        # Going live is gated on readiness: connections and the knowledge the
+        # system declared it needs. NOT on the contract — that became advisory
+        # on 2026-08-20 (see `ready`), because requiring eight prose answers
+        # before a system may run was stopping work it did not protect. The
+        # contract still gates `auto`, which is the rung it was written for.
         if fields.get("status") == "live" and row.status != "live":
             r = ready(row)
             if not r["ready"]:
@@ -323,10 +345,26 @@ def ready(system: db.System) -> dict:
     impossible: list[str] = []      # producing is not possible at all
     thin: list[str] = []            # producing is possible, and worse
 
+    # The contract is ADVISORY. Owner's call, 2026-08-20: *"Every system
+    # currently has to fill in the contract otherwise the system fails. That
+    # doesn't need to happen."*
+    #
+    # It stays computed and visible — `contract_complete` is what the Systems
+    # card renders, and the eight questions are genuinely worth answering — but
+    # it is no longer a `thin` gap. As one it was reported as something the
+    # account was MISSING on every tick, filed through `record_unknowns` onto
+    # the knowledge queue, and rendered in the backlog as "would have run
+    # without: contract: Job replaced, Owner, ..." — three of the top four
+    # items on a real week's ranking of what to go and write, none of which is
+    # knowledge and none of which any amount of writing about the client would
+    # ever satisfy.
+    #
+    # It is kept as a gate on ONE thing only: see `can_promote`. Running
+    # unattended without kill criteria or a failure mode is the case the eight
+    # questions were written for, and it is the only case where the answer is
+    # load-bearing rather than useful.
     missing_contract = [label for f, label, _ in CONTRACT
                         if not (getattr(system, f, "") or "").strip()]
-    if missing_contract:
-        thin.append("contract: " + ", ".join(missing_contract))
 
     caps = tenants.capabilities(system.tenant)
     absent = [c for c in sp["requires"] if not caps.get(c)]
@@ -371,6 +409,7 @@ def ready(system: db.System) -> dict:
     blockers = impossible + thin
     return {"ready": not blockers, "blockers": blockers,
             "contract_complete": not missing_contract,
+            "missing_contract": missing_contract,
             "can_produce": not impossible, "impossible": impossible,
             "thin": thin}
 
@@ -408,6 +447,22 @@ def can_promote(system: db.System) -> dict:
     if not r["ready"]:
         return {"can": False, "target": target,
                 "why": "not ready: " + "; ".join(r["blockers"])}
+
+    # The contract gates the UNATTENDED rung and nothing else.
+    #
+    # Everywhere else it is advisory (see `ready`). Here it is not: `auto` is
+    # the rung where no human reads the output, and the questions that matter
+    # then are exactly the ones the contract asks — what makes us switch this
+    # off, how does it break, and who notices. A system running loose with
+    # those blank is the case the eight questions exist for.
+    if target == "auto":
+        gaps = [label for f, label, _ in CONTRACT
+                if not (getattr(system, f, "") or "").strip()]
+        if gaps:
+            return {"can": False, "target": target,
+                    "why": ("nothing reads the output on `auto`, so the "
+                            "contract has to be answered first — still blank: "
+                            + ", ".join(gaps))}
 
     gate = GATES.get(target)
     if not gate:  # shadow -> approve_all needs readiness only; nothing has run yet
@@ -484,7 +539,8 @@ def finish_run(run_id: str, stage: str, **fields) -> None:
         # `skipped` joins the terminal set: a run that correctly produced
         # nothing (promo mail, a notification) is FINISHED, and leaving it open
         # would have it reported later as a run that died.
-        if stage in ("sent", "blocked", "failed", "approved", "skipped"):
+        if stage in ("sent", "blocked", "failed", "approved", "skipped",
+                     "escalated", "not_built"):
             row.finished_at = db.utcnow()
         s.commit()
 

@@ -1512,9 +1512,29 @@ class SystemRun(Base):
 
     trigger = Column(String)          # inbound_email | schedule | manual
     ref = Column(String)              # source identifier, e.g. a gmail message id
-    # brief | draft | validated | approved | sent | blocked | failed | skipped
-    # `draft` is WAITING on a person, not finished. `skipped` is finished with
-    # nothing produced, and correctly so — half of inbound mail needs no reply.
+    # brief | draft | validated | approved | sent | escalated | skipped |
+    # not_built | blocked | failed
+    #
+    # The distinctions are load-bearing, and collapsing them is how a system
+    # reports its best work as failure. The owner caught exactly that: every
+    # fraud alert and MFA warning the mail path correctly routed to him was
+    # being listed as a "blocked" run — the design working, filed as a problem.
+    #
+    #   sent/approved  produced something
+    #   escalated      routed to a PERSON on purpose. Success, not a refusal:
+    #                  "a human must act on this" is the correct outcome for a
+    #                  carding attack or a verification deadline.
+    #   skipped        correctly produced nothing (promo, notifications)
+    #   draft          waiting on a person, not finished
+    #   not_built      the system is ready and its generator does not exist
+    #                  yet. OUR roadmap, not the account's gap — it must never
+    #                  reach `blocked_reasons()`, which ranks what to go and
+    #                  WRITE, and which it would otherwise dominate for ever.
+    #   blocked        could not produce; something nameable is missing
+    #   failed         raised
+    #
+    # A PROBLEM is only ever `failed`, or `blocked` — a response was required
+    # and did not happen. Everything above them is the system working.
     stage = Column(String, default="brief")
     blocked_on = Column(JSON, default=list)  # named missing fields — refuse-don't-invent, recorded
 

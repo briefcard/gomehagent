@@ -277,9 +277,16 @@ def main() -> int:
                             {"reply_body": "x", "reason": "BLOCKED: banned"})
     with db.SessionLocal() as s2:
         row = s2.get(db.SystemRun, esc)
-        ck("  an escalation is blocked, with the reason kept",
-           row.stage == "blocked" and row.blocked_on
-           and "banned" in row.blocked_on[0])
+        # CHANGED 2026-08-20. This pinned `escalate` -> `blocked`, which the
+        # owner overturned after reading a week of it: routing something to a
+        # person IS the response, and filing it as blocked put every fraud
+        # alert on the ranking of what to go and WRITE.
+        ck("  an escalation is filed as escalated, not blocked",
+           row.stage == "escalated", row.stage)
+        ck("    with the reason kept and readable",
+           "banned" in (row.output or ""), (row.output or "")[:60])
+        ck("    and nothing on the knowledge backlog",
+           not (row.blocked_on or []))
     skip = worker._mail_run("baci", {"id": "msg-3"})
     worker._finish_mail_run(skip, "ignore", {"reply_body": "", "reason": ""})
     with db.SessionLocal() as s2:
@@ -296,8 +303,12 @@ def main() -> int:
     ck("the queue is reported as waiting, not as unfinished",
        h["waiting"] >= 1 and h["unfinished"] == 0,
        "an approval queue and a dead worker are opposite findings")
-    ck("  and a blocked run still outranks a waiting queue in the verdict",
-       "refused" in h["verdict"], h["verdict"])
+    # CHANGED with the above: the escalated run is no longer a refusal, so the
+    # verdict for this account is about the queue rather than about a block.
+    ck("  and an escalation does not read as a refusal",
+       "refused" not in h["verdict"], h["verdict"])
+    ck("  while it is still counted and visible",
+       h["escalated"] >= 1, str(h["escalated"]))
     # The waiting line only earns the verdict when nothing is actually wrong —
     # otherwise "3 waiting on you" would sit where "a connection is dead"
     # belongs.

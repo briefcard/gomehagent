@@ -118,17 +118,28 @@ def _finish_mail_run(run_id: str, action: str, result: dict) -> None:
     """
     if not run_id:
         return
-    # `ignore` is `skipped`, NOT `sent`. Roughly half of inbound mail is promo
-    # and notifications that correctly produce nothing, and counting those as
-    # sends would make the pipeline's success rate mostly an artefact of how
-    # much junk arrived that day. `draft` stays open on purpose — it is waiting
-    # on a person, which is a different state from having finished.
+    # `escalate` is `escalated`, NOT `blocked` — the owner caught this one.
+    #
+    # Routing a carding attack, an MFA change or a verification deadline to a
+    # person is the CORRECT outcome, not a refusal. Filing it as `blocked` made
+    # the Diagnostics log list the mail path's best work as problems, and put
+    # each escalation's reasoning into `blocked_reasons()`, which ranks what to
+    # go and WRITE into the knowledge base — where no amount of writing could
+    # ever satisfy "verify this with TD Bank out of band".
+    #
+    # `ignore` is `skipped`, NOT `sent`: roughly half of inbound is promo that
+    # correctly produces nothing, and counting those as sends would make the
+    # success rate an artefact of how much junk arrived. `draft` stays open —
+    # waiting on a person is not finished.
     stage = {"auto_reply": "sent", "draft": "draft",
-             "escalate": "blocked", "ignore": "skipped"}.get(action, "draft")
+             "escalate": "escalated", "ignore": "skipped"}.get(action, "draft")
     reason = (result.get("reason") or "")
     fields = {"output": (result.get("reply_body") or "")[:2000]}
-    if stage == "blocked":
-        fields["blocked_on"] = [reason[:300]] if reason else ["escalated"]
+    if stage == "escalated":
+        # Kept on the run so the log can say WHY it was raised, without it
+        # counting as a gap. `output` carries it; `blocked_on` deliberately
+        # stays empty.
+        fields["output"] = (reason or "escalated")[:2000]
     try:
         from . import systems
         systems.finish_run(run_id, stage, **fields)
@@ -274,8 +285,23 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             logged = "drafted"
         elif action == "escalate":
             sugg = result.get("suggestion")
+            # The all-clear travels WITH the alarm.
+            #
+            # The same concerns were raised five times because clearing one
+            # meant knowing a URL existed and going to find it. An escalation
+            # somebody cannot answer from where they read it is an escalation
+            # that gets answered by ignoring it — and then the real one looks
+            # like the four before it.
+            clear = ""
+            if config.PUBLIC_BASE_URL.startswith("http"):
+                from urllib.parse import quote as _q
+                clear = (f"\n\n✅ That was you / already handled? "
+                         f"{config.PUBLIC_BASE_URL.rstrip('/')}/admin/allclear"
+                         f"?key={config.APPROVAL_SECRET}"
+                         f"&what={_q(email['subject'][:80])}"
+                         + (f"&tenant={tenant}" if tenant else ""))
             note = (f"🚨 [{alias}] {email['from']} — {email['subject']}\n{detail}"
-                    + (f"\n💡 {sugg}" if sugg else ""))
+                    + (f"\n💡 {sugg}" if sugg else "") + clear)
             whatsapp.send_text(note)
             if not config.WHATSAPP_ENABLED:
                 gmail_client.send_email(
@@ -518,6 +544,12 @@ def systems_tick() -> None:
     for sysrow in systems.all_systems():
         if sysrow.status not in ("live", "designed"):
             continue          # paused and retired are decisions, not failures
+        if sysrow.key in systems.EXTERNALLY_DRIVEN:
+            # Its runs are filed by the pipeline that does the work — see
+            # `systems.EXTERNALLY_DRIVEN`. Evaluating it here reported the mail
+            # path as having no generator while it was drafting replies all
+            # day, and put that claim at the top of the backlog.
+            continue
         live += 1
         run_id = systems.start_run(sysrow.id, sysrow.tenant, trigger="schedule")
         try:
@@ -544,11 +576,17 @@ def systems_tick() -> None:
             # have been working WITHOUT is recorded beside that, so the gap is
             # already ranked in `blocked_reasons()` by the time there is
             # something to block.
+            # `not_built`, not `blocked`. The system is READY; what is missing
+            # is our generator, which is a roadmap item rather than anything
+            # this account can answer. As `blocked` it dominated
+            # `blocked_reasons()` — the ranking of what to go and WRITE — with
+            # a row nobody could ever satisfy by writing, and it was reported
+            # nightly as a problem.
             systems.finish_run(
-                run_id, "blocked",
-                blocked_on=(["no generator yet — system is otherwise able to run"]
-                            + [f"would have run without: {t}"
-                               for t in state["thin"]]))
+                run_id, "not_built",
+                error=("no generator yet — system is otherwise able to run"
+                       + ("; would have run without: "
+                          + ", ".join(state["thin"]) if state["thin"] else "")))
         except Exception as exc:  # noqa: BLE001 — one system must not stop the rest
             log.exception("systems tick failed for %s/%s", sysrow.tenant, sysrow.key)
             systems.finish_run(run_id, "failed",

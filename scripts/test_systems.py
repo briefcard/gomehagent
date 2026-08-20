@@ -54,9 +54,19 @@ def main() -> int:
     # ---- readiness ------------------------------------------------------
     print("\n— readiness names its blockers —")
     lead = systems.find("agency", "lead_responder")
-    check("a fresh system is not ready", not systems.ready(lead)["ready"])
-    check("an empty contract is named as the blocker",
-          any(b.startswith("contract:") for b in systems.ready(lead)["blockers"]))
+    # CHANGED 2026-08-20, deliberately. These pinned the rule that an empty
+    # contract blocks a system, which the owner overturned: "Every system
+    # currently has to fill in the contract otherwise the system fails. That
+    # doesn't need to happen." As a blocker it was also being reported as
+    # something the ACCOUNT was missing — three of the top four rows in a real
+    # week's knowledge backlog were contract fields, which no amount of writing
+    # about the client could ever satisfy.
+    check("an empty contract is NOT a blocker",
+          not any(b.startswith("contract:")
+                  for b in systems.ready(lead)["blockers"]),
+          str(systems.ready(lead)["blockers"]))
+    check("  and is still visible as incomplete",
+          systems.ready(lead)["contract_complete"] is False)
 
     # agency has no ESP wired and no such system; use a tenant that needs one.
     campaign = systems.find("baci", "campaign_email")
@@ -103,9 +113,19 @@ def main() -> int:
 
     # ---- the go-live gate ----------------------------------------------
     print("\n— the contract gate —")
-    refused = systems.update(lead.id, status="live")
-    check("going live is refused while the contract is incomplete",
-          bool(refused.get("error")), refused.get("error", ""))
+    # CHANGED with the above: going live is gated on connections and knowledge,
+    # not on prose. What the contract still gates is `auto` — the rung where
+    # nobody reads the output, which is the case its eight questions were
+    # written for.
+    went = systems.update(lead.id, status="live")
+    check("going live is NOT refused for an incomplete contract alone",
+          went.get("ok") is True or "contract" not in str(went.get("blockers", "")),
+          str(went))
+    lead_live = systems.find("agency", "lead_responder")
+    lead_live.autonomy = "approve_exceptions"
+    gate = systems.can_promote(lead_live)
+    check("  but the unattended rung still requires it",
+          not gate["can"] and "contract" in gate["why"], gate["why"][:70])
 
     for f in systems.CONTRACT_FIELDS:
         systems.update(lead.id, **{f: f"filled {f}"})
@@ -285,10 +305,12 @@ def check_per_system_kb_gate(ck):
     ck("an incomplete contract is NOT a reason it cannot run",
        not any(b.startswith("contract:") for b in blank["impossible"]),
        str(blank["impossible"]))
-    ck("  it is carried as thin instead",
-       any(t.startswith("contract:") for t in blank["thin"]), str(blank["thin"]))
-    ck("  so it stops going live, and nothing else",
-       not blank["ready"] and blank["contract_complete"] is False)
+    ck("  and it is not carried as thin either",
+       not any(t.startswith("contract:") for t in blank["thin"]),
+       str(blank["thin"]))
+    ck("  it is reported on its own, for a person to answer or not",
+       blank["contract_complete"] is False and blank["missing_contract"],
+       "advisory, not a gap the account has to fill")
 
     # The classification must NOT be re-derived from the message text. The
     # first version used `b.startswith("not connected:")` on prose this same

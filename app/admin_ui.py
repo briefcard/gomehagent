@@ -1224,7 +1224,7 @@ def render_systems(key: str, tenant: str = "") -> str:
   <p class="mut">Everything in the catalogue for this account, with what each one
   needs and whether it has it. <b>✓</b> is wired or written, <b>✗</b> is not.
   A system starts in <em>designed / shadow</em> — it records and sends nothing —
-  so the 8-part contract comes after installing, while you are looking at it.</p>
+  and the 8-part contract is optional — worth answering, never a blocker.</p>
   {cards}
 </div>"""
 
@@ -3025,6 +3025,10 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         sysrows = ""
         for row in h["systems"]:
             bad = row["failed"] or row["unfinished"]
+            # "Problem" means a response was required and did not happen. An
+            # escalation is a response — to the owner, on purpose — and mail
+            # that needed no reply got the right treatment. Colouring those red
+            # trains somebody to stop reading the page.
             cls = "bad" if bad else ("warn" if row["blocked"] else "")
             timing = (f'{_dur(row["median_ms"])} median · '
                       f'{_dur(row["slowest_ms"])} slowest'
@@ -3035,10 +3039,12 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
             sysrows += f"""
             <div class="sysrow {cls}">
               <span class="nm">{_esc(row["name"])}</span>{acct}
-              <span class="n">{row["runs"]} runs · {row["blocked"]} blocked ·
-                {row["failed"]} failed · {row["decided"]} decided{
+              <span class="n">{row["runs"]} runs · <b>{row["problems"]}</b> problem(s){
+                f' · {row["worked"]} worked' if row.get("worked") else ""}{
+                f' · {row["escalated"]} raised for you' if row.get("escalated") else ""}{
                 f' · {row["waiting"]} waiting' if row.get("waiting") else ""}{
-                f' · {row["skipped"]} needed no reply' if row.get("skipped") else ""}</span>
+                f' · {row["skipped"]} needed no reply' if row.get("skipped") else ""}{
+                f' · {row["not_built"]} no generator yet' if row.get("not_built") else ""}</span>
               <span class="vd">{_esc(row["verdict"])}</span>
               <span class="n">{timing}</span>
             </div>"""
