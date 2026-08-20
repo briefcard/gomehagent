@@ -872,9 +872,30 @@ and an unimplemented one refuses by name.
 
 **Offline access, deliberately.** No `access_mode` in `extra` means the token
 does not expire and is not tied to a browser session, which is what a worker
-reading orders at 3am needs. `write_content` is deliberately NOT in the scope
-set: asking a client for write access they were not told about is how a connect
-page loses trust.
+reading orders at 3am needs.
+
+**Everything this platform can do, asked ONCE — and disclosed.** The first
+version stopped at the three read scopes, reasoning that asking for undisclosed
+write access loses a client's trust. The owner corrected it: the answer to
+undisclosed is to DISCLOSE, not to omit. Omitting means the `blog` system
+installs, passes readiness and cannot publish, and the client has to be sent
+back through a second consent round — the same reasoning already written into
+the Google flow, where a second round-trip is a second chance for them not to
+get round to it.
+
+So the set covers what the code actually writes: `write_products` (product SEO
+and `body_html`), `read_content`/`write_content` (articles and pages),
+`read_themes`/`write_themes` (the structured-data snippet), alongside the
+reads. The custom-app `howto` was updated to match — they had drifted the
+moment one gained the content scopes, which would have made "connected" mean
+two different things depending on which button somebody used.
+
+`SCOPE_WORDS` renders the grant list on the connect page FROM the flow's own
+scopes, so the two cannot drift, and write access is described by what it
+CHANGES: "publish and revise blog posts and pages" is something a merchant can
+weigh, `write_content` is not. The merchant meets Shopify's own version of this
+a moment later anyway; the one that costs trust is the one they meet only
+there.
 
 **Unproven, and this is the part to watch.** No OAuth leg in this codebase has
 ever run against a real provider, and this one has only met a stub. Before it
@@ -883,7 +904,8 @@ from a Partner app and register the redirect URI **byte for byte**:
 `https://assistant-web-zm2d.onrender.com/oauth/shopify/callback`. The app also
 needs custom distribution to a named store, or to be published — a Partner app
 in neither state has nothing to install. `scripts/test_shopify_oauth.py`, 37
-checks, including the six that fail the moment the shop gate is removed.
+checks, including the six that fail the moment the shop gate is removed and a
+render of the page a client actually sees.
 
 **Three OAuth providers are one env var each**, and nothing else blocks them.
 Register the redirect URI byte-for-byte in the provider console:

@@ -52,9 +52,16 @@ PROVIDERS: dict[str, dict] = {
         # appears wherever providers are rendered, and only when the app
         # credentials exist.
         oauth_optional=True,
+        # The SAME grants the OAuth flow asks for, so a store connected either
+        # way can do the same work. They drifted the moment one of them gained
+        # the content scopes, which would have made "connected" mean two
+        # different things depending on which button somebody used.
         howto="In Shopify admin: Settings → Apps and sales channels → Develop apps "
-              "→ Create an app → Configure Admin API scopes (tick read_products, "
-              "read_orders, read_inventory) → Install app → Reveal token once.",
+              "→ Create an app → Configure Admin API scopes → tick read_products, "
+              "write_products, read_orders, read_inventory, read_content, "
+              "write_content, read_themes and write_themes → Install app → "
+              "Reveal token once. Fewer scopes still connect, and the features "
+              "that needed them fail later rather than here.",
         wrong_key_howto=(
             "The one to paste is on the app's API credentials tab under "
             "\u201cAdmin API access token\u201d, and it begins shpat_ — not the "

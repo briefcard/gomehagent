@@ -141,6 +141,32 @@ def shop_host(raw: str) -> str:
     return host if _SHOP_RE.match(host) else ""
 
 
+#: What each scope lets us do, in words a merchant can weigh. Rendered on the
+#: connect page from the flow's own `scopes`, so a scope added here appears
+#: there and an unlisted one shows as itself rather than silently as nothing.
+#:
+#: Write access is described by WHAT IT CHANGES, not as "write": "publish and
+#: revise blog posts and pages" is something somebody can agree or object to;
+#: "write_content" is not, and a consent screen nobody can read is consent in
+#: name only.
+SCOPE_WORDS = {
+    "read_products": "read your products, prices and collections",
+    "write_products": "update product descriptions and SEO fields",
+    "read_orders": "read orders, so replies can answer about them",
+    "read_inventory": "read stock levels",
+    "read_content": "read your blog posts and pages",
+    "write_content": "publish and revise blog posts and pages",
+    "read_themes": "read your theme",
+    "write_themes": "add a structured-data snippet to your theme "
+                    "(reversible from Shopify's theme history)",
+}
+
+
+def scope_words(provider: str) -> list[str]:
+    """The plain-language grant list for a flow, in the order it is requested."""
+    return [SCOPE_WORDS.get(s, s) for s in (FLOWS.get(provider) or {}).get("scopes", [])]
+
+
 def _identify_shopify(access_token: str, payload: dict) -> dict:
     """What was connected, and what Shopify actually granted.
 
@@ -223,11 +249,23 @@ FLOWS: dict[str, dict] = {
     "shopify": dict(
         authorize="https://{shop}/admin/oauth/authorize",
         token="https://{shop}/admin/oauth/access_token",
-        # The same set the custom-app path asks for, so a store connected
-        # either way can do the same work. `write_content` is deliberately NOT
-        # here: the blog path can publish, and asking a client for write access
-        # they have not been told about is how a connect page loses trust.
-        scopes=["read_products", "read_orders", "read_inventory"],
+        # Everything this platform can do to a Shopify store, asked ONCE.
+        #
+        # The first version stopped at the three read scopes on the grounds
+        # that asking for undisclosed write access loses a client's trust. The
+        # owner corrected it, and he is right: the answer to undisclosed is to
+        # DISCLOSE, not to omit. Omitting means the blog system cannot publish
+        # and the client has to be sent back through a second consent round —
+        # which is the same reasoning already written into the Google flow, and
+        # a second round-trip is a second chance for them not to get round to
+        # it.
+        #
+        # So the connect page lists these in plain words (`SCOPE_WORDS`),
+        # rendered FROM this list so the two cannot drift apart.
+        scopes=["read_products", "write_products",
+                "read_orders", "read_inventory",
+                "read_content", "write_content",
+                "read_themes", "write_themes"],
         extra={},
         client=_shopify_client,
         env="SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET",

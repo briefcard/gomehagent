@@ -90,9 +90,25 @@ def main() -> int:
     loc = r.headers.get("location", "")
     ck("  on the shop's host, not ours", urlparse(loc).netloc == SHOP, loc[:70])
     q = parse_qs(urlparse(loc).query)
+    asked = q.get("scope", [""])[0].split(",")
     ck("  asking for the scopes the flow declares",
-       q.get("scope", [""])[0] == "read_products,read_orders,read_inventory",
-       q.get("scope", [""])[0])
+       asked == oauth.FLOWS["shopify"]["scopes"], q.get("scope", [""])[0])
+    # The blog system publishes articles and pages; without the content scopes
+    # it installs, passes readiness and cannot write — and the client would
+    # have to be sent back through a SECOND consent round to fix it, which is
+    # a second chance for them not to get round to it.
+    for need in ("write_content", "read_content", "write_products"):
+        ck(f"    including {need}, so the store connects ONCE", need in asked)
+
+    print("\n— and the client is told what they are agreeing to —")
+    words = oauth.scope_words("shopify")
+    ck("every requested scope has plain words",
+       len(words) == len(oauth.FLOWS["shopify"]["scopes"])
+       and not any(w.startswith(("read_", "write_")) for w in words),
+       str([w for w in words if w.startswith(("read_", "write_"))]))
+    ck("  and write access says what it CHANGES",
+       any("publish and revise" in w for w in words),
+       "'write_content' is not something a merchant can weigh")
     ck("  with our registered redirect", q["redirect_uri"][0]
        == "https://ops.example.com/oauth/shopify/callback")
     state = q["state"][0]
@@ -192,6 +208,24 @@ def main() -> int:
     ck("shopify_config resolves domain + token",
        conf.get("domain") == SHOP and conf.get("token") == "shpat_from_oauth",
        str(conf))
+
+    print("\n— and it reaches the page the client actually sees —")
+    import datetime as _dt, secrets as _secrets
+    tok = _secrets.token_urlsafe(16)
+    with db.SessionLocal() as s2:
+        s2.add(db.ConnectLink(token=tok, tenant="baci", label="Jane",
+                              expires_at=db.utcnow() + _dt.timedelta(days=7)))
+        s2.commit()
+    page = c.get(f"/connect/{tok}").text
+    ck("the sign-in button is offered", "Sign in with Shopify" in page)
+    ck("  with a box for their store domain",
+       'name="shop"' in page and "your-handle.myshopify.com" in page)
+    ck("  the grants are listed in plain words",
+       "publish and revise blog posts and pages" in page,
+       "a consent screen nobody can read is consent in name only")
+    ck("  and pasting a token is still possible underneath",
+       "Or paste a token instead" in page,
+       "removing it would break connecting a store you hold a key for")
 
     print("\n— both ways stay open —")
     row = [x for x in cred.status("baci") if x["provider"] == "shopify"][0]

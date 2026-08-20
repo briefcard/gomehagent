@@ -2544,13 +2544,26 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
             shop_field = ('<label>Your store domain</label>'
                           '<input name="shop" placeholder="your-handle.myshopify.com"'
                           ' required>' if r.get("shop_scoped") else "")
+            # What they are agreeing to, before they click — rendered from the
+            # flow's own scope list so it cannot drift from what is requested.
+            # A consent screen nobody can read is consent in name only, and the
+            # merchant sees Shopify's version of this a moment later anyway;
+            # the one that costs trust is the one they meet only there.
+            from . import oauth as _oa
+            words = _oa.scope_words(r["provider"])
+            grants = ("<div class=\"mut\">You will be asked to allow:</div>"
+                      "<ul class=\"mut\">"
+                      + "".join(f"<li>{_esc(w)}</li>" for w in words)
+                      + "</ul>") if words else ""
             oauth_block = f"""
             <form class="f" method="get"
                   action="/connect/{_esc(link.token)}/oauth/{_esc(r['provider'])}">
               {shop_field}
+              {grants}
               <div class="row"><button>Sign in with {_esc(spec['name'])}</button></div>
-              <div class="mut">Recommended — you approve the permissions on
-              {_esc(spec['name'])}'s own screen and nothing is copied by hand.</div>
+              <div class="mut">Recommended — you approve these on
+              {_esc(spec['name'])}'s own screen and nothing is copied by hand.
+              You can revoke it there at any time.</div>
             </form>
             <details class="how" style="margin-top:10px">
               <summary>Or paste a token instead</summary>"""
