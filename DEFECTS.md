@@ -1621,6 +1621,29 @@ deliberately rather than worked around, which is the same treatment the two in
 or resented. Make it visible, make it optional, and gate only the case where
 its absence is genuinely dangerous.*
 
+### 2.54 Two systems, one inbox, no owner — closed before it fired 2026-08-20
+
+The owner asked how `inbox_triage`, `service_desk` and `lead_responder` avoid
+conflicting on one mailbox. They do — because two of them have no generator and
+produce nothing. That is a property of the build, not the design.
+
+Nothing would have caught it. `already_seen` is per MESSAGE, not per thread.
+`Conversation.system_key` is written on one path only. And the two paths record
+in different tables — `EmailLog` + `Approval` for triage, `Output` for the
+substrate — so neither could see the other's reply.
+
+**Fix:** `replies.owner()` reads both, `may_reply()` refuses a second system by
+name, and it is checked at BOTH entry points — the mail loop and `skill.run`,
+which the WhatsApp agent can reach directly via the `run_skill` kernel tool.
+
+Recorded here although nothing broke, because the interesting part is the
+question: *what stops this once the missing half exists?* A guard added while
+the answer is still "nothing produces yet" costs an hour; the same guard after
+a customer gets two replies costs the customer.
+
+*Rule: when a component is inert, ask what protects the system once it is not.
+"It cannot happen yet" is a schedule, not a safeguard.*
+
 ## 4. How to verify
 
 ```bash
@@ -1654,6 +1677,7 @@ python3 scripts/test_shopify_compliance.py # the mandatory privacy webhooks
 python3 scripts/test_craft.py             # cross-client lessons and the leak guard
 python3 scripts/test_correlate.py         # the nightly sweep, incl. with no model at all
 python3 scripts/test_allclear.py          # escalation is success; "that was me" sticks
+python3 scripts/test_replies.py           # one reply per thread, across both entry points
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

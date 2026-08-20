@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**60 suites, 60 pass.** Check the OUTPUT, not the exit code, and skip
+**61 suites, 61 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -318,6 +318,58 @@ which was visible anywhere before, which is how a stale breach note went on
 inflating everything for weeks. `/admin/forget_note` retires one.
 
 `scripts/test_allclear.py`, 34 checks. **Nine assertions across four suites pinned the old behaviour and were CHANGED deliberately** — four in `test_systems`, two in `test_skill` (already changed once for the earlier half of this rule), two in `test_grounding` (mine, from wiring the mail ledger) and one in `test_worker_systems`. That spread is the measure of how far a single mislabelled stage had reached.
+
+## One reply per conversation, whoever writes it
+
+Owner's question, 2026-08-20: three systems sit on the same inbox —
+`inbox_triage`, `service_desk`, `lead_responder` — *"how do we make sure they
+don't conflict?"*
+
+**Today they cannot, and that is luck rather than design.** Only
+`inbox_triage` produces anything; the other two are installed, evaluated
+daily, and file `not_built`. One writer, so nothing can collide — a fact about
+the build that expires the moment a generator lands.
+
+**None of the existing guards covers it, and the reason is worth keeping.**
+`worker.already_seen` is keyed on a Gmail MESSAGE id: it stops one email being
+triaged twice and says nothing about two systems answering one thread.
+`Conversation.system_key` records an owner but only on the substrate path. And
+the two paths record in DIFFERENT PLACES — triage writes `EmailLog` and an
+`Approval`, the substrate writes `Output` — so neither can see the other. That
+is exactly the shape this codebase already paid for one level down: an approval
+built from a COPY of a draft meant approving it later "would deliver the
+original text A SECOND TIME to the same customer on the same thread".
+
+`app/replies.py`. `owner()` reads BOTH ledgers, because a check that consults
+one fails precisely when it matters. A second system is refused **by name** —
+which system, doing what, when — since a silent skip looks identical to a
+broken system and sends somebody to debug the wrong thing.
+
+Wired into both doors: the mail loop before it drafts, and `skill.run` —
+**before `preflight`**, deliberately. "Another system already answered this
+thread" is true whether or not this one is installed or connected, it is the
+cheapest check available, and it is the refusal a caller can act on: *"not
+connected: inbox"* would send somebody to wire a credential when the reply has
+already been written.
+
+Four limits, each a real case: the same system may continue its own thread (a
+follow-up is a conversation, not a collision); a DENIED approval frees the
+thread (we decided not to send it — somebody still has to answer); no thread at
+all is allowed, or every first contact would be blocked; and it is scoped per
+account, because Gmail thread ids are not unique across mailboxes.
+
+**Routing so it rarely arises.** `ROUTES` maps the bucket triage already
+computes to an owner — `sales_leads → lead_responder`, `order_* →
+service_desk` — as data rather than an `elif` in the mail loop. Anything
+unclaimed stays with `inbox_triage`: a system that has not claimed a kind of
+mail must not start answering it because somebody added a row.
+
+**A trap for whoever builds the next reply skill.** `skill.run` refuses an
+undeclared parameter BEFORE any guard reads it, so a drafting skill has to
+declare `thread_id` or the guard can never fire. `inbound_reply` does; the
+suite says why.
+
+`scripts/test_replies.py`, 18 checks; disabling the guard fails six by name.
 
 ## Craft — the one thing that crosses the tenant boundary
 
@@ -1604,7 +1656,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **60 suites pass**, none touching the network,
+**Ran and confirmed.** All **61 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1797,7 +1849,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 60 of them, all offline:
+**Run the suites first, before changing anything.** 61 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue

@@ -508,6 +508,27 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     each produced thing is allowed to do.
     """
     sk = get(key)
+
+    # One reply per conversation, whoever writes it — and checked FIRST.
+    #
+    # `run_skill` is a kernel tool, so the WhatsApp agent can reach a drafting
+    # skill directly: a second entry point that never passes through triage. A
+    # guard covering one of two doors is not a guard.
+    #
+    # Before `preflight` deliberately. "Another system already answered this
+    # thread" is true whether or not this one is installed or connected, it is
+    # the cheapest check here, and it is the one whose refusal a caller can act
+    # on — "not connected: inbox" would send somebody to wire a credential when
+    # the real answer is that the reply has already been written.
+    thread = str(params.get("thread_id") or "")
+    if thread and sk and sk.produces == "draft":
+        from . import replies
+        may = replies.may_reply(tenant, thread, sk.system_key)
+        if not may["ok"]:
+            return {"skill": key, "tenant": tenant, "status": "refused",
+                    "blocked_on": [may["why"]], "items": [], "notes": [],
+                    "coverage": {}, "run_id": ""}
+
     pre = preflight(key, tenant)
     if pre["status"] != "ready":
         # A refusal that leaves no trace is a gap nobody can rank. `blocked`

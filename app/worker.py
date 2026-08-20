@@ -250,6 +250,29 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             gmail_client.mark_read(alias, email["id"])
             logged = "auto_replied"
         elif action == "draft":
+            # One reply per thread, whoever writes it.
+            #
+            # `already_seen` stops the same MESSAGE being triaged twice and says
+            # nothing about a second system answering the same conversation.
+            # Today nothing else produces, so this cannot fire — it is here
+            # BEFORE the generators land rather than after the first customer
+            # gets two answers to one question.
+            from . import replies
+            may = replies.may_reply(tenant, email["threadId"], "inbox_triage")
+            if not may["ok"]:
+                log.info("[%s] not drafting: %s", alias, may["why"])
+                detail += f" [not drafted: {may['why'][:120]}]"
+                _finish_mail_run(run_id, "ignore", result)
+                logged = "deferred"
+                with db.SessionLocal() as s:
+                    s.add(db.EmailLog(
+                        account=alias, tenant=tenant,
+                        gmail_message_id=email["id"],
+                        thread_id=email["threadId"], sender=email["from"],
+                        subject=email["subject"], category=bucket,
+                        action=logged, detail=detail))
+                    s.commit()
+                continue
             reply_cc = result.get("reply_cc", "")  # reply-all: preserve original CCs
             # The draft id is KEPT. It was thrown away, which is why the queue
             # and the mailbox could not stay in step: approving composed a

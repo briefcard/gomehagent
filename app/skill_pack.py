@@ -433,8 +433,13 @@ register(Skill(
     system_key="service_desk",
     tier=3,
     needs=("rules.banned_claims",),
+    # `thread_id` is declared so the one-reply-per-conversation guard can see
+    # it: `skill.run` refuses an undeclared parameter before any check runs, so
+    # a guard reading a parameter nobody may pass is a guard that never fires.
+    # Optional — a first contact has no thread, and refusing those would block
+    # most of what this skill is for.
     params=("utterance", "contact_id", "entity_key", "facts",
-            "draft_with_model"),
+            "draft_with_model", "thread_id"),
     writes=False,
     produces="draft",
     run=_run_inbound_reply))
