@@ -2486,6 +2486,64 @@ def system_add(key: str = Depends(admin_key), tenant: str = "", system: str = ""
     return _back_to_systems(key)
 
 
+@app.get("/admin/system_on")
+def system_on(key: str = Depends(admin_key), system: str = "",
+              tenant: str = "", install: int = 0, off: int = 0) -> dict:
+    """Switch one system on (or off) across accounts, BY NAME.
+
+    `system_set` takes a system's uuid, which means turning one thing on for
+    five accounts is five lookups and five calls — enough friction that it does
+    not get done, which is how `content_compliance` sat switched off with a
+    working scanner behind it.
+
+    Reports per account and REFUSES BY NAME: going live is gated on readiness,
+    so an account with no ban list is told that rather than silently skipped.
+    Those refusals are the useful half of the output — they are the list of
+    what to go and fix.
+
+    `install=1` creates the system where it is missing. Off by default, because
+    installing is a decision and a route that quietly installs across every
+    account is how somebody finds a pipeline they never chose.
+    `off=1` pauses instead, using the same addressing.
+    """
+    from . import systems, tenants as tn
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not system:
+        return {"error": "name a system, e.g. ?system=content_compliance",
+                "known": sorted(systems.CATALOG)}
+    if system not in systems.CATALOG:
+        return {"error": f"unknown system {system!r}",
+                "known": sorted(systems.CATALOG)}
+
+    want = [tn.get(tenant)] if tenant else tn.all_tenants()
+    want = [t for t in want if t]
+    if not want:
+        return {"error": f"unknown account {tenant!r}"}
+
+    out: dict[str, str] = {}
+    for t in want:
+        row = systems.find(t.key, system)
+        if not row:
+            if not install:
+                out[t.key] = ("not installed — add &install=1 if it should be")
+                continue
+            row = systems.create(t.key, system)
+        if off:
+            systems.update(row.id, status="paused")
+            out[t.key] = "paused"
+            continue
+        res = systems.update(row.id, status="live")
+        if res.get("error"):
+            # Named, not swallowed. "not ready to go live" alone sends nobody
+            # anywhere; the blockers say which connection or which knowledge.
+            out[t.key] = f"{res['error']}: " + "; ".join(res.get("blockers", []))
+        else:
+            out[t.key] = "live"
+    return {"system": system, "accounts": out,
+            "note": "refusals name what is missing — that list is the work"}
+
+
 @app.get("/admin/system_set")
 def system_set(request: Request, key: str = Depends(admin_key), id: str = ""):
     """Update contract fields, status or autonomy on one system.

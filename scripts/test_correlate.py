@@ -215,6 +215,30 @@ def main() -> int:
     finally:
         _c.scan = real_scan
 
+    print("\n— and turning it on is one call, with the refusals named —")
+    c = TestClient(web.app)
+    # `system_set` takes a uuid, so switching one thing on for five accounts
+    # was five lookups and five calls — enough friction that it did not get
+    # done, which is how a working scanner sat switched off.
+    r = c.get("/admin/system_on?key=s3cret&system=content_compliance"
+              "&install=1").json()
+    ck("it addresses systems by name", "accounts" in r, str(r)[:70])
+    ck("  and reports per account", len(r["accounts"]) >= 2, str(r["accounts"]))
+    ck("  naming what is missing rather than skipping",
+       any("live" == v or ":" in v for v in r["accounts"].values()),
+       str(r["accounts"]))
+    ck("an unknown system is refused with the list",
+       "known" in c.get("/admin/system_on?key=s3cret&system=nope").json())
+    ck("  and installing is opt-in",
+       "not installed" in str(c.get(
+           "/admin/system_on?key=s3cret&system=ad_creative").json()),
+       "a route that quietly installs across every account is how somebody "
+       "finds a pipeline they never chose")
+    anon2 = TestClient(web.app)
+    rr2 = anon2.get("/admin/system_on?system=content_compliance")
+    ck("unauthorised cannot use it",
+       rr2.status_code >= 400 or "error" in rr2.json(), str(rr2.status_code))
+
     print("\n— and the tick stops calling it un-built —")
     ck("content_compliance is scheduled elsewhere",
        "content_compliance" in systems.externally_driven())
@@ -223,7 +247,6 @@ def main() -> int:
        "a daily 'no generator yet' five days after it swept the whole site")
 
     print("\n— on demand, and read-only unless asked —")
-    c = TestClient(web.app)
     before = _sweeps()
     r = c.get("/admin/sweep?key=s3cret&tenant=baci").json()
     ck("it computes without delivering",
