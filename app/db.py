@@ -647,6 +647,46 @@ class Lesson(Base):
     hits = Column(String, default="0")  # times reinforced
 
 
+class CraftLesson(Base):
+    """Something learned at one account that may help at a similar one.
+
+    The ONLY table here with no tenant column, and that is the point: it is
+    deliberately outside the isolation boundary everything else obeys. So the
+    line it must never cross is drawn narrowly and enforced in `app/craft.py`:
+
+    **Craft shapes HOW something is said. It is never WHAT is asserted.** A
+    claim is a fact about a client's business, carries a `claim_id` and gets
+    cited; a lesson is technique, is injected as guidance, and can never become
+    a citation. That distinction is the same one this codebase already draws
+    between prose guidance and the banned-claims list, applied one layer out.
+
+    `learned_from` is kept for audit — "where did this come from" must be
+    answerable — and is NEVER rendered into a prompt or shown to another
+    client. `business_model` is the reach: a lesson from a venue does not
+    travel to a shop, using the vocabulary `metrics.OUTCOMES` already defines.
+
+    Nothing lands here automatically. `review` follows the KB's rule and a
+    person approves, because the leak guard can only catch what it can
+    recognise and a human is the second check.
+    """
+
+    __tablename__ = "craft_lessons"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    # Which kind of business it applies to, or "" for any.
+    business_model = Column(String, default="", index=True)
+    # The situation vocabulary, so a lesson surfaces when it is relevant.
+    situations = Column(JSON, default=list)
+    lesson = Column(Text, nullable=False)      # the guidance itself
+    basis = Column(Text, default="")           # why we believe it
+    learned_from = Column(String, default="")  # audit only, never rendered
+    review = Column(String, default="proposed", index=True)  # proposed|approved|retired
+    approved_by = Column(String, default="")
+    approved_at = Column(DateTime(timezone=True))
+    uses = Column(String, default="0")
+
+
 class ComplianceEvent(Base):
     """One privacy request from Shopify, and what we did about it.
 

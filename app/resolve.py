@@ -165,6 +165,10 @@ def _rules(tenant: str, system: str = "") -> dict:
     return {
         "block": block + guidance,
         "guidance": guidance,
+        # `craft` is NOT folded into `block` here — it is added to the bundle
+        # further down, once the situations are known, so a lesson can be
+        # matched to what is actually being asked rather than injected at
+        # every account on every turn.
         "positioning": (b.positioning if b else "") or "",
         "voice_tone": list((b.voice or {}).get("tone") or []) if b else [],
         "banned_claims": list(b.banned_claims or []) if b else [],
@@ -435,6 +439,24 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # Filed beside the correspondence rather than removed from it. What was
     # said is a fact about the conversation and stays true whatever the stock
     # does now; the drafter needs to know it was said AND that it has aged.
+    # What worked at a SIMILAR account, and it ranks last on purpose.
+    #
+    # This is the one thing in a bundle that did not come from this client.
+    # Precedence here is the same rule claims already use — relevance, then
+    # specificity, then strength — and a cross-client lesson is the least
+    # specific thing that can be said about anything, so it sits at the bottom
+    # and says so in its own text. It is technique, never a fact, and it can
+    # never carry a claim_id: see `app/craft.py` for why that line is the whole
+    # safety design.
+    try:
+        from . import craft as _craft
+        bundle["craft"] = _craft.block(
+            tenant, situations.get("detected") or [])
+        if bundle["craft"]:
+            searched.append("craft")
+    except Exception:                                            # noqa: BLE001
+        bundle["craft"] = ""     # borrowed technique must never lose a draft
+
     from . import ledger as _ledger
     bundle["perishable"] = _ledger.perishable(
         tenant, conversation_id=(convo or {}).get("id", "") if isinstance(convo, dict) else "")

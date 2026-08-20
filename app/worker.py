@@ -695,6 +695,13 @@ def main() -> None:
     # its own once each account's cursor reaches the start of its mailbox.
     sched.add_job(_safe(mail_backfill, "sent-mail backfill"), "cron",
                   hour=3, minute=15)
+    # The evening sweep. Late on purpose: it reads the day that just happened,
+    # and it competes with nothing. The correlation is deterministic Python
+    # over rows we already wrote; only the summary paragraph touches a model,
+    # on the cheapest one, and the findings stand without it.
+    from . import correlate
+    sched.add_job(_safe(correlate.nightly, "nightly sweep"), "cron",
+                  hour=config.SWEEP_HOUR, minute=10)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'

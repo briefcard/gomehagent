@@ -214,14 +214,17 @@ def render(bundle: dict) -> str:
     # identity prose, and injecting it twice is how a prompt starts
     # contradicting itself.
     guidance = ((bundle.get("rules") or {}).get("guidance") or "").strip()
+    # Borrowed technique, last and labelled — see `app/craft.py`.
+    craft = (bundle.get("craft") or "").strip()
 
-    if not parts and not guidance:
+    if not parts and not guidance and not craft:
         return ""
     head = ("\n\n=== WHAT THIS ACCOUNT KNOWS ===\n"
             "Everything below has been approved by the owner. It is what you "
             "are allowed to assert. Nothing here overrides the hard rules.\n"
             + "\n".join(parts)) if parts else ""
-    return head + (f"\n{guidance}" if guidance else "")
+    return (head + (f"\n{guidance}" if guidance else "")
+            + (f"\n{craft}" if craft else ""))
 
 
 def verify(offered: list[str], claimed) -> list[str]:

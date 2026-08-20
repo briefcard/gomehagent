@@ -1388,6 +1388,70 @@ def oauth_callback(provider: str, request: Request, code: str = "",
     return RedirectResponse(f"{back}?ok={quote(stored['detail'])}", 303)
 
 
+@app.get("/admin/sweep")
+def admin_sweep(key: str = Depends(admin_key), tenant: str = "",
+                days: int = 7, run: int = 0) -> dict:
+    """What the nightly sweep would say, on demand.
+
+    `run=1` delivers it to the queue as the scheduled job would; without it
+    this only computes and returns, so it can be read a dozen times without
+    filling the approval queue with duplicates.
+    """
+    from . import correlate
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    days = max(1, min(days, 90))
+    if run:
+        return correlate.nightly(days)
+    if tenant:
+        return {"tenant": tenant, "days": days,
+                "findings": correlate.sweep(tenant, days)}
+    from . import tenants as tn
+    return {"days": days, "findings": [
+        f for t in tn.all_tenants() for f in correlate.sweep(t.key, days)]}
+
+
+@app.get("/admin/craft")
+def craft_list(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Cross-client lessons: what is waiting, and what would reach one account.
+
+    `tenant` shows what THAT account would actually see, which is the only way
+    to check the reach rule by looking rather than by reasoning.
+    """
+    from . import craft
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    out = {"pending": craft.pending()}
+    if tenant:
+        out["would_reach"] = craft.for_account(tenant)
+        out["tenant"] = tenant
+    return out
+
+
+@app.get("/admin/craft_add")
+def craft_add(key: str = Depends(admin_key), lesson: str = "",
+              business_model: str = "", situations: str = "",
+              basis: str = "", learned_from: str = "") -> dict:
+    """Propose a lesson. Refused by name if it identifies an account."""
+    from . import craft
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return craft.propose(
+        lesson, business_model=business_model, basis=basis,
+        learned_from=learned_from,
+        situations=[s.strip() for s in situations.split(",") if s.strip()])
+
+
+@app.get("/admin/craft_review")
+def craft_review(key: str = Depends(admin_key), id: str = "",
+                 approve: int = 1) -> dict:
+    """Approve or retire one lesson. Re-checks the leak guard on the way in."""
+    from . import craft
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return craft.approve(id, approve_it=bool(approve))
+
+
 @app.post("/webhooks/shopify/compliance")
 async def shopify_compliance(request: Request):
     """Shopify's three mandatory privacy webhooks, on one endpoint.

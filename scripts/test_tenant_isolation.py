@@ -36,6 +36,19 @@ PLATFORM_MODELS = {
     "Tenant": "it IS the client",
     "User": "carries tenant_key — the platform's own access rows",
     "FeatureRequest": "about this product, not any client's business",
+    # The ONE model that deliberately crosses the boundary this suite exists to
+    # enforce, and the reason it may: craft is TECHNIQUE, never a fact about a
+    # client's business. It cannot carry a claim_id, so it can never be cited
+    # as true of anyone. A deterministic leak guard (re-run at approval),
+    # reach limited by `business_model`, and human approval are what keep it
+    # narrow — see `app/craft.py` and `scripts/test_craft.py`, where the
+    # boundary is tested rather than the intention.
+    #
+    # Deliberately NOT given a tenant column: a lesson belongs to no account,
+    # and adding one would invite it to be filtered like client data and then
+    # trusted like it.
+    "CraftLesson": "cross-client TECHNIQUE by design — never a client fact; "
+                   "guarded by craft.leaks() + business_model reach + approval",
     "Setting": "run-once markers for the service itself",
     "IntakeLink": "carries tenant",
     "ConnectLink": "carries tenant",

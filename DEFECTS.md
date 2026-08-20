@@ -1508,6 +1508,55 @@ saying why.
 *Rule: an authorisation test must run on a client that has never authorised.
 Reusing the session under test is testing the session, not the guard.*
 
+### 2.49 The one table deliberately outside the isolation boundary — 2026-08-19
+
+Not a defect; a hazard recorded because `test_tenant_isolation` is the
+mandatory suite and `craft_lessons` is the only table that does not obey it. It
+has no tenant column BY DESIGN, so `reset._tenant_models()` never sees it and
+the unclassified report will never name it — which is correct (resetting one
+client must not delete craft learned across all of them) and is exactly the
+kind of silence that hides a mistake later.
+
+What keeps it safe is a single invariant: **craft shapes HOW something is said
+and is never WHAT is asserted as true.** It cannot carry a `claim_id`, so it
+can never be cited as fact. Plus a deterministic leak guard re-run at approval,
+reach limited by `business_model`, and human approval.
+
+*Rule: if something must sit outside the system's central invariant, give it
+ONE narrow licence, write the licence down where the code is, and test the
+boundary rather than the intention.*
+
+**And the mandatory suite caught it, which is the point of it.**
+`test_tenant_isolation` failed on `CraftLesson` — not because the design was
+wrong but because the exception had not been DECLARED. Its own instructions
+say it: a model that genuinely holds no client data goes in `PLATFORM_MODELS`
+with a reason, and adding one without doing either fails the suite. That is the
+difference between a standard and a preference. The licence now sits in the
+exception list where the next person meets it before they meet the table.
+
+### 2.50 The sweep must survive its own model — 2026-08-19
+
+Not a defect found; a failure mode designed out and then pinned, because the
+obvious version of a nightly correlation sweep has it. If the model writes the
+findings, then an expired API key, a rate limit or a bad night turns the sweep
+SILENT — and silence from a monitoring job is indistinguishable from "nothing
+was wrong". That is the same shape as §1's absence-collapsed-into-a-value, at
+the level of a whole feature.
+
+So the correlation is deterministic Python over rows already written, and the
+model only puts words around numbers it is handed. `test_correlate.py` runs the
+entire sweep with `ANTHROPIC_API_KEY` unset and asserts it still delivers,
+still carries every number and every suggested action, and prints "written
+without the summariser" rather than quietly reading thinner.
+
+The same reasoning covers a check that raises: it is reported as a
+`sweep_error` finding rather than skipped, because a sweep that silently drops
+half its checks reads as a clean night.
+
+*Rule: when a job's PURPOSE is to notice things, its failure mode must never be
+silence. Ask what it prints when its most expensive dependency is gone, and
+make that the tested path.*
+
 ## 4. How to verify
 
 ```bash
@@ -1538,6 +1587,8 @@ python3 scripts/test_diagnostics.py       # the run/tool/check log, classified a
 python3 scripts/test_grounding.py         # the KB reaches the mail path, and guards it
 python3 scripts/test_shopify_oauth.py     # client-store sign-in; the shop gate and its attacks
 python3 scripts/test_shopify_compliance.py # the mandatory privacy webhooks
+python3 scripts/test_craft.py             # cross-client lessons and the leak guard
+python3 scripts/test_correlate.py         # the nightly sweep, incl. with no model at all
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

@@ -148,6 +148,12 @@ BUCKET_MODELS = json.loads(os.environ.get(
 
 # Cheap model for backfill classification (no drafting, label-only)
 CLASSIFY_MODEL = os.environ.get("CLASSIFY_MODEL", "claude-haiku-4-5-20251001")
+# The nightly correlation sweep. Cheap on purpose and separate from
+# CLASSIFY_MODEL so one can be changed without the other: the sweep does not
+# route anything, it only puts words around numbers that were already computed.
+# Nothing it writes is sent anywhere — it lands in a digest a person reads.
+SWEEP_MODEL = os.environ.get("SWEEP_MODEL", "claude-haiku-4-5-20251001")
+SWEEP_HOUR = int(os.environ.get("SWEEP_HOUR", "20"))
 BUCKET_BACKFILL_DAYS = int(os.environ.get("BUCKET_BACKFILL_DAYS", "30"))
 
 POLL_INTERVAL_MIN = int(os.environ.get("POLL_INTERVAL_MIN", "5"))

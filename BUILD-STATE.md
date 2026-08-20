@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**57 suites, 57 pass.** Check the OUTPUT, not the exit code, and skip
+**59 suites, 59 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -244,6 +244,60 @@ scope clause and watching fourteen assertions fail.
 been diagnosed with it yet, and the first one will find something — every
 assumption in this codebase tested against reality so far has been wrong in some
 detail.
+
+## Craft — the one thing that crosses the tenant boundary
+
+Built 2026-08-19 at the owner's request: *"The cross-client layer may inform
+how I handle specific situations across similar clients… Just as you do inside
+of the claude client you sometimes borrow knowledge from what happens in each
+client, but we would want to keep it secure as possible."* Low-priority
+learning, kept as narrow as it can be made.
+
+**One invariant does the security work, and everything else follows from it:**
+
+> Craft shapes HOW something is said. It is never WHAT is asserted as true.
+
+A claim is a fact about a client's business — it carries a `claim_id`, it is
+cited, and an assertion traces back to it. A craft lesson is technique, is
+injected as guidance, and structurally cannot become a citation. A leak of
+technique is embarrassing; a leak of one client's FACTS into another client's
+output is the thing this entire architecture exists to prevent. Drawing the
+line there is what makes the rest of it a small problem. It is the same line
+already drawn between prose guidance and the banned-claims list, one layer out.
+
+**Three gates, and none of them is trust.**
+
+* **Reach is `business_model`**, not "everyone" — already on `Tenant` from the
+  metrics work, so no second taxonomy. Baci and Eien are both
+  `ecom_inventory`; Ironside is `local_venue` and a shop's lesson never
+  arrives there. A lesson with no model set applies anywhere and ranks BELOW
+  one that named this kind of business.
+* **A deterministic leak guard.** Every account's key, name and domain, every
+  entity name and catalogue key, every brand's positioning — read from the
+  database rather than listed, because a hand-kept list going stale here means
+  a leak rather than a gap — plus emails, URLs and long numbers by shape. It
+  **refuses and names what it found**; it does NOT scrub. Rewriting a lesson
+  to get it past a filter is not something code should do on somebody's
+  behalf. Re-checked AT APPROVAL, because a word that was harmless when
+  written may be a client's name by the time it is approved — the suite proves
+  that with a lesson about a "stonehouse table" and a client onboarded later
+  called Stonehouse.
+* **A person approves.** The guard catches what it can recognise, which is not
+  everything.
+
+**And it ranks last, in the text as well as in the code.** The block says it is
+borrowed, that it is the weakest thing in the brief, and that it may never be
+asserted. It never names the account it came from — `learned_from` is audit
+data for the owner at `/admin/craft`, never prompt data. `MIN_TOKEN = 5` keeps
+the guard from blocking a lesson because it contains a short common word that
+happens to be a product name.
+
+`scripts/test_craft.py`, 31 checks; disabling the guard fails 16 of them.
+
+**Built the CARRIER, not the DISCOVERER — and that is the honest gap.** Lessons
+have to be written by a person today. Nothing observes five accounts and
+proposes "this keeps working". That is the correlation engine, and it is the
+piece the owner actually asked about; see the plan.
 
 ## Time — claims expire, and so do answers
 
@@ -1476,7 +1530,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **57 suites pass**, none touching the network,
+**Ran and confirmed.** All **59 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1598,6 +1652,68 @@ for one.
 **6 — Squarespace, or decide Ironside's blog is not a system.** It is installed
 and permanently blocked on a provider that does not exist.
 
+**2 — ~~The correlation pass.~~ BUILT — the nightly sweep.** `app/correlate.py`,
+scheduled at `SWEEP_HOUR` (20:10 by default), one digest for every account.
+
+The owner asked for it *"for evening sweeps with a lower cost model"*, and both
+constraints shaped it. **The correlation is deterministic Python over rows we
+already wrote; the model only puts words around numbers it is handed.** That is
+the codebase's own rule (AI at the edges) and it is also the cost design: a few
+hundred output tokens a night on `SWEEP_MODEL`, which defaults to Haiku and is
+separate from `CLASSIFY_MODEL` so one can change without the other.
+
+**The findings stand when the model does not run at all** — the suite runs the
+whole sweep with no API key and asserts it still delivers, still carries every
+number, and SAYS it was written without the summariser rather than quietly
+reading thinner. A sweep that goes silent when a key expires is worse than one
+that reads awkwardly.
+
+Six checks, ordered by what each costs rather than by how interesting it is:
+a dying connection, the gap that cost the most output, a rule the drafter keeps
+reaching for (framed as COST — each one was caught; the finding is that it
+keeps happening, and the fix is guidance rather than another rule), a queue
+nobody has worked, spend that produced nothing shipped, and grounding that is
+not landing. That last one is the specific thing flagged to watch after the
+grounding work: claims on file and none cited means the prompt is being
+ignored, not that the knowledge is missing, and those are opposite fixes.
+
+**Computed, never stored** — same reasoning as `scope_conflicts`: a finding
+that has been dealt with stops appearing on its own, and one that recurs is
+still true. A findings table would need rows marked resolved, and a queue of
+stale findings is one that stops being read. **One message per sweep, never one
+per finding**, which the suite pins — this codebase has lived the other
+version. A check that raises is REPORTED as a `sweep_error` rather than
+skipped, because a sweep that silently drops half its checks reads as a clean
+night. `/admin/sweep` computes on demand and delivers only with `run=1`, so it
+can be read a dozen times without filling the queue.
+
+`scripts/test_correlate.py`, 28 checks.
+
+**Still pulled, not pushed, for the cross-client half:** the sweep runs per
+account and `craft` is fed by hand. Feeding accepted findings into
+`craft.propose` where they are about technique rather than one client's
+business is the next join, and the carrier already exists.
+
+**~~2 — The correlation pass, which is what the owner actually asked for.~~**
+*"How are we making sure that we are finding correlations and getting all the
+context I have all the time so that this agent is as informed of all the
+clients at scale?"* Today context is PULLED when a task asks, with an utterance
+to match on. Nothing watches. The July finding that mattered most — Baci's ad
+spend holding while the zodiac ranges went out of stock — was found BY HAND,
+and the system holds every input it needed: `ToolCall`, `Output`, the ledger,
+`SystemRun`, Meta insights, inventory.
+
+Build it as a scheduled pass that reads the ledgers and PROPOSES findings with
+their evidence into the queue the owner already works — findings, never
+conclusions, approved like claims are. Start with
+**knowledge-gaps-vs-blocked-output**: every input is already local, no new
+integration, and it makes the KB queue self-prioritising. `blocked_reasons()`
+is half of it already. Then point the same machinery at spend-vs-stock, which
+is the same shape with two live sources.
+
+Feed accepted findings to `craft.propose` where they are about technique rather
+than about one client's business — the carrier exists and is empty.
+
 **Deliberately NOT next:** more knowledge authoring. It is no longer a
 prerequisite for producing, the queue now fills from real runs, and the
 unguarded write paths above are where the actual risk is.
@@ -1607,7 +1723,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 57 of them, all offline:
+**Run the suites first, before changing anything.** 59 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue
