@@ -1670,6 +1670,36 @@ Two suites had assertions that only passed because "off" meant nothing.
 three call sites each interpret the values themselves, the disagreements are
 already there — you just have not hit them yet.*
 
+### 2.56 Doing on purpose what had only ever happened by accident — 2026-08-20
+
+Six tests in this log passed for the wrong reason, and every one was found by
+accident — the portal cookie over http, `test_oauth` against a page that
+stacked every account, a fixture with literal backslash-n, an authorisation
+check on a client that had already signed in, an assertion about absence run
+against an empty table, and a go-live gate that passed by never being asked.
+Three of those were found in a single day.
+
+`scripts/sabotage.py` does it deliberately. Each entry disables ONE guard, runs
+the suites that claim to cover it, and expects them to fail. Nine guards, all
+currently caught: tenant scoping, the mail ban list, guidance reaching the
+prompt, the cross-client leak guard, the Shopify shop-host allowlist, webhook
+signature verification, one-reply-per-thread, the on/off switch, and the sweep
+surviving with no model.
+
+Three outcomes, and the third is the one worth having: `caught`, `MISSED` (the
+guard can be deleted today and nothing says so), and **`STALE`** — the code no
+longer contains what the entry patches, so it has been testing nothing since it
+moved. A sabotage harness that silently reports a pass when its target has gone
+is the same failure it exists to find, one level up.
+
+It edits the live tree, so it restores after every entry and VERIFIES the
+restore byte-for-byte before continuing; a failed restore is fatal and shouted
+about. No `return` inside the `finally` that restores — that would swallow the
+exception which sent it there and turn a crashed suite into a silent success.
+
+*Rule: a test suite's coverage is a claim, and claims get checked. Run the
+harness after adding a guard, and read a STALE line as loudly as a MISSED one.*
+
 ## 4. How to verify
 
 ```bash
@@ -1704,6 +1734,7 @@ python3 scripts/test_craft.py             # cross-client lessons and the leak gu
 python3 scripts/test_correlate.py         # the nightly sweep, incl. with no model at all
 python3 scripts/test_allclear.py          # escalation is success; "that was me" sticks
 python3 scripts/test_replies.py           # one reply per thread, across both entry points
+python3 scripts/sabotage.py               # turn each guard off; the suites must notice
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

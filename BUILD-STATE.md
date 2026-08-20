@@ -1895,6 +1895,16 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
+**And after adding a guard, check the suite would notice it going.**
+
+    python3 scripts/sabotage.py
+
+Nine guards, each disabled in turn against the suites that claim to cover it.
+Six tests in `DEFECTS` passed for the wrong reason and every one was found by
+accident — three of them in a single day. This does it on purpose. Read a
+`STALE` line as loudly as a `MISSED` one: it means the code moved and that
+entry has been covering nothing since.
+
 **Run the suites first, before changing anything.** 61 of them, all offline:
 
     for f in scripts/test_*.py; do
