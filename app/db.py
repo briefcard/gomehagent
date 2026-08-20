@@ -647,6 +647,36 @@ class Lesson(Base):
     hits = Column(String, default="0")  # times reinforced
 
 
+class ComplianceEvent(Base):
+    """One privacy request from Shopify, and what we did about it.
+
+    Shopify's three mandatory webhooks carry a LEGAL deadline (30 days), and
+    two of them cannot be satisfied by code alone: deciding what counts as a
+    customer's data in a system that stores replies, drafts and correspondence
+    is a judgement. So this table is the record that the request arrived, what
+    was deleted automatically, and what a person still has to do — because a
+    compliance obligation nobody can prove was met is one that was not met.
+
+    The payload is kept deliberately: it is the merchant's own request, it is
+    small, and reconstructing "which customer did Shopify ask about in March"
+    from a deleted row is impossible. `handled_at` is null until somebody
+    closes it.
+    """
+
+    __tablename__ = "compliance_events"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    topic = Column(String, default="", index=True)   # customers/redact | ...
+    shop = Column(String, default="", index=True)    # the myshopify domain
+    tenant = Column(String, default="", index=True)  # ours, when resolvable
+    payload = Column(JSON, default=dict)
+    # What code did on its own, and what it could not decide.
+    acted = Column(JSON, default=list)
+    needs_human = Column(Text, default="")
+    handled_at = Column(DateTime(timezone=True))
+
+
 class SystemDoc(Base):
     """The Systems Map — durable, structured knowledge of HOW Gomeh's world is
     organized: Drive folder taxonomies, filing conventions, registries, active

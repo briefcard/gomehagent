@@ -1489,6 +1489,25 @@ suite asserts the attacks, and removing the gate fails six checks by name.
 the point of assembly, not only at the door. A caller that already validated is
 a caller you are trusting.*
 
+### 2.48 A test that passed because the client was already signed in — caught 2026-08-19
+
+`test_shopify_compliance` asserted that `/admin/privacy_requests` refuses an
+unauthenticated read, using the same `TestClient` that had authenticated a few
+lines earlier. It carried the console session cookie, so "no key" was a signed-in
+request and the assertion passed for the wrong reason — it only surfaced because
+the route happens to return `{"error": …}` with a 200 rather than a 4xx.
+
+Fifth instance of a test passing for the wrong reason, and the SECOND caused by
+this exact cookie (§ the portal `secure=True` trap). The tell is the same: the
+assertion was about being refused, and nothing had been arranged for it to be
+refused FOR.
+
+**Fix:** a fresh `TestClient` for the unauthenticated check, with a comment
+saying why.
+
+*Rule: an authorisation test must run on a client that has never authorised.
+Reusing the session under test is testing the session, not the guard.*
+
 ## 4. How to verify
 
 ```bash
@@ -1518,6 +1537,7 @@ python3 scripts/test_console_frame.py     # one account per page, seeded so a le
 python3 scripts/test_diagnostics.py       # the run/tool/check log, classified and scoped
 python3 scripts/test_grounding.py         # the KB reaches the mail path, and guards it
 python3 scripts/test_shopify_oauth.py     # client-store sign-in; the shop gate and its attacks
+python3 scripts/test_shopify_compliance.py # the mandatory privacy webhooks
 python3 scripts/test_brief.py --demo
 python3 scripts/seed_kb.py --report      # what each account still needs
 python3 scripts/tenant_scope.py --report # what is still unattributed

@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**56 suites, 56 pass.** Check the OUTPUT, not the exit code, and skip
+**57 suites, 57 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -897,6 +897,58 @@ weigh, `write_content` is not. The merchant meets Shopify's own version of this
 a moment later anyway; the one that costs trust is the one they meet only
 there.
 
+### The privacy webhooks, and the line code must not cross
+
+Shopify requires `customers/data_request`, `customers/redact` and `shop/redact`
+of every public app; review checks it and there was no webhook receiver here at
+all. `app/shopify_webhooks.py` plus `POST /webhooks/shopify/compliance` — one
+URL for all three, because the payloads differ while the verification, the
+recording and the shop lookup do not, and `X-Shopify-Topic` already says which.
+
+**Verified on the RAW bytes, before anything parses them.** `json.loads` then
+`json.dumps` does not round-trip, so a digest over re-serialised JSON fails on
+valid deliveries. Unverified is **401** — what Shopify's own checks look for —
+because answering 200 to whatever arrives is the failure the signature exists
+to prevent.
+
+**`shop/redact` is mechanical and does exactly its own job.** The store's
+credential and the entities `catalog_sync` copied out of it, matched on
+`origin="store_sync"` rather than on the domain — `source` is sometimes the
+literal "shopify" and a URL match would silently spare half the rows. It is
+deliberately NOT a tenant wipe: an account here is a client relationship with a
+mailbox, a knowledge base and years of correspondence that never came from
+Shopify, and destroying those on an uninstall would answer a request that never
+covered them. If the shop is also in `SHOPIFY_STORES_JSON` it says so — this
+endpoint cannot edit the service's environment.
+
+**The customer topics refuse to guess, and that is the design.** This system
+stores no Shopify customer records — they are read live, which is why `lookups`
+exists — but it stores REPLIES, and whether a sentence in a drafted email is
+"the customer's personal data" is a judgement about content. A redactor that
+guessed would either delete a client's correspondence or claim a deletion it
+did not make. So those record the request, report exactly WHERE the address
+appears (a count and the places, never the bodies — copying correspondence into
+a compliance row would create a second store of the very data being asked
+about), and queue it for the owner. Thirty days is the deadline and
+`/admin/privacy_requests` is the proof it was worked.
+
+**Never 500, and never 4xx an unknown topic.** Shopify retries a failure for
+days, so one malformed payload would become a flood; and a 4xx on an
+unrecognised topic reads as a broken endpoint to their tests. Both are recorded
+and acknowledged.
+
+`db.ComplianceEvent` was classified in `reset.py` **in the same change that
+added it** — the lesson of `kb_assets` and `kb_brand`, each named by the
+unclassified report for weeks while a reset quietly left their data behind and
+reported success. `scripts/test_shopify_compliance.py`, 24 checks; three fail
+the moment verification accepts anything.
+
+**Still required before submission, and NOT built:** the protected customer
+data application (`read_customers` and `read_orders` both carry PII — the scope
+alone is not enough, and unapproved fields come back REDACTED rather than
+erroring, which reads as an empty account), and `read_all_orders` if anything
+is to look further back than 60 days.
+
 **Unproven, and this is the part to watch.** No OAuth leg in this codebase has
 ever run against a real provider, and this one has only met a stub. Before it
 can run at all, the owner must set `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET`
@@ -1424,7 +1476,7 @@ review never enters a bundle.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **56 suites pass**, none touching the network,
+**Ran and confirmed.** All **57 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1555,7 +1607,7 @@ unguarded write paths above are where the actual risk is.
 **Read, and only these:** this file, then `DEFECTS.md` §1 and §3, then
 `app/skill.py`. Do not search the repo broadly.
 
-**Run the suites first, before changing anything.** 56 of them, all offline:
+**Run the suites first, before changing anything.** 57 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue

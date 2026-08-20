@@ -1388,6 +1388,84 @@ def oauth_callback(provider: str, request: Request, code: str = "",
     return RedirectResponse(f"{back}?ok={quote(stored['detail'])}", 303)
 
 
+@app.post("/webhooks/shopify/compliance")
+async def shopify_compliance(request: Request):
+    """Shopify's three mandatory privacy webhooks, on one endpoint.
+
+    One URL for all three topics rather than three routes: the payloads differ
+    but the verification, the recording and the "who is this shop" lookup are
+    identical, and `X-Shopify-Topic` already says which arrived. Register the
+    same URL against each of the three in the app config.
+
+    The body is read as BYTES and verified before anything parses it — a digest
+    over re-serialised JSON does not round-trip and would fail valid
+    deliveries. An unverified request gets 401, which is what Shopify's own
+    checks look for; answering 200 to whatever arrives is the failure the
+    signature exists to prevent.
+    """
+    from fastapi.responses import JSONResponse
+
+    from . import shopify_webhooks as swh
+
+    raw = await request.body()
+    if not swh.verify(raw, request.headers.get("X-Shopify-Hmac-Sha256", "")):
+        return JSONResponse({"error": "unverified"}, status_code=401)
+
+    topic = request.headers.get("X-Shopify-Topic", "")
+    shop = request.headers.get("X-Shopify-Shop-Domain", "")
+    try:
+        payload = json.loads(raw or b"{}")
+        if not isinstance(payload, dict):
+            payload = {"_raw": str(payload)[:500]}
+    except Exception:                                            # noqa: BLE001
+        payload = {}
+
+    # Never 500. Shopify retries a failed delivery for days, so an exception
+    # here turns one malformed payload into a flood — and the request would
+    # still be unrecorded, which is the half that matters legally.
+    try:
+        swh.handle(topic, shop, payload)
+    except Exception:                                            # noqa: BLE001
+        log.exception("shopify compliance webhook failed: %s", topic)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/admin/privacy_requests")
+def privacy_requests(key: str = Depends(admin_key), open_only: bool = True) -> dict:
+    """What Shopify has asked us to do about somebody's data, and what is left.
+
+    Thirty days is the deadline and the queue is the only proof it was worked,
+    so this is a read of the record rather than a computation over it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    with db.SessionLocal() as s:
+        q = s.query(db.ComplianceEvent)
+        if open_only:
+            q = q.filter(db.ComplianceEvent.handled_at == None)  # noqa: E711
+        rows = q.order_by(db.ComplianceEvent.created_at.desc()).limit(200).all()
+        return {"open_only": open_only, "count": len(rows), "requests": [{
+            "id": r.id, "at": db.as_utc(r.created_at).isoformat(),
+            "topic": r.topic, "shop": r.shop, "tenant": r.tenant,
+            "done_automatically": r.acted or [],
+            "needs_a_person": r.needs_human or "",
+        } for r in rows]}
+
+
+@app.get("/admin/privacy_close")
+def privacy_close(key: str = Depends(admin_key), id: str = "") -> dict:
+    """Mark one privacy request handled, once a person has done it."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    with db.SessionLocal() as s:
+        row = s.get(db.ComplianceEvent, id)
+        if not row:
+            return {"error": f"no privacy request {id!r}"}
+        row.handled_at = db.utcnow()
+        s.commit()
+        return {"ok": True, "id": id, "topic": row.topic}
+
+
 @app.get("/admin/connect_new")
 def connect_new(key: str = Depends(admin_key), tenant: str = "",
                 label: str = "", days: int = 30) -> dict:

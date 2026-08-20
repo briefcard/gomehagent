@@ -154,6 +154,8 @@ SCOPE_WORDS = {
     "write_products": "update product descriptions and SEO fields",
     "read_orders": "read orders, so replies can answer about them",
     "read_inventory": "read stock levels",
+    "read_customers": "see who a message is from — their past orders and any "
+                      "previous problems",
     "read_content": "read your blog posts and pages",
     "write_content": "publish and revise blog posts and pages",
     "read_themes": "read your theme",
@@ -262,8 +264,14 @@ FLOWS: dict[str, dict] = {
         #
         # So the connect page lists these in plain words (`SCOPE_WORDS`),
         # rendered FROM this list so the two cannot drift apart.
+        # `read_customers` is here because `lookups.TOOLS` declares
+        # `shopify_customer` — "order history, lifetime value, previous
+        # issues" — so a support reply is meant to be able to see who it is
+        # answering. Note it needs Shopify's separate PROTECTED CUSTOMER DATA
+        # approval on top of the scope; without that the fields come back
+        # REDACTED rather than erroring, which reads as an empty account.
         scopes=["read_products", "write_products",
-                "read_orders", "read_inventory",
+                "read_orders", "read_inventory", "read_customers",
                 "read_content", "write_content",
                 "read_themes", "write_themes"],
         extra={},

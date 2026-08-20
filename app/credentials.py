@@ -58,8 +58,9 @@ PROVIDERS: dict[str, dict] = {
         # different things depending on which button somebody used.
         howto="In Shopify admin: Settings → Apps and sales channels → Develop apps "
               "→ Create an app → Configure Admin API scopes → tick read_products, "
-              "write_products, read_orders, read_inventory, read_content, "
-              "write_content, read_themes and write_themes → Install app → "
+              "write_products, read_orders, read_inventory, read_customers, "
+              "read_content, write_content, read_themes and write_themes → "
+              "Install app → "
               "Reveal token once. Fewer scopes still connect, and the features "
               "that needed them fail later rather than here.",
         wrong_key_howto=(

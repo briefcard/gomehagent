@@ -61,7 +61,7 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",
               "seo_snapshots", "voice_profiles", "follow_ups",
               "seo_site_config", "system_docs", "assurance_events",
-              "tool_calls", "reported_figures"}
+              "tool_calls", "reported_figures", "compliance_events"}
 # `assurance_events` is operations, not knowledge: it records what the system
 # DID — which drafts were checked and what was caught — and no crawl or sync
 # can rebuild it. Classified in the same change that added the table, because
@@ -73,6 +73,14 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
 # discovered — and deleting a client's login is a separate decision from
 # clearing their data anyway.
 ACCESS = {"credentials", "connect_links", "intake_links", "portal_links"}
+# `compliance_events` is OPERATIONS and classified in the same change that adds
+# it, which is the whole lesson of the two comments above: `kb_assets` and
+# `kb_brand` were each named by the unclassified report for weeks while a reset
+# quietly left their data behind and reported success.
+#
+# Operations rather than access: it is a record of what was ASKED and what we
+# did, not a credential — and a privacy request that survives a reset is the
+# correct behaviour, because the obligation does too.
 
 GROUPS = {"knowledge": KNOWLEDGE, "operations": OPERATIONS, "access": ACCESS}
 
