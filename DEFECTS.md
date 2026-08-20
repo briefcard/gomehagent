@@ -1644,6 +1644,32 @@ a customer gets two replies costs the customer.
 *Rule: when a component is inert, ask what protects the system once it is not.
 "It cannot happen yet" is a schedule, not a safeguard.*
 
+### 2.55 Three answers to one question — fixed 2026-08-20
+
+`System.status` looked like a switch and was not. `skill.preflight` blocked on
+`retired` alone, so a PAUSED system kept running skills — pausing being the one
+action whose entire meaning is stop. `systems_tick` ran `live` AND `designed`,
+which filed a daily row against every pipeline nobody had turned on. And run
+re-homing checked only that a row existed.
+
+**Fix:** `systems.is_on()`, one question, asked by all three. Only `live` is on.
+
+The interesting part is what it took to make the fix safe. `inbox_triage`'s row
+was being created `designed` while the mail path ran regardless — the row
+described nothing. Gating the mail path on a switch the row had never honestly
+carried would have stopped every inbox on deploy, so the row is created and
+back-filled `live` (it IS running), while anything explicitly `paused` is left
+alone: `designed` was never a decision, `paused` was.
+
+And it fails OPEN — no row, no tenant, or a raise all mean run. A switch nobody
+set is not a switch turned off.
+
+Two suites had assertions that only passed because "off" meant nothing.
+
+*Rule: a status column is not a switch until exactly one predicate reads it. If
+three call sites each interpret the values themselves, the disagreements are
+already there — you just have not hit them yet.*
+
 ## 4. How to verify
 
 ```bash

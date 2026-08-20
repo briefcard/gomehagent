@@ -118,8 +118,18 @@ def seed(tenant, banned=(), claim=""):
     for p in (CLEAN, DIRTY, ASKS, UNREAD):
         kb.add_entity(tenant, "product", p["handle"], p["title"],
                       description=p["body"], origin="seed")
-    return (systems.find(tenant, "catalog_compliance")
-            or systems.create(tenant, "catalog_compliance"))
+    row = (systems.find(tenant, "catalog_compliance")
+           or systems.create(tenant, "catalog_compliance"))
+    # Switched ON. Since 2026-08-20 the on/off state is THE dictator of whether
+    # a system runs, and `designed` is off — without this every assertion below
+    # comes back "the system is designed" and the refusals they exist to check
+    # are never reached. Set directly because `update(status="live")` is gated
+    # on readiness, and several of these fixtures are deliberately unready.
+    with db.SessionLocal() as _s:
+        r = _s.get(db.System, row.id)
+        r.status = "live"
+        _s.commit()
+    return systems.find(tenant, "catalog_compliance")
 
 
 def contract(row, autonomy="shadow", live=True):
@@ -304,11 +314,26 @@ def main():
     # blocker, and the right one. (The contract no longer is; see above.) That
     # is the earlier and better refusal, asserted rather than worked around.
     nrow = seed("eien")
+    # Back to `designed` first: `seed` switches systems on so the rest of this
+    # file can run at all, and `update` only applies the go-live gate on the
+    # transition INTO live. Without this the row is already live and the gate
+    # never runs — the assertion would pass by never being asked.
+    with db.SessionLocal() as _s:
+        _r = _s.get(db.System, nrow.id)
+        _r.status = "designed"
+        _s.commit()
     live = systems.update(nrow.id, status="live")
     ck("an account with no ban list cannot even go live",
        live.get("error") == "not ready to go live",
        str(live))
     nrow = contract(nrow, live=False)
+    # And on again: the go-live gate has been proven above, and what the next
+    # assertions test is the BAN LIST refusal. Left designed, they would come
+    # back "the system is designed" — a true answer to a different question.
+    with db.SessionLocal() as _s:
+        _r = _s.get(db.System, nrow.id)
+        _r.status = "live"
+        _s.commit()
     r = skill.run("catalog_compliance", "eien")
     ck("no ban list blocks the skill", r["status"] == "blocked", r["status"])
     ck("  and says the validator would have nothing to check against",

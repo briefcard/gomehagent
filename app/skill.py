@@ -483,9 +483,13 @@ def preflight(key: str, tenant: str) -> dict:
         return {"status": "blocked", "blocked_on": [
             f"the {sk.system_key} system is not installed for {tenant} — "
             f"install it on the Systems tab — the contract is optional"]}
-    if row.status == "retired":
-        return {"status": "blocked",
-                "blocked_on": [f"the {sk.system_key} system is retired"]}
+    # The switch, not a list of bad statuses. This checked `retired` only, so a
+    # PAUSED system went on running skills — pausing something is the one
+    # action whose whole meaning is "stop", and it did not.
+    if not systems.is_on(row):
+        return {"status": "blocked", "blocked_on": [
+            f"the {sk.system_key} system is {row.status or 'not live'} — turn "
+            f"it on on the Systems tab if it should be running"]}
 
     gate = systems.ready(row)
     if not gate["can_produce"]:

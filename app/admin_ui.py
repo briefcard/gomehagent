@@ -1204,6 +1204,21 @@ def render_systems(key: str, tenant: str = "") -> str:
                       f'&amp;tenant={_esc(tenant)}&amp;system={_esc(p["key"])}">'
                       f'Install anyway</a>'
                       f'<div class="when">will not run until: {_esc(what)}</div>')
+        # What installing this one actually gets you, when the mail path is
+        # already doing the work. Without this the card reads as "switch on a
+        # pipeline", when the honest description is "start governing a kind of
+        # mail triage is answering anyway" — which is a different and much
+        # easier decision.
+        from . import replies as _rep
+        mail_owned = ""
+        if p["key"] in set(_rep.ROUTES.values()):
+            kinds = ", ".join(sorted(b for b, k in _rep.ROUTES.items()
+                                     if k == p["key"]))
+            mail_owned = (f'<div class="when">Triage already answers this mail. '
+                          f'Installing it does not change who writes the reply — '
+                          f'it gives <b>{_esc(kinds)}</b> its own ledger, '
+                          f'guidance and autonomy rung, so a correction here '
+                          f'teaches only this kind of mail.</div>')
         cards += f"""
         <div class="inst {"done" if p["installed"] else ("ok" if p["ready"] else "gap")}">
           <div class="insthead">
@@ -1213,6 +1228,7 @@ def render_systems(key: str, tenant: str = "") -> str:
             {action}
           </div>
           <div class="when">{_esc(p["does"])}</div>
+          {mail_owned}
           <div class="prereqs">{chips}</div>
         </div>"""
 

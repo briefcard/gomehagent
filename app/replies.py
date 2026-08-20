@@ -46,6 +46,14 @@ ROUTES = {
     "order_issue": "service_desk",
 }
 
+#: Systems whose runs come from the MAIL PATH rather than from the substrate.
+#:
+#: Derived from `ROUTES` rather than listed again, because a hand-kept second
+#: copy is the one that goes stale — and going stale here means `systems_tick`
+#: filing "no generator yet" against a system whose work is being done every
+#: day by triage.
+HANDLED_BY_MAIL = frozenset({"inbox_triage"} | set(ROUTES.values()))
+
 #: How long an owned thread stays owned. A conversation that went quiet for a
 #: fortnight and comes back is a new exchange, not a double-reply risk.
 OWNED_FOR_DAYS = 14

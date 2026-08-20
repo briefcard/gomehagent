@@ -270,6 +270,40 @@ def for_tenant(tenant: str) -> list[db.System]:
 #: catalogue — and reported "no generator yet" every day, so the one pipeline
 #: actually answering the owner's email was the loudest thing in the backlog
 #: claiming it could not run. It had been drafting all along.
+def is_on(system) -> bool:
+    """THE switch. One question, one answer, everywhere.
+
+    Owner's rule, 2026-08-20: *"The off/on mechanism needs to be the dictator
+    of whether a system is running or not."* Before this there were three
+    different answers — `skill.preflight` blocked only `retired`, so a PAUSED
+    system still ran skills; `systems_tick` evaluated `live` AND `designed`;
+    and run re-homing checked nothing at all but existence. A switch that three
+    call sites interpret differently is not a switch.
+
+    Only `live` is on. `designed` means built and not yet switched on, which is
+    off — the previous behaviour of evaluating designed systems was a
+    deliberate choice to collect blockers early, and it is exactly what filled
+    the log with daily rows for pipelines nobody had turned on.
+
+    Takes a row or None, so a caller does not have to check twice.
+    """
+    return (getattr(system, "status", "") or "") == "live"
+
+
+def externally_driven() -> frozenset:
+    """Systems whose runs are filed by a pipeline of its own.
+
+    Read from `replies.HANDLED_BY_MAIL` rather than listed here, so the routing
+    table is the single place that decides. A system receiving triage's runs is
+    NOT missing a generator — its work is being done — and evaluating it in
+    `systems_tick` would file "no generator yet" against a pipeline that
+    answered nine emails that morning.
+    """
+    from . import replies
+    return replies.HANDLED_BY_MAIL
+
+
+#: Kept for callers that want the plain name. See `externally_driven()`.
 EXTERNALLY_DRIVEN = ("inbox_triage",)
 
 

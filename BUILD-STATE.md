@@ -319,6 +319,52 @@ inflating everything for weeks. `/admin/forget_note` retires one.
 
 `scripts/test_allclear.py`, 34 checks. **Nine assertions across four suites pinned the old behaviour and were CHANGED deliberately** — four in `test_systems`, two in `test_skill` (already changed once for the earlier half of this rule), two in `test_grounding` (mine, from wiring the mail ledger) and one in `test_worker_systems`. That spread is the measure of how far a single mislabelled stage had reached.
 
+## The switch is the dictator
+
+Owner, 2026-08-20: *"The off/on mechanism needs to be the dictator of whether a
+system is running or not."* It was not. Three call sites gave three different
+answers, and a switch three callers interpret differently is not a switch:
+
+* `skill.preflight` blocked only `retired` — so a **paused** system went on
+  running skills, and pausing something is the one action whose entire meaning
+  is *stop*.
+* `systems_tick` evaluated `live` AND `designed` — which is what filed a daily
+  row against every pipeline nobody had turned on.
+* Run re-homing checked that a row EXISTED and nothing else.
+
+`systems.is_on()` is the one question now, and **only `live` is on**.
+`designed` means built and not yet switched on, which is off. Evaluating
+designed systems had been a deliberate choice to collect blockers early; it is
+also most of why the daily log was noise.
+
+**The switch reaches the mail path too.** Pausing `inbox_triage` stops triage
+for that account — labelling and drafting both. A real lever during an
+incident, and previously impossible: the row existed and controlled nothing.
+
+Two safety decisions, both load-bearing:
+
+**`inbox_triage` is created — and back-filled — as `live`**, because it IS
+running and the row records a fact. Created `designed` it would read as off
+while answering mail all day, and once the switch gates the mail path that
+mismatch would have stopped the inbox on deploy. Rows written before the switch
+meant anything are promoted once; anything explicitly **paused** is left alone,
+because that was a decision and `designed` never was.
+
+**It fails OPEN.** No tenant, no row, or a lookup that raises all mean *run*. A
+switch nobody has set is not a switch somebody turned off, and stopping an
+inbox on the strength of a missing row is worse than running it.
+
+The consequence to know: `run_skill` now refuses for every system that is not
+`live`, and today most are `designed`. That is the rule as asked — turning
+things on is a required step rather than an optional one. The contract being
+advisory is what keeps it cheap: go-live needs connections and knowledge, not
+prose.
+
+Two suites had assertions that only passed because "off" did not mean anything
+— `test_run_skill` expected a connection refusal from a system that was never
+switched on, and `test_replies` expected re-homing into one. Both now switch
+the system on first, which is the same assertion made honestly.
+
 ## One reply per conversation, whoever writes it
 
 Owner's question, 2026-08-20: three systems sit on the same inbox —

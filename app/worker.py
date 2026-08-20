@@ -88,10 +88,43 @@ def _mail_system_id(tenant: str) -> str:
         from . import grounding, systems
         row = systems.find(tenant, grounding.SYSTEM_KEY)
         if not row:
+            # Created LIVE, because it is running — the row records a fact.
+            # Created `designed` it would read as switched off while answering
+            # mail all day, and once the switch actually gates the mail path
+            # (below) that mismatch would stop the inbox.
             row = systems.create(tenant, grounding.SYSTEM_KEY, "Inbox triage")
+            systems.update(row.id, status="live")
+            row = systems.find(tenant, grounding.SYSTEM_KEY)
+        elif (row.status or "") == "designed":
+            # One-time backfill for rows created before the switch meant
+            # anything. `designed` here was never a decision — nobody chose it
+            # — whereas `paused` was, and is left alone.
+            systems.update(row.id, status="live")
+            row = systems.find(tenant, grounding.SYSTEM_KEY)
         return row.id
     except Exception:                                            # noqa: BLE001
         return ""       # bookkeeping must never stop the inbox
+
+
+def _mail_is_on(tenant: str) -> bool:
+    """Is the mail path switched on for this account?
+
+    Fails OPEN — no tenant, no row, or a lookup that raises all mean "run".
+    A switch nobody has set is not a switch somebody turned off, and treating
+    it as one would stop an inbox on the strength of a missing row.
+    """
+    if not tenant:
+        return True
+    try:
+        from . import grounding, systems
+        row = systems.find(tenant, grounding.SYSTEM_KEY)
+        if not row:
+            return True
+        if (row.status or "") == "designed":
+            return True     # never decided; `_mail_system_id` backfills it
+        return systems.is_on(row)
+    except Exception:                                            # noqa: BLE001
+        return True
 
 
 def _mail_run(tenant: str, email: dict) -> str:
@@ -107,7 +140,52 @@ def _mail_run(tenant: str, email: dict) -> str:
         return ""
 
 
-def _finish_mail_run(run_id: str, action: str, result: dict) -> None:
+def _rehome_run(run_id: str, tenant: str, bucket: str) -> str:
+    """File this run under the system the bucket belongs to, if it is installed.
+
+    Triage is ONE executor doing several jobs. The systems are governance
+    envelopes — a contract, an autonomy rung, standing guidance, metrics, a run
+    ledger — and until now every mail run landed under `inbox_triage`, so
+    `lead_responder` and `service_desk` had empty ledgers while triage answered
+    their mail all day. Their guidance could never be earned and their autonomy
+    could never be promoted, because nothing they governed had ever run.
+
+    Re-homing on FINISH rather than at start, because the bucket is not known
+    until triage has read the mail — that is the one moment we actually know
+    which job this was.
+
+    **Only to a system that is already installed.** A silent install would put
+    a pipeline on somebody's Systems tab that they never chose, and the whole
+    point of the envelope is that installing it is a decision. Not installed
+    means the run stays with `inbox_triage`, which is the truth: triage did it,
+    and nothing else has claimed that kind of mail.
+    """
+    from . import replies, systems
+    key = replies.route(bucket)
+    if key == "inbox_triage" or not tenant:
+        return ""
+    try:
+        row = systems.find(tenant, key)
+        if not row or not systems.is_on(row):
+            # Not installed, or installed and switched OFF. Either way the run
+            # stays with triage, which is the truth: triage did the work and
+            # nothing else has claimed that kind of mail. Re-homing into a
+            # paused system would fill the ledger of something the owner
+            # deliberately stopped.
+            return ""
+        with db.SessionLocal() as s:
+            run = s.get(db.SystemRun, run_id)
+            if not run:
+                return ""
+            run.system_id = row.id
+            s.commit()
+        return key
+    except Exception:                                            # noqa: BLE001
+        return ""           # bookkeeping must never stop the inbox
+
+
+def _finish_mail_run(run_id: str, action: str, result: dict,
+                     tenant: str = "", bucket: str = "") -> None:
     """Close the run out with what actually happened to the draft.
 
     The stage is the ACTION, not the model's confidence: `escalate` is where a
@@ -143,6 +221,7 @@ def _finish_mail_run(run_id: str, action: str, result: dict) -> None:
     try:
         from . import systems
         systems.finish_run(run_id, stage, **fields)
+        _rehome_run(run_id, tenant, bucket)
     except Exception:                                            # noqa: BLE001
         pass
 
@@ -153,6 +232,22 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
     so every email in the batch is attributed and scoped identically."""
     from . import tenants as _tn
     tenant = tenant or _tn.for_alias(alias)
+    # The switch decides whether the mail path runs at all.
+    #
+    # Owner's rule: the on/off mechanism dictates whether a system is running.
+    # `inbox_triage` is a system like any other, so pausing it stops triage for
+    # that account — labelling and drafting both. That is a real lever worth
+    # having during an incident, and it was previously impossible: the row
+    # existed and controlled nothing.
+    #
+    # Fails OPEN when there is nothing to consult. An unmapped inbox has no
+    # System row, and a mailbox that cannot be switched off must not be treated
+    # as switched off — that would silently stop mail nobody had turned off.
+    if not _mail_is_on(tenant):
+        log.info("[%s] inbox_triage is switched off — %d email(s) left alone",
+                 alias, len(emails))
+        return
+
     for email in emails:
         if already_seen(email["id"]):
             continue
@@ -262,7 +357,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             if not may["ok"]:
                 log.info("[%s] not drafting: %s", alias, may["why"])
                 detail += f" [not drafted: {may['why'][:120]}]"
-                _finish_mail_run(run_id, "ignore", result)
+                _finish_mail_run(run_id, "ignore", result, tenant, bucket)
                 logged = "deferred"
                 with db.SessionLocal() as s:
                     s.add(db.EmailLog(
@@ -338,7 +433,7 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
                 gmail_client.mark_read(alias, email["id"])
             logged = "ignored"
 
-        _finish_mail_run(run_id, action, result)
+        _finish_mail_run(run_id, action, result, tenant, bucket)
 
         with db.SessionLocal() as s:
             s.add(db.EmailLog(
@@ -565,9 +660,12 @@ def systems_tick() -> None:
     from . import systems
     live = ready_count = blocked_count = 0
     for sysrow in systems.all_systems():
-        if sysrow.status not in ("live", "designed"):
-            continue          # paused and retired are decisions, not failures
-        if sysrow.key in systems.EXTERNALLY_DRIVEN:
+        if not systems.is_on(sysrow):
+            # ONE switch, and `designed` is off. This used to evaluate designed
+            # systems too, to collect blockers early — which is what filed a
+            # daily row against every pipeline nobody had turned on.
+            continue
+        if sysrow.key in systems.externally_driven():
             # Its runs are filed by the pipeline that does the work — see
             # `systems.EXTERNALLY_DRIVEN`. Evaluating it here reported the mail
             # path as having no generator while it was drafting replies all

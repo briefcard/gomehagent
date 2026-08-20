@@ -51,6 +51,23 @@ def triaged(thread, action="drafted", tenant="baci"):
         s.commit()
 
 
+def switch(tenant, key, status):
+    """Set the switch directly.
+
+    `systems.update(status="live")` is gated on READINESS, which is a different
+    rule and not the one under test — going through it would mean these
+    assertions passed or failed on connections and knowledge rather than on the
+    switch itself.
+    """
+    from app import db as _db
+    with _db.SessionLocal() as s:
+        row = (s.query(_db.System)
+               .filter(_db.System.tenant == tenant,
+                       _db.System.key == key).first())
+        row.status = status
+        s.commit()
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -58,7 +75,7 @@ def main() -> int:
     kb.add_banned("baci", "hand-decorated")
     # Installed, or `preflight` refuses first — which is the correct EARLIER
     # refusal, and would have hidden whether the thread guard fires at all.
-    from app import systems
+    from app import skill_pack, systems      # noqa: F401 — registers the skills
     systems.create("baci", "service_desk", "Service desk")
 
     print("— an untouched thread is free —")
@@ -129,6 +146,103 @@ def main() -> int:
        replies.route("receipts") == "inbox_triage",
        "a system that has not claimed a kind of mail must not silently start "
        "answering it")
+
+    print("\n— triage's runs are filed under the system that owns that mail —")
+    from app import worker
+    # Switched ON first: re-homing only ever goes to a system that is running,
+    # which is the rule the section below this one tests from the other side.
+    switch("baci", "service_desk", "live")
+    # Triage is ONE executor doing several jobs. Until now every mail run
+    # landed under `inbox_triage`, so `lead_responder` and `service_desk` had
+    # empty ledgers while triage answered their mail all day — their guidance
+    # could never be earned and their autonomy could never be promoted.
+    rid = worker._mail_run("baci", {"id": "e-1"})
+    worker._finish_mail_run(rid, "draft", {"reply_body": "x", "reason": ""},
+                            "baci", "order_routine")
+    with db.SessionLocal() as s2:
+        run = s2.get(db.SystemRun, rid)
+        owner_key = s2.get(db.System, run.system_id).key
+    ck("an order question lands under service_desk", owner_key == "service_desk",
+       owner_key)
+
+    rid2 = worker._mail_run("baci", {"id": "e-2"})
+    worker._finish_mail_run(rid2, "draft", {"reply_body": "x", "reason": ""},
+                            "baci", "receipts")
+    with db.SessionLocal() as s2:
+        run = s2.get(db.SystemRun, rid2)
+        ck("  unclaimed mail stays with triage",
+           s2.get(db.System, run.system_id).key == "inbox_triage",
+           "a system that has not claimed a kind of mail must not receive it")
+
+    print("\n— and nothing is installed behind your back —")
+    ck("lead_responder is not installed for baci",
+       not systems.find("baci", "lead_responder"))
+    rid3 = worker._mail_run("baci", {"id": "e-3"})
+    worker._finish_mail_run(rid3, "draft", {"reply_body": "x", "reason": ""},
+                            "baci", "sales_leads")
+    with db.SessionLocal() as s2:
+        run = s2.get(db.SystemRun, rid3)
+        ck("  so a sales reply stays with triage",
+           s2.get(db.System, run.system_id).key == "inbox_triage",
+           "a silent install puts a pipeline on somebody's tab they never chose")
+    ck("  and it is still not installed",
+       not systems.find("baci", "lead_responder"),
+       "installing is a decision, and re-homing must not make it")
+
+    print("\n— a system doing the mail path's work is not 'missing a generator' —")
+    ck("service_desk is handled by mail",
+       "service_desk" in systems.externally_driven())
+    ck("  as is lead_responder", "lead_responder" in systems.externally_driven())
+    ck("  and inbox_triage itself",
+       "inbox_triage" in systems.externally_driven(),
+       "systems_tick would otherwise file 'no generator yet' against a "
+       "pipeline that answered nine emails that morning")
+
+    print("\n— ONE switch decides whether anything runs —")
+    # Owner's rule: the on/off mechanism dictates whether a system is running.
+    # There used to be three answers — preflight blocked only `retired` (so a
+    # PAUSED system still ran skills), systems_tick ran `live` AND `designed`,
+    # and re-homing checked nothing but existence.
+    switch("baci", "service_desk", "live")
+    ck("live is on", systems.is_on(systems.find("baci", "service_desk")))
+    for off in ("paused", "designed", "retired"):
+        switch("baci", "service_desk", off)
+        ck(f"  {off} is off",
+           not systems.is_on(systems.find("baci", "service_desk")))
+
+    print("\n— and every caller asks the same question —")
+    switch("baci", "service_desk", "paused")
+    r_off = skill.run("inbound_reply", "baci", utterance="hi")
+    ck("a paused system refuses a skill",
+       r_off["status"] == "blocked"
+       and any("paused" in b for b in r_off.get("blocked_on", [])),
+       str(r_off.get("blocked_on"))[:80])
+    rid4 = worker._mail_run("baci", {"id": "e-4"})
+    worker._finish_mail_run(rid4, "draft", {"reply_body": "x", "reason": ""},
+                            "baci", "order_routine")
+    with db.SessionLocal() as s2:
+        run = s2.get(db.SystemRun, rid4)
+        ck("  and receives no runs",
+           s2.get(db.System, run.system_id).key == "inbox_triage",
+           "re-homing into a paused system fills the ledger of something the "
+           "owner deliberately stopped")
+    switch("baci", "service_desk", "live")
+
+    print("\n— the mail path answers to it too —")
+    tri = systems.find("baci", "inbox_triage")
+    ck("triage's own row is LIVE, because it is running",
+       systems.is_on(tri),
+       "created `designed` it would read as off while answering mail all day")
+    switch("baci", "inbox_triage", "paused")
+    ck("  paused means the inbox is left alone", not worker._mail_is_on("baci"))
+    switch("baci", "inbox_triage", "live")
+    ck("  and back on again", worker._mail_is_on("baci"))
+
+    print("\n— but a switch nobody set is not a switch turned off —")
+    ck("an unmapped inbox still runs", worker._mail_is_on(""),
+       "fails OPEN: stopping mail on the strength of a missing row is worse "
+       "than running it")
+    ck("  and an account with no row does too", worker._mail_is_on("coverings"))
 
     print("\n— the second entry point is guarded too —")
     # `run_skill` is a kernel tool: the WhatsApp agent can reach a drafting

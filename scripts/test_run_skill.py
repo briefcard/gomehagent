@@ -41,6 +41,16 @@ def main() -> int:
     tenants.seed()
     systems.create("baci", "catalog_compliance")
     systems.create("baci", "content_compliance")
+    # Switched ON. Since 2026-08-20 the on/off state is THE dictator of whether
+    # a system runs, and `designed` is off — so without this every assertion
+    # below would come back "the system is designed", and the refusals they
+    # exist to check (a missing connection, a thin run) would never be reached.
+    # Set directly because `update(status="live")` is gated on readiness, and
+    # these systems are deliberately unready.
+    with db.SessionLocal() as _s:
+        for r in _s.query(db.System).filter(db.System.tenant == "baci").all():
+            r.status = "live"
+        _s.commit()
 
     print("— the model is never asked which client —")
     tools = tool_scope.filter_tools(ca.ACTION_TOOLS, "baci")

@@ -64,11 +64,36 @@ def main() -> int:
     ck("the ledger starts empty — nothing ever called it", before == 0,
        f"{before} runs")
 
+    # A switched-OFF system is not evaluated at all. Since 2026-08-20 the on/off
+    # state is THE dictator of whether a system runs, and `designed` is off —
+    # which is what used to file a daily row against every pipeline nobody had
+    # turned on. Asserted BEFORE switching anything on, because "nothing ran"
+    # has to be shown to be a consequence of the switch rather than of an empty
+    # fixture.
+    worker.systems_tick()
+    off_runs = sum(len(systems.runs(s.id, limit=0)) for s in all_sys)
+    ck("a system nobody switched on is not evaluated", off_runs == 0,
+       f"{off_runs} runs from designed systems")
+
+    # Now switch them on. Set directly: `update(status="live")` is gated on
+    # readiness, and these fixtures are deliberately unready in various ways —
+    # which is the whole point of the assertions below.
+    with db.SessionLocal() as _s:
+        for r in _s.query(db.System).all():
+            r.status = "live"
+        _s.commit()
+    all_sys = systems.all_systems()
+
     worker.systems_tick()
 
+    # Every system the tick OWNS — not every system. The mail-driven ones get
+    # their runs from triage; a run here would be this tick claiming work it
+    # did not do.
+    mine = [s for s in all_sys if s.key not in systems.externally_driven()]
     after = sum(len(systems.runs(s.id, limit=0)) for s in all_sys)
-    ck("the tick recorded a run for every system", after == len(all_sys),
-       f"{after} runs for {len(all_sys)} systems")
+    ck("the tick recorded a run for every system it evaluates",
+       after == len(mine),
+       f"{after} runs for {len(mine)} of {len(all_sys)} systems")
 
     stages = set()
     for s in all_sys:
@@ -103,7 +128,21 @@ def main() -> int:
 
     # ---- a system that cannot run says why --------------------------------
     print("\n— what is actually blocking them —")
-    for s in all_sys[:4]:
+    # Only systems the tick actually evaluates. `service_desk`,
+    # `lead_responder` and `inbox_triage` get their runs from the MAIL PATH —
+    # triage does that work — so the tick skips them, and asserting a run for
+    # them would be asserting that a pipeline reports "no generator yet" while
+    # answering nine emails a morning.
+    evaluated = [s for s in all_sys
+                 if s.key not in systems.externally_driven()][:4]
+    ck("the tick has systems of its own to evaluate", bool(evaluated),
+       f"{len(all_sys)} installed, {len(evaluated)} not mail-driven")
+    for s in [x for x in all_sys if x.key in systems.externally_driven()]:
+        ck(f"  {s.key} is left to the mail path",
+           not systems.runs(s.id, limit=1),
+           "its runs are filed by triage, not by this tick")
+
+    for s in evaluated:
         state = systems.ready(s)
         run = systems.runs(s.id, limit=1)[0]
         if not state["ready"]:
