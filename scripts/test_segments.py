@@ -17,6 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import db, esp, segments, tenants  # noqa: E402
 
+#: Captured BEFORE anything in main() stubs the module attribute. A
+#: mid-suite `from app.esp import audiences` returns whatever lambda is
+#: sitting on the attribute at that moment — which is how this suite once
+#: "restored" a stub as the real function and pinned the stub's behaviour.
+_REAL_AUDIENCES = esp.audiences
+
 _fail: list[str] = []
 
 
@@ -192,8 +198,7 @@ def main() -> int:
         def draft_from_html(**kw):
             return {"ok": True}
     _saved_backend, _saved_aud = esp.backend, esp.audiences
-    from app.esp import audiences as _real_audiences
-    esp.audiences = _real_audiences
+    esp.audiences = _REAL_AUDIENCES
     esp.backend = lambda t: (_CountlessMod, "")
     rec_real = segments.reconcile("baci")
     esp.backend, esp.audiences = _saved_backend, _saved_aud
@@ -202,7 +207,10 @@ def main() -> int:
        rec_real["ok"] and not any("zero members" in d["what"]
                                   for d in rec_real["drift"])
        and next(s for s in rec_real["segments"]
-                if s["key"] == "reorder_due")["esp_count"] == "")
+                if s["key"] == "reorder_due")["esp_count"] == "",
+       (f"ok={rec_real.get('ok')} read={rec_real.get('esp_read')} "
+        f"note={rec_real.get('esp_note', '')[:60]!r} "
+        f"drift={[d['what'][:40] for d in rec_real.get('drift', [])]}"))
 
     print("\n— sync remembers, stores the card's record, refuses silence —")
     out = segments.sync("baci")
