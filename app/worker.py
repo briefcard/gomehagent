@@ -698,6 +698,39 @@ def compliance_sweep() -> None:
                 log.exception("catalog compliance failed for %s", t.key)
 
 
+def segments_sweep() -> None:
+    """Weekly: keep every switched-on campaign account's segment map true.
+
+    READS the client's ESP and WRITES only our own record — the remembered
+    key→id links and the stored state the Segments card renders from. It
+    never creates or edits a segment in a live account; building stays
+    `materialize(apply=1)`, an explicit act behind its dry-run gate.
+
+    Weekly and gated on the switch, like the compliance sweep and for the
+    same reasons: segments do not churn hourly, and a maintenance job for a
+    system nobody turned on is the daily-noise defect wearing a new name.
+    Drift findings land in the stored state (the card leads with them) and
+    in the log; a sweep that cannot read the ESP records that refusal as
+    the state rather than silently keeping last week's.
+    """
+    from . import segments as segmod, systems, tenants as tn
+
+    for t in tn.all_tenants():
+        row = systems.find(t.key, "campaign_email")
+        if not (row and systems.is_on(row)):
+            continue
+        try:
+            out = segmod.sync(t.key)
+            if not out.get("ok"):
+                log.warning("segments sweep could not read %s's ESP: %s",
+                            t.key, out.get("error", ""))
+            elif out.get("drift"):
+                log.warning("segment drift for %s: %s", t.key,
+                            "; ".join(d["what"] for d in out["drift"])[:400])
+        except Exception:                                        # noqa: BLE001
+            log.exception("segments sweep failed for %s", t.key)
+
+
 def systems_tick() -> None:
     """Evaluate every installed system once, and record what happened.
 
@@ -1001,6 +1034,10 @@ def main() -> None:
     # changed. Monday early, clear of the other weekly jobs.
     sched.add_job(_safe(compliance_sweep, "compliance sweep"), "cron",
                   day_of_week="mon", hour=4, minute=30)
+    # Segment upkeep: re-link and report drift before the 07:00 tick plans
+    # the week's campaigns against those segments.
+    sched.add_job(_safe(segments_sweep, "segments sweep"), "cron",
+                  day_of_week="mon", hour=5, minute=15)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'

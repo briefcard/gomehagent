@@ -920,19 +920,32 @@ def _run_campaign_email(ctx: Context) -> dict:
     # connected, and there is nothing blocking a send. A draft is safe (nothing
     # sends); LAUNCHING is `esp.backend().send_campaign(confirm=True)`, which the
     # substrate never calls — that is the final approval the owner keeps.
-    esp_draft = {}
+    esp_draft, esp_target = {}, {}
     if (item.get("ok") and not missing and native.get("ok")
             and _flag(ctx.params.get("draft_into_esp"), default=True)):
         mod, refusal = esp.backend(ctx.tenant)
         if refusal:
             ctx.note("could not draft into the ESP: " + refusal)
         else:
+            # Bind the draft to the PLANNED segment inside the ESP — the
+            # remembered id first, a live name-match second, and a named
+            # absence third: an untargeted draft is a real state the owner
+            # must see, because at launch it would go to whoever the ESP
+            # defaults to rather than to the cohort the plan named.
+            from . import segments as segmod
+            target = esp_target = segmod.esp_id_for(ctx.tenant, seg["key"])
+            include = [target["id"]] if target.get("id") else None
+            if not target.get("id"):
+                ctx.note("the ESP draft is untargeted — " + target.get("why", ""))
+            elif target.get("why"):
+                ctx.note(target["why"])
             try:
                 esp_draft = mod.draft_from_html(
                     ctx.tenant, name=copy.get("subject", "")[:120],
                     subject=copy.get("subject", ""),
                     sender_name=theme["name"], html=final_html,
-                    preheader=copy.get("preheader", ""))
+                    preheader=copy.get("preheader", ""),
+                    include_segments=include)
                 if not esp_draft.get("ok"):
                     ctx.note("the ESP rejected the draft: "
                              + esp_draft.get("error", "")[:200])
@@ -954,6 +967,7 @@ def _run_campaign_email(ctx: Context) -> dict:
             "hero": {"basis": hero_got.get("basis", ""),
                      "asset_id": hero_got.get("asset_id", ""),
                      "drafted": hero_got.get("drafted", {})},
+            "esp_target": esp_target,
             "esp_draft": esp_draft, "html_bytes": len(final_html)}
 
 

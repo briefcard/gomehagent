@@ -378,6 +378,18 @@ SABOTAGES = [
                "skipped is re-proposed, and every planning pass can pile "
                "more campaigns onto a month that was already full",
     },
+    {
+        "name": "segment_id_remembered",
+        "file": "app/segments.py",
+        "find": "    stored = links(tenant).get(key) or {}",
+        "replace": "    stored = {}  # SABOTAGE",
+        "suites": ["test_segments.py"],
+        "why": "every campaign draft falls back to a name search of the "
+               "live ESP \u2014 a renamed segment silently unlinks, the draft "
+               "goes untargeted or to the wrong cohort, and the Canva-"
+               "folder lesson (the id is remembered, never searched for "
+               "by name) is unlearned",
+    },
 ]
 
 

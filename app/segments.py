@@ -224,14 +224,53 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
 
-def reconcile(tenant: str) -> dict:
-    """Cross the catalog against the client's LIVE ESP segments.
+# ---------------------------------------------------------------------------
+# The remembered link — catalog key → the ESP's own segment id.
+#
+# Stored on `Tenant.esp["segments"]`, INSIDE the ESP connection block on
+# purpose: the map belongs to that connection, and switching providers makes
+# it visibly stale rather than silently wrong. The rule is the Canva-folder
+# rule, verbatim: the id is remembered, never searched for by name again —
+# a name search eventually matches a renamed segment or misses it entirely,
+# and `materialize` would then build a DUPLICATE in a live account.
+# ---------------------------------------------------------------------------
 
-    Says which recommended segments already EXIST in the ESP (matched by a
-    loose name compare) and which are still TO BUILD — so the operator sees the
-    gap, not a flat wishlist. Read-only. If the ESP is not connected it returns
-    the catalog with everything `to_build` and says the ESP could not be read,
-    rather than pretending nothing exists.
+def links(tenant: str) -> dict:
+    """The stored key → {id, name} map. Empty when nothing was ever linked."""
+    t = tenants.get(tenant)
+    return dict(((t.esp or {}).get("segments") or {})) if t else {}
+
+
+def _store_links(tenant: str, found: dict) -> None:
+    from . import db
+    if not found:
+        return
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, tenant)
+        if not t:
+            return
+        cfg = dict(t.esp or {})
+        cur = dict(cfg.get("segments") or {})
+        cur.update(found)
+        cfg["segments"] = cur
+        t.esp = cfg
+        s.commit()
+
+
+def reconcile(tenant: str) -> dict:
+    """Cross the catalog against the client's LIVE ESP segments. Read-only.
+
+    Matching is ID-FIRST: a remembered id wins even when the segment was
+    renamed in the ESP (that is what remembering is for); the loose name
+    compare is only for segments nothing has linked yet. Alongside the rows
+    it returns `drift` — the findings a maintainer acts on, each named:
+    a remembered id that vanished from the ESP, a rename (informational —
+    still linked), and a segment reporting literally zero members. A count
+    the provider never sent is ABSENT, not zero, and raises nothing.
+
+    If the ESP is not connected it returns the catalog with everything
+    `to_build` and says the ESP could not be read, rather than pretending
+    nothing exists.
     """
     base = for_tenant(tenant)
     if not base.get("ok"):
@@ -239,17 +278,49 @@ def reconcile(tenant: str) -> dict:
 
     from . import esp
     live = esp.audiences(tenant)
-    existing = {_norm(a["name"]): a for a in (live.get("audiences") or [])} \
-        if live.get("ok") else {}
+    rows_live = (live.get("audiences") or []) if live.get("ok") else []
+    by_id = {a.get("id", ""): a for a in rows_live if a.get("id")}
+    by_name = {_norm(a["name"]): a for a in rows_live}
+    stored = links(tenant)
 
-    out = []
+    out, drift = [], []
     for s in base["segments"]:
-        match = existing.get(_norm(s["name"])) or next(
-            (a for k, a in existing.items()
-             if _norm(s["key"]) in k or k in _norm(s["name"])), None)
+        remembered = (stored.get(s["key"]) or {}).get("id", "")
+        match, linked_by, lost = None, "", False
+        if remembered:
+            match = by_id.get(remembered)
+            if match is not None:
+                linked_by = "id"
+            elif live.get("ok"):
+                lost = True
+                drift.append({"key": s["key"], "name": s["name"],
+                              "what": (f"the remembered segment id for "
+                                       f"{s['name']!r} no longer exists in "
+                                       f"the ESP — deleted, or the account "
+                                       f"changed; sync re-links by name if "
+                                       f"one still matches")})
+        if match is None:
+            match = by_name.get(_norm(s["name"])) or next(
+                (a for k, a in by_name.items()
+                 if _norm(s["key"]) in k or k in _norm(s["name"])), None)
+            if match is not None:
+                linked_by = "name"
+        esp_name = (match or {}).get("name", "")
+        if linked_by == "id" and _norm(esp_name) != _norm(s["name"]):
+            drift.append({"key": s["key"], "name": s["name"],
+                          "what": (f"renamed in the ESP to {esp_name!r} — "
+                                   f"still linked by its remembered id")})
+        count = (match or {}).get("count")
+        if match is not None and isinstance(count, (int, float)) and count == 0:
+            drift.append({"key": s["key"], "name": s["name"],
+                          "what": "exists in the ESP and reports zero "
+                                  "members — the conditions may not match "
+                                  "anybody"})
         out.append({**s, "state": "exists" if match else "to_build",
                     "esp_segment_id": (match or {}).get("id", ""),
-                    "esp_count": (match or {}).get("count", "")})
+                    "esp_name": esp_name, "linked_by": linked_by,
+                    "lost_id": lost,
+                    "esp_count": "" if count is None else count})
 
     return {"ok": True, "tenant": tenant,
             "business_model": base["business_model"],
@@ -257,10 +328,11 @@ def reconcile(tenant: str) -> dict:
             "esp_note": "" if live.get("ok") else live.get("error", ""),
             "exists": [s for s in out if s["state"] == "exists"],
             "to_build": [s for s in out if s["state"] == "to_build"],
+            "drift": drift,
             "segments": out}
 
 
-def materialize(tenant: str, apply: bool = False) -> dict:
+def materialize(tenant: str, apply: bool = False, rec: dict | None = None) -> dict:
     """Build the missing catalog segments IN the client's live ESP.
 
     Dry-run by default — the harvest pattern: without `apply` it reports what
@@ -276,7 +348,7 @@ def materialize(tenant: str, apply: bool = False) -> dict:
     worse than a named gap. A segment is created only from the adapter's own
     condition table; nothing here invents criteria.
     """
-    rec = reconcile(tenant)
+    rec = rec if rec is not None else reconcile(tenant)
     if not rec.get("ok"):
         return rec
     if not rec.get("esp_read"):
@@ -316,6 +388,10 @@ def materialize(tenant: str, apply: bool = False) -> dict:
         else:
             failed.append({"key": s["key"], "name": s["name"],
                            "error": got.get("error", "")[:300]})
+    # The id is remembered AT CREATION — the one moment it is known for
+    # certain — never left for a later name search to rediscover.
+    _store_links(tenant, {d["key"]: {"id": d["segment_id"], "name": d["name"]}
+                          for d in done})
     return {"ok": True, "tenant": tenant, "applied": bool(apply),
             "existing": [{"key": s["key"], "name": s["name"],
                           "esp_segment_id": s["esp_segment_id"]}
@@ -325,3 +401,123 @@ def materialize(tenant: str, apply: bool = False) -> dict:
             "note": ("" if apply else
                      "dry run — nothing was created; add apply=1 to build "
                      "the would_create list in the live ESP")}
+
+
+# ---------------------------------------------------------------------------
+# Maintenance — sync remembers, the sweep watches, nothing here writes to
+# the live ESP. Creating segments stays `materialize(apply=1)`, an explicit
+# act behind its dry-run gate; maintenance only keeps OUR map true and says
+# what drifted.
+# ---------------------------------------------------------------------------
+
+def sync(tenant: str) -> dict:
+    """Reconcile against the live ESP, REMEMBER every link, report drift.
+
+    The write is to our own map (`Tenant.esp["segments"]`) and our own
+    stored state — never to the client's ESP. Refuses when the ESP cannot
+    be read: a sync against silence would report every remembered id as
+    drift and unlink a healthy account.
+    """
+    import datetime as _dt
+    import json as _json
+
+    rec = reconcile(tenant)
+    if not rec.get("ok"):
+        return rec
+    if not rec.get("esp_read"):
+        return {"ok": False, "error": (
+            f"the live ESP could not be read ({rec.get('esp_note', '')}) — "
+            f"nothing was re-linked, because syncing against silence would "
+            f"read every remembered segment as missing.")}
+
+    stored = links(tenant)
+    found = {}
+    for s in rec["segments"]:
+        if s["state"] != "exists" or not s["esp_segment_id"]:
+            continue
+        cur = stored.get(s["key"]) or {}
+        live_name = s.get("esp_name") or s["name"]
+        if cur.get("id") != s["esp_segment_id"] or cur.get("name") != live_name:
+            found[s["key"]] = {"id": s["esp_segment_id"], "name": live_name}
+    _store_links(tenant, found)
+
+    # The dry half of materialize rides along so the stored state can say
+    # what is still to build and what the adapter cannot express — the card
+    # renders from THIS record, never from a live call on page load.
+    mat = materialize(tenant, apply=False, rec=rec)
+    state = {
+        "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "esp_read": True,
+        "linked": [{"key": s["key"], "name": s["name"],
+                    "esp_name": s.get("esp_name", ""),
+                    "esp_segment_id": s["esp_segment_id"],
+                    "esp_count": s.get("esp_count", ""),
+                    "linked_by": s.get("linked_by", "")}
+                   for s in rec["exists"]],
+        "to_build": ([{"key": w["key"], "name": w["name"]}
+                      for w in mat.get("would_create", [])]
+                     if mat.get("ok") else
+                     [{"key": s["key"], "name": s["name"]}
+                      for s in rec["to_build"]]),
+        "unmapped": mat.get("unmapped", []) if mat.get("ok") else [],
+        "build_note": "" if mat.get("ok") else mat.get("error", ""),
+        "drift": rec["drift"],
+        "relinked": sorted(found),
+    }
+    from . import db
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"segments_state:{tenant}")
+        if row is None:
+            s.add(db.Setting(key=f"segments_state:{tenant}",
+                             value=_json.dumps(state)))
+        else:
+            row.value = _json.dumps(state)
+        s.commit()
+    return {"ok": True, **state}
+
+
+def stored_state(tenant: str) -> dict | None:
+    """The last sync's record, for surfaces — a page render must never be
+    the moment a live ESP call happens. None means never synced, which is a
+    different fact from synced-and-empty."""
+    import json as _json
+
+    from . import db
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"segments_state:{tenant}")
+    if row is None or not (row.value or "").strip():
+        return None
+    try:
+        return _json.loads(row.value)
+    except ValueError:
+        return None
+
+
+def esp_id_for(tenant: str, key: str) -> dict:
+    """The ESP segment id one campaign should target, or a named absence.
+
+    The remembered map wins and costs no network call. A live name-match is
+    the fallback for a segment nothing has linked yet — used for this draft
+    and NOT persisted (the draft path stays read-only; `sync` remembers).
+    Returns {id, name, via, why}; an empty id always carries a why.
+    """
+    stored = links(tenant).get(key) or {}
+    if stored.get("id"):
+        return {"id": stored["id"], "name": stored.get("name", ""),
+                "via": "remembered", "why": ""}
+    rec = reconcile(tenant)
+    if rec.get("ok") and rec.get("esp_read"):
+        for s in rec["segments"]:
+            if s["key"] == key and s["state"] == "exists" and s["esp_segment_id"]:
+                return {"id": s["esp_segment_id"],
+                        "name": s.get("esp_name") or s["name"],
+                        "via": "name-match",
+                        "why": ("linked by name for this draft — run Sync "
+                                "on the Segments card to remember the id")}
+        return {"id": "", "name": "", "via": "",
+                "why": (f"segment {key!r} does not exist in the ESP yet — "
+                        f"build it from the Segments card")}
+    return {"id": "", "name": "", "via": "",
+            "why": ("the ESP could not be read ("
+                    + (rec.get("esp_note") or rec.get("error", ""))[:200]
+                    + ") — the draft is untargeted")}

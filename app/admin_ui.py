@@ -1723,6 +1723,92 @@ def _measured_section(row) -> str:
     </div>"""
 
 
+def _segments_card(key: str, row) -> str:
+    """The cohorts this system's campaigns target — rendered from the RECORD.
+
+    A page load must never be the moment a live ESP call happens (the
+    client_report rule), so everything here comes from the last sync's
+    stored state; the buttons do the live work. Building segments is the
+    explicit act — dry-run first, and the apply button says it writes to
+    the live account.
+    """
+    from . import segments as segmod
+    st = segmod.stored_state(row.tenant)
+    base = (f"/admin/segments_sync?key={_esc(key)}&amp;tenant={_esc(row.tenant)}"
+            f"&amp;system={_esc(row.key)}")
+    sync_btn = f'<a href="{base}"><button type="button">Sync now</button></a>'
+
+    if st is None:
+        body = ('<p class="mut">Never synced. Sync reads the live ESP, '
+                'remembers the id of every segment that matches the catalog '
+                '(a remembered id survives a rename — a name search does '
+                'not), and reports what is missing or drifting. It writes '
+                'nothing to the ESP.</p>'
+                f'<div class="row">{sync_btn}</div>')
+        return (f'<div class="card"><div class="anchor" id="segments"></div>'
+                f'<div class="head"><h2>Segments</h2>'
+                f'<span class="mut">the cohorts campaigns target</span></div>'
+                f'{body}</div>')
+
+    when = _esc((st.get("at") or "")[:16].replace("T", " "))
+    drift = ""
+    if st.get("drift"):
+        items = "".join(f"<li>{_esc(d['what'])}</li>" for d in st["drift"])
+        drift = (f'<div class="note"><strong>Drift.</strong>'
+                 f'<ul class="bl">{items}</ul></div>')
+
+    linked_rows = "".join(f"""
+      <div class="msg"><div><b>{_esc(s["name"])}</b>
+        {('<span class="mut"> — in the ESP as “' + _esc(s["esp_name"]) + '”</span>')
+         if s.get("esp_name") and _esc(s["esp_name"]) != _esc(s["name"]) else ''}
+        {('<span class="mut"> · ' + _esc(str(s["esp_count"])) + ' members</span>')
+         if str(s.get("esp_count", "")) != "" else ''}</div>
+        <div class="when"><code>{_esc(s.get("esp_segment_id", ""))}</code>
+          · linked by {_esc(s.get("linked_by") or "sync")}</div>
+      </div>""" for s in st.get("linked", []))
+    linked = (f'<div class="thread">{linked_rows}</div>' if linked_rows else
+              '<p class="mut">Nothing is linked yet.</p>')
+
+    build = ""
+    to_build = st.get("to_build", [])
+    unmapped = st.get("unmapped", [])
+    if to_build:
+        chips = "".join(f'<span class="chip off">{_esc(w["name"])}</span>'
+                        for w in to_build)
+        burl = (f"/admin/segments_build?key={_esc(key)}&amp;tenant="
+                f"{_esc(row.tenant)}&amp;ui=1&amp;system={_esc(row.key)}")
+        build = (f'<div class="chips">{chips}</div>'
+                 f'<div class="row">'
+                 f'<a href="{burl}"><button class="sec" type="button">'
+                 f'Preview build</button></a>'
+                 f'<a href="{burl}&amp;apply=1"><button type="button">'
+                 f'Create {len(to_build)} in the ESP</button></a>'
+                 f'<span class="mut">preview is a dry run; create WRITES to '
+                 f'the live account — segments send nothing and can be '
+                 f'deleted in the ESP if wrong</span></div>')
+    elif not st.get("build_note"):
+        build = '<p class="mut">Every catalog segment the adapter can express exists.</p>'
+    if unmapped:
+        u = "".join(f"<li><b>{_esc(x['name'])}</b> — {_esc(x['why'])}</li>"
+                    for x in unmapped)
+        build += (f'<div class="mut">Cannot be built yet:'
+                  f'<ul class="bl">{u}</ul></div>')
+    if st.get("build_note"):
+        build += f'<p class="mut">{_esc(st["build_note"])}</p>'
+
+    return f"""
+    <div class="card"><div class="anchor" id="segments"></div>
+      <div class="head"><h2>Segments</h2>
+        <span class="mut">{len(st.get("linked", []))} linked ·
+          {len(to_build)} to build · synced {when} (weekly, and on this
+          button)</span></div>
+      {drift}
+      {linked}
+      {build}
+      <div class="row">{sync_btn}</div>
+    </div>"""
+
+
 def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
     """One system's workflow: planned, waiting, shipped, measured — in the
     order the work moves, with the queue's controls leading each section."""
@@ -1770,6 +1856,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
   {gate_note}
 </div>
 {_planned_section(key, row, ppage)}
+{_segments_card(key, row) if systems.workflow(row.key)["artifact"] == "esp_campaign" else ""}
 {_waiting_section(key, row)}
 {_shipped_section(row)}
 {_measured_section(row)}

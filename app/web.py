@@ -484,7 +484,7 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
 
 @app.get("/admin/segments_build")
 def segments_build(key: str = Depends(admin_key), tenant: str = "",
-                   apply: int = 0) -> dict:
+                   apply: int = 0, ui: int = 0, system: str = ""):
     """Build the catalog's missing segments in a client's live ESP.
 
     /admin/segments_build?tenant=eien            what it would create (reads only)
@@ -496,13 +496,64 @@ def segments_build(key: str = Depends(admin_key), tenant: str = "",
     four named outcomes — exists / created / would_create / unmapped — and
     `unmapped` names why, because a guessed condition builds a segment that
     silently matches nobody.
+
+    `ui=1` (the Segments card's buttons) returns to the card with the same
+    outcome as a flash instead of a JSON body; a successful apply also runs
+    `sync`, so the card the redirect lands on already shows the new links.
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "say which client: ?tenant=eien"}
     from . import segments
-    return segments.materialize(tenant, apply=bool(apply))
+    out = segments.materialize(tenant, apply=bool(apply))
+    if not ui:
+        return out
+    syskey = system or "campaign_email"
+    if not out.get("ok"):
+        return _back_to_system(tenant, syskey, err=out.get("error", ""),
+                               anchor="segments")
+    if apply:
+        segments.sync(tenant)
+        said = (f"Created {len(out.get('created', []))} segment(s) in the ESP"
+                + (f"; {len(out.get('failed', []))} failed — "
+                   + "; ".join(f["error"][:80] for f in out["failed"])
+                   if out.get("failed") else "")
+                + (f"; {len(out.get('unmapped', []))} cannot be expressed yet"
+                   if out.get("unmapped") else ""))
+        return _back_to_system(tenant, syskey,
+                               err=said if out.get("failed") else "",
+                               ok="" if out.get("failed") else said,
+                               anchor="segments")
+    said = ("Dry run — would create: "
+            + (", ".join(w["name"] for w in out.get("would_create", []))
+               or "nothing")
+            + (f"; {len(out.get('unmapped', []))} cannot be expressed yet"
+               if out.get("unmapped") else ""))
+    return _back_to_system(tenant, syskey, ok=said, anchor="segments")
+
+
+@app.get("/admin/segments_sync")
+def segments_sync(key: str = Depends(admin_key), tenant: str = "",
+                  system: str = ""):
+    """Re-link the segment map against the live ESP and store the state the
+    Segments card renders from. Writes to OUR record only — never to the
+    client's ESP."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import segments
+    syskey = system or "campaign_email"
+    out = segments.sync(tenant)
+    if not out.get("ok"):
+        return _back_to_system(tenant, syskey, err=out.get("error", ""),
+                               anchor="segments")
+    said = (f"Synced — {len(out.get('linked', []))} linked, "
+            f"{len(out.get('to_build', []))} to build"
+            + (f", {len(out.get('relinked', []))} newly remembered"
+               if out.get("relinked") else "")
+            + (f"; {len(out.get('drift', []))} drift finding(s) — see the card"
+               if out.get("drift") else ""))
+    return _back_to_system(tenant, syskey, ok=said, anchor="segments")
 
 
 @app.get("/admin/canva_probe")

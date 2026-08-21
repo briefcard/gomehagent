@@ -220,6 +220,18 @@ def main() -> int:
     ck("the strip carries it too", "1 of 1</b> sent as-is" in tab)
     ck("…and counts the week's shipping", "shipped this week" in tab)
 
+    print("\n— the Segments card, on ESP-campaign systems only —")
+    systems.create("agency", "campaign_email")       # designed is fine to VIEW
+    seg_v = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                  "&system=campaign_email").text
+    ck("the campaign system's view carries the Segments card",
+       'id="segments"' in seg_v and "Never synced" in seg_v
+       and "Sync now" in seg_v)
+    ck("…and it renders from the record — no live call promised on load",
+       "reads the live ESP" in seg_v)
+    ck("a non-ESP system has no Segments card",
+       'id="segments"' not in _view(c, "agency"))
+
     print("\n— all accounts: the workflow view is one account's place —")
     va = c.get("/admin/ui?key=s3cret&tab=systems&tenant=*&system=wf_probe").text
     ck("system= on the all-accounts view falls back to the grouped list",

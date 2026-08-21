@@ -430,13 +430,63 @@ dry-run/apply, the deriver on Eien, then go-live — the planner fills the
 queue and consumption drafts into Omnisend from there with no further code.
 
 `scripts/test_planner.py` (22 checks) beside `test_plans.py` (71) and
-`test_workflow_ui.py` (40); `test_campaign_email` gained the plan-subject
+`test_workflow_ui.py` (43); `test_campaign_email` gained the plan-subject
 pin. Two assertions in `test_worker_systems` were CHANGED deliberately
 (comments say why): they counted every SystemRun row and pinned "one per
 evaluated system", which the tick's top-up half breaks by design — a
 planner's `planned` rows are queue, not runs, the same rule `stats()`
 keeps; the counts now exclude them and assert the queue separately.
-Sabotage is 34 entries, all find-strings re-verified intact.
+
+**SEGMENT UPKEEP (2026-08-21, same day — owner: "do we have a function to
+set and maintain segments?" — set yes, maintain was four gaps; all closed).**
+
+* **The draft is BOUND to its planned segment.** `omnisend.draft_from_html`
+  always accepted `include_segments`; the skill never passed it, so every
+  campaign drafted UNTARGETED and the owner would have picked recipients by
+  hand at launch. `segments.esp_id_for(tenant, key)` resolves the target —
+  the remembered map first (no network), a live name-match second (used for
+  the draft, not persisted; the note says Sync will remember it), a NAMED
+  absence third ("the ESP draft is untargeted — …") — and
+  `campaign_email` passes it through; the run detail carries `esp_target`.
+* **The id is REMEMBERED, never searched for by name again** — the
+  Canva-folder rule verbatim, stored on `Tenant.esp["segments"]` (inside
+  the ESP connection block on purpose: switching providers makes the map
+  visibly stale rather than silently wrong). `materialize` stores each id
+  AT CREATION; `segments.sync` remembers every name-match. `reconcile` is
+  now ID-FIRST — a renamed segment stays linked and the rename is reported
+  as informational drift — and returns `drift` beside the rows: remembered
+  id vanished (named), renamed, and zero members ONLY when a count was
+  actually sent (absence is a third state; Omnisend sends no counts and
+  raises nothing). Sabotage #35 `segment_id_remembered`.
+* **The Segments card**, on every ESP-campaign system's workflow view,
+  rendered FROM THE RECORD (`segments.stored_state` — a page load is never
+  a live ESP call; the client_report rule): linked with ids and counts,
+  drift led as a note, to-build chips with **Preview build** (dry) and
+  **Create N in the ESP** (the explicit live write, still behind
+  materialize's dry-run gate), unmapped named, **Sync now**. Routes:
+  `/admin/segments_sync`; `/admin/segments_build` gained `ui=1` (redirects
+  to the card with the outcome as a flash; a successful apply re-syncs so
+  the card lands already linked). Exercised on the rendered demo: Sync on
+  an ESP-less account refuses by name and re-links nothing.
+* **The weekly sweep** — `worker.segments_sweep`, Mondays 05:15 (after
+  compliance, before the 07:00 tick plans against these segments): syncs
+  every account whose `campaign_email` system is ON, writes only our own
+  record, logs drift; an unreadable ESP is recorded as the state rather
+  than silently keeping last week's.
+* **`omnisend.segments` reads EVERY page now** — the first-page-only read
+  meant `materialize(apply=1)` could have DUPLICATED segments a big
+  account already held; paging follows the response's own `paging.next`
+  (VERIFY on the first multi-page account), and a mid-pagination failure
+  fails the whole read, because a partial list is exactly that duplicate
+  risk. `esp.audiences` stopped defaulting an absent member count to 0 —
+  absence survives to the output.
+
+Still deliberately NOT built: segment DISCOVERY (commerce + ESP data →
+proposed cohorts, reviewed like claims — the recorded "segment engine live
+half") and a correlate/digest lane for drift findings (they surface on the
+card and in the log today). `test_segments.py` grew to 32 checks;
+`test_campaign_email` to 15 (binding pins), `test_workflow_ui` to 43 (the
+card). Sabotage is 35 entries, all find-strings re-verified intact.
 
 ## The front door (2026-08-21)
 

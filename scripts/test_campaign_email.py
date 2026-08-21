@@ -65,8 +65,10 @@ def _fake_esp():
 
     class _Mod:
         @staticmethod
-        def draft_from_html(tenant, *, name, subject, sender_name, html, preheader=""):
-            _drafted.append({"tenant": tenant, "subject": subject})
+        def draft_from_html(tenant, *, name, subject, sender_name, html,
+                            preheader="", include_segments=None):
+            _drafted.append({"tenant": tenant, "subject": subject,
+                             "include": include_segments})
             return {"ok": True, "campaign_id": "camp_1", "stage": "done"}
     esp.backend = lambda t: (_Mod, "")
 
@@ -113,6 +115,21 @@ def main():
     ck("draft_from_html was called on the client's ESP",
        any(d["subject"] == "You're about to run out" for d in _drafted))
     ck("the run reports the ESP draft", r["detail"]["esp_draft"].get("ok") is True)
+
+    print("\n— the draft is BOUND to the planned segment in the ESP —")
+    ck("with nothing linked, the draft is untargeted and the run SAYS so",
+       _drafted and _drafted[-1]["include"] is None
+       and any("untargeted" in n for n in r.get("notes", [])),
+       str((r.get("notes") or [])[-1:])[:90])
+    from app import segments as segmod
+    segmod._store_links("baci", {"reorder_due": {"id": "seg-lnk-1",
+                                                 "name": "Reorder due"}})
+    r_bind = skill.run("campaign_email", "baci", segment="reorder_due")
+    ck("a remembered segment id rides the draft as its audience",
+       _drafted[-1]["include"] == ["seg-lnk-1"],
+       str(_drafted[-1].get("include")))
+    ck("…and the run reports the target",
+       (r_bind.get("detail") or {}).get("esp_target", {}).get("id") == "seg-lnk-1")
 
     print("\n— a subject set on the PLAN outranks the drafter's —")
     _drafted.clear()

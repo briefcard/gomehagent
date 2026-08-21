@@ -150,6 +150,115 @@ def main() -> int:
        not r["ok"] and "unreadable" in r["error"] and not _created,
        r.get("error", "")[:70])
 
+    # ---- upkeep: the remembered link ------------------------------------
+    print("\n— the remembered link: set at creation, id-first ever after —")
+    lk = segments.links("baci")
+    ck("materialize remembered every created id",
+       all(k in lk for k in ("vip_high_aov", "lapsed_60_90", "repeat_buyers"))
+       and lk["vip_high_aov"]["id"].startswith("sid-"), str(sorted(lk)))
+
+    vip_id = lk["vip_high_aov"]["id"]
+    esp.audiences = lambda t: {"ok": True, "kind": "segment", "audiences": [
+        {"id": vip_id, "name": "VIPS RENAMED BY HAND", "count": 51},
+        {"id": "rd1", "name": "Reorder due"},                # count ABSENT
+        {"id": "rb1", "name": "Repeat buyers", "count": 0}]}
+    rec = segments.reconcile("baci")
+    vip = next(s for s in rec["segments"] if s["key"] == "vip_high_aov")
+    ck("a renamed segment stays linked by its remembered id",
+       vip["state"] == "exists" and vip["linked_by"] == "id"
+       and vip["esp_name"] == "VIPS RENAMED BY HAND")
+    ck("…and the rename is reported as drift, informational",
+       any("renamed" in d["what"] and d["key"] == "vip_high_aov"
+           for d in rec["drift"]))
+    ck("a remembered id that vanished is drift, by name",
+       any("no longer exists" in d["what"] and d["key"] == "lapsed_60_90"
+           for d in rec["drift"]))
+    ck("zero MEMBERS is drift only when a count was actually sent",
+       any("zero members" in d["what"] and d["key"] == "repeat_buyers"
+           for d in rec["drift"])
+       and not any("zero members" in d["what"] and d["key"] == "reorder_due"
+                   for d in rec["drift"]),
+       "absence is a third state, not a zero")
+
+    print("\n— sync remembers, stores the card's record, refuses silence —")
+    out = segments.sync("baci")
+    ck("sync persisted the name-matched links",
+       out["ok"] and segments.links("baci")["reorder_due"]["id"] == "rd1"
+       and segments.links("baci")["repeat_buyers"]["id"] == "rb1")
+    st = segments.stored_state("baci")
+    ck("the stored state carries drift and to_build for the card",
+       st is not None and st["drift"] and isinstance(st["to_build"], list)
+       and st["at"])
+    esp.audiences = lambda t: {"ok": False, "error": "token revoked"}
+    r = segments.sync("baci")
+    ck("sync against an unreadable ESP refuses and keeps last week's record",
+       not r["ok"] and "silence" in r["error"]
+       and segments.stored_state("baci")["at"] == st["at"])
+
+    print("\n— esp_id_for: remembered beats searched —")
+    def _boom(t):
+        raise AssertionError("a map hit must not call the ESP")
+    esp.audiences = _boom
+    got = segments.esp_id_for("baci", "reorder_due")
+    ck("a remembered id answers with NO live call",
+       got["id"] == "rd1" and got["via"] == "remembered")
+    esp.audiences = lambda t: {"ok": False, "error": "token revoked"}
+    got = segments.esp_id_for("baci", "cart_abandoners")
+    ck("no link + unreadable ESP → untargeted, why named",
+       not got["id"] and "could not be read" in got["why"])
+    esp.audiences = lambda t: {"ok": True, "kind": "segment", "audiences": [
+        {"id": "ca9", "name": "Cart abandoners", "count": 12}]}
+    got = segments.esp_id_for("baci", "cart_abandoners")
+    ck("an unlinked segment falls back to a live name-match, and says Sync "
+       "will remember it",
+       got["id"] == "ca9" and got["via"] == "name-match" and "Sync" in got["why"])
+
+    print("\n— omnisend reads EVERY page —")
+    import app.omnisend as om
+    pages = {
+        "/api/segments": {"ok": True, "data": {
+            "segments": [{"segmentID": "p1", "name": "One"}],
+            "paging": {"next": "https://api.omnisend.com/api/segments?page=2"}}},
+        "/api/segments?page=2": {"ok": True, "data": {
+            "segments": [{"segmentID": "p2", "name": "Two"}]}},
+    }
+    calls: list = []
+    real_call = om.call
+    om.call = lambda t, m, p, **kw: calls.append(p) or pages[p]
+    try:
+        got = om.segments("baci")
+    finally:
+        om.call = real_call
+    ck("both pages returned — the next link is followed as a path",
+       got["ok"] and [s["id"] for s in got["segments"]] == ["p1", "p2"]
+       and calls == ["/api/segments", "/api/segments?page=2"], str(calls))
+    om.call = lambda t, m, p, **kw: (pages["/api/segments"]
+                                     if p == "/api/segments"
+                                     else {"ok": False, "error": "500"})
+    try:
+        got = om.segments("baci")
+    finally:
+        om.call = real_call
+    ck("a mid-pagination failure fails the WHOLE read — a partial list is "
+       "the duplicate risk the full read exists to remove", not got["ok"])
+
+    print("\n— the weekly sweep syncs switched-on campaign accounts only —")
+    from app import systems, worker
+    live_row = systems.create("baci", "campaign_email")
+    with db.SessionLocal() as s:
+        s.get(db.System, live_row.id).status = "live"
+        s.commit()
+    systems.create("ironside", "campaign_email")     # designed = off
+    swept: list = []
+    real_sync = segments.sync
+    segments.sync = lambda t: swept.append(t) or {"ok": True, "drift": []}
+    try:
+        worker.segments_sweep()
+    finally:
+        segments.sync = real_sync
+    ck("the sweep reads only accounts whose campaign system is ON",
+       swept == ["baci"], str(swept))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

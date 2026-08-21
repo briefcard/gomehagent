@@ -48,8 +48,9 @@ def _fake_esp():
     class _Mod:
         @staticmethod
         def draft_from_html(tenant, *, name, subject, sender_name, html,
-                            preheader=""):
-            _drafted.append({"tenant": tenant, "subject": subject})
+                            preheader="", include_segments=None):
+            _drafted.append({"tenant": tenant, "subject": subject,
+                             "include": include_segments})
             return {"ok": True, "campaign_id": "camp_1"}
     esp.backend = lambda t: (_Mod, "")
 

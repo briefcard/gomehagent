@@ -100,11 +100,30 @@ call = _tc.instrument('omnisend', _call)
 
 
 def segments(tenant: str) -> dict:
-    """Audience segments, for targeting a campaign."""
-    res = call(tenant, "GET", "/api/segments")
-    if not res["ok"]:
-        return res
-    rows = (res["data"] or {}).get("segments") or []
+    """Audience segments, for targeting a campaign. ALL pages.
+
+    The first version read page one and stopped — on an account with more
+    segments than one page, `segments.reconcile` would have missed the rest
+    and `materialize(apply=1)` would have DUPLICATED them in the live
+    account. Paging follows the response's own `paging.next` (absolute or
+    relative — the path half is kept either way; VERIFY on the first
+    multi-page account, the shape is docs-read). A mid-pagination failure
+    fails the WHOLE read: a partial list is exactly the duplicate risk the
+    full read exists to remove.
+    """
+    rows: list = []
+    path, pages = "/api/segments", 0
+    while path and pages < 20:
+        res = call(tenant, "GET", path)
+        if not res["ok"]:
+            return res
+        data = res["data"] or {}
+        rows += data.get("segments") or []
+        pages += 1
+        nxt = str((data.get("paging") or {}).get("next") or "")
+        if nxt and "://" in nxt:
+            nxt = "/" + nxt.split("://", 1)[1].split("/", 1)[-1]
+        path = nxt
     return {"ok": True, "segments": [{"id": s.get("segmentID") or s.get("id"),
                                       "name": s.get("name", "")} for s in rows]}
 

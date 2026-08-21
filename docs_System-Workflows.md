@@ -371,6 +371,30 @@ Parked by choice, not blocked:
   proposed", proposals born complete, held only by the rung's tap.
   `test_planner.py` (22 checks); sabotage #34 `planner_month_cap`.
 
+## What is built (2026-08-21, segment upkeep)
+
+The owner's question — "do we have a function to set and maintain
+segments?" — was set-yes, maintain-no. Closed:
+
+* **Drafts bind to their planned segment** — `segments.esp_id_for` resolves
+  the ESP segment id (remembered map first, live name-match second, named
+  absence third) and `campaign_email` passes it to `draft_from_html`; an
+  untargeted draft says so on the run.
+* **The id is remembered, never name-searched again** (the Canva-folder
+  rule) — stored on `Tenant.esp["segments"]`, written by `materialize` at
+  creation and by `sync` at match; `reconcile` is id-first and reports
+  drift (vanished id, rename, zero members only when a count was sent).
+* **The Segments card** on ESP-campaign workflow views, rendered from the
+  stored sync state — linked / drift / to-build with Preview + Create
+  (dry-run gate intact) / unmapped named / Sync now.
+* **`worker.segments_sweep`** — Mondays 05:15, switched-on campaign
+  accounts only, writes only our record, logs drift.
+* **`omnisend.segments` pages fully** (partial reads risked duplicate
+  creation), and an absent member count is no longer collapsed to 0.
+
+Not built, deliberately: segment DISCOVERY from commerce/ESP data (the
+recorded "segment engine live half") and a correlate/digest lane for drift.
+
 **Dormant in production still:** `campaign_email` is live for no account, so
 the planner runs for nobody until the owner's recorded steps land (segments
 apply, deriver, go-live). The inbox family's surface is complete because its
