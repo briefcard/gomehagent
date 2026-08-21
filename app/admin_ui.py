@@ -1820,6 +1820,24 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                        "three or four words, comma separated", 1))
 
     warn = f'<div class="note">{_esc(err)}</div>' if err else ""
+    # The email LOOK, beside what may be SAID: where the brand theme stands and
+    # the one link to the derive/review surface — otherwise it exists only as a
+    # typed URL, which is how a working scanner once sat switched off.
+    from . import brand_theme as _bt
+    _ts = _bt.status(tenant)
+    if _ts.get("live"):
+        _gaps = _ts.get("live_gaps") or []
+        _theme_state = ("<b>approved</b> — still not sendable: "
+                        + _esc("; ".join(_gaps)) if _gaps
+                        else "<b>approved</b> — sendable")
+    else:
+        _theme_state = ("<b>none approved</b> — campaign emails render on the "
+                        "default look with no mailing address")
+    theme_line = (
+        f'<p class="mut">Brand theme (the email LOOK): {_theme_state}'
+        + (f' · a proposal from {_esc(_ts.get("derived_at", ""))} awaits review'
+           if _ts.get("proposed") else "")
+        + f' · <a href="/admin/brand_theme?tenant={_esc(tenant)}">derive / review →</a></p>')
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
 <div>
@@ -1827,6 +1845,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
   <p class="mut">Everything the generators are allowed to say, per account. A draft
   may assert nothing that is not on this page — which is why an empty section here
   is a blocked pipeline there, not a cosmetic gap.</p>
+  {theme_line}
 </div>
 
 

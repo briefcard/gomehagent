@@ -68,7 +68,7 @@ was hardened to fail closed the same way (§2.63). Email-derived text in
 `/admin/pending` and `/decide` is escaped (§2.62). Still open on that surface:
 no CSRF, no route-inventory auth test, the ~37 mutating GETs untouched.
 
-**Sabotage is now 25 guards** (+ `campaign_draft_gate`), all caught.
+**Sabotage is now 26 guards** (+ `theme_review_gate`), all caught.
 
 ## Email campaign engine — ESP-agnostic, tenant-generic (2026-08-21, in progress)
 
@@ -83,7 +83,7 @@ has EVER made a real ESP call, no client is connected, and there is no generator
 or segment engine. The most complete prior attempt was the `lifecycle_eien.py`
 fork — deleted this session; it was Eien-hardcoded, unproven and unsafe.
 
-**Built so far (uncommitted): `app/esp.py` — the keystone.** A per-tenant
+**Built (live at `4472a69`, dormant): `app/esp.py` — the keystone.** A per-tenant
 resolver, same shape as `sites.backend()`: `provider_for(tenant)` reads which
 ESP is actually connected (credential store, not the declared Tenant field);
 `backend(tenant)` returns the transport adapter or refuses BY NAME (no ESP, or
@@ -100,7 +100,7 @@ via stubbed seams) + `sabotage.esp_unknown_token`.
 **Honesty carried through:** the native merge strings in `PROFILES` are
 best-effort from public docs and marked VERIFY — no adapter has met a live ESP.
 
-**Also built (uncommitted): `app/email_render.py` — the branded renderer.** The
+**Also built (live at `4472a69`, dormant): `app/email_render.py` — the branded renderer.** The
 "looks like the brand" half, and the reason two companies get two different
 emails from one generator: canonical BLOCKS (hero/text/products/cta/divider) +
 a per-client `theme` (logo, palette, fonts, radius, footer) → send-ready,
@@ -115,7 +115,7 @@ distinct branded emails, footer always present) + `sabotage.email_legal_footer`.
 Two rendered demos (Eien + Baci) were sent to the owner. Dormant — nothing
 imports it until the generator wires it.
 
-**Built (uncommitted): the segment engine + the generator skill.**
+**Built (live at `4472a69`, dormant): the segment engine + the generator skill.**
 `app/segments.py` — common/high-value segments organized by `Tenant.business_model`
 (ecom_inventory / local_venue / b2b_spec / digital_products), tenant-generic;
 `for_tenant` resolves a client's model to its segments (high-value first, refuses
@@ -130,9 +130,43 @@ banned-claims gate) → and only a VALID, sendable email is drafted into the
 client's ESP via `esp.backend().draft_from_html`; launching stays
 `send_campaign(confirm=True)`, which the substrate never calls. `citations`
 intersected with the offered claims (no invented ids). `scripts/test_campaign_email.py`
-(11 checks) + `sabotage.campaign_draft_gate`. Proven OFFLINE end to end; NOT
-wired to a route/agent tool yet and NOT deployed — the next step is wiring it +
-proving the ESP draft round-trip live (the segments read already resolves; §2.64).
+(11 checks) + `sabotage.campaign_draft_gate`. Proven OFFLINE end to end;
+deployed DORMANT — not wired to a route/agent tool yet; the next step is wiring
+it + proving the ESP draft round-trip live (the segments read already resolves;
+§2.64).
+
+**Built (this session, 2026-08-21): the BRAND-THEME DERIVER + store + review
+surface.** `app/brand_theme.py::derive(tenant)` pulls the visual identity from
+what already exists, in the owner's stated order — **Canva brand kit** (logo,
+first brand colour, heading/body faces) → **Shopify** (Brand settings via this
+codebase's first GraphQL call: labelled primary colour + logo + slogan; the
+shop record for the CAN-SPAM **mailing address**; the published theme's
+settings for `social_*_link` rows and typography handles) → **the site**
+(JSON-LD Organization: logo/sameAs/PostalAddress; `theme-color`; header logo
+img; footer social links) — field by field, first-set-wins, with per-field
+provenance (`sources`), every unreachable source named with why
+(`unavailable`), and NOTHING invented: a field no source fills stays absent,
+the renderer falls back to its plain defaults, and `missing_to_send` keeps
+naming the gap. `derive` writes `KbBrand.theme_proposed` ONLY.
+`approve(tenant, edits)` is the owner's review and the **only writer of
+`KbBrand.theme`** (what emails render with); owner edits win, owner-EDITED
+fields carry forward across later re-derives (rule 3: a hand-corrected address
+must not silently revert on the next derive-and-approve), blank form inputs
+are not edits, and edit paths are validated against `email_render._DEFAULT`'s
+own shape (rule 4). `live_theme()` NEVER reads the proposal —
+`sabotage.theme_review_gate` removes exactly that distinction and the suite
+fails. `skill_pack._theme_for` now renders the approved theme when one exists,
+so an approved theme with an address makes `campaign_email` genuinely SENDABLE
+end to end — `test_campaign_email` now reaches the ESP-draft path with the
+CAN-SPAM gate ON (a real `brand_theme.approve`, not the old
+`missing_to_send` stub). Review surface: **`/admin/brand_theme?tenant=X`** —
+provenance table, refusals by name, the SAME sample email rendered through the
+proposed and the live theme (judge an email, not a swatch table), derive +
+approve as POST forms. Honesty: `canva.brand_kit` is the one VERIFY — no
+brand-kit read has ever met the live Connect API and the endpoint is
+best-effort from docs; if it 404s for real the chain falls through to
+Shopify/site by design and that finding gets written down.
+`scripts/test_brand_theme.py` (46 checks) + guard #26.
 
 **Owner's bar (2026-08-21): SEND-READY, not a draft** — the data layer's job is
 to close the edit-delta to ~zero (correctly branded + voice-matched + compliant
@@ -141,18 +175,24 @@ to close the edit-delta to ~zero (correctly branded + voice-matched + compliant
 **Canva brand kit → Shopify theme → site**, owner-reviewed (the deriver is the
 next build). Canva is connected-but-never-run, like the ESP adapters.
 
-**Next, in order:** (1) connect a real ESP (Eien → Omnisend) and prove one round
-trip — the gate on everything; (2) the brand-theme STORE (extend `KbBrand`) +
-the DERIVER (Canva/Shopify/site → theme, owner-reviewed); (3) the
-`campaign_email` GENERATOR skill — per segment, grounded/validated copy →
-`email_render` → native via `esp` → draft in the client's ESP, approval-gated;
-(4) the segment engine (commerce + ESP data → proposed cohorts, reviewed like
-claims); (5) the Klaviyo adapter; (6) native dynamic blocks. Known small fixes
-to fold in: `omnisend.segments` first-page-only; `upload_image` wired nowhere;
-the Shopify OAuth onboarding path needs a per-tenant app registry
-(`SHOPIFY_APPS_JSON` → `{client_id, client_secret}`) — the global
-`SHOPIFY_CLIENT_ID/_SECRET` holds only one app, and clients get one each in the
-Dev Dashboard. Does NOT block Eien (connected via token, `SHOPIFY_STORES_JSON`).
+**Next, in order:** (1) OWNER: re-run
+`/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` to confirm Eien's segments
+now read (the Omnisend-Version header fix is live); (2) run the deriver FOR
+REAL on Eien — `/admin/brand_theme?tenant=eien`, derive, owner reviews +
+approves (types the mailing address if no source had it) — the first live
+Canva/Shopify-brand/site reads, so expect one wrong assumption; (3) wire
+`campaign_email` to a console route + an agent tool (`run_skill`), install +
+go-live the `campaign_email` system for Eien, and prove the live Omnisend
+draft round-trip with real grounded copy; (4) real product photos into the
+product blocks (Shopify CDN image URLs); (5) the segment engine's live half
+(commerce + ESP data → proposed cohorts, reviewed like claims); (6) the
+Klaviyo adapter; (7) more sections (columns/testimonial/offer) + native ESP
+dynamic blocks. Known small fixes to fold in: `omnisend.segments`
+first-page-only; `upload_image` wired nowhere; the Shopify OAuth onboarding
+path needs a per-tenant app registry (`SHOPIFY_APPS_JSON` →
+`{client_id, client_secret}`) — the global `SHOPIFY_CLIENT_ID/_SECRET` holds
+only one app, and clients get one each in the Dev Dashboard. Does NOT block
+Eien (connected via token, `SHOPIFY_STORES_JSON`).
 
 ## Start here if you are new to this thread
 
@@ -165,7 +205,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**65 suites, 65 pass.** Check the OUTPUT, not the exit code, and skip
+**66 suites, 66 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The

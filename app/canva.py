@@ -332,6 +332,107 @@ def reconcile(tenant: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# The brand kit — what the theme deriver reads
+# ---------------------------------------------------------------------------
+
+def _normalize_kit(raw: dict) -> dict:
+    """Best-effort extraction of {logo_url, colors[], fonts{heading,body}}.
+
+    Written defensively across the shapes the API might plausibly return,
+    because no real brand-kit response has ever been seen (VERIFY below) —
+    anything unrecognised simply stays absent, and the deriver treats an empty
+    kit as an unavailable source rather than inventing values for it.
+    """
+    colors: list[str] = []
+    palettes = raw.get("color_palettes") or raw.get("palettes") or []
+    if not palettes and raw.get("colors"):
+        palettes = [raw]
+    for pal in palettes:
+        if not isinstance(pal, dict):
+            continue
+        for c in (pal.get("colors") or []):
+            v = c.get("hex", "") if isinstance(c, dict) else (c if isinstance(c, str) else "")
+            v = str(v).strip()
+            if v and not v.startswith("#"):
+                v = "#" + v
+            if v and v not in colors:
+                colors.append(v)
+
+    fonts: dict[str, str] = {}
+    for f in (raw.get("fonts") or raw.get("text_styles") or []):
+        if not isinstance(f, dict):
+            continue
+        fam = f.get("family") or f.get("font_family") or ""
+        if not fam and isinstance(f.get("font"), dict):
+            fam = f["font"].get("family", "")
+        if not fam:
+            continue
+        role = str(f.get("role") or f.get("usage") or f.get("name") or "").lower()
+        if "head" in role or "title" in role:
+            fonts.setdefault("heading", fam)
+        elif "body" in role or "paragraph" in role or "text" in role:
+            fonts.setdefault("body", fam)
+        else:
+            fonts.setdefault("heading" if "heading" not in fonts else "body", fam)
+
+    logo = ""
+    lg = raw.get("logo")
+    if isinstance(lg, dict):
+        logo = lg.get("url") or (lg.get("image") or {}).get("url", "")
+    for entry in (raw.get("logos") or []):
+        if logo:
+            break
+        if isinstance(entry, dict):
+            logo = entry.get("url") or (entry.get("image") or {}).get("url", "")
+    return {"logo_url": str(logo or ""), "colors": colors, "fonts": fonts}
+
+
+def brand_kit(tenant: str) -> dict:
+    """The client's Canva brand kit — logo, colours, fonts — normalised.
+
+    Returns ``{ok, brand_kit_id, kit: {logo_url, colors[], fonts{}}}`` or a
+    refusal that names the fix. `Tenant.design.canva_brand_id` says which kit
+    when the workspace holds several — same rule as `credentials.resolve` with
+    two Shopify sites: picking one silently would brand a client with another
+    client's kit, so ambiguity refuses and names the choices.
+
+    **VERIFY on the first real call.** Like every Canva path here, this has
+    never met the live API — and Canva's public Connect docs are explicit about
+    brand *templates* (Enterprise) while the brand-*kit* read below is
+    best-effort. If it 404s for real, this refuses by name and the theme
+    deriver falls through to the Shopify/site sources by design; that outcome
+    is a finding to write down, not a crash.
+    """
+    t = tenants.get(tenant)
+    if not t:
+        return {"ok": False, "error": f"unknown tenant {tenant!r}"}
+    want = (t.design or {}).get("canva_brand_id") or ""
+    if want:
+        res = call(tenant, "GET", f"/brand-kits/{want}")
+        if not res["ok"]:
+            return res
+        raw = (res["data"] or {}).get("brand_kit") or res["data"] or {}
+    else:
+        res = call(tenant, "GET", "/brand-kits")
+        if not res["ok"]:
+            return res
+        items = ((res["data"] or {}).get("items")
+                 or (res["data"] or {}).get("brand_kits") or [])
+        if not items:
+            return {"ok": False,
+                    "error": f"{tenant}'s Canva holds no brand kit to read."}
+        if len(items) > 1:
+            names = ", ".join(str(i.get("name") or i.get("id") or "?")
+                              for i in items[:6] if isinstance(i, dict))
+            return {"ok": False, "error": (
+                f"{tenant}'s Canva holds {len(items)} brand kits — set "
+                f"design.canva_brand_id on the tenant row to say which: {names}")}
+        raw = items[0] if isinstance(items[0], dict) else {}
+    return {"ok": True, "brand_kit_id": str(raw.get("id", "")),
+            "kit": _normalize_kit(raw)}
+
+
+# ---------------------------------------------------------------------------
 # From a finished image to something a person can still change
 # ---------------------------------------------------------------------------
 

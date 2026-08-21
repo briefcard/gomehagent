@@ -773,18 +773,28 @@ def _compose_campaign(bundle: dict, seg: dict, goal: str) -> dict:
 
 
 def _theme_for(tenant: str) -> dict:
-    """A minimal render theme from the brand KB.
+    """The render theme: the OWNER-APPROVED derived theme when one exists.
 
-    Concrete colours, logo and the mailing address come from the brand-theme
-    DERIVER (Canva kit → Shopify theme → site), which is not built yet — so this
-    is branded by name and voice, on a clean default palette, with no address.
-    That absent address is not hidden: `email_render` shows a loud placeholder
-    and `missing_to_send` names it, so the email reads as not-yet-sendable rather
+    `brand_theme.live_theme` returns only what the owner reviewed — never the
+    deriver's unreviewed proposal — so a customer sees no look nobody signed
+    off. Until a theme is approved this falls back to the old minimal shape:
+    branded by name on the default palette, with no address. That absent
+    address is not hidden: `email_render` shows a loud placeholder and
+    `missing_to_send` names it, so the email reads as not-yet-sendable rather
     than quietly shipping without a CAN-SPAM footer.
     """
-    from . import kb
+    from . import brand_theme, kb
     b = kb.brand(tenant)
     name = (b.display_name if b else "") or tenant
+    t = brand_theme.live_theme(tenant)
+    if t:
+        # Identity is brand-KB data; a theme approved without it still renders
+        # under the client's name rather than an empty title.
+        t.setdefault("name", name)
+        foot = dict(t.get("footer") or {})
+        foot.setdefault("brand", t["name"])
+        t["footer"] = foot
+        return t
     return {"name": name,
             "footer": {"brand": name, "address": "", "tagline": "",
                        "disclaimer": ""}}

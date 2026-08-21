@@ -95,6 +95,17 @@ SABOTAGES = [
                "physical address — illegal to send under CAN-SPAM",
     },
     {
+        "name": "theme_review_gate",
+        "file": "app/brand_theme.py",
+        "find": "    return dict(row.theme or {})",
+        "replace": "    return dict(row.theme or ((row.theme_proposed or {})"
+                   ".get(\"theme\") or {}))  # SABOTAGE",
+        "suites": ["test_brand_theme.py"],
+        "why": "a machine-derived, never-reviewed brand theme — logo, palette, "
+               "mailing address — ships in customer emails without the owner "
+               "ever approving the look",
+    },
+    {
         "name": "campaign_draft_gate",
         "file": "app/skill_pack.py",
         "find": "    if (item.get(\"ok\") and not missing and native.get(\"ok\")",

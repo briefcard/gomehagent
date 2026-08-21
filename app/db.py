@@ -951,12 +951,26 @@ class KbBrand(Base):
     # How the brand LOOKS, as rules a generator can be held to: {direction,
     # do_show[], never_show[]}. Deliberately not colours, type or logos — those
     # live in the Canva brand kit, which a designer already maintains, and
-    # duplicating them here would create two sources of truth that drift.
+    # duplicating them BY HAND here would create two sources of truth that
+    # drift. (The `theme` below is not that: it is a DERIVED, owner-approved
+    # snapshot of those sources, refreshed by re-running the deriver.)
     # What no brand kit holds is art direction: "always styled on a laid
     # table", "never a face", "no props we do not sell". That is the visual
     # equivalent of `voice.never_say`, and without it a generative creative
     # path has nothing to be wrong against.
     visual = Column(JSON, default=dict)
+    # How the brand looks in an EMAIL, concretely: the render theme
+    # `email_render` consumes — logo URL, palette, font stacks, nav, and the
+    # CAN-SPAM footer (mailing address, socials, disclaimer).
+    #
+    # `theme` is the LIVE one: derived by `brand_theme.derive` (Canva brand kit
+    # → Shopify → the site), then reviewed and APPROVED by the owner, whose
+    # edits win. `theme_proposed` is the deriver's latest output with per-field
+    # provenance, awaiting that review — NOTHING renders with it. A NULL/empty
+    # value means "never derived / never approved", which is the true state of
+    # every pre-existing row, so the migration needs no backfill.
+    theme = Column(JSON, default=dict)
+    theme_proposed = Column(JSON, default=dict)
     # Hard compliance boundary. The validator rejects any draft containing one
     # of these strings — see Baci's origin/handcraft rules. Never advisory.
     banned_claims = Column(JSON, default=list)

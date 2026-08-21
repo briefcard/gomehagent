@@ -20,7 +20,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'ce.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import (config, db, email_render, esp, kb, skill,  # noqa: E402
+from app import (config, db, esp, kb, skill,  # noqa: E402
                  skill_pack, systems, tenants)
 
 _fail = []
@@ -76,9 +76,13 @@ def main():
     tenants.seed()
     _seed_live("baci")           # business_model ecom_inventory, from the seed
     _fake_esp()
-    # A complete-enough theme so the CAN-SPAM address gap doesn't mask the ESP
-    # draft path (the real address comes from the brand-theme deriver).
-    email_render.missing_to_send = lambda theme: []
+    # A real, owner-approved theme — the address that makes the email sendable
+    # arrives the way it does in production (brand_theme.approve), so the
+    # CAN-SPAM gate stays ON and the ESP draft path is reached honestly.
+    from app import brand_theme
+    ok = brand_theme.approve("baci", {"footer.address":
+                                      "2875 NE 191st St, Aventura, FL 33180"})
+    assert ok.get("ok") and ok["gaps"] == [], ok
 
     def _grounded_stub(banned_phrase=""):
         def _d(bundle, seg, goal):
