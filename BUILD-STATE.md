@@ -68,7 +68,7 @@ was hardened to fail closed the same way (§2.63). Email-derived text in
 `/admin/pending` and `/decide` is escaped (§2.62). Still open on that surface:
 no CSRF, no route-inventory auth test, the ~37 mutating GETs untouched.
 
-**Sabotage is now 23 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`, `esp_unknown_token`), all caught.
+**Sabotage is now 24 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`, `esp_unknown_token`, `email_legal_footer`), all caught.
 
 ## Email campaign engine — ESP-agnostic, tenant-generic (2026-08-21, in progress)
 
@@ -100,14 +100,40 @@ via stubbed seams) + `sabotage.esp_unknown_token`.
 **Honesty carried through:** the native merge strings in `PROFILES` are
 best-effort from public docs and marked VERIFY — no adapter has met a live ESP.
 
+**Also built (uncommitted): `app/email_render.py` — the branded renderer.** The
+"looks like the brand" half, and the reason two companies get two different
+emails from one generator: canonical BLOCKS (hero/text/products/cta/divider) +
+a per-client `theme` (logo, palette, fonts, radius, footer) → send-ready,
+email-safe HTML (table layout, inline styles, bulletproof button). Owns the
+send-ready SAFETY the generator must not be able to skip: the CAN-SPAM footer
+(physical address + `{{UNSUBSCRIBE}}`) is added by the renderer, and a theme
+with no address renders a LOUD un-sendable placeholder; `missing_to_send(theme)`
+names the gap. Output keeps NEUTRAL tokens for `esp.personalize`. It does NOT
+check claims or compose copy — validator + voice own those, upstream.
+`scripts/test_email_render.py` (18 checks: same blocks × two themes → two
+distinct branded emails, footer always present) + `sabotage.email_legal_footer`.
+Two rendered demos (Eien + Baci) were sent to the owner. Dormant — nothing
+imports it until the generator wires it.
+
+**Owner's bar (2026-08-21): SEND-READY, not a draft** — the data layer's job is
+to close the edit-delta to ~zero (correctly branded + voice-matched + compliant
++ complete), so the human approves rather than finishes. Tracked by
+`SystemRun.edit_diff` / "% sent as-is". And brand identity per client comes from
+**Canva brand kit → Shopify theme → site**, owner-reviewed (the deriver is the
+next build). Canva is connected-but-never-run, like the ESP adapters.
+
 **Next, in order:** (1) connect a real ESP (Eien → Omnisend) and prove one round
-trip — the gate on everything; (2) the canonical email model (semantic blocks +
-neutral tokens) and its base-HTML renderer; (3) the `campaign_email` GENERATOR
-skill — per segment, a grounded/validated email → native via `esp` → draft in
-the client's ESP, approval-gated; (4) the segment engine (commerce + ESP data →
-proposed cohorts, reviewed like claims); (5) the Klaviyo adapter; (6) native
-dynamic blocks. `omnisend.segments` first-page-only and `upload_image` (wired
-nowhere) are known small fixes to fold in.
+trip — the gate on everything; (2) the brand-theme STORE (extend `KbBrand`) +
+the DERIVER (Canva/Shopify/site → theme, owner-reviewed); (3) the
+`campaign_email` GENERATOR skill — per segment, grounded/validated copy →
+`email_render` → native via `esp` → draft in the client's ESP, approval-gated;
+(4) the segment engine (commerce + ESP data → proposed cohorts, reviewed like
+claims); (5) the Klaviyo adapter; (6) native dynamic blocks. Known small fixes
+to fold in: `omnisend.segments` first-page-only; `upload_image` wired nowhere;
+the Shopify OAuth onboarding path needs a per-tenant app registry
+(`SHOPIFY_APPS_JSON` → `{client_id, client_secret}`) — the global
+`SHOPIFY_CLIENT_ID/_SECRET` holds only one app, and clients get one each in the
+Dev Dashboard. Does NOT block Eien (connected via token, `SHOPIFY_STORES_JSON`).
 
 ## Start here if you are new to this thread
 

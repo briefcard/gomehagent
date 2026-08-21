@@ -86,6 +86,15 @@ SABOTAGES = [
                "text instead of being caught before the draft",
     },
     {
+        "name": "email_legal_footer",
+        "file": "app/email_render.py",
+        "find": "    rows.append(_footer(t))",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_email_render.py"],
+        "why": "a marketing email renders with no unsubscribe link and no "
+               "physical address — illegal to send under CAN-SPAM",
+    },
+    {
         "name": "banned_claims_mail",
         "file": "app/triage.py",
         "find": ('        hard = [f for f in report["failures"]\n'
