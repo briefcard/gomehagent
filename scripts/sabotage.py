@@ -169,6 +169,18 @@ SABOTAGES = [
                "notices \u2014 which is how nine of twenty-six call sites came "
                "to be the only attributed ones",
     },
+    {
+        "name": "oauth_route_named_for_api_key_providers",
+        "file": "app/credentials.py",
+        "find": "        oauth_why = oauth.configured(key) if has_oauth else \"\"",
+        "replace": "        oauth_why = \"\"  # SABOTAGE",
+        "suites": ["test_connect_ui.py"],
+        "why": "Shopify's one-click route disappears from every screen with no "
+               "reason attached, so connecting a store means walking a merchant "
+               "through developer settings, nine API scopes and a token shown "
+               "once \u2014 while the easy route sits one env var away and "
+               "nothing says so",
+    },
 ]
 
 

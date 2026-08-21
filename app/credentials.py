@@ -69,6 +69,28 @@ PROVIDERS: dict[str, dict] = {
             "API key or secret key below it. It can only be revealed ONCE, "
             "right after you install the app; if it has already been revealed "
             "and lost, uninstall and reinstall the app to issue a new one."),
+        # What this route actually costs somebody, for the routes panel. Only
+        # Shopify carries one, because only Shopify's token route is materially
+        # harder than "copy a key out of settings" — nine scopes, an app that
+        # must be INSTALLED before the token section appears at all, and a value
+        # shown exactly once. A provider without this gets the generic line.
+        # Setting the two env vars makes the BUTTON work. It does not make the
+        # data complete, and the panel would otherwise imply it did. Both of
+        # these are properties of Shopify's platform, not of our setup, and
+        # both fail QUIETLY — which is why they belong on the screen rather
+        # than in somebody's head.
+        oauth_caveat=("Shopify also gates the data itself: `read_customers` "
+                      "and `read_orders` carry PII and need Protected "
+                      "Customer Data approval in the Partner Dashboard — "
+                      "without it those fields come back REDACTED rather than "
+                      "erroring, which reads as an empty account. And plain "
+                      "`read_orders` returns only the LAST 60 DAYS; any "
+                      "historical analysis needs `read_all_orders`, requested "
+                      "and justified separately."),
+        effort="the merchant creates a custom app in their own developer "
+               "settings, ticks nine API scopes, installs it, and copies a "
+               "token shown exactly once — or you do it with collaborator "
+               "access to their store",
         starts="shpat_"),
     "omnisend": dict(
         name="Omnisend",
@@ -475,7 +497,17 @@ def status(tenant: str) -> list[dict]:
         # An OAuth provider is self-serve once the app credentials exist. Before
         # that it is not "coming soon", it is one env var away, and saying which
         # is the difference between a blocker someone can clear and a mystery.
-        blocked = oauth.configured(key) if spec["kind"] == "oauth" else ""
+        # An OAuth flow may exist for a provider whose `kind` is `api_key` —
+        # Shopify is one, and it is the important one. Asking `kind == "oauth"`
+        # therefore computed NOTHING for it, so when the Shopify app credentials
+        # were unset the one-click route simply vanished from every screen with
+        # no reason attached: the console showed a paste-a-token form and the
+        # owner had no way to learn that the easy route existed and was one env
+        # var from working. A missing button that explains itself is a task; a
+        # missing button that does not is a feature nobody knows they have.
+        has_oauth = spec["kind"] == "oauth" or bool(spec.get("oauth_optional"))
+        oauth_why = oauth.configured(key) if has_oauth else ""
+        blocked = oauth_why if spec["kind"] == "oauth" else ""
         # Shopify is the one provider where BOTH flows are correct, and which
         # is right depends on whose store it is: a custom-app token is five
         # minutes for a store you own, while OAuth is what lets a client
@@ -492,6 +524,12 @@ def status(tenant: str) -> list[dict]:
                               if row and row.last_verified else ""),
             "self_serve": spec["kind"] == "api_key" or not blocked,
             "blocked_by": blocked,
+            # Whether a one-click route EXISTS at all, and separately what is
+            # stopping it. `blocked_by` keeps its old meaning (a pure-OAuth
+            # provider that cannot run) so the rendering that reads it is
+            # unchanged; these two describe the route rather than the provider.
+            "has_oauth": has_oauth,
+            "oauth_blocked_by": oauth_why,
             "oauth_too": bool(oauth_too),
             "shop_scoped": bool(oauth.FLOWS.get(key, {}).get("shop_scoped")),
             "covered_by": "",
@@ -520,6 +558,110 @@ def status(tenant: str) -> list[dict]:
         if r["state"] == "missing" and r["capability"] in done:
             r["covered_by"] = done[r["capability"]]["name"]
     return out
+
+
+def routes() -> dict:
+    """Which ways of connecting actually work right now, and what blocks each.
+
+    `status(tenant)` answers "is THIS account connected". Nothing answered "is
+    the plumbing itself correct" — and that is a different question with a
+    different owner: a client cannot fix an unset app credential, and the
+    person who can had no screen that said one was unset.
+
+    The gap was not theoretical. Shopify's one-click route is built and
+    deployed, and when its app credentials are absent the button simply did not
+    render — on the client page AND on the console — so connecting any store
+    meant walking a merchant through developer settings, ticking nine API
+    scopes and copying a token revealed exactly once. That is the hard route
+    presented as the only route, with nothing anywhere naming the easy one.
+
+    **Computed, never stored, and it calls nothing.** Same rule as
+    `diagnostics.report` and for the same reason: opening a page about broken
+    plumbing must not be the moment something breaks, and it can then be read
+    as often as anyone likes.
+    """
+    from . import oauth
+    warnings = []
+
+    # Credentials are encrypted with CREDENTIAL_KEY, or — when it is unset —
+    # with a key DERIVED FROM APPROVAL_SECRET. That degradation is deliberate
+    # (still encrypted, rather than plaintext) but it ties two unrelated
+    # secrets together: rotating the console password would make every stored
+    # credential undecryptable, and `_decrypt` swallows a bad key and returns
+    # "" — so they would not error, they would quietly read as NOT CONNECTED.
+    # A silent mass disconnection is worth one line on a page.
+    if not os.environ.get("CREDENTIAL_KEY", ""):
+        warnings.append({
+            "what": "CREDENTIAL_KEY is not set",
+            "detail": ("Stored credentials are encrypted with a key derived "
+                       "from APPROVAL_SECRET instead. Rotating APPROVAL_SECRET "
+                       "would make every one of them unreadable — and they "
+                       "would read as 'missing' rather than as an error."),
+            "fix": ("Set CREDENTIAL_KEY in the env group BEFORE any further "
+                    "client connects. Anything stored before it is set stays "
+                    "readable only while APPROVAL_SECRET is unchanged."),
+        })
+    if not config.PUBLIC_BASE_URL.startswith("https://"):
+        warnings.append({
+            "what": f"PUBLIC_BASE_URL is {config.PUBLIC_BASE_URL!r}",
+            "detail": ("Every one-click sign-in redirects back here, and OAuth "
+                       "providers reject a redirect that is not https. No "
+                       "provider below can use its one-click route."),
+            "fix": "Set PUBLIC_BASE_URL to the https address this runs on.",
+        })
+
+    provs = []
+    for key, spec in PROVIDERS.items():
+        ways = []
+        if spec["kind"] == "api_key":
+            bits = [f"Paste the {spec['field']}"]
+            if spec.get("starts"):
+                bits.append(f"it begins {spec['starts']}")
+            ways.append({
+                "kind": "api_key", "label": "Paste a token",
+                "ok": True, "why": "", "action": " — ".join(bits),
+                # Honest about what it costs, because the whole point of this
+                # panel is choosing between routes rather than discovering the
+                # hard one by walking it.
+                "effort": spec.get(
+                    "effort",
+                    f"someone with admin access copies a value out of "
+                    f"{spec['name']}'s own settings"),
+            })
+        if spec["kind"] == "oauth" or spec.get("oauth_optional"):
+            why = oauth.configured(key)
+            ways.append({
+                "kind": "oauth", "label": "One-click sign-in",
+                "ok": not why, "why": why,
+                # Shown whether or not the route works. It is needed MOST
+                # when it does not — registering it is half of switching the
+                # flow on — and withholding it until the flow already worked
+                # meant the panel handed over the value only once it was no
+                # longer the thing anybody needed. It is also the half that
+                # fails silently: a byte mismatch surfaces as a consent screen
+                # rejecting you with no hint of why.
+                "action": (f"Register this redirect URI exactly: "
+                           f"{oauth.redirect_uri(key)}"),
+                "caveat": spec.get("oauth_caveat", ""),
+                "effort": "the client clicks Connect and approves on the "
+                          "provider's own screen",
+            })
+        usable = [w for w in ways if w["ok"]]
+        provs.append({
+            "provider": key, "name": spec["name"],
+            "capability": spec["capability"], "ways": ways,
+            # The verdict, said once, so nobody has to read four rows to learn
+            # that a provider cannot be connected at all.
+            "verdict": ("no route works" if not usable else
+                        ("every route works" if len(usable) == len(ways) else
+                         f"only: {', '.join(w['label'] for w in usable)}")),
+            "degraded": bool(usable) and len(usable) < len(ways),
+            "dead": not usable,
+        })
+    return {"warnings": warnings, "providers": provs,
+            "redirect_uri_note": ("The redirect URI is per APP, not per store "
+                                  "or per client — one registration serves "
+                                  "every account.")}
 
 
 # --------------------------------------------------------------------------

@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**63 suites, 63 pass.** Check the OUTPUT, not the exit code, and skip
+**64 suites, 64 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -1843,6 +1843,53 @@ found `triage.py:490`: the JSON-repair retry, unlogged, **on the path that is
 93% of model spend**, also reading `content[0].text` eight lines under a loop
 that already scans for the text block properly.
 
+### A route that is off looks exactly like a route that does not exist
+
+Owner, reading the console: *"our shopify connection still expects a shps api
+code, I'd like to make sure it's as easy as possible for me to connect accounts
+correctly."*
+
+`credentials.status()` asked `spec["kind"] == "oauth"` before computing whether
+a one-click route could run. **Shopify's kind is `api_key`** — it carries
+`oauth_optional`, which is the only reason it gets a button at all — so the
+blocker was never computed for the one provider where both routes exist. With
+`SHOPIFY_CLIENT_ID` unset the button rendered nowhere, on the client page or the
+console, and nothing said why. `admin_ui._connections` had the same hole one
+layer up and fell to `action = ""`.
+
+So connecting a store meant the token route: a merchant in their own developer
+settings, nine API scopes, an app that must be INSTALLED before the token
+section appears at all, and a value revealed exactly once — presented as the
+only way, with the button sitting one env var away.
+
+**`credentials.routes()` and the Connection routes panel** answer the question
+nothing answered. Not *is this account connected* — `status()` does that — but
+*can anybody connect at all*. Different question, different owner: a client
+cannot fix an unset app credential, and the person who can had no screen saying
+one was unset. Computed, never stored, calls nothing, same rule as
+`diagnostics.report`.
+
+Two things it says that no amount of reading the code would have surfaced, and
+both fail quietly:
+
+* **`CREDENTIAL_KEY` is unset.** Credentials then encrypt with a key derived
+  from `APPROVAL_SECRET`. Rotating the console password would make every stored
+  credential undecryptable — and `_decrypt` swallows a bad key and returns
+  `""`, so they would read as NOT CONNECTED rather than as an error. A silent
+  mass disconnection.
+* **Switching Shopify's button on does not make the DATA complete.**
+  `read_customers` / `read_orders` need Protected Customer Data approval or the
+  fields come back REDACTED rather than erroring — which reads as an empty
+  account — and plain `read_orders` returns only the last 60 days.
+
+The redirect URI is shown whether or not the route works; it was withheld until
+the flow already worked, which handed it over only once nobody needed it.
+
+`scripts/test_connect_ui.py` asserts against the RENDERED HTML, including that a
+stored secret never reaches the page — checked by storing a known value, since
+the first version hunted for `shpat_` and caught the INSTRUCTIONS that say a
+token begins with it. §2.59.
+
 ### What was NOT done, and why
 
 * **`SEO_SITES_JSON` is still env-only**, so the fourth registry stands and a
@@ -1871,7 +1918,7 @@ that already scans for the text block properly.
 
 ## Verified vs assumed
 
-**Ran and confirmed.** All **63 suites pass**, none touching the network,
+**Ran and confirmed.** All **64 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -2075,13 +2122,13 @@ unguarded write paths above are where the actual risk is.
 
     python3 scripts/sabotage.py
 
-Fourteen guards, each disabled in turn against the suites that claim to cover it.
+Fifteen guards, each disabled in turn against the suites that claim to cover it.
 Six tests in `DEFECTS` passed for the wrong reason and every one was found by
 accident — three of them in a single day. This does it on purpose. Read a
 `STALE` line as loudly as a `MISSED` one: it means the code moved and that
 entry has been covering nothing since.
 
-**Run the suites first, before changing anything.** 63 of them, all offline:
+**Run the suites first, before changing anything.** 64 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue

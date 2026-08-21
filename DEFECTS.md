@@ -1738,7 +1738,7 @@ done
 
 **Check the OUTPUT, not the exit code**, and skip `test_brief.py` — it is an
 argparse CLI that exits 0 whatever happens, and counting it as a passing test
-is a mistake this project made for weeks. 63 suites, none touching the network,
+is a mistake this project made for weeks. 64 suites, none touching the network,
 ~7 minutes; a single shell call may hit a 2-minute timeout, so background it.
 
 **Then check the suite would notice a guard going:**
@@ -1747,7 +1747,7 @@ is a mistake this project made for weeks. 63 suites, none touching the network,
 python3 scripts/sabotage.py
 ```
 
-Fourteen guards, each disabled in turn against the suites that claim to cover it.
+Fifteen guards, each disabled in turn against the suites that claim to cover it.
 Read a `STALE` line as loudly as a `MISSED` one — it means the code moved and
 that entry has been covering nothing since.
 
@@ -1879,3 +1879,71 @@ on the day rather than an unrelated change admitting it months later.
 
 `scripts/test_llm.py`, 24 checks. Two sabotage entries. The structural one
 counts call sites per file, so a new unattributed call fails the suite.
+
+---
+
+### 2.59 A route that was switched off looked exactly like a route that did not exist — fixed 2026-08-20
+
+Owner, reading the console: *"our shopify connection still expects a shps api
+code, I'd like to make sure it's as easy as possible for me to connect accounts
+correctly."*
+
+Shopify can be connected two ways and only one of them is reasonable to ask a
+client for. A custom-app token means walking a merchant through their own
+developer settings, ticking nine API scopes, installing the app — the token
+section does not exist until it is installed, which is why it looks missing —
+and copying a value revealed exactly once. OAuth is a button.
+
+The OAuth route is built and deployed. `credentials.status()` computed whether
+it could run like this:
+
+    blocked = oauth.configured(key) if spec["kind"] == "oauth" else ""
+
+**Shopify's `kind` is `api_key`.** It carries `oauth_optional=True`, which is
+how it gets a button at all — so the blocker was never computed for the one
+provider where both routes exist. With `SHOPIFY_CLIENT_ID` unset the button
+rendered nowhere, on the client page or the console, and no screen anywhere
+said why. The paste form was presented as the only way to connect a store.
+
+`admin_ui._connections` had the matching hole one layer up: its branches ask
+`r["kind"] == "oauth"` twice and fall to `action = ""`, so Shopify got no
+button, no blocker and no redirect URI on the owner's own Connections tab.
+
+**An absent button and an unbuilt feature look identical.** That is the whole
+defect, and it is the same shape as §2.13 and the credential layer being
+invisible to its own operator: the state existed and nothing rendered it.
+
+Three things now:
+
+* `status()` computes the OAuth blocker for any provider that HAS an OAuth
+  flow, and reports `has_oauth` / `oauth_blocked_by` separately from
+  `blocked_by`, whose old meaning the pure-OAuth rendering still depends on.
+* `_connections` gives an api-key-plus-OAuth provider either the sign-in form
+  or the named blocker plus the redirect URI to register.
+* `credentials.routes()` and a **Connection routes** panel answer the question
+  nothing answered: not "is this account connected" but "can anybody connect at
+  all". Those have different owners — a client cannot fix an unset app
+  credential, and the person who can had no screen saying one was unset.
+
+**Two things the panel says that no code could have inferred**, both of which
+fail quietly:
+
+* `CREDENTIAL_KEY` is unset, so credentials are encrypted with a key derived
+  from `APPROVAL_SECRET`. Rotating the console password would make every stored
+  credential undecryptable — and `_decrypt` swallows a bad key and returns `""`,
+  so they would not error, they would read as NOT CONNECTED. A silent mass
+  disconnection.
+* Switching Shopify's button on does not make the DATA complete.
+  `read_customers` / `read_orders` need Protected Customer Data approval or the
+  fields return REDACTED rather than erroring — which reads as an empty
+  account — and plain `read_orders` returns only the last 60 days.
+
+The redirect URI is now shown whether or not the route works. It was withheld
+until the flow already worked, which handed the value over only once nobody
+needed it, and it is the half that fails silently on a byte mismatch.
+
+`scripts/test_connect_ui.py`, offline, asserting against the RENDERED HTML the
+way `test_kb_ui.py` does — including that a stored secret never reaches the
+page, checked by storing a known value rather than by hunting for a prefix that
+also appears in the instructions. `sabotage.py` entry
+`oauth_route_named_for_api_key_providers`.

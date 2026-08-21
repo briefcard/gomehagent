@@ -527,6 +527,74 @@ def _chips(caps: dict) -> str:
         for c, ok in caps.items())
 
 
+def _routes_panel() -> str:
+    """Which ways of connecting work at all — the plumbing, not one account.
+
+    Every other thing on this tab answers "is this ACCOUNT connected", which is
+    the wrong question when the answer is "nobody can connect, because an app
+    credential is unset". Those are different problems with different owners,
+    and only one of them is fixable by the person reading a client's card.
+
+    Shopify is the case that earned this panel: its one-click route is built and
+    deployed, and with the app credentials unset the button did not render
+    anywhere — so connecting a store meant walking a merchant through developer
+    settings, ticking nine API scopes and copying a token shown exactly once,
+    with nothing on any screen saying the easy route existed.
+    """
+    from . import credentials as cred
+    r = cred.routes()
+
+    warn = ""
+    for w in r["warnings"]:
+        warn += (f'<div class="note"><strong>{_esc(w["what"])}</strong>'
+                 f'<div class="mut">{_esc(w["detail"])}</div>'
+                 f'<div class="when">{_esc(w["fix"])}</div></div>')
+
+    rows = ""
+    for p in r["providers"]:
+        chip = ('<span class="chip off">no route works</span>' if p["dead"]
+                else ('<span class="chip nb">one route only</span>' if p["degraded"]
+                      else '<span class="chip on">ready</span>'))
+        ways = ""
+        for w in p["ways"]:
+            if w["ok"]:
+                ways += (f'<div class="mut">✓ <strong>{_esc(w["label"])}</strong>'
+                         f' — {_esc(w["effort"])}</div>')
+                if w["action"]:
+                    ways += f'<div class="when">{_esc(w["action"])}</div>'
+            else:
+                # The blocked route is the useful row: it is the one somebody
+                # can go and unblock, and the one whose absence is otherwise
+                # indistinguishable from the feature not existing.
+                ways += (f'<div class="mut">✗ <strong>{_esc(w["label"])}</strong>'
+                         f' — would be: {_esc(w["effort"])}</div>'
+                         f'<div class="when">Blocked by: {_esc(w["why"])}</div>'
+                         + (f'<div class="when">{_esc(w["action"])}</div>'
+                            if w["action"] else ""))
+            if w.get("caveat"):
+                # True whether the route is on or off, and it fails QUIETLY:
+                # switching the button on does not make the data complete, and
+                # a redacted field reads as an empty account rather than as an
+                # error. Cheaper on the screen than discovered in a report.
+                ways += (f'<div class="note">Even once it is on — '
+                         f'{_esc(w["caveat"])}</div>')
+        rows += (f'<div class="card"><div class="head">'
+                 f'<h2>{_esc(p["name"])}</h2><code>{_esc(p["capability"])}</code>'
+                 f'{chip}</div>{ways}</div>')
+
+    return f"""
+    <div class="card">
+      <div class="head"><h2>Connection routes</h2>
+        <span class="mut">the plumbing itself — not any one account</span></div>
+      <div class="mut">A route that is switched off does not appear as a button
+      anywhere, on this console or on a client's connect page. That is why it is
+      listed here: an absent button and an unbuilt feature look identical.</div>
+      {warn}
+      {rows}
+      <div class="when">{_esc(r["redirect_uri_note"])}</div>
+    </div>"""
+
+
 def _connections(tenant: str, key: str) -> str:
     """What this account has actually connected, and the buttons to change it.
 
@@ -580,6 +648,44 @@ def _connections(tenant: str, key: str) -> str:
                       f'<div class="when">Then register this redirect URI, '
                       f'exactly:<br><code>{_esc(_oauth.redirect_uri(r["provider"]))}'
                       f'</code></div>')
+        elif r["has_oauth"]:
+            # An API-key provider that ALSO has a one-click route — Shopify.
+            # Both are correct and which one is right depends on whose store it
+            # is: a custom-app token is five minutes for a store you own, while
+            # OAuth is what lets a CLIENT connect theirs without being walked
+            # through Shopify's developer settings, ticking nine API scopes and
+            # copying a token that is revealed exactly once.
+            #
+            # Neither of those was on this page. The branch above asks
+            # `kind == "oauth"`, Shopify's kind is `api_key`, so it fell to the
+            # empty `else` — and the paste form was presented as the only way to
+            # connect a store, on the owner's own console.
+            from . import oauth as _oauth
+            if not r["oauth_blocked_by"]:
+                shop_field = ('<input name="shop" placeholder="handle.myshopify.com" '
+                              'required>' if r["shop_scoped"] else "")
+                action = (
+                    f'<form method="get" action="/admin/oauth/{_esc(r["provider"])}" '
+                    f'class="inl"><input type="hidden" name="key" value="{_esc(key)}">'
+                    f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                    f'{shop_field}<button class="sec">Sign in with '
+                    f'{_esc(r["name"].split(" (")[0])}</button></form>'
+                    f'<div class="mut">One click for the merchant — no token to '
+                    f'copy. The form below still works for a store you already '
+                    f'hold a token for.</div>')
+            else:
+                # Named, not hidden. This is the whole point: the reason is an
+                # env var somebody can go and set, and until it is set every
+                # client has to be walked through Shopify's developer settings.
+                action = (
+                    f'<div class="mut"><strong>One-click sign-in exists for '
+                    f'{_esc(r["name"].split(" (")[0])} and is switched off.</strong> '
+                    f'Until it is on, connecting a store means the token form '
+                    f'below — nine scopes, and a value revealed once.</div>'
+                    f'<div class="mut">Blocked by: {_esc(r["oauth_blocked_by"])}</div>'
+                    f'<div class="when">Then register this redirect URI, '
+                    f'exactly:<br><code>'
+                    f'{_esc(_oauth.redirect_uri(r["provider"]))}</code></div>')
         else:
             action = ""      # the form below IS the action for an API key
 
@@ -820,10 +926,14 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                                        "ever offered for one named account."))
     rows = [r for r in rows if r.key == tenant]
     if not rows:
-        body = ('<div class="note">No accounts yet. Run '
+        # The routes panel first even here: with no accounts yet, "can anyone
+        # connect at all" is the only question on this page that HAS an answer,
+        # and it is the one a fresh install needs.
+        body = (_routes_panel()
+                + '<div class="note">No accounts yet. Run '
                 '<code>/admin/register_owner</code> first — it seeds the five.</div>')
     else:
-        body = ""
+        body = _routes_panel()
         for t in rows:
             caps = tenants.capabilities(t.key)
             missing = [c for c, ok in caps.items() if not ok]
