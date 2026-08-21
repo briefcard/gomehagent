@@ -16,7 +16,7 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `d02edab` (134 routes), confirmed serving on /health. That includes the tenant-boundary + webhook-hardening batch, the read-only `/admin/esp_probe`, the campaign engine (`esp.py`, `email_render.py`, `segments.py`, the `campaign_email` skill — DEPLOYED BUT DORMANT: registered, not wired to any route or agent tool yet), and now the BRAND-THEME deriver + review surface (`brand_theme.py`, `/admin/brand_theme` — live and usable; the campaign skill reads the approved theme). A docs-only commit may sit above this — `/health` is the authority, and this line is the last CODE commit watched onto the service.
+**Live:** everything below is pushed and deployed at `b680e9f` (134 routes), confirmed serving on /health. That includes the tenant-boundary + webhook-hardening batch, the read-only `/admin/esp_probe`, the campaign engine (`esp.py`, `email_render.py`, `segments.py`, the `campaign_email` skill — DEPLOYED BUT DORMANT: registered, not wired to any route or agent tool yet), and the BRAND-THEME deriver with its review surface as the console's own Brand tab (`brand_theme.py`, `/admin/ui?tab=brand` — live and usable; the campaign skill reads the approved theme). A docs-only commit may sit above this — `/health` is the authority, and this line is the last CODE commit watched onto the service.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
@@ -196,11 +196,21 @@ product blocks (Shopify CDN image URLs); (5) the segment engine's live half
 (commerce + ESP data → proposed cohorts, reviewed like claims); (6) the
 Klaviyo adapter; (7) more sections (columns/testimonial/offer) + native ESP
 dynamic blocks. Known small fixes to fold in: `omnisend.segments`
-first-page-only; `upload_image` wired nowhere; the Shopify OAuth onboarding
-path needs a per-tenant app registry (`SHOPIFY_APPS_JSON` →
-`{client_id, client_secret}`) — the global `SHOPIFY_CLIENT_ID/_SECRET` holds
-only one app, and clients get one each in the Dev Dashboard. Does NOT block
-Eien (connected via token, `SHOPIFY_STORES_JSON`).
+first-page-only; `upload_image` wired nowhere.
+
+**SHOPIFY_APPS_JSON is DEAD — owner's call, 2026-08-21.** The planned
+per-tenant OAuth app registry is not needed: `SHOPIFY_STORES_JSON` already
+takes `{domain, client_id, client_secret}` per store, and
+`data_tools._shopify_token` mints + auto-refreshes the 24h client-credentials
+token from it — every read path rides that seam (`shopify_seo` included; the
+audit found no other consumer reading `cfg["token"]` directly). Onboarding a
+Dev Dashboard client = create their app, paste its id/secret into the store's
+entry, one time; both auth styles coexist per entry, so token-style rows
+(Eien, Baci) are untouched. The global `SHOPIFY_CLIENT_ID/_SECRET` now matters
+ONLY to `oauth.py`'s authorization-code /connect dance — a self-serve path a
+client would use instead of handing Gomeh credentials; it stays single-app
+until a client actually wants it, and the token-paste /connect route covers
+self-serve today.
 
 ## Start here if you are new to this thread
 
