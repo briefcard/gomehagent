@@ -8,12 +8,10 @@ import io
 import json
 import logging
 
-import anthropic
 
 from . import approvals, config, data_tools, db, drive_io, emailfmt, gmail_client
 
 log = logging.getLogger("skills")
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 
 def _send_report(subject: str, body: str, also_whatsapp: bool = True) -> None:
@@ -162,15 +160,15 @@ def business_pulse() -> str:
         lines += [f"  • {d.due_date} — {d.description} ({d.amount})" for d in deads]
 
     # Top-3 via the model from this snapshot
-    try:
-        msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=400,
-            messages=[{"role": "user", "content":
-                "From this weekly business snapshot, give the owner the 3 most "
-                "important things to do this week, one line each, concrete.\n\n"
-                + "\n".join(lines)}])
-        lines.append("\n🎯 Top 3 this week:\n" + msg.content[0].text.strip())
-    except Exception:  # noqa: BLE001
-        pass
+    from . import llm
+    _top3 = llm.ask("weekly_pulse",
+                    "From this weekly business snapshot, give the owner the 3 "
+                    "most important things to do this week, one line each, "
+                    "concrete.\n\n" + "\n".join(lines), max_tokens=400)
+    if _top3.ok and _top3.text.strip():
+        lines.append("\n🎯 Top 3 this week:\n" + _top3.text.strip())
+    # A heading with nothing under it is worse than no heading: the report still
+    # goes out, and the owner reads an empty Top 3 as "nothing is urgent".
     body = "\n".join(lines)
     _send_report("Weekly Business Pulse", body)
     return "business_pulse sent"
@@ -198,16 +196,21 @@ def contract_expiry_watch() -> str:
             data = drive_io.download("baci", fid)
             if len(data) > 4_000_000 or not d.filename.lower().endswith(".pdf"):
                 continue
-            msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=200,
-                messages=[{"role": "user", "content": [
-                    {"type": "document", "source": {"type": "base64",
-                     "media_type": "application/pdf",
-                     "data": _b64.standard_b64encode(data).decode()}},
-                    {"type": "text", "text":
-                     "Does this contract have a renewal or expiry date? Respond JSON: "
-                     '{"date":"YYYY-MM-DD or empty","what":"one line"}'}]}])
-            r = json.loads(msg.content[0].text[msg.content[0].text.find("{"):
-                                               msg.content[0].text.rfind("}") + 1])
+            from . import llm
+            reply = llm.ask("contract_expiry", [
+                {"type": "document", "source": {"type": "base64",
+                 "media_type": "application/pdf",
+                 "data": _b64.standard_b64encode(data).decode()}},
+                {"type": "text", "text":
+                 "Does this contract have a renewal or expiry date? Respond JSON: "
+                 '{"date":"YYYY-MM-DD or empty","what":"one line"}'}],
+                max_tokens=200)
+            if not reply.ok:
+                log.warning("contract expiry scan skipped for %s — %s",
+                            d.filename, reply.error or reply.degraded)
+                continue
+            txt = reply.text
+            r = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
             if r.get("date"):
                 with db.SessionLocal() as s:
                     if not s.query(db.Deadline).filter(
@@ -322,14 +325,22 @@ def meeting_scan() -> str:
         except Exception:  # noqa: BLE001
             pass
 
+    from . import llm
+    reply = llm.ask("meeting_scan", MEETING_PROMPT.format(
+        today=dt.datetime.now().strftime("%A %Y-%m-%d"),
+        events="\n".join(events) or "none",
+        emails="\n".join(snips)), max_tokens=1200)
+    if not reply.ok:
+        # Reported apart from a parse failure on purpose. "the model could not
+        # be called" and "the model answered something we could not read" send
+        # you to a billing console and to a prompt respectively, and a single
+        # message covering both sends you to neither.
+        why = reply.error or reply.degraded
+        log.warning("meeting_scan: no model output — %s", why)
+        return f"meeting_scan: no model output — {why}"
     try:
-        msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=1200,
-            messages=[{"role": "user", "content": MEETING_PROMPT.format(
-                today=dt.datetime.now().strftime("%A %Y-%m-%d"),
-                events="\n".join(events) or "none",
-                emails="\n".join(snips))}])
-        found = json.loads(msg.content[0].text[msg.content[0].text.find("{"):
-                                               msg.content[0].text.rfind("}") + 1])
+        txt = reply.text
+        found = json.loads(txt[txt.find("{"):txt.rfind("}") + 1])
         meetings = found.get("meetings", [])
     except Exception:  # noqa: BLE001
         log.exception("meeting_scan parse failed")

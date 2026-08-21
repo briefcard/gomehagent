@@ -486,20 +486,21 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     result = _parse_verdict(text)
     if result is None:
         # One repair attempt: ask the model to re-emit clean JSON only.
-        try:
-            fix = client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=2500,
-                messages=[{"role": "user", "content":
-                           "Convert this triage verdict into the required JSON "
-                           "object ONLY (keys: category, action, reason, "
-                           "reply_subject, reply_body, claim_ids, deadline). "
-                           "No prose, no "
-                           "code fences. If truncated, complete it sensibly:\n\n"
-                           + text[:4000]}],
-            )
-            result = _parse_verdict(fix.content[0].text)
-        except Exception:  # noqa: BLE001
-            result = None
+        # Through the gateway, for two reasons that both bit here. It was the
+        # one model call on this path that recorded NO usage — on the path that
+        # is 93% of spend — so every repair attempt was free as far as any
+        # report could tell. And it read `content[0].text` while the loop eight
+        # lines above already knows better and scans for the text block.
+        from . import llm
+        fix = llm.ask("triage_repair",
+                      "Convert this triage verdict into the required JSON "
+                      "object ONLY (keys: category, action, reason, "
+                      "reply_subject, reply_body, claim_ids, deadline). "
+                      "No prose, no "
+                      "code fences. If truncated, complete it sensibly:\n\n"
+                      + text[:4000],
+                      tenant=tenant, max_tokens=2500)
+        result = _parse_verdict(fix.text) if fix.ok else None
     if result is None:
         result = {"category": "other", "action": "escalate",
                   "reason": "triage parse failure (after retry)",

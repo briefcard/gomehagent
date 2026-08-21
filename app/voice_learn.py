@@ -4,12 +4,10 @@ startup if a profile doesn't exist yet. Delete a row from voice_profiles to
 force a re-learn."""
 import logging
 
-import anthropic
 
 from . import config, db, gmail_client
 
 log = logging.getLogger("voice")
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 PROMPT = """Below are real emails the owner sent from the "{alias}" inbox.
 Distill a concise voice profile (max ~400 words) that a drafting assistant
@@ -53,13 +51,20 @@ def ensure_profiles() -> None:
                 log.info("[%s] no sent mail found; skipping voice profile", alias)
                 continue
             joined = "\n\n=====\n\n".join(sent)[:120000]
-            msg = client.messages.create(
-                model=config.CLAUDE_MODEL,
-                max_tokens=1000,
-                messages=[{"role": "user",
-                           "content": PROMPT.format(alias=alias, emails=joined)}],
-            )
-            rules = msg.content[0].text.strip()
+            from . import llm
+            r = llm.ask("voice_learn",
+                        PROMPT.format(alias=alias, emails=joined),
+                        max_tokens=1000)
+            if not r.ok:
+                # Explicit, because the gateway does not raise: without this the
+                # failure would fall THROUGH the except below and store an empty
+                # voice profile, which reads as "this person has no style" and
+                # is never re-learned — the row exists, so the guard at the top
+                # skips the alias for ever.
+                log.warning("[%s] voice profile not learned — %s", alias,
+                            r.error or r.degraded)
+                continue
+            rules = r.text.strip()
             with db.SessionLocal() as s:
                 s.add(db.VoiceProfile(alias=alias, rules=rules))
                 s.commit()

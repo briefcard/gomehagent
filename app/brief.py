@@ -132,13 +132,20 @@ def classify(text: str, sender: str = "", model_fn=None) -> dict:
 
 
 def _default_model(system: str, user: str) -> str:
-    import anthropic
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model=config.CLAUDE_MODEL, max_tokens=800, system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    return msg.content[0].text.strip().strip("`")
+    """The classifier's model call. Returns "" when it could not be made.
+
+    `classify` already treats unparseable output as an empty classification, so
+    "" degrades exactly the way junk output does. What was missing is the
+    REASON: a spend limit and a model writing prose both produced an empty
+    dict, and only one of those is fixed in a billing console. The gateway
+    classifies it and it is logged here rather than discarded.
+    """
+    from . import llm
+    r = llm.ask("brief_classify", user, system=system, max_tokens=800)
+    if not r.ok:
+        log.warning("classify: no model output — %s", r.error or r.degraded)
+        return ""
+    return r.text.strip().strip("`")
 
 
 # ---------------------------------------------------------------------------

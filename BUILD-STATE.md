@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**61 suites, 61 pass.** Check the OUTPUT, not the exit code, and skip
+**63 suites, 63 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -933,6 +933,8 @@ Traced mechanically on 2026-08-18. This is the most important table in the file.
     worker.py           systems replies compliance skill   the cron tick
     skill.py            kb resolve validator ledger replies   the substrate
     web.py              everything                 console + bridge
+    connections.py      credentials                one resolver, by TENANT
+    llm.py              usage model_error          one door to the model
 
 **The mail path is grounded and guarded — 2026-08-19.** The audit's worst
 finding was not a bug but an absence: `resolve.resolve` had exactly ONE caller,
@@ -1760,9 +1762,116 @@ the KB", it is read → draft → come back through the gate. `test_bridge.py`
 `auto` as well as on `shadow`; both drafts reach the ledger; and material in
 review never enters a bundle.
 
+## Connections — one resolver, and one door to the model
+
+This thread was spent entirely on the connection layer, at the owner's
+direction: *"We still have a messy interface to connect our different tools. I
+need it all connected in a way that our claude API can leverage it throughout
+the system."*
+
+The mess was four separate ones, and they stacked.
+
+    four registries answered "what is this client connected to"
+      credentials.PROVIDERS + the encrypted store   per tenant
+      config.SHOPIFY_STORES / GMAIL_ACCOUNTS /
+        WORDPRESS_SITES / SEO_SITES_JSON            per env key
+      db.Tenant.shopify_store / .gmail_alias / .cms names INTO those blobs
+      sites.py                                      SEO profiles, own creds_key
+
+    four vocabularies named the same client
+      tenant · account|alias · store · site
+
+    three registries declared model-facing tools
+      command_agent 38 · seo_tools 33 · data_tools 11
+
+    twenty-six model calls behind eleven clients
+      nine logged usage · two classified their errors
+
+**`credentials.resolve` had already unified the first two, correctly, per
+tenant.** What it could not fix is that most consumers do not address a tenant
+— they address a store key, an inbox alias or a site key — so the unification
+stopped at the door of every module speaking one of the other three. That is
+not a tidiness problem, and §2.57 is what it cost.
+
+### The publish path could not see a connection the client had made
+
+`shopify_seo` and `wordpress_seo` are the only two modules that write to a
+client's live website. Neither had ever called `credentials`. A client could
+finish `/connect/<token>`, be shown connected on every screen, grant `cms` or
+`commerce` to `wired_capabilities` — and every publish answered *"not
+configured … Available: ['baci']"*, or *"add it to WORDPRESS_SITES_JSON"*.
+
+`app/connections.py` resolves **by tenant**, not by the env key, and that is
+the part that fixes rather than papers over: a store connected by OAuth has no
+env key, so anything joining through `creds_key` can never find it. Client
+connection first, env group second, refusal naming the account and the connect
+page when neither exists.
+
+The negative half is confirmed in production: after deploy,
+`/health/connections` still resolves both Shopify stores and all three Google
+accounts. Nothing was cut over.
+
+Two more in the same seam. The account/site join had **two implementations that
+disagreed** — the inline one in `tool_scope._site_for` did not strip a scheme —
+and `filter_tools` **resolved the account once per tool**: 48 scoped tools, 27
+of them by site, so one tool list cost 48 `Tenant` reads and 27 `SEO_SITES_JSON`
+parses on every turn of every agent.
+
+### One door to the model
+
+`app/llm.py`. `purpose` is required and is BOTH the usage tag and the model
+selector, **so an unattributed call is not expressible** — the nine-of-twenty-six
+problem was never carelessness, it was that logging was a second thing to
+remember. It does not raise: `Reply.ok` is the gate, `.error` is the provider's
+condition in words somebody can act on, `.degraded` is what was absent before
+the call.
+
+Fifteen sites migrated (`ops_jobs` ×10, `skills` ×3, `brief`, `voice_learn`).
+Eleven clients became eight, and all eight already logged.
+
+**Two migrations were not mechanical**, which is the argument against doing the
+rest of them in a hurry. `voice_learn` would have stored an EMPTY voice profile
+on failure and never re-learned that alias, because the guard at the top of its
+loop skips any alias that already has a row. `skills.meeting_scan` reported "the
+model could not be called" and "the model said something unreadable" with one
+message, and those are a billing console and a prompt respectively.
+
+**And `sabotage.py` caught the new guard being decoration, on the day.** The
+structural check asked whether a module *mentions* `usage.log_usage` — which
+`triage.py` did, twice, while holding three calls. Counting the sites instead
+found `triage.py:490`: the JSON-repair retry, unlogged, **on the path that is
+93% of model spend**, also reading `content[0].text` eight lines under a loop
+that already scans for the text block properly.
+
+### What was NOT done, and why
+
+* **`SEO_SITES_JSON` is still env-only**, so the fourth registry stands and a
+  new client still needs a Render edit to get a site profile. Deriving profiles
+  from the `Tenant` table is the real merge. **There is a trap:**
+  `sites.all_profiles()` sits under `tool_scope._site_for` in the per-turn tool
+  path, so putting a query behind it turns one env parse into a query per turn
+  — decide the caching first. Widening it also widens which tools an account is
+  offered, which is probably right and needs its own isolation assertion rather
+  than arriving as a side effect. See `DEFECTS.md` §3.
+* **L3, the tool plane, was not started.** 82 schemas across three modules, and
+  `tool_scope.guard` still has exactly two callers (`kernel._dispatch` and
+  `data_tools.dispatch`) — so every path reaching a platform another way
+  (`worker`, `ops_jobs`, `skill_pack`, the adapters) is unguarded by the account
+  boundary and unrecorded in `ToolCall`. That is the largest remaining piece of
+  "connected so the model can leverage it throughout", and it is a thread of its
+  own.
+* **The eleven remaining model calls were left alone** — `kernel`, `triage`,
+  `correlate`, `data_tools`, `responder`, `voice`, `skill_pack`, `extract`. All
+  already log usage, so the marginal gain is caching and error classification,
+  and the risk is the live mail path. Worth doing; not worth doing at the end of
+  a session.
+* **Model IDs were not touched.** `CLAUDE_MODEL` is `claude-sonnet-4-6` and
+  `SEO_MODEL` is `claude-opus-4-8`. Changing them changes cost and behaviour on
+  every path at once, which is the owner's call, not a refactor's.
+
 ## Verified vs assumed
 
-**Ran and confirmed.** All **61 suites pass**, none touching the network,
+**Ran and confirmed.** All **63 suites pass**, none touching the network,
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -1966,13 +2075,13 @@ unguarded write paths above are where the actual risk is.
 
     python3 scripts/sabotage.py
 
-Nine guards, each disabled in turn against the suites that claim to cover it.
+Fourteen guards, each disabled in turn against the suites that claim to cover it.
 Six tests in `DEFECTS` passed for the wrong reason and every one was found by
 accident — three of them in a single day. This does it on purpose. Read a
 `STALE` line as loudly as a `MISSED` one: it means the code moved and that
 entry has been covering nothing since.
 
-**Run the suites first, before changing anything.** 61 of them, all offline:
+**Run the suites first, before changing anything.** 63 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue
@@ -2011,10 +2120,24 @@ another way records no duration and reads as untimed rather than fast; and
 `Usage.tenant` is blank on every row written before attribution was wired, so an
 account's spend in a long window is understated — the note says so.
 
-**When there IS something to build:** `reports` is the largest declared-and-
-empty thing left, and it is the one that would let a client report carry a
-number the client already believes. After that, the join from an accepted sweep
-finding into `craft.propose` — the carrier exists and is empty.
+**When there IS something to build:** the connection work has an obvious next
+slice and it is the biggest one left — **L3, the tool plane.** 82 model-facing
+schemas are hand-written across `command_agent` (38), `seo_tools` (33) and
+`data_tools` (11), and `tool_scope.guard` has exactly TWO callers. So the
+account boundary covers the kernel loop and the shared data tools, and covers
+nothing that reaches a platform another way — `worker`, `ops_jobs`,
+`skill_pack`, the adapters. Those calls are also absent from `ToolCall`, which
+is why Diagnostics reports most of the system as untimed. One registry where a
+tool declares `name / schema / handler / capability / account_param / writes`,
+and one `tools.call()` that guards, records and validates writes, is the shape.
+
+Before that, or beside it, the smaller connection piece: derive SEO site
+profiles from the `Tenant` table so a new client needs no Render edit — with
+the caching trap in `DEFECTS.md` §3 settled FIRST, because `all_profiles()`
+sits in the per-turn tool path.
+
+Then `reports`, still the largest declared-and-empty thing, and the join from an
+accepted sweep finding into `craft.propose` — the carrier exists and is empty.
 
 ### Three habits this session earned the hard way
 

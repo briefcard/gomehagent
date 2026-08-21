@@ -496,6 +496,27 @@ it. Highest-value remaining fix in the codebase.
 (via `sites.py`), and `SeoSiteConfig`. The SEO subsystem uses the second; the
 platform uses the first. Merge before onboarding client #6.
 
+*Partly closed 2026-08-20 (§2.57).* The half that was actively breaking is
+fixed: **credentials** no longer live in whichever registry the caller happens
+to speak. `app/connections.py` resolves them by tenant, so a client-connected
+store or install reaches the publish path, and `tool_scope` and `connections`
+now share one domain normaliser rather than two that disagreed.
+
+**Still open, and this is the whole remaining merge:** `SEO_SITES_JSON` is
+env-only, so a new client still cannot get an SEO site profile without a Render
+edit, and `SeoSiteConfig` remains a third row keyed by site. Deriving profiles
+from the `Tenant` table is the fix.
+
+**Do not do it naively — there is a trap in the call path.** `sites
+.all_profiles()` parses that JSON on every call and sits under
+`tool_scope._site_for`, which runs while a tool list is being built. Putting a
+database query behind it turns one env parse into a query per turn. Decide the
+caching first; the profile derivation is the easy half. Note also that widening
+`all_profiles()` widens which tools each account is OFFERED, since `_site_for`
+returning a value is what makes the 27 site-scoped tools visible — that is
+probably correct, and it is a behaviour change that needs its own assertion in
+`test_tenant_isolation.py` rather than arriving as a side effect.
+
 **Console writes are GET requests.** `/admin/kb_add`, `/admin/seed_kb`,
 `/admin/tenant_scope`, `/admin/harvest` mutate on a GET, so a prefetch or link
 preview can fire them. `/admin/claim_edit`, `/connect/<token>`,
@@ -1717,7 +1738,7 @@ done
 
 **Check the OUTPUT, not the exit code**, and skip `test_brief.py` — it is an
 argparse CLI that exits 0 whatever happens, and counting it as a passing test
-is a mistake this project made for weeks. 61 suites, none touching the network,
+is a mistake this project made for weeks. 63 suites, none touching the network,
 ~7 minutes; a single shell call may hit a 2-minute timeout, so background it.
 
 **Then check the suite would notice a guard going:**
@@ -1726,7 +1747,7 @@ is a mistake this project made for weeks. 61 suites, none touching the network,
 python3 scripts/sabotage.py
 ```
 
-Ten guards, each disabled in turn against the suites that claim to cover it.
+Fourteen guards, each disabled in turn against the suites that claim to cover it.
 Read a `STALE` line as loudly as a `MISSED` one — it means the code moved and
 that entry has been covering nothing since.
 
@@ -1743,3 +1764,118 @@ Two reports rather than tests, worth running after data work:
 python3 scripts/seed_kb.py --report       # what each account still needs
 python3 scripts/tenant_scope.py --report  # what is still unattributed
 ```
+
+---
+
+### 2.57 A connection the client made was invisible to the code that publishes — fixed 2026-08-20
+
+`shopify_seo` and `wordpress_seo` are the only two modules in this codebase
+that write to a client's live website. Neither had ever called `credentials`.
+Both read `config.SHOPIFY_STORES` / `config.WORDPRESS_SITES` directly, so the
+entire client-connect path — the encrypted store, the probe, the console chip,
+`wired_capabilities` granting `cms` or `commerce` — stopped at their door.
+
+A client could finish `/connect/<token>`, be shown as connected on every screen
+we have, and every publish would answer:
+
+    Shopify store 'coverings' not configured for site 'coverings'.
+    Available: ['baci']
+
+telling them to edit a Render variable for a thing they had just connected
+correctly. On WordPress it was `add it to WORDPRESS_SITES_JSON`. Had `_ok`
+somehow been passed, `_base` would have raised `KeyError` reaching for a domain
+that was sitting in the credential store the whole time.
+
+This is §2.29 one floor down — two layers disagreeing about whether an account
+is connected — and `credentials.google_config` had already written the verdict
+in its own docstring months earlier: *the connection would be real and
+unreadable, which is worse than absent.* It was written about `email_harvest`,
+and nobody checked whether the same join was missing anywhere else. It was.
+
+**Half of `shopify_seo` was already correct, which is why nothing looked wrong.**
+`_headers` resolves the TOKEN through `data_tools._shopify_token`, which is
+client-first. Only the DOMAIN and the existence check read the env group. One
+credential, half resolved, and the half that worked is the half a person would
+have spot-checked.
+
+Fixed by `app/connections.py`, which resolves **by tenant** rather than by the
+env key. That distinction is the fix rather than a workaround: a store connected
+by OAuth has no env key at all, so anything joining through `creds_key` can
+never find it, however many fallbacks are stacked behind it. Client connection
+first, env group second, refusal by name — naming the account and the connect
+page — when neither exists.
+
+`scripts/test_connections.py`, 30 checks, verified to fail without the fix with
+the exact message above. `sabotage.py` entry `client_credential_reaches_publish`.
+
+Two more found in the same seam:
+
+* **The account/site join had two implementations that disagreed.**
+  `tool_scope._site_for` (tenant → site) and `connections.tenant_for_site`
+  (site → tenant) are one rule run in two directions; the inline one lowercased
+  and stripped `www.` but not a scheme, so a profile whose domain was written
+  `https://acme.com` resolved one way and not the other. One normaliser now,
+  and the suite asserts the join is reversible.
+
+* **`filter_tools` resolved the account once per tool.** 48 tools are scoped
+  and 27 of those by site, so building one tool list cost 48 `Tenant` reads and
+  27 `SEO_SITES_JSON` parses — on every turn of every agent. Resolved once now.
+  The test asserts the cost does not GROW with the tool count rather than
+  pinning a threshold, because a threshold drifts and this cannot pass while
+  the resolution is back inside the loop.
+
+### 2.58 Two thirds of model spend was unrecorded, and the worst offender was on the most expensive path — fixed 2026-08-20
+
+Twenty-six `messages.create` calls behind eleven `anthropic.Anthropic()`
+clients. **Nine called `usage.log_usage`.** So a spend report covered about a
+third of the spend while looking complete — and `Usage.tenant`, already on the
+declared-and-never-written list, could not be filled by callers that were not
+logging at all.
+
+Three more things were inconsistent for the same reason — each was a second
+thing to remember rather than a property of the call:
+
+* **`model_error.explain` had two callers of twenty-six.** It exists because a
+  spend limit once reached the console as a truncated `BadRequestError` and
+  sent somebody through the ban list and the validator hunting a billing
+  problem. The other twenty-four still reported the exception class.
+* **Absence had three spellings** — degrade and say so, return `""`, or raise.
+* **Every one of the twenty-six read `content[0].text`.** The content is a LIST
+  of blocks and a thinking or tool_use block may lead it. Nothing has enabled
+  thinking yet, so this is a trap rather than a bug — the kind that goes off
+  during an unrelated change.
+
+`app/llm.py` is one door. `purpose` is required and is BOTH the usage tag and
+the model selector, so an unattributed call is not expressible. It does not
+raise: `Reply.ok` is the gate, `.error` is the provider's condition in words
+somebody can act on, `.degraded` is what was missing before the call was made.
+Fifteen sites migrated (`ops_jobs` ×10, `skills` ×3, `brief`, `voice_learn`);
+eleven clients became eight, and all eight already logged.
+
+**The migration was not mechanical, and two sites proved it.**
+
+* `voice_learn` wrapped its call in a `try/except` that logged and moved on.
+  Since the gateway does not raise, a naive swap would have written an EMPTY
+  voice profile — and the guard at the top of that loop skips any alias that
+  already has a row, so the account would never be re-learned. A silent,
+  permanent regression from a change that "only" added logging.
+* `skills.meeting_scan` returned `"parse failed"` for both a model that could
+  not be called and a model that answered something unreadable. Those send you
+  to a billing console and to a prompt respectively, and one message covering
+  both sends you to neither. Reported apart now.
+
+**And the guard against this recurring was itself decoration at first.** The
+new suite asked whether each module calling the API *mentions* `usage.log_usage`
+— which `triage.py` did, twice, while holding three calls. `sabotage.py`
+reported the entry UNDETECTED, and counting the sites instead found
+`triage.py:490`: the JSON-repair retry, `CLAUDE_MODEL` at 2500 max tokens,
+recording nothing — **on the path that is 93% of model spend**. It also read
+`content[0].text` eight lines below a loop that already scans for the text
+block properly.
+
+That is the §2.15 lesson again: a test that cannot fail for its stated reason
+is worse than no test. The difference this time is that `sabotage.py` said so
+on the day rather than an unrelated change admitting it months later.
+
+`scripts/test_llm.py`, 25 checks. Two sabotage entries. The structural one
+counts call sites per file, so a new unattributed call fails the suite.

@@ -9,12 +9,11 @@
 import json
 import logging
 
-import anthropic
 
-from . import approvals, config, db, drive_io, gmail_client, triage
+from . import (approvals, config, db, drive_io, gmail_client, llm,
+               tenants, triage)
 
 log = logging.getLogger("ops")
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
 DOC_SWEEP_ALIAS = "baci"
 DOC_SWEEP_DAYS = 180
@@ -133,17 +132,15 @@ def doc_sweep() -> str:
                     "summary": att["filename"]}
             if att["filename"].lower().endswith(".pdf") and len(data) < 4_500_000:
                 try:
-                    msg = client.messages.create(
-                        model=config.CLAUDE_MODEL, max_tokens=400,
-                        messages=[{"role": "user", "content": [
+                    meta.update(_json_extract(llm.text_or_raise(llm.ask(
+                        "doc_extract", [
                             {"type": "document", "source": {
                                 "type": "base64", "media_type": "application/pdf",
                                 "data": _b64.standard_b64encode(data).decode()}},
                             {"type": "text", "text": EXTRACT_PROMPT.format(
-                                sender=em["from"][:60], subject=em["subject"][:120])},
-                        ]}],
-                    )
-                    meta.update(_json_extract(msg.content[0].text))
+                                sender=em["from"][:60],
+                                subject=em["subject"][:120])},
+                        ], tenant=tenants.for_alias(alias), max_tokens=400))))
                 except Exception:  # noqa: BLE001
                     log.exception("extract failed: %s", att["filename"])
             docs.append({"i": len(docs), "filename": att["filename"], "data": data,
@@ -160,12 +157,10 @@ def doc_sweep() -> str:
         f"order_ref='{d['order_ref']}', refs={d['all_refs']}, date={d['date']}, "
         f"old={d['is_old_version']}, file='{d['filename']}'" for d in docs)
     try:
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=3000,
-            messages=[{"role": "user", "content": CLUSTER_PROMPT.format(
-                n=len(docs), tree=tree_text or "(empty)", docs=doc_lines)}],
-        )
-        groups = _json_extract(msg.content[0].text).get("groups", [])
+        groups = _json_extract(llm.text_or_raise(llm.ask(
+            "doc_cluster", CLUSTER_PROMPT.format(
+                n=len(docs), tree=tree_text or "(empty)", docs=doc_lines),
+            tenant=tenants.for_alias(alias), max_tokens=3000))).get("groups", [])
     except Exception:  # noqa: BLE001
         log.exception("clustering failed")
         return "doc_sweep: clustering step failed — nothing filed"
@@ -255,12 +250,10 @@ def shipment_audit() -> str:
     if not summaries:
         return "shipment_audit: no logistics threads found in 90 days"
 
-    msg = client.messages.create(
-        model=config.BUCKET_MODELS.get("logistics", config.CLAUDE_MODEL),
-        max_tokens=4000, system=AUDIT_PROMPT,
-        messages=[{"role": "user", "content": "\n".join(summaries)}],
-    )
-    text = msg.content[0].text.strip().strip("`")
+    text = llm.text_or_raise(llm.ask(
+        "shipment_audit", "\n".join(summaries), system=AUDIT_PROMPT,
+        tenant=tenants.for_alias(alias), max_tokens=4000,
+        model=config.BUCKET_MODELS.get("logistics", ""))).strip().strip("`")
     text = text[text.find("{"):text.rfind("}") + 1]
     audit = json.loads(text)
 
@@ -377,11 +370,9 @@ def refile_intake() -> str:
         blocks.append({"type": "text", "text": REFILE_PROMPT.format(
             tree=tree_text or "(empty)", path=f["path"])})
         try:
-            msg = client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=200,
-                messages=[{"role": "user", "content": blocks}],
-            )
-            verdict = _json_extract(msg.content[0].text)
+            verdict = _json_extract(llm.text_or_raise(llm.ask(
+                "refile_verdict", blocks, tenant=tenants.for_alias(alias),
+                max_tokens=200)))
             target = (verdict.get("target_path") or "keep").strip().strip("/")
         except Exception:  # noqa: BLE001
             log.exception("refile decision failed for %s", f["path"])
@@ -402,12 +393,10 @@ def refile_intake() -> str:
     proposals = "\n".join(f"- id={m['file_id']} file='{m['from']}' -> "
                           f"'{m['to']}' anchor='{m['anchor']}'" for m in plan)
     try:
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=2500,
-            messages=[{"role": "user", "content": CONSOLIDATE_PROMPT.format(
-                tree=tree_text or "(empty)", proposals=proposals)}],
-        )
-        result = _json_extract(msg.content[0].text)
+        result = _json_extract(llm.text_or_raise(llm.ask(
+            "refile_consolidate", CONSOLIDATE_PROMPT.format(
+                tree=tree_text or "(empty)", proposals=proposals),
+            tenant=tenants.for_alias(alias), max_tokens=2500)))
         groups = result.get("groups", [])
         kept += len(result.get("keep_in_intake", []))
     except Exception:  # noqa: BLE001
@@ -498,15 +487,13 @@ def build_onboarding_packet() -> str:
         chosen = None
         if uniq:
             try:
-                msg = client.messages.create(
-                    model=config.CLAUDE_MODEL, max_tokens=50,
-                    messages=[{"role": "user", "content": PICK_PROMPT.format(
+                pick = llm.text_or_raise(llm.ask(
+                    "doc_pick", PICK_PROMPT.format(
                         doc_type=doc_type,
                         candidates="\n".join(f"- id={c['id']} name={c['name']} "
                                              f"modified={c['modifiedTime']}"
-                                             for c in uniq[:10]))}],
-                )
-                pick = msg.content[0].text.strip()
+                                             for c in uniq[:10])),
+                    max_tokens=50)).strip()
                 chosen = next((c for c in uniq if c["id"] in pick), None)
             except Exception:  # noqa: BLE001
                 log.exception("pick failed")
@@ -614,11 +601,9 @@ def file_whatsapp_document(media_id: str, filename: str, mime: str,
         tree=tree or "(empty)", chat=chat_context[:3000],
         filename=filename, caption=caption or "(none)")})
     try:
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=300,
-            messages=[{"role": "user", "content": blocks}],
-        )
-        meta = _json_extract(msg.content[0].text)
+        meta = _json_extract(llm.text_or_raise(llm.ask(
+            "whatsapp_file", blocks, tenant=tenants.for_alias(alias),
+            max_tokens=300)))
     except Exception:  # noqa: BLE001
         meta = {"target_path": f"{INTAKE_NAME}/WhatsApp", "rename_to": "",
                 "note": "filed to intake (couldn't classify)"}
@@ -728,9 +713,9 @@ def organize(account: str = "baci", query: str = "", destination: str = "B2B",
                 sender=headers.get("from", "")[:60], subject=headers.get("subject", "")[:120],
                 date=headers.get("date", "")[:30])})
             try:
-                msg = client.messages.create(model=config.CLAUDE_MODEL,
-                                             max_tokens=400, messages=[{"role": "user", "content": blocks}])
-                meta.update(_json_extract(msg.content[0].text))
+                meta.update(_json_extract(llm.text_or_raise(llm.ask(
+                    "organize_extract", blocks,
+                    tenant=tenants.for_alias(account), max_tokens=400))))
             except Exception:  # noqa: BLE001
                 pass
             docs.append({"i": len(docs), "filename": fname, "data": data, "mime": mime,
@@ -745,11 +730,12 @@ def organize(account: str = "baci", query: str = "", destination: str = "B2B",
         f"id={d['i']}: type={d['doc_type']}, who='{d['counterparty']}', ref='{d['ref']}', "
         f"amount='{d['amount']}', month={d['month']}, file='{d['filename']}'" for d in docs)
     try:
-        msg = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=3000,
-            messages=[{"role": "user", "content": ORGANIZE_CLUSTER.format(
+        groups = _json_extract(llm.text_or_raise(llm.ask(
+            "organize_cluster", ORGANIZE_CLUSTER.format(
                 n=len(docs), dest=destination, acct=account, scheme=scheme_desc,
-                tree=tree_text or "(empty)", docs=doc_lines)}])
-        groups = _json_extract(msg.content[0].text).get("groups", [])
+                tree=tree_text or "(empty)", docs=doc_lines),
+            tenant=tenants.for_alias(account),
+            max_tokens=3000))).get("groups", [])
     except Exception:  # noqa: BLE001
         log.exception("organize clustering failed")
         return "organize: clustering failed"
@@ -870,12 +856,11 @@ def daily_review() -> str:
     email_t = "\n".join(snips) or "none"
 
     try:
-        msg = client.messages.create(
-            model=config.BUCKET_MODELS.get("logistics", config.CLAUDE_MODEL),
+        r = _json_extract(llm.text_or_raise(llm.ask(
+            "daily_review", REVIEW_PROMPT.format(
+                shipments=ship_t, rfqs=rfq_t, deadlines=dead_t, emails=email_t),
             max_tokens=2000,
-            messages=[{"role": "user", "content": REVIEW_PROMPT.format(
-                shipments=ship_t, rfqs=rfq_t, deadlines=dead_t, emails=email_t)}])
-        r = _json_extract(msg.content[0].text)
+            model=config.BUCKET_MODELS.get("logistics", ""))))
     except Exception:  # noqa: BLE001
         log.exception("daily_review reasoning failed")
         return "daily_review failed"

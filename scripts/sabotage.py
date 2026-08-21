@@ -149,6 +149,26 @@ SABOTAGES = [
                "and an SEO_SITES_JSON parse per site-scoped one \u2014 48 and 27 "
                "of them, on every turn of every agent",
     },
+    {
+        "name": "gateway_logs_usage",
+        "file": "app/llm.py",
+        "find": "    usage.log_usage(purpose, chosen, msg, tenant=tenant)",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_llm.py"],
+        "why": "the model spend of every migrated caller stops being recorded, "
+               "and a spend report that omits most of the spend is worse than "
+               "none because it gets believed",
+    },
+    {
+        "name": "no_unattributed_call_site",
+        "file": "app/triage.py",
+        "find": "    usage.log_usage(\"classify\", config.CLASSIFY_MODEL, msg, tenant=tenant)",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_llm.py"],
+        "why": "a module can call the API without recording it and no test "
+               "notices \u2014 which is how nine of twenty-six call sites came "
+               "to be the only attributed ones",
+    },
 ]
 
 
