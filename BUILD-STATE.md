@@ -351,11 +351,50 @@ skills accept. `blog`/`reorder_engine`/`reports` declare unit + ship only
 (plans exist only once a skill can consume them, or they queue forever);
 the inbox family declares the Gmail-draft loop it already runs.
 
-**Dormant by construction:** no planner exists, no surface creates plans, and
-`campaign_email` is live for no account — the mechanism ships inert, exactly
-like the campaign engine before it. `scripts/test_plans.py` (52 checks);
-sabotage is now 33 entries, the four new ones verified caught and every
-older find-string re-checked present exactly once.
+**PHASE 2 — THE SURFACE (2026-08-21, same day, owner: "Lets go ahead and do
+this phase 2").** Every system now has its own workflow VIEW — a real section
+inside `_shell` at `tab=systems&system=<key>` (`admin_ui._system_view`),
+account-scoped, sections in work order: **Planned** (plan cards PREFILLED and
+editable in place — rule 13; paginated at 15 with the pager on the page;
+approve / save / skip per card; a "Plan one by hand" form built off the
+declaration — open on the empty state, folded once plans exist, replaced by
+the plain state when the system is off), **Waiting on you** (this system's
+pending approvals, matched by system_id OR run_id because the two pipelines
+wire the join from different ends), **Shipped** (terminal produced runs),
+**Measured** (sent-as-is read from captured `edit_diff` deltas, with
+un-captured sends NAMED rather than folded into a flattering zero), then the
+runs fold and a folded how-to-read. The Systems-tab card carries a one-line
+**work strip** (N planned · N waiting on you · N shipped this week · X of Y
+sent as-is), each figure linking into its section, plus a "Workflow →"
+button. The **Review tab** gains ONE new card — "Plans awaiting you" —
+listing held plans across systems (incomplete ones say what to complete,
+complete-on-low-rung ones say "approve it"), each row linking to the exact
+card; `_review_waiting` (the sidebar badge) now counts held plans beside
+proposals, via `systems.plans_needing_action`. Routes: `/admin/plan_new`
+(mints `manual:<id>` refs — idempotency-by-ref is for planners, not people),
+`/admin/plan_save`, `/admin/plan_approve`, `/admin/plan_skip` — each returns
+the reader to the exact card on the exact page (`_back_to_system`, the
+`_back_to_content` contract). The system view header carries the GATE when
+the system cannot produce ("not connected: esp — plans keep and stay
+editable; they run once this is wired") because a queue that can never drain
+must say so where the queue is.
+
+**Two fixes found by looking at it, not by the suites.** The tick counted a
+`skill.run` REFUSAL as a consumption — so a blocked system with due plans
+(no ESP wired) would skip its evaluation row and read as busy while nothing
+ran; refusals now count as `held` and the day falls through to the honest
+blocked row (pinned in `test_plans.py`: "a blocked system's due plans do not
+read as consumed"). And `skill_pack._flag` now parses yes/no strings for
+`draft_visual` / `draft_into_esp` — plans carry text, and `bool("no")` is
+True, so a saved "no" would have switched the thing ON.
+
+**Dormant in production still:** no planner exists and `campaign_email` is
+live for no account; the surface renders every installed system's view today
+(the inbox family's is complete because its ledgers already exist), and the
+plan machinery has data only where somebody files a plan by hand.
+`scripts/test_plans.py` (71 checks) + `scripts/test_workflow_ui.py`
+(40 checks, TestClient over the real routes); sabotage is 33 entries, all
+find-strings re-verified intact after the surface edits.
 
 ## The front door (2026-08-21)
 
@@ -385,7 +424,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**67 suites, 67 pass** (test_plans.py joined 2026-08-21). Check the OUTPUT, not the exit code, and skip
+**68 suites, 68 pass** (test_plans.py and test_workflow_ui.py joined 2026-08-21). Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The

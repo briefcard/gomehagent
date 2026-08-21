@@ -1362,7 +1362,15 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     # the cookie authenticates them.
     link_key = key if request.query_params.get("key") else ""
     if tab == "systems":
-        return ui.render_systems(link_key, tenant)
+        try:
+            pp = int(request.query_params.get("ppage", "1"))
+        except ValueError:
+            pp = 1
+        return ui.render_systems(link_key, tenant,
+                                 msg=request.query_params.get("ok", ""),
+                                 err=request.query_params.get("err", ""),
+                                 system=request.query_params.get("system", ""),
+                                 ppage=pp)
     if tab == "kb":
         return ui.render_kb(link_key, tenant,
                             err=request.query_params.get("err", ""),
@@ -2962,6 +2970,121 @@ def system_rule(key: str = Depends(admin_key), id: str = "", phrase: str = ""):
     if result.startswith("No KB brand row"):
         return {"error": result}
     return _back_to_systems(key)
+
+
+# ---------------------------------------------------------------------------
+# Plans — the workflow surface's actions. Every one returns the reader to the
+# system's own view, at the card they acted on, on the page they were on —
+# the `_back_to_content` contract: a decision must never cost your place.
+# ---------------------------------------------------------------------------
+
+def _back_to_system(tenant: str, system: str, ok: str = "", err: str = "",
+                    anchor: str = "", ppage: int = 0):
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    q = f"/admin/ui?tab=systems&tenant={quote(tenant)}&system={quote(system)}"
+    if ok:
+        q += f"&ok={quote(ok)}"
+    if err:
+        q += f"&err={quote(err)}"
+    try:
+        if int(ppage) > 1:
+            q += f"&ppage={int(ppage)}"
+    except (TypeError, ValueError):
+        pass
+    if anchor:
+        q += f"#{anchor}"
+    return RedirectResponse(q, status_code=303)
+
+
+def _plan_fields_from(request: Request, syskey: str) -> dict:
+    """The declared plan fields present on this request — and nothing else.
+
+    Read off the declaration rather than listed here (rule 4), so a field
+    added to the CATALOG is editable without a route change. Unknown keys
+    never reach `save_plan`'s refusal from our own form; a hand-built URL's
+    do, and get the named refusal.
+    """
+    from . import systems
+    declared = {f["key"] for f in systems.workflow(syskey)["plan_fields"]}
+    return {k: v for k, v in request.query_params.items() if k in declared}
+
+
+@app.get("/admin/plan_new")
+def plan_new(request: Request, key: str = Depends(admin_key),
+             tenant: str = "", system: str = "", planned_for: str = ""):
+    """File one plan by hand — the path until each system's planner lands.
+
+    The ref is minted here (`manual:<id>`): idempotency-by-ref exists so a
+    PLANNER cannot double-file, and a person filing two similar plans on
+    purpose is not a duplicate to collapse.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    import uuid as _uuid
+
+    from . import systems
+    out = systems.open_plan(tenant, system,
+                            ref=f"manual:{_uuid.uuid4().hex[:8]}",
+                            plan=_plan_fields_from(request, system),
+                            planned_for=planned_for, trigger="manual")
+    if out.get("error"):
+        return _back_to_system(tenant, system, err=out["error"], anchor="planned")
+    said = ("filed — complete, runs " + planned_for if out.get("complete")
+            else "filed — still missing: " + ", ".join(out.get("missing", [])))
+    return _back_to_system(tenant, system, ok=f"Plan {said}",
+                           anchor=f"plan-{out['run_id']}")
+
+
+@app.get("/admin/plan_save")
+def plan_save(request: Request, key: str = Depends(admin_key), id: str = "",
+              tenant: str = "", system: str = "", planned_for: str = "",
+              ppage: int = 1):
+    """Save the owner's edits to one plan. Blank boxes leave fields as they
+    are; every accepted edit is tracked so the planner cannot write over it."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    out = systems.save_plan(id, _plan_fields_from(request, system),
+                            planned_for=planned_for)
+    if out.get("error"):
+        return _back_to_system(tenant, system, err=out["error"],
+                               anchor=f"plan-{id}", ppage=ppage)
+    said = ("Saved — complete" if out.get("complete")
+            else "Saved — still missing: " + ", ".join(out.get("missing", [])))
+    return _back_to_system(tenant, system, ok=said,
+                           anchor=f"plan-{id}", ppage=ppage)
+
+
+@app.get("/admin/plan_approve")
+def plan_approve(key: str = Depends(admin_key), id: str = "",
+                 tenant: str = "", system: str = "", ppage: int = 1):
+    """The explicit go-ahead a plan needs on shadow / approve_all."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    out = systems.approve_plan(id)
+    if out.get("error"):
+        return _back_to_system(tenant, system, err=out["error"],
+                               anchor=f"plan-{id}", ppage=ppage)
+    return _back_to_system(tenant, system,
+                           ok="Plan approved — it runs on its date",
+                           anchor=f"plan-{id}", ppage=ppage)
+
+
+@app.get("/admin/plan_skip")
+def plan_skip(key: str = Depends(admin_key), id: str = "", tenant: str = "",
+              system: str = "", reason: str = ""):
+    """Decline one plan — recorded as a decision, never a silent delete."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    out = systems.skip_plan(id, reason=reason)
+    if out.get("error"):
+        return _back_to_system(tenant, system, err=out["error"], anchor="planned")
+    return _back_to_system(tenant, system, ok="Plan skipped — kept on the record",
+                           anchor="planned")
 
 
 # ---------------------------------------------------------------------------

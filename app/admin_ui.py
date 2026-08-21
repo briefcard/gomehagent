@@ -334,6 +334,20 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 .pager{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:.85rem}
 .navbadge{margin-left:auto;background:var(--gap);color:#fff;border-radius:9px;
 font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
+/* The workflow surface: the strip is STATE (counts that link into the
+   system's own view), a plan card is one item of queued work. */
+.workstrip{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:.8rem;align-items:center;color:var(--mut)}
+.workstrip a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--mut)}
+.workstrip b{font-weight:600}
+.crumb{font-size:.8rem}
+.crumb a{color:var(--acc);text-decoration:none}
+.plan{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
+  display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+.plan.ok{border-left:3px solid var(--ok)}
+.plan.gap{border-left:3px solid var(--gap)}
+.planhead{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.planhead .grow{flex:1}
+.planfields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
 """
 
 #: (key, label, icon). Ordered the way a day runs rather than the way the code
@@ -452,12 +466,16 @@ def _review_waiting(tenant: str) -> int:
     from . import provenance as prov
     try:
         with db.SessionLocal() as s:
-            return sum(
+            proposed = sum(
                 s.query(model)
                 .filter(model.tenant == tenant,
                         model.review == prov.PROPOSED).count()
                 for model in (db.KbClaim, db.KbAudience, db.KbObjection,
                               db.KbEntity, db.KbSituation, db.KbAsset))
+        # Plans held for a person are review work too — a plan missing a
+        # field, or complete and awaiting the explicit tap its rung requires.
+        # In the same badge, because "is there work" is one question.
+        return proposed + len(systems.plans_needing_action(tenant))
     except Exception:                                            # noqa: BLE001
         return 0
 
@@ -1237,7 +1255,12 @@ def _thread(key: str, row) -> str:
 
 
 def _runs(row, total: int) -> str:
-    rows = systems.runs(row.id, limit=8)
+    # Queue is not activity here either: a planned row is a card in the
+    # Planned section, and listing it again as a "run" would count work that
+    # has not happened (and disagree with the stats beside it, which already
+    # exclude it).
+    rows = [r for r in systems.runs(row.id, limit=0)
+            if r.stage != systems.PLANNED][:8]
     if not rows:
         return ('<details><summary>Runs (0)</summary>'
                 '<p class="mut" style="margin-top:10px">Nothing has run yet.</p></details>')
@@ -1249,6 +1272,95 @@ def _runs(row, total: int) -> str:
     more = f" — showing the last {len(rows)}" if total > len(rows) else ""
     return (f'<details><summary>Runs ({total}){more}</summary>'
             f'<div class="thread" style="margin-top:10px">{lines}</div></details>')
+
+
+def _measured(row) -> dict:
+    """Sent-as-is, from the deltas that were actually captured.
+
+    `edit_diff` is written by `edits.record` as JSON when a draft is sent;
+    a run without one is UNMEASURED, which is a different fact from "sent
+    as-is" and is reported beside it rather than folded in — 0% edited would
+    be the lie that flatters the generator most.
+    """
+    rows = [r for r in systems.runs(row.id, limit=0)
+            if r.stage != systems.PLANNED]
+    measured = as_is = 0
+    for r in rows:
+        if not (r.edit_diff or "").strip():
+            continue
+        measured += 1
+        try:
+            if json.loads(r.edit_diff).get("as_is"):
+                as_is += 1
+        except (ValueError, AttributeError):
+            pass
+    unmeasured = sum(1 for r in rows if r.stage in ("sent", "approved")
+                     and not (r.edit_diff or "").strip())
+    return {"measured": measured, "as_is": as_is, "unmeasured": unmeasured}
+
+
+def _pending_for_system(row, limit: int = 300) -> list:
+    """This system's approvals still waiting on a person.
+
+    Matched by `system_id` OR by `run_id`, because the two pipelines wire
+    the join from different ends (the substrate sets both; the mail path
+    sets the run) — and a check that consults one ledger fails exactly when
+    it matters, which is the `replies.owner()` lesson one table over.
+    """
+    run_ids = {r.id for r in systems.runs(row.id, limit=limit)}
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.tenant == row.tenant,
+                        db.Approval.status == "pending")
+                .order_by(db.Approval.created_at.desc()).limit(limit).all())
+        s.expunge_all()
+    return [a for a in rows
+            if a.system_id == row.id or (a.run_id and a.run_id in run_ids)]
+
+
+def _shipped_runs(row, days: int = 0, limit: int = 0) -> list:
+    """Terminal, produced runs — what actually went out or was approved."""
+    import datetime as _dt
+    rows = [r for r in systems.runs(row.id, limit=0)
+            if r.stage in ("sent", "approved") and r.decision != "denied"]
+    if days:
+        since = db.utcnow() - _dt.timedelta(days=days)
+        rows = [r for r in rows
+                if db.as_utc(r.finished_at or r.created_at) >= since]
+    return rows[:limit] if limit else rows
+
+
+def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0) -> str:
+    url = (f"/admin/ui?key={_esc(key)}&amp;tab=systems"
+           f"&amp;tenant={_esc(row.tenant)}&amp;system={_esc(row.key)}")
+    if ppage and ppage > 1:
+        url += f"&amp;ppage={ppage}"
+    return url + (f"#{anchor}" if anchor else "")
+
+
+def _work_strip(key: str, row) -> str:
+    """One line of state per system: what is queued, waiting, shipped, kept.
+
+    Counts, each linking into the section of the system's own view that
+    holds the rows behind it — state first, and the click lands on the work
+    rather than on an explanation of it.
+    """
+    bits: list[str] = []
+    if systems.plan_capable(row.key):
+        n = len(systems.plans(row.tenant, row.key))
+        bits.append(f'<a href="{_sysview_url(key, row, "planned")}">'
+                    f'<b>{n}</b> planned</a>')
+    waiting = len(_pending_for_system(row))
+    bits.append(f'<a href="{_sysview_url(key, row, "waiting")}">'
+                f'<b>{waiting}</b> waiting on you</a>')
+    week = len(_shipped_runs(row, days=7))
+    bits.append(f'<a href="{_sysview_url(key, row, "shipped")}">'
+                f'<b>{week}</b> shipped this week</a>')
+    m = _measured(row)
+    if m["measured"]:
+        bits.append(f'<a href="{_sysview_url(key, row, "measured")}">'
+                    f'<b>{m["as_is"]} of {m["measured"]}</b> sent as-is</a>')
+    return '<div class="workstrip">' + " · ".join(bits) + "</div>"
 
 
 def _system_card(key: str, row) -> str:
@@ -1303,8 +1415,10 @@ def _system_card(key: str, row) -> str:
           <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
           <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
         </span>
+        <a class="btn sec" href="{_sysview_url(key, row)}">Workflow &rarr;</a>
       </div>
       <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
+      {_work_strip(key, row)}
       {gate}
       {_rung(row.autonomy or "shadow")}
       <div class="stat">
@@ -1321,7 +1435,313 @@ def _system_card(key: str, row) -> str:
     </div>"""
 
 
-def render_systems(key: str, tenant: str = "") -> str:
+PLANS_PAGE = 15
+
+
+def _plan_field_input(f: dict, value) -> str:
+    """One declared plan field as a prefilled control — rule 13: nothing the
+    owner can see is display-only, and the control shows what IS before
+    offering what could be."""
+    label = _esc(f.get("label") or f["key"])
+    req = ('<div class="what">required — the plan cannot run without it</div>'
+           if f.get("required") else "")
+    if f.get("kind") == "flag":
+        cur = str(value or "").strip().lower()
+        state = ("yes" if cur in ("1", "true", "yes", "y", "on")
+                 else "no" if cur else "")
+        opts = "".join(
+            f'<option value="{v}"{" selected" if v == state else ""}>{t}</option>'
+            for v, t in (("", "— unset —"), ("yes", "yes"), ("no", "no")))
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<select name="{_esc(f["key"])}">{opts}</select></div>')
+    return (f'<div class="f"><label>{label}</label>{req}'
+            f'<input name="{_esc(f["key"])}" value="{_esc(str(value or ""))}">'
+            f'</div>')
+
+
+def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
+    """One queued item: its state, then its prefilled edit form."""
+    brief = p.brief or {}
+    plan = brief.get("plan") or {}
+    comp = systems.plan_complete(p, row.key)
+    approved = bool(brief.get("plan_approved_at"))
+    when = str(brief.get("planned_for") or "")
+    low_rung = rung in ("shadow", "approve_all")
+
+    if not comp["complete"]:
+        state = ('<span class="pre no">✗ needs completing: '
+                 + _esc(", ".join(comp["missing"])) + "</span>")
+        ok = False
+    elif low_rung and not approved:
+        state = ('<span class="pre no">complete — awaiting your approval'
+                 '</span>')
+        ok = False
+    elif low_rung:
+        state = f'<span class="pre yes">✓ approved — runs {_esc(when)}</span>'
+        ok = True
+    else:
+        state = (f'<span class="pre yes">runs {_esc(when)} — no tap needed '
+                 f'on {_esc(rung.replace("_", " "))}</span>')
+        ok = True
+
+    approve = ""
+    if live and comp["complete"] and low_rung and not approved:
+        approve = (f'<a href="/admin/plan_approve?key={_esc(key)}'
+                   f'&amp;id={_esc(p.id)}&amp;tenant={_esc(row.tenant)}'
+                   f'&amp;system={_esc(row.key)}&amp;ppage={ppage}">'
+                   f'<button type="button">Approve plan</button></a>')
+
+    fields = "".join(_plan_field_input(f, plan.get(f["key"], ""))
+                     for f in systems.workflow(row.key)["plan_fields"])
+    return f"""
+    <div class="plan {'ok' if ok else 'gap'}" id="plan-{_esc(p.id)}">
+      <div class="planhead">
+        <b>{_esc(p.ref or "(no key)")}</b>
+        {state}
+        <span class="grow"></span>
+        {approve}
+      </div>
+      <form method="get" action="/admin/plan_save">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="id" value="{_esc(p.id)}">
+        <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+        <input type="hidden" name="system" value="{_esc(row.key)}">
+        <input type="hidden" name="ppage" value="{ppage}">
+        <div class="planfields">
+          {fields}
+          <div class="f"><label>planned for</label>
+            <div class="what">the date it may run — a dateless plan is never due</div>
+            <input type="date" name="planned_for" value="{_esc(when)}"></div>
+        </div>
+        <div class="row" style="margin-top:8px"><button>Save changes</button>
+          <span class="mut">a blank box leaves its field as it is — saving is
+          a re-attestation, and your edits survive the planner's next pass</span>
+        </div>
+      </form>
+      <div class="when">filed {p.created_at:%b %d, %H:%M} · {_esc(p.trigger or "")}</div>
+      <details><summary class="mut">skip this plan</summary>
+        <form method="get" action="/admin/plan_skip" class="row" style="margin-top:7px">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="id" value="{_esc(p.id)}">
+          <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+          <input type="hidden" name="system" value="{_esc(row.key)}">
+          <input name="reason" placeholder="why (optional — kept on the record)">
+          <button class="sec">Skip</button>
+        </form>
+      </details>
+    </div>"""
+
+
+def _planned_section(key: str, row, ppage: int) -> str:
+    """The queue: what this system intends to do, editable before it does."""
+    wf = systems.workflow(row.key)
+    if not systems.plan_capable(row.key):
+        if row.key in systems.externally_driven():
+            why = ("This system takes no plans — its work arrives on its own "
+                   "trigger (inbound mail, or its weekly schedule), and shows "
+                   "up below the moment it happens.")
+        else:
+            why = ("This system declares no plan fields yet — plans arrive "
+                   "when its planner and consuming skill land together.")
+        return (f'<div class="card"><div class="head"><h2>Planned</h2></div>'
+                f'<p class="mut">{_esc(why)}</p></div>')
+
+    live = systems.is_on(row)
+    open_plans = systems.plans(row.tenant, row.key)
+    total = len(open_plans)
+    pages = max(1, -(-total // PLANS_PAGE))
+    ppage = max(1, min(ppage, pages))
+    shown = open_plans[(ppage - 1) * PLANS_PAGE: ppage * PLANS_PAGE]
+    rung = row.autonomy or "shadow"
+
+    cards = "".join(_plan_card(key, row, p, rung, live, ppage) for p in shown)
+
+    pager = ""
+    if pages > 1:
+        def _pg(n: int) -> str:
+            return _sysview_url(key, row, "planned", ppage=n)
+        pager = ('<div class="pager"><span class="mut">plans '
+                 f'{(ppage - 1) * PLANS_PAGE + 1}&ndash;'
+                 f'{(ppage - 1) * PLANS_PAGE + len(shown)} of {total}</span>'
+                 + (f'<a href="{_pg(ppage - 1)}">&larr; sooner</a>'
+                    if ppage > 1 else "")
+                 + (f'<a href="{_pg(ppage + 1)}">later &rarr;</a>'
+                    if ppage < pages else "")
+                 + "</div>")
+
+    new_fields = "".join(_plan_field_input(f, "")
+                         for f in wf["plan_fields"])
+    if live:
+        create = f"""
+        <details class="sec"{"" if total else " open"}>
+          <summary>{"Plan another" if total else "Plan one by hand"}</summary>
+          <form method="get" action="/admin/plan_new">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+            <input type="hidden" name="system" value="{_esc(row.key)}">
+            <div class="planfields">
+              {new_fields}
+              <div class="f"><label>planned for</label>
+                <div class="what">the date it may run</div>
+                <input type="date" name="planned_for"></div>
+            </div>
+            <div class="row" style="margin-top:8px"><button>File the plan</button></div>
+          </form>
+        </details>"""
+    else:
+        create = ('<p class="mut">Filing plans needs the system on — the '
+                  'switch is above. Existing plans stay editable meanwhile.</p>')
+
+    if total:
+        empty = ""
+    else:
+        empty = ('<p class="mut">Nothing is planned. The planner is not '
+                 'built yet, so plans are filed by hand for now — each one '
+                 'says what it still needs before it can run.</p>')
+
+    return f"""
+    <div class="card"><div class="anchor" id="planned"></div>
+      <div class="head"><h2>Planned — the queue</h2>
+        <span class="mut">{total} open · runs on its date, through every gate</span></div>
+      {empty}{pager}{cards}{pager}{create}
+    </div>"""
+
+
+def _waiting_section(key: str, row) -> str:
+    pend = _pending_for_system(row)
+    if not pend:
+        body = '<p class="mut">Nothing is waiting on you.</p>'
+    else:
+        body = "".join(f"""
+        <div class="msg"><div>{_esc(a.summary or a.kind)}</div>
+          <div class="when">{a.created_at:%b %d, %H:%M} ·
+            <a href="/admin/pending?key={_esc(key)}&amp;tenant={_esc(row.tenant)}">decide &rarr;</a>
+          </div></div>""" for a in pend[:15])
+    return f"""
+    <div class="card"><div class="anchor" id="waiting"></div>
+      <div class="head"><h2>Waiting on you</h2>
+        <span class="mut">{len(pend)} pending — decisions happen on the approvals queue</span></div>
+      <div class="thread">{body}</div>
+    </div>"""
+
+
+def _shipped_section(row) -> str:
+    done = _shipped_runs(row)
+    week = len(_shipped_runs(row, days=7))
+    if not done:
+        body = ('<p class="mut">Nothing has shipped yet. When it does, each '
+                'one lands here with its decision and its date.</p>')
+    else:
+        body = "".join(f"""
+        <div class="msg"><div><code>{_esc(r.stage)}</code>
+          {_esc(r.decision or "")} — {_esc(r.output or "")}</div>
+          <div class="when">{(r.finished_at or r.created_at):%b %d, %H:%M} · {_esc(r.ref or r.trigger or "")}</div>
+        </div>""" for r in done[:8])
+    return f"""
+    <div class="card"><div class="anchor" id="shipped"></div>
+      <div class="head"><h2>Shipped</h2>
+        <span class="mut">{len(done)} all-time · {week} this week</span></div>
+      <div class="thread">{body}</div>
+    </div>"""
+
+
+def _measured_section(row) -> str:
+    st = systems.stats(row.id)
+    m = _measured(row)
+    if m["measured"]:
+        headline = (f'<span><b>{m["as_is"]} of {m["measured"]}</b> measured '
+                    f'sends went as-is</span>')
+    else:
+        headline = ('<span class="mut">no delta has been measured yet — '
+                    'the number arrives with the first sends</span>')
+    gap = ""
+    if m["unmeasured"]:
+        gap = (f'<p class="mut">{m["unmeasured"]} send(s) carry no delta — '
+               f'unmeasured, which is a different fact from "sent as-is". '
+               f'Mail captures its delta at send; other artifact kinds get '
+               f'theirs as their ship paths land.</p>')
+    return f"""
+    <div class="card"><div class="anchor" id="measured"></div>
+      <div class="head"><h2>Measured</h2></div>
+      <div class="stat">
+        {headline}
+        <span><b>{st['decided']}</b> decided</span>
+        <span><b>{st['approved']}</b> approved</span>
+        <span><b>{st['edited']}</b> edited</span>
+        <span><b>{st['denied']}</b> denied</span>
+        <span><b>{st['blocked']}</b> blocked</span>
+      </div>
+      {gap}
+    </div>"""
+
+
+def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
+    """One system's workflow: planned, waiting, shipped, measured — in the
+    order the work moves, with the queue's controls leading each section."""
+    wf = systems.workflow(row.key)
+    live_ctl = ""
+    if row.status != "live" and systems.ready(row)["ready"]:
+        live_ctl = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
+                    f'&amp;status=live"><button type="button">Switch on</button></a>')
+    elif row.status == "live":
+        live_ctl = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
+                    f'&amp;status=paused"><button class="sec" type="button">Pause</button></a>')
+
+    ship_note = (f'<p class="mut">One item is {_esc(wf["unit"])}. '
+                 f'Approving {_esc(wf["ship"] or "ships it")}.</p>'
+                 if wf["unit"] else "")
+
+    # The gate, on the page whose queue it holds shut. A Planned list on a
+    # system that cannot produce reads as "will run on its date" — when the
+    # truth is that every attempt is refused until a connection is wired,
+    # and a queue that can never drain must say so where the queue is.
+    gate = systems.ready(row)
+    gate_note = ""
+    if not gate["can_produce"]:
+        items = "".join(f"<li>{_esc(b)}</li>" for b in gate["impossible"])
+        gate_note = ('<div class="note"><strong>Cannot produce.</strong>'
+                     f'<ul class="bl">{items}</ul>'
+                     '<div class="mut">Plans keep and stay editable; they '
+                     'run once this is wired.</div></div>')
+
+    body = f"""
+{flash}
+<div>
+  <div class="crumb"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(row.tenant)}">&larr; Systems</a></div>
+  <div class="head" style="border-bottom:0;padding-bottom:0">
+    <h1>{_esc(row.name)}</h1>
+    <code>{_esc(row.key)}</code>
+    <span class="chips">
+      <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
+      <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+    </span>
+    {live_ctl}
+  </div>
+  {ship_note}
+  {_work_strip(key, row)}
+  {gate_note}
+</div>
+{_planned_section(key, row, ppage)}
+{_waiting_section(key, row)}
+{_shipped_section(row)}
+{_measured_section(row)}
+{_runs(row, systems.stats(row.id)['total'])}
+<details class="sec"><summary>How to read this page</summary>
+  <p class="mut">Planned is work declared in advance — each plan is editable
+  until the moment it runs, an incomplete plan waits and names its gaps, and
+  on the shadow / approve-all rungs a complete plan still waits for your
+  explicit approval because running it has real side effects. Waiting on you
+  is this system's approval queue. Shipped is what actually went out.
+  Measured is the edit delta — the share of sends a human did not have to
+  touch, which is the number this system is trying to move.</p>
+</details>"""
+    return _shell(key, "systems", f"{row.name} — workflow",
+                  tenant=row.tenant, body=body,
+                  suffix=f"&amp;system={_esc(row.key)}")
+
+
+def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
+                   system: str = "", ppage: int = 1) -> str:
     """One account's pipelines.
 
     This tab used to render `systems.all_systems()` grouped by client, so the
@@ -1333,6 +1753,24 @@ def render_systems(key: str, tenant: str = "") -> str:
     """
     tenant, here, all_t = _account(tenant)
     every = tenant == ALL
+
+    flash = ""
+    if err:
+        flash = f'<div class="flash"><div class="note">{_esc(err)}</div></div>'
+    elif msg:
+        flash = f'<div class="flash"><div class="ok">{_esc(msg)}</div></div>'
+
+    # One system's own workflow view — a real place inside the frame, not a
+    # hyperlink to somewhere unframed. `system=` on the all-accounts view is
+    # ignored: a workflow belongs to one account.
+    if system and not every:
+        target = systems.find(tenant, system)
+        if target is not None:
+            return _system_view(key, target, flash, ppage=ppage)
+        flash += (f'<div class="note">No <code>{_esc(system)}</code> system '
+                  f'is installed for this account — the list below is what '
+                  f'is.</div>')
+
     rows = systems.all_systems() if every else systems.for_tenant(tenant)
 
     if not rows:
@@ -1459,6 +1897,7 @@ def render_systems(key: str, tenant: str = "") -> str:
 </div>"""
 
     return _shell(key, "systems", "Systems", tenant=tenant, body=f"""
+{flash}
 {_every_note(every, "Every account's pipelines, grouped by client. "
              "Installing and the contract forms are on an account's own page.")}
 <div>
@@ -3036,6 +3475,32 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         # A bulk decision reports what it did, including what it refused. A
         # count with no reasons reads as a partial success nobody can act on.
         banner = f'<div class="when">{_esc(msg)}</div>' + banner
+
+    # --- plans waiting on a person, across systems -------------------------
+    # One kind of thing per card: a PLAN is queued work that cannot run until
+    # the owner completes or approves it — different from a proposal (which
+    # asks "is this true") and from an approval (which asks "may this ship").
+    # Each row links into the system's own workflow view, at the card itself.
+    plans_wait = systems.plans_needing_action(tenant)
+    plans_card = ""
+    if plans_wait:
+        prows = "".join(f"""
+        <div class="msg"><div><b>{_esc(w["system_name"])}</b> ·
+          {_esc(w["ref"])}{" · " + _esc(w["planned_for"]) if w["planned_for"] else ""}
+          — {'needs completing: ' if w["need"] == "complete" else ''}{_esc(w["detail"])}</div>
+          <div class="when"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}#plan-{_esc(w["run_id"])}">
+            {'complete it' if w["need"] == "complete" else 'approve it'} &rarr;</a></div>
+        </div>""" for w in plans_wait[:15])
+        plans_card = f"""
+<div class="anchor" id="plans"></div>
+<div class="card">
+  <div class="head"><h2>Plans awaiting you</h2>
+    <span class="chip off">{len(plans_wait)} held</span></div>
+  <p class="mut">Queued work that cannot run yet — a plan missing a field, or
+  one that is complete and needs your go-ahead on this rung. Nothing here
+  fails while it waits; it just waits.</p>
+  <div class="thread">{prows}</div>
+</div>"""
     # Order (owner, 2026-08-21): the queues this tab exists for come first —
     # the destructive start-over card used to be the FIRST thing on the page,
     # a rare, dangerous action sitting above the daily work. It now lives
@@ -3065,7 +3530,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     for years. Only the buckets triage flagged as worth mining are opened.</span></div>
   {clear_all}
 </div>
-
+{plans_card}
 <div class="anchor" id="others"></div>
 <div class="card">
   <div class="head"><h2>Everything else awaiting you</h2>

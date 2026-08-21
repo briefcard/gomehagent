@@ -1,7 +1,7 @@
 # System workflows — one work ledger, per-system vocabulary
 
-**Status: phase 1 (the substrate) IS BUILT — see "What is built" at the end.
-The surface (phase 2) and the planners (phase 3+) are not.** Written
+**Status: phases 1 (the substrate) and 2 (the surface) ARE BUILT — see "What
+is built" at the end. The planners (phase 3+) are not.** Written
 2026-08-21 from the owner's directive in the workflow thread: *"really each
 system is going to have its own workflow to track the agent's work. So this is
 not unique to just the email"* — and, same day: *"making sure you have
@@ -263,11 +263,7 @@ Parked by choice, not blocked:
 ## Build order
 
 1. **~~The contract + the `planned` stage.~~ DONE — see "What is built".**
-2. **The surface.** Per-system workflow view reading EXISTING ledgers (all
-   systems get it immediately; inbox family complete day one), the work strip
-   on cards, the Review "plans" card + badge, and the plan cards themselves
-   (prefilled edit-in-place → `save_plan`; approve → `approve_plan`;
-   skip → `skip_plan`).
+2. **~~The surface.~~ DONE — see "What is built".**
 3. **`campaign_email` end to end.** The rollout planner (calls `open_plan`
    per segment × date, proposes only what it reads from data); first live
    Omnisend draft round-trip. This ABSORBS BUILD-STATE's recorded next-step
@@ -320,19 +316,49 @@ Parked by choice, not blocked:
   is structural (a consumed row goes through the normal `skill.run` path
   and `Context.emit`; there is no other door to patch out).
 
-**Dormant by construction:** nothing creates plans in production yet — no
-planner exists and the surface (phase 2) is not built, and `campaign_email`
-is live for no account. The mechanism ships inert, exactly like the
-campaign engine before it.
+## What is built (2026-08-21, phase 2 — the surface)
+
+* **The per-system workflow view** — `admin_ui._system_view` at
+  `tab=systems&system=<key>`, a real section inside the frame,
+  account-scoped. Sections in work order: Planned (plan cards prefilled and
+  editable in place, paginated at 15 with the pager on the page; approve /
+  save / skip per card; a "Plan one by hand" form derived from the
+  declaration — open on the empty state, folded once plans exist, replaced
+  by the plain state when the system is off), Waiting on you (pending
+  approvals matched by system_id OR run_id), Shipped, Measured (sent-as-is
+  from captured deltas; un-captured sends named, never a flattering zero),
+  the runs fold, a folded how-to-read. The header carries the GATE when the
+  system cannot produce — a queue that can never drain says so where the
+  queue is.
+* **The work strip** on every Systems-tab card — planned · waiting on you ·
+  shipped this week · sent as-is — each figure linking into its section,
+  plus a "Workflow →" button.
+* **The Review tab's "Plans awaiting you" card** + the sidebar badge now
+  counting held plans (`systems.plans_needing_action`): an incomplete plan
+  says what to complete, a complete one on shadow/approve_all says
+  "approve it", and each row lands on the exact card.
+* **Routes** `/admin/plan_new` (mints `manual:<id>` refs — idempotency-by-
+  ref is for planners, not people), `/admin/plan_save`, `/admin/plan_approve`,
+  `/admin/plan_skip`; every redirect returns the reader to the exact card on
+  the exact page.
+* **Two fixes found by looking at the rendered page:** the tick no longer
+  counts a `skill.run` refusal as a consumption (a blocked system's due
+  plans now fall through to the honest blocked evaluation row — pinned in
+  the suite), and `skill_pack._flag` parses yes/no strings for the two
+  toggle fields, because plans carry text and `bool("no")` is True.
+* `scripts/test_workflow_ui.py` (40 checks, TestClient over the real
+  routes) beside `test_plans.py` (71).
+
+**Dormant in production still:** no planner exists and `campaign_email` is
+live for no account. The surface renders every installed system's view today
+— the inbox family's is complete because its ledgers already exist — and the
+plan machinery holds data only where somebody files a plan by hand.
 
 ## Open decisions for the owner
 
 1. **Cadence numbers** per system (`campaign_email` horizon and per-segment
    monthly cap first) — needed for phase 3's planner, stored in
    `System.config`.
-2. **The UI word.** "Plans" is recommended ("brief" collides with
-   `brief.py`, the drafting bundle; "schedule" undersells the editable
-   half). The stage name in code is `planned` either way.
-3. **Where the per-system view lives** — under Systems as proposed, or
-   elsewhere. (The rung mapping recommended in the first draft is now
-   built as recommended; say the word if it should differ.)
+2. Built as recommended, overrule at will: the UI word is **"Plans"**, the
+   per-system view lives **under Systems**, and the rung mapping puts the
+   explicit plan tap on shadow / approve_all.

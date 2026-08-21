@@ -57,6 +57,20 @@ def _probe_catalog() -> None:
         key="plan_probe", name="Plan probe", does="test",
         system_key="plan_probe", tier=1, params=("segment", "goal"),
         writes=False, produces="report", run=lambda ctx: {"summary": "ok"}))
+    # A plan-capable system whose CONNECTION is absent — the queue that can
+    # never drain until something is wired.
+    systems.CATALOG["plan_probe_gated"] = dict(
+        name="Plan probe gated", does="test", requires=("esp",),
+        requires_any=(), needs_kb=False, kb_needs=(),
+        workflow=dict(unit="one gated probe", skill="plan_probe_gated",
+                      plan_fields=(
+                          dict(key="segment", label="Segment", required=True),
+                      ),
+                      artifact="none", ship="", measure=""))
+    skill.register(skill.Skill(
+        key="plan_probe_gated", name="Plan probe gated", does="test",
+        system_key="plan_probe_gated", tier=1, params=("segment",),
+        writes=False, produces="report", run=lambda ctx: {"summary": "ok"}))
 
 
 def _open_count(tenant: str) -> int:
@@ -331,6 +345,28 @@ def main() -> int:
     check("…and the quiet-day row says so", quiet is not None
           and "held" in (quiet.output or ""),
           (quiet.output or "")[:80] if quiet else "no quiet row filed")
+
+    # ---- a refusal is not a consumption ---------------------------------
+    print("\n— a blocked system's due plans do not read as consumed —")
+    gated = systems.create("agency", "plan_probe_gated")
+    with db.SessionLocal() as s:
+        # `update()` correctly refuses go-live with no ESP wired; force the
+        # status so the tick evaluates exactly that misconfigured state.
+        s.get(db.System, gated.id).status = "live"
+        s.get(db.System, gated.id).autonomy = "approve_exceptions"
+        s.commit()
+    gp = systems.open_plan("agency", "plan_probe_gated", ref="gated:1",
+                           plan={"segment": "g"}, planned_for=TODAY)["run_id"]
+    worker.systems_tick()          # the REAL skill.run — preflight blocks it
+    with db.SessionLocal() as s:
+        gprow = s.get(db.SystemRun, gp)
+        evals = (s.query(db.SystemRun)
+                 .filter(db.SystemRun.system_id == gated.id,
+                         db.SystemRun.stage == "blocked").all())
+    check("the plan is untouched — still planned", gprow.stage == "planned")
+    check("…and the day filed a BLOCKED evaluation row naming the gap",
+          len(evals) == 1 and any("esp" in b for b in (evals[0].blocked_on or [])),
+          str([e.blocked_on for e in evals]))
 
     # ---- skipping is a decision -----------------------------------------
     print("\n— skip_plan —")

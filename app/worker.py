@@ -753,9 +753,18 @@ def systems_tick() -> None:
                     held += 1
                     continue
                 try:
-                    skill.run(wf["skill"] or sysrow.key, sysrow.tenant,
-                              trigger="schedule", run_id=prow.id)
-                    ran_here += 1
+                    res = skill.run(wf["skill"] or sysrow.key, sysrow.tenant,
+                                    trigger="schedule", run_id=prow.id)
+                    # A refusal is NOT a consumption. `skill.run` refuses
+                    # before touching the plan (a blocked preflight — no ESP
+                    # wired — or a held gate), and counting that as "ran"
+                    # would skip the evaluation row below, so a system whose
+                    # queue can never drain would file nothing at all and
+                    # read as busy.
+                    if (res or {}).get("status") in ("refused", "blocked"):
+                        held += 1
+                    else:
+                        ran_here += 1
                 except Exception:                                # noqa: BLE001
                     log.exception("plan consumption failed for %s/%s",
                                   sysrow.tenant, sysrow.key)

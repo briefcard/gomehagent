@@ -67,6 +67,18 @@ COPY_FIELDS = ("seo_description", "seo_title", "title", "body")
 # ---------------------------------------------------------------------------
 
 
+def _flag(value, default: bool = False) -> bool:
+    """A yes/no parameter that may arrive as a bool OR as a plan's string.
+
+    `bool("no")` is True — so the moment plans started carrying these fields
+    as text, a saved "no" would have switched the thing ON. Absent or blank
+    means the default, exactly like the parameter not being passed.
+    """
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
 def _strip(html_text: str) -> str:
     return " ".join(_htmllib.unescape(_TAGS.sub(" ", html_text or "")).split())
 
@@ -849,7 +861,7 @@ def _run_campaign_email(ctx: Context) -> dict:
         ctx.tenant, segment_key=seg["key"],
         entity_keys=[e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
         title=f"Email hero — {seg['name']}"[:120],
-        draft_if_missing=bool(ctx.params.get("draft_visual")))
+        draft_if_missing=_flag(ctx.params.get("draft_visual")))
     hero = hero_got.get("image")
     if hero_got.get("basis") == "drafted_in_canva":
         ctx.note("bespoke visual: " + hero_got.get("note", ""))
@@ -902,7 +914,7 @@ def _run_campaign_email(ctx: Context) -> dict:
     # substrate never calls — that is the final approval the owner keeps.
     esp_draft = {}
     if (item.get("ok") and not missing and native.get("ok")
-            and bool(ctx.params.get("draft_into_esp", True))):
+            and _flag(ctx.params.get("draft_into_esp"), default=True)):
         mod, refusal = esp.backend(ctx.tenant)
         if refusal:
             ctx.note("could not draft into the ESP: " + refusal)

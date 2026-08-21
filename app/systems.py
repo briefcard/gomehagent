@@ -104,9 +104,9 @@ CATALOG = {
                 dict(key="goal", label="Angle / goal", required=True),
                 dict(key="entity_key", label="Featured entity", required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
-                     required=False),
+                     required=False, kind="flag"),
                 dict(key="draft_into_esp", label="Set up as an ESP draft",
-                     required=False),
+                     required=False, kind="flag"),
             ),
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
@@ -964,6 +964,40 @@ def plans(tenant: str, key: str = "", due_by: str = "") -> list[db.SystemRun]:
         rows = [r for r in rows
                 if ((r.brief or {}).get("planned_for") or "") and _when(r) <= due_by]
     return rows
+
+
+def plans_needing_action(tenant: str) -> list[dict]:
+    """Open plans waiting on a PERSON, across this account's systems.
+
+    Two kinds, each named so the card can say what to do rather than that
+    something is wrong: `complete` (fields are missing — the plan cannot run
+    until they are filled) and `approve` (the plan is complete, and the
+    system's rung requires the owner's explicit tap before execution).
+    A complete plan on `approve_exceptions`/`auto` is NOT here — it needs
+    nobody; it runs when due. Feeds the Review badge and the Review tab's
+    plans card, so "is there work" costs zero clicks.
+    """
+    out: list[dict] = []
+    by_id = {r.id: r for r in for_tenant(tenant)}
+    for row in plans(tenant):
+        sysrow = by_id.get(row.system_id)
+        if sysrow is None:
+            continue
+        comp = plan_complete(row, sysrow.key)
+        brief = row.brief or {}
+        if not comp["complete"]:
+            need, detail = "complete", ", ".join(comp["missing"])
+        elif ((sysrow.autonomy or "shadow") in ("shadow", "approve_all")
+                and not brief.get("plan_approved_at")):
+            need, detail = "approve", "complete — awaiting your go-ahead"
+        else:
+            continue
+        out.append({"run_id": row.id, "system_key": sysrow.key,
+                    "system_name": sysrow.name or sysrow.key,
+                    "ref": row.ref or "", "planned_for":
+                        str(brief.get("planned_for") or ""),
+                    "need": need, "detail": detail})
+    return out
 
 
 def consumable(row, sysrow) -> dict:
