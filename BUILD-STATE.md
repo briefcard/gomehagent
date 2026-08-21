@@ -481,6 +481,20 @@ set and maintain segments?" — set yes, maintain was four gaps; all closed).**
   risk. `esp.audiences` stopped defaulting an absent member count to 0 —
   absence survives to the output.
 
+**A plan's segment is a REFERENCE, never free text (owner, 2026-08-21:
+"Audience segment should not be a free-text field… It needs to be a
+reference to a direct segment").** `plan_fields` grew `kind="segment"`: the
+form renders a select over the account's own catalog (`for_tenant`,
+high-value first, each option marked "· in the ESP" from the last sync's
+record; a stale key on an old plan renders as "(unknown key)" rather than
+snapping to something else), and the DATA LAYER holds the same line —
+`systems._check_plan_refs` refuses an unknown key in `open_plan` AND
+`save_plan` by name, listing the real keys, so a hand-built URL is bound
+exactly as the form is (sabotage #36 `plan_segment_reference`). Kindless
+fields (the probe's, ad_creative's audience/entity for now) stay free text;
+giving `audience_key`/`entity_key` the same reference treatment is the
+obvious follow-up when ad_creative's planner lands.
+
 Still deliberately NOT built: segment DISCOVERY (commerce + ESP data →
 proposed cohorts, reviewed like claims — the recorded "segment engine live
 half") and a correlate/digest lane for drift findings (they surface on the

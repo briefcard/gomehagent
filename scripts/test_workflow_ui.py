@@ -221,9 +221,20 @@ def main() -> int:
     ck("…and counts the week's shipping", "shipped this week" in tab)
 
     print("\n— the Segments card, on ESP-campaign systems only —")
-    systems.create("agency", "campaign_email")       # designed is fine to VIEW
+    camp = systems.create("agency", "campaign_email")
+    with db.SessionLocal() as s:
+        # go-live is rightly gated on an ESP; force the status so the
+        # Planned section offers its create form and the select is on page
+        s.get(db.System, camp.id).status = "live"
+        s.commit()
     seg_v = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
                   "&system=campaign_email").text
+    ck("the segment field is a SELECT over the account's real catalog — "
+       "never free text",
+       '<select name="segment">' in seg_v and "choose a segment" in seg_v
+       and "trial_no_convert" in seg_v, "agency = digital_products")
+    ck("…while a kindless probe field stays a text input",
+       '<input name="segment"' in _view(c, "agency"))
     ck("the campaign system's view carries the Segments card",
        'id="segments"' in seg_v and "Never synced" in seg_v
        and "Sync now" in seg_v)

@@ -1438,13 +1438,50 @@ def _system_card(key: str, row) -> str:
 PLANS_PAGE = 15
 
 
-def _plan_field_input(f: dict, value) -> str:
+def _plan_field_input(f: dict, value, tenant: str = "") -> str:
     """One declared plan field as a prefilled control — rule 13: nothing the
     owner can see is display-only, and the control shows what IS before
     offering what could be."""
     label = _esc(f.get("label") or f["key"])
     req = ('<div class="what">required — the plan cannot run without it</div>'
            if f.get("required") else "")
+    if f.get("kind") == "segment":
+        # A REFERENCE, not free text (owner, 2026-08-21): the options are
+        # the account's own segment catalog, and the data layer refuses any
+        # key outside it — so the select is a convenience over a rule, not
+        # the rule itself. Linked-in-the-ESP status rides each option from
+        # the last sync's record.
+        from . import segments as segmod
+        got = segmod.for_tenant(tenant)
+        cur = str(value or "").strip()
+        if not got.get("ok"):
+            note = f'<div class="what">{_esc(got.get("error", ""))}</div>'
+            opts = (f'<option value="" selected>— unavailable —</option>'
+                    + (f'<option value="{_esc(cur)}" selected>{_esc(cur)}'
+                       f'</option>' if cur else ""))
+            return (f'<div class="f"><label>{label}</label>{req}{note}'
+                    f'<select name="{_esc(f["key"])}">{opts}</select></div>')
+        linked = {s.get("key") for s in
+                  ((segmod.stored_state(tenant) or {}).get("linked") or [])}
+        opts = [f'<option value=""{"" if cur else " selected"}>— choose a '
+                f'segment —</option>']
+        seen = False
+        for s in got["segments"]:
+            seen = seen or s["key"] == cur
+            tag = ("high value" if s["tier"] == "high_value" else "common")
+            in_esp = " · in the ESP" if s["key"] in linked else ""
+            opts.append(
+                f'<option value="{_esc(s["key"])}"'
+                f'{" selected" if s["key"] == cur else ""}>'
+                f'{_esc(s["name"])} — {tag}{in_esp}</option>')
+        if cur and not seen:
+            # An old plan holding a key the catalog no longer has renders
+            # the truth rather than silently snapping to something else.
+            opts.append(f'<option value="{_esc(cur)}" selected>{_esc(cur)} '
+                        f'(unknown key)</option>')
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
+                f'</div>')
     if f.get("kind") == "flag":
         cur = str(value or "").strip().lower()
         state = ("yes" if cur in ("1", "true", "yes", "y", "on")
@@ -1491,7 +1528,7 @@ def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
                    f'&amp;system={_esc(row.key)}&amp;ppage={ppage}">'
                    f'<button type="button">Approve plan</button></a>')
 
-    fields = "".join(_plan_field_input(f, plan.get(f["key"], ""))
+    fields = "".join(_plan_field_input(f, plan.get(f["key"], ""), row.tenant)
                      for f in systems.workflow(row.key)["plan_fields"])
     return f"""
     <div class="plan {'ok' if ok else 'gap'}" id="plan-{_esc(p.id)}">
@@ -1569,7 +1606,7 @@ def _planned_section(key: str, row, ppage: int) -> str:
                     if ppage < pages else "")
                  + "</div>")
 
-    new_fields = "".join(_plan_field_input(f, "")
+    new_fields = "".join(_plan_field_input(f, "", row.tenant)
                          for f in wf["plan_fields"])
     if live:
         create = f"""

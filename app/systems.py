@@ -101,7 +101,8 @@ CATALOG = {
             skill="campaign_email",
             cadence=dict(horizon_days=21, per_segment_monthly=1),
             plan_fields=(
-                dict(key="segment", label="Audience segment", required=True),
+                dict(key="segment", label="Audience segment", required=True,
+                     kind="segment"),
                 dict(key="goal", label="Angle / goal", required=True),
                 dict(key="subject", label="Subject line", required=False),
                 dict(key="entity_key", label="Featured entity", required=False),
@@ -817,6 +818,42 @@ def plan_complete(row_or_brief, key: str) -> dict:
     return {"complete": not missing, "missing": missing}
 
 
+def _segment_key_check(tenant: str, value: str) -> str:
+    """'' when the value is a real segment key; the named refusal otherwise.
+
+    A plan's segment is a REFERENCE into the account's segment catalog,
+    never free text (owner, 2026-08-21): a key matching nothing slides
+    through to `_segment_brief`'s generic stand-in and the campaign composes
+    against a cohort that does not exist — the same hole the ESP binding
+    closed, one layer up. Enforced here so a hand-built URL is refused the
+    same way the form's select is constrained.
+    """
+    from . import segments as segmod
+    got = segmod.for_tenant(tenant)
+    if not got.get("ok"):
+        return got.get("error", "segments unavailable")
+    keys = [s["key"] for s in got["segments"]]
+    if value in keys:
+        return ""
+    return (f"unknown segment {value!r} — this account's segments are: "
+            + ", ".join(keys))
+
+
+def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
+    """Reference-kind plan fields must point at something real. Blank stays
+    allowed — completeness owns 'required'; this owns 'genuine'."""
+    for f in workflow(key)["plan_fields"]:
+        if f.get("kind") != "segment":
+            continue
+        v = str(values.get(f["key"], "") or "").strip()
+        if not v:
+            continue
+        why = _segment_key_check(tenant, v)
+        if why:
+            return why
+    return ""
+
+
 def _open_plan_row(s, system_id: str, ref: str):
     return (s.query(db.SystemRun)
             .filter(db.SystemRun.system_id == system_id,
@@ -858,6 +895,9 @@ def open_plan(tenant: str, key: str, *, ref: str, plan: dict | None = None,
                          f"system's plan takes {', '.join(sorted(fields))}"}
     if planned_for and not _valid_date(planned_for):
         return {"error": f"planned_for must be an ISO date, got {planned_for!r}"}
+    bad_ref = _check_plan_refs(tenant, key, plan or {})
+    if bad_ref:
+        return {"error": bad_ref}
 
     with db.SessionLocal() as s:
         existing = _open_plan_row(s, row.id, ref)
@@ -923,6 +963,9 @@ def save_plan(run_id: str, edits: dict | None = None, *,
                              f"system's plan takes {', '.join(sorted(fields))}"}
         if planned_for and not _valid_date(planned_for):
             return {"error": f"planned_for must be an ISO date, got {planned_for!r}"}
+        bad_ref = _check_plan_refs(row.tenant, key, cleaned)
+        if bad_ref:
+            return {"error": bad_ref}
         brief = dict(row.brief or {})
         plan = dict(brief.get("plan") or {})
         edited = set(brief.get("edited") or [])

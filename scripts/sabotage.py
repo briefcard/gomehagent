@@ -379,6 +379,17 @@ SABOTAGES = [
                "more campaigns onto a month that was already full",
     },
     {
+        "name": "plan_segment_reference",
+        "file": "app/systems.py",
+        "find": "        why = _segment_key_check(tenant, v)",
+        "replace": "        why = \"\"  # SABOTAGE",
+        "suites": ["test_plans.py"],
+        "why": "a plan's segment becomes free text again — a typo'd or "
+               "invented key slides through to the campaign's generic "
+               "stand-in cohort and an email composes for a segment that "
+               "does not exist",
+    },
+    {
         "name": "segment_id_remembered",
         "file": "app/segments.py",
         "find": "    stored = links(tenant).get(key) or {}",

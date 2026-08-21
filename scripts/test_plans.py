@@ -346,6 +346,32 @@ def main() -> int:
           and "held" in (quiet.output or ""),
           (quiet.output or "")[:80] if quiet else "no quiet row filed")
 
+    # ---- a segment is a REFERENCE, not free text ------------------------
+    print("\n— a plan's segment must point at a real catalog segment —")
+    camp = systems.create("baci", "campaign_email")
+    with db.SessionLocal() as s:
+        s.get(db.System, camp.id).status = "live"
+        s.commit()
+    out = systems.open_plan("baci", "campaign_email", ref="ref:1",
+                            plan={"segment": "everyone_ever",
+                                  "goal": "g"}, planned_for=TODAY)
+    check("a made-up segment key is refused, naming it AND the real ones",
+          "unknown segment 'everyone_ever'" in (out.get("error") or "")
+          and "reorder_due" in (out.get("error") or ""),
+          (out.get("error") or "")[:80])
+    out = systems.open_plan("baci", "campaign_email", ref="ref:1",
+                            plan={"segment": "reorder_due", "goal": "g"},
+                            planned_for=TODAY)
+    check("a real catalog key files", out.get("ok") is True)
+    check("save_plan holds the same line — a hand-built URL cannot sneak "
+          "one past the form's select",
+          "unknown segment 'nope'" in (systems.save_plan(
+              out["run_id"], {"segment": "nope"}).get("error") or ""))
+    check("…while the probe's kindless segment field stays free text",
+          systems.open_plan("agency", "plan_probe", ref="freetext:1",
+                            plan={"segment": "anything at all"},
+                            planned_for=TODAY).get("ok") is True)
+
     # ---- a refusal is not a consumption ---------------------------------
     print("\n— a blocked system's due plans do not read as consumed —")
     gated = systems.create("agency", "plan_probe_gated")
