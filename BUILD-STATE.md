@@ -16,11 +16,11 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `340b743` (130 routes). A docs-only commit may sit above it — `/health` is the authority, and this line is the last CODE commit that was watched onto the service.
+**Live:** everything below is pushed and deployed at `5761a17` (130 routes) — the tenant-boundary + webhook-hardening batch, confirmed serving on /health. A docs-only commit may sit above it — `/health` is the authority, and this line is the last CODE commit that was watched onto the service.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
-## Architectural remediation — in progress, NOT yet deployed (2026-08-21)
+## Architectural remediation — first batch LIVE at 5761a17 (2026-08-21)
 
 A full top-down audit was run against `39659a4`: the data layer is sound, the
 debt is concentrated in the runtime perimeter that was built around it before
@@ -38,7 +38,7 @@ and is reached by no agent path.
 
 **The tenant-boundary seam, built bottom-up. Each step verified before the next.**
 
-1. **Scope the prompt builders — DONE (uncommitted).** `memory.shipments_block`
+1. **Scope the prompt builders — DONE (LIVE).** `memory.shipments_block`
    and `sender_history` took no tenant and injected every client's data into
    every client's drafting prompt (§2.61). Now a required scope: a concrete key
    is one client, `""` fails toward less exposure, `"*"` is the explicit
@@ -61,7 +61,7 @@ and is reached by no agent path.
    the `include_unassigned` reads from step 1 can tighten to strict — the owner's
    "never a breach" stance raises this priority for the future client case.
 
-**Security holes patched alongside (uncommitted).** WhatsApp webhook now verifies
+**Security holes patched alongside (LIVE).** WhatsApp webhook now verifies
 Meta's signature and fails closed — inert without `META_APP_SECRET`, which suits
 the channel being dropped (§2.62). The Telegram webhook — now the live channel —
 was hardened to fail closed the same way (§2.63). Email-derived text in
