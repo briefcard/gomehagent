@@ -180,6 +180,30 @@ def main() -> int:
                    for d in rec["drift"]),
        "absence is a third state, not a zero")
 
+    # Through the REAL esp.audiences, not a stub above it: Omnisend's
+    # segment list carries no counts, and the old 0-default would have made
+    # every one of its segments fire the zero-members drift.
+    class _CountlessMod:
+        @staticmethod
+        def segments(tenant):
+            return {"ok": True, "segments": [{"id": "s1", "name": "Reorder due"}]}
+
+        @staticmethod
+        def draft_from_html(**kw):
+            return {"ok": True}
+    _saved_backend, _saved_aud = esp.backend, esp.audiences
+    from app.esp import audiences as _real_audiences
+    esp.audiences = _real_audiences
+    esp.backend = lambda t: (_CountlessMod, "")
+    rec_real = segments.reconcile("baci")
+    esp.backend, esp.audiences = _saved_backend, _saved_aud
+    ck("a provider that sends NO counts fires no zero-member drift — proven "
+       "through the real esp.audiences",
+       rec_real["ok"] and not any("zero members" in d["what"]
+                                  for d in rec_real["drift"])
+       and next(s for s in rec_real["segments"]
+                if s["key"] == "reorder_due")["esp_count"] == "")
+
     print("\n— sync remembers, stores the card's record, refuses silence —")
     out = segments.sync("baci")
     ck("sync persisted the name-matched links",

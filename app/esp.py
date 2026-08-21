@@ -240,5 +240,11 @@ def audiences(tenant: str) -> dict:
     kind = "list" if prof.get("audience_fn") == "contact_lists" else "segment"
     return {"ok": True, "kind": kind,
             "audiences": [{"id": r.get("id", ""), "name": r.get("name", ""),
-                           "count": r.get("count", r.get("membership_count", 0))}
+                           # None when the provider sent none — Omnisend's
+                           # segment list carries no counts, and collapsing
+                           # that absence to 0 made every one of its segments
+                           # read as empty (the zero-members drift check
+                           # would have fired on ALL of them). Absence is a
+                           # third state and survives to the output.
+                           "count": r.get("count", r.get("membership_count"))}
                           for r in rows]}
