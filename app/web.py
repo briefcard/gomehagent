@@ -1087,7 +1087,7 @@ def list_tenants(key: str = Depends(admin_key)) -> dict:
 
 @app.get("/admin/tenant_set")
 def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
-               value: str = "") -> dict:
+               value: str = "", ui: int = 0):
     """Update one connection field on a tenant, without a redeploy.
 
     /admin/tenant_set?key=SECRET&tenant=baci&field=gmail_alias&value=baci
@@ -1095,8 +1095,23 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
 
     JSON fields (esp, ads, cms, analytics, design, crm, systems) take a JSON
     literal; the rest take a plain string. Values are keys into credential
-    dicts or vault references — never secrets themselves.
+    dicts or vault references — never secrets themselves. `ui=1` returns to
+    the Connections tab with the outcome as a flash instead of a JSON body —
+    "saving reloads to JSON, hit back" was a console form's actual UX.
     """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    def _out(res: dict):
+        if not ui:
+            return res
+        arg = (("err", res["error"]) if res.get("error")
+               else ("ok", f"{field} saved for {tenant}"))
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&tenant={quote(tenant)}"
+            f"&{arg[0]}={quote(str(arg[1])[:200])}", 303)
+
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import tenants
@@ -1104,29 +1119,29 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
     SCALAR = {"name", "kind", "status", "domain", "timezone",
               "gmail_alias", "shopify_store", "notes", "business_model"}
     if field not in JSON_FIELDS | SCALAR:
-        return {"error": f"unknown field; allowed: {sorted(JSON_FIELDS | SCALAR)}"}
+        return _out({"error": f"unknown field; allowed: {sorted(JSON_FIELDS | SCALAR)}"})
     if field == "business_model" and value:
         # Validated here as well as on create. A field settable through two
         # paths and checked on one is a field that will be set wrong through
         # the other, and a typo is silent until a client reads the report.
         from . import metrics
         if value not in metrics.OUTCOMES:
-            return {"error": f"unknown business_model {value!r}",
-                    "known": sorted(metrics.OUTCOMES)}
+            return _out({"error": f"unknown business_model {value!r}",
+                         "known": sorted(metrics.OUTCOMES)})
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, tenant)
         if not t:
-            return {"error": f"unknown tenant {tenant!r}"}
+            return _out({"error": f"unknown tenant {tenant!r}"})
         if field in JSON_FIELDS:
             try:
                 parsed = json.loads(value)
             except ValueError as exc:
-                return {"error": f"field {field} needs JSON: {exc}"}
+                return _out({"error": f"field {field} needs JSON: {exc}"})
             setattr(t, field, parsed)
         else:
             setattr(t, field, value)
         s.commit()
-    return {"ok": True, **tenants.resolve(tenant)}
+    return _out({"ok": True, **tenants.resolve(tenant)})
 
 
 @app.get("/admin/tenant_add")

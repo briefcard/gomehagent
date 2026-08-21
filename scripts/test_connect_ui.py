@@ -115,6 +115,32 @@ def main() -> int:
     ck("though the connection itself is shown as connected",
        "connected" in page2)
 
+    # --- business model is a CONTROL on the card, not a URL-only knob -------
+    # It gates segment building and decides report vocabulary, and the only
+    # way to set it on an existing account was a hand-typed tenant_set URL —
+    # which is how prod's eien reached the segment builder unclassified
+    # (2026-08-21). Rule 10: every view-changing knob gets an on-page control.
+    ck("the account card carries a business-model selector",
+       'name="field" value="business_model"' in page2
+       and "<select" in page2)
+    with TestClient(app) as cl:
+        r = cl.get("/admin/tenant_set",
+                   params={"key": "s3cret", "tenant": "baci",
+                           "field": "business_model",
+                           "value": "ecom_inventory", "ui": "1"},
+                   follow_redirects=False)
+    ck("saving from the form lands back on the tab with a flash, not JSON",
+       r.status_code == 303 and "tab=accounts" in r.headers.get("location", "")
+       and "ok=" in r.headers.get("location", ""),
+       f"{r.status_code} {r.headers.get('location', '')[:60]}")
+    with TestClient(app) as cl:
+        bad = cl.get("/admin/tenant_set",
+                     params={"key": "s3cret", "tenant": "baci",
+                             "field": "business_model", "value": "nonsense",
+                             "ui": "1"}, follow_redirects=False)
+    ck("a typo'd model is refused and the refusal rides the flash",
+       bad.status_code == 303 and "err=" in bad.headers.get("location", ""))
+
     # --- with them set ----------------------------------------------------
     print("\n— and once they are set —")
     config.SHOPIFY_CLIENT_ID = "test-client-id"

@@ -346,12 +346,14 @@ _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("accounts", "Connections", "⚯"), ("schema", "Data layer", "⛁"))
 
 
-def _model_options() -> str:
+def _model_options(selected: str = "") -> str:
     """The business models a report knows how to speak, from the one list.
 
     Read off `metrics.OUTCOMES` rather than typed here: a model in this dropdown
     that the report has no vocabulary for creates an account whose first report
     says "no outcomes for 'x'", and a hand-kept second list is how that happens.
+    `selected` pre-picks the account's current value, so the edit control on an
+    existing account shows what IS before offering what could be.
     """
     from . import metrics
     label = {"ecom_inventory": "shop — sells stock it holds",
@@ -362,8 +364,10 @@ def _model_options() -> str:
              "coaching": "coaching or consulting",
              "real_estate": "property",
              "food_bev": "food and drink"}
-    opts = ['<option value="">— not set (their report carries no outcomes) —</option>']
-    opts += [f'<option value="{m}">{label.get(m, m)}</option>'
+    opts = [f'<option value=""{"" if selected else " selected"}>'
+            f'— not set (their report carries no outcomes) —</option>']
+    opts += [f'<option value="{m}"{" selected" if m == selected else ""}>'
+             f'{label.get(m, m)}</option>'
              for m in sorted(metrics.OUTCOMES)]
     return "".join(opts)
 
@@ -1027,6 +1031,18 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                 <a href="/admin/verify?key={_esc(key)}&amp;tenant={_esc(t.key)}"><button class="sec" type="button">Test connections</button></a>
                 <span class="mut">chips show what is <em>configured</em>; this calls each one to see if it <em>works</em></span>
               </div>
+              <form class="row" method="get" action="/admin/tenant_set"
+                    style="align-items:center;gap:8px">
+                <input type="hidden" name="key" value="{_esc(key)}">
+                <input type="hidden" name="tenant" value="{_esc(t.key)}">
+                <input type="hidden" name="field" value="business_model">
+                <input type="hidden" name="ui" value="1">
+                <label style="white-space:nowrap"><b>Business model</b></label>
+                <select name="value">{_model_options(t.business_model or "")}</select>
+                <button class="sec">Save</button>
+                <span class="mut">decides which segments get built and which
+                numbers their report speaks{' — <b>unset: segments and reports refuse until this is chosen</b>' if not (t.business_model or '') else ''}</span>
+              </form>
               {_connections(t.key, key)}
               <details class="sec">
                 <summary>Raw wiring — this account's connection keys (advanced)</summary>
