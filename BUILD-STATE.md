@@ -68,7 +68,7 @@ was hardened to fail closed the same way (§2.63). Email-derived text in
 `/admin/pending` and `/decide` is escaped (§2.62). Still open on that surface:
 no CSRF, no route-inventory auth test, the ~37 mutating GETs untouched.
 
-**Sabotage is now 24 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`, `esp_unknown_token`, `email_legal_footer`), all caught.
+**Sabotage is now 25 guards** (+ `campaign_draft_gate`), all caught.
 
 ## Email campaign engine — ESP-agnostic, tenant-generic (2026-08-21, in progress)
 
@@ -114,6 +114,25 @@ check claims or compose copy — validator + voice own those, upstream.
 distinct branded emails, footer always present) + `sabotage.email_legal_footer`.
 Two rendered demos (Eien + Baci) were sent to the owner. Dormant — nothing
 imports it until the generator wires it.
+
+**Built (uncommitted): the segment engine + the generator skill.**
+`app/segments.py` — common/high-value segments organized by `Tenant.business_model`
+(ecom_inventory / local_venue / b2b_spec / digital_products), tenant-generic;
+`for_tenant` resolves a client's model to its segments (high-value first, refuses
+if the model is unset), `reconcile` marks which already exist in the live ESP vs
+are to build. `scripts/test_segments.py`. And skill #5 in `skill_pack.py`:
+**`campaign_email`** — the DATA LAYER writes the copy. Same pattern as `ad_copy`:
+the model writes FROM the bundle (voice block + approved claims as credibility +
+positioning + segment angle), a deterministic composer is the no-key fallback
+(basis="composed"), and code owns the rest — assemble canonical blocks →
+`email_render` (branded) → `esp.personalize` (native) → `Context.emit` (the
+banned-claims gate) → and only a VALID, sendable email is drafted into the
+client's ESP via `esp.backend().draft_from_html`; launching stays
+`send_campaign(confirm=True)`, which the substrate never calls. `citations`
+intersected with the offered claims (no invented ids). `scripts/test_campaign_email.py`
+(11 checks) + `sabotage.campaign_draft_gate`. Proven OFFLINE end to end; NOT
+wired to a route/agent tool yet and NOT deployed — the next step is wiring it +
+proving the ESP draft round-trip live (the segments read already resolves; §2.64).
 
 **Owner's bar (2026-08-21): SEND-READY, not a draft** — the data layer's job is
 to close the edit-delta to ~zero (correctly branded + voice-matched + compliant

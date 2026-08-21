@@ -95,6 +95,15 @@ SABOTAGES = [
                "physical address — illegal to send under CAN-SPAM",
     },
     {
+        "name": "campaign_draft_gate",
+        "file": "app/skill_pack.py",
+        "find": "    if (item.get(\"ok\") and not missing and native.get(\"ok\")",
+        "replace": "    if (not missing and native.get(\"ok\")  # SABOTAGE",
+        "suites": ["test_campaign_email.py"],
+        "why": "a campaign email that FAILED the banned-claims check still gets "
+               "drafted into the client's live ESP",
+    },
+    {
         "name": "banned_claims_mail",
         "file": "app/triage.py",
         "find": ('        hard = [f for f in report["failures"]\n'

@@ -646,3 +646,266 @@ register(Skill(
     writes=False,
     produces="draft",
     run=_run_ad_copy))
+
+
+# ---------------------------------------------------------------------------
+# 5 · Campaign email — the data layer writes the copy, code renders and gates it
+#
+# The owner's requirement, in one line: the COPY comes from the data layer, so
+# every email stays on-brand (voice), credible (approved claims), and correctly
+# positioned — never the model freelancing. Same split as `ad_copy`: the model
+# writes FROM the bundle, and code decides what it may write from and whether the
+# result ships. What is new here is the whole email — subject, body, branded
+# render, ESP-native personalization — assembled around that grounded copy and
+# put through `emit` so the banned-claims gate runs before anything is drafted
+# into a client's ESP.
+# ---------------------------------------------------------------------------
+
+_CAMPAIGN_SYSTEM = """You are writing ONE marketing email for this brand, to a
+specific audience segment, to drive ONE action.
+
+Everything you may assert is in the context: the brand's positioning and voice,
+the APPROVED CLAIMS (your only credibility — cite the ones you use by id), the
+products, and the segment you are writing to. Do NOT introduce a claim, price,
+material, origin, guarantee or statistic that is not in the context — the hard
+rules are enforced in code after you write, so a draft that breaks one is thrown
+away, not softened, and you will have wasted the slot.
+
+Write copy that DRIVES ACTION: a subject line that earns the open, a one-line
+preheader, and body copy that hooks on the segment's situation, leads with the
+benefit backed by an approved claim, and ends on ONE clear call to action. Match
+the house voice. Short. No fluff, no second CTA, no invented offer.
+
+Return JSON only, nothing else:
+{"subject": "...", "preheader": "...",
+ "body_html": "the body copy as simple <p> paragraphs; may use {{FIRST_NAME}}; "
+              "no <html>/<head>/<style>, no images (added later by code)",
+ "claim_ids": ["id of each approved claim you actually used"],
+ "cta_label": "...", "cta_url": ""}"""
+
+
+def _segment_brief(tenant: str, segment) -> dict:
+    """The target segment and its angle, from the business-model catalog."""
+    if isinstance(segment, dict) and segment.get("name"):
+        return segment
+    from . import segments as seg
+    got = seg.for_tenant(tenant)
+    if got.get("ok"):
+        for s in got["segments"]:
+            if s["key"] == segment:
+                return s
+    return {"key": str(segment or "general"), "name": str(segment or "General list"),
+            "angle": "", "definition": ""}
+
+
+def _draft_campaign_live(bundle: dict, seg: dict, goal: str) -> tuple:
+    """One model call for one email. Returns `(data|None, basis, why_not)`.
+
+    `data` is the JSON the model returned (subject/preheader/body_html/claim_ids).
+    Degrades to the composer when the model is unavailable, and says why on the
+    row — the `basis` field, exactly as `ad_copy` does.
+    """
+    from . import config
+    if not config.ANTHROPIC_API_KEY:
+        return None, "composed", "ANTHROPIC_API_KEY is not set"
+    try:
+        import json as _json
+
+        import anthropic
+        parts = [bundle.get("rules", {}).get("block", "").strip()]
+        claims = bundle.get("claims") or []
+        if claims:
+            parts.append("\n## APPROVED CLAIMS — your only credibility, cite by id:")
+            for c in claims[:6]:
+                parts.append(f"- [{c['claim_id']}] {c['claim']}"
+                             + (f" (evidence: {c['evidence']})" if c.get("evidence") else ""))
+        ents = bundle.get("entities") or []
+        if ents:
+            parts.append("\n## Products you may feature:")
+            for e in ents[:4]:
+                parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"[:200])
+        objs = bundle.get("objections") or []
+        if objs:
+            parts.append("\n## Hesitations you may answer:")
+            for o in objs[:2]:
+                parts.append(f"- {o.get('objection', '')}")
+        parts.append(f"\n## Segment you are writing to:\n{seg['name']} — "
+                     f"{seg.get('definition', '')}")
+        parts.append(f"## The action to drive:\n{goal or seg.get('angle', '')}")
+
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=900,
+            system=_CAMPAIGN_SYSTEM,
+            messages=[{"role": "user", "content": "\n".join(parts)}])
+        try:
+            from . import usage
+            usage.log_usage("campaign_email", config.CLAUDE_MODEL, msg,
+                            tenant=str(bundle.get("tenant") or ""))
+        except Exception:                                        # noqa: BLE001
+            pass
+        text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        s, e = text.find("{"), text.rfind("}")
+        data = _json.loads(text[s:e + 1])
+        return (data if isinstance(data, dict) and data.get("body_html")
+                else None), "model", ""
+    except Exception as exc:                                     # noqa: BLE001
+        from . import model_error
+        return None, "composed", model_error.explain(exc)
+
+
+draft_campaign = _draft_campaign_live   # the seam the offline suite replaces
+
+
+def _compose_campaign(bundle: dict, seg: dict, goal: str) -> dict:
+    """The deterministic grounded fallback — dull, honest, provable offline."""
+    claims = bundle.get("claims") or []
+    top = claims[0] if claims else None
+    line = (goal or seg.get("angle") or "A quick note").split(".")[0]
+    proof = top["claim"].rstrip(". ") if top else ""
+    body = (f"<p>Hi {{{{FIRST_NAME}}}},</p><p>{proof}.</p>" if proof
+            else "<p>Hi {{FIRST_NAME}},</p>")
+    return {"subject": f"{seg['name']}: {line}"[:78],
+            "preheader": seg.get("definition", "")[:100],
+            "body_html": body,
+            "claim_ids": [top["claim_id"]] if top else [],
+            "cta_label": "Shop now", "cta_url": ""}
+
+
+def _theme_for(tenant: str) -> dict:
+    """A minimal render theme from the brand KB.
+
+    Concrete colours, logo and the mailing address come from the brand-theme
+    DERIVER (Canva kit → Shopify theme → site), which is not built yet — so this
+    is branded by name and voice, on a clean default palette, with no address.
+    That absent address is not hidden: `email_render` shows a loud placeholder
+    and `missing_to_send` names it, so the email reads as not-yet-sendable rather
+    than quietly shipping without a CAN-SPAM footer.
+    """
+    from . import kb
+    b = kb.brand(tenant)
+    name = (b.display_name if b else "") or tenant
+    return {"name": name,
+            "footer": {"brand": name, "address": "", "tagline": "",
+                       "disclaimer": ""}}
+
+
+def _campaign_blocks(copy: dict, bundle: dict) -> list:
+    """Canonical blocks around the grounded copy. Products by NAME only for now —
+    photos and prices come with the catalogue/deriver, and inventing them would
+    be the exact fabrication this layer exists to prevent."""
+    blocks = [{"type": "text", "html": copy.get("body_html") or ""}]
+    ents = bundle.get("entities") or []
+    items = [{"name": e.get("name", ""), "price": e.get("price", ""),
+              "url": e.get("url", "")} for e in ents[:3] if e.get("name")]
+    if items:
+        blocks.append({"type": "products", "items": items})
+    if copy.get("cta_label"):
+        blocks.append({"type": "cta", "label": copy["cta_label"],
+                       "url": copy.get("cta_url") or "#"})
+    return blocks
+
+
+def _run_campaign_email(ctx: Context) -> dict:
+    from . import email_render, esp
+    seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
+    goal = str(ctx.params.get("goal") or "")
+
+    if not ctx.claims:
+        ctx.note("no approved claim is in scope, so this email has no credibility "
+                 "from the data layer — it can still be written, but authoring a "
+                 "claim or two for this brand is what makes it persuasive.")
+
+    copy, basis, why = draft_campaign(ctx.bundle, seg, goal)
+    if copy is None:
+        copy = _compose_campaign(ctx.bundle, seg, goal)
+    # The model may only cite claims that were actually offered — an invented id
+    # is worse than none, because it looks traceable. Intersect with the bundle.
+    offered = {c["claim_id"] for c in ctx.claims}
+    cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
+
+    theme = _theme_for(ctx.tenant)
+    blocks = _campaign_blocks(copy, ctx.bundle)
+    html = email_render.render(theme, blocks, preheader=copy.get("preheader", ""))
+    native = esp.personalize(ctx.tenant, html)
+    final_html = native["html"] if native.get("ok") else html
+    if not native.get("ok"):
+        ctx.note("ESP not connected, so personalization stayed neutral — connect "
+                 "one to make {{FIRST_NAME}}/unsubscribe native and to draft it in.")
+
+    missing = email_render.missing_to_send(theme)
+    if missing:
+        ctx.note("not yet sendable: " + "; ".join(missing)
+                 + " (comes from the brand theme, which needs deriving/review)")
+
+    def _repair(previous: str, failures: list) -> str:
+        note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
+        again, _b, _w = draft_campaign(
+            {**ctx.bundle,
+             "rules": {**ctx.bundle.get("rules", {}),
+                       "block": ctx.bundle.get("rules", {}).get("block", "")
+                       + f"\n\n## Your previous copy was rejected\n{previous}"
+                         f"\n\n## Why, and what to change\n{note}\nRewrite it so "
+                         f"none of these apply; keep it truthful and keep the "
+                         f"claims you cited."}}, seg, goal)
+        return (again or {}).get("body_html", "")
+
+    # Validate the COPY (clean text, not HTML tags): subject + preheader + body.
+    # The banned-claims gate runs here, before anything is drafted into an ESP.
+    to_check = (f"{copy.get('subject', '')}\n{copy.get('preheader', '')}\n"
+                + _strip(copy.get("body_html", "")))
+    item = ctx.emit(
+        to_check, claim_ids=cited, angle=seg["key"], fmt="campaign_email",
+        require_citation=False,      # a promo email need not cite; banned always runs
+        destination=f"esp:{esp.provider_for(ctx.tenant) or 'none'}",
+        meta={"subject": copy.get("subject", ""),
+              "preheader": copy.get("preheader", ""),
+              "html": final_html, "segment": seg["key"], "basis": basis,
+              "sendable": not missing, "missing_to_send": missing},
+        redraft=_repair if basis == "model" else None)
+
+    # Set it up in the ESP as a DRAFT — only when the copy passed, the ESP is
+    # connected, and there is nothing blocking a send. A draft is safe (nothing
+    # sends); LAUNCHING is `esp.backend().send_campaign(confirm=True)`, which the
+    # substrate never calls — that is the final approval the owner keeps.
+    esp_draft = {}
+    if (item.get("ok") and not missing and native.get("ok")
+            and bool(ctx.params.get("draft_into_esp", True))):
+        mod, refusal = esp.backend(ctx.tenant)
+        if refusal:
+            ctx.note("could not draft into the ESP: " + refusal)
+        else:
+            try:
+                esp_draft = mod.draft_from_html(
+                    ctx.tenant, name=copy.get("subject", "")[:120],
+                    subject=copy.get("subject", ""),
+                    sender_name=theme["name"], html=final_html,
+                    preheader=copy.get("preheader", ""))
+                if not esp_draft.get("ok"):
+                    ctx.note("the ESP rejected the draft: "
+                             + esp_draft.get("error", "")[:200])
+            except Exception as exc:                            # noqa: BLE001
+                ctx.note(f"drafting into the ESP raised {exc.__class__.__name__}")
+
+    return {"summary": (f"campaign email for '{seg['name']}' — {basis}, "
+                        + ("sendable" if not missing else "not yet sendable")
+                        + (", drafted in ESP" if esp_draft.get("ok") else "")),
+            "segment": seg, "basis": basis, "cited_claims": cited,
+            "esp_draft": esp_draft, "html_bytes": len(final_html)}
+
+
+register(Skill(
+    key="campaign_email",
+    name="Campaign email",
+    does="Draft a send-ready, on-brand, compliant marketing email for one "
+         "audience segment — copy grounded in the brand's voice and approved "
+         "claims, rendered to the brand's look, made native for its ESP, and "
+         "(when connected) set up as a draft ready to launch pending approval.",
+    system_key="campaign_email",
+    tier=3,
+    needs=("rules.voice_tone", "rules.positioning"),
+    params=("segment", "goal", "entity_key", "audience_key", "utterance",
+            "draft_into_esp"),
+    writes=True,
+    produces="draft",
+    run=_run_campaign_email))
