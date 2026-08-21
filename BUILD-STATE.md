@@ -211,10 +211,16 @@ with NO ban list fails campaign validation by design — the `no_ban_list`
 rule — which is Eien's exact state until its banned_claims are authored.
 
 **Next, in order:** (1) OWNER: re-run
-`/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` to confirm Eien's segments
-now read (the Omnisend-Version header fix is live), and hit
-`/admin/canva_probe?tenant=agency&key=<APPROVAL_SECRET>` — the first live
-Canva/MCP contact; paste both results. The probe's tool list is what lets the
+`/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` a THIRD time — round one
+found the missing version header (§2.64), round two found its format was
+wrong (§2.65, fixed: full-date `2026-03-15` from the API reference); this
+round should finally list Eien's segments. For Canva, the probe named its
+blocker precisely: no connection anywhere. The setup is: create the
+integration at canva.com/developers, register redirect URI EXACTLY
+`https://assistant-web-zm2d.onrender.com/oauth/canva/callback`, set
+`CANVA_CLIENT_ID`/`CANVA_CLIENT_SECRET` in the Render env group, then
+Accounts tab → agency → Sign in with Canva, then re-run
+`/admin/canva_probe?tenant=agency&key=…` — its tool list is what lets the
 next session wire brand-kit + design reads to EXACT MCP tool names; (2) run
 the deriver FOR
 REAL on Eien — console → Eien → Brand tab, derive, owner reviews +

@@ -164,6 +164,15 @@ def main() -> int:
     omnisend.segments("baci")
     ck("every call carries a non-empty Omnisend-Version header",
        bool(_seen.get("Omnisend-Version")), str(_seen.get("Omnisend-Version")))
+    # The SECOND live call's lesson (Eien segments probe, 2026-08-21): the
+    # value must be a FULL date. "2024-06" authenticated fine and then failed
+    # every versioned endpoint with 400 "Omnisend-Version: invalid_format" —
+    # so presence alone is a check that passes while every call fails.
+    import re as _re
+    ck("…and the value is a full YYYY-MM-DD date, the format the API validates",
+       bool(_re.fullmatch(r"\d{4}-\d{2}-\d{2}",
+                          str(_seen.get("Omnisend-Version", "")))),
+       str(_seen.get("Omnisend-Version")))
 
     print()
     if _fails:

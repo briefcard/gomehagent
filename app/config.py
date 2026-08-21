@@ -182,11 +182,13 @@ APPROVAL_BATCH_MINUTES = int(os.environ.get("APPROVAL_BATCH_MINUTES", "30"))
 SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 
 # Omnisend requires a dated API version header on every call (`Omnisend-Version`).
-# Its absence is a 400 "Omnisend-Version: required" — which is exactly how the
-# first real call against a live Omnisend account failed. Overridable so a
-# version bump is an env change, not a code deploy; if this value is ever
-# rejected, Omnisend's error names the versions it accepts.
-OMNISEND_API_VERSION = os.environ.get("OMNISEND_API_VERSION", "2024-06")
+# Its absence is a 400 "Omnisend-Version: required" — the first live call. Its
+# FORMAT is a full date, YYYY-MM-DD — the second live call: "2024-06" came back
+# 400 "Omnisend-Version: invalid_format" on the Eien segments probe
+# (2026-08-21). The default is the one version the API reference documents
+# (api-docs.omnisend.com/reference/overview). Overridable so a version bump is
+# an env change, not a code deploy.
+OMNISEND_API_VERSION = os.environ.get("OMNISEND_API_VERSION", "2026-03-15")
 
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))

@@ -2226,3 +2226,25 @@ Omnisend's error names the versions it accepts. `test_omnisend` drives the real
 The useful part is the shape of the finding: auth, resolution and the whole
 credential path were RIGHT; one required header was missing. That is exactly the
 kind of thing only a live call surfaces, and exactly why the probe went first.
+
+### 2.65 The second real Omnisend call — the version VALUE was the wrong shape — 2026-08-21
+
+§2.64's fix guessed the value: `2024-06`. The owner's re-probe answered with
+**400 Validation failed · Omnisend-Version: invalid_format** — the header must
+be a FULL date, and the API reference documents exactly one version:
+`Omnisend-Version: 2026-03-15` (api-docs.omnisend.com/reference/overview,
+checked rather than guessed this time). So the header's *presence* fix shipped
+with a *format* bug inside it, and the suite could not notice: it asserted the
+header was non-empty, which passes while every versioned call fails.
+
+Fixed: default `2026-03-15`, still env-overridable (`OMNISEND_API_VERSION`).
+`test_omnisend` now also pins the SHAPE — a `YYYY-MM-DD` fullmatch — because
+the guarantee that broke was the format, and a check that would have passed
+through this defect is decoration (§ the sabotage file's own rule).
+
+Two lessons worth the ink. A live probe that half-works is a BETTER teacher
+than one that fails outright — `connected: true` plus a field-level error
+localised this to one header value in one read. And when an external API names
+a format, look the value up in its docs at fix time; the first fix invented
+`2024-06` from the error's shape, which is how a second deploy got spent on
+one header.
