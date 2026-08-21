@@ -353,7 +353,8 @@ def main() -> int:  # noqa: PLR0915
     ck("hard rules render with an adder", "made in Italy" in page
        and 'name="add_banned"' in page)
     ck("the voice deriver is a button, not a typed URL",
-       "derive_voice=1" in page)
+       'name="derive_voice"' in page
+       and "Derive voice from the site" in page)
 
     c = TestClient(web.app)
     c.get("/admin/ui", params={"key": "test-secret"})   # session cookie
@@ -399,6 +400,20 @@ def main() -> int:  # noqa: PLR0915
        and "Nothing was written" in dpage)
     ck("…and truly wrote nothing",
        (kb.brand("baci").voice or {}).get("tone") == ["measured", "warm"])
+
+    # The owner's actual click path, end to end: the first shipped control
+    # was a button nested inside an anchor inside the identity form — invalid
+    # HTML whose click did NOTHING ("I pressed it and it's not populating").
+    import re as _re
+    ck("no button hides inside an anchor anywhere on the tab",
+       not _re.search(r"<a [^>]*>\s*<button", page))
+    ck("the derive control is a real form the dispatcher honours",
+       'name="derive_voice"' in page)
+    clicked = c.get("/admin/ui", params={"key": "test-secret", "tab": "brand",
+                                         "tenant": "baci",
+                                         "derive_voice": "1"}).text
+    ck("clicking it through the console actually populates the proposal",
+       "assured, warm" in clicked and "Nothing was written" in clicked)
 
     print()
     if _fail:

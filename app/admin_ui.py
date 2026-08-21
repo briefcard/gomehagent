@@ -1690,7 +1690,11 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     voice_prop = ""
     if derive_voice:
         from . import voice as vc
-        texts, how = vc.gather(tenant, limit=15)
+        # Six pages, not fifteen: this runs INSIDE the page request, and a
+        # sequential crawl plus a model call has to come back while the
+        # person is still watching the tab. Six pages of a brand's own copy
+        # is plenty to hear a voice in.
+        texts, how = vc.gather(tenant, limit=6)
         if not texts:
             voice_prop = (f'<div class="note">Could not read the site to '
                           f'derive a voice: {_esc(how)}</div>')
@@ -1738,11 +1742,21 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     <textarea name="do_say" rows="3">{_esc(chr(10).join(voice_d.get('do_say') or []))}</textarea>
     <label>Never say — one per line (style guidance; hard rules are below)</label>
     <textarea name="never_say" rows="3">{_esc(chr(10).join(voice_d.get('never_say') or []))}</textarea>
-    <div class="row"><button>Save identity</button>
-      <a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;tenant={_esc(tenant)}&amp;derive_voice=1">
-        <button class="sec" type="button">Derive voice from the site</button></a>
-      <span class="mut">reads their published pages; writes nothing</span>
-    </div>
+    <div class="row"><button>Save identity</button></div>
+  </form>
+  <!-- Its own form, OUTSIDE the editor. The first version nested a button
+       inside an anchor inside the identity form — invalid HTML whose click
+       does nothing in most browsers, which is exactly how the owner found
+       it: "I pressed it and it's not populating." A control that cannot
+       fire is worse than a missing one, because it reads as broken. -->
+  <form method="get" action="/admin/ui" class="row" style="margin-top:8px">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tab" value="brand">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="derive_voice" value="1">
+    <button class="sec">Derive voice from the site</button>
+    <span class="mut">reads a few of their published pages and proposes below —
+    takes ~20 seconds, writes nothing</span>
   </form>
   <div style="margin-top:10px"><span class="mut">Hard rules the validator
   enforces — a draft containing one is BLOCKED, never softened:</span></div>
