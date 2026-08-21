@@ -68,7 +68,46 @@ was hardened to fail closed the same way (§2.63). Email-derived text in
 `/admin/pending` and `/decide` is escaped (§2.62). Still open on that surface:
 no CSRF, no route-inventory auth test, the ~37 mutating GETs untouched.
 
-**Sabotage is now 22 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`), all caught.
+**Sabotage is now 23 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`, `esp_unknown_token`), all caught.
+
+## Email campaign engine — ESP-agnostic, tenant-generic (2026-08-21, in progress)
+
+Owner wants automated email marketing for ALL clients (Eien first), across
+whichever ESP each one uses — some Omnisend, some Klaviyo, some Constant
+Contact. His design: generate ONE canonical email (grounded, validated,
+ESP-agnostic HTML with neutral tokens), then render it native per ESP — merge
+tags and, later, each provider's dynamic blocks. **This is a real build on a
+strong base, not a switch-flip:** the substrate (validator, approval-gating,
+ledger) and the Omnisend/Constant Contact transport functions exist, but nothing
+has EVER made a real ESP call, no client is connected, and there is no generator
+or segment engine. The most complete prior attempt was the `lifecycle_eien.py`
+fork — deleted this session; it was Eien-hardcoded, unproven and unsafe.
+
+**Built so far (uncommitted): `app/esp.py` — the keystone.** A per-tenant
+resolver, same shape as `sites.backend()`: `provider_for(tenant)` reads which
+ESP is actually connected (credential store, not the declared Tenant field);
+`backend(tenant)` returns the transport adapter or refuses BY NAME (no ESP, or
+connected to Klaviyo whose adapter is unbuilt); `PROFILES` holds each provider's
+native merge-tag map and capability flags in one place so the two ESPs cannot
+drift; `personalize(tenant, html)` turns `{{FIRST_NAME}}` into the client's
+native syntax and REFUSES an unknown token rather than shipping it as literal
+text (any `{{…}}` that is not a known token — mixed-case typos included);
+`audiences(tenant)` normalises Omnisend segments and Constant Contact lists to
+one shape; `caps(tenant)` is what a generator reads before composing (host
+images? dynamic products? segments?). `scripts/test_esp.py` (20+ checks, offline
+via stubbed seams) + `sabotage.esp_unknown_token`.
+
+**Honesty carried through:** the native merge strings in `PROFILES` are
+best-effort from public docs and marked VERIFY — no adapter has met a live ESP.
+
+**Next, in order:** (1) connect a real ESP (Eien → Omnisend) and prove one round
+trip — the gate on everything; (2) the canonical email model (semantic blocks +
+neutral tokens) and its base-HTML renderer; (3) the `campaign_email` GENERATOR
+skill — per segment, a grounded/validated email → native via `esp` → draft in
+the client's ESP, approval-gated; (4) the segment engine (commerce + ESP data →
+proposed cohorts, reviewed like claims); (5) the Klaviyo adapter; (6) native
+dynamic blocks. `omnisend.segments` first-page-only and `upload_image` (wired
+nowhere) are known small fixes to fold in.
 
 ## Start here if you are new to this thread
 

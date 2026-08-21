@@ -76,6 +76,16 @@ SABOTAGES = [
                "reaches approve/execute when the secret is unset (fail open)",
     },
     {
+        "name": "esp_unknown_token",
+        "file": "app/esp.py",
+        "find": ("    unknown = sorted({m.group(1).strip() for m in _TOKEN_RE.finditer(html or \"\")}\n"
+                 "                     - set(TOKENS))"),
+        "replace": "    unknown = []  # SABOTAGE",
+        "suites": ["test_esp.py"],
+        "why": "a typo'd personalization token ships to the customer as literal "
+               "text instead of being caught before the draft",
+    },
+    {
         "name": "banned_claims_mail",
         "file": "app/triage.py",
         "find": ('        hard = [f for f in report["failures"]\n'
