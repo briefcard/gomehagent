@@ -2323,9 +2323,14 @@ def render_content(key: str, tenant: str = "", started: str = "",
                       or '<div class="note">No accounts yet.</div>')
 
     # --- proposals ---------------------------------------------------------
-    entries = kbm.proposals(tenant, kind="claim").get("claim", [])
-    pending = [e["row"] for e in entries]
-    _dupes = {e["row"].id: e for e in entries}
+    # Two-step, and the order is the performance fix (owner, 2026-08-21: "why
+    # does it take so long to load tabs" — measured at 2.5–4.5s/render at real
+    # harvest volume): first the ROWS with no analysis, to know the queue and
+    # slice the page; then the O(pending × approved) similarity pass for the
+    # 15 cards actually being shown, not the 135 that are not.
+    base = kbm.proposals(tenant, kind="claim",
+                         analyze_ids=frozenset()).get("claim", [])
+    pending = [e["row"] for e in base]
 
     # A harvest files claims by the dozen, and a hundred full edit-forms on
     # one page is a queue nobody works (owner, 2026-08-21). One page of cards
@@ -2339,6 +2344,14 @@ def render_content(key: str, tenant: str = "", started: str = "",
     except (TypeError, ValueError):
         cpage = 1
     shown = pending[(cpage - 1) * CLAIMS_PAGE: cpage * CLAIMS_PAGE]
+    analyzed = kbm.proposals(tenant, kind="claim",
+                             analyze_ids=frozenset(r.id for r in shown)
+                             ).get("claim", [])
+    _dupes = {e["row"].id: e for e in analyzed}
+    # The page renders the ANALYZED copies of the shown rows — same ids, same
+    # order (both queries order by id), with the duplicate context attached.
+    shown = [e["row"] for e in analyzed
+             if e["row"].id in {r.id for r in shown}]
     vocab = sorted(kbm.situations(tenant))
     cat = sorted(((e.key, e.name) for e in
                   kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
@@ -2658,7 +2671,16 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # Claims had a review queue; audiences, objections, entities and situations
     # went live on write, so a client could redefine a buyer segment through an
     # intake link and nobody would ever see it happen.
-    other = {k: v for k, v in kbm.proposals(tenant).items() if k != "claim"}
+    # Per kind, EXCLUDING claims — the old call asked for everything and then
+    # threw the claims away, which recomputed their full duplicate scan a
+    # third time per page load purely to discard it.
+    other = {}
+    for k in kbm.REVIEWABLE:
+        if k == "claim":
+            continue
+        got = kbm.proposals(tenant, kind=k).get(k, [])
+        if got:
+            other[k] = got
     if other:
         def _prop(kind: str, item: dict) -> str:
             r = item["row"]

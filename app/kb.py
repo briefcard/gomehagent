@@ -2557,24 +2557,59 @@ def brand_level_duplicates(tenant: str) -> list[tuple[str, str]]:
     Computed here rather than passed in from the page, so a bulk reject acts on
     what is true now instead of on a list the browser assembled before the last
     approval landed.
+
+    Scans DIRECTLY — pending entity-scoped claims against approved
+    BRAND-LEVEL claims only, which is the entire definition of "covered". It
+    used to call `proposals()` and take the full O(pending × all-approved)
+    similarity pass along for the ride, which doubled the Review tab's render
+    cost to compute a number: coverage never involved the entity-scoped
+    approved rows at all.
     """
-    entries = proposals(tenant, kind="claim").get("claim", [])
+    with db.SessionLocal() as s:
+        pend = (s.query(db.KbClaim)
+                .filter(db.KbClaim.tenant == tenant,
+                        db.KbClaim.review == prov.PROPOSED)
+                .order_by(db.KbClaim.id).all())
+        from sqlalchemy import or_
+        # `IN ('', NULL)` never matches NULL — SQL's oldest trap — so the
+        # brand-level test is an explicit OR over both spellings of "unscoped".
+        brand_level = (s.query(db.KbClaim)
+                       .filter(db.KbClaim.tenant == tenant,
+                               db.KbClaim.review == prov.APPROVED,
+                               or_(db.KbClaim.entity_key == "",
+                                   db.KbClaim.entity_key.is_(None)))
+                       .all()) if pend else []
+        s.expunge_all()
     out = []
-    for e in entries:
-        covered = e.get("covered_by_brand_level") or []
-        if covered:
-            out.append((e["row"].id,
-                        f"covered by brand-level: "
-                        f"{(covered[0].claim or '')[:80]}"))
+    for r in pend:
+        if not (r.entity_key or ""):
+            continue                    # a brand-level proposal can't be "covered"
+        dupes = prov.near_duplicates(r.claim or "", brand_level, "claim")
+        if dupes:
+            out.append((r.id, f"covered by brand-level: "
+                              f"{(dupes[0].claim or '')[:80]}"))
     return out
 
 
-def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
+def proposals(tenant: str = "", kind: str = "",
+              analyze_ids: set | frozenset | None = None) -> dict[str, list]:
     """Everything waiting for a human, by kind, newest table first.
 
     Each row is returned with the near-duplicates already on file, because the
     reviewer's real question is rarely "is this true" — it is "haven't I seen
     this already", and answering that by memory is how a queue stops being read.
+
+    `analyze_ids` bounds WHERE that comparison work is spent: None (the
+    default) analyzes every row — the decide paths need truth about the whole
+    queue — while a set restricts the O(pending × approved) similarity pass to
+    those rows, and the rest come back with empty analysis lists. The Review
+    tab paginates at 15 cards, and at real harvest volume the full pass took
+    seconds per page load to compute comparisons for 135 cards nobody was
+    shown (owner, 2026-08-21: "why does it take so long to load tabs").
+
+    Rows are ordered by id — arbitrary but STABLE, where the old unordered
+    query let the database reshuffle the queue between two page loads, which
+    under pagination means a card silently changing pages mid-review.
     """
     out: dict[str, list] = {}
     for name, (model, field) in REVIEWABLE.items():
@@ -2584,9 +2619,11 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
             q = s.query(model).filter(model.review == prov.PROPOSED)
             if tenant:
                 q = q.filter(model.tenant == tenant)
-            rows = q.all()
+            rows = q.order_by(model.id).all()
+            need_analysis = (rows if analyze_ids is None
+                             else [r for r in rows if r.id in analyze_ids])
             approved = []
-            if rows:
+            if need_analysis:
                 aq = s.query(model).filter(model.review == prov.APPROVED)
                 if tenant:
                     aq = aq.filter(model.tenant == tenant)
@@ -2594,6 +2631,7 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
             s.expunge_all()
         if not rows:
             continue
+        skip_analysis = ({r.id for r in rows} - {r.id for r in need_analysis})
 
         # Two products can carry facts that read alike and are not
         # interchangeable — "dishwasher safe" is true of the porcelain and false
@@ -2615,6 +2653,11 @@ def proposals(tenant: str = "", kind: str = "") -> dict[str, list]:
 
         entries = []
         for r in rows:
+            if r.id in skip_analysis:
+                entries.append({"row": r, "near_duplicates": [],
+                                "covered_by_brand_level": [],
+                                "parallel_on_other_entities": []})
+                continue
             same, other = _scoped(r)
             text = getattr(r, field, "") or ""
             dupes = prov.near_duplicates(text, same, field)

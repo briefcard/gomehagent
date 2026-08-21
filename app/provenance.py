@@ -113,9 +113,26 @@ def fingerprint(*parts: str) -> str:
     return hashlib.sha1(joined.encode("utf-8")).hexdigest() if joined else ""
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=8192)
+def _token_set(s: str) -> frozenset:
+    """The token set behind `similarity`, cached — pure function of the text.
+
+    A duplicate pass compares every pending row against every approved row,
+    so the SAME 500-odd strings were being re-normalised and re-split once
+    per PAIR: 132,000 normalise calls to compare 550 texts, which is most of
+    why the Review tab took seconds to load (measured 2026-08-21). Strings
+    are immutable and normalise is pure, so caching changes nothing but the
+    clock.
+    """
+    return frozenset(normalise(s).split())
+
+
 def similarity(a: str, b: str) -> float:
     """Token overlap of two normalised strings, 0..1. Used to FLAG, never merge."""
-    ta, tb = set(normalise(a).split()), set(normalise(b).split())
+    ta, tb = _token_set(a), _token_set(b)
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / len(ta | tb)
