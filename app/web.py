@@ -1206,9 +1206,14 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "schema":
         return ui.render_schema(link_key, tenant)
     if tab == "content":
+        try:
+            cp = int(request.query_params.get("cpage", "1"))
+        except ValueError:
+            cp = 1
         return ui.render_content(link_key, tenant, started=started,
                                  err=request.query_params.get("err", ""),
-                                 msg=request.query_params.get("ok", ""))
+                                 msg=request.query_params.get("ok", ""),
+                                 cpage=cp)
     q = request.query_params
     return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""))
@@ -1951,13 +1956,20 @@ def intake(token: str, answer: str = "", skip: str = "") -> str:
 
 @app.get("/admin/claim_review")
 def claim_review(key: str = Depends(admin_key), claim_id: str = "",
-                 approve: str = "yes", tenant: str = "", ui: str = ""):
-    """Approve or reject a client-submitted claim."""
+                 approve: str = "yes", tenant: str = "", ui: str = "",
+                 next: str = "", cpage: int = 1):
+    """Approve or reject a client-submitted claim. From the console (`ui=1`)
+    it lands back at the next card on the same queue page rather than at the
+    top — a decision must never cost the reader their place."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import kb as kbm
     res = kbm.review_claim(claim_id, approve == "yes")
-    return _back_to_content(tenant) if ui else {"result": res}
+    if ui:
+        return _back_to_content(tenant,
+                                anchor=(f"c-{next}" if next else "proposals"),
+                                cpage=cpage)
+    return {"result": res}
 
 
 @app.get("/admin/kb")
@@ -3548,7 +3560,7 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
 
 
 def _back_to_content(tenant: str, started: str = "", err: str = "",
-                     msg: str = "", anchor: str = ""):
+                     msg: str = "", anchor: str = "", cpage: int = 0):
     """Return to the Content tab. No key in the URL: by the time an action has
     run, the session cookie is already set (the middleware sets it on any
     request carrying a valid key), so putting the secret back into the address
@@ -3557,6 +3569,9 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
     `anchor` puts the reader back where they were. Deciding one claim in a
     queue of forty used to return them to the top of the page, so every
     decision cost a scroll — which is how a review queue stops being worked.
+    `cpage` finishes that job now the queue paginates: an anchor on page two
+    is unreachable from page one, so the redirect must carry the page or the
+    anchor silently lands at the top — the exact bounce this exists to stop.
     """
     from urllib.parse import quote
 
@@ -3568,6 +3583,11 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
         q += f"&err={quote(err)}"
     if msg:
         q += f"&ok={quote(msg)}"
+    try:
+        if int(cpage) > 1:
+            q += f"&cpage={int(cpage)}"
+    except (TypeError, ValueError):
+        pass
     if anchor:
         q += f"#{anchor}"
     return RedirectResponse(q, status_code=303)
@@ -3773,13 +3793,13 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
         problem = kbm.update_objection(row_id,
                                        entity_key=str(form.get("entity_key", "")))
         if problem != "Saved.":
-            return _back_to_content(tenant, err=problem)
+            return _back_to_content(tenant, err=problem, anchor="others")
     result = kbm.approve(kind, row_id, by="owner",
                          approve_it=str(form.get("action", "")) == "approve",
                          brand_wide=bool(form.get("brand_wide")))
     if result.startswith("Say what"):
-        return _back_to_content(tenant, err=result)
-    return _back_to_content(tenant)
+        return _back_to_content(tenant, err=result, anchor="others")
+    return _back_to_content(tenant, anchor="others")
 
 
 @app.get("/admin/vocabulary")
@@ -3937,6 +3957,10 @@ async def claims_decide(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", ""))
+    try:
+        cpage = int(form.get("cpage") or 1)
+    except ValueError:
+        cpage = 1
 
     if action == "reject_covered":
         pairs = kbm.brand_level_duplicates(tenant)
@@ -3946,11 +3970,13 @@ async def claims_decide(request: Request, key: str = Depends(admin_key)):
         return _back_to_content(
             tenant, msg=(f"retired {n} narrower cop{'y' if n == 1 else 'ies'} "
                          f"of claims already approved brand-level"
-                         if n else "nothing was covered brand-level"))
+                         if n else "nothing was covered brand-level"),
+            anchor="proposals", cpage=cpage)
 
     ids = [str(i) for i in form.getlist("claim_ids") if str(i).strip()]
     if not ids:
-        return _back_to_content(tenant, msg="nothing was selected")
+        return _back_to_content(tenant, msg="nothing was selected",
+                                anchor="proposals", cpage=cpage)
 
     approve = action == "approve"
     done, refused = 0, []
@@ -3968,7 +3994,7 @@ async def claims_decide(request: Request, key: str = Depends(admin_key)):
     msg = f"{verb} {done} of {len(ids)}"
     if refused:
         msg += f" — {len(refused)} refused: {refused[0][:120]}"
-    return _back_to_content(tenant, msg=msg)
+    return _back_to_content(tenant, msg=msg, anchor="proposals", cpage=cpage)
 
 
 @app.post("/admin/claim_edit", response_class=HTMLResponse)
@@ -3991,10 +4017,15 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
     # The next card, so approving walks DOWN the queue instead of bouncing to
     # the top of it. Read before the decision, while this row is still pending.
     nxt = str(form.get("next_id", ""))
+    try:
+        cpage = int(form.get("cpage") or 1)
+    except ValueError:
+        cpage = 1
 
     if action == "reject":
         kbm.review_claim(claim_id, approve=False)
-        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
+        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}",
+                                cpage=cpage)
 
     if action == "never":
         # Timeless, and approved in the same move. Marking a claim permanent
@@ -4003,7 +4034,8 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         # which is an approval with an extra fact attached.
         kbm.set_claim_expiry(claim_id, never=True)
         kbm.review_claim(claim_id, approve=True)
-        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
+        return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}",
+                                cpage=cpage)
 
     # Whatever was typed into the entity box, resolved to a real key — by name,
     # by slug, or by a unique partial of either. Refusing here rather than
@@ -4013,7 +4045,8 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
     ent_raw = str(form.get("entity_key", ""))
     ent_key, ent_problem = kbm.resolve_entity_ref(tenant, ent_raw)
     if ent_problem:
-        return _back_to_content(tenant, err=ent_problem, anchor=f"c-{claim_id}")
+        return _back_to_content(tenant, err=ent_problem,
+                                anchor=f"c-{claim_id}", cpage=cpage)
 
     msg = kbm.update_claim(
         claim_id,
@@ -4033,8 +4066,8 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         if isinstance(refusal, str) and refusal.lower().startswith(
                 ("cannot", "needs", "refus")):
             return _back_to_content(tenant, err=refusal,
-                                    anchor=f"c-{claim_id}")
-    return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}")
+                                    anchor=f"c-{claim_id}", cpage=cpage)
+    return _back_to_content(tenant, anchor=f"c-{nxt or claim_id}", cpage=cpage)
 
 
 @app.get("/admin/harvest")

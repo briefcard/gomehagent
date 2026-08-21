@@ -173,7 +173,12 @@ def main() -> int:
                  source="review on /products/x", status="pending")
 
     page = admin_ui.render_content(KEY, "baci")
-    ck("the Content tab renders", "Content" in page and len(page) > 800)
+    # Needle CHANGED DELIBERATELY (2026-08-21): the h1 was renamed "Content" →
+    # "Review" to match the nav (two names for one tab read as two places).
+    # "Proposed, awaiting you" is body-specific, which the old needle never
+    # was — "Content" also appeared in prose on other tabs.
+    ck("the Review tab renders", "Proposed, awaiting you" in page
+       and len(page) > 800)
     ck("a pending proposal is shown", has(page, "PROPOSED CLAIM AWAITING REVIEW"))
     ck("with its provenance", has(page, "review on /products/x"))
     ck("and can be edited, tagged and approved without leaving the page",

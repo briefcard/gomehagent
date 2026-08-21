@@ -327,6 +327,11 @@ details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;color:var(--
 details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);padding-bottom:7px}
 .msg.gone{opacity:.62}
 .msg.esc{border-left-color:var(--gap)}\n.tags{display:flex;flex-wrap:wrap;gap:4px 10px}\n.tags .tag{font-size:.78rem;color:var(--ink2);display:flex;align-items:center;gap:4px;white-space:nowrap}\n.tags input{width:auto}
+/* The result of what you just did stays readable even when a redirect lands
+   the reader mid-page at an anchor — without this, every anchored decision
+   scrolled its own confirmation out of view. */
+.flash{position:sticky;top:0;z-index:60}
+.pager{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:.85rem}
 """
 
 #: (key, label, icon). Ordered the way a day runs rather than the way the code
@@ -1014,6 +1019,8 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
           and connects nothing else.</div>
           <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
         </div>"""
+    if note:
+        note = f'<div class="flash">{note}</div>'
 
     # Order (owner, 2026-08-21): the result of what you just did, then the
     # selected account's actual state — the question the tab exists to answer —
@@ -1614,6 +1621,8 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "") -> st
     live = brand_theme.live_theme(tenant)
     note = (f'<div class="ok">{_esc(msg)}</div>' if msg else "") + \
            (f'<div class="note">{_esc(err)}</div>' if err else "")
+    if note:
+        note = f'<div class="flash">{note}</div>'
 
     # The live half: what customers' emails render with today.
     if live:
@@ -1794,7 +1803,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         + _claim_block("Claims — retired", inv["retired"],
                        "Nothing retired.", "withdrawn from selection", "gone"))
 
-    aud_html = _kb_list("Audiences", [
+    aud_html = _kb_list("All audiences", [
         f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.key)}</code></div>"
         + _kv([("pains", _words(r.pains, "none recorded")),
                ("their words", _words(r.vocabulary,
@@ -1890,15 +1899,19 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
               <div class="row"><button class="sec">Save scope</button></div>
             </form>""")
 
-    obj_html = over_html + _kb_list("Objections", [_obj(r) for r in obj_rows],
+    # Objections stand alone — they used to share a block with the situation-
+    # merge warnings, which is how "claims vs objections" stopped reading as
+    # two different things (owner, 2026-08-21). The merge card now lives with
+    # the situations it is about.
+    obj_html = _kb_list("All objections", [_obj(r) for r in obj_rows],
                         "None. This is human-authored and it is half of the "
-                        "intake.")
+                        "intake.", open=len(obj_rows) <= 12)
     obj_html += ('<datalist id="objents">'
                  + "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
                            for k, v in obj_cat.items()) + "</datalist>")
 
     ents = kb.entities(tenant, available_only=False)
-    ent_html = _kb_list("Things they sell", [
+    ent_html = _kb_list("All items", [
         f'<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.type)}</code> '
         f"{_esc(r.price) or _mut('no price')}"
         + ("" if (r.availability or "available") == "available"
@@ -2021,7 +2034,8 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         + _kb_add_form(key, tenant, "tone", "Set voice",
                        "three or four words, comma separated", 1))
 
-    warn = f'<div class="note">{_esc(err)}</div>' if err else ""
+    warn = (f'<div class="flash"><div class="note">{_esc(err)}</div></div>'
+            if err else "")
     # A pointer, not a section: the email LOOK lives on its own Brand tab now
     # (owner, 2026-08-21 — a one-line link was not a place). This line stays so
     # somebody reading "what may be said" is told where "how it looks" went.
@@ -2030,17 +2044,34 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         f'palette, mailing address — is the '
         f'<a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;'
         f'tenant={_esc(tenant)}">Brand tab →</a></p>')
+
+    # Anything waiting for a decision is the first thing on the page — the
+    # queue lives on Review, but discovering it exists must not require
+    # visiting Review on spec.
+    n_pending = len(inv["pending"])
+    review_banner = ""
+    if n_pending:
+        review_banner = (
+            f'<div class="card"><div class="head"><h2>Waiting for review</h2>'
+            f'<span class="chip off">{n_pending} claims</span></div>'
+            f'<p class="mut">Proposed claims are invisible to every generator '
+            f'until approved. '
+            f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;'
+            f'tenant={_esc(tenant)}#proposals">Open the review queue →</a></p>'
+            f'</div>')
+
+    # The substance, one clearly-named card per kind (owner, 2026-08-21: one
+    # "What is in there" card mixing claims, audiences, objections and the
+    # catalogue read as a single undifferentiated pile). Identity detail rides
+    # folded under the stat strip — state first, prose on request.
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
 <div>
   <h1>Knowledge</h1>
-  <p class="mut">Everything the generators are allowed to say, per account. A draft
-  may assert nothing that is not on this page — which is why an empty section here
-  is a blocked pipeline there, not a cosmetic gap.</p>
+  <p class="mut">Everything the generators are allowed to say, for this account. A
+  draft may assert nothing that is not on this page.</p>
   {theme_line}
 </div>
-
-
 
 <div class="card">
   <div class="head">
@@ -2058,22 +2089,50 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
     <span><b>{len(banned)}</b> hard rules</span>
     <span><b>{len(unk)}</b> open gaps</span>
   </div>
-  {_kv([
-    ("positioning", _esc(b.positioning if b else "") or _mut("not set")),
-    ("elevator", _esc((b.elevator or {}).get("sentence", "") if b else "")
-                 or _mut("not set")),
-    ("tone", _words(voice.get("tone"))),
-    ("do say", _words(voice.get("do_say"), "nothing specified")),
-    ("never say", _words(voice.get("never_say"), "nothing specified")),
-    ("selection", _selection_line(kb.selection_config(tenant))),
-    ("next steps", _next_steps_line((b.next_steps or {}) if b else {})),
-  ])}
-  <div><span class="mut">Hard rules the validator enforces:</span></div>
-  <div class="chips">{banned_html}</div>
-  {_approval_policy_html((b.approval_policy or {}) if b else {})}
+  <details class="sec">
+    <summary>Identity — positioning, voice, hard rules &amp; policy</summary>
+    {_kv([
+      ("positioning", _esc(b.positioning if b else "") or _mut("not set")),
+      ("elevator", _esc((b.elevator or {}).get("sentence", "") if b else "")
+                   or _mut("not set")),
+      ("tone", _words(voice.get("tone"))),
+      ("do say", _words(voice.get("do_say"), "nothing specified")),
+      ("never say", _words(voice.get("never_say"), "nothing specified")),
+      ("selection", _selection_line(kb.selection_config(tenant))),
+      ("next steps", _next_steps_line((b.next_steps or {}) if b else {})),
+    ])}
+    <div><span class="mut">Hard rules the validator enforces:</span></div>
+    <div class="chips">{banned_html}</div>
+    {_approval_policy_html((b.approval_policy or {}) if b else {})}
+  </details>
 </div>
 
+{review_banner}
 {ask}
+
+<div class="card">
+  <div class="head"><h2>Claims — the proof drafts may cite</h2>
+    <span class="chip {'on' if inv['selectable'] else 'off'}">{len(inv['selectable'])} usable</span></div>
+  {claims_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Objections — the approved answers</h2>
+    <span class="chip {'on' if obj_rows else 'off'}">{len(obj_rows)}</span></div>
+  {obj_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Catalogue — what they sell</h2>
+    <span class="chip {'on' if ents else 'off'}">{len(ents)}</span></div>
+  {ent_html}
+</div>
+
+<div class="card">
+  <div class="head"><h2>Audiences — who they sell to</h2>
+    <span class="chip {'on' if c['counts'].get('audiences', 0) else 'off'}">{c['counts'].get('audiences', 0)}</span></div>
+  {aud_html}
+</div>
 
 <div class="card">
   <div class="head"><h2>Situations — this account's vocabulary</h2>
@@ -2081,24 +2140,16 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
   {sit_note}
   <div class="thread">{sit_body}</div>
 </div>
-
-<div class="card">
-  <div class="head"><h2>What is in there</h2></div>
-  {claims_html}
-  {aud_html}
-  {obj_html}
-  {ent_html}
-</div>
+{over_html}
 
 {unk_card}
 
-<div class="card">
-  <div class="head"><h2>Add to {_esc(t.name)}</h2></div>
+<details class="sec">
+  <summary>Add to {_esc(t.name)} — claims, objections, audiences, catalogue, rules</summary>
   <div class="grid">{forms}</div>
-</div>
-
-<p class="mut">The same captures work from Telegram — <code>/next</code> asks these
-one at a time and reads your reply as the answer.</p>
+  <p class="mut">The same captures work from Telegram — <code>/next</code> asks
+  these one at a time and reads your reply as the answer.</p>
+</details>
 """, suffix=f"&amp;tenant={tenant}")
 
 
@@ -2212,7 +2263,7 @@ def _act(key: str, action: str, label: str, tenant: str = "",
 
 
 def render_content(key: str, tenant: str = "", started: str = "",
-                   err: str = "", msg: str = "") -> str:
+                   err: str = "", msg: str = "", cpage: int = 1) -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     tenant, t, rows = _account(tenant)
@@ -2227,6 +2278,19 @@ def render_content(key: str, tenant: str = "", started: str = "",
     entries = kbm.proposals(tenant, kind="claim").get("claim", [])
     pending = [e["row"] for e in entries]
     _dupes = {e["row"].id: e for e in entries}
+
+    # A harvest files claims by the dozen, and a hundred full edit-forms on
+    # one page is a queue nobody works (owner, 2026-08-21). One page of cards
+    # at a time; every decide path carries `cpage` back so a decision returns
+    # to THIS page at the next card, never to the top of page one.
+    CLAIMS_PAGE = 15
+    total_claims = len(pending)
+    pages = max(1, -(-total_claims // CLAIMS_PAGE))
+    try:
+        cpage = max(1, min(int(cpage or 1), pages))
+    except (TypeError, ValueError):
+        cpage = 1
+    shown = pending[(cpage - 1) * CLAIMS_PAGE: cpage * CLAIMS_PAGE]
     vocab = sorted(kbm.situations(tenant))
     cat = sorted(((e.key, e.name) for e in
                   kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
@@ -2240,8 +2304,9 @@ def render_content(key: str, tenant: str = "", started: str = "",
                + "".join(f'<option value="{_esc(k + kbm.LABEL_SEP + n)}">'
                          f'</option>' for k, n in cat) + "</datalist>")
     # Where the reader lands after deciding one, so approving walks down the
-    # queue rather than returning to the top of it every time.
-    _order = [e["row"].id for e in entries]
+    # queue rather than returning to the top of it every time. Computed over
+    # the PAGE being shown — the next card must be one that is on screen.
+    _order = [p.id for p in shown]
     _after = {cid: (_order[i + 1] if i + 1 < len(_order) else "")
               for i, cid in enumerate(_order)}
 
@@ -2404,6 +2469,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <input type="hidden" name="claim_id" value="{_esc(p.id)}">
               <input type="hidden" name="tenant" value="{_esc(tenant)}">
               <input type="hidden" name="next_id" value="{_esc(_next_of(p.id))}">
+              <input type="hidden" name="cpage" value="{cpage}">
               <label>{"Quoted — a customer's own words"
                       if verbatim else "Claim"}</label>
               <textarea name="claim" rows="2"{" readonly" if verbatim else ""
@@ -2463,12 +2529,28 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 f'class="sec" title="A brand-level claim is already usable in '
                 f'content about every product, so these narrower copies add '
                 f'nothing">Retire {n} already covered brand-level</button>')
+        def _pg(p: int) -> str:
+            return (f"/admin/ui?tab=content&amp;tenant={_esc(tenant)}"
+                    f"&amp;cpage={p}#proposals")
+        pager = ""
+        if pages > 1:
+            pager = ('<div class="pager"><span class="mut">claims '
+                     f'{(cpage - 1) * CLAIMS_PAGE + 1}&ndash;'
+                     f'{(cpage - 1) * CLAIMS_PAGE + len(shown)} of {total_claims}'
+                     '</span>'
+                     + (f'<a href="{_pg(cpage - 1)}">&larr; newer</a>'
+                        if cpage > 1 else "")
+                     + (f'<a href="{_pg(cpage + 1)}">older &rarr;</a>'
+                        if cpage < pages else "")
+                     + '</div>')
         bulk = f"""
         <form id="bulk" method="post" action="/admin/claims_decide"></form>
         <input type="hidden" name="tenant" value="{_esc(tenant)}" form="bulk">
+        <input type="hidden" name="cpage" value="{cpage}" form="bulk">
+        {pager}
         <div class="bulkbar">
           <label class="pick"><input type="checkbox" id="allbox"> select all
-            {len(pending)}</label>
+            {len(shown)} on this page</label>
           <span class="grow"></span>
           {covered_btn}
           <button form="bulk" name="action" value="reject" class="sec">Reject
@@ -2484,7 +2566,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
         </script>"""
         proposals = (catlist + assets_form + bulk
                      + '<div class="grid" style="grid-template-columns:1fr">'
-                     + "".join(_card(p) for p in pending) + "</div>")
+                     + "".join(_card(p) for p in shown) + "</div>" + pager)
     else:
         proposals = (assets_form + '<p class="mut">Nothing waiting. Harvest reads the account\'s '
                      'own site and files what it finds here — as proposals, never '
@@ -2696,39 +2778,21 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         # A bulk decision reports what it did, including what it refused. A
         # count with no reasons reads as a partial success nobody can act on.
         banner = f'<div class="when">{_esc(msg)}</div>' + banner
+    # Order (owner, 2026-08-21): the queues this tab exists for come first —
+    # the destructive start-over card used to be the FIRST thing on the page,
+    # a rare, dangerous action sitting above the daily work. It now lives
+    # folded at the bottom. The heading matches the nav ("Review"): two names
+    # for one tab made it read like two places.
     return _shell(key, "content", "Review", tenant=tenant, body=f"""
-{banner}
+<div class="flash">{banner}</div>
 <div>
-  <h1>Content</h1>
-  <p class="mut">What this account's site actually says, what its catalogue holds,
-  and what has been proposed but not yet approved. Nothing here is published —
-  it is the difference between what the brand allows and what is live.</p>
+  <h1>Review</h1>
+  <p class="mut">What has been proposed for this account and not yet approved.
+  Nothing here is published — it is the difference between what the brand
+  allows and what is live.</p>
 </div>
 
-<div class="card danger">
-  <div class="head"><h2>Start this account's machine-read half over</h2></div>
-  <p class="mut">Deletes every claim and objection that came from a crawl or a
-  mailbox for <strong>{_esc(t.name if t else tenant)}</strong> — <strong>including approved
-  ones</strong>, which is what the proposal clear below cannot reach. Keeps the
-  ban list, the situation vocabulary, the catalogue, and anything a person
-  wrote: a re-harvest needs all four, and without the catalogue every answer
-  comes back unscoped.</p>
-  <div class="row">
-    <form method="get" action="/admin/purge_harvested" class="inl">
-      <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <button class="sec">Show me what it would delete</button>
-    </form>
-    <form method="post" action="/admin/purge_harvested" class="inl"
-          onsubmit="return confirm('Delete every crawled and mailed claim and objection for {_esc(tenant)}, approved ones included? The ban list, vocabulary and catalogue are kept.')">
-      <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <input type="hidden" name="ui" value="1">
-      <button>Clear and re-harvest</button>
-    </form>
-    <span class="mut">then run Fill from every source, below</span>
-  </div>
-</div>
-
-
+<div class="anchor" id="proposals"></div>
 <div class="card">
   <div class="head"><h2>Proposed, awaiting you</h2>
     <span class="chip {'off' if pending else 'on'}">{len(pending)} pending</span></div>
@@ -2744,6 +2808,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   {clear_all}
 </div>
 
+<div class="anchor" id="others"></div>
 <div class="card">
   <div class="head"><h2>Everything else awaiting you</h2>
     <span class="chip {'off' if n_other else 'on'}">{n_other} pending</span></div>
@@ -2775,6 +2840,31 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
     <span class="mut">names, prices and live stock — the store owns those</span></div>
 </div>
+
+<details class="sec">
+  <summary>Start this account's machine-read half over (destructive)</summary>
+  <div class="card danger" style="margin-top:10px">
+  <p class="mut">Deletes every claim and objection that came from a crawl or a
+  mailbox for <strong>{_esc(t.name if t else tenant)}</strong> — <strong>including approved
+  ones</strong>, which is what the proposal clear above cannot reach. Keeps the
+  ban list, the situation vocabulary, the catalogue, and anything a person
+  wrote: a re-harvest needs all four, and without the catalogue every answer
+  comes back unscoped.</p>
+  <div class="row">
+    <form method="get" action="/admin/purge_harvested" class="inl">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <button class="sec">Show me what it would delete</button>
+    </form>
+    <form method="post" action="/admin/purge_harvested" class="inl"
+          onsubmit="return confirm('Delete every crawled and mailed claim and objection for {_esc(tenant)}, approved ones included? The ban list, vocabulary and catalogue are kept.')">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="ui" value="1">
+      <button>Clear and re-harvest</button>
+    </form>
+    <span class="mut">then run Find proposals / Mine sent mail, above</span>
+  </div>
+  </div>
+</details>
 """, suffix=f"&amp;tenant={tenant}")
 
 

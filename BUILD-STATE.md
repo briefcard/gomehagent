@@ -1001,6 +1001,20 @@ layer, with a "Client view →" link to the portal for the selected account.
 (Brand joined 2026-08-21 — the campaign engine's derive/review surface,
 promoted from a one-line Knowledge link at the owner's instruction.)
 
+**The console UX rules, owner-set 2026-08-21** (kept in full in the assistant's
+`ui-surfaces-not-hyperlinks` memory; the console was reworked to them in three
+passes that day — Connections, then Review + Knowledge): state before
+instructions, the result flash first (sticky, so an anchored redirect cannot
+scroll it away); each fact once per page; a parked decision is never rendered
+as a blocker; instructions and rare/destructive actions fold, dangerous ones
+at the BOTTOM; queues paginate (~15 cards) and every decision returns the
+reader to their place — the redirect carries anchor AND `cpage`, because an
+anchor on page two reached from page one lands nowhere; one kind of thing per
+card, plainly named (Claims and Objections are separate cards now, and the
+Review tab's h1 finally matches its nav label). Three suites pinned literal
+headings as render-proof and were repointed at body-specific markers,
+deliberately, comments say why (test_console_auth, test_kb, test_kb_ui).
+
 Same visual language as the portal, deliberately: switching between them should
 not mean learning a second layout.
 
