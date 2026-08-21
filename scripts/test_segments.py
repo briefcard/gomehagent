@@ -70,6 +70,24 @@ def main() -> int:
     r = segments.for_tenant("coverings")
     ck("no business_model refuses and says how to fix it",
        not r["ok"] and "business_model" in r["error"], r.get("error", "")[:70])
+    ck("…and the refusal names the exact PLACE — the owner hunted tabs for "
+       "a control that existed all along",
+       "Connections tab" in r["error"])
+
+    print("\n— seed backfills a BLANK model, never an owner's choice —")
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "ironside").business_model = "coaching"  # owner-set
+        s.commit()
+    out = tenants.seed()
+    ck("the blank row picked up its seeded classification",
+       "coverings" in out.get("backfilled", [])
+       and segments.for_tenant("coverings")["ok"])
+    ck("a value somebody chose is never touched",
+       tenants.get("ironside").business_model == "coaching"
+       and "ironside" not in out.get("backfilled", []))
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "ironside").business_model = "local_venue"
+        s.commit()
 
     print("\n— reconcile marks what exists in the live ESP vs to build —")
     esp.audiences = lambda t: {"ok": True, "kind": "segment",

@@ -400,11 +400,23 @@ _SEED = [
 
 
 def seed(force: bool = False) -> dict:
-    added, skipped = [], []
+    added, skipped, backfilled = [], [], []
     with db.SessionLocal() as s:
         for row in _SEED:
             existing = s.get(db.Tenant, row["key"])
             if existing and not force:
+                # Skipping existing rows is right — but it also meant a
+                # classification added to _SEED never reached a row created
+                # before it: live eien sat with a BLANK business_model while
+                # this file said ecom_inventory, and the planner refused
+                # (2026-08-21). A blank is a value nobody chose, so filling
+                # ONLY blanks from the seed is a backfill, not an overwrite —
+                # anything the owner set (or sets later, on the Connections
+                # tab control) is never touched.
+                if not (existing.business_model or "").strip() \
+                        and row.get("business_model"):
+                    existing.business_model = row["business_model"]
+                    backfilled.append(row["key"])
                 skipped.append(row["key"])
                 continue
             if existing:
@@ -413,7 +425,7 @@ def seed(force: bool = False) -> dict:
             s.add(db.Tenant(**row))
             added.append(row["key"])
         s.commit()
-    return {"added": added, "skipped": skipped}
+    return {"added": added, "skipped": skipped, "backfilled": backfilled}
 
 
 def seed_owner(chat_id: str, name: str = "Gomeh") -> dict:

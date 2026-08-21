@@ -205,10 +205,13 @@ def for_tenant(tenant: str) -> dict:
         return {"ok": False, "error": f"unknown account {tenant!r}"}
     model = (t.business_model or "").strip()
     if not model:
+        # The fix has an exact address — a refusal that says "set it on the
+        # account" without naming WHERE sent the owner hunting through tabs
+        # for a control that existed all along (2026-08-21).
         return {"ok": False, "error": (
-            f"{tenant} has no business_model set — set it on the account "
-            f"(ecom_inventory, local_venue, b2b_spec, digital_products…) and its "
-            f"segments follow from it.")}
+            f"{tenant} has no business_model set — the control is on the "
+            f"Connections tab, on this account's card (“Business "
+            f"model”, one save); its segments follow from it.")}
     rows = by_model(model)
     if not rows:
         return {"ok": False, "error": (
