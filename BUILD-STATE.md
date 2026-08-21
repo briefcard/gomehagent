@@ -16,7 +16,7 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `4472a69` (131 routes), confirmed serving on /health. That includes the tenant-boundary + webhook-hardening batch, the read-only `/admin/esp_probe`, and the campaign engine (`esp.py`, `email_render.py`, `segments.py`, the `campaign_email` skill) — the campaign pieces are DEPLOYED BUT DORMANT: registered, not wired to any route or agent tool yet, so unreachable at runtime. A docs-only commit may sit above this — `/health` is the authority, and this line is the last CODE commit watched onto the service.
+**Live:** everything below is pushed and deployed at `d02edab` (134 routes), confirmed serving on /health. That includes the tenant-boundary + webhook-hardening batch, the read-only `/admin/esp_probe`, the campaign engine (`esp.py`, `email_render.py`, `segments.py`, the `campaign_email` skill — DEPLOYED BUT DORMANT: registered, not wired to any route or agent tool yet), and now the BRAND-THEME deriver + review surface (`brand_theme.py`, `/admin/brand_theme` — live and usable; the campaign skill reads the approved theme). A docs-only commit may sit above this — `/health` is the authority, and this line is the last CODE commit watched onto the service.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
