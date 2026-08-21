@@ -364,6 +364,29 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(back, 303)
 
 
+@app.get("/admin/segments_build")
+def segments_build(key: str = Depends(admin_key), tenant: str = "",
+                   apply: int = 0) -> dict:
+    """Build the catalog's missing segments in a client's live ESP.
+
+    /admin/segments_build?tenant=eien            what it would create (reads only)
+    /admin/segments_build?tenant=eien&apply=1    create them
+
+    Dry-run by default for the same reason harvest is: Eien's first probe found
+    an EMPTY segment list, and the fix for an empty ESP must not be a GET that
+    writes to a client's workspace on page load. Every segment reports one of
+    four named outcomes — exists / created / would_create / unmapped — and
+    `unmapped` names why, because a guessed condition builds a segment that
+    silently matches nobody.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "say which client: ?tenant=eien"}
+    from . import segments
+    return segments.materialize(tenant, apply=bool(apply))
+
+
 @app.get("/admin/canva_probe")
 def canva_probe(key: str = Depends(admin_key), tenant: str = "agency") -> dict:
     """Prove a client's live Canva end to end — READ ONLY, and a TEACHER.

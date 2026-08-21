@@ -96,6 +96,19 @@ SABOTAGES = [
                "campaign email",
     },
     {
+        "name": "segments_dry_run_gate",
+        "file": "app/segments.py",
+        "find": ('        if not apply:\n'
+                 '            would.append({"key": s["key"], "name": s["name"]})\n'
+                 '            continue'),
+        "replace": "        pass  # SABOTAGE — dry-run creates for real",
+        "suites": ["test_segments.py"],
+        "why": "the read-only preview of segment building CREATES segments in "
+               "a client's live ESP on every page load — the poller/prefetch "
+               "class of incident this codebase already paid for at ~200 "
+               "queued drafts",
+    },
+    {
         "name": "email_legal_footer",
         "file": "app/email_render.py",
         "find": "    rows.append(_footer(t))",

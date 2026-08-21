@@ -210,11 +210,29 @@ it (hero block, notes, `mark_asset_used` on a successful ESP draft;
 with NO ban list fails campaign validation by design — the `no_ban_list`
 rule — which is Eien's exact state until its banned_claims are authored.
 
-**Next, in order:** (1) OWNER: re-run
-`/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` a THIRD time — round one
-found the missing version header (§2.64), round two found its format was
-wrong (§2.65, fixed: full-date `2026-03-15` from the API reference); this
-round should finally list Eien's segments. For Canva, the probe named its
+**THE FIRST CLEAN LIVE ESP ROUND-TRIP READ — 2026-08-21.** The third Eien
+probe returned `ok: true` end to end: credential store → `esp.provider_for` →
+`omnisend.segments` → normalized audiences, against the real account. Three
+probes, two defects (§2.64 missing header, §2.65 wrong format), one working
+read. `omnisend` moves off the "built and NEVER called for real" list for
+READS; `draft_from_html`/`send_campaign` and the PROFILES merge strings remain
+VERIFY (no live write yet). The read's finding: **Eien's Omnisend holds ZERO
+segments** — so `segments.materialize(tenant, apply=)` now exists:
+`omnisend.SEGMENT_CONDITIONS` expresses the catalog natively (docs-read,
+VERIFY on first create; groups OR'd / conditions AND'd; the three cohorts
+needing unverified event names — cart, engagement — are reported `unmapped`
+BY NAME, never guessed), `create_segment` refuses empty conditions (an empty
+segment matches EVERYONE), materialize refuses an unreadable ESP (duplicate
+risk) and is DRY-RUN BY DEFAULT (`sabotage.segments_dry_run_gate`, guard #28).
+Route: `/admin/segments_build?tenant=eien[&apply=1]`, harvest's pattern.
+
+**Next, in order:** (1) OWNER: run
+`/admin/segments_build?tenant=eien&key=<APPROVAL_SECRET>` (dry-run — review
+the would_create list), then `&apply=1` — the FIRST LIVE ESP WRITE this
+codebase makes, deliberately a reversible one (segments send nothing; delete
+in Omnisend's UI if wrong). Expect §2.64/§2.65-class findings: the condition
+schema is docs-read. Then re-run the esp_probe to see the segments listed
+with counts. For Canva, the probe named its
 blocker precisely: no connection anywhere. The setup is: create the
 integration at canva.com/developers, register redirect URI EXACTLY
 `https://assistant-web-zm2d.onrender.com/oauth/canva/callback`, set

@@ -109,6 +109,95 @@ def segments(tenant: str) -> dict:
                                       "name": s.get("name", "")} for s in rows]}
 
 
+# ---------------------------------------------------------------------------
+# Building segments — Omnisend's native conditions for the generic catalog.
+#
+# `segments.CATALOG` says WHICH cohorts a business model wants, in plain words;
+# this table says how OMNISEND expresses each one — the same split as
+# esp.PROFILES for merge tags, so the catalog never learns provider syntax.
+# Schema from api-docs.omnisend.com/reference/post_segments (2026-03-15):
+# conditionGroups are OR'd, conditions inside a group are AND'd, an event
+# filter is {name, operator has|hasNot, count "atLeast"|"equals", value int,
+# period {operator inTheLast, value, unit}} and a filter with no period reads
+# as all-time. VERIFY on the first live create — no segment has ever been
+# created through this, and the hasNot/count interaction and the lifecycle-
+# stage values are docs-read, not API-proven.
+# ---------------------------------------------------------------------------
+
+def _order_event(operator: str, days: int = 0, at_least: int = 1) -> dict:
+    f: dict = {"name": "placed order", "operator": operator,
+               "count": "atLeast", "value": at_least}
+    if days:
+        f["period"] = {"operator": "inTheLast", "unit": "days", "value": days}
+    return f
+
+
+SEGMENT_CONDITIONS: dict[str, list[dict]] = {
+    # Bought a consumable ~30–45 days ago: ordered in the last 45 AND not in
+    # the last 30 — the window where a reorder nudge lands before the runout.
+    "reorder_due": [{"conditions": [{"entity": "event", "junction": "and",
+                     "filters": [_order_event("has", days=45),
+                                 _order_event("hasNot", days=30)]}]}],
+    # Omnisend computes lifecycle stages itself — using them beats inventing a
+    # spend threshold that would be wrong for one client or another.
+    "vip_high_aov": [{"conditions": [{"entity": "contact", "junction": "and",
+                      "filters": [{"property": "customerLifecycleStage",
+                                   "operator": "anyOf",
+                                   "value": ["champions", "loyalists"]}]}]}],
+    "lapsed_60_90": [{"conditions": [{"entity": "event", "junction": "and",
+                      "filters": [_order_event("has", days=90),
+                                  _order_event("hasNot", days=60)]}]}],
+    "repeat_buyers": [{"conditions": [{"entity": "event", "junction": "and",
+                       "filters": [_order_event("has", at_least=2)]}]}],
+    "first_time_buyers": [{"conditions": [{"entity": "event", "junction": "and",
+                           "filters": [{"name": "placed order",
+                                        "operator": "has",
+                                        "count": "equals", "value": 1}]}]}],
+    "win_back": [{"conditions": [{"entity": "event", "junction": "and",
+                  "filters": [_order_event("has"),
+                              _order_event("hasNot", days=120)]}]}],
+    "new_subscribers": [{"conditions": [
+        {"entity": "contact", "junction": "and",
+         "filters": [{"property": "subscriptionStatus", "operator": "anyOf",
+                      "value": ["subscribed"]}]},
+        {"entity": "event", "junction": "and",
+         "filters": [_order_event("hasNot")]}]}],
+    # NOT mapped, deliberately: cart_abandoners / engaged_non_buyers /
+    # unengaged_sunset need Omnisend's exact EVENT NAMES for cart and
+    # engagement activity, which the docs pages read so far do not give.
+    # Guessing an event name builds a segment that silently matches nobody —
+    # worse than absent. They surface as `unmapped`, by name, until a live
+    # read of an existing segment (or the events reference) supplies them.
+}
+
+
+def segment_conditions_for(key: str) -> list[dict] | None:
+    """Omnisend's conditionGroups for one catalog segment key, or None —
+    None means "not expressible yet", which the caller must SAY, not skip."""
+    return SEGMENT_CONDITIONS.get(key)
+
+
+def create_segment(tenant: str, name: str, condition_groups: list[dict]) -> dict:
+    """Create one segment. Returns {ok, segment_id} or the API's own error."""
+    if not name.strip():
+        return {"ok": False, "error": "A segment needs a name."}
+    if not condition_groups:
+        return {"ok": False, "error": (
+            f"refusing to create {name!r} with no conditions — an empty "
+            f"segment matches everyone, and 'everyone' as a targeting "
+            f"mistake sends a campaign to the whole list.")}
+    res = call(tenant, "POST", "/api/segments",
+               payload={"name": name[:256],
+                        "conditionGroups": condition_groups})
+    if not res["ok"]:
+        return res
+    sid = (res["data"] or {}).get("segmentID") or ""
+    if not sid:
+        return {"ok": False, "error": "Omnisend accepted the segment but "
+                                      "returned no segmentID."}
+    return {"ok": True, "segment_id": sid}
+
+
 def import_template(tenant: str, name: str, html: str) -> dict:
     """Turn finished HTML into an Omnisend template. Step one of two.
 

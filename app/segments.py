@@ -258,3 +258,70 @@ def reconcile(tenant: str) -> dict:
             "exists": [s for s in out if s["state"] == "exists"],
             "to_build": [s for s in out if s["state"] == "to_build"],
             "segments": out}
+
+
+def materialize(tenant: str, apply: bool = False) -> dict:
+    """Build the missing catalog segments IN the client's live ESP.
+
+    Dry-run by default — the harvest pattern: without `apply` it reports what
+    WOULD be created and touches nothing, because Eien's first live probe
+    (2026-08-21) came back `audiences: []` and the answer to an empty ESP must
+    not be a route that writes to it on page load. `sabotage.segments_dry_run
+    _gate` removes the gate and the suite fails.
+
+    Per segment, one of four named outcomes: `exists` (reconcile matched it),
+    `created` / `would_create` (the adapter expressed it natively), or
+    `unmapped` — the adapter cannot express it yet and SAYS SO, because a
+    guessed condition builds a segment that silently matches nobody, which is
+    worse than a named gap. A segment is created only from the adapter's own
+    condition table; nothing here invents criteria.
+    """
+    rec = reconcile(tenant)
+    if not rec.get("ok"):
+        return rec
+    if not rec.get("esp_read"):
+        return {"ok": False, "error": (
+            f"the live ESP could not be read ({rec.get('esp_note', '')}) — "
+            f"building against an unreadable ESP risks duplicating every "
+            f"segment it already holds.")}
+
+    from . import esp
+    mod, refusal = esp.backend(tenant)
+    if refusal:
+        return {"ok": False, "error": refusal}
+    conditions_for = getattr(mod, "segment_conditions_for", None)
+    create = getattr(mod, "create_segment", None)
+    if not (conditions_for and create):
+        return {"ok": False, "error": (
+            f"{esp.provider_for(tenant)} has no segment-building surface in "
+            f"its adapter yet — segments must be created in its own UI, or "
+            f"the adapter needs `segment_conditions_for`/`create_segment`.")}
+
+    done, would, unmapped, failed = [], [], [], []
+    for s in rec["to_build"]:
+        groups = conditions_for(s["key"])
+        if not groups:
+            unmapped.append({"key": s["key"], "name": s["name"],
+                             "why": "the adapter cannot express this cohort "
+                                    "natively yet — see its condition table "
+                                    "for what is missing"})
+            continue
+        if not apply:
+            would.append({"key": s["key"], "name": s["name"]})
+            continue
+        got = create(tenant, s["name"], groups)
+        if got.get("ok"):
+            done.append({"key": s["key"], "name": s["name"],
+                         "segment_id": got["segment_id"]})
+        else:
+            failed.append({"key": s["key"], "name": s["name"],
+                           "error": got.get("error", "")[:300]})
+    return {"ok": True, "tenant": tenant, "applied": bool(apply),
+            "existing": [{"key": s["key"], "name": s["name"],
+                          "esp_segment_id": s["esp_segment_id"]}
+                         for s in rec["exists"]],
+            "created": done, "would_create": would,
+            "unmapped": unmapped, "failed": failed,
+            "note": ("" if apply else
+                     "dry run — nothing was created; add apply=1 to build "
+                     "the would_create list in the live ESP")}
