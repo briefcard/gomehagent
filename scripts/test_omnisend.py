@@ -140,6 +140,31 @@ def main() -> int:
        not r["ok"], r.get("error", "")[:60])
 
     omnisend.call = omnisend._call
+
+    # The Omnisend-Version header — a missing one is the 400 the first real call
+    # against a live account actually hit. Drive the real `_call` with a mocked
+    # transport and assert the header is on the wire.
+    print("\n— the required API version header is sent —")
+    import httpx as _hx
+    from app import credentials as _cred
+    _cred.resolve = lambda t, p, site="": {"secret": "k"}
+    _seen: dict = {}
+
+    def _req(method, url, *, headers=None, json=None, params=None, timeout=None):
+        _seen.update(headers or {})
+
+        class _R:
+            status_code = 200
+
+            def json(self):
+                return {"segments": []}
+        return _R()
+
+    _hx.request = _req
+    omnisend.segments("baci")
+    ck("every call carries a non-empty Omnisend-Version header",
+       bool(_seen.get("Omnisend-Version")), str(_seen.get("Omnisend-Version")))
+
     print()
     if _fails:
         print(f"{len(_fails)} FAILED:")

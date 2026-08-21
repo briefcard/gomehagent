@@ -28,7 +28,7 @@ expensive rather than merely broken:
 """
 from __future__ import annotations
 
-from . import credentials as cred
+from . import config, credentials as cred
 
 BASE = "https://api.omnisend.com"
 TIMEOUT = 30
@@ -58,7 +58,10 @@ def _call(tenant: str, method: str, path: str, *, payload: dict | None = None,
     try:
         r = httpx.request(method, f"{BASE}{path}",
                           headers={"X-API-KEY": secret,
-                                   "Content-Type": "application/json"},
+                                   "Content-Type": "application/json",
+                                   # Required on every call — a missing version
+                                   # is a 400, and the first real call proved it.
+                                   "Omnisend-Version": config.OMNISEND_API_VERSION},
                           json=payload, params=params, timeout=TIMEOUT)
     except Exception as exc:                                     # noqa: BLE001
         return {"ok": False, "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}

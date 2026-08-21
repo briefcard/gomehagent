@@ -2206,3 +2206,23 @@ ops channel. It now fails CLOSED, same as WhatsApp and Shopify. `render.yaml`
 generates the secret so prod is unaffected; a deploy that forgets it is refused
 rather than exposed. `test_console_auth` drives it end to end and
 `sabotage.telegram_webhook_sig` confirms the guard is caught.
+
+### 2.64 The first real Omnisend call — connected, and a missing version header — 2026-08-21
+
+The moment the audit kept predicting: the FIRST real call any of this made
+against a live ESP found something. Eien's Omnisend, probed read-only through
+`/admin/esp_probe`, resolved perfectly — `connected: true`, `provider: omnisend`,
+no 401 — so the credential store, `esp.provider_for` and `esp.backend` all work
+against a real account. But `segments()` came back **400 Validation failed ·
+Omnisend-Version: required**. Omnisend now requires a dated `Omnisend-Version`
+header on every call and `omnisend._call` sent none.
+
+Fixed on the transport, so every Omnisend call inherits it: `_call` sends
+`Omnisend-Version: config.OMNISEND_API_VERSION`, default `2024-06`, overridable
+by env so a version bump is not a deploy — and if the value is ever rejected,
+Omnisend's error names the versions it accepts. `test_omnisend` drives the real
+`_call` through a mocked transport and asserts the header is on the wire.
+
+The useful part is the shape of the finding: auth, resolution and the whole
+credential path were RIGHT; one required header was missing. That is exactly the
+kind of thing only a live call surfaces, and exactly why the probe went first.

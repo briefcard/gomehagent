@@ -52,13 +52,18 @@ _DEFAULT = {
     "font": {"heading": "Georgia, 'Times New Roman', serif",
              "body": "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"},
     "radius": "8px", "width": 600,
-    "footer": {"brand": "", "address": "", "tagline": ""},
+    # A working nav, brand data: [{"label","url"}]. Empty renders no nav bar.
+    "nav": [],
+    # `socials` [{"name","url"}] and `disclaimer` are brand data too; the
+    # unsubscribe/preferences are NEUTRAL TOKENS the ESP layer makes native.
+    "footer": {"brand": "", "address": "", "tagline": "",
+               "socials": [], "disclaimer": ""},
 }
 
 
 def _theme(theme: dict) -> dict:
     """A theme with every field filled from the default, deep enough for the
-    three nested dicts the renderer reads."""
+    nested dicts the renderer reads."""
     t = {**_DEFAULT, **(theme or {})}
     for k in ("colors", "font", "footer"):
         t[k] = {**_DEFAULT[k], **((theme or {}).get(k) or {})}
@@ -161,10 +166,24 @@ def _header(t: dict) -> str:
             f'font-weight:600;color:{c["text"]}">{_esc(t["name"])}</span>')
     view = (f'<a href="{BROWSER}" style="font-family:{t["font"]["body"]};'
             f'font-size:12px;color:{c["muted"]};text-decoration:underline">View in browser</a>')
-    return (f'<tr><td style="padding:18px 32px 0"><table role="presentation" width="100%" '
-            f'cellpadding="0" cellspacing="0" border="0"><tr>'
-            f'<td align="left">{logo}</td><td align="right">{view}</td>'
-            f'</tr></table></td></tr>')
+    top = (f'<tr><td style="padding:18px 32px 0"><table role="presentation" width="100%" '
+           f'cellpadding="0" cellspacing="0" border="0"><tr>'
+           f'<td align="left">{logo}</td><td align="right">{view}</td>'
+           f'</tr></table></td></tr>')
+    # A working nav bar — real links to the store's sections. Centered, spaced,
+    # in the body font, tinted to the brand text colour. Rendered only when the
+    # theme carries nav items, so a plainer brand skips it cleanly.
+    nav_items = [i for i in (t.get("nav") or []) if i.get("label") and i.get("url")]
+    if not nav_items:
+        return top
+    links = (f'&nbsp;&nbsp;<span style="color:{c["border"]}">·</span>&nbsp;&nbsp;'.join(
+        f'<a href="{_esc(i["url"])}" style="color:{c["text"]};text-decoration:none;'
+        f'font-family:{t["font"]["body"]};font-size:13px;letter-spacing:.02em;'
+        f'text-transform:uppercase">{_esc(i["label"])}</a>' for i in nav_items[:5]))
+    nav = (f'<tr><td style="padding:14px 32px 6px" align="center">{links}</td></tr>'
+           f'<tr><td style="padding:0 32px"><div style="height:1px;'
+           f'background:{c["border"]};line-height:1px">&nbsp;</div></td></tr>')
+    return top + nav
 
 
 def _footer(t: dict) -> str:
@@ -175,14 +194,28 @@ def _footer(t: dict) -> str:
     addr = (_esc(f["address"]) if f["address"]
             else '<span style="color:#c0392b">[NO MAILING ADDRESS ON FILE — '
                  'required before this can send]</span>')
-    tag = (f'<div style="padding-bottom:6px">{_esc(f["tagline"])}</div>'
+    tag = (f'<div style="padding-bottom:10px">{_esc(f["tagline"])}</div>'
            if f["tagline"] else "")
-    return (f'<tr><td style="padding:22px 32px 30px;font-family:{t["font"]["body"]};'
+    # Socials — brand data, real links. A quiet row above the legal line.
+    socials = [s for s in (f.get("socials") or []) if s.get("name") and s.get("url")]
+    social_row = ""
+    if socials:
+        links = "&nbsp;&nbsp;&nbsp;".join(
+            f'<a href="{_esc(s["url"])}" style="color:{c["muted"]};'
+            f'text-decoration:none;font-weight:600">{_esc(s["name"])}</a>'
+            for s in socials[:5])
+        social_row = f'<div style="padding-bottom:12px;font-size:13px">{links}</div>'
+    # Per-brand disclaimer (e.g. a supplement DSHEA line). Brand data, and the
+    # validator still enforces the ban list on it upstream — this only renders.
+    disc = (f'<div style="padding-top:10px;font-size:11px;color:{c["muted"]};'
+            f'opacity:.85">{_esc(f["disclaimer"])}</div>' if f["disclaimer"] else "")
+    return (f'<tr><td style="padding:24px 32px 32px;font-family:{t["font"]["body"]};'
             f'font-size:12px;line-height:1.6;color:{c["muted"]};text-align:center">'
-            f'{tag}<div>{_esc(f["brand"] or t["name"])} · {addr}</div>'
-            f'<div style="padding-top:6px">'
-            f'<a href="{UNSUB}" style="color:{c["muted"]};text-decoration:underline">Unsubscribe</a>'
-            f'</div></td></tr>')
+            f'{tag}{social_row}'
+            f'<div>{_esc(f["brand"] or t["name"])} · {addr}</div>'
+            f'<div style="padding-top:8px">'
+            f'<a href="{UNSUB}" style="color:{c["muted"]};text-decoration:underline">'
+            f'Unsubscribe</a></div>{disc}</td></tr>')
 
 
 def render(theme: dict, blocks: list, *, preheader: str = "") -> str:

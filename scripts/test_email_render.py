@@ -32,8 +32,16 @@ EIEN = {
     "colors": {"bg": "#eef3f1", "surface": "#ffffff", "text": "#12332b",
                "accent": "#2f7d6b", "accent_text": "#ffffff"},
     "font": {"heading": "Georgia, serif", "body": "Helvetica, Arial, sans-serif"},
+    "nav": [{"label": "Shop", "url": "https://eienhealth.com/shop"},
+            {"label": "Bestsellers", "url": "https://eienhealth.com/best"},
+            {"label": "Learn", "url": "https://eienhealth.com/learn"}],
     "footer": {"brand": "Eien Health", "address": "1213 South 30th Ave, Hollywood FL 33020",
-               "tagline": "Science-backed wellness."},
+               "tagline": "Science-backed wellness.",
+               "socials": [{"name": "Instagram", "url": "https://instagram.com/eien"},
+                           {"name": "TikTok", "url": "https://tiktok.com/@eien"}],
+               "disclaimer": "These statements have not been evaluated by the FDA. "
+                             "This product is not intended to diagnose, treat, cure, "
+                             "or prevent any disease."},
 }
 BACI = {
     "name": "Baci Milano USA",
@@ -87,6 +95,16 @@ def main() -> int:
     ck("view-in-browser token present", er.BROWSER in a)
     ck("the copy's link survived (body html not escaped)",
        "href=\"https://example.com/shop\"" in a or "example.com/shop" in a)
+
+    print("\n— nav, socials, and disclaimer render from brand data —")
+    ck("eien renders a working nav link",
+       'href="https://eienhealth.com/shop"' in a and "Bestsellers" in a)
+    ck("eien renders social links",
+       "Instagram" in a and 'href="https://instagram.com/eien"' in a)
+    ck("eien renders its DSHEA disclaimer",
+       "not been evaluated by the FDA" in a)
+    ck("baci, with none of those set, skips them cleanly (no empty chrome)",
+       "Instagram" not in b and "Bestsellers" not in b)
 
     print("\n— robustness —")
     ck("an unknown block is skipped, not fatal",

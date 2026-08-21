@@ -176,6 +176,13 @@ APPROVAL_BATCH_MINUTES = int(os.environ.get("APPROVAL_BATCH_MINUTES", "30"))
 #  "eien": {"domain": "yyy.myshopify.com", "token": "shpat_..."}}
 SHOPIFY_STORES = json.loads(os.environ.get("SHOPIFY_STORES_JSON", "{}"))
 
+# Omnisend requires a dated API version header on every call (`Omnisend-Version`).
+# Its absence is a 400 "Omnisend-Version: required" — which is exactly how the
+# first real call against a live Omnisend account failed. Overridable so a
+# version bump is an env change, not a code deploy; if this value is ever
+# rejected, Omnisend's error names the versions it accepts.
+OMNISEND_API_VERSION = os.environ.get("OMNISEND_API_VERSION", "2024-06")
+
 # How many prior messages of a thread to give Claude as context.
 THREAD_CONTEXT_MESSAGES = int(os.environ.get("THREAD_CONTEXT_MESSAGES", "5"))
 
