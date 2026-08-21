@@ -52,6 +52,22 @@ def ck(label, cond, detail=""):
 def _seed_account(key: str, name: str, banned: str, mark: str) -> None:
     kb.ensure_brand(key, name)
     kb.add_banned(key, banned)
+    # A live AND a proposed brand theme, both carrying the mark — the Brand tab
+    # renders previews and a provenance table from these, so a cross-account
+    # leak there fails here rather than passing against empty theme columns
+    # (the exact way this file once passed while the Systems tab leaked).
+    kb.set_brand(
+        key,
+        theme={"name": name, "footer": {"brand": name,
+                                        "address": f"{mark} street, Miami FL"},
+               "_meta": {"approved_at": "2026-08-21T00:00:00+00:00",
+                         "edited": ["footer.address"], "sources": {}}},
+        theme_proposed={"theme": {"name": name,
+                                  "footer": {"brand": name,
+                                             "address": f"{mark} street, Miami FL"}},
+                        "sources": {"footer.address": f"{mark} source"},
+                        "unavailable": {}, "partial": {}, "gaps": [],
+                        "derived_at": "2026-08-21T00:00:00+00:00"})
     sysrow = systems.create(key, "lead_responder", f"{mark} responder")
     run = systems.start_run(sysrow.id, key, trigger="inbound_email", ref=mark)
     systems.finish_run(run, "blocked", blocked_on=[f"{mark}_gap"])

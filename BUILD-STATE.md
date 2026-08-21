@@ -159,10 +159,18 @@ fails. `skill_pack._theme_for` now renders the approved theme when one exists,
 so an approved theme with an address makes `campaign_email` genuinely SENDABLE
 end to end — `test_campaign_email` now reaches the ESP-draft path with the
 CAN-SPAM gate ON (a real `brand_theme.approve`, not the old
-`missing_to_send` stub). Review surface: **`/admin/brand_theme?tenant=X`** —
-provenance table, refusals by name, the SAME sample email rendered through the
-proposed and the live theme (judge an email, not a swatch table), derive +
-approve as POST forms. Honesty: `canva.brand_kit` is the one VERIFY — no
+`missing_to_send` stub). Review surface: **the console's Brand tab**
+(`/admin/ui?tab=brand`, `admin_ui.render_brand`) — provenance table, refusals
+by name, the SAME sample email rendered through the proposed and the live
+theme (judge an email, not a swatch table), derive + approve as POST forms.
+It began as a standalone page linked by one line from Knowledge; the owner's
+verdict (2026-08-21, adopted): *a one-line hyperlink is not a place* — so
+Brand is a first-class tab beside Knowledge (SAY vs LOOK), single-account like
+Connections (the `*` view refuses the forms), and `/admin/brand_theme`
+redirects there so bookmarks survive. `test_console_frame` seeds live+proposed
+themes per account with markers, so a cross-account leak on the new tab fails
+the suite rather than passing against empty columns.
+Honesty: `canva.brand_kit` is the one VERIFY — no
 brand-kit read has ever met the live Connect API and the endpoint is
 best-effort from docs; if it 404s for real the chain falls through to
 Shopify/site by design and that finding gets written down.
@@ -178,7 +186,7 @@ next build). Canva is connected-but-never-run, like the ESP adapters.
 **Next, in order:** (1) OWNER: re-run
 `/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` to confirm Eien's segments
 now read (the Omnisend-Version header fix is live); (2) run the deriver FOR
-REAL on Eien — `/admin/brand_theme?tenant=eien`, derive, owner reviews +
+REAL on Eien — console → Eien → Brand tab, derive, owner reviews +
 approves (types the mailing address if no source had it) — the first live
 Canva/Shopify-brand/site reads, so expect one wrong assumption; (3) wire
 `campaign_email` to a console route + an agent tool (`run_skill`), install +
@@ -978,8 +986,10 @@ The account is now chosen once in the sidebar, travels on every link, and is
 named in a pill at the top of every page. Connections renders ONE account where
 it used to stack all five. The four duplicate pickers are gone — two controls
 for one decision is how they disagree. Nav is ordered the way a day runs:
-Review, Knowledge, Systems, Assurance, Diagnostics, Connections, Data layer,
-with a "Client view →" link to the portal for the selected account.
+Review, Knowledge, Brand, Systems, Assurance, Diagnostics, Connections, Data
+layer, with a "Client view →" link to the portal for the selected account.
+(Brand joined 2026-08-21 — the campaign engine's derive/review surface,
+promoted from a one-line Knowledge link at the owner's instruction.)
 
 Same visual language as the portal, deliberately: switching between them should
 not mean learning a second layout.

@@ -289,130 +289,30 @@ def esp_probe(key: str = Depends(admin_key), tenant: str = "eien") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Brand theme — derive, review, approve. The owner's review surface for the
-# campaign engine's "looks like the brand" half: what the deriver found, where
-# each field came from, which sources refused and why, and the same sample
-# email rendered through the proposed and the live theme so the judgement is
-# made on a real email rather than a swatch table.
+# Brand theme — derive and approve POSTs. The review PAGE is the console's
+# Brand tab (`admin_ui.render_brand`, /admin/ui?tab=brand): it began life as a
+# standalone page here and the owner's verdict was that a page reached by one
+# hyperlink is not a place — so the surface moved into the frame beside
+# Knowledge, and the old URL below redirects rather than 404ing bookmarks.
 # ---------------------------------------------------------------------------
 
-_THEME_EDIT_FIELDS = (
-    # (dotted path, label, hint) — the hand-editable subset on the review form.
-    # Deliberately the high-consequence fields; everything else is derived or
-    # edited via re-derive. footer.address is the CAN-SPAM line.
-    ("footer.address", "Mailing address", "required before anything can send"),
-    ("logo_url", "Logo URL", "absolute https URL"),
-    ("colors.accent", "Accent colour", "#hex — buttons and links"),
-    ("footer.tagline", "Tagline", "one line above the legal footer"),
-    ("footer.disclaimer", "Disclaimer", "rendered small in the footer"),
-    ("name", "Brand name", "defaults to the brand KB display name"),
-)
 
-
-def _theme_preview(theme: dict) -> str:
-    """The sample email through one theme, as a sandboxed inline frame."""
-    from . import brand_theme, email_render
-    doc = email_render.render(theme, brand_theme.PREVIEW_BLOCKS,
-                              preheader="Theme preview")
-    return (f'<iframe sandbox="" srcdoc="{html.escape(doc, quote=True)}" '
-            f'style="width:100%;height:520px;border:1px solid #d8dbe0;'
-            f'border-radius:8px;background:#fff"></iframe>')
-
-
-@app.get("/admin/brand_theme", response_class=HTMLResponse)
+@app.get("/admin/brand_theme")
 def brand_theme_page(request: Request, key: str = Depends(admin_key),
-                     tenant: str = "") -> HTMLResponse:
+                     tenant: str = ""):
+    """The old standalone review page — now a bookmark-safe redirect to the
+    console's Brand tab, where the surface lives."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
     if key != config.APPROVAL_SECRET:
         return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
-    from . import brand_theme, tenants
-    qkey = html.escape(str(request.query_params.get("key", "")), quote=True)
-    ok_msg = html.escape(str(request.query_params.get("ok", "")))
-
-    if not tenant or not tenants.get(tenant):
-        rows = "".join(
-            f'<li><a href="/admin/brand_theme?tenant={t.key}'
-            + (f"&key={qkey}" if qkey else "") + f'">{html.escape(t.name)}'
-            f' ({t.key})</a></li>' for t in tenants.all_tenants())
-        return HTMLResponse(
-            "<h2>Brand theme — pick an account</h2>"
-            + (f"<p><b>{html.escape(tenant)}</b> is not an account.</p>"
-               if tenant else "") + f"<ul>{rows}</ul>")
-
-    st = brand_theme.status(tenant)
-    prop = brand_theme.proposed(tenant)
-    live = brand_theme.live_theme(tenant)
-    keyfield = f'<input type="hidden" name="key" value="{qkey}">' if qkey else ""
-
-    parts = [
-        "<!doctype html><meta charset='utf-8'>"
-        "<style>body{font:15px/1.5 -apple-system,'Segoe UI',sans-serif;"
-        "max-width:720px;margin:24px auto;padding:0 16px;color:#1c1e22}"
-        "h2{margin:6px 0}table{border-collapse:collapse;width:100%;font-size:13px}"
-        "td,th{border:1px solid #e6e8ec;padding:4px 8px;text-align:left}"
-        "code{background:#f2f3f5;padding:1px 4px;border-radius:4px}"
-        ".warn{color:#c0392b}.ok{color:#1e7d32}"
-        "input[type=text]{width:100%;box-sizing:border-box;padding:5px}"
-        "button{padding:8px 14px;border-radius:6px;border:1px solid #cbd0d6;"
-        "background:#1f2937;color:#fff;cursor:pointer}</style>",
-        f"<h2>Brand theme — {html.escape(st['tenant'])}</h2>",
-        (f"<p class='ok'>{ok_msg}</p>" if ok_msg else ""),
-    ]
-
-    # The live half: what customers' emails render with today.
-    if live:
-        gaps = st.get("live_gaps") or []
-        parts.append(f"<h3>Live (approved {html.escape(st.get('approved_at') or '?')})</h3>")
-        parts.append("<p class='warn'>Still not sendable: "
-                     + html.escape("; ".join(gaps)) + "</p>" if gaps else
-                     "<p class='ok'>Sendable — address and name are on file.</p>")
-        parts.append(_theme_preview(live))
-    else:
-        parts.append("<h3>Live</h3><p class='warn'>No approved theme — emails "
-                     "render on the default look with no mailing address, and "
-                     "every campaign stays marked not-yet-sendable.</p>")
-
-    # The proposed half: what the deriver found, and where.
-    parts.append("<h3>Proposed</h3>")
-    if prop.get("theme"):
-        parts.append(f"<p>Derived {html.escape(prop.get('derived_at', '?'))}."
-                     + (" <span class='warn'>Gaps: "
-                        + html.escape("; ".join(prop.get("gaps") or []))
-                        + "</span>" if prop.get("gaps") else "") + "</p>")
-        src_rows = "".join(
-            f"<tr><td><code>{html.escape(p)}</code></td>"
-            f"<td>{html.escape(s)}</td></tr>"
-            for p, s in sorted((prop.get("sources") or {}).items()))
-        parts.append(f"<table><tr><th>field</th><th>came from</th></tr>{src_rows}</table>")
-        if prop.get("unavailable"):
-            parts.append("<p><b>Sources not consulted</b> — each names its fix:</p><ul>"
-                         + "".join(f"<li><b>{html.escape(k)}</b>: {html.escape(v)}</li>"
-                                   for k, v in prop["unavailable"].items()) + "</ul>")
-        parts.append(_theme_preview(prop["theme"]))
-    else:
-        parts.append("<p>Nothing derived yet.</p>")
-
-    # Actions. Derive proposes; approve is the owner's signature, edits win.
-    parts.append(f"""
-<form method="post" action="/admin/brand_theme/derive" style="margin:14px 0">
-  {keyfield}<input type="hidden" name="tenant" value="{html.escape(tenant)}">
-  <button>Derive from Canva / Shopify / site</button>
-</form>
-<h3>Approve{' / correct' if prop.get('theme') else ' (by hand)'}</h3>
-<p>Blank fields keep the derived value; anything typed here wins.</p>
-<form method="post" action="/admin/brand_theme/approve">
-  {keyfield}<input type="hidden" name="tenant" value="{html.escape(tenant)}">
-  <table>""")
-    for path, label, hint in _THEME_EDIT_FIELDS:
-        cur = ""
-        node: object = prop.get("theme") or live or {}
-        for part in path.split("."):
-            node = node.get(part, "") if isinstance(node, dict) else ""
-        cur = html.escape(str(node or ""), quote=True)
-        parts.append(f"<tr><td style='white-space:nowrap'>{html.escape(label)}"
-                     f"<br><small>{html.escape(hint)}</small></td>"
-                     f"<td><input type='text' name='{path}' value='{cur}'></td></tr>")
-    parts.append("</table><p><button>Approve — this look ships</button></p></form>")
-    return HTMLResponse("".join(parts))
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+    if request.query_params.get("key"):
+        back += f"&key={quote(str(request.query_params['key']))}"
+    if request.query_params.get("ok"):
+        back += f"&ok={quote(str(request.query_params['ok']))}"
+    return RedirectResponse(back, 303)
 
 
 @app.post("/admin/brand_theme/derive")
@@ -429,9 +329,10 @@ async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     got = brand_theme.derive(tenant)
-    msg = ("derived — review below" if got.get("ok")
-           else got.get("error", "derive failed"))
-    back = f"/admin/brand_theme?tenant={quote(tenant)}&ok={quote(msg)}"
+    arg = (("ok", "derived — review below") if got.get("ok")
+           else ("err", got.get("error", "derive failed")))
+    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+            f"&{arg[0]}={quote(arg[1])}")
     if form.get("key"):
         back += f"&key={quote(str(form['key']))}"
     return RedirectResponse(back, 303)
@@ -447,15 +348,17 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     from . import brand_theme
     if key != config.APPROVAL_SECRET:
         return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    from . import admin_ui as ui
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     edits = {path: str(form.get(path, ""))
-             for path, _label, _hint in _THEME_EDIT_FIELDS
+             for path, _label, _hint in ui._THEME_EDIT_FIELDS
              if str(form.get(path, "")).strip()}
     got = brand_theme.approve(tenant, edits)
-    msg = (("approved" + (" — " + got["note"] if got.get("note") else ""))
-           if got.get("ok") else got.get("error", "approve failed"))
-    back = f"/admin/brand_theme?tenant={quote(tenant)}&ok={quote(msg)}"
+    arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
+           if got.get("ok") else ("err", got.get("error", "approve failed")))
+    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+            f"&{arg[0]}={quote(arg[1])}")
     if form.get("key"):
         back += f"&key={quote(str(form['key']))}"
     return RedirectResponse(back, 303)
@@ -1277,6 +1180,10 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "kb":
         return ui.render_kb(link_key, tenant,
                             err=request.query_params.get("err", ""))
+    if tab == "brand":
+        return ui.render_brand(link_key, tenant,
+                               msg=request.query_params.get("ok", ""),
+                               err=request.query_params.get("err", ""))
     if tab == "assurance":
         try:
             days = int(request.query_params.get("days", "30"))

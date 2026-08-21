@@ -333,6 +333,7 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 #: is arranged: what needs deciding, then what it knows, then what it is
 #: connected to, then the plumbing.
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
+         ("brand", "Brand", "❖"),
          ("systems", "Systems", "◧"), ("assurance", "Assurance", "◉"),
          ("diagnostics", "Diagnostics", "⚕"),
          ("accounts", "Connections", "⚯"), ("schema", "Data layer", "⛁"))
@@ -1502,6 +1503,159 @@ def _next_steps_line(steps: dict) -> str:
         for stage, v in steps.items())
 
 
+# ---------------------------------------------------------------------------
+# Brand tab — the email LOOK, with the same standing as Knowledge.
+# ---------------------------------------------------------------------------
+
+#: (dotted path, label, hint) — the hand-editable subset on the approve form.
+#: Deliberately the high-consequence fields; the long tail (background/border
+#: colours, radius, nav) arrives via the deriver or `brand_theme.approve`
+#: called directly. footer.address is the CAN-SPAM line.
+_THEME_EDIT_FIELDS = (
+    ("footer.address", "Mailing address", "required before anything can send"),
+    ("logo_url", "Logo URL", "absolute https URL"),
+    ("colors.accent", "Accent colour", "#hex — buttons and links"),
+    ("footer.tagline", "Tagline", "one line above the legal footer"),
+    ("footer.disclaimer", "Disclaimer", "rendered small in the footer"),
+    ("name", "Brand name", "defaults to the brand KB display name"),
+)
+
+_BRAND_CSS = """<style>
+.bt-frame{width:100%;height:480px;border:1px solid var(--rule);border-radius:6px;background:#fff}
+.bt-table{border-collapse:collapse;width:100%;font-size:.82rem;margin:8px 0}
+.bt-table td,.bt-table th{border:1px solid var(--rule);padding:4px 8px;text-align:left}
+.bt-form input[type=text]{width:100%;box-sizing:border-box;padding:5px}
+.bt-form td{vertical-align:top}
+</style>"""
+
+
+def _theme_preview(theme: dict) -> str:
+    """The sample email through one theme, sandboxed. A swatch table asks the
+    owner to imagine the email; this shows it."""
+    from . import brand_theme, email_render
+    doc = email_render.render(theme, brand_theme.PREVIEW_BLOCKS,
+                              preheader="Theme preview")
+    return f'<iframe sandbox="" srcdoc="{_esc(doc)}" class="bt-frame"></iframe>'
+
+
+def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
+    """One account's email LOOK: derive it, see where every field came from,
+    correct it, approve it.
+
+    Split out of the Knowledge tab at the owner's instruction (2026-08-21) —
+    a one-line link is not a place — and given the same standing because it
+    answers the sibling question: Knowledge is what a generator may SAY, Brand
+    is what the result LOOKS like. Derive writes a PROPOSAL only; the approve
+    form here is the one path to the live theme, and the owner's edits win and
+    survive re-derives. Like Connections, the forms write to a single account,
+    so the cross-account view refuses to offer them.
+    """
+    from . import brand_theme
+    tenant, t, _rows = _account(tenant)
+    if tenant == ALL:
+        return _shell(key, "brand", "Brand", tenant=tenant,
+                      body=_every_note(True, "A brand theme is derived and "
+                                       "approved one account at a time — these "
+                                       "forms write to a single client, so "
+                                       "pick one in the sidebar."))
+    st = brand_theme.status(tenant)
+    if not st.get("ok"):
+        return _shell(key, "brand", "Brand", tenant=tenant, head=_BRAND_CSS,
+                      body=f'<div class="note">{_esc(st.get("error", ""))}</div>')
+    prop = brand_theme.proposed(tenant)
+    live = brand_theme.live_theme(tenant)
+    note = (f'<div class="ok">{_esc(msg)}</div>' if msg else "") + \
+           (f'<div class="note">{_esc(err)}</div>' if err else "")
+
+    # The live half: what customers' emails render with today.
+    if live:
+        gaps = st.get("live_gaps") or []
+        meta = live.get("_meta") or {}
+        state = (('<span class="mut">still not sendable: '
+                  + _esc("; ".join(gaps)) + "</span>") if gaps
+                 else "<b>sendable</b> — address and name are on file")
+        edited = ", ".join(meta.get("edited") or []) or "none"
+        live_body = (f'<p class="mut">Approved {_esc(meta.get("approved_at") or "?")}'
+                     f' · {state} · hand-set fields (these survive re-derives): '
+                     f'{_esc(edited)}</p>' + _theme_preview(live))
+    else:
+        live_body = ('<div class="note">No approved theme — campaign emails '
+                     'render on the default look with no mailing address, and '
+                     'every campaign stays marked not-yet-sendable until one '
+                     'is approved here.</div>')
+
+    # The proposed half: what the deriver found, and where every field came
+    # from. Provenance is the review — the owner is signing off SOURCES, not
+    # just colours.
+    if prop.get("theme"):
+        src_rows = "".join(
+            f"<tr><td><code>{_esc(p)}</code></td><td>{_esc(s)}</td></tr>"
+            for p, s in sorted((prop.get("sources") or {}).items()))
+        unavailable = "".join(
+            f"<li><b>{_esc(k)}</b>: {_esc(v)}</li>"
+            for k, v in (prop.get("unavailable") or {}).items())
+        partial = "".join(
+            f"<li><b>{_esc(k)}</b> answered partly: {_esc('; '.join(v))}</li>"
+            for k, v in (prop.get("partial") or {}).items())
+        prop_body = (
+            f'<p class="mut">Derived {_esc(prop.get("derived_at") or "?")}'
+            + (' · <span class="mut">gaps: '
+               + _esc("; ".join(prop.get("gaps") or [])) + "</span>"
+               if prop.get("gaps") else "")
+            + "</p>"
+            + f'<table class="bt-table"><tr><th>field</th><th>came from</th>'
+              f"</tr>{src_rows}</table>"
+            + (f'<p><b>Sources not consulted</b> — each names its fix:</p>'
+               f"<ul>{unavailable}</ul>" if unavailable else "")
+            + (f"<ul>{partial}</ul>" if partial else "")
+            + _theme_preview(prop["theme"]))
+    else:
+        prop_body = ('<p class="mut">Nothing derived yet — the button below '
+                     'reads the Canva brand kit, then Shopify (brand settings, '
+                     'the shop\'s registered address, theme socials), then the '
+                     'site, and shows the result here for review.</p>')
+
+    # The approve form, prefilled from the proposal (else the live theme) so
+    # approving unchanged is one click and correcting is typing over a value.
+    inputs = ""
+    for path, label, hint in _THEME_EDIT_FIELDS:
+        node: object = prop.get("theme") or live or {}
+        for part in path.split("."):
+            node = node.get(part, "") if isinstance(node, dict) else ""
+        inputs += (f"<tr><td style='white-space:nowrap'>{_esc(label)}<br>"
+                   f"<small class='mut'>{_esc(hint)}</small></td>"
+                   f"<td><input type='text' name='{path}' "
+                   f"value='{_esc(node)}'></td></tr>")
+    keyfield = f'<input type="hidden" name="key" value="{_esc(key)}">'
+    actions = f"""
+<form method="post" action="/admin/brand_theme/derive" style="margin:10px 0">
+  {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
+  <button>Derive from Canva / Shopify / site</button>
+  <span class="mut">writes a proposal only — nothing ships from this button</span>
+</form>
+<h3>Approve{" / correct" if prop.get("theme") else " by hand"}</h3>
+<p class="mut">Blank fields keep the derived value; anything typed here wins,
+and hand-set fields survive future re-derives.</p>
+<form method="post" action="/admin/brand_theme/approve" class="bt-form">
+  {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
+  <table class="bt-table">{inputs}</table>
+  <p><button>Approve — this look ships</button></p>
+</form>"""
+
+    return _shell(key, "brand", "Brand", tenant=tenant, head=_BRAND_CSS, body=f"""
+{note}
+<div>
+  <h1>Brand</h1>
+  <p class="mut">The email LOOK for this account — logo, palette, type, socials
+  and the CAN-SPAM mailing address. Derived from the client's own sources with
+  the origin of every field shown, reviewed here, and rendered into every
+  campaign email once approved. Voice and claims stay on Knowledge; this page
+  is how the result looks.</p>
+  <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
+  <div class="card"><div class="head"><h2>Proposed</h2></div>{prop_body}{actions}</div>
+</div>""")
+
+
 def render_kb(key: str, tenant: str = "", err: str = "") -> str:
     # One resolver for the frame and the body, so the pill cannot name an
     # account the numbers below it are not about.
@@ -1820,24 +1974,14 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                        "three or four words, comma separated", 1))
 
     warn = f'<div class="note">{_esc(err)}</div>' if err else ""
-    # The email LOOK, beside what may be SAID: where the brand theme stands and
-    # the one link to the derive/review surface — otherwise it exists only as a
-    # typed URL, which is how a working scanner once sat switched off.
-    from . import brand_theme as _bt
-    _ts = _bt.status(tenant)
-    if _ts.get("live"):
-        _gaps = _ts.get("live_gaps") or []
-        _theme_state = ("<b>approved</b> — still not sendable: "
-                        + _esc("; ".join(_gaps)) if _gaps
-                        else "<b>approved</b> — sendable")
-    else:
-        _theme_state = ("<b>none approved</b> — campaign emails render on the "
-                        "default look with no mailing address")
+    # A pointer, not a section: the email LOOK lives on its own Brand tab now
+    # (owner, 2026-08-21 — a one-line link was not a place). This line stays so
+    # somebody reading "what may be said" is told where "how it looks" went.
     theme_line = (
-        f'<p class="mut">Brand theme (the email LOOK): {_theme_state}'
-        + (f' · a proposal from {_esc(_ts.get("derived_at", ""))} awaits review'
-           if _ts.get("proposed") else "")
-        + f' · <a href="/admin/brand_theme?tenant={_esc(tenant)}">derive / review →</a></p>')
+        f'<p class="mut">What may be said lives here; how it LOOKS — logo, '
+        f'palette, mailing address — is the '
+        f'<a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;'
+        f'tenant={_esc(tenant)}">Brand tab →</a></p>')
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
 <div>
