@@ -109,6 +109,18 @@ SABOTAGES = [
                "queued drafts",
     },
     {
+        "name": "claim_edit_reattests",
+        "file": "app/web.py",
+        "find": ("    if not timeless:\n"
+                 "        kbm.set_claim_expiry(claim_id)"),
+        "replace": "    pass  # SABOTAGE — edits stop re-dating the claim",
+        "suites": ["test_kb_ui.py"],
+        "why": "editing an approved claim stops resetting its expiry, so a "
+               "fact the owner just re-attested still comes due on the OLD "
+               "clock — or, edited a year in, never gets asked about again "
+               "the way the owner's resave rule promises",
+    },
+    {
         "name": "email_legal_footer",
         "file": "app/email_render.py",
         "find": "    rows.append(_footer(t))",

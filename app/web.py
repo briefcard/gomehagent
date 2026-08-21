@@ -1303,7 +1303,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_systems(link_key, tenant)
     if tab == "kb":
         return ui.render_kb(link_key, tenant,
-                            err=request.query_params.get("err", ""))
+                            err=request.query_params.get("err", ""),
+                            msg=request.query_params.get("ok", ""))
     if tab == "brand":
         return ui.render_brand(link_key, tenant,
                                msg=request.query_params.get("ok", ""),
@@ -3717,14 +3718,21 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
     return RedirectResponse(q, status_code=303)
 
 
-def _back_to_kb(tenant: str, err: str = ""):
-    """Return to the Knowledge tab, carrying any refusal with it."""
+def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = ""):
+    """Return to the Knowledge tab, carrying the outcome and the reader's
+    place — the same contract `_back_to_content` keeps: a decision must never
+    cost a scroll back to where you were."""
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
     q = f"/admin/ui?tab=kb&tenant={tenant}"
-    return RedirectResponse(q + (f"&err={quote(err)}" if err else ""),
-                            status_code=303)
+    if err:
+        q += f"&err={quote(err)}"
+    if ok:
+        q += f"&ok={quote(ok)}"
+    if anchor:
+        q += f"#{anchor}"
+    return RedirectResponse(q, status_code=303)
 
 
 def _run_bg(label: str, fn, *args, **kw) -> None:
@@ -4043,9 +4051,74 @@ async def objection_edit(request: Request, key: str = Depends(admin_key)):
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    result = kbm.update_objection(str(form.get("row_id", "")),
-                                  entity_key=str(form.get("entity_key", "")))
-    return _back_to_kb(tenant, err="" if result == "Saved." else result)
+    row_id = str(form.get("row_id", ""))
+    # Text fields ride only when the form carried them, so the older
+    # scope-only form and the full editor share this route without the one
+    # blanking fields the other never showed.
+    kw: dict = {"entity_key": str(form.get("entity_key", ""))}
+    for f in ("objection", "response"):
+        if form.get(f) is not None:
+            kw[f] = str(form.get(f, ""))
+    result = kbm.update_objection(row_id, **kw)
+    good = result == "Saved."
+    return _back_to_kb(tenant, err="" if good else result,
+                       ok="objection saved" if good else "",
+                       anchor=f"o-{row_id}")
+
+
+@app.post("/admin/claim_update", response_class=HTMLResponse)
+async def claim_update(request: Request, key: str = Depends(admin_key)):
+    """Edit an APPROVED claim in place, from the Knowledge tab.
+
+    A human may always correct a row — that is `provenance.may_write`'s first
+    rule — and the owner's rule rides on top (2026-08-21): **a resave is a
+    re-attestation.** Saving resets the expiry clock — explicit due date
+    cleared, verified today, due again on the usual interval — because the
+    person editing a fact is looking straight at whether it is still true.
+    The one exception is a claim already marked timeless: an edit must not
+    silently undo that standing decision, so it stays timeless and only the
+    verification date refreshes. `never` marks it timeless; `expire` puts a
+    timeless claim back on the clock, dated from today.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>")
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    claim_id = str(form.get("claim_id", ""))
+    action = str(form.get("action", "save"))
+    anchor = f"cl-{claim_id}"
+
+    if action == "never":
+        return _back_to_kb(tenant, ok=kbm.set_claim_expiry(claim_id, never=True),
+                           anchor=anchor)
+    if action == "expire":
+        return _back_to_kb(tenant, ok=kbm.set_claim_expiry(claim_id),
+                           anchor=anchor)
+
+    msg = kbm.update_claim(
+        claim_id,
+        claim=str(form.get("claim", "")),
+        evidence=str(form.get("evidence", "")),
+        entity_key=str(form.get("entity_key", "")),
+        tags=[str(t) for t in form.getlist("tags")])
+    if msg != "Saved.":
+        # The refusal is the feature: verbatim testimonials cannot be
+        # reworded, unknown tags cannot be invented — same rules as review.
+        return _back_to_kb(tenant, err=msg, anchor=anchor)
+    with db.SessionLocal() as s:
+        row = s.get(db.KbClaim, claim_id)
+        timeless = bool(row) and (row.expiry_policy or "") == "never"
+        if timeless:
+            # Freshness is still recorded; the timeless decision stands.
+            row.verified_at = db.utcnow()
+            s.commit()
+    if not timeless:
+        kbm.set_claim_expiry(claim_id)
+    return _back_to_kb(tenant, anchor=anchor,
+                       ok=("saved — verified today"
+                           + ("" if timeless else
+                              "; expiry reset to a year from now")))
 
 
 @app.post("/admin/conflict_resolve", response_class=HTMLResponse)

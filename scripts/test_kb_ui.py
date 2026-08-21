@@ -18,6 +18,7 @@ import sys
 import tempfile
 
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'kbui.db')}"
+os.environ["APPROVAL_SECRET"] = "testkey"   # the edit routes are admin-gated
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import admin_ui, db, kb, kb_seed, tenants  # noqa: E402
@@ -310,6 +311,116 @@ def main() -> int:
     ck("nullable joins are marked as such", page.count(">nullable<") >= 3)
     ck("an account with nothing still renders",
        "Data layer" in admin_ui.render_schema(KEY, "blank"))
+
+    # ---- approved knowledge is editable in place; a resave re-attests ------
+    # Owner's rule (2026-08-21): saving an approved claim resets its expiry —
+    # the person editing a fact is looking straight at whether it is still
+    # true. Timeless stays timeless through an edit; `never` and `expire`
+    # toggle the clock; a testimonial's wording still cannot be rewritten.
+    print("\n— editing approved knowledge —")
+    import datetime as _dt
+
+    from fastapi.testclient import TestClient
+
+    from app import db as _db, web
+    c = TestClient(web.app)
+    c.get("/admin/ui", params={"key": "testkey"})    # prime the session cookie
+
+    kb.add_situation("baci", "editcase", patterns=[["editcase"]],
+                     description="e", origin="seed")
+    kb.add_claim("baci", "Editable fact, first wording.", "ev-1",
+                 ["editcase"], origin="human", status="active")
+    row = [r for r in kb.claims("baci", limit=0)
+           if "Editable fact" in (r.claim or "")][0]
+    kb.set_claim_expiry(row.id, on="2026-09-01")     # an explicit, NEAR date
+
+    page = admin_ui.render_kb(KEY, "baci")
+    ck("an approved claim card carries the edit form",
+       'action="/admin/claim_update"' in page and f'id="cl-{row.id}"' in page)
+    ck("and shows when it expires, with the resave rule stated",
+       "resave re-verifies" in page)
+
+    r1 = c.post("/admin/claim_update",
+                data={"claim_id": row.id, "tenant": "baci",
+                      "claim": "Editable fact, corrected wording.",
+                      "evidence": "ev-2", "entity_key": "",
+                      "tags": ["editcase"], "action": "save"},
+                follow_redirects=False)
+    ck("saving redirects back to the card with the outcome",
+       r1.status_code == 303 and f"#cl-{row.id}" in r1.headers["location"]
+       and "ok=" in r1.headers["location"])
+    fresh = [r for r in kb.claims("baci", limit=0) if r.id == row.id][0]
+    ck("the edit landed and the row is STILL approved and selectable",
+       fresh.claim == "Editable fact, corrected wording."
+       and fresh.evidence == "ev-2")
+    e = kb.claim_expiry(fresh)
+    soon = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=300)
+    ck("the resave RESET the expiry: explicit date cleared, due ~a year out",
+       e["state"] == "dated" and fresh.expires_at is None
+       and e.get("due") and _db.as_utc(e["due"]) > soon,
+       f"state={e['state']} due={e.get('due')}")
+
+    c.post("/admin/claim_update", data={"claim_id": row.id, "tenant": "baci",
+                                        "action": "never"},
+           follow_redirects=False)
+    fresh = [r for r in kb.claims("baci", limit=0) if r.id == row.id][0]
+    ck("'never' removes the expiry", kb.claim_expiry(fresh)["state"] == "timeless")
+    ck("…and the card says so", "never expires" in admin_ui.render_kb(KEY, "baci"))
+    c.post("/admin/claim_update",
+           data={"claim_id": row.id, "tenant": "baci",
+                 "claim": "Editable fact, third wording.", "evidence": "ev-3",
+                 "entity_key": "", "tags": ["editcase"], "action": "save"},
+           follow_redirects=False)
+    fresh = [r for r in kb.claims("baci", limit=0) if r.id == row.id][0]
+    ck("an edit does NOT silently undo a standing timeless decision",
+       kb.claim_expiry(fresh)["state"] == "timeless"
+       and fresh.claim == "Editable fact, third wording.")
+    c.post("/admin/claim_update", data={"claim_id": row.id, "tenant": "baci",
+                                        "action": "expire"},
+           follow_redirects=False)
+    fresh = [r for r in kb.claims("baci", limit=0) if r.id == row.id][0]
+    ck("'expires again' puts it back on the clock, dated from today",
+       kb.claim_expiry(fresh)["state"] == "dated")
+
+    kb.add_claim("baci", "It arrived beautifully wrapped, five stars.",
+                 "Review, June", ["editcase"], proof_type="testimonial",
+                 origin="human", status="active")
+    quote = [r for r in kb.claims("baci", limit=0)
+             if "beautifully wrapped" in (r.claim or "")][0]
+    r3 = c.post("/admin/claim_update",
+                data={"claim_id": quote.id, "tenant": "baci",
+                      "claim": "It arrived wrapped OK.", "evidence": "Review",
+                      "entity_key": "", "tags": ["editcase"],
+                      "action": "save"}, follow_redirects=False)
+    fresh_q = [r for r in kb.claims("baci", limit=0) if r.id == quote.id][0]
+    ck("a customer's own words still cannot be reworded from this door",
+       "err=" in r3.headers.get("location", "")
+       and fresh_q.claim == "It arrived beautifully wrapped, five stars.")
+
+    # The seeds carry no objections (DEFECTS §3: human-authored, 0 on all
+    # five accounts) — author one to edit. Return ASSERTED: §2.1 is the story
+    # of a write whose refusal nobody read — and the first draft of THIS
+    # check proved the rule again: it reused section 4's "dishwasher safe"
+    # wording, fingerprint-matched that section's deliberately-PROPOSED row,
+    # and the add silently became an update to an unapproved objection.
+    said = kb.add_objection("baci", "Does the glaze contain lead?",
+                            "No — independently tested, fully food-safe.",
+                            origin="human")
+    assert "Added" in said, f"add_objection refused: {said!r}"
+    obj = [o for o in kb.objections("baci", any_entity=True)
+           if "glaze" in (o.objection or "")][0]
+    c.post("/admin/objection_edit",
+           data={"row_id": obj.id, "tenant": "baci",
+                 "objection": obj.objection,
+                 "response": "A newly corrected approved answer.",
+                 "entity_key": obj.entity_key or ""},
+           follow_redirects=False)
+    fresh_o = [o for o in kb.objections("baci", any_entity=True)
+               if o.id == obj.id][0]
+    ck("an approved objection's answer is editable in place",
+       fresh_o.response == "A newly corrected approved answer.")
+    ck("…and the objections card carries the editor",
+       'name="response"' in admin_ui.render_kb(KEY, "baci"))
 
     print()
     if _fail:

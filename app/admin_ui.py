@@ -1761,7 +1761,7 @@ and hand-set fields survive future re-derives.</p>
 </div>""")
 
 
-def render_kb(key: str, tenant: str = "", err: str = "") -> str:
+def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
     # One resolver for the frame and the body, so the pill cannot name an
     # account the numbers below it are not about.
     tenant, t, rows = _account(tenant)
@@ -1809,14 +1809,72 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
     # --- claims, split by whether they can actually be used ------------------
     inv = kb.claim_inventory(tenant)
 
-    def _claim_msg(r, note: str = "", cls: str = "") -> str:
+    vocab = sorted(kb.situations(tenant))
+
+    def _expiry_line(r) -> str:
+        """When this claim stops standing — visible on EVERY card (owner,
+        2026-08-21). Three states, same vocabulary as `kb.claim_expiry`."""
+        e = kb.claim_expiry(r)
+        if e["state"] == "timeless":
+            return ('<span class="chip nb">never expires</span>')
+        if e["state"] == "undatable":
+            return ('<span class="chip off">undatable</span> '
+                    '<span class="mut">no verification date on file — '
+                    'saving it dates it from today</span>')
+        due = e.get("due")
+        return (f'<span class="mut">expires {_esc(_date(due)) if due else "?"}'
+                f' — a resave re-verifies and resets it to a year out</span>')
+
+    def _claim_editor(r) -> str:
+        """Edit-in-place for an approved claim, folded so the list stays
+        scannable. Same guards as review: a testimonial's wording is its
+        evidence (read-only), tags come only from the account's vocabulary."""
+        verbatim = (r.proof_type or "") in kb.VERBATIM_ONLY
+        tagbox = "".join(
+            f'<label class="tag"><input type="checkbox" name="tags" '
+            f'value="{_esc(tg)}"{" checked" if tg in (r.situations or []) else ""}> '
+            f'{_esc(tg)}</label>' for tg in vocab)
+        exp_btn = ('<button class="sec" name="action" value="expire" '
+                   'title="Put it back on the clock, dated from today">'
+                   'Expires again</button>'
+                   if (r.expiry_policy or "") == "never" else
+                   '<button class="sec" name="action" value="never" '
+                   'title="Brand origin, a material, a permanent placement — '
+                   'facts that do not go stale">Never expires</button>')
+        return f"""
+        <details><summary class="mut">Edit</summary>
+          <form class="f" method="post" action="/admin/claim_update">
+            <input type="hidden" name="claim_id" value="{_esc(r.id)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <label>{"Quoted — a customer's own words (cannot be reworded)"
+                    if verbatim else "Claim"}</label>
+            <textarea name="claim" rows="2"{" readonly" if verbatim else ""
+                      }>{_esc(r.claim)}</textarea>
+            <label>Evidence</label>
+            <input name="evidence" value="{_esc(r.evidence or '')}"
+                   placeholder="what makes this checkable">
+            <label>True of — blank means the whole brand</label>
+            <input name="entity_key" list="objents"
+                   value="{_esc(r.entity_key or '')}"
+                   placeholder="brand-level (used in any content)">
+            <label>Situations</label>
+            <div class="tags">{tagbox}</div>
+            <div class="row">
+              <button title="Saving re-attests it: verified today, any expiry
+date reset to a year from now (a timeless claim stays timeless)">Save</button>
+              {exp_btn}
+            </div>
+          </form>
+        </details>"""
+
+    def _claim_msg(r, note: str = "", cls: str = "", editable: bool = False) -> str:
         meta = " · ".join(x for x in [
             _esc(r.strength or ""), _esc(r.proof_type or ""),
             f"verified {_date(r.verified_at)}" if r.verified_at else "",
-            f"expires {_date(r.expires_at)}" if r.expires_at else "",
         ] if x)
         tags = " ".join(r.situations or []) or "untagged — can never be selected"
-        return (f'<div class="msg {cls}">'
+        return (f'<div class="anchor" id="cl-{_esc(r.id)}"></div>'
+                f'<div class="msg {cls}">'
                 f"<div>{_esc(r.claim)}</div>"
                 + (f'<div class="when"><strong>{_esc(r.evidence)}</strong></div>'
                    if r.evidence else
@@ -1824,24 +1882,28 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                 + f'<div class="when"><code>{_esc(tags)}</code></div>'
                 + f'<div class="when">{meta}{" · " if meta else ""}'
                 f'{_esc(r.source or "source not recorded")}</div>'
+                + f'<div class="when">{_expiry_line(r)}</div>'
                 + (f'<div class="when"><b>{_esc(kb.usage_rule(r.proof_type))}</b></div>'
                    if kb.usage_rule(r.proof_type or "") else "")
                 + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
+                + (_claim_editor(r) if editable else "")
                 + "</div>")
 
     def _claim_block(title: str, rows_, empty: str, note: str = "",
-                     cls: str = "", open_: bool = False) -> str:
+                     cls: str = "", open_: bool = False,
+                     editable: bool = False) -> str:
         if not rows_:
             return (f'<details class="sec"><summary>{_esc(title)} (0)</summary>'
                     f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
-        body = "".join(_claim_msg(r, note, cls) for r in rows_)
+        body = "".join(_claim_msg(r, note, cls, editable=editable) for r in rows_)
         return (f'<details class="sec"{" open" if open_ else ""}>'
                 f'<summary>{_esc(title)} ({len(rows_)})</summary>'
                 f'<div class="thread">{body}</div></details>')
 
     claims_html = (
         _claim_block("Claims — selectable", inv["selectable"],
-                     "No usable proof. Any draft that needs a number is blocked.")
+                     "No usable proof. Any draft that needs a number is blocked.",
+                     editable=True)
         + _claim_block("Claims — awaiting review", inv["pending"],
                        "Nothing submitted for review.",
                        "not selectable until approved", "gone")
@@ -1924,6 +1986,7 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                     if kb.scope_unconfirmed(r) or (r.origin or "") == "crawl"
                     else "")
         return (
+            f'<div class="anchor" id="o-{_esc(r.id)}"></div>'
             f'<div><strong>{_esc(r.objection)}</strong>'
             + (' <span class="chip off">escalate</span>'
                if (r.escalate or "").lower() == "yes" else "")
@@ -1937,15 +2000,21 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
                if r.claim_id else "")
             + "</div>" + flag
             + f"""
+            <details><summary class="mut">Edit</summary>
             <form class="f" method="post" action="/admin/objection_edit">
               <input type="hidden" name="row_id" value="{_esc(r.id)}">
               <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <label>Objection — the hesitation in the buyer's words</label>
+              <textarea name="objection" rows="2">{_esc(r.objection or '')}</textarea>
+              <label>The approved answer</label>
+              <textarea name="response" rows="3">{_esc(r.response or '')}</textarea>
               <label>True of &mdash; blank claims it of everything they sell</label>
               <input name="entity_key" list="objents"
                      value="{_esc(r.entity_key or '')}"
                      placeholder="leave blank only if it really is brand-wide">
-              <div class="row"><button class="sec">Save scope</button></div>
-            </form>""")
+              <div class="row"><button class="sec">Save</button></div>
+            </form>
+            </details>""")
 
     # Objections stand alone — they used to share a block with the situation-
     # merge warnings, which is how "claims vs objections" stopped reading as
@@ -2082,8 +2151,10 @@ def render_kb(key: str, tenant: str = "", err: str = "") -> str:
         + _kb_add_form(key, tenant, "tone", "Set voice",
                        "three or four words, comma separated", 1))
 
-    warn = (f'<div class="flash"><div class="note">{_esc(err)}</div></div>'
-            if err else "")
+    warn = ((f'<div class="note">{_esc(err)}</div>' if err else "")
+            + (f'<div class="ok">{_esc(msg)}</div>' if msg else ""))
+    if warn:
+        warn = f'<div class="flash">{warn}</div>'
     # A pointer, not a section: the email LOOK lives on its own Brand tab now
     # (owner, 2026-08-21 — a one-line link was not a place). This line stays so
     # somebody reading "what may be said" is told where "how it looks" went.
