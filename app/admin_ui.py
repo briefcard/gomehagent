@@ -332,6 +332,8 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
    scrolled its own confirmation out of view. */
 .flash{position:sticky;top:0;z-index:60}
 .pager{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:.85rem}
+.navbadge{margin-left:auto;background:var(--gap);color:#fff;border-radius:9px;
+font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 """
 
 #: (key, label, icon). Ordered the way a day runs rather than the way the code
@@ -430,6 +432,32 @@ def _hues(rows: list) -> dict[str, str]:
     return {k: str(round((i * 360 / n + 25) % 360)) for i, k in enumerate(keys)}
 
 
+def _review_waiting(tenant: str) -> int:
+    """This account's review-queue depth — every KB table's proposed rows.
+
+    Rides the Review item in the sidebar on every page, because "is there
+    work" must not cost a click per tab to find out (owner, 2026-08-21: the
+    fewer clicks and the less thinking, the better the app is planned). The
+    sibling number — pending APPROVALS — already has its own pill below the
+    switcher linking /admin/pending; this one is the proposals half and links
+    where proposals are decided. Scalar COUNTs only, and any failure counts as
+    zero: a sidebar must never be the thing that breaks a page.
+    """
+    if not tenant or tenant == ALL:
+        return 0
+    from . import provenance as prov
+    try:
+        with db.SessionLocal() as s:
+            return sum(
+                s.query(model)
+                .filter(model.tenant == tenant,
+                        model.review == prov.PROPOSED).count()
+                for model in (db.KbClaim, db.KbAudience, db.KbObjection,
+                              db.KbEntity, db.KbSituation, db.KbAsset))
+    except Exception:                                            # noqa: BLE001
+        return 0
+
+
 def _every_note(every: bool, what: str) -> str:
     """Say, on the page itself, that this one is about every account.
 
@@ -473,7 +501,11 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
         f'href="/admin/ui?key={_esc(key)}&amp;tab={t}&amp;tenant={_esc(tenant)}'
-        f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}</a>'
+        f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}'
+        + (f'<span class="navbadge" title="proposals waiting for review">'
+           f'{_rw}</span>'
+           if t == "content" and (_rw := _review_waiting(tenant)) else "")
+        + '</a>'
         for t, label, i in _TABS)
 
     # How many decisions are waiting, FOR THIS ACCOUNT, on every page.
@@ -3287,8 +3319,19 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
     rep = assurance.report("" if every else tenant, days)
     who = f" · {_esc(_account_name(tenant, here))}"
 
+    # The window is a CONTROL, not a caption (owner, 2026-08-21) — and it
+    # renders on the empty state too, because "nothing in the last day" with
+    # no way to widen the window from the page is a dead end.
+    windows = ('<div class="filters">' + "".join(
+        f'<a class="{"on" if days == d else ""}" '
+        f'href="/admin/ui?key={_esc(key)}&amp;tab=assurance&amp;'
+        f'tenant={_esc(tenant)}&amp;days={d}">{lbl}</a>'
+        for d, lbl in ((1, "24h"), (7, "7d"), (30, "30d"), (90, "90d")))
+        + "</div>")
+
     if not rep["events"]:
         body = (_every_note(every, "Checks recorded across every account.")
+                + windows
                 + f'<div class="note"><strong>Nothing has been checked for '
                 f'{_esc(_account_name(tenant, here))} in the last {days} '
                 f'days.</strong><br>That is not the same as '
@@ -3325,6 +3368,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
     {_every_note(every, "Checks recorded across every account, pooled. "
                  "Pick a client to see only theirs.")}
     <h2>Assurance{who}</h2>
+    {windows}
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
 
     <details class="conns" open><summary>What was caught</summary>
@@ -3593,14 +3637,25 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
     refresh = (f'<meta http-equiv="refresh" content="{live}">' if live else "")
 
     lay = rep["layers"]
+    # The controls lead the page (owner, 2026-08-21: a window nobody can
+    # change from the page is a URL-editing exercise). The whole report is
+    # computed from `days`, so the bar governs everything below it, not just
+    # the log it used to sit on.
     body = f"""
 {_every_note(every, "Every account's runs, calls and checks in one timeline. "
              "Each row names the client it belongs to.")}
-<p class="mut">Where a system is breaking, and at which layer.
-<b>functionality</b> is the call not coming back, <b>logic</b> is it working
-and refusing or being caught, <b>performance</b> is it working and being slow.
-They need different fixes and are constantly mistaken for each other — a
-blocked run is the system doing its job.</p>
+<div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
+  <span class="sep"></span>{livebar}</div>
+<details class="sec">
+  <summary>How to read this page</summary>
+  <p class="mut">Where a system is breaking, and at which layer.
+  <b>functionality</b> is the call not coming back, <b>logic</b> is it working
+  and refusing or being caught, <b>performance</b> is it working and being slow.
+  They need different fixes and are constantly mistaken for each other — a
+  blocked run is the system doing its job. Everything here is computed from
+  rows other layers already wrote — this page calls nothing, so opening it
+  cannot be the moment a dead token is discovered.</p>
+</details>
 
 <div class="card">
   <div class="head"><h2>Systems</h2>
@@ -3619,16 +3674,10 @@ blocked run is the system doing its job.</p>
 <div class="card">
   <div class="head"><h2>Log</h2>
     <span class="mut">{lay["functionality"]} functionality ·
-      {lay["logic"]} logic · {lay["performance"]} performance</span></div>
-  <div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
-    <span class="sep"></span>{livebar}</div>
+      {lay["logic"]} logic · {lay["performance"]} performance ·
+      last {days} days</span></div>
   {log}
 </div>
-
-<p class="mut">Everything here is computed from rows other layers already
-wrote — this page calls nothing. Opening it must not be the moment a dead token
-is discovered, and a diagnostics screen that half-fails while reporting on
-failures is worse than one built from the record.</p>
 """
     return _shell(key, "diagnostics", "Diagnostics", body=body, tenant=tenant,
                   head=refresh, suffix=f"&amp;days={days}")

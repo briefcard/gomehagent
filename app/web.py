@@ -1164,9 +1164,11 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
 
 @app.get("/admin/ui", response_class=HTMLResponse)
 def admin_ui(request: Request, key: str = Depends(admin_key),
-             tab: str = "accounts", tenant: str = "",
+             tab: str = "content", tenant: str = "",
              started: str = "") -> str:
-    """The console. Accounts wires connections; Systems runs the pipelines."""
+    """The console. Opens on Review — the tab the day starts on (owner,
+    2026-08-21: the fastest path to the actual work). It landed on
+    Connections for historical reasons: that tab existed first."""
     if key != config.APPROVAL_SECRET:
         return "<h3>bad key</h3>"
     from . import admin_ui as ui

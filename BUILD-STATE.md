@@ -1014,6 +1014,12 @@ card, plainly named (Claims and Objections are separate cards now, and the
 Review tab's h1 finally matches its nav label). Three suites pinned literal
 headings as render-proof and were repointed at body-specific markers,
 deliberately, comments say why (test_console_auth, test_kb, test_kb_ui).
+Fourth pass, same day: every view-changing query param gets an ON-PAGE
+control (assurance `days` had none; diagnostics' bar was buried on the log
+card — both now lead their page, and render on empty states so a narrow
+window is not a dead end); the console LANDS on Review, not Connections; the
+sidebar Review item carries a per-account proposals-waiting badge
+(`_review_waiting`, scalar COUNTs, fails to zero) beside the approvals pill.
 
 Same visual language as the portal, deliberately: switching between them should
 not mean learning a second layout.
