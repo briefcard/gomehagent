@@ -95,6 +95,30 @@ def main() -> int:
         ck("and access is refused again",
            c.get("/admin/tenants").json().get("error") == "unauthorized")
 
+    # --- the front door: public landing, POST sign-in, no dead ends -------
+    print("\n— the front door —")
+    with TestClient(web.app) as c:
+        r = c.get("/")
+        ck("the root is a branded page, not a 404 JSON",
+           r.status_code == 200 and "MarketingThatWorks" in r.text)
+        leaks = [x for x in ("Baci", "baci", "Eien", "eien", SECRET,
+                             "/admin/ui") if x in r.text]
+        ck("and it is public-safe — no client, no secret, no console route",
+           not leaks, ", ".join(leaks))
+        r = c.get("/admin/ui", follow_redirects=False)
+        ck("an unauthenticated console visit lands on sign-in, not 'bad key'",
+           r.status_code == 303 and r.headers["location"] == "/admin/signin")
+        r = c.post("/admin/signin", data={"key": "wrong"},
+                   follow_redirects=False)
+        ck("a wrong key is one 401 shape with no cookie",
+           r.status_code == 401 and "console" not in r.cookies)
+        r = c.post("/admin/signin", data={"key": SECRET},
+                   follow_redirects=False)
+        ck("the right key becomes the session via POST body — never a URL",
+           r.status_code == 303 and bool(r.cookies.get("console")))
+        ck("and the console renders on that session",
+           'class="side"' in c.get("/admin/ui").text)
+
     # --- the console stops threading the key through links ---------------
     print("\n— the console's own links —")
     with TestClient(web.app) as c:

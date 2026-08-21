@@ -196,6 +196,62 @@ def admin_logout() -> dict:
     return r
 
 
+# ---------------------------------------------------------------------------
+# The front door. The root URL served FastAPI's bare 404 JSON, and the only
+# way into the console was knowing to type /admin/ui?key=… — which is not a
+# product, it is a debugging habit (owner, 2026-08-21: "our routes make no
+# sense"). Now: `/` is a public-safe landing page for MarketingThatWorks —
+# AI Governance & Agent Management (no client names, no counts, no secrets);
+# the console has a real sign-in whose key travels in a POST body rather than
+# a URL; and an unauthenticated /admin/ui lands on that sign-in instead of a
+# bare "<h3>bad key</h3>". Every existing route is untouched.
+# ---------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    from . import landing
+    return landing.render()
+
+
+@app.get("/console")
+def console_alias():
+    """A memorable alias for the console — redirects, never renders."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/admin/ui", 303)
+
+
+@app.get("/admin/signin", response_class=HTMLResponse)
+def admin_signin_page(request: Request) -> str:
+    from . import landing
+    # Already signed in? Straight to the console rather than asking again.
+    if admin_key(request):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/ui", 303)
+    return landing.signin()
+
+
+@app.post("/admin/signin", response_class=HTMLResponse)
+async def admin_signin(request: Request):
+    """Exchange the console key for the session cookie — via POST body, so
+    the secret never lands in the address bar, browser history or a Referer
+    header, which is exactly what the cookie system was built to stop."""
+    from fastapi.responses import RedirectResponse
+
+    from . import landing
+    form = await request.form()
+    supplied = str(form.get("key", ""))
+    if not _matches(supplied, config.APPROVAL_SECRET or ""):
+        # One shape for every failure — a sign-in page must not say which
+        # part was wrong, and an unset secret fails closed via _matches.
+        return HTMLResponse(landing.signin("That key was not recognised."),
+                            status_code=401)
+    r = RedirectResponse("/admin/ui", 303)
+    r.set_cookie(ADMIN_COOKIE, _console_token(), max_age=_COOKIE_MAX_AGE,
+                 httponly=True, samesite="lax",
+                 secure=request.url.scheme == "https")
+    return r
+
+
 def _active_tenant(chat_id: str) -> str:
     """Which account this sender is working on, for the agent's context.
 
@@ -1233,7 +1289,10 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     2026-08-21: the fastest path to the actual work). It landed on
     Connections for historical reasons: that tab existed first."""
     if key != config.APPROVAL_SECRET:
-        return "<h3>bad key</h3>"
+        # A person, not an API, hits this without a session — hand them the
+        # sign-in door instead of a bare "<h3>bad key</h3>" dead end.
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/signin", 303)
     from . import admin_ui as ui
     # Once the session cookie carries the credential, stop threading it through
     # every link and hidden field — that propagation is what put it in browser

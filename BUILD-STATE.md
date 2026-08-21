@@ -267,6 +267,23 @@ client would use instead of handing Gomeh credentials; it stays single-app
 until a client actually wants it, and the token-paste /connect route covers
 self-serve today.
 
+## The front door (2026-08-21)
+
+The product has a name and a face now: **MarketingThatWorks — AI Governance &
+Agent Management** (`app/landing.py`). `/` was FastAPI's bare 404 JSON; it is
+a public-safe landing page — no client names, counts, secrets or console
+routes on it, and the auth suite pins that. `/admin/signin` is a real door:
+the key travels in a POST body (never a URL, history or Referer — the leak
+the cookie system exists to stop), wrong keys get one 401 shape, and an
+unauthenticated `/admin/ui` redirects there instead of dead-ending on
+"<h3>bad key</h3>". `/console` is a memorable alias. NO registered
+integration path changed — this host is the App URL in every provider
+registration (Shopify, Canva, OAuth callbacks, webhooks), so the landing
+actually improves what those registrations resolve to; when the owner moves
+to a subdomain, every byte-exact redirect URI must be re-registered
+per provider — it is not a DNS flip, and the Render URL stays valid until
+each one has moved.
+
 ## Start here if you are new to this thread
 
 Read this file, then `DEFECTS.md` §1 (the recurring patterns) and §3 (what is
