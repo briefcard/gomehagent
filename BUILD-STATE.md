@@ -16,7 +16,7 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `70de037` (130 routes).
+**Live:** everything below is pushed and deployed at `898ff1e` (130 routes).
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
@@ -1886,7 +1886,7 @@ name; putting the old `systems.all_systems()` call back fails
 `test_console_frame` with `systems body is single-account — Baci Milano USA,
 BACIMARK`. Both were restored immediately.
 
-**All of it is deployed.** `/health` reports `70de037` and 130 routes, and
+**All of it is deployed.** `/health` reports `898ff1e` and 130 routes, and
 `/health/connections` still resolves both Shopify stores and three Google
 accounts. Eleven commits went out across 2026-08-19/20: console scoping and
 Diagnostics, mail grounding and both guards, the Shopify connect fixes, Shopify

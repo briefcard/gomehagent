@@ -134,6 +134,18 @@ def main() -> int:
     ck("and pointing at the connect page, not only at Render",
        "connect" in refusal.lower(), refusal)
 
+    # A client with a WordPress install for a DIFFERENT property. Refusing is
+    # right — publishing one site's content to another because it was the only
+    # credential available is the kind of thing a client finds out by reading
+    # their own website — but "has no wordpress connection" would be false.
+    other = {"key": "mtw2", "domain": "blog.marketingthatworks.co",
+             "platform": "wordpress", "creds_key": "agencywp"}
+    cfg, refusal = connections.platform_config(other)
+    if connections.tenant_for_site("mtw2"):
+        ck("a connection for another property still refuses", not cfg, str(cfg))
+        ck("but says WHICH properties are connected, not that none are",
+           "no wordpress connection" not in refusal, refusal)
+
     cfg, refusal = connections.platform_config(prof["ironside"])
     ck("a platform with no backend refuses by naming the platform",
        not cfg and "squarespace" in refusal.lower(), refusal)

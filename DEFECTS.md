@@ -1805,7 +1805,7 @@ never find it, however many fallbacks are stacked behind it. Client connection
 first, env group second, refusal by name — naming the account and the connect
 page — when neither exists.
 
-`scripts/test_connections.py`, 30 checks, verified to fail without the fix with
+`scripts/test_connections.py`, 32 checks, verified to fail without the fix with
 the exact message above. `sabotage.py` entry `client_credential_reaches_publish`.
 
 Two more found in the same seam:
@@ -1877,5 +1877,5 @@ That is the §2.15 lesson again: a test that cannot fail for its stated reason
 is worse than no test. The difference this time is that `sabotage.py` said so
 on the day rather than an unrelated change admitting it months later.
 
-`scripts/test_llm.py`, 25 checks. Two sabotage entries. The structural one
+`scripts/test_llm.py`, 24 checks. Two sabotage entries. The structural one
 counts call sites per file, so a new unattributed call fails the suite.

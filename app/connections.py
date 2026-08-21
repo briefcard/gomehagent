@@ -150,6 +150,25 @@ def platform_config(profile: dict) -> tuple[dict, str]:
         return env, ""
 
     who = tenant or f"site '{site_key}'"
+
+    # "has no wordpress connection" is FALSE and misleading when the client has
+    # one for a different property — which is the normal case for a site-scoped
+    # provider, since `SITE_SCOPED` exists precisely because one client may run
+    # several installs. Refusing is still right: publishing acme.com's content
+    # to blog.acme.com because it was the only credential lying around is the
+    # kind of thing a client discovers by reading their own website. But the
+    # refusal has to say which property is missing rather than implying they
+    # never connected anything.
+    if tenant and provider in credentials.SITE_SCOPED:
+        connected = [c for c in credentials.sites(tenant, provider) if c]
+        if connected:
+            return {}, (
+                f"{who} has {len(connected)} {provider} connection(s) — "
+                + ", ".join(connected)
+                + f" — but none for {profile.get('domain') or site_key}. "
+                f"Connect that property, or correct the domain on the site "
+                f"profile if it is one of these.")
+
     return {}, (f"{who} has no {provider} connection — connect it on the "
                 f"account's connect page, or add '{creds_key}' to "
                 f"{ENV_GROUP.get(platform, 'the env group')}.")
