@@ -20,6 +20,56 @@ never for state.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
+## Architectural remediation — in progress, NOT yet deployed (2026-08-21)
+
+A full top-down audit was run against `39659a4`: the data layer is sound, the
+debt is concentrated in the runtime perimeter that was built around it before
+tenancy existed (the mail worker, the three tool packs, `web.py`, `ops_jobs`)
+and in the scale mechanics. The through-line: the CORE is safe by *structure*
+(`Context.emit` is the only exit); the PERIMETER is safe by *memory* (someone
+must remember to call the guard), and the holes are all the places somebody
+forgot. The remediation makes the edge structural the way the core is.
+
+**Owner's rule (2026-08-21): switch accounts explicitly, so there is never a
+misunderstanding or a breach.** No ambient cross-account agent mode. An agent
+turn is always ONE account — the one `/use`'d, named in its ACTIVE ACCOUNT
+banner. `"*"` is reserved for a deliberately all-accounts console/report view
+and is reached by no agent path.
+
+**The tenant-boundary seam, built bottom-up. Each step verified before the next.**
+
+1. **Scope the prompt builders — DONE (uncommitted).** `memory.shipments_block`
+   and `sender_history` took no tenant and injected every client's data into
+   every client's drafting prompt (§2.61). Now a required scope: a concrete key
+   is one client, `""` fails toward less exposure, `"*"` is the explicit
+   all-accounts console view. `Role.extra_context` now receives the active
+   account, so the admin agent's own context scopes to it (§2.63) rather than
+   the `"*"` it briefly used. `test_tenant_isolation` §7 + `sabotage.shipments_scope`.
+2. **Resolve a real scope at `/admin/ask`** — NEXT, and smaller now: the WhatsApp
+   file/voice lanes are moot (channel dropped), the Telegram lanes already
+   resolve via `_active_tenant`, so only `/admin/ask` (`web.py:525`) still passes
+   no tenant.
+3. **Make `tool_scope` fail CLOSED** (the keystone) — `""` and `"*"` → offer no
+   tools (an agent turn is one concrete account); concrete → scoped; delete the
+   `"baci"` handler defaults in `command_agent`. Coupled to the 34 unscoped
+   tools (ISO-5): removing a default is only safe once the tool either injects
+   its account via `SCOPED` or handles absence. Highest-leverage change; do it
+   as its own carefully-verified unit.
+4. **De-fork the triage identity/signature** into per-tenant KB data — the
+   system prompt names three companies and signs every unknown inbox "Gomeh".
+5. Route intake brand-writes through review; then backfill unattributed rows so
+   the `include_unassigned` reads from step 1 can tighten to strict — the owner's
+   "never a breach" stance raises this priority for the future client case.
+
+**Security holes patched alongside (uncommitted).** WhatsApp webhook now verifies
+Meta's signature and fails closed — inert without `META_APP_SECRET`, which suits
+the channel being dropped (§2.62). The Telegram webhook — now the live channel —
+was hardened to fail closed the same way (§2.63). Email-derived text in
+`/admin/pending` and `/decide` is escaped (§2.62). Still open on that surface:
+no CSRF, no route-inventory auth test, the ~37 mutating GETs untouched.
+
+**Sabotage is now 22 guards** (added `shipments_scope`, `whatsapp_webhook_sig`, `telegram_webhook_sig`), all caught.
+
 ## Start here if you are new to this thread
 
 Read this file, then `DEFECTS.md` §1 (the recurring patterns) and §3 (what is
@@ -2204,7 +2254,7 @@ unguarded write paths above are where the actual risk is.
 
     python3 scripts/sabotage.py
 
-Nineteen guards, each disabled in turn against the suites that claim to cover it.
+Twenty-two guards, each disabled in turn against the suites that claim to cover it.
 Six tests in `DEFECTS` passed for the wrong reason and every one was found by
 accident — three of them in a single day. This does it on purpose. Read a
 `STALE` line as loudly as a `MISSED` one: it means the code moved and that

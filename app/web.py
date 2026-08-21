@@ -301,7 +301,11 @@ def health_seo(key: str = Depends(admin_key)) -> dict:
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
     outcome = approvals.decide(token)
-    return f"<html><body style='font-family:sans-serif;padding:3em'><h2>{outcome}</h2></body></html>"
+    # `outcome` carries the approval summary, which is built from an email's
+    # sender and subject (worker.py) — attacker-controlled text on an
+    # unauthenticated page. Escape it, or a crafted subject line is stored XSS.
+    return ("<html><body style='font-family:sans-serif;padding:3em'>"
+            f"<h2>{html.escape(outcome)}</h2></body></html>")
 
 
 # ---- On-demand jobs ----
@@ -453,16 +457,22 @@ def pending_page(key: str = Depends(admin_key), tenant: str = "") -> str:
             # one's -- an unattributed row folded into whoever is looking is
             # exactly the leak this page is being scoped to close.
             owner = (ap.tenant or "").strip() or "unattributed"
+            # Everything from the approval — summary (email sender + subject),
+            # body (model/email content), owner key — is escaped before it
+            # reaches the console DOM. Unescaped, one crafted subject line runs
+            # JS against the httpOnly session, and dozens of /admin GETs mutate.
             rows.append(
                 f"<li style='margin:0 0 14px'><b>{ap.created_at:%b %d}</b> "
                 f"<span style='font-size:.8em;background:#eef0f4;padding:1px 7px;"
-                f"border-radius:99px'>{owner}</span> — {ap.summary}"
+                f"border-radius:99px'>{html.escape(owner)}</span> — "
+                f"{html.escape(ap.summary or '')}"
                 + (f"<details><summary>details</summary><pre style='white-space:"
-                   f"pre-wrap;background:#f6f6f6;padding:8px'>{body[:1500]}</pre>"
+                   f"pre-wrap;background:#f6f6f6;padding:8px'>"
+                   f"{html.escape(body[:1500])}</pre>"
                    f"</details>" if body else "")
                 + f" &nbsp;<a href='{approve}'>✅ Approve</a> · "
                   f"<a href='{deny}'>❌ Deny</a></li>")
-    head = (f"Pending approvals — {who} ({len(rows)})" if scoped
+    head = (f"Pending approvals — {html.escape(who)} ({len(rows)})" if scoped
             else f"Pending approvals — all accounts ({len(rows)})")
     other = ("" if scoped else
              "<p style='font-size:.85em;color:#6e7686'>Every account. "
@@ -723,10 +733,41 @@ def whatsapp_verify(request: Request):
     return PlainTextResponse("forbidden", status_code=403)
 
 
+def _verify_meta_sig(raw: bytes, header: str) -> bool:
+    """Is this really Meta's delivery? HMAC-SHA256 of the RAW body under the app
+    secret — the signature Meta sends in X-Hub-Signature-256 as 'sha256=...'.
+
+    Fails CLOSED: with no META_APP_SECRET set we cannot verify, and this
+    endpoint approves, executes and commands the agent, so an unverifiable
+    delivery is refused rather than trusted. `compare_digest`, never `==`, on a
+    value reachable from the open internet. Same shape as the Shopify webhook.
+    """
+    secret = (config.META_APP_SECRET or "").encode()
+    if not secret or not header:
+        return False
+    want = "sha256=" + hmac.new(secret, raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, header)
+
+
 @app.post("/webhooks/whatsapp")
-async def whatsapp_incoming(request: Request) -> dict:
-    """Handle button replies (approve:<id> / deny:<id>) and free-text messages."""
-    body = await request.json()
+async def whatsapp_incoming(request: Request) -> Response:
+    """Handle button replies (approve:<id> / deny:<id>) and free-text messages.
+
+    Verified on the RAW body before anything is parsed. The only gate used to be
+    `msg["from"] == approver` — a field of the caller's own JSON — so a forged
+    POST reached approve/execute and the command agent with no cryptographic
+    check at all. An unsigned or wrongly-signed delivery is now refused 401.
+    """
+    raw = await request.body()
+    if not _verify_meta_sig(raw, request.headers.get("x-hub-signature-256", "")):
+        log.warning("whatsapp webhook: signature check failed — refused. "
+                    "Set META_APP_SECRET to enable inbound WhatsApp.")
+        return Response('{"status":"unverified"}', status_code=401,
+                        media_type="application/json")
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return Response('{"status":"received"}', media_type="application/json")
     try:
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
@@ -769,7 +810,7 @@ async def whatsapp_incoming(request: Request) -> dict:
                         }))
     except Exception:  # noqa: BLE001 — always 200 so Meta doesn't retry-storm
         pass
-    return {"status": "received"}
+    return Response('{"status":"received"}', media_type="application/json")
 
 
 # ---------------------------------------------------------------------------
@@ -785,13 +826,19 @@ async def telegram_webhook(request: Request) -> dict:
     from . import telegram
 
     # 1) Authenticate the CALLER. Telegram echoes the secret we set via
-    #    setWebhook; anything without it is not Telegram and is dropped.
+    #    setWebhook. Fails CLOSED: with no secret set we cannot prove a delivery
+    #    is Telegram's, and this endpoint approves, executes and commands the
+    #    agent, so an unverifiable call is refused rather than trusted. Telegram
+    #    is the live ops channel and `render.yaml` generates the secret, so this
+    #    only bites a deploy that forgot it. The sender allowlist below is a
+    #    second gate — but on a chat id in the caller's OWN body; the secret is
+    #    the one it cannot forge.
     expected = telegram.wire_secret()
-    if expected:
-        sent = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if not hmac.compare_digest(sent, expected):
-            log.warning("telegram webhook: bad or missing secret token")
-            return {"status": "forbidden"}
+    sent = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not (expected and hmac.compare_digest(sent, expected)):
+        log.warning("telegram webhook: secret check failed — refused. "
+                    "Set TELEGRAM_WEBHOOK_SECRET to enable the ops channel.")
+        return {"status": "forbidden"}
     try:
         update = await request.json()
     except Exception:  # noqa: BLE001

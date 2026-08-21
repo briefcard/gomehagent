@@ -105,5 +105,9 @@ ROLE = Role(
     model=config.CLAUDE_MODEL,
     usage_purpose="command",
     use_data_tools=True,
-    extra_context=memory.shipments_block,
+    # Scoped to the ACTIVE ACCOUNT, never all of them. The owner switches
+    # accounts explicitly (`/use baci`), so the admin agent sees one business's
+    # open shipments at a time — the account named in its own ACTIVE ACCOUNT
+    # banner — and never another's. Switch to see another's; nothing is mixed.
+    extra_context=lambda tenant: memory.shipments_block(tenant),
 )

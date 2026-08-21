@@ -158,6 +158,52 @@ def main() -> int:
         ck(f"{package} is declared — {why} need it at runtime", ok,
            "" if ok else "app/ uses it; requirements.txt does not list it")
 
+    # ---- the WhatsApp webhook verifies Meta's signature ------------------
+    # It approves, executes, and commands the agent, and its only gate used to
+    # be `msg["from"]` — a field of the caller's own JSON. A forged POST reached
+    # approve/execute with no cryptographic check. It now verifies HMAC over the
+    # raw body and fails CLOSED when no app secret is set.
+    print("\n— whatsapp webhook signature —")
+    import hashlib as _hl
+    import hmac as _hmac
+
+    c = TestClient(web.app)
+    raw = b'{"entry":[]}'
+    config.META_APP_SECRET = ""
+    r = c.post("/webhooks/whatsapp", content=raw)
+    ck("unsigned delivery refused when no app secret is set (fail closed)",
+       r.status_code == 401, f"got {r.status_code}")
+
+    config.META_APP_SECRET = "app-secret-xyz"
+    r = c.post("/webhooks/whatsapp", content=raw,
+               headers={"x-hub-signature-256": "sha256=deadbeef"})
+    ck("a forged signature is refused", r.status_code == 401, f"got {r.status_code}")
+    good = "sha256=" + _hmac.new(b"app-secret-xyz", raw, _hl.sha256).hexdigest()
+    r = c.post("/webhooks/whatsapp", content=raw,
+               headers={"x-hub-signature-256": good})
+    ck("a validly-signed delivery is accepted", r.status_code == 200,
+       f"got {r.status_code}")
+    config.META_APP_SECRET = ""
+
+    # ---- the Telegram webhook (the live ops channel) fails closed --------
+    from app import telegram as _tg
+    config.TELEGRAM_WEBHOOK_SECRET = ""
+    r = c.post("/telegram/webhook", json={"update_id": 1, "message": {}})
+    ck("telegram delivery refused when no secret is set (fail closed)",
+       r.json().get("status") == "forbidden", str(r.json()))
+    config.TELEGRAM_WEBHOOK_SECRET = "tg-secret-abc"
+    wire = _tg.wire_secret()
+    r = c.post("/telegram/webhook", json={"update_id": 2, "message": {}},
+               headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})
+    ck("a wrong telegram secret is refused",
+       r.json().get("status") == "forbidden", str(r.json()))
+    r = c.post("/telegram/webhook",
+               json={"update_id": 3, "message": {"chat": {"id": 999999}}},
+               headers={"X-Telegram-Bot-Api-Secret-Token": wire})
+    ck("a valid telegram secret passes gate 1 (allowlist still applies after)",
+       r.json().get("status") != "forbidden", str(r.json()))
+    config.TELEGRAM_WEBHOOK_SECRET = ""
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

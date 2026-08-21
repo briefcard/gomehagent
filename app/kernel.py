@@ -125,8 +125,11 @@ class Role:
     max_tokens: int = 2000
     max_steps: int = 10
     # Optional callable returning extra dynamic context (e.g. open shipments for
-    # admin). Kept OUT of the cached prefix so the static block caches cleanly.
-    extra_context: Callable[[], str] | None = None
+    # admin). Receives the ACTIVE ACCOUNT so the context is scoped to it — the
+    # owner switches accounts explicitly, and an agent turn is always about one
+    # account, never all of them. Kept OUT of the cached prefix so the static
+    # block caches cleanly.
+    extra_context: Callable[[str], str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +188,7 @@ def run(role: Role, text: str, attachments: list[dict] | None = None,
     if tenant:
         dynamic += tenants.agent_block(tenant)
     if role.extra_context:
-        dynamic += role.extra_context()
+        dynamic += role.extra_context(tenant)
     if history:
         recent = history[-4:]
         recap = "\n".join(f"  {m['role']}: "

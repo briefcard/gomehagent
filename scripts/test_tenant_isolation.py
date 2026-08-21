@@ -376,6 +376,41 @@ def main() -> int:
     ck("each account has its own conversation",
        "aqua" in b and "omega" not in b)
 
+    # ---- 7. the prompt builders scope, so no client seeds another's draft --
+    # `shipments_block` and `sender_history` inject straight into the drafting
+    # prompt and took NO tenant at all, so every triage saw every tenant's
+    # shipments and every tenant's prior handling of a shared sender. This is
+    # the schema test's twin: the block for one account must not CONTAIN
+    # another account's data, which the schema check cannot see.
+    print("\n— prompt scoping —")
+    with db.SessionLocal() as s:
+        s.add(db.Shipment(tenant="baci", name="BACI-SHIP-Z1",
+                          status="in_transit", counterparty="baci-fwd"))
+        s.add(db.Shipment(tenant="eien", name="EIEN-SHIP-Z2",
+                          status="in_transit", counterparty="eien-fwd"))
+        s.add(db.EmailLog(tenant="baci", account="baci",
+                          gmail_message_id="ti-b1",
+                          sender="shared@forwarder.com", subject="baci booking",
+                          action="drafted", detail="baci"))
+        s.add(db.EmailLog(tenant="eien", account="eien",
+                          gmail_message_id="ti-e1",
+                          sender="shared@forwarder.com", subject="eien booking",
+                          action="drafted", detail="eien"))
+        s.commit()
+
+    sb = memory.shipments_block("baci")
+    ck("a client's shipment block holds its own and not another's",
+       "BACI-SHIP-Z1" in sb and "EIEN-SHIP-Z2" not in sb, sb[:60])
+    sh = memory.sender_history("shared@forwarder.com", "baci")
+    ck("a shared sender's history is scoped to the asking client",
+       "baci booking" in sh and "eien booking" not in sh, sh[:60])
+    owner = memory.shipments_block("*")
+    ck("the owner's cross-account view (*) still sees every business",
+       "BACI-SHIP-Z1" in owner and "EIEN-SHIP-Z2" in owner)
+    unresolved = memory.shipments_block("")
+    ck("an unresolved scope leaks no client's attributed rows",
+       "BACI-SHIP-Z1" not in unresolved and "EIEN-SHIP-Z2" not in unresolved)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

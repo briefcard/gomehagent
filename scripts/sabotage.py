@@ -47,6 +47,35 @@ SABOTAGES = [
                "client's Diagnostics page",
     },
     {
+        "name": "shipments_scope",
+        "file": "app/memory.py",
+        "find": ('        if tenant != "*":\n'
+                 '            q = q.filter(db.tenant_filter(db.Shipment, tenant,\n'
+                 '                                          include_unassigned=True))'),
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_tenant_isolation.py"],
+        "why": "one client's open shipments are injected into another client's "
+               "drafting prompt on the live mail path",
+    },
+    {
+        "name": "whatsapp_webhook_sig",
+        "file": "app/web.py",
+        "find": '    if not _verify_meta_sig(raw, request.headers.get("x-hub-signature-256", "")):',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_console_auth.py"],
+        "why": "a forged POST to the WhatsApp webhook approves, executes and "
+               "commands the agent with no signature check",
+    },
+    {
+        "name": "telegram_webhook_sig",
+        "file": "app/web.py",
+        "find": "    if not (expected and hmac.compare_digest(sent, expected)):",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_console_auth.py"],
+        "why": "a forged POST to the Telegram webhook — the live ops channel — "
+               "reaches approve/execute when the secret is unset (fail open)",
+    },
+    {
         "name": "banned_claims_mail",
         "file": "app/triage.py",
         "find": ('        hard = [f for f in report["failures"]\n'

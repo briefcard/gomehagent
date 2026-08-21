@@ -227,9 +227,16 @@ def seo_progress(domain: str = "") -> str:
         "moved_down": sorted(lost, key=lambda x: x["to"])[:15]})
 
 
-def seo_context_block() -> str:
+def seo_context_block(tenant: str = "") -> str:
     """Injected into the SEO role each turn: which client sites it manages + the
-    primary site's current baseline."""
+    primary site's current baseline.
+
+    Accepts the active account (the kernel passes it) for signature parity with
+    the other role context hooks. NOT yet used to scope the baseline — that line
+    still shows the primary site's numbers regardless of which client is active,
+    which is a separate leak (audit SEO-1) fixed when the SEO role is scoped by
+    site rather than by the global SEO_DOMAIN.
+    """
     block = sites.block()
     with db.SessionLocal() as s:
         snap = (s.query(db.SeoSnapshot)

@@ -212,12 +212,28 @@ def retire(note_id: str) -> str:
         return f"Retired: {row.topic}"
 
 
-def shipments_block() -> str:
-    """Open shipment records — injected into triage and chat prompts."""
+def shipments_block(tenant: str) -> str:
+    """Open shipment records — injected into triage and chat prompts.
+
+    Scoped, and the scope is not optional. `tenant="*"` is the OWNER's
+    cross-account view — the back office runs every business's logistics, so the
+    admin agent legitimately sees all of it. A concrete key is ONE client's, and
+    one client's shipments must never appear in another client's drafting prompt
+    — which is exactly what an unscoped query did on the live mail path, seeding
+    every tenant's triage with every other tenant's counterparties and gaps.
+
+    An unresolved scope (``""``) sees only legacy unattributed rows, never
+    another tenant's — the same fail-toward-less-exposure the rest of the
+    tenant layer already follows. Legacy rows written before attribution are
+    still shown to a concrete tenant via `include_unassigned`; a backfill is
+    what lets that tighten to strict.
+    """
     with db.SessionLocal() as s:
-        rows = (s.query(db.Shipment)
-                .filter(db.Shipment.status != "closed")
-                .order_by(db.Shipment.updated_at.desc()).limit(15).all())
+        q = s.query(db.Shipment).filter(db.Shipment.status != "closed")
+        if tenant != "*":
+            q = q.filter(db.tenant_filter(db.Shipment, tenant,
+                                          include_unassigned=True))
+        rows = q.order_by(db.Shipment.updated_at.desc()).limit(15).all()
     if not rows:
         return ""
     lines = []
@@ -265,12 +281,22 @@ def lessons_block(role: str = "", tenant: str = "") -> str:
             + "\n".join(f"- {r.lesson}" for r in rows))
 
 
-def sender_history(sender_email: str, limit: int = 3) -> str:
-    """What we previously did with this sender — for email triage context."""
+def sender_history(sender_email: str, tenant: str, limit: int = 3) -> str:
+    """What we previously did with this sender — for email triage context.
+
+    Scoped, and the scope is required. The same forwarder is a counterparty for
+    several clients, so an unscoped lookup let one client's prior handling of a
+    shared sender seed another client's draft. `tenant="*"` is the owner's
+    cross-account view; a concrete key is one client's history plus the legacy
+    unattributed rows, never another tenant's.
+    """
     with db.SessionLocal() as s:
-        rows = (s.query(db.EmailLog)
-                .filter(db.EmailLog.sender.ilike(f"%{sender_email}%"))
-                .order_by(db.EmailLog.seen_at.desc()).limit(limit).all())
+        q = s.query(db.EmailLog).filter(
+            db.EmailLog.sender.ilike(f"%{sender_email}%"))
+        if tenant != "*":
+            q = q.filter(db.tenant_filter(db.EmailLog, tenant,
+                                          include_unassigned=True))
+        rows = q.order_by(db.EmailLog.seen_at.desc()).limit(limit).all()
     if not rows:
         return ""
     lines = [f"- {r.seen_at:%b %d}: '{r.subject}' -> {r.action} ({r.detail})"

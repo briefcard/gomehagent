@@ -1747,7 +1747,7 @@ is a mistake this project made for weeks. 65 suites, none touching the network,
 python3 scripts/sabotage.py
 ```
 
-Nineteen guards, each disabled in turn against the suites that claim to cover it.
+Twenty-two guards, each disabled in turn against the suites that claim to cover it.
 Read a `STALE` line as loudly as a `MISSED` one — it means the code moved and
 that entry has been covering nothing since.
 
@@ -2092,3 +2092,117 @@ count rather than in somebody's head.
 called at a dozen sites through `googleapiclient` — so instrumenting it is a
 different shape of job, not another line in this one. Until it is done, the mail
 path's Google round trips remain absent from the ledger.
+
+### 2.61 The prompt builders on the live mail path had no tenant at all — fixed 2026-08-21
+
+The audit's highest-risk isolation finding, and it was invisible to
+`test_tenant_isolation` because that suite checks the *schema* and this is the
+*prompt*. Two functions injected straight into every drafting prompt and took
+no tenant argument:
+
+* `memory.shipments_block()` — `s.query(db.Shipment).filter(status != "closed")`,
+  every tenant's open shipments, counterparties and missing-document lists, in
+  every client's triage.
+* `memory.sender_history(sender)` — `EmailLog.sender.ilike("%addr%")` across
+  every mailbox, so one client's prior handling of a shared forwarder seeded
+  another client's draft.
+
+This is the exact cross-client disclosure the whole architecture exists to
+prevent, running on the one path that answers real customers. The schema test
+could never see it: `Shipment` and `EmailLog` both *carry* `tenant`; nothing
+*read* it here.
+
+Both now take a **required** `tenant`, and the scope is a first-class value with
+three meanings rather than an optional string that defaulted to "everything":
+
+* `"*"` — an EXPLICIT all-accounts view, for a console or report that is
+  deliberately cross-account. **Not for an agent turn** — see §2.63: the owner
+  chose to switch accounts explicitly, so the admin agent scopes to the active
+  account and never runs against all of them. Stating the intent is the point —
+  the leak was that "no scope" and "every scope" were the same value.
+* a concrete key — one client's, via `tenant_filter(..., include_unassigned=True)`.
+  Legacy rows written before attribution are still shown, because the logistics
+  ledger predates it; the backfill is what lets this tighten to strict.
+* `""` — an unresolved scope sees only legacy unattributed rows, never another
+  tenant's attributed ones. It fails toward less exposure, the same direction
+  `db.tenant_filter` already chose.
+
+`scripts/test_tenant_isolation.py` gained section 7 — seed two accounts, assert
+each block holds its own marker and not the other's, that `"*"` sees both, and
+that `""` leaks neither. `scripts/sabotage.py` gained `shipments_scope`, which
+removes the filter and confirms the suite fails by name — verified caught.
+
+**Deliberately still open (the write side and the rest of the seam).**
+`memory.remember` / `add_lesson` still write unattributed because the admin tool
+dispatch does not yet carry a tenant to attribute with — that is the next step,
+folded into threading tenant through the tool door. And the read fix leans on
+`include_unassigned`, so a real tightening waits on a backfill of the rows
+written before this existed. This closed the largest leak, not the class.
+
+### 2.62 Two live security holes on the internet-facing edge — fixed 2026-08-21
+
+Found by the audit, patched alongside the tenant seam because both are
+exploitable on the running service, not latent.
+
+**The WhatsApp webhook had no signature check.** `POST /webhooks/whatsapp` read
+JSON and processed it with zero cryptographic verification — no
+`X-Hub-Signature-256`, though `META_APP_SECRET` was already in config. The only
+gate was `_norm_phone(msg["from"]) == WHATSAPP_APPROVER_NUMBER`, and `from` is a
+field of the caller's OWN body. A forged POST reached `_handle_button("approve",
+id)` → `apply_decision` → `_execute` (sends mail, publishes SEO) and
+`_handle_command` (the agent). Telegram and Shopify both verified; this one did
+not. `_verify_meta_sig` now checks HMAC-SHA256 over the RAW body and **fails
+closed** — an unverifiable delivery is refused 401, the same shape as
+`shopify_webhooks.verify`. With `META_APP_SECRET` unset the webhook is disabled
+rather than open, and says so in the log; Telegram is the active ops channel, so
+this costs nothing today and closes the hole.
+
+**Email text was rendered unescaped into the console.** `/admin/pending` and the
+unauthenticated `/decide/{token}` page interpolated `ap.summary` (built from an
+email's sender and subject) and `payload["body"]` (model/email content) straight
+into HTML. With no CSRF token and dozens of mutating `/admin` GETs, one crafted
+subject line was stored XSS running against the httpOnly console session. Both
+sinks now go through `html.escape`.
+
+`scripts/test_console_auth.py` drives the webhook end to end (fail-closed unset,
+forged refused, valid accepted); `scripts/sabotage.py` gained
+`whatsapp_webhook_sig`, verified caught. **Still open on this surface** (bigger
+jobs, not this pass): there is no route-inventory test asserting every mutating
+route checks the secret, no CSRF tokens, and the ~37 GET routes that mutate are
+untouched — the escaping stops the injection, it does not make the GETs safe.
+The XSS escaping itself has no render-level regression test yet.
+
+### 2.63 Explicit account switching, and the Telegram webhook — 2026-08-21
+
+Owner's decision, and it made the tenant seam simpler and stricter: *"I'd like
+to switch accounts explicitly so that there is never a misunderstanding or data
+breach."* So there is no ambient cross-account agent mode. An agent turn is
+always about ONE account — the one the owner selected with `/use` and the one
+its own ACTIVE ACCOUNT banner names — and never all of them.
+
+That corrected a choice made an hour earlier in §2.61. The admin agent's context
+hook had been wired to `shipments_block("*")` (every business's shipments); it
+now scopes to the active account. `Role.extra_context` changed from a zero-arg
+callable to `Callable[[str], str]` so the kernel passes it the active tenant;
+`roles/admin.py` is `lambda tenant: memory.shipments_block(tenant)`, and
+`seo_tools.seo_context_block` gained the parameter for signature parity (its
+baseline is still the global primary site — audit SEO-1, a separate fix). `"*"`
+survives as the reserved token for a deliberately all-accounts console view, and
+is reached by no agent path.
+
+**The tool boundary is already scoped for this on the live path.**
+`kernel.run` passes the active tenant to `tool_scope.filter_tools`, so the
+Telegram admin flow (which resolves the account via `_active_tenant`) already
+offers only the active account's tools. The remaining fail-OPEN — `filter_tools`
+returning everything unscoped when the tenant is `""` — is the keystone still to
+flip (the `/admin/ask` entry point and the `"baci"` handler defaults go with it).
+
+**Telegram hardened, because it is now the channel.** Owner is dropping WhatsApp
+for the free Telegram ops channel. The WhatsApp webhook already fails closed
+without `META_APP_SECRET` (§2.62), so that path is now inert — which suits. The
+Telegram webhook verified its secret only `if expected:` — fail OPEN when
+`TELEGRAM_WEBHOOK_SECRET` is unset, the §"secrets fail open" shape on the live
+ops channel. It now fails CLOSED, same as WhatsApp and Shopify. `render.yaml`
+generates the secret so prod is unaffected; a deploy that forgets it is refused
+rather than exposed. `test_console_auth` drives it end to end and
+`sabotage.telegram_webhook_sig` confirms the guard is caught.

@@ -430,8 +430,8 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
     if thread_context:
         user_content += f"\n\nEARLIER MESSAGES IN THIS THREAD (context):\n{thread_context[:8000]}"
     sender_addr = email["from"].split("<")[-1].rstrip(">").strip()
-    user_content += memory.sender_history(sender_addr)
-    user_content += memory.shipments_block()
+    user_content += memory.sender_history(sender_addr, tenant)
+    user_content += memory.shipments_block(tenant)
 
     # Attach PDF contents (commercial invoices, BOLs, packing lists) so the
     # agent reads the actual documents, not just the email text.
