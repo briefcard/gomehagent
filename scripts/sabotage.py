@@ -326,6 +326,48 @@ SABOTAGES = [
                "path raises TypeError before reaching WordPress \u2014 "
                "`_send` takes `body` positionally and has no `params`",
     },
+    {
+        "name": "plan_edit_carry_forward",
+        "file": "app/systems.py",
+        "find": "                if fk in edited:",
+        "replace": "                if False:  # SABOTAGE",
+        "suites": ["test_plans.py"],
+        "why": "a planner re-proposing an item writes straight over the "
+               "owner's hand-set plan fields \u2014 the segment or date he "
+               "corrected silently reverts on the next planning pass, the "
+               "exact failure the theme deriver's rule 3 exists to prevent",
+    },
+    {
+        "name": "planner_double_file",
+        "file": "app/systems.py",
+        "find": "        existing = _open_plan_row(s, row.id, ref)",
+        "replace": "        existing = None  # SABOTAGE",
+        "suites": ["test_plans.py"],
+        "why": "every planning pass files the same item again \u2014 the "
+               "queue fills with duplicates and a campaign is drafted once "
+               "per copy, the record_scan double-file defect one layer up",
+    },
+    {
+        "name": "plan_complete_gate",
+        "file": "app/systems.py",
+        "find": "    comp = plan_complete(row, sysrow.key)\n    if not comp[\"complete\"]:",
+        "replace": "    comp = plan_complete(row, sysrow.key)\n    if False:  # SABOTAGE",
+        "suites": ["test_plans.py"],
+        "why": "an under-specified plan executes \u2014 a campaign with no "
+               "segment or no date runs anyway, which is the owner's "
+               "'complete brief in advance of execution' requirement removed "
+               "at its only enforcement point",
+    },
+    {
+        "name": "plan_switch_gate",
+        "file": "app/systems.py",
+        "find": "    if not is_on(sysrow):",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_plans.py"],
+        "why": "a paused system's queued plans keep executing \u2014 pausing "
+               "is the one action whose entire meaning is stop, and the "
+               "switch would no longer dictate at the queue",
+    },
 ]
 
 

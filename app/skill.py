@@ -504,12 +504,18 @@ def preflight(key: str, tenant: str) -> dict:
 
 
 def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
-        **params) -> dict:
+        run_id: str = "", **params) -> dict:
     """Run one skill for one account. The only entry point.
 
     Everything a caller needs to decide what happens next is in the return:
     what was searched, what could not be grounded, what was produced and what
     each produced thing is allowed to do.
+
+    `run_id` names a PLANNED row to consume: the plan's fields become the
+    run's parameters and the same row advances through the stages, so one
+    row is one item. The gates (switch, completeness, rung) live in
+    `systems.take_plan`, structurally — a caller cannot reach execution
+    around them. On any refusal the plan stays `planned`, untouched.
     """
     sk = get(key)
 
@@ -545,31 +551,53 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
         # `refused` is different and stays unrecorded: an unknown skill or an
         # unknown account is a caller error, not something this account is
         # missing, and filing it would put noise on the authoring backlog.
-        run_id = ""
-        if pre["status"] == "blocked":
+        #
+        # A CONSUME call is a third case: the plan row already carries the
+        # item, so nothing extra is filed and the plan stays `planned` — a
+        # daily blocked row per stuck plan is the tick noise this codebase
+        # was already cured of once.
+        logged = ""
+        if pre["status"] == "blocked" and not run_id:
             if pre.get("system_id"):
-                run_id = systems.start_run(pre["system_id"], tenant,
+                logged = systems.start_run(pre["system_id"], tenant,
                                            trigger=trigger, ref=ref or key)
-                systems.finish_run(run_id, "blocked",
+                systems.finish_run(logged, "blocked",
                                    blocked_on="; ".join(pre["blocked_on"]))
             ledger.record(tenant, sk.system_key if sk else key,
                           status="blocked", blocked_on=pre["blocked_on"],
-                          run_id=run_id, format=sk.produces if sk else "")
+                          run_id=logged, format=sk.produces if sk else "")
         return {"skill": key, "tenant": tenant, "status": pre["status"],
                 "blocked_on": pre["blocked_on"], "items": [], "notes": [],
-                "coverage": {}, "run_id": run_id}
+                "coverage": {}, "run_id": logged}
 
     unknown = [p for p in params if p not in sk.params]
     if unknown:
         # Refuse rather than ignore. A silently dropped parameter is the
-        # caller believing it asked for something it did not get.
+        # caller believing it asked for something it did not get. Checked on
+        # the CALLER's params before any plan is consumed, so a bad call
+        # cannot flip a plan and then bail, stranding the row mid-stage.
         return {"skill": key, "tenant": tenant, "status": "refused",
                 "blocked_on": [f"unknown parameter(s): {', '.join(sorted(unknown))}"
                                f" — this skill accepts {', '.join(sk.params) or 'none'}"],
                 "items": [], "notes": [], "coverage": {}, "run_id": ""}
 
-    run_id = systems.start_run(pre["system_id"], tenant, trigger=trigger,
-                               ref=ref or key)
+    consuming = bool(run_id)
+    if consuming:
+        grab = systems.take_plan(run_id, tenant,
+                                 system_id=pre["system_id"],
+                                 skill_params=sk.params,
+                                 caller_params=tuple(params))
+        if not grab["ok"]:
+            # The plan stays `planned` — every take_plan refusal happens
+            # before the flip, so a held plan waits visibly on the Planned
+            # list rather than half-consuming.
+            return {"skill": key, "tenant": tenant, "status": "refused",
+                    "blocked_on": [grab["why"]], "items": [], "notes": [],
+                    "coverage": {}, "run_id": ""}
+        params = {**grab["params"], **params}
+    else:
+        run_id = systems.start_run(pre["system_id"], tenant, trigger=trigger,
+                                   ref=ref or key)
 
     bundle = rs.resolve(tenant, system=sk.system_key, tier=sk.tier,
                         utterance=str(params.get("utterance") or ""),
@@ -642,9 +670,15 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     if ctx.items and all(i["status"] == "blocked" for i in ctx.items):
         stage, status = "blocked", "produced"
 
-    systems.finish_run(run_id, stage,
-                       output=f"{len(ctx.items)} item(s)",
-                       brief=f"{sk.key} · tier {sk.tier}")
+    # A consumed plan KEEPS its brief — the plan is the record of what this
+    # run was asked to do, and overwriting it here was how the instruction
+    # would have vanished at the exact moment it was carried out. (The old
+    # write was also a plain string into a JSON column — §1's signature
+    # defect, one writer and no reader.)
+    finish_fields = dict(output=f"{len(ctx.items)} item(s)")
+    if not consuming:
+        finish_fields["brief"] = {"skill": sk.key, "tier": sk.tier}
+    systems.finish_run(run_id, stage, **finish_fields)
 
     return {"skill": key, "tenant": tenant, "status": status,
             "blocked_on": [], "items": ctx.items, "notes": ctx.notes,

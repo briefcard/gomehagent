@@ -226,6 +226,11 @@ segment matches EVERYONE), materialize refuses an unreadable ESP (duplicate
 risk) and is DRY-RUN BY DEFAULT (`sabotage.segments_dry_run_gate`, guard #28).
 Route: `/admin/segments_build?tenant=eien[&apply=1]`, harvest's pattern.
 
+*(Step 3 below — wiring `campaign_email` to a route + agent tool — is now
+ABSORBED by the workflow layer: the route becomes the per-system workflow
+surface and the wiring becomes the rollout planner + plan consumption. See
+"System workflows" below and `docs_System-Workflows.md`.)*
+
 **Next, in order:** (1) OWNER: run
 `/admin/segments_build?tenant=eien&key=<APPROVAL_SECRET>` (dry-run — review
 the would_create list), then `&apply=1` — the FIRST LIVE ESP WRITE this
@@ -267,6 +272,91 @@ client would use instead of handing Gomeh credentials; it stays single-app
 until a client actually wants it, and the token-paste /connect route covers
 self-serve today.
 
+## System workflows — plans, and the complete brief (2026-08-21)
+
+**The owner's directive, verbatim:** *"really each system is going to have its
+own workflow to track the agent's work. So this is not unique to just the
+email"* — and, same day: *"making sure you have incorporated the mechanism for
+saving changes to the brief and for each system having a proper complete brief
+in advance of execution."* The design is `docs_System-Workflows.md` (+ the
+owner's artifact copy); this section records what is BUILT — phase 1, the
+substrate. The surface (phase 2) and the planners (phase 3+) are not built.
+
+**One new stage, no new tables.** A plan is a `SystemRun` opened at stage
+`planned` by `systems.open_plan` — plan fields in the `brief` JSON column,
+stable item key in `ref` (idempotent among OPEN planned rows; sabotage
+`planner_double_file`). When due, **the same row becomes the execution row**:
+`skill.run(run_id=…)` consumes it via `systems.take_plan`, the plan's fields
+become the run's parameters, and the row advances through the existing stages
+— one row is one item, and the brief SURVIVES execution (the old
+`finish_run(brief="<skill> · tier N")` write — a plain string into a JSON
+column, one writer, no reader — now writes a dict and never overwrites a
+consumed plan).
+
+**Saving is one mechanism.** `save_plan` is the only writer after proposal:
+keys validated against the system's declared `plan_fields` (unknown refused BY
+NAME), a blank input is not an edit (the `brand_theme.approve` rule), every
+accepted edit tracked in `brief["edited"]`, and a consumed plan is closed to
+editing. The tracked set makes carry-forward mechanical: `open_plan`
+re-proposals refresh only un-edited fields (sabotage
+`plan_edit_carry_forward`). Editing a paused system's plans is allowed;
+consuming one is not.
+
+**Completeness is the pre-execution bar.** Required plan fields + a planned
+date (a dateless plan can never come due — "queued" that means "lost").
+`plan_complete` names the gaps in the field's own label; `consumable` — one
+function, every caller — refuses an incomplete plan and the row STAYS
+`planned`, waiting visibly (sabotage `plan_complete_gate`). Deliberately NOT
+the knowledge gate: thin knowledge still produces; an incomplete INSTRUCTION
+never runs, and its gaps are owner work, never filed through
+`record_unknowns`. `approve_plan` refuses an incomplete plan too.
+
+**The switch and the rung reach the queue.** `open_plan` refuses a system
+that is not live; a paused system's plans are un-consumable (sabotage
+`plan_switch_gate`). Plans ride the EXISTING autonomy ladder: on `shadow` and
+`approve_all` a plan needs an explicit `approve_plan` before it may run —
+because execution itself has side effects (`campaign_email` drafts into the
+live ESP whenever the copy validates, on ANY rung: `item["ok"]` is the
+validator's verdict, not the rung's — and a run spends model budget);
+`approve_exceptions`/`auto` consume due plans. No rung launches:
+`send_campaign(confirm=True)` stays uncalled by the substrate.
+
+**Every take_plan refusal happens BEFORE the row flips** — tenant/system
+mismatch, incompleteness, the rung, a caller trying to override a plan field
+("the plan is the reviewed instruction"), and declaration drift (a plan field
+the skill no longer accepts is refused by name; `test_plans.py` also pins
+declaration⊆skill-params statically, so growing the plan — subject line,
+planned hero — and teaching the skill to honour it must land in one change).
+The unknown-CALLER-param check moved before consumption for the same reason:
+a bad call must not flip a plan and then bail, stranding the row mid-stage.
+
+**The tick consumes.** For each live plan-capable system, `systems_tick` runs
+due consumable plans through `skill.run(run_id=…)`; a day where plans ran
+files NO evaluation row (the consumed runs are the record); a quiet day files
+ONE `skipped` row saying how many plans are queued and how many are held and
+why — never `not_built`, because these systems' generator exists and
+reporting a wired skill as unbuilt is the `inbox_triage` mislabel again.
+
+**Queue is not activity, anywhere.** `stats()` and `can_promote`'s clean tail
+exclude `planned` (plans at the head of the ledger must not push real denials
+out of the promotion window); `diagnostics.health` splits `queued` out before
+any number is computed (an old open plan is not a stale run) and the log
+shows "queued — planned for <date>".
+
+**Declared per system:** every `CATALOG` entry now carries `workflow` —
+`unit / skill / plan_fields / artifact / ship / measure`. Plan-capable today:
+`campaign_email` (segment, goal, entity, visual/ESP toggles) and
+`ad_creative` (entity, audience, variants) — exactly the parameters their
+skills accept. `blog`/`reorder_engine`/`reports` declare unit + ship only
+(plans exist only once a skill can consume them, or they queue forever);
+the inbox family declares the Gmail-draft loop it already runs.
+
+**Dormant by construction:** no planner exists, no surface creates plans, and
+`campaign_email` is live for no account — the mechanism ships inert, exactly
+like the campaign engine before it. `scripts/test_plans.py` (52 checks);
+sabotage is now 33 entries, the four new ones verified caught and every
+older find-string re-checked present exactly once.
+
 ## The front door (2026-08-21)
 
 The product has a name and a face now: **MarketingThatWorks — AI Governance &
@@ -295,7 +385,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**66 suites, 66 pass.** Check the OUTPUT, not the exit code, and skip
+**67 suites, 67 pass** (test_plans.py joined 2026-08-21). Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The

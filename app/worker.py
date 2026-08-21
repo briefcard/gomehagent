@@ -716,8 +716,11 @@ def systems_tick() -> None:
     "could this system have run today", which does not change every ten minutes,
     and a run row per system per tick would bury the signal it exists to carry.
     """
-    from . import systems
-    live = ready_count = blocked_count = 0
+    import datetime as _dt
+
+    from . import skill, systems
+    today = _dt.date.today().isoformat()
+    live = ready_count = blocked_count = consumed_count = 0
     for sysrow in systems.all_systems():
         if not systems.is_on(sysrow):
             # ONE switch, and `designed` is off. This used to evaluate designed
@@ -731,6 +734,36 @@ def systems_tick() -> None:
             # day, and put that claim at the top of the backlog.
             continue
         live += 1
+
+        # The workflow layer: a plan-capable system runs from its OWN queue.
+        # Due plans are consumed one by one — `take_plan` re-checks the
+        # switch, the completeness bar and the rung structurally, so this
+        # loop cannot execute an under-specified or unapproved instruction
+        # even if it tries. A day where plans ran needs no evaluation row:
+        # the consumed runs ARE the record.
+        queued = held = 0
+        if systems.plan_capable(sysrow.key):
+            wf = systems.workflow(sysrow.key)
+            open_plans = systems.plans(sysrow.tenant, sysrow.key)
+            queued = len(open_plans)
+            ran_here = 0
+            for prow in systems.plans(sysrow.tenant, sysrow.key,
+                                      due_by=today):
+                if not systems.consumable(prow, sysrow)["ok"]:
+                    held += 1
+                    continue
+                try:
+                    skill.run(wf["skill"] or sysrow.key, sysrow.tenant,
+                              trigger="schedule", run_id=prow.id)
+                    ran_here += 1
+                except Exception:                                # noqa: BLE001
+                    log.exception("plan consumption failed for %s/%s",
+                                  sysrow.tenant, sysrow.key)
+            if ran_here:
+                consumed_count += ran_here
+                ready_count += 1
+                continue
+
         run_id = systems.start_run(sysrow.id, sysrow.tenant, trigger="schedule")
         try:
             state = systems.ready(sysrow)
@@ -751,6 +784,19 @@ def systems_tick() -> None:
                                    blocked_on=list(state["impossible"]))
                 continue
             ready_count += 1
+            if systems.plan_capable(sysrow.key):
+                # The generator EXISTS for these — what was missing today was
+                # work in the queue. Filed as `skipped` (correctly produced
+                # nothing), never `not_built`: reporting a wired skill as
+                # unbuilt is the inbox_triage mislabel all over again.
+                detail = ("no plans were due today"
+                          + (f" — {queued} queued" if queued else
+                             " — nothing is queued; the planner is not built "
+                             "yet, so plans are filed by hand for now")
+                          + (f", {held} held (incomplete or awaiting your "
+                             f"approval)" if held else ""))
+                systems.finish_run(run_id, "skipped", output=detail)
+                continue
             # The generator lands here. Until it does, say so on the run rather
             # than recording a success that never happened. What the run would
             # have been working WITHOUT is recorded beside that, so the gap is
@@ -771,8 +817,8 @@ def systems_tick() -> None:
             log.exception("systems tick failed for %s/%s", sysrow.tenant, sysrow.key)
             systems.finish_run(run_id, "failed",
                                error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
-    log.info("systems tick: %d evaluated, %d ready, %d blocked",
-             live, ready_count, blocked_count)
+    log.info("systems tick: %d evaluated, %d ready, %d blocked, %d plan(s) consumed",
+             live, ready_count, blocked_count, consumed_count)
 
 
 def follow_up_chase() -> None:

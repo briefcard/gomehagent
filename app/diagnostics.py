@@ -131,6 +131,13 @@ def health(tenant: str = "", days: int = 30) -> dict:
     out = []
     for sysrow in rows:
         mine = by_system.pop(sysrow.id, [])
+        # A plan is QUEUE, not activity — split out before anything is
+        # counted. Left in `mine`, a plan dated next week would trip the
+        # stale-run check after six hours and report the worker dead, and
+        # every downstream number (runs, durations, verdict) would describe
+        # work that has not happened yet as though it had.
+        queued = [r for r in mine if (r.stage or "") == "planned"]
+        mine = [r for r in mine if (r.stage or "") != "planned"]
         stages: dict[str, int] = {}
         for r in mine:
             stages[r.stage or "brief"] = stages.get(r.stage or "brief", 0) + 1
@@ -167,6 +174,7 @@ def health(tenant: str = "", days: int = 30) -> dict:
             "decided": sum(1 for r in mine if r.decision),
             "unfinished": len(stuck),
             "waiting": len(waiting),
+            "queued": len(queued),
             "skipped": stages.get("skipped", 0),
             "escalated": stages.get("escalated", 0),
             "not_built": stages.get("not_built", 0),
@@ -371,6 +379,14 @@ def events(tenant: str = "", days: int = 7, level: str = "",
             elif stage in _WAITING:
                 lvl, layer = "info", "logic"
                 detail = "waiting on a person"
+            elif stage == "planned":
+                # Queue, not activity — logged so the chronology shows work
+                # being lined up, never counted as work done (health() splits
+                # it out before any number is computed).
+                lvl, layer = "info", "logic"
+                when = (r.brief or {}).get("planned_for") if isinstance(r.brief, dict) else ""
+                detail = "queued" + (f" — planned for {when}" if when else
+                                     " — no date yet, so it can never come due")
             else:
                 lvl, layer = "info", "logic"
                 detail = f"stage: {stage}"

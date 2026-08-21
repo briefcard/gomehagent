@@ -81,27 +81,69 @@ CATALOG = {
         does="Answers an inbound enquiry with a grounded, approved draft.",
         requires=("inbox",), requires_any=(), needs_kb=True,
         kb_needs=("tone", "banned_claims", "audience", "objection", "claim",
-                  "next_steps")),
+                  "next_steps"),
+        workflow=dict(
+            unit="one thread's reply",
+            artifact="gmail_draft",
+            ship="approving sends the draft itself",
+            measure="edits.py delta; sent-as-is rate")),
     "campaign_email": dict(
         name="Campaign email",
         does="Builds and schedules campaign sends from the catalogue and calendar.",
         requires=("esp",), requires_any=(), needs_kb=True,
-        kb_needs=("tone", "banned_claims", "entity", "claim")),
+        kb_needs=("tone", "banned_claims", "entity", "claim"),
+        # The workflow declaration — see `workflow()`. `plan_fields` may only
+        # name parameters the consuming skill declares TODAY; the suite pins
+        # that, so growing the plan (subject line, planned hero) and teaching
+        # the skill to honour it are forced to land in the same change.
+        workflow=dict(
+            unit="a campaign email to one segment",
+            skill="campaign_email",
+            plan_fields=(
+                dict(key="segment", label="Audience segment", required=True),
+                dict(key="goal", label="Angle / goal", required=True),
+                dict(key="entity_key", label="Featured entity", required=False),
+                dict(key="draft_visual", label="Draft a Canva hero on a miss",
+                     required=False),
+                dict(key="draft_into_esp", label="Set up as an ESP draft",
+                     required=False),
+            ),
+            artifact="esp_campaign",
+            ship="marks it launch-ready — launching stays human, in the ESP",
+            measure="generated HTML vs the ESP draft at launch")),
     "blog": dict(
         name="Blog / content",
         does="Publishes grounded articles against the keyword map.",
         requires=("cms",), requires_any=(), needs_kb=True,
-        kb_needs=("tone", "banned_claims", "audience", "claim")),
+        kb_needs=("tone", "banned_claims", "audience", "claim"),
+        # No `plan_fields` yet: plans exist only once a skill can consume
+        # them, or they would queue forever. The keyword-map planner and the
+        # drafting skill land together.
+        workflow=dict(
+            unit="one article against one keyword",
+            artifact="cms_article",
+            ship="publishes the draft article, behind seo_guard",
+            measure="draft-vs-published delta")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",
         requires=("commerce", "esp"), requires_any=(), needs_kb=False,
-        kb_needs=("entity",)),
+        kb_needs=("entity",),
+        workflow=dict(
+            unit="one replenishment prompt per cohort",
+            artifact="esp_campaign",
+            ship="marks it launch-ready — launching stays human",
+            measure="provider stats, once `reports` exists")),
     "service_desk": dict(
         name="Service desk",
         does="Handles routine inbound support with a drafted, checked reply.",
         requires=("inbox",), requires_any=(), needs_kb=True,
-        kb_needs=("tone", "banned_claims", "objection", "entity")),
+        kb_needs=("tone", "banned_claims", "objection", "entity"),
+        workflow=dict(
+            unit="one thread's reply",
+            artifact="gmail_draft",
+            ship="approving sends the draft itself",
+            measure="edits.py delta; sent-as-is rate")),
     "content_compliance": dict(
         name="Website content compliance",
         does="Checks the live site against the brand's own banned claims and "
@@ -127,12 +169,30 @@ CATALOG = {
         does="Drafts grounded ad copy from approved claims against an audience "
              "and an entity. Copy only — imagery waits on the media layer.",
         requires=(), requires_any=("ads", "commerce"), needs_kb=True,
-        kb_needs=("tone", "banned_claims", "audience", "claim", "entity")),
+        kb_needs=("tone", "banned_claims", "audience", "claim", "entity"),
+        workflow=dict(
+            unit="one ad batch for one audience × entity",
+            skill="ad_copy",
+            plan_fields=(
+                dict(key="entity_key", label="Entity", required=True),
+                dict(key="audience_key", label="Audience", required=True),
+                dict(key="variants", label="Variants (1–5)", required=False),
+            ),
+            artifact="proposal_rows",
+            ship="marks the batch ready — no ad-platform write is wired, and "
+                 "the surface says so",
+            measure="asset outcomes per channel (fed by hand until the "
+                    "output→ad-id join exists)")),
     "reports": dict(
         name="Reports",
         does="The weekly number, assembled from whatever is connected.",
         requires=(), requires_any=("analytics", "ads", "commerce"), needs_kb=False,
-        kb_needs=()),
+        kb_needs=(),
+        workflow=dict(
+            unit="the weekly number, one report",
+            artifact="report_document",
+            ship="sends it to the client, on approval",
+            measure="none — the report IS the measurement")),
 }
 
 
@@ -468,7 +528,12 @@ def ready(system: db.System) -> dict:
 
 def stats(system_id: str) -> dict:
     """Run history, reduced to the numbers a promotion decision needs."""
-    rows = runs(system_id, limit=0)
+    # A plan is QUEUE, not activity: it has run nothing, decided nothing and
+    # earned nothing. Counting planned rows here would let a system that
+    # plans a lot and ships nothing inflate its own run total — and `runs`
+    # feeds `can_promote`'s clean-tail check, where a planned row would
+    # dilute the tail with rows no denial could ever appear on.
+    rows = [r for r in runs(system_id, limit=0) if r.stage != PLANNED]
     decided = [r for r in rows if r.decision in ("approved", "denied", "edited", "auto")]
     approved = [r for r in decided if r.decision in ("approved", "auto")]
     edited = [r for r in decided if r.decision == "edited"]
@@ -524,8 +589,11 @@ def can_promote(system: db.System) -> dict:
         return {"can": False, "target": target,
                 "why": f"approval rate {st['approval_rate']:.0%}, "
                        f"needs {gate['min_approval_rate']:.0%}"}
-    tail = [r for r in runs(system.id, limit=gate["clean_tail"])
-            if r.decision == "denied"]
+    # Planned rows are excluded BEFORE the window is cut, not after: a queue
+    # of plans at the head of the ledger would otherwise push real denials
+    # out of the tail and promote a system on rows nothing could deny.
+    recent = [r for r in runs(system.id, limit=0) if r.stage != PLANNED]
+    tail = [r for r in recent[:gate["clean_tail"]] if r.decision == "denied"]
     if tail:
         return {"can": False, "target": target,
                 "why": f"a denial inside the last {gate['clean_tail']} runs"}
@@ -619,6 +687,364 @@ def blocked_reasons(tenant: str = "", days: int = 30) -> list[tuple[str, int]]:
         for reason in (r.blocked_on or []):
             counts[reason] = counts.get(reason, 0) + 1
     return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+# ---------------------------------------------------------------------------
+# Plans — work declared in advance of execution
+#
+# The owner's requirement (2026-08-21): each system tracks its work through
+# its own workflow, and a system executes only from a COMPLETE brief it was
+# shown in advance. A plan is a `SystemRun` opened at stage `planned`, its
+# fields in the `brief` JSON column, its stable item key in `ref` — no new
+# table. When the item comes due the SAME row becomes the execution row
+# (`take_plan` flips it to `brief` and `skill.run` advances it), so one row is
+# one item and the attempt history stays where it always was.
+#
+# Two mechanisms, both structural rather than remembered:
+#
+# * SAVING — `save_plan` is the only writer of plan fields after proposal.
+#   It validates every key against the system's declared `plan_fields`
+#   (an unknown key is refused BY NAME, the `esp.personalize` pattern),
+#   treats a blank form input as not-an-edit (the `brand_theme.approve`
+#   rule), and records every accepted key in `brief["edited"]` — which is
+#   what lets a planner re-propose around the owner's edits without ever
+#   writing over them. A resave is a re-attestation.
+#
+# * COMPLETENESS — `plan_complete` names what a plan is still missing
+#   (required fields + a date), and `take_plan`/`consumable` refuse an
+#   incomplete plan BY NAME. The row STAYS `planned`: an under-specified
+#   instruction is never executed and never fails — it waits, visibly.
+#   This is deliberately NOT the knowledge gate: thin knowledge still
+#   produces (enrich, don't gatekeep); an incomplete INSTRUCTION never
+#   runs. The gaps are owner work on the Planned surface, not client
+#   knowledge, so they are never filed through `record_unknowns`.
+#
+# The rung rule: consuming a plan on `shadow` or `approve_all` requires an
+# explicit `approve_plan` first, because EXECUTION itself has side effects —
+# `campaign_email` drafts into the live ESP whenever the copy validates, on
+# any rung, and a run spends model budget. `approve_exceptions` and `auto`
+# consume due plans without the extra tap. And no rung, ever, launches:
+# `send_campaign(confirm=True)` stays uncalled by the substrate.
+# ---------------------------------------------------------------------------
+
+PLANNED = "planned"
+
+
+def workflow(key: str) -> dict:
+    """The system's workflow declaration, with every field present."""
+    wf = dict(spec(key).get("workflow") or {})
+    wf.setdefault("unit", "")
+    wf.setdefault("skill", "")
+    wf.setdefault("plan_fields", ())
+    wf.setdefault("artifact", "")
+    wf.setdefault("ship", "")
+    wf.setdefault("measure", "")
+    return wf
+
+
+def plan_capable(key: str) -> bool:
+    """Does this system take plans at all? Declared, never inferred."""
+    return bool(workflow(key)["plan_fields"])
+
+
+def _plan_keys(key: str) -> dict[str, dict]:
+    return {f["key"]: f for f in workflow(key)["plan_fields"]}
+
+
+def _valid_date(value: str) -> bool:
+    try:
+        dt.date.fromisoformat(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def plan_complete(row_or_brief, key: str) -> dict:
+    """Is this plan a complete instruction? If not, exactly what is absent.
+
+    `planned_for` is generically required — a plan with no date can never
+    come due, which reads as "queued" while meaning "lost".
+    """
+    brief = (row_or_brief if isinstance(row_or_brief, dict)
+             else (getattr(row_or_brief, "brief", None) or {}))
+    plan = brief.get("plan") or {}
+    missing = [f["label"] or f["key"] for f in workflow(key)["plan_fields"]
+               if f.get("required") and not str(plan.get(f["key"], "") or "").strip()]
+    if not _valid_date(str(brief.get("planned_for", "") or "")):
+        missing.append("planned date")
+    return {"complete": not missing, "missing": missing}
+
+
+def _open_plan_row(s, system_id: str, ref: str):
+    return (s.query(db.SystemRun)
+            .filter(db.SystemRun.system_id == system_id,
+                    db.SystemRun.ref == ref,
+                    db.SystemRun.stage == PLANNED)
+            .first())
+
+
+def open_plan(tenant: str, key: str, *, ref: str, plan: dict | None = None,
+              planned_for: str = "", trigger: str = "planner") -> dict:
+    """File (or refresh) one planned item. The planner's only entry point.
+
+    Idempotent per `ref` among OPEN planned rows: re-proposing an item
+    updates only the fields the owner has NOT edited — owner edits carry
+    forward, the same rule as theme edits surviving re-derives. A planner
+    proposes only what it can read from data; a field it cannot fill stays
+    absent and `plan_complete` names it, because a planner that invents a
+    value produces a plan nobody wrote.
+    """
+    if not ref.strip():
+        return {"error": "a plan needs a stable item key (ref) — without one "
+                         "the planner cannot avoid filing the same item twice"}
+    row = find(tenant, key)
+    if not row:
+        return {"error": f"the {key} system is not installed for {tenant}"}
+    if not is_on(row):
+        # The switch is the dictator, at the queue as well as at the run: a
+        # planner filling work for a system somebody turned off is the same
+        # defect as the tick evaluating `designed` systems, one stage earlier.
+        return {"error": f"the {key} system is {row.status or 'not live'} — "
+                         f"plans are only filed for a system that is on"}
+    if not plan_capable(key):
+        return {"error": f"the {key} system declares no plan fields — it does "
+                         f"not take planned work"}
+    fields = _plan_keys(key)
+    bad = sorted(set(plan or {}) - set(fields))
+    if bad:
+        return {"error": f"unknown plan field(s): {', '.join(bad)} — this "
+                         f"system's plan takes {', '.join(sorted(fields))}"}
+    if planned_for and not _valid_date(planned_for):
+        return {"error": f"planned_for must be an ISO date, got {planned_for!r}"}
+
+    with db.SessionLocal() as s:
+        existing = _open_plan_row(s, row.id, ref)
+        if existing is not None:
+            brief = dict(existing.brief or {})
+            kept = dict(brief.get("plan") or {})
+            edited = set(brief.get("edited") or [])
+            preserved, refreshed = [], []
+            for fk, fv in (plan or {}).items():
+                if fk in edited:
+                    preserved.append(fk)
+                    continue
+                kept[fk] = fv
+                refreshed.append(fk)
+            brief["plan"] = kept
+            if planned_for and "planned_for" not in edited:
+                brief["planned_for"] = planned_for
+            elif planned_for:
+                preserved.append("planned_for")
+            existing.brief = brief
+            s.commit()
+            comp = plan_complete(brief, key)
+            return {"ok": True, "run_id": existing.id, "updated": True,
+                    "refreshed": sorted(refreshed),
+                    "preserved": sorted(preserved), **comp}
+        run = db.SystemRun(
+            system_id=row.id, tenant=tenant, trigger=trigger, ref=ref,
+            stage=PLANNED,
+            brief={"plan": dict(plan or {}), "edited": [],
+                   "planned_for": planned_for})
+        s.add(run)
+        s.commit()
+        comp = plan_complete(run.brief, key)
+        return {"ok": True, "run_id": run.id, "created": True, **comp}
+
+
+def save_plan(run_id: str, edits: dict | None = None, *,
+              planned_for: str = "") -> dict:
+    """The owner's changes to one plan — the ONLY writer after proposal.
+
+    Blank inputs are not edits (the form posts every field; absence of typing
+    must not clear a value). Every accepted key joins `brief["edited"]`, so
+    later re-proposals cannot write over a hand-set value. Editing a paused
+    system's plan is allowed — fixing plans while stopped is legitimate work;
+    CONSUMING one is not, and `consumable` refuses it.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if not row:
+            return {"error": "unknown plan"}
+        if row.stage != PLANNED:
+            return {"error": f"this plan was already consumed (stage "
+                             f"{row.stage!r}) — changes now belong on the "
+                             f"next item, not on the record of this one"}
+        sysrow = s.get(db.System, row.system_id)
+        key = sysrow.key if sysrow else ""
+        fields = _plan_keys(key)
+        cleaned = {k: v for k, v in (edits or {}).items()
+                   if str(v or "").strip()}
+        bad = sorted(set(cleaned) - set(fields))
+        if bad:
+            return {"error": f"unknown plan field(s): {', '.join(bad)} — this "
+                             f"system's plan takes {', '.join(sorted(fields))}"}
+        if planned_for and not _valid_date(planned_for):
+            return {"error": f"planned_for must be an ISO date, got {planned_for!r}"}
+        brief = dict(row.brief or {})
+        plan = dict(brief.get("plan") or {})
+        edited = set(brief.get("edited") or [])
+        for k, v in cleaned.items():
+            plan[k] = v
+            edited.add(k)
+        if planned_for:
+            brief["planned_for"] = planned_for
+            edited.add("planned_for")
+        brief["plan"] = plan
+        brief["edited"] = sorted(edited)
+        row.brief = brief
+        s.commit()
+        comp = plan_complete(brief, key)
+        return {"ok": True, "run_id": run_id, "edited": sorted(edited), **comp}
+
+
+def approve_plan(run_id: str) -> dict:
+    """The owner's explicit go-ahead for one plan — what `shadow` and
+    `approve_all` require before a plan may be consumed. Refused while the
+    plan is incomplete: approving an under-specified instruction would just
+    move the refusal one step later and make it look like consent."""
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if not row:
+            return {"error": "unknown plan"}
+        if row.stage != PLANNED:
+            return {"error": f"not a plan any more (stage {row.stage!r})"}
+        sysrow = s.get(db.System, row.system_id)
+        comp = plan_complete(row.brief or {}, sysrow.key if sysrow else "")
+        if comp["missing"]:
+            return {"error": "this plan is not complete — still missing: "
+                             + ", ".join(comp["missing"])}
+        brief = dict(row.brief or {})
+        brief["plan_approved_at"] = db.utcnow().isoformat()
+        row.brief = brief
+        s.commit()
+        return {"ok": True, "run_id": run_id}
+
+
+def skip_plan(run_id: str, reason: str = "") -> dict:
+    """Decline one plan. A decision, recorded — never a silent delete."""
+    row = None
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if not row:
+            return {"error": "unknown plan"}
+        if row.stage != PLANNED:
+            return {"error": f"not a plan any more (stage {row.stage!r})"}
+        brief = dict(row.brief or {})
+        if reason:
+            brief["skip_reason"] = reason[:300]
+        row.brief = brief
+        s.commit()
+    finish_run(run_id, "skipped", decision="denied",
+               output="plan skipped before execution")
+    return {"ok": True, "run_id": run_id}
+
+
+def plans(tenant: str, key: str = "", due_by: str = "") -> list[db.SystemRun]:
+    """Open planned rows for one account, soonest first.
+
+    `due_by` (ISO date) narrows to plans whose date has arrived — dateless
+    plans are NEVER due (they are incomplete, and `plan_complete` is already
+    naming that; consuming one would execute an instruction with no when).
+    """
+    with db.SessionLocal() as s:
+        q = (s.query(db.SystemRun)
+             .filter(db.SystemRun.tenant == tenant,
+                     db.SystemRun.stage == PLANNED))
+        if key:
+            ids = [r.id for r in s.query(db.System)
+                   .filter(db.System.tenant == tenant, db.System.key == key)]
+            q = q.filter(db.SystemRun.system_id.in_(ids or [""]))
+        rows = q.all()
+        s.expunge_all()
+    def _when(r):
+        return (r.brief or {}).get("planned_for") or "9999-12-31"
+    rows.sort(key=lambda r: (_when(r), db.as_utc(r.created_at)))
+    if due_by:
+        rows = [r for r in rows
+                if ((r.brief or {}).get("planned_for") or "") and _when(r) <= due_by]
+    return rows
+
+
+def consumable(row, sysrow) -> dict:
+    """May this plan be executed now? One place decides, for every caller.
+
+    Three gates, each named: the switch (only a live system runs), the
+    completeness bar (an incomplete instruction waits, visibly), and the
+    rung (shadow/approve_all put a person before EXECUTION — the run itself
+    drafts into live platforms and spends model budget).
+    """
+    if not is_on(sysrow):
+        return {"ok": False,
+                "why": f"the {sysrow.key} system is {sysrow.status or 'off'} "
+                       f"— a plan is only consumed by a system that is on"}
+    comp = plan_complete(row, sysrow.key)
+    if not comp["complete"]:
+        return {"ok": False,
+                "why": "this plan is not a complete instruction yet — "
+                       "still missing: " + ", ".join(comp["missing"])}
+    rung = sysrow.autonomy or "shadow"
+    if rung in ("shadow", "approve_all") \
+            and not (row.brief or {}).get("plan_approved_at"):
+        return {"ok": False,
+                "why": f"on the {rung} rung a plan needs your explicit "
+                       f"approval before it runs — approve it on the "
+                       f"Planned list"}
+    return {"ok": True, "why": ""}
+
+
+def take_plan(run_id: str, tenant: str, *, system_id: str,
+              skill_params: tuple, caller_params: tuple = ()) -> dict:
+    """Consume one plan: validate everything, flip it to the execution row.
+
+    Called by `skill.run` when it is handed a `run_id` — the gate lives HERE
+    so it is structural for every caller, not remembered by the tick. EVERY
+    refusal happens before the flip, so on any of them the row stays
+    `planned`, untouched; nothing extra is filed, because a daily blocked
+    row per stuck plan is the exact noise the tick was cured of. Returns
+    the plan's non-blank fields as the run's parameters.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if not row:
+            return {"ok": False, "why": f"no plan keyed {run_id!r}"}
+        if row.stage != PLANNED:
+            return {"ok": False,
+                    "why": f"run {run_id} is not a plan (stage {row.stage!r})"}
+        if row.tenant != tenant or row.system_id != system_id:
+            # A mismatch is a caller error worth its own words: consuming
+            # another account's plan is the tenant boundary, not a typo.
+            return {"ok": False,
+                    "why": "this plan belongs to a different account or "
+                           "system than the one asked to run it"}
+        sysrow = s.get(db.System, row.system_id)
+        verdict = consumable(row, sysrow)
+        if not verdict["ok"]:
+            return {"ok": False, "why": verdict["why"]}
+        plan = dict((row.brief or {}).get("plan") or {})
+        params = {k: v for k, v in plan.items() if str(v or "").strip()}
+        undeclared = sorted(set(params) - set(skill_params))
+        if undeclared:
+            # The declaration drifted from the skill. Refusing here — by name,
+            # before the generic unknown-parameter refusal — keeps a drifted
+            # plan waiting visibly instead of half-running.
+            return {"ok": False,
+                    "why": ("this plan carries field(s) the skill does not "
+                            "accept: " + ", ".join(undeclared)
+                            + " — the workflow declaration and the skill "
+                              "have drifted; fix the declaration")}
+        collide = sorted(set(params) & set(caller_params))
+        if collide:
+            # The plan is the REVIEWED instruction. A caller silently
+            # overriding a field the owner may have set would make the plan
+            # lie about what ran — refused, before the flip.
+            return {"ok": False,
+                    "why": ("these parameter(s) are set by the plan and may "
+                            "not be overridden at the call: "
+                            + ", ".join(collide))}
+        row.stage = "brief"
+        s.commit()
+        return {"ok": True, "why": "", "params": params}
 
 
 # ---------------------------------------------------------------------------
