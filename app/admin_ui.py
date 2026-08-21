@@ -1701,25 +1701,54 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
         else:
             got = vc.propose(tenant, texts)
             tone_s = ", ".join(str(x) for x in (got.get("tone") or []))
-            exemplars = "".join(
+            pos = str(got.get("positioning") or "")
+            elev = str(got.get("elevator") or "")
+            # `propose` returns the verified quotes as "evidence" — the first
+            # panel read a key that did not exist and rendered tone with no
+            # quotes under it, which the suite missed because its stub used
+            # the same wrong key. The stub uses the real one now.
+            quotes = "".join(
                 f'<div class="msg"><div>&ldquo;{_esc(e)}&rdquo;</div></div>'
-                for e in (got.get("exemplars") or [])[:4])
+                for e in (got.get("evidence") or got.get("exemplars") or [])[:4])
+            identity_rows = ""
+            if pos:
+                identity_rows += (f'<p><b>Proposed positioning:</b> '
+                                  f'{_esc(pos)}</p>')
+            if elev:
+                identity_rows += (f'<p><b>Proposed elevator:</b> '
+                                  f'{_esc(elev)}</p>')
+            if not (pos or elev):
+                identity_rows = (
+                    '<p class="mut">No positioning or elevator proposed — '
+                    + _esc(got.get("degraded")
+                           or "the copy read never says what the business "
+                              "does, and an invented one beats nothing by "
+                              "being worse") + "</p>")
+            adopt_fields = "".join(
+                f'<input type="hidden" name="{n}" value="{_esc(v)}">'
+                for n, v in (("tone", tone_s), ("positioning", pos),
+                             ("elevator_sentence", elev)) if v)
+            adopts = " + ".join(x for x, v in (("tone", tone_s),
+                                               ("positioning", pos),
+                                               ("elevator", elev)) if v)
             voice_prop = f"""
       <div class="card">
-        <div class="head"><h2>Voice, read off their own site</h2>
+        <div class="head"><h2>Read off their own site</h2>
           <span class="mut">{_esc(str(got.get("source") or how))}</span></div>
-        <p class="mut"><b>Nothing was written.</b> This is a proposal from
-        what the brand has already published — banned phrases filtered out,
-        quotes verbatim. Adopt it by saving the form above (the tone below is
-        prefilled there when you use this button's Apply).</p>
+        <p class="mut"><b>Nothing was written.</b> A proposal from what the
+        brand has already published — banned phrases filtered out, quotes
+        verbatim, and the positioning may assert only what the copy asserts.
+        Adopt it below, or copy what fits into the editor above.</p>
         <p><b>Proposed tone:</b> {_esc(tone_s) or '<span class="mut">nothing inferred</span>'}</p>
-        {exemplars}
-        <form method="post" action="/admin/brand_update" class="row">
+        {identity_rows}
+        {quotes}
+        {f'''<form method="post" action="/admin/brand_update" class="row">
           <input type="hidden" name="tenant" value="{_esc(tenant)}">
-          <input type="hidden" name="tone" value="{_esc(tone_s)}">
-          <button class="sec">Apply this tone</button>
-          <span class="mut">writes tone only; everything else stays as set</span>
-        </form>
+          {adopt_fields}
+          <button class="sec">Adopt proposal ({adopts})</button>
+          <span class="mut">saves only the fields shown; everything else
+          stays as set</span>
+        </form>''' if adopts else ''}
       </div>"""
 
     identity = f"""

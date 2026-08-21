@@ -389,18 +389,39 @@ def main() -> int:  # noqa: PLR0915
        "artisanal" in (kb.brand("baci").banned_claims or []))
 
     from app import voice as vc
+    # The stub carries `propose`'s REAL keys — the first one used a key the
+    # function never returns ("exemplars" for what is really "evidence"),
+    # which let a panel that rendered tone with no quotes pass its suite.
     vc.gather = lambda tenant, limit=25: (["We set tables the Milanese way."],
                                           "3 pages read")
     vc.propose = lambda tenant, texts: {
         "tenant": tenant, "tone": ["assured", "warm"],
-        "exemplars": ["We set tables the Milanese way."]}
+        "evidence": ["We set tables the Milanese way."],
+        "positioning": "Milanese tableware for hosts who set a serious table.",
+        "elevator": "The Milan table, shipped from Miami.",
+        "degraded": ""}
     dpage = admin_ui.render_brand("test-secret", "baci", derive_voice=True)
-    ck("the derive panel shows the proposal — tone, verbatim exemplars",
+    ck("the derive panel shows tone AND the verbatim quotes behind it",
        "assured, warm" in dpage and "Milanese way" in dpage
        and "Nothing was written" in dpage)
+    ck("…and proposes positioning and elevator from the same read",
+       "hosts who set a serious table" in dpage
+       and "shipped from Miami" in dpage)
     ck("…and truly wrote nothing",
        (kb.brand("baci").voice or {}).get("tone") == ["measured", "warm"])
-
+    r = c.post("/admin/brand_update",
+               data={"tenant": "baci", "tone": "assured, warm",
+                     "positioning": "Milanese tableware for hosts who set a "
+                                    "serious table.",
+                     "elevator_sentence": "The Milan table, shipped from Miami."},
+               follow_redirects=False)
+    b4 = kb.brand("baci")
+    ck("Adopt saves all three, touching nothing else",
+       r.status_code == 303
+       and b4.positioning == "Milanese tableware for hosts who set a serious table."
+       and (b4.elevator or {}).get("sentence") == "The Milan table, shipped from Miami."
+       and (b4.voice or {}).get("tone") == ["assured", "warm"]
+       and (b4.voice or {}).get("do_say") == ["la tavola", "set the table"])
     # The owner's actual click path, end to end: the first shipped control
     # was a button nested inside an anchor inside the identity form — invalid
     # HTML whose click did NOTHING ("I pressed it and it's not populating").
@@ -414,6 +435,17 @@ def main() -> int:  # noqa: PLR0915
                                          "derive_voice": "1"}).text
     ck("clicking it through the console actually populates the proposal",
        "assured, warm" in clicked and "Nothing was written" in clicked)
+
+    vc.propose = lambda tenant, texts: {
+        "tenant": tenant, "tone": ["measured"], "evidence": [],
+        "positioning": "", "elevator": "",
+        "degraded": "ANTHROPIC_API_KEY is not set — measured metrics only"}
+    dpage2 = admin_ui.render_brand("test-secret", "baci", derive_voice=True)
+    ck("with no model, positioning/elevator are ABSENT and say why — "
+       "arithmetic cannot state what a business does",
+       "No positioning or elevator proposed" in dpage2
+       and "ANTHROPIC_API_KEY" in dpage2
+       and "Adopt proposal (tone)" in dpage2)
 
     print()
     if _fail:

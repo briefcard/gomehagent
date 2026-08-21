@@ -176,10 +176,12 @@ def _drop_banned(tenant: str, sents: list[str]) -> tuple[list[str], list[str]]:
 
 
 _PROMPT = """You are reading sentences a brand has published, to describe HOW
-it writes — never what it sells.
+it writes and — strictly from what is in front of you — WHAT it does.
 
 Return JSON only:
-{"tone": ["word", "word"], "exemplars": ["<verbatim sentence>", ...]}
+{"tone": ["word", "word"], "exemplars": ["<verbatim sentence>", ...],
+ "positioning": "one sentence: what they do, and for whom",
+ "elevator": "the one-liner a stranger could repeat correctly"}
 
 Rules:
 - At most %d tone words. Plain adjectives a copywriter would use.
@@ -187,6 +189,10 @@ Rules:
   character. Anything else is discarded by code before you are read.
 - Choose exemplars that show the tone words. 2-5 of them.
 - Describe voice, not products. "warm" not "colourful tableware".
+- positioning and elevator may assert ONLY what these sentences assert: no
+  numbers, origins, materials, guarantees or superlatives that are not in
+  the input. If the copy never says what they do, return "" for both — an
+  empty answer beats an invented one.
 """
 
 
@@ -228,7 +234,13 @@ def _infer(tenant: str, sents: list[str]) -> tuple[dict, str]:
 
         tone = [str(w).strip().lower() for w in data.get("tone", []) if str(w).strip()]
         return {"tone": tone[:MAX_TONE_WORDS], "exemplars": kept[:5],
-                "discarded_exemplars": invented}, ""
+                "discarded_exemplars": invented,
+                # Syntheses, not quotes — they cannot be verbatim-verified the
+                # way exemplars are, which is exactly why they land as a
+                # PROPOSAL a person reads before anything is saved. Clipped so
+                # a runaway paragraph cannot masquerade as a one-liner.
+                "positioning": str(data.get("positioning") or "").strip()[:300],
+                "elevator": str(data.get("elevator") or "").strip()[:200]}, ""
     except Exception as exc:  # noqa: BLE001
         return {}, f"{exc.__class__.__name__}: {str(exc)[:120]}"
 
@@ -258,6 +270,12 @@ def propose(tenant: str, texts: list[str]) -> dict:
         "tone": tone,
         "tone_from": ("model, with evidence" if inferred.get("tone")
                       else "measurement only — no model ran"),
+        # Empty when the model did not run or the copy never says what the
+        # business does — arithmetic can describe a voice, it cannot state a
+        # positioning, and inventing one here would put words in the brand's
+        # mouth at the exact spot built to prevent that.
+        "positioning": inferred.get("positioning", ""),
+        "elevator": inferred.get("elevator", ""),
         "suggested_command": (
             f"set tone: {', '.join(tone)}" if tone else ""),
         "evidence": inferred.get("exemplars", []),
