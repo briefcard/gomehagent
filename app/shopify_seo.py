@@ -14,7 +14,7 @@ import json
 
 import httpx
 
-from . import config, data_tools
+from . import data_tools
 
 API_VERSION = data_tools.API_VERSION
 SEO_KEYS = ("title_tag", "description_tag")
@@ -25,8 +25,22 @@ def _store(profile: dict) -> str:
     return profile["creds_key"]
 
 
+def _cfg(store: str) -> dict:
+    """`{domain, token}` for a store key, the client's own connection first.
+
+    Was `config.SHOPIFY_STORES[store]` — the env group and nothing else. A
+    store the client connected themselves has no entry there, so the domain
+    lookup raised `KeyError` on a connection that was live and verified.
+    `credentials.shopify_config` is the same precedence `data_tools` already
+    reads the TOKEN through; the domain was simply never brought with it, which
+    is how one credential ended up half-resolved.
+    """
+    from . import credentials
+    return credentials.shopify_config(store) or {}
+
+
 def _base(store: str) -> str:
-    return f"https://{config.SHOPIFY_STORES[store]['domain']}/admin/api/{API_VERSION}"
+    return f"https://{_cfg(store)['domain']}/admin/api/{API_VERSION}"
 
 
 def _headers(store: str) -> dict:
@@ -49,14 +63,22 @@ def _send(store: str, method: str, path: str, body: dict) -> dict:
 
 
 def _store_url(store: str) -> str:
-    return f"https://{config.SHOPIFY_STORES[store]['domain']}"
+    return f"https://{_cfg(store)['domain']}"
 
 
 def _ok(profile: dict) -> str | None:
-    if _store(profile) not in config.SHOPIFY_STORES:
-        return (f"Shopify store '{_store(profile)}' not configured for site "
-                f"'{profile['key']}'. Available: {list(config.SHOPIFY_STORES)}")
-    return None
+    """The gate in front of every read and every publish.
+
+    Membership in `config.SHOPIFY_STORES` used to BE this check, so a client who
+    connected their store through the console passed every other layer —
+    stored, probed, `commerce` granted, shown connected — and was refused here
+    and told to edit an env var. Resolution is by tenant now (see
+    `app/connections.py`), which is the only form that can find a store
+    connected by OAuth, since that store has no env key to be keyed by.
+    """
+    from . import connections
+    cfg, refusal = connections.platform_config(profile)
+    return None if cfg else refusal
 
 
 def _seo_metafields(fields: dict) -> list:

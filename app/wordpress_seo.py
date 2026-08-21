@@ -3,7 +3,9 @@ a service-based site). Same function surface as shopify_seo, so the SEO tools an
 approval executors don't care about the platform.
 
 Uses the WordPress REST API with Application Passwords (Basic auth). Credentials
-per site live in config.WORDPRESS_SITES, keyed by profile['creds_key'].
+resolve through `app/connections.py` — the client's own connection first, the
+WORDPRESS_SITES env group second. This module read the env group directly until
+2026-08-20, which made every client-connected install unpublishable.
 
 Platform differences vs Shopify, handled here:
 - WordPress KEEPS <script> in post content, so JSON-LD is embedded inline
@@ -22,20 +24,29 @@ import re
 
 import httpx
 
-from . import config, sites
 
 INLINE_JSONLD = True  # WordPress content keeps <script> -> embed JSON-LD inline
 
 
 def _cfg(profile: dict) -> dict | None:
-    return config.WORDPRESS_SITES.get(profile.get("creds_key", ""))
+    """`{base_url, user, app_password}`, the client's own connection first.
+
+    Was `config.WORDPRESS_SITES` and nothing else — so a WordPress install the
+    client connected on `/connect/<token>` was stored encrypted, probed, shown
+    as connected and granted `cms`, and every publish still refused. The
+    connection was real and unreadable, which `credentials.google_config` had
+    already written down as worse than absent. Resolution is by tenant now; see
+    `app/connections.py`.
+    """
+    from . import connections
+    cfg, _ = connections.platform_config(profile)
+    return cfg or None
 
 
 def _ok(profile: dict) -> str | None:
-    if not _cfg(profile):
-        return (f"WordPress site '{profile.get('creds_key')}' not configured for "
-                f"site '{profile['key']}' (add it to WORDPRESS_SITES_JSON).")
-    return None
+    from . import connections
+    cfg, refusal = connections.platform_config(profile)
+    return None if cfg else refusal
 
 
 def _api(profile: dict) -> str:

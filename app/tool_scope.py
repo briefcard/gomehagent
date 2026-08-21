@@ -49,16 +49,22 @@ def _site_for(t) -> str:
     is what the unscoped code did, and is how one client's content work would
     have been done against another's property.
     """
-    from . import sites
+    from . import connections, sites
     try:
         profiles = sites.all_profiles()
     except Exception:  # noqa: BLE001 — a missing SEO config is not an outage
         return ""
     if t.key in profiles:
         return t.key
-    dom = (t.domain or "").lower().replace("www.", "")
+    # One normaliser, shared with `connections.tenant_for_site`, which is this
+    # same join run backwards. The inline version here lowercased and stripped
+    # `www.` but not the scheme, so a profile whose domain was written
+    # `https://acme.com` matched nothing while its inverse matched fine — two
+    # implementations of one rule disagreeing, which is the whole reason
+    # `app/connections.py` exists.
+    dom = connections.norm_domain(t.domain or "")
     for key, p in profiles.items():
-        if dom and (p.get("domain", "").lower().replace("www.", "") == dom):
+        if dom and connections.norm_domain(p.get("domain", "")) == dom:
             return key
     return ""
 
@@ -143,6 +149,26 @@ def _register_dynamic() -> None:
     DYNAMIC_DESCRIPTION["run_skill"] = skill.tool_description
 
 
+def handles(tenant: str) -> dict[str, str]:
+    """Every vocabulary this account answers to, resolved once.
+
+    `account_for` reads the Tenant row and, for `site`, re-parses
+    `SEO_SITES_JSON` on every call — and `filter_tools` called it once PER
+    TOOL. With eighty-odd schemas that is eighty database round trips and
+    eighty JSON parses to build a tool list, on every single turn of every
+    agent. Nothing was wrong with the answer; it was just being computed
+    from scratch for each tool that asked.
+
+    One read, one dict. `filter_tools` uses this; `guard` still asks for a
+    single parameter, since it handles one call at a time.
+    """
+    from . import tenants
+    t = tenants.get(tenant)
+    if not t:
+        return {}
+    return {param: (fn(t) or "") for param, fn in _RESOLVERS.items()}
+
+
 def account_for(tenant: str, param: str) -> str:
     """The value this account resolves to for one parameter, or ""."""
     from . import tenants
@@ -159,6 +185,7 @@ def filter_tools(tools: list[dict], tenant: str) -> list[dict]:
         return tools
     from . import tenants
     caps = tenants.capabilities(tenant)
+    resolved = handles(tenant)
     out = []
     for spec in tools:
         if spec.get("name") in DYNAMIC_DESCRIPTION or spec.get("name") == "run_skill":
@@ -174,7 +201,7 @@ def filter_tools(tools: list[dict], tenant: str) -> list[dict]:
         param, need = scoped
         if need and not caps.get(need):
             continue
-        if not account_for(tenant, param):
+        if not resolved.get(param):
             continue  # nothing to address for this client — do not offer it
         schema = dict(spec.get("input_schema") or {})
         schema["properties"] = {k: v for k, v in

@@ -127,6 +127,28 @@ SABOTAGES = [
         "why": "the nightly sweep goes silent when the API key expires, and "
                "silence from a monitor is indistinguishable from all-clear",
     },
+    {
+        "name": "client_credential_reaches_publish",
+        "file": "app/connections.py",
+        "find": "    tenant = tenant_for_site(site_key)\n    if tenant:",
+        "replace": "    tenant = tenant_for_site(site_key)\n    if False:  # SABOTAGE",
+        "suites": ["test_connections.py"],
+        "why": "a client who connected their own Shopify or WordPress through "
+               "the console is told to edit an env var, and cannot publish at "
+               "all if they were never in one \u2014 the connection is real, "
+               "verified, shown as connected, and unreadable by the only two "
+               "modules that write to their live site",
+    },
+    {
+        "name": "handles_resolved_once",
+        "file": "app/tool_scope.py",
+        "find": "        if not resolved.get(param):",
+        "replace": "        if not account_for(tenant, param):  # SABOTAGE",
+        "suites": ["test_connections.py"],
+        "why": "building one tool list costs a database read per scoped tool "
+               "and an SEO_SITES_JSON parse per site-scoped one \u2014 48 and 27 "
+               "of them, on every turn of every agent",
+    },
 ]
 
 
