@@ -336,6 +336,70 @@ def main() -> int:  # noqa: PLR0915
     ck("status reports both halves",
        st["live"] is True and st["proposed"] is True and st["approved_at"])
 
+    print("\n— identity lives on the Brand tab, editable, derivable —")
+    # Owner (2026-08-21): positioning/tone/hard-rules were read-only fossils
+    # of the intake era, and "all those things should live in Brand".
+    from fastapi.testclient import TestClient
+
+    from app import admin_ui, web
+    kb.set_brand("baci", positioning="Italian-designed tableware for the table.",
+                 tone="direct, warm")
+    kb.add_banned("baci", "made in Italy")
+    page = admin_ui.render_brand("test-secret", "baci")
+    ck("the identity editor renders PREFILLED — an edit, not a blank set-form",
+       'action="/admin/brand_update"' in page
+       and 'value="Italian-designed tableware for the table."' in page
+       and "direct, warm" in page)
+    ck("hard rules render with an adder", "made in Italy" in page
+       and 'name="add_banned"' in page)
+    ck("the voice deriver is a button, not a typed URL",
+       "derive_voice=1" in page)
+
+    c = TestClient(web.app)
+    c.get("/admin/ui", params={"key": "test-secret"})   # session cookie
+    r = c.post("/admin/brand_update",
+               data={"tenant": "baci",
+                     "positioning": "Set the table like Milan does.",
+                     "elevator_sentence": "Milanese tableware, shipped from Miami.",
+                     "tone": "confident, playful",
+                     "do_say": "la tavola\nset the table",
+                     "never_say": "cheap\nluxury for less"},
+               follow_redirects=False)
+    b2 = kb.brand("baci")
+    ck("saving the identity lands every field",
+       r.status_code == 303 and "#identity" in r.headers["location"]
+       and b2.positioning == "Set the table like Milan does."
+       and (b2.elevator or {}).get("sentence") == "Milanese tableware, shipped from Miami."
+       and (b2.voice or {}).get("tone") == ["confident", "playful"]
+       and (b2.voice or {}).get("do_say") == ["la tavola", "set the table"]
+       and (b2.voice or {}).get("never_say") == ["cheap", "luxury for less"])
+    c.post("/admin/brand_update", data={"tenant": "baci",
+                                        "tone": "measured, warm"},
+           follow_redirects=False)
+    b3 = kb.brand("baci")
+    ck("a tone-only apply touches tone and NOTHING else",
+       (b3.voice or {}).get("tone") == ["measured", "warm"]
+       and (b3.voice or {}).get("do_say") == ["la tavola", "set the table"]
+       and b3.positioning == "Set the table like Milan does.")
+    c.post("/admin/brand_update", data={"tenant": "baci",
+                                        "add_banned": "artisanal"},
+           follow_redirects=False)
+    ck("the hard-rule adder writes through the one ban-list path",
+       "artisanal" in (kb.brand("baci").banned_claims or []))
+
+    from app import voice as vc
+    vc.gather = lambda tenant, limit=25: (["We set tables the Milanese way."],
+                                          "3 pages read")
+    vc.propose = lambda tenant, texts: {
+        "tenant": tenant, "tone": ["assured", "warm"],
+        "exemplars": ["We set tables the Milanese way."]}
+    dpage = admin_ui.render_brand("test-secret", "baci", derive_voice=True)
+    ck("the derive panel shows the proposal — tone, verbatim exemplars",
+       "assured, warm" in dpage and "Milanese way" in dpage
+       and "Nothing was written" in dpage)
+    ck("…and truly wrote nothing",
+       (kb.brand("baci").voice or {}).get("tone") == ["measured", "warm"])
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

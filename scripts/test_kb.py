@@ -85,7 +85,11 @@ with TestClient(app) as cl:
         r = cl.get("/admin/ui", params={"key":"s3cret","tab":tab})
         ck(f"{tab} tab renders", r.status_code==200 and needle in r.text, f"{len(r.text)}b")
     r = cl.get("/admin/ui", params={"key":"s3cret","tab":"kb","tenant":"baci"})
-    ck("kb tab shows baci's rules", "handmade" in r.text and "Zodiac" in r.text)
+    # SPLIT DELIBERATELY (2026-08-21): the ban list moved to the Brand tab's
+    # identity editor; claims stayed on Knowledge. One pin per surface.
+    ck("kb tab shows baci's claims", "Zodiac" in r.text)
+    rb = cl.get("/admin/ui", params={"key":"s3cret","tab":"brand","tenant":"baci"})
+    ck("brand tab shows baci's rules", "handmade" in rb.text)
     r = cl.get("/admin/kb", params={"key":"s3cret","tenant":"ironside"})
     j = r.json()
     ck("kb json exposes everything", len(j["entities"])==8 and j["brand"] is not None)

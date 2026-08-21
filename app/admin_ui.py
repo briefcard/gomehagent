@@ -1641,17 +1641,23 @@ def _theme_preview(theme: dict) -> str:
     return f'<iframe sandbox="" srcdoc="{_esc(doc)}" class="bt-frame"></iframe>'
 
 
-def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
-    """One account's email LOOK: derive it, see where every field came from,
-    correct it, approve it.
+def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
+                 derive_voice: bool = False) -> str:
+    """One account's brand, whole: WHO they are and how they SOUND (identity —
+    positioning, elevator, voice, hard rules) and how their email LOOKS (the
+    derived, owner-approved theme).
 
     Split out of the Knowledge tab at the owner's instruction (2026-08-21) —
-    a one-line link is not a place — and given the same standing because it
-    answers the sibling question: Knowledge is what a generator may SAY, Brand
-    is what the result LOOKS like. Derive writes a PROPOSAL only; the approve
-    form here is the one path to the live theme, and the owner's edits win and
-    survive re-derives. Like Connections, the forms write to a single account,
-    so the cross-account view refuses to offer them.
+    a one-line link is not a place — then widened the same day: identity
+    fields lived on Knowledge as read-only display whose only write paths
+    were the intake kernel and two blank set-forms in a fold ("how does that
+    make sense?" — it didn't; the fossil of the interview-first era). Brand
+    now owns identity, edit-in-place and prefilled; Knowledge keeps what is
+    TRUE and sayable. `derive_voice` runs the voice proposer against the
+    client's own site — banned-claims-filtered, verbatim exemplars, and it
+    WRITES NOTHING: `set_brand` via the form remains the only way a voice
+    lands. Like Connections, the forms write to a single account, so the
+    cross-account view refuses to offer them.
     """
     from . import brand_theme
     tenant, t, _rows = _account(tenant)
@@ -1671,6 +1677,84 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "") -> st
            (f'<div class="note">{_esc(err)}</div>' if err else "")
     if note:
         note = f'<div class="flash">{note}</div>'
+
+    # --- identity: positioning, elevator, voice, hard rules -----------------
+    b = kb.brand(tenant)
+    voice_d = (b.voice or {}) if b else {}
+    banned = (b.banned_claims or []) if b else []
+    banned_chips = "".join(f'<span class="chip off">{_esc(p)}</span>'
+                           for p in banned) or \
+        '<span class="mut">none — the validator has nothing to enforce, and ' \
+        'campaign emails will not validate until at least one exists</span>'
+
+    voice_prop = ""
+    if derive_voice:
+        from . import voice as vc
+        texts, how = vc.gather(tenant, limit=15)
+        if not texts:
+            voice_prop = (f'<div class="note">Could not read the site to '
+                          f'derive a voice: {_esc(how)}</div>')
+        else:
+            got = vc.propose(tenant, texts)
+            tone_s = ", ".join(str(x) for x in (got.get("tone") or []))
+            exemplars = "".join(
+                f'<div class="msg"><div>&ldquo;{_esc(e)}&rdquo;</div></div>'
+                for e in (got.get("exemplars") or [])[:4])
+            voice_prop = f"""
+      <div class="card">
+        <div class="head"><h2>Voice, read off their own site</h2>
+          <span class="mut">{_esc(str(got.get("source") or how))}</span></div>
+        <p class="mut"><b>Nothing was written.</b> This is a proposal from
+        what the brand has already published — banned phrases filtered out,
+        quotes verbatim. Adopt it by saving the form above (the tone below is
+        prefilled there when you use this button's Apply).</p>
+        <p><b>Proposed tone:</b> {_esc(tone_s) or '<span class="mut">nothing inferred</span>'}</p>
+        {exemplars}
+        <form method="post" action="/admin/brand_update" class="row">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="tone" value="{_esc(tone_s)}">
+          <button class="sec">Apply this tone</button>
+          <span class="mut">writes tone only; everything else stays as set</span>
+        </form>
+      </div>"""
+
+    identity = f"""
+<div class="anchor" id="identity"></div>
+<div class="card">
+  <div class="head"><h2>Identity — who they are, how they sound</h2></div>
+  <form class="f" method="post" action="/admin/brand_update">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <label>Positioning — one sentence: what they do, and for whom</label>
+    <input name="positioning" value="{_esc(b.positioning if b else '')}"
+           placeholder="not set — every draft leans on this">
+    <label>Elevator sentence</label>
+    <input name="elevator_sentence"
+           value="{_esc((b.elevator or {}).get('sentence', '') if b else '')}"
+           placeholder="the one-liner a stranger repeats correctly">
+    <label>Tone — three or four words, comma separated</label>
+    <input name="tone" value="{_esc(', '.join(voice_d.get('tone') or []))}"
+           placeholder="e.g. direct, warm, unhurried">
+    <label>Do say — one per line</label>
+    <textarea name="do_say" rows="3">{_esc(chr(10).join(voice_d.get('do_say') or []))}</textarea>
+    <label>Never say — one per line (style guidance; hard rules are below)</label>
+    <textarea name="never_say" rows="3">{_esc(chr(10).join(voice_d.get('never_say') or []))}</textarea>
+    <div class="row"><button>Save identity</button>
+      <a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;tenant={_esc(tenant)}&amp;derive_voice=1">
+        <button class="sec" type="button">Derive voice from the site</button></a>
+      <span class="mut">reads their published pages; writes nothing</span>
+    </div>
+  </form>
+  <div style="margin-top:10px"><span class="mut">Hard rules the validator
+  enforces — a draft containing one is BLOCKED, never softened:</span></div>
+  <div class="chips">{banned_chips}</div>
+  <form class="row" method="post" action="/admin/brand_update"
+        style="align-items:center;gap:8px">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input name="add_banned" placeholder="add a phrase the validator must reject">
+    <button class="sec">Add hard rule</button>
+  </form>
+</div>
+{voice_prop}"""
 
     # The live half: what customers' emails render with today.
     if live:
@@ -1751,11 +1835,11 @@ and hand-set fields survive future re-derives.</p>
 {note}
 <div>
   <h1>Brand</h1>
-  <p class="mut">The email LOOK for this account — logo, palette, type, socials
-  and the CAN-SPAM mailing address. Derived from the client's own sources with
-  the origin of every field shown, reviewed here, and rendered into every
-  campaign email once approved. Voice and claims stay on Knowledge; this page
-  is how the result looks.</p>
+  <p class="mut">Who this account is, how it sounds, and how its email looks —
+  positioning and voice feed every draft; the theme is rendered into every
+  campaign email once approved. What may be ASSERTED (claims, objections, the
+  catalogue) lives on Knowledge.</p>
+  {identity}
   <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
   <div class="card"><div class="head"><h2>Proposed</h2></div>{prop_body}{actions}</div>
 </div>""")
@@ -1777,7 +1861,6 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
     c = kb.completeness(tenant)
     gaps = kb.gaps(tenant)
     b = kb.brand(tenant)
-    voice = (b.voice or {}) if b else {}
 
     if gaps:
         nxt = gaps[0]
@@ -1803,8 +1886,6 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
                'is still better than less — keep adding claims as they are earned.</p></div>')
 
     banned = (b.banned_claims or []) if b else []
-    banned_html = "".join(f'<span class="chip off">{_esc(p)}</span>' for p in banned) \
-        or '<span class="mut">None — the validator has nothing to enforce.</span>'
 
     # --- claims, split by whether they can actually be used ------------------
     inv = kb.claim_inventory(tenant)
@@ -2135,6 +2216,9 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
       {closed} gap(s) closed so far.</p>
     </div>"""
 
+    # Positioning, tone and the hard-rule adder moved to the Brand tab's
+    # identity editor (2026-08-21) — two controls for one decision is how
+    # they disagree, and the editor there is prefilled where these were blank.
     forms = (
         _kb_add_form(key, tenant, "claim", "Add a claim",
                      "claim | evidence | situation tags (spaces)")
@@ -2143,13 +2227,7 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
         + _kb_add_form(key, tenant, "audience", "Add an audience",
                        "key | name | pains (semicolons) | their words (semicolons)")
         + _kb_add_form(key, tenant, "entity", "Add something they sell",
-                       "type | key | name | price | description")
-        + _kb_add_form(key, tenant, "banned_claims", "Add a hard rule",
-                       "phrases the validator must reject, separated by semicolons", 1)
-        + _kb_add_form(key, tenant, "positioning", "Set positioning",
-                       "one sentence: what they do, and for whom")
-        + _kb_add_form(key, tenant, "tone", "Set voice",
-                       "three or four words, comma separated", 1))
+                       "type | key | name | price | description"))
 
     warn = ((f'<div class="note">{_esc(err)}</div>' if err else "")
             + (f'<div class="ok">{_esc(msg)}</div>' if msg else ""))
@@ -2159,8 +2237,8 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
     # (owner, 2026-08-21 — a one-line link was not a place). This line stays so
     # somebody reading "what may be said" is told where "how it looks" went.
     theme_line = (
-        f'<p class="mut">What may be said lives here; how it LOOKS — logo, '
-        f'palette, mailing address — is the '
+        f'<p class="mut">What may be ASSERTED lives here. Who the brand is — '
+        f'positioning, voice, hard rules — and how its email looks are the '
         f'<a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;'
         f'tenant={_esc(tenant)}">Brand tab →</a></p>')
 
@@ -2209,20 +2287,16 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
     <span><b>{len(unk)}</b> open gaps</span>
   </div>
   <details class="sec">
-    <summary>Identity — positioning, voice, hard rules &amp; policy</summary>
+    <summary>Selection &amp; next steps — how picking works (advanced)</summary>
     {_kv([
-      ("positioning", _esc(b.positioning if b else "") or _mut("not set")),
-      ("elevator", _esc((b.elevator or {}).get("sentence", "") if b else "")
-                   or _mut("not set")),
-      ("tone", _words(voice.get("tone"))),
-      ("do say", _words(voice.get("do_say"), "nothing specified")),
-      ("never say", _words(voice.get("never_say"), "nothing specified")),
       ("selection", _selection_line(kb.selection_config(tenant))),
       ("next steps", _next_steps_line((b.next_steps or {}) if b else {})),
     ])}
-    <div><span class="mut">Hard rules the validator enforces:</span></div>
-    <div class="chips">{banned_html}</div>
     {_approval_policy_html((b.approval_policy or {}) if b else {})}
+    <p class="mut">Positioning, voice and the hard-rule list moved to the
+    <a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;tenant={_esc(tenant)}">Brand
+    tab</a> (owner, 2026-08-21) — identity is the brand's, facts are the
+    knowledge base's.</p>
   </details>
 </div>
 

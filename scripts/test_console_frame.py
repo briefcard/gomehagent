@@ -152,8 +152,13 @@ def main() -> int:
            "All accounts" not in head)
 
     print("\n— switching actually switches —")
-    a = c.get("/admin/ui?key=s3cret&tab=kb&tenant=baci").text
-    b = c.get("/admin/ui?key=s3cret&tab=kb&tenant=ironside").text
+    # RETARGETED DELIBERATELY (2026-08-21): the hard-rule list moved from the
+    # Knowledge tab to Brand's identity editor. The property under test —
+    # switching accounts switches the DATA, and neither account's rules leak
+    # into the other's page — is unchanged; it is asserted where the rules
+    # now render.
+    a = c.get("/admin/ui?key=s3cret&tab=brand&tenant=baci").text
+    b = c.get("/admin/ui?key=s3cret&tab=brand&tenant=ironside").text
     ck("baci's rules appear for baci", "hand-decorated" in a)
     ck("  and ironside's for ironside", "cheapest venue" in b)
     ck("  and neither shows the other's",

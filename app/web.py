@@ -371,6 +371,68 @@ def brand_theme_page(request: Request, key: str = Depends(admin_key),
     return RedirectResponse(back, 303)
 
 
+@app.post("/admin/brand_update")
+async def brand_update(request: Request, key: str = Depends(admin_key)):
+    """Save the brand IDENTITY from the Brand tab — positioning, elevator
+    sentence, voice, and additions to the hard-rule list.
+
+    The fields these write existed since the KB was built and were editable
+    from nowhere but the intake kernel and two blank set-forms (owner,
+    2026-08-21: "how does that make sense?"). Prefilled edit-in-place now,
+    same as claims got. Submitted values REPLACE — the form shows what IS, so
+    what comes back is the whole intended value, blanks included. Only fields
+    the form carried are touched, so the derive panel's tone-only apply
+    cannot blank the rest.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    b = kbm.brand(tenant) or kbm.ensure_brand(tenant)
+
+    fields: dict = {}
+    if form.get("positioning") is not None:
+        fields["positioning"] = str(form.get("positioning", "")).strip()
+    if form.get("elevator_sentence") is not None:
+        elev = dict(b.elevator or {})
+        elev["sentence"] = str(form.get("elevator_sentence", "")).strip()
+        fields["elevator"] = elev
+
+    voice = dict(b.voice or {})
+    changed_voice = False
+    if form.get("tone") is not None:
+        voice["tone"] = [t.strip() for t in
+                         str(form.get("tone", "")).split(",") if t.strip()]
+        changed_voice = True
+    for f in ("do_say", "never_say"):
+        if form.get(f) is not None:
+            voice[f] = [ln.strip() for ln in
+                        str(form.get(f, "")).splitlines() if ln.strip()]
+            changed_voice = True
+    if changed_voice:
+        fields["voice"] = voice
+
+    msgs = []
+    if fields:
+        res = kbm.set_brand(tenant, **fields)
+        if not res.startswith("Updated"):
+            return RedirectResponse(
+                f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+                f"&err={quote(res[:200])}#identity", 303)
+        msgs.append("identity saved")
+    rule = str(form.get("add_banned", "")).strip()
+    if rule:
+        msgs.append(kbm.add_banned(tenant, rule)[:120])
+    return RedirectResponse(
+        f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+        f"&ok={quote(' · '.join(msgs) or 'nothing to change')}#identity", 303)
+
+
 @app.post("/admin/brand_theme/derive")
 async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
     """Run the deriver and re-show the review page. Writes the PROPOSAL only —
@@ -1308,7 +1370,9 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "brand":
         return ui.render_brand(link_key, tenant,
                                msg=request.query_params.get("ok", ""),
-                               err=request.query_params.get("err", ""))
+                               err=request.query_params.get("err", ""),
+                               derive_voice=bool(
+                                   request.query_params.get("derive_voice")))
     if tab == "assurance":
         try:
             days = int(request.query_params.get("days", "30"))

@@ -74,16 +74,25 @@ def main() -> int:
             if r.description:
                 ck(f"{t}: {r.tag} described", has(page, r.description),
                    r.description[:40])
+        # RETARGETED DELIBERATELY (2026-08-21): identity — hard rules, voice,
+        # positioning — moved to the Brand tab at the owner's instruction
+        # ("all those things should live in Brand"). The invariant is
+        # unchanged: if a fact is in the KB it is VISIBLE somewhere named,
+        # and these are now visible (and editable) on Brand.
+        bpage = admin_ui.render_brand(KEY, t)
         for p in (b.banned_claims or []) if b else []:
-            ck(f"{t}: hard rule shown", has(page, p), p[:40])
+            ck(f"{t}: hard rule shown on Brand", has(bpage, p), p[:40])
+        for tone in ((b.voice or {}).get("tone") or []) if b else []:
+            ck(f"{t}: voice tone shown on Brand", has(bpage, tone))
+        if b and b.positioning:
+            ck(f"{t}: positioning shown on Brand", has(bpage, b.positioning),
+               b.positioning[:40])
         for stage, v in ((b.next_steps or {}) if b else {}).items():
             ck(f"{t}: next step '{stage}'", has(page, (v or {}).get("ask", "")),
                stage)
         if b and (b.selection or {}).get("primary_type"):
             ck(f"{t}: selection primary_type",
                has(page, b.selection["primary_type"]))
-        for tone in ((b.voice or {}).get("tone") or []) if b else []:
-            ck(f"{t}: voice tone", has(page, tone))
 
     # ---- 2. non-selectable proof is shown as such, not hidden --------------
     import datetime as _dt
