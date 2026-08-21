@@ -11,7 +11,7 @@ import json
 
 import anthropic
 
-from . import config
+from . import config, tools as _tools
 
 client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
@@ -476,8 +476,16 @@ def triage_email(email: dict, account_alias: str, sender_trusted: bool,
                     results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": data_tools.dispatch(
-                            block.name, dict(block.input), tenant=tenant),
+                        # Through the same door the kernel uses. This called
+                        # `data_tools.dispatch` directly, which applies the
+                        # account boundary and files NOTHING — so the busiest
+                        # model loop in the system, the one answering mail every
+                        # few minutes, contributed no rows to the ledger that
+                        # Diagnostics reads. Its platform calls were invisible in
+                        # exactly the report you open when mail stops working.
+                        "content": _tools.call(
+                            block.name, dict(block.input), tenant,
+                            source="triage"),
                     })
             messages.append({"role": "user", "content": results})
             continue

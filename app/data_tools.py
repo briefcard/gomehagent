@@ -9,7 +9,7 @@ import json
 import httpx
 from googleapiclient.discovery import build
 
-from . import config, gmail_client
+from . import config, gmail_client, toolcalls as _tc
 
 API_VERSION = "2024-10"
 
@@ -57,6 +57,12 @@ def _shopify_token(store: str) -> str:
     return token
 
 
+def _shopify_tenant(store: str) -> str:
+    from . import connections
+    return connections.tenant_for_store(store)
+
+
+@_tc.http_seam("shopify", _shopify_tenant, method="GET")
 def _shopify(store: str, path: str, params: dict | None = None) -> dict:
     cfg = _store_cfg(store)
     r = httpx.get(

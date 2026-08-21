@@ -181,6 +181,48 @@ SABOTAGES = [
                "once \u2014 while the easy route sits one env var away and "
                "nothing says so",
     },
+    {
+        "name": "adapter_round_trips_recorded",
+        "file": "app/toolcalls.py",
+        "find": "                record(tenant, f\"{provider}:{verb} {clean_path(path)}\",",
+        "replace": "                return  # SABOTAGE\n                record(tenant, f\"{provider}:{verb} {clean_path(path)}\",",
+        "suites": ["test_toolcalls.py"],
+        "why": "every Shopify and WordPress round trip vanishes from the "
+               "ledger again, so Diagnostics reports the two platforms that "
+               "run every day as untimed \u2014 and an untimed call reads as "
+               "fast rather than as unmeasured",
+    },
+    {
+        "name": "model_tool_calls_gated",
+        "file": "app/tools.py",
+        "find": "    args, refusal = tool_scope.guard(name, args, tenant)",
+        "replace": "    refusal = \"\"  # SABOTAGE",
+        "suites": ["test_tenant_isolation.py", "test_scope.py"],
+        "why": "a model can address another client's store or inbox from "
+               "either loop \u2014 the kernel's and the mail path's now share "
+               "this one door, so removing it opens both",
+    },
+    {
+        "name": "one_layer_per_provider",
+        "file": "app/toolcalls.py",
+        "find": "        if r.provider in platform_layer and r.source != \"adapter\":\n            continue          # counted from the round trip instead",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_toolcalls.py"],
+        "why": "instrumenting the adapters doubles every provider total and "
+               "HALVES its failure rate, so a completely dead token reads 0.5 "
+               "\u2014 exactly the line this report draws between a broken "
+               "connection and the internet",
+    },
+    {
+        "name": "wordpress_blog_reads_callable",
+        "file": "app/wordpress_seo.py",
+        "find": "    post = _get(profile, f\"posts/{article_id}\", {\"context\": \"edit\"})",
+        "replace": "    post = _send(profile, \"GET\", f\"posts/{article_id}\", params={\"context\": \"edit\"})  # SABOTAGE",
+        "suites": ["test_toolcalls.py"],
+        "why": "the 'review and revise existing articles' half of the blog "
+               "path raises TypeError before reaching WordPress \u2014 "
+               "`_send` takes `body` positionally and has no `params`",
+    },
 ]
 
 

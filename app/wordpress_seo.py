@@ -24,6 +24,8 @@ import re
 
 import httpx
 
+from . import toolcalls as _tc
+
 
 INLINE_JSONLD = True  # WordPress content keeps <script> -> embed JSON-LD inline
 
@@ -58,6 +60,12 @@ def _auth(profile: dict) -> tuple:
     return (c["user"], c["app_password"])
 
 
+def _tenant(profile: dict) -> str:
+    from . import connections
+    return connections.tenant_for_site((profile or {}).get("key", ""))
+
+
+@_tc.http_seam("wordpress", _tenant, method="GET")
 def _get(profile: dict, path: str, params: dict | None = None):
     r = httpx.get(f"{_api(profile)}/{path}", params=params or {},
                   auth=_auth(profile), timeout=30)
@@ -65,6 +73,7 @@ def _get(profile: dict, path: str, params: dict | None = None):
     return r.json()
 
 
+@_tc.http_seam("wordpress", _tenant)
 def _send(profile: dict, method: str, path: str, body: dict) -> dict:
     r = httpx.request(method, f"{_api(profile)}/{path}", json=body,
                       auth=_auth(profile), timeout=30)
@@ -196,9 +205,15 @@ def list_articles(profile: dict, blog_id=None, limit: int = 20) -> str:
     """Published posts, newest first. `blog_id` is accepted and ignored —
     WordPress has one post type where Shopify has many blogs, and keeping the
     signatures identical is what lets `sites.backend()` stay duck-typed."""
-    posts = _send(profile, "GET", "posts",
-                  params={"per_page": min(int(limit or 20), 100),
-                          "status": "publish,draft"}) or []
+    # `_get`, not `_send`. This called `_send(profile, "GET", "posts",
+    # params=...)` — and `_send` takes `body` positionally and has no `params`,
+    # so it raised TypeError before reaching WordPress. Same in `get_article`
+    # below. Both were written to mirror `shopify_seo`'s shape, both are reads,
+    # and neither has ever been called for real — which is the only reason a
+    # TypeError on the happy path survived being shipped.
+    posts = _get(profile, "posts",
+                 {"per_page": min(int(limit or 20), 100),
+                  "status": "publish,draft"}) or []
     if not posts:
         return "No posts."
     return "\n".join(
@@ -210,7 +225,7 @@ def list_articles(profile: dict, blog_id=None, limit: int = 20) -> str:
 def get_article(profile: dict, blog_id=None, article_id=None) -> str:
     """The full post, body included — a revision that has not read the current
     text is a rewrite, and rewriting a page that ranks loses the position."""
-    post = _send(profile, "GET", f"posts/{article_id}", params={"context": "edit"})
+    post = _get(profile, f"posts/{article_id}", {"context": "edit"})
     if not post:
         return f"No post {article_id}."
     return json.dumps({

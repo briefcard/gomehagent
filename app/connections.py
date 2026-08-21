@@ -87,6 +87,33 @@ def tenant_for_site(site_key: str) -> str:
     return ""
 
 
+def tenant_for_store(store_key: str) -> str:
+    """Which account a Shopify store key belongs to, or "".
+
+    The third vocabulary's inverse, and the same join `credentials
+    .shopify_config` does privately. Public here because telemetry needs it:
+    `shopify_seo` and `data_tools` are keyed by a store key, and a tool call
+    filed against no account is a row Diagnostics cannot scope.
+
+    Falls back to treating the key AS an account key, which is true for every
+    store today (`Tenant.shopify_store` is "baci" on the tenant "baci") and is
+    also what `shopify_config` already assumes. Returns "" for nothing, never a
+    default account: attributing one client's calls to another is worse than
+    attributing them to nobody.
+    """
+    if not store_key:
+        return ""
+    from . import db
+    with db.SessionLocal() as s:
+        row = (s.query(db.Tenant)
+               .filter(db.Tenant.shopify_store == store_key).first())
+        if row:
+            return row.key
+        if s.query(db.Tenant).filter(db.Tenant.key == store_key).first():
+            return store_key
+    return ""
+
+
 def _env_for(platform: str, creds_key: str) -> dict:
     """The env-group blob for a platform, in that platform's own shape."""
     if platform == "shopify":

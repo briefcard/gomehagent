@@ -31,7 +31,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**64 suites, 64 pass.** Check the OUTPUT, not the exit code, and skip
+**65 suites, 65 pass.** Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The
@@ -935,6 +935,7 @@ Traced mechanically on 2026-08-18. This is the most important table in the file.
     web.py              everything                 console + bridge
     connections.py      credentials                one resolver, by TENANT
     llm.py              usage model_error          one door to the model
+    tools.py            tool_scope toolcalls       one door for a model's tool
 
 **The mail path is grounded and guarded — 2026-08-19.** The audit's worst
 finding was not a bug but an absence: `resolve.resolve` had exactly ONE caller,
@@ -1916,9 +1917,90 @@ token begins with it. §2.59.
   `SEO_MODEL` is `claude-opus-4-8`. Changing them changes cost and behaviour on
   every path at once, which is the owner's call, not a refactor's.
 
+## L3 — one door for a tool the model chose
+
+The audit that opened this thread said `tool_scope.guard` had two callers and
+that the paths reaching a platform another way were "unguarded and unrecorded".
+Half of that was right, and measuring which half is what shaped the work.
+
+**The guard was fine.** Wherever a MODEL picks a tool — the kernel loop and
+`triage`'s own loop — `tool_scope.guard` runs. The other paths (`worker`,
+`ops_jobs`, `skill_pack`, the adapters) are code choosing a call, not a model
+choosing a client, and their correctness is `connections.resolve` — which is
+what L1 fixed. Rewriting them behind a model-facing boundary would have been
+ceremony.
+
+**The recording was not fine, and it was skewed in the worst possible
+direction.** `toolcalls.record` had two callers, both in `kernel.py`, plus three
+adapters wrapped through `instrument` — Omnisend, Constant Contact and Canva,
+every one of which is on this file's own *built and NEVER called for real* list.
+The modules that reach live stores and sites all day recorded nothing. The
+ledger covered the code that has never run and missed the code that runs
+constantly, which is the real content of Diagnostics' "reads as untimed" note.
+
+Two pieces:
+
+* **`toolcalls.http_seam`** wraps a seam whose key is not a tenant — a store key
+  or a site profile — using `tenant_of` to turn it into an account. That join is
+  `app/connections.py`, built this morning for a different reason;
+  `tenant_for_store` is new and public because a tool call filed against no
+  account is a row Diagnostics cannot scope. Five seams instrumented:
+  `shopify_seo._get/_send`, `wordpress_seo._get/_send`, `data_tools._shopify`.
+
+* **`app/tools.py`** is the door for a tool the model named: guard, run, record.
+  Those three were written out in `kernel._dispatch` and nowhere else, and
+  `triage` ran a second model loop that did the first and skipped the third —
+  so the loop answering the owner's mail every few minutes contributed nothing
+  to the ledger you open when mail stops working. `kernel` delegates now and
+  `triage` calls it with `source="triage"`, so the boundary is proven once
+  against the thing both loops share.
+
+**Adding a layer nearly corrupted the headline diagnostic.** Two rows per model
+tool call doubled every provider total and, because `data_tools.dispatch`
+swallows the exception into a `"Tool error"` string, halved the failure rate: a
+completely dead Shopify token measured `0.5` — exactly the line `report` draws
+between a broken connection and the internet. `by_provider` counts one layer per
+provider now and says which layer it used. Same lesson as
+`compliance_double_run`, found the same way.
+
+**A suite assertion was CHANGED DELIBERATELY and the way it failed is worth
+keeping.** `test_tenant_isolation` pinned the literal source text of one call,
+indentation and all — §1's *string-matching instead of state-checking*, inside
+the suite this repo calls the standard rather than a preference. It failed for a
+change that strengthened the property it protects. It asks behaviour now.
+
+**And wrapping a seam means reading its callers, which found a crash.** Both
+WordPress blog READS called `_send(profile, "GET", path, params=...)` — `_send`
+takes `body` positionally and has no `params`, so `list_articles` and
+`get_article` raised TypeError before reaching WordPress. They are the "review
+and revise existing articles" half of the blog path. Nothing had ever called
+them. The suite drives them now.
+
+### What L3 still does not include
+
+**The 82 schemas are still hand-written in three modules** — `command_agent`
+(38), `seo_tools` (33), `data_tools` (11). One registry where a tool declares
+`name / schema / handler / capability / account_param / writes` is still the
+right shape, and it was NOT done here, deliberately: it is a large mechanical
+refactor whose payoff is preventing future drift rather than closing a present
+hole. `ACCOUNT_PARAMS` already fails the isolation suite by name when a tool
+exposes an account parameter without registering, which is the drift that
+actually costs something. Do it when a fourth tool pack appears, or when a tool
+needs to declare something the current shape cannot express — `writes`, for the
+validator, is the likely trigger.
+
+**`gmail_client` is still unrecorded.** It has no single seam: `.execute()` is
+called at a dozen sites through `googleapiclient`. Instrumenting it is a
+different shape of job, and until it is done the mail path's Google round trips
+are absent from the ledger.
+
+
 ## Verified vs assumed
 
-**Ran and confirmed.** All **64 suites pass**, none touching the network,
+**Ran and confirmed.** All **65 suites pass**, none touching the network,
+and all **19 sabotage guards report caught, none stale**. (The run
+reported 66 — another thread had an uncommitted suite in the worktree at
+the time. 65 is what this branch carries.)
 including `test_tenant_isolation.py` **unmodified**. New: `test_diagnostics.py`
 (42 checks). `test_console_frame.py` was rewritten rather than extended — see
 §2.41; its old form asserted scoping against empty tables. `test_assurance.py`,
@@ -2122,13 +2204,13 @@ unguarded write paths above are where the actual risk is.
 
     python3 scripts/sabotage.py
 
-Fifteen guards, each disabled in turn against the suites that claim to cover it.
+Nineteen guards, each disabled in turn against the suites that claim to cover it.
 Six tests in `DEFECTS` passed for the wrong reason and every one was found by
 accident — three of them in a single day. This does it on purpose. Read a
 `STALE` line as loudly as a `MISSED` one: it means the code moved and that
 entry has been covering nothing since.
 
-**Run the suites first, before changing anything.** 64 of them, all offline:
+**Run the suites first, before changing anything.** 65 of them, all offline:
 
     for f in scripts/test_*.py; do
       [ "$(basename $f)" = "test_brief.py" ] && continue

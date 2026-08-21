@@ -104,16 +104,41 @@ def report(tenant: str = "", days: int = 30) -> dict:
         b["median_ms"] = (sorted(b["ms"])[len(b["ms"]) // 2] if b["ms"] else 0)
         del b["ms"]
 
+    # ONE LAYER PER PROVIDER, and this is not tidiness.
+    #
+    # A model tool call that reaches Shopify now files TWO rows: the tool the
+    # model named, and the HTTP round trip under it. Counting both doubles every
+    # provider total — and worse, it halves the failure rate, because
+    # `data_tools.dispatch` catches the exception and returns a "Tool error"
+    # STRING, so the platform row records a failure while the tool row records a
+    # success for the very same call.
+    #
+    # Measured: a completely dead Shopify token read as `failure_rate 0.5`. This
+    # report's own comment below says most-of-the-time means a broken connection
+    # and occasionally means the internet, so a dead credential landed exactly on
+    # the line between them.
+    #
+    # The platform layer is the truthful one where it exists, so it wins. Where
+    # no seam is instrumented — Google, today — the tool layer is all there is
+    # and is used, with `layer` saying so, because a provider counted from the
+    # tool layer has durations that include our own work rather than the round
+    # trip, and reading those as network time is the next version of this bug.
+    platform_layer = {r.provider for r in rows
+                      if r.source == "adapter" and r.provider}
     by_provider: dict[str, dict] = {}
     for r in rows:
         if not r.provider:
             continue          # our own tables say nothing about their stack
+        if r.provider in platform_layer and r.source != "adapter":
+            continue          # counted from the round trip instead
         b = by_provider.setdefault(r.provider, {"calls": 0, "failed": 0,
                                                 "last_error": ""})
         b["calls"] += 1
         if r.ok != "yes":
             b["failed"] += 1
             b["last_error"] = b["last_error"] or (r.error or "")[:160]
+    for prov, b in by_provider.items():
+        b["layer"] = "platform" if prov in platform_layer else "tool"
 
     # A provider that fails MOST of the time is a broken connection; one that
     # fails occasionally is the internet. Ranked so the first is not buried
@@ -144,6 +169,76 @@ def reached(tenant: str, days: int = 30) -> dict[str, int]:
     return out
 
 
+def clean_path(path: str) -> str:
+    """A path safe to store as telemetry, and coarse enough to group by.
+
+    One id per segment makes every call unique and useless to group by, and it
+    would also put a client's order numbers in our own telemetry — which is the
+    payload rule one level down. Numeric-looking segments are dropped.
+    """
+    head = str(path or "").split("?")[0].rstrip("/")
+    return "/".join(seg for seg in head.split("/")
+                    if not any(ch.isdigit() for ch in seg)) or "/"
+
+
+def http_seam(provider: str, tenant_of, method: str = ""):
+    """Record every round trip through a seam keyed by something that is not a tenant.
+
+    `instrument` fits the three adapters whose `call` already begins with a
+    tenant — and those three are Omnisend, Constant Contact and Canva, every
+    one of which has never been called for real. The modules that run EVERY
+    DAY were not instrumented at all: `shopify_seo` is keyed by a store key and
+    `wordpress_seo` by a site profile, so neither fits that signature.
+
+    The result was telemetry that covered the code which never runs and missed
+    the code which runs constantly, which is why Diagnostics reports most of
+    this system as untimed. `tenant_of` is how the seam's own key becomes an
+    account — the join `app/connections.py` exists to provide.
+
+    `method=""` means the seam takes the HTTP verb as its SECOND argument
+    (`_send(who, method, path, ...)`); a given verb means it is fixed for that
+    seam (`_get(who, path, ...)`).
+
+    **A raising seam is recorded and re-raised.** These wrap `raise_for_status`,
+    so a dead token arrives as an exception — and an exception is exactly the
+    call worth having in the ledger. Swallowing it here would turn a broken
+    connection into a silent empty answer, which is the failure mode this whole
+    ledger exists to make visible.
+    """
+    import functools
+    import time as _clock
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapped(who, *a, **kw):
+            if method:
+                verb, path = method, (a[0] if a else "")
+            else:
+                verb, path = ((a[0] if a else ""), (a[1] if len(a) > 1 else ""))
+            started = _clock.perf_counter()
+            err = ""
+            res = None
+            try:
+                res = fn(who, *a, **kw)
+                return res
+            except Exception as exc:                             # noqa: BLE001
+                err = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                raise
+            finally:
+                try:
+                    tenant = tenant_of(who) or ""
+                except Exception:                                # noqa: BLE001
+                    # Never let the ATTRIBUTION of a call break the call.
+                    tenant = ""
+                record(tenant, f"{provider}:{verb} {clean_path(path)}",
+                       source="adapter", provider=provider, ok=not err,
+                       error=err,
+                       ms=int((_clock.perf_counter() - started) * 1000),
+                       bytes_back=len(str(res)) if res is not None else 0)
+        return wrapped
+    return deco
+
+
 def instrument(provider: str, fn):
     """Wrap an adapter's `call` seam so every platform round trip is recorded.
 
@@ -165,12 +260,8 @@ def instrument(provider: str, fn):
         try:
             ok = bool((res or {}).get("ok"))
             err = "" if ok else str((res or {}).get("error", ""))
-            head = str(path).split("?")[0].rstrip("/")
-            # One id per path segment is enough to make every call unique and
-            # useless to group by, so numeric-looking segments are dropped.
-            clean = "/".join(seg for seg in head.split("/")
-                             if not any(ch.isdigit() for ch in seg))
-            record(tenant, f"{provider}:{method} {clean or '/'}",
+            clean = clean_path(path)
+            record(tenant, f"{provider}:{method} {clean}",
                    source="adapter", provider=provider, ok=ok, error=err,
                    ms=int((_clock.perf_counter() - started) * 1000),
                    bytes_back=len(str((res or {}).get("data", ""))))

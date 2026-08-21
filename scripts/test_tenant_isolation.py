@@ -306,9 +306,32 @@ def main() -> int:
        tenants.for_alias("nosuchinbox") == "")
 
     tsrc = pathlib.Path("app/triage.py").read_text()
-    ck("triage's own tool loop is gated",
-       "data_tools.tools_for(tenant)" in tsrc
-       and "dispatch(\n                            block.name, dict(block.input), tenant=tenant)" in tsrc)
+    # CHANGED DELIBERATELY 2026-08-20. This pinned the literal source text of
+    # one call, indentation and all:
+    #
+    #   "dispatch(\n     block.name, dict(block.input), tenant=tenant)" in tsrc
+    #
+    # which is §1's *string-matching instead of state-checking* — it fails for
+    # a refactor that keeps the boundary and passes for any rewrite that
+    # happens to preserve the characters. It broke the moment triage was routed
+    # through the shared guarded door, which STRENGTHENS the property it was
+    # written to protect.
+    #
+    # Asked as behaviour now, on the door both model loops share, plus the
+    # durable structural half: that the UNGATED call is absent.
+    ck("triage still builds its tool list per account",
+       "data_tools.tools_for(tenant)" in tsrc)
+    ck("triage's tool loop goes through the guarded door, not around it",
+       "_tools.call(" in tsrc and "data_tools.dispatch(" not in tsrc)
+    from app import tools as _tools_mod
+    refusal = _tools_mod.call("shopify_find_orders", {"store": "someone-else"},
+                              "baci", source="test")
+    ck("and that door refuses a call naming another account BY NAME",
+       "Refused" in refusal and "someone-else" in refusal, refusal)
+    ck("recording the refusal as a failed call — a blocked account must not "
+       "read as an idle one",
+       any(r.tool == "shopify_find_orders" and r.ok == "no"
+           for r in db.SessionLocal().query(db.ToolCall).all()))
     ck("triage's memory is scoped", 'memory_block("", tenant)' in tsrc)
     ck("triage is told the account's rules", "tenants.agent_block(tenant)" in tsrc)
 

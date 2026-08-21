@@ -14,7 +14,7 @@ import json
 
 import httpx
 
-from . import data_tools
+from . import data_tools, toolcalls as _tc
 
 API_VERSION = data_tools.API_VERSION
 SEO_KEYS = ("title_tag", "description_tag")
@@ -48,6 +48,12 @@ def _headers(store: str) -> dict:
             "Content-Type": "application/json"}
 
 
+def _tenant(store: str) -> str:
+    from . import connections
+    return connections.tenant_for_store(store)
+
+
+@_tc.http_seam("shopify", _tenant, method="GET")
 def _get(store: str, path: str, params: dict | None = None) -> dict:
     r = httpx.get(f"{_base(store)}/{path}", headers=_headers(store),
                   params=params or {}, timeout=30)
@@ -55,6 +61,7 @@ def _get(store: str, path: str, params: dict | None = None) -> dict:
     return r.json()
 
 
+@_tc.http_seam("shopify", _tenant)
 def _send(store: str, method: str, path: str, body: dict) -> dict:
     r = httpx.request(method, f"{_base(store)}/{path}", headers=_headers(store),
                       json=body, timeout=30)

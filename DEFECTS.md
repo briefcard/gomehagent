@@ -1738,7 +1738,7 @@ done
 
 **Check the OUTPUT, not the exit code**, and skip `test_brief.py` — it is an
 argparse CLI that exits 0 whatever happens, and counting it as a passing test
-is a mistake this project made for weeks. 64 suites, none touching the network,
+is a mistake this project made for weeks. 65 suites, none touching the network,
 ~7 minutes; a single shell call may hit a 2-minute timeout, so background it.
 
 **Then check the suite would notice a guard going:**
@@ -1747,7 +1747,7 @@ is a mistake this project made for weeks. 64 suites, none touching the network,
 python3 scripts/sabotage.py
 ```
 
-Fifteen guards, each disabled in turn against the suites that claim to cover it.
+Nineteen guards, each disabled in turn against the suites that claim to cover it.
 Read a `STALE` line as loudly as a `MISSED` one — it means the code moved and
 that entry has been covering nothing since.
 
@@ -1947,3 +1947,148 @@ way `test_kb_ui.py` does — including that a stored secret never reaches the
 page, checked by storing a known value rather than by hunting for a prefix that
 also appears in the instructions. `sabotage.py` entry
 `oauth_route_named_for_api_key_providers`.
+
+---
+
+### 2.60 The telemetry covered the code that never runs — fixed 2026-08-20
+
+`toolcalls.record` had **exactly two callers**, both in `kernel.py`, plus three
+adapters wrapped through `instrument`: Omnisend, Constant Contact and Canva.
+
+Every one of those three is on this file's own *built and NEVER called for real*
+list.
+
+Meanwhile `shopify_seo`, `wordpress_seo` and `data_tools` reach live stores and
+sites all day through plain `httpx`, and recorded nothing — because `instrument`
+fits a signature beginning with a tenant, and those modules are keyed by a store
+key and a site profile instead. So the ledger covered the code that has never
+run and missed the code that runs constantly.
+
+That is why Diagnostics reports most of this system as untimed, and the note it
+carries about that — *"anything reaching a platform another way records no
+duration and reads as untimed rather than fast"* — was describing nearly the
+whole platform surface rather than an edge.
+
+**`toolcalls.http_seam(provider, tenant_of, method="")`** wraps a seam whose key
+is not a tenant. `tenant_of` is exactly the join `app/connections.py` was built
+for a few hours earlier — `tenant_for_store` is new and public for this reason,
+since a tool call filed against no account is a row Diagnostics cannot scope.
+Five seams: `shopify_seo._get/_send`, `wordpress_seo._get/_send`,
+`data_tools._shopify`.
+
+Three properties the suite pins, each of which is a way this could have been
+written wrong:
+
+* **A raising seam is recorded and re-raised.** These wrap `raise_for_status`,
+  so a dead token arrives as an exception — and that is exactly the call worth
+  having in the ledger. Swallowing it would turn a broken connection into a
+  silent empty answer.
+* **A client's ids never enter our telemetry.** `products/8123456789.json` is
+  filed as `shopify:GET products`. One id per segment would make every row
+  unique and useless to group by, and would put order numbers in our own logs.
+* **A broken attribution costs a label, never the call.** If the tenant join
+  raises, the row is filed unattributed rather than lost, and no account is
+  guessed.
+
+### And the busiest model loop filed nothing
+
+`triage.py` runs its own tool loop for inbound mail. It called
+`data_tools.dispatch(..., tenant=…)`, which applies the account boundary and
+records nothing — so the loop answering the owner's mail every few minutes
+contributed no rows to the ledger Diagnostics reads. Its platform calls were
+invisible in precisely the report you open when mail stops being answered.
+
+Not a bug in `triage`. Three things have to happen when a model names a tool —
+guard, run, record — and they were written out longhand in `kernel._dispatch`
+and nowhere else. Three steps kept inside one caller are three steps the next
+loop does two of.
+
+**`app/tools.py` is the door.** `kernel._dispatch` keeps its role plumbing and
+delegates; `triage` calls it directly with `source="triage"`. The boundary is
+now proven ONCE against the thing both loops share.
+
+**One assertion in `test_tenant_isolation.py` was CHANGED DELIBERATELY**, and
+how it failed is the useful part. It pinned the literal source text of one call,
+indentation included:
+
+    "dispatch(\n     block.name, dict(block.input), tenant=tenant)" in tsrc
+
+That is §1's *string-matching instead of state-checking* living inside the suite
+that is called the standard rather than a preference. It failed for a change
+that STRENGTHENED the property it protects, and would have passed for any
+rewrite preserving the characters. It asks behaviour now — that the door refuses
+a call naming another account, by name, and records the refusal as a failed call
+so a blocked account does not read as an idle one — plus the durable structural
+half, that the ungated call is absent.
+
+### Adding a layer nearly corrupted the number that is read first
+
+Instrumenting the seams means a model tool call reaching Shopify files TWO rows
+— the tool the model named, and the HTTP round trip under it. `report`'s
+`by_provider` counted both.
+
+That doubles every provider total, which is merely wrong. What is dangerous is
+the failure rate: `data_tools.dispatch` catches the exception and returns a
+`"Tool error"` STRING, so for one failing call the platform row records a
+failure and the tool row records a success. **Measured: a completely dead
+Shopify token read `failure_rate 0.5`.**
+
+`report`'s own comment two lines below says a provider failing most of the time
+is a broken connection and one failing occasionally is the internet. A dead
+credential landed exactly on the line between them — so the instrumentation, on
+its own, would have made the headline diagnostic WORSE than no instrumentation.
+
+`by_provider` counts one layer per provider now: the platform layer wins where a
+seam exists, the tool layer is used where none does (Google, today), and `layer`
+says which — because a provider counted at the tool layer has durations that
+include our own work rather than the round trip, and reading those as network
+time is the next version of this bug. `by_tool` still carries both, which is
+correct: they answer different questions.
+
+This is the `compliance_double_run` lesson in a second place — a new writer
+added beside an existing one, halving a rate computed from the ledger — and it
+was caught the same way, by reading what the function being called already did.
+
+`scripts/test_toolcalls.py`, 23 checks. Sabotage entries
+`adapter_round_trips_recorded`, `model_tool_calls_gated` and
+`one_layer_per_provider`.
+
+### A crash found by reading the call sites in order to wrap them
+
+`wordpress_seo._send(profile, method, path, body)` takes `body` positionally and
+has no `params`. Both blog READS called it as
+`_send(profile, "GET", path, params={...})` — an unexpected keyword AND a
+missing positional, so `list_articles` and `get_article` raised `TypeError`
+before reaching WordPress.
+
+Those two are the *"review and revise existing articles"* half of the blog path,
+which the owner asked for by name. They were written to mirror `shopify_seo`'s
+shape, they are reads, and `_get` was sitting next to them doing exactly the
+right thing. **Nothing had ever called them** — the same sentence this file
+keeps writing — which is the only reason a `TypeError` on the happy path
+survived being shipped.
+
+The suite DRIVES both functions rather than reading their source, because
+reading the source is what missed it for weeks. `sabotage.py` entry
+`wordpress_blog_reads_callable`.
+
+**One deliberate change to what is recorded.** `kernel` filed every row as
+`source="kernel"`; it files the ROLE now — `admin`, `seo` — and `triage` files
+`triage`. Nothing branches on the old value (`diagnostics` only displays it, and
+the layer rule above keys on `"adapter"`), and the log is the place where
+knowing WHICH loop made a call is worth more than knowing it was a loop.
+Historical rows keep saying `kernel`, which is true of them.
+
+**A limitation this made visible rather than created.**
+`data_tools.dispatch` catches every handler exception and returns a
+`"Tool error (...)"` STRING, so at the tool layer a call that failed is filed as
+`ok=yes` with the error inside the payload. For an instrumented provider that no
+longer matters — the platform row carries the truth and is the one counted. For
+a provider with no seam (Google, today) it means the tool layer cannot report a
+failure at all, which is a second reason the `layer` field has to be on the
+count rather than in somebody's head.
+
+**Still not recorded:** `gmail_client`. It has no single seam — `.execute()` is
+called at a dozen sites through `googleapiclient` — so instrumenting it is a
+different shape of job, not another line in this one. Until it is done, the mail
+path's Google round trips remain absent from the ledger.

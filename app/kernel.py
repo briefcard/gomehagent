@@ -135,45 +135,19 @@ class Role:
 # ---------------------------------------------------------------------------
 def _dispatch(role: Role, name: str, args: dict, session_files: dict,
               tenant: str) -> str:
-    """Route one tool call, enforcing the account boundary on the way through.
+    """Route one tool call for this role.
 
-    The boundary is applied here, before anything is routed, so it covers every
-    tool in every role rather than only the shared pack. Gating one dispatcher
-    and not the others is not a boundary — the admin pack alone had twelve tools
-    taking an account, including one that drafts mail as it.
+    The boundary, the dispatch and the ledger entry live in `app/tools.py` now,
+    because they were written out here and NOWHERE ELSE — and `triage` runs a
+    second model loop that therefore applied the boundary and filed nothing.
+    Three steps kept inside one caller are three steps the next loop will do two
+    of. All this adds is the role's own handler and its session files.
     """
-    import time as _clock
-
-    from . import tool_scope, toolcalls
-    args, refusal = tool_scope.guard(name, args, tenant)
-    if refusal:
-        # A refusal IS a tool call and is recorded as a failed one. It is the
-        # signal that something asked for a capability this account has not
-        # connected, which is precisely what a report should surface — and
-        # dropping it would make an account look idle rather than blocked.
-        toolcalls.record(tenant, name, ok=False, error=refusal[:200])
-        return refusal
-
-    started = _clock.perf_counter()
-    err = ""
-    out = ""
-    try:
-        if name in data_tools._HANDLERS:
-            out = data_tools.dispatch(name, args)
-        else:
-            out = role.dispatch(name, args, session_files)
-        return out
-    except Exception as exc:                                     # noqa: BLE001
-        # Recorded, then re-raised. Swallowing here would turn a broken
-        # connection into a silent empty answer, which is the failure mode this
-        # whole ledger exists to make visible.
-        err = f"{exc.__class__.__name__}: {str(exc)[:160]}"
-        raise
-    finally:
-        toolcalls.record(
-            tenant, name, ok=not err, error=err,
-            ms=int((_clock.perf_counter() - started) * 1000),
-            bytes_back=len(out or "") if isinstance(out, str) else 0)
+    from . import tools
+    return tools.call(
+        name, args, tenant,
+        fallback=lambda n, a: role.dispatch(n, a, session_files),
+        source=role.name or "kernel")
 
 
 def run(role: Role, text: str, attachments: list[dict] | None = None,
