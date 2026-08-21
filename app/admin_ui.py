@@ -528,7 +528,7 @@ def _chips(caps: dict) -> str:
         for c, ok in caps.items())
 
 
-def _routes_panel() -> str:
+def _routes_panel(expanded: bool | None = None) -> str:
     """Which ways of connecting work at all — the plumbing, not one account.
 
     Every other thing on this tab answers "is this ACCOUNT connected", which is
@@ -541,6 +541,13 @@ def _routes_panel() -> str:
     anywhere — so connecting a store meant walking a merchant through developer
     settings, ticking nine API scopes and copying a token shown exactly once,
     with nothing on any screen saying the easy route existed.
+
+    **Collapsed by default since 2026-08-21** (owner: the tab led with two
+    blocks of instructions and buried the account's actual state). It OPENS
+    ITSELF when it has something urgent — a prerequisite warning, or a provider
+    where no route works at all — because that is the one moment the plumbing
+    is the headline. A parked route on a provider that still connects fine is
+    background, and reads here as one summary line until opened.
     """
     from . import credentials as cred
     r = cred.routes()
@@ -583,17 +590,38 @@ def _routes_panel() -> str:
                  f'<h2>{_esc(p["name"])}</h2><code>{_esc(p["capability"])}</code>'
                  f'{chip}</div>{ways}</div>')
 
+    def _short(names: list[str]) -> str:
+        names = [n.split(" (")[0] for n in names]
+        return (", ".join(names[:3])
+                + (f" +{len(names) - 3} more" if len(names) > 3 else ""))
+
+    dead = [p["name"] for p in r["providers"] if p["dead"]]
+    degraded = [p["name"] for p in r["providers"] if p["degraded"] and not p["dead"]]
+    if r["warnings"]:
+        verdict = "a prerequisite needs attention"
+    elif dead:
+        verdict = "no route works for " + _short(dead)
+    elif degraded:
+        verdict = "all connectable · one-click parked for " + _short(degraded)
+    else:
+        verdict = "every route works"
+    # Self-opens ONLY on a prerequisite warning — something that breaks every
+    # connection and is fixable right now. A dead OAuth-only provider is a
+    # standing state (Canva until its app creds exist), and a panel that opens
+    # on a standing state is open forever, which is the wall this fold
+    # replaced. The verdict line above names the dead ones without opening.
+    is_open = bool(r["warnings"]) if expanded is None else expanded
     return f"""
-    <div class="card">
-      <div class="head"><h2>Connection routes</h2>
-        <span class="mut">the plumbing itself — not any one account</span></div>
-      <div class="mut">A route that is switched off does not appear as a button
-      anywhere, on this console or on a client's connect page. That is why it is
-      listed here: an absent button and an unbuilt feature look identical.</div>
+    <details class="sec"{" open" if is_open else ""}>
+      <summary>Connection routes — {_esc(verdict)}</summary>
+      <div class="mut">The plumbing itself, not any one account. A route that
+      is switched off does not appear as a button anywhere, on this console or
+      on a client's connect page — an absent button and an unbuilt feature look
+      identical, which is why the off ones are listed here.</div>
       {warn}
       {rows}
       <div class="when">{_esc(r["redirect_uri_note"])}</div>
-    </div>"""
+    </details>"""
 
 
 def _connections(tenant: str, key: str) -> str:
@@ -636,19 +664,19 @@ def _connections(tenant: str, key: str) -> str:
                       f'?key={_esc(key)}&amp;tenant={_esc(tenant)}">'
                       f'<button class="sec" type="button">{label}</button></a>')
         elif r["kind"] == "oauth":
-            # Named, not hidden: the thing standing in the way is an env var
-            # someone can go and set, and saying which is the whole difference
-            # between a blocker and a feature that reads as unbuilt.
-            #
-            # And the redirect URI is shown, because it is the other half of the
-            # job and the half that fails silently: it must match the provider
-            # console byte for byte, and a mismatch surfaces as a consent screen
-            # rejecting you with no hint of why.
+            # Named, not hidden — but QUIETLY: the blocker is an env var
+            # someone can go and set, and it belongs on the page (saying which
+            # is the difference between a blocker and a feature that reads as
+            # unbuilt) without being the loudest thing on the row. The redirect
+            # URI rides along because it is the other half of the job and the
+            # half that fails silently on a byte mismatch.
             from . import oauth as _oauth
-            action = (f'<div class="mut">{_esc(r["blocked_by"])}</div>'
+            action = (f'<details><summary class="mut">Not connectable yet — '
+                      f'how to switch it on</summary>'
+                      f'<div class="mut">{_esc(r["blocked_by"])}</div>'
                       f'<div class="when">Then register this redirect URI, '
                       f'exactly:<br><code>{_esc(_oauth.redirect_uri(r["provider"]))}'
-                      f'</code></div>')
+                      f'</code></div></details>')
         elif r["has_oauth"]:
             # An API-key provider that ALSO has a one-click route — Shopify.
             # Both are correct and which one is right depends on whose store it
@@ -675,18 +703,25 @@ def _connections(tenant: str, key: str) -> str:
                     f'copy. The form below still works for a store you already '
                     f'hold a token for.</div>')
             else:
-                # Named, not hidden. This is the whole point: the reason is an
-                # env var somebody can go and set, and until it is set every
-                # client has to be walked through Shopify's developer settings.
+                # PARKED BY CHOICE, and the page says so (owner, 2026-08-21:
+                # this rendered as a shouty "Blocked by:" wall on every visit,
+                # nagging about a flow he had deliberately decided not to use).
+                # One-click OAuth is the client self-serve path; the working
+                # paths today are the token form below and a per-store
+                # client_id/secret entry in SHOPIFY_STORES_JSON. The env var
+                # and redirect URI stay ON the page — inside the fold — for
+                # whenever a client actually wants self-serve.
                 action = (
-                    f'<div class="mut"><strong>One-click sign-in exists for '
-                    f'{_esc(r["name"].split(" (")[0])} and is switched off.</strong> '
-                    f'Until it is on, connecting a store means the token form '
-                    f'below — nine scopes, and a value revealed once.</div>'
-                    f'<div class="mut">Blocked by: {_esc(r["oauth_blocked_by"])}</div>'
+                    f'<details><summary class="mut">One-click sign-in — '
+                    f'parked until a client wants self-serve</summary>'
+                    f'<div class="mut">Connecting works today via the token '
+                    f'form below, or a per-store client_id/secret entry in '
+                    f'SHOPIFY_STORES_JSON. To switch the one-click route on '
+                    f'instead: {_esc(r["oauth_blocked_by"])}</div>'
                     f'<div class="when">Then register this redirect URI, '
                     f'exactly:<br><code>'
-                    f'{_esc(_oauth.redirect_uri(r["provider"]))}</code></div>')
+                    f'{_esc(_oauth.redirect_uri(r["provider"]))}</code></div>'
+                    f'</details>')
         else:
             action = ""      # the form below IS the action for an API key
 
@@ -927,14 +962,15 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                                        "ever offered for one named account."))
     rows = [r for r in rows if r.key == tenant]
     if not rows:
-        # The routes panel first even here: with no accounts yet, "can anyone
+        # The routes panel EXPANDED here: with no accounts yet, "can anyone
         # connect at all" is the only question on this page that HAS an answer,
         # and it is the one a fresh install needs.
-        body = (_routes_panel()
-                + '<div class="note">No accounts yet. Run '
+        panel = _routes_panel(expanded=True)
+        body = ('<div class="note">No accounts yet. Run '
                 '<code>/admin/register_owner</code> first — it seeds the five.</div>')
     else:
-        body = _routes_panel()
+        panel = _routes_panel()
+        body = ""
         for t in rows:
             caps = tenants.capabilities(t.key)
             missing = [c for c, ok in caps.items() if not ok]
@@ -955,7 +991,17 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                 <span class="mut">chips show what is <em>configured</em>; this calls each one to see if it <em>works</em></span>
               </div>
               {_connections(t.key, key)}
-              <div class="grid">{fields}</div>
+              <details class="sec">
+                <summary>Raw wiring — this account's connection keys (advanced)</summary>
+                <div class="mut">These fields are <strong>keys into</strong>
+                credential dictionaries or env-var names — never secrets. The
+                secrets themselves are either in the Render env group or, for
+                anything a client connected themselves, encrypted in the
+                database and shown above only as a state. Saving reloads to a
+                JSON response — hit back to return here; changes take effect
+                immediately, no redeploy.</div>
+                <div class="grid">{fields}</div>
+              </details>
             </div>"""
 
     note = f'<div class="ok">{_esc(msg)}</div>' if msg else ""
@@ -969,18 +1015,21 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
           <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
         </div>"""
 
+    # Order (owner, 2026-08-21): the result of what you just did, then the
+    # selected account's actual state — the question the tab exists to answer —
+    # and only then the rarely-used admin forms and the plumbing, folded. The
+    # old page led with two blocks of instructions and two create-forms, and
+    # the account's connections sat below all of it.
     return _shell(key, "accounts", "Connections", tenant=tenant, body=f"""
-<div>
-  <h1>Accounts</h1>
-  <p class="mut">The fields on each card are <strong>keys into</strong> credential
-  dictionaries or env-var names — never secrets. The secrets themselves are
-  either in the Render env group or, for anything a client connected
-  themselves, encrypted in the database and shown here only as a state.</p>
-</div>
 {note}
+<div>
+  <h1>Connections</h1>
+</div>
 
-<div class="card">
-  <div class="head"><h2>Add an account</h2></div>
+{body}
+
+<details class="sec">
+  <summary>Add an account</summary>
   <form method="get" action="/admin/tenant_add" class="grid">
     <input type="hidden" name="key" value="{_esc(key)}">
     <div class="f"><label>tenant key</label>
@@ -1002,10 +1051,12 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
       <select name="business_model">{_model_options()}</select>
       <div class="row"><button>Create</button></div></div>
   </form>
-</div>
+  <div class="when">Saving reloads to a JSON response — hit back to return
+  here. Changes take effect immediately; no redeploy.</div>
+</details>
 
-<div class="card">
-  <div class="head"><h2>Give someone bot access</h2></div>
+<details class="sec">
+  <summary>Give someone bot access</summary>
   <p class="mut">They message the bot first — it replies with their chat id
   because it doesn't recognise them. Paste that id here.</p>
   <form method="get" action="/admin/user_add" class="grid">
@@ -1027,12 +1078,9 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
   <div class="note"><strong>Not yet.</strong> Ops commands are scoped correctly, but
   free-text questions fall through to an agent that is not tenant-scoped. Hold off
   on client access until reporting and agent scoping land.</div>
-</div>
+</details>
 
-{body}
-
-<p class="mut">Saving reloads to a JSON response — hit back to return here.
-Changes take effect immediately; no redeploy.</p>
+{panel}
 """)
 
 

@@ -76,7 +76,12 @@ with TestClient(app) as cl:
 
     # --- web surfaces ---
     print("\n— console —")
-    for tab,needle in (("kb","Knowledge"),("systems","Systems"),("accounts","Accounts")):
+    # "accounts" needle CHANGED DELIBERATELY (2026-08-21): it was the literal
+    # h1 "Accounts", renamed by the Connections-tab redesign. "Connection
+    # routes" is body-specific to that tab (renders in both its branches),
+    # which "Connections" alone would not prove — the sidebar nav carries that
+    # word on every tab.
+    for tab,needle in (("kb","Knowledge"),("systems","Systems"),("accounts","Connection routes")):
         r = cl.get("/admin/ui", params={"key":"s3cret","tab":tab})
         ck(f"{tab} tab renders", r.status_code==200 and needle in r.text, f"{len(r.text)}b")
     r = cl.get("/admin/ui", params={"key":"s3cret","tab":"kb","tenant":"baci"})

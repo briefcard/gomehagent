@@ -98,10 +98,15 @@ def main() -> int:
     # --- the console stops threading the key through links ---------------
     print("\n— the console's own links —")
     with TestClient(web.app) as c:
+        # CHANGED DELIBERATELY (2026-08-21): the marker was the literal page
+        # heading "Accounts", which the Connections-tab redesign renamed. The
+        # assertion's intent is "the console frame rendered, not an error
+        # page" — so it now checks the frame's own sidebar marker, the same
+        # one test_console_frame uses, which no copy edit can knock over.
         html = c.get("/admin/ui", params={"key": SECRET}).text
-        ck("first load renders", "Accounts" in html)
+        ck("first load renders", 'class="side"' in html)
         html2 = c.get("/admin/ui").text          # now on the cookie
-        ck("second load still renders", "Accounts" in html2)
+        ck("second load still renders", 'class="side"' in html2)
         ck("and no longer embeds the secret in links", SECRET not in html2,
            "secret found in rendered HTML")
         ck("(it was embedded on the first, key-bearing load)", SECRET in html)
