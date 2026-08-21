@@ -130,6 +130,59 @@ call_binary = _call_binary
 
 
 # ---------------------------------------------------------------------------
+# The MCP transport — Canva's own server, called from THIS adapter.
+#
+# ARCHITECTURE.md: MCP is a transport, not an authority. These functions sit
+# in the same seam as `call`, use the same per-tenant token, and file the same
+# `toolcalls` rows — so switching a read from REST to MCP changes nothing
+# about scoping, approval or the ledger. Tool NAMES are deliberately not
+# guessed here: `/admin/canva_probe` lists the live server's real names first,
+# and the adapter maps exact names as they are learned (the esp.PROFILES
+# discipline, applied to tools).
+# ---------------------------------------------------------------------------
+
+def mcp_session(tenant: str):
+    """An authenticated MCP session for this tenant: `(session, "")` or
+    `(None, why)`. Uses the same OAuth token the REST calls mint — VERIFY on
+    first live call whether Canva's MCP accepts it or wants its own grant."""
+    from . import config, mcp_client
+    if not config.CANVA_MCP_URL:
+        return None, "CANVA_MCP_URL is empty — the MCP transport is disabled."
+    secret, why = _token(tenant)
+    if why:
+        return None, why
+    return mcp_client.open_session(config.CANVA_MCP_URL, secret)
+
+
+def mcp_tools(tenant: str) -> dict:
+    """The live server's tool inventory — the first probe's whole purpose."""
+    from . import mcp_client
+    sess, why = mcp_session(tenant)
+    if why:
+        _tc.record(tenant, "canva.mcp.tools", provider="canva", ok=False,
+                   error=why[:200])
+        return {"ok": False, "error": why}
+    got = mcp_client.tools(sess)
+    _tc.record(tenant, "canva.mcp.tools", provider="canva",
+               ok=bool(got.get("ok")), error=(got.get("error") or "")[:200])
+    return got
+
+
+def mcp_call(tenant: str, tool: str, arguments: dict | None = None) -> dict:
+    """One MCP tool call, instrumented like every other adapter round trip."""
+    from . import mcp_client
+    sess, why = mcp_session(tenant)
+    if why:
+        _tc.record(tenant, f"canva.mcp.{tool}", provider="canva", ok=False,
+                   error=why[:200])
+        return {"ok": False, "error": why}
+    got = mcp_client.tool_call(sess, tool, arguments)
+    _tc.record(tenant, f"canva.mcp.{tool}", provider="canva",
+               ok=bool(got.get("ok")), error=(got.get("error") or "")[:200])
+    return got
+
+
+# ---------------------------------------------------------------------------
 # Where a tenant's work lives
 # ---------------------------------------------------------------------------
 
@@ -227,16 +280,24 @@ def upload_asset(tenant: str, url: str, name: str, *,
 
 
 def create_design(tenant: str, *, title: str, design_type: str = "",
-                  asset_id: str = "", entity_key: str = "") -> dict:
+                  asset_id: str = "", entity_key: str = "",
+                  width: int = 0, height: int = 0) -> dict:
     """Create a design, file it in this account's folder, record it.
 
     All three, or it says which part did not happen. A design sitting in Canva
     that nothing in the library names is invisible to every skill — it cannot
     be selected, cannot be credited when it is used, and cannot carry a result.
+
+    `width`/`height` (px) create a CUSTOM-sized design instead of a preset —
+    what an email hero needs, since no preset is 1200×600. VERIFY on first
+    live call, like everything Canva: the custom design_type shape is from
+    public docs and has never met the API.
     """
-    payload: dict = {"design_type": {"type": "preset",
-                                     "name": design_type or "instagram-post"},
-                     "title": title[:255]}
+    if width and height:
+        dt: dict = {"type": "custom", "width": int(width), "height": int(height)}
+    else:
+        dt = {"type": "preset", "name": design_type or "instagram-post"}
+    payload: dict = {"design_type": dt, "title": title[:255]}
     if asset_id:
         payload["asset_id"] = asset_id
     res = call(tenant, "POST", "/designs", payload=payload)

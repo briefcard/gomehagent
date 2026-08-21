@@ -183,9 +183,40 @@ to close the edit-delta to ~zero (correctly branded + voice-matched + compliant
 **Canva brand kit → Shopify theme → site**, owner-reviewed (the deriver is the
 next build). Canva is connected-but-never-run, like the ESP adapters.
 
+**Campaign visuals + the MCP transport (2026-08-21, after the architecture
+decision — see `ARCHITECTURE.md`, new, the decision record).** The owner
+adopted: MCP as a transport INSIDE adapter seams (never wired into a model
+loop — the trust-boundary rule is written down), Canva first; the substrate
+itself exposed as MCP later; the multi-model runtime rejected. Built:
+`app/mcp_client.py` (minimal Streamable-HTTP MCP client — handshake with
+session id, tools/list, tools/call, JSON and SSE responses both parsed, every
+failure a named refusal; `test_mcp_client.py`, no live server ever touched);
+`canva.mcp_session/mcp_tools/mcp_call` in the same seam as REST, toolcalls-
+instrumented, same per-tenant token (VERIFY whether Canva's MCP accepts it);
+`/admin/canva_probe?tenant=X` — read-only, and a TEACHER: lists the live
+server's REAL tool names so the adapter maps exact names, never guessed ones.
+`canva.create_design` takes custom width/height now (email-hero sizes; the
+custom design_type shape is VERIFY). And the campaign engine gets BESPOKE
+VISUALS through the governed loop — `app/creative.py::hero_for_campaign`:
+the hero is an APPROVED, OWNED photograph from the creative library
+(entity-scoped beats brand-wide, logos never, reference/proposed rows
+structurally unreachable — `sabotage.asset_rights_gate`, guard #27) or a
+NAMED absence; `draft_visual=1` creates a right-sized Canva draft that lands
+in the library as a design — which cannot be a hero, so nothing generated in
+a run ships in that run; the owner finishes it in Canva, the export enters
+the pictures queue, the NEXT run uses it. `skill_pack.campaign_email` wires
+it (hero block, notes, `mark_asset_used` on a successful ESP draft;
+`test_campaign_visual.py`). A learning while writing that suite: an account
+with NO ban list fails campaign validation by design — the `no_ban_list`
+rule — which is Eien's exact state until its banned_claims are authored.
+
 **Next, in order:** (1) OWNER: re-run
 `/admin/esp_probe?tenant=eien&key=<APPROVAL_SECRET>` to confirm Eien's segments
-now read (the Omnisend-Version header fix is live); (2) run the deriver FOR
+now read (the Omnisend-Version header fix is live), and hit
+`/admin/canva_probe?tenant=agency&key=<APPROVAL_SECRET>` — the first live
+Canva/MCP contact; paste both results. The probe's tool list is what lets the
+next session wire brand-kit + design reads to EXACT MCP tool names; (2) run
+the deriver FOR
 REAL on Eien — console → Eien → Brand tab, derive, owner reviews +
 approves (types the mailing address if no source had it) — the first live
 Canva/Shopify-brand/site reads, so expect one wrong assumption; (3) wire

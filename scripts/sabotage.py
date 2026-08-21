@@ -86,6 +86,16 @@ SABOTAGES = [
                "text instead of being caught before the draft",
     },
     {
+        "name": "asset_rights_gate",
+        "file": "app/kb.py",
+        "find": "            q = q.filter(db.KbAsset.rights == OWNED)",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_campaign_visual.py", "test_assets.py"],
+        "why": "a competitor's photograph saved as inspiration becomes "
+               "selectable imagery and ships as the hero of a customer's "
+               "campaign email",
+    },
+    {
         "name": "email_legal_footer",
         "file": "app/email_render.py",
         "find": "    rows.append(_footer(t))",

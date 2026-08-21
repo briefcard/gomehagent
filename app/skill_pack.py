@@ -800,11 +800,17 @@ def _theme_for(tenant: str) -> dict:
                        "disclaimer": ""}}
 
 
-def _campaign_blocks(copy: dict, bundle: dict) -> list:
+def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list:
     """Canonical blocks around the grounded copy. Products by NAME only for now —
     photos and prices come with the catalogue/deriver, and inventing them would
-    be the exact fabrication this layer exists to prevent."""
-    blocks = [{"type": "text", "html": copy.get("body_html") or ""}]
+    be the exact fabrication this layer exists to prevent. The hero image, when
+    there is one, arrived through `creative.hero_for_campaign` — approved and
+    owned, or absent."""
+    blocks: list = []
+    if hero and hero.get("url"):
+        blocks.append({"type": "hero", "image": hero["url"],
+                       "alt": hero.get("alt", "")})
+    blocks.append({"type": "text", "html": copy.get("body_html") or ""})
     ents = bundle.get("entities") or []
     items = [{"name": e.get("name", ""), "price": e.get("price", ""),
               "url": e.get("url", "")} for e in ents[:3] if e.get("name")]
@@ -817,7 +823,7 @@ def _campaign_blocks(copy: dict, bundle: dict) -> list:
 
 
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import email_render, esp
+    from . import creative, email_render, esp
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -834,8 +840,24 @@ def _run_campaign_email(ctx: Context) -> dict:
     offered = {c["claim_id"] for c in ctx.claims}
     cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
 
+    # The bespoke visual, through the governed loop: an APPROVED, OWNED
+    # photograph or nothing — `draft_visual` opts into having a Canva draft
+    # created on a miss, which lands in the pictures queue, never in this
+    # email. The refusal/note is surfaced either way, so an imageless send
+    # is a decision the owner can see, not a silent default.
+    hero_got = creative.hero_for_campaign(
+        ctx.tenant, segment_key=seg["key"],
+        entity_keys=[e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
+        title=f"Email hero — {seg['name']}"[:120],
+        draft_if_missing=bool(ctx.params.get("draft_visual")))
+    hero = hero_got.get("image")
+    if hero_got.get("basis") == "drafted_in_canva":
+        ctx.note("bespoke visual: " + hero_got.get("note", ""))
+    elif not hero:
+        ctx.note("no hero image: " + hero_got.get("why", ""))
+
     theme = _theme_for(ctx.tenant)
-    blocks = _campaign_blocks(copy, ctx.bundle)
+    blocks = _campaign_blocks(copy, ctx.bundle, hero=hero)
     html = email_render.render(theme, blocks, preheader=copy.get("preheader", ""))
     native = esp.personalize(ctx.tenant, html)
     final_html = native["html"] if native.get("ok") else html
@@ -894,13 +916,24 @@ def _run_campaign_email(ctx: Context) -> dict:
                 if not esp_draft.get("ok"):
                     ctx.note("the ESP rejected the draft: "
                              + esp_draft.get("error", "")[:200])
+                elif hero_got.get("asset_id"):
+                    # Feedback signal one: the photograph actually went into
+                    # a drafted campaign. Publishing is the explicit act the
+                    # creative library's `uses` counter exists for.
+                    from . import kb as _kb
+                    _kb.mark_asset_used(hero_got["asset_id"],
+                                        destination="campaign_email draft")
             except Exception as exc:                            # noqa: BLE001
                 ctx.note(f"drafting into the ESP raised {exc.__class__.__name__}")
 
     return {"summary": (f"campaign email for '{seg['name']}' — {basis}, "
                         + ("sendable" if not missing else "not yet sendable")
+                        + (", hero image" if hero else ", no hero image")
                         + (", drafted in ESP" if esp_draft.get("ok") else "")),
             "segment": seg, "basis": basis, "cited_claims": cited,
+            "hero": {"basis": hero_got.get("basis", ""),
+                     "asset_id": hero_got.get("asset_id", ""),
+                     "drafted": hero_got.get("drafted", {})},
             "esp_draft": esp_draft, "html_bytes": len(final_html)}
 
 
@@ -915,7 +948,7 @@ register(Skill(
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
     params=("segment", "goal", "entity_key", "audience_key", "utterance",
-            "draft_into_esp"),
+            "draft_into_esp", "draft_visual"),
     writes=True,
     produces="draft",
     run=_run_campaign_email))

@@ -32,6 +32,11 @@ SHOPIFY_CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 CANVA_CLIENT_ID = os.environ.get("CANVA_CLIENT_ID", "")
 CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
+# Canva's own MCP server — the adopted transport (ARCHITECTURE.md): called by
+# OUR adapter, never wired into a model loop. Empty disables the MCP path and
+# the adapter stays on REST.
+CANVA_MCP_URL = os.environ.get("CANVA_MCP_URL", "https://mcp.canva.com/mcp")
+CANVA_MCP = os.environ.get("CANVA_MCP", "")   # "1" prefers MCP where mapped
 CONSTANT_CONTACT_CLIENT_ID = os.environ.get("CONSTANT_CONTACT_CLIENT_ID", "")
 CONSTANT_CONTACT_CLIENT_SECRET = os.environ.get("CONSTANT_CONTACT_CLIENT_SECRET", "")
 

@@ -364,6 +364,31 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(back, 303)
 
 
+@app.get("/admin/canva_probe")
+def canva_probe(key: str = Depends(admin_key), tenant: str = "agency") -> dict:
+    """Prove a client's live Canva end to end — READ ONLY, and a TEACHER.
+
+    Two questions, both answered without creating anything: does the REST
+    token work (`/users/me` would need a wrapper, so the cheap read here is
+    the folder lookup path's precondition — the token mint itself), and what
+    does Canva's MCP server actually offer (tools/list — the REAL tool names,
+    so the adapter maps exact names instead of guessed ones; ARCHITECTURE.md).
+    Admin-gated because tool inventories and error strings are account data.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import canva
+    token, why = canva._token(tenant)
+    rest = ({"ok": True, "note": "token minted — the REST surface will "
+                                 "authenticate"} if token
+            else {"ok": False, "error": why})
+    mcp = canva.mcp_tools(tenant)
+    return {"tenant": tenant, "rest": rest, "mcp": mcp,
+            "next": ("wire exact MCP tool names into the canva adapter from "
+                     "the list above" if mcp.get("ok") else
+                     "fix the named blocker, then re-run this probe")}
+
+
 @app.get("/health/seo")
 def health_seo(key: str = Depends(admin_key)) -> dict:
     """Exactly what the DEPLOYED service sees for the SEO agent (no secrets) —
