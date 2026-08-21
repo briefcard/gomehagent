@@ -1521,12 +1521,24 @@ def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
                  f'on {_esc(rung.replace("_", " "))}</span>')
         ok = True
 
+    # The date makes a plan eligible for the MORNING TICK; a person is the
+    # other trigger. "Run now" consumes THIS plan through skill.run — the
+    # same take_plan gates as the tick, so nothing about safety changes,
+    # only who pulled the trigger (owner, 2026-08-21: "putting today's date
+    # didn't work" — filing after 07:00 meant waiting for tomorrow's tick).
+    _actions = (f'key={_esc(key)}&amp;id={_esc(p.id)}&amp;tenant='
+                f'{_esc(row.tenant)}&amp;system={_esc(row.key)}'
+                f'&amp;ppage={ppage}')
     approve = ""
     if live and comp["complete"] and low_rung and not approved:
-        approve = (f'<a href="/admin/plan_approve?key={_esc(key)}'
-                   f'&amp;id={_esc(p.id)}&amp;tenant={_esc(row.tenant)}'
-                   f'&amp;system={_esc(row.key)}&amp;ppage={ppage}">'
-                   f'<button type="button">Approve plan</button></a>')
+        approve = (f'<a href="/admin/plan_approve?{_actions}">'
+                   f'<button type="button">Approve plan</button></a>'
+                   f'<a href="/admin/plan_run?{_actions}&amp;approve=1">'
+                   f'<button class="sec" type="button">Approve &amp; run '
+                   f'now</button></a>')
+    elif live and comp["complete"]:
+        approve = (f'<a href="/admin/plan_run?{_actions}">'
+                   f'<button type="button">Run now</button></a>')
 
     fields = "".join(_plan_field_input(f, plan.get(f["key"], ""), row.tenant)
                      for f in systems.workflow(row.key)["plan_fields"])
@@ -1687,7 +1699,9 @@ def _planned_section(key: str, row, ppage: int) -> str:
     return f"""
     <div class="card"><div class="anchor" id="planned"></div>
       <div class="head"><h2>Planned — the queue</h2>
-        <span class="mut">{total} open · runs on its date, through every gate</span></div>
+        <span class="mut">{total} open · runs on its date via the morning
+        tick, or the moment you press Run now — through every gate either
+        way</span></div>
       {empty}{planner_ctl}{pager}{cards}{pager}{create}
     </div>"""
 

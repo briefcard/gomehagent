@@ -481,6 +481,23 @@ set and maintain segments?" — set yes, maintain was four gaps; all closed).**
   risk. `esp.audiences` stopped defaulting an absent member count to 0 —
   absence survives to the output.
 
+**"Run now" — the human trigger beside the tick's (owner, 2026-08-21:
+"putting today's date didn't work").** The date makes a plan ELIGIBLE; the
+only consumer was the 07:00 tick, so a plan filed after it waited a day
+with nothing saying so. `/admin/plan_run` consumes ONE plan immediately
+through `skill.run(run_id=…)` — the same take_plan gates (switch,
+completeness, rung), the same preflight, validator and disposition; nothing
+about safety changed, only who pulled the trigger. On a complete plan the
+card offers **Run now** (or, on shadow/approve_all, **Approve & run now** —
+the explicit approval those rungs require and the run, one deliberate act);
+refusals land as the flash at the card ("Did not run — …") with the plan
+untouched, success lands at Waiting-on-you or Shipped with the run's own
+summary, and an untargeted-draft note rides the flash. The Planned header
+now says both triggers. Pinned in `test_workflow_ui` (refuse-without-
+approval, same-row consume, no double-run) — which also had to REGISTER its
+probe skill for the first time: every prior check rendered pages and none
+had ever executed one.
+
 **A plan's segment is a REFERENCE, never free text (owner, 2026-08-21:
 "Audience segment should not be a free-text field… It needs to be a
 reference to a direct segment").** `plan_fields` grew `kind="segment"`: the

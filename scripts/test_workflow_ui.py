@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import approvals, db, systems, tenants, web  # noqa: E402
+from app import approvals, db, skill, systems, tenants, web  # noqa: E402
 
 PASS, FAIL = "  ok  ", " FAIL "
 _failures = []
@@ -49,6 +49,10 @@ systems.CATALOG["wf_probe"] = dict(
                            required=False, kind="flag"),
                   ),
                   artifact="none", ship="marks it ready", measure="none"))
+skill.register(skill.Skill(
+    key="wf_probe", name="Workflow probe", does="test",
+    system_key="wf_probe", tier=1, params=("segment", "goal", "draft_visual"),
+    writes=False, produces="report", run=lambda ctx: {"summary": "ok"}))
 
 
 def _view(c, tenant: str, extra: str = "") -> str:
@@ -203,6 +207,38 @@ def main() -> int:
     ck("filing on a paused system is refused, named in the flash",
        "plans are only filed" in v)
     systems.update(ag.id, status="live")
+
+    # ---- run now: the human trigger beside the tick's --------------------
+    print("\n— Run now: a date makes a plan eligible; a person or the tick "
+          "starts it —")
+    v = _view(c, "agency")
+    ck("a complete, unapproved plan on shadow offers Approve & run now",
+       "Approve &amp; run now" in v)
+    r = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
+              f"&system=wf_probe&ppage=1", follow_redirects=False)
+    v = c.get(r.headers.get("location", "")).text
+    with db.SessionLocal() as s:
+        still = s.get(db.SystemRun, p_ag).stage
+    ck("without the approval it refuses through the same gate, and the plan "
+       "is untouched",
+       "Did not run" in v and "approval" in v and still == "planned", still)
+    r = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
+              f"&system=wf_probe&ppage=1&approve=1", follow_redirects=False)
+    loc = r.headers.get("location", "")
+    v = c.get(loc).text
+    with db.SessionLocal() as s:
+        ran = s.get(db.SystemRun, p_ag)
+    import re as _re
+    _flash = _re.search(r'class="flash">(.{0,200})', v)
+    ck("Approve & run consumes THIS plan immediately — the same row, "
+       "terminal", ran.stage == "sent" and "Ran now" in v,
+       f"{ran.stage} · flash={_flash.group(1) if _flash else '?'}")
+    ck("…and the redirect lands where the outcome lives", "#shipped" in loc,
+       loc[-30:])
+    twice = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
+                  f"&system=wf_probe", follow_redirects=True).text
+    ck("a consumed plan cannot run twice",
+       "Did not run" in twice and "not a plan" in twice)
 
     # ---- measured --------------------------------------------------------
     print("\n— measured: the delta counts, and unmeasured is NAMED —")

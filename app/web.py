@@ -3138,6 +3138,59 @@ def plan_skip(key: str = Depends(admin_key), id: str = "", tenant: str = "",
                            anchor="planned")
 
 
+@app.get("/admin/plan_run")
+def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
+             system: str = "", ppage: int = 1, approve: int = 0):
+    """Consume ONE plan right now — the human trigger beside the tick's.
+
+    The date makes a plan eligible for the 07:00 tick; this is the other
+    way work starts, and it goes through exactly the same gates —
+    `take_plan` (switch, completeness, rung), preflight (connections), the
+    validator, the rung's disposition. `approve=1` is the low-rung
+    one-tap: the explicit approval those rungs require, and the run,
+    expressed as one deliberate act.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import skill, systems
+    row = systems.find(tenant, system)
+    if not row:
+        return _back_to_system(tenant, system,
+                               err=f"no {system} system on this account",
+                               anchor="planned")
+    if approve:
+        ok = systems.approve_plan(id)
+        if ok.get("error"):
+            return _back_to_system(tenant, system, err=ok["error"],
+                                   anchor=f"plan-{id}", ppage=ppage)
+    wf = systems.workflow(row.key)
+    out = skill.run(wf["skill"] or row.key, tenant, trigger="manual",
+                    run_id=id)
+    status = out.get("status", "")
+    if status in ("refused", "blocked"):
+        # The plan is untouched — take_plan refuses before the flip, and a
+        # blocked preflight on a consume files nothing.
+        why = "; ".join(out.get("blocked_on") or [])[:300]
+        return _back_to_system(tenant, system,
+                               err=f"Did not run — {why}",
+                               anchor=f"plan-{id}", ppage=ppage)
+    if status == "failed":
+        why = "; ".join(out.get("blocked_on") or [])[:200]
+        return _back_to_system(tenant, system,
+                               err=f"Ran and FAILED — {why}; the run is on "
+                                   f"the log below", anchor="planned")
+    items = out.get("items") or []
+    waiting = any(i.get("disposition") == "needs_approval" for i in items)
+    said = (f"Ran now — {out.get('summary') or status}"
+            + (f" · {len(items)} item(s)" if items else "")
+            + (" — it is in Waiting on you" if waiting else ""))
+    notes = [n for n in (out.get("notes") or []) if "untargeted" in n]
+    if notes:
+        said += " · " + notes[0][:160]
+    return _back_to_system(tenant, system, ok=said,
+                           anchor="waiting" if waiting else "shipped")
+
+
 @app.get("/admin/plan_propose")
 def plan_propose(key: str = Depends(admin_key), tenant: str = "",
                  system: str = ""):
