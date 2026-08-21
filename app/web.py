@@ -262,6 +262,32 @@ def health_connections() -> dict:
     return report
 
 
+@app.get("/admin/esp_probe")
+def esp_probe(key: str = Depends(admin_key), tenant: str = "eien") -> dict:
+    """Prove a client's live ESP end to end — READ ONLY, no draft, no send.
+
+    Admin-gated because it returns segment/list NAMES (client data). It is the
+    first real call any of this makes against a live ESP, so it doubles as a
+    diagnosis: `connected: False` means the ESP was NOT connected via the
+    Credential store (the /connect flow or the Accounts tab) — ESP creds are
+    read from there ONLY, never from an env var, so an env-set key will not
+    resolve and must be reconnected through the console.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import esp
+    provider = esp.provider_for(tenant)
+    if not provider:
+        return {"tenant": tenant, "connected": False,
+                "note": "No ESP resolves for this account. ESP credentials are "
+                        "read from the Credential store only — connect Omnisend "
+                        "on the Accounts tab (or a /connect link); an env var is "
+                        "not read for ESPs."}
+    aud = esp.audiences(tenant)   # read-only: GET segments / lists
+    return {"tenant": tenant, "provider": provider, "connected": True,
+            "audiences": aud}
+
+
 @app.get("/health/seo")
 def health_seo(key: str = Depends(admin_key)) -> dict:
     """Exactly what the DEPLOYED service sees for the SEO agent (no secrets) —
