@@ -1,7 +1,9 @@
 # System workflows — one work ledger, per-system vocabulary
 
-**Status: phases 1 (the substrate) and 2 (the surface) ARE BUILT — see "What
-is built" at the end. The planners (phase 3+) are not.** Written
+**Status: phases 1 (the substrate), 2 (the surface) and 3 (the campaign
+planner) ARE BUILT — see "What is built" at the end. The live Omnisend
+round-trip waits on the owner's recorded steps; phases 4–5 are not built.**
+Written
 2026-08-21 from the owner's directive in the workflow thread: *"really each
 system is going to have its own workflow to track the agent's work. So this is
 not unique to just the email"* — and, same day: *"making sure you have
@@ -264,14 +266,12 @@ Parked by choice, not blocked:
 
 1. **~~The contract + the `planned` stage.~~ DONE — see "What is built".**
 2. **~~The surface.~~ DONE — see "What is built".**
-3. **`campaign_email` end to end.** The rollout planner (calls `open_plan`
-   per segment × date, proposes only what it reads from data); first live
-   Omnisend draft round-trip. This ABSORBS BUILD-STATE's recorded next-step
-   3 (wire campaign_email to a route + agent tool) — the route becomes the
-   workflow surface. Owner steps 1–2 recorded there (segments dry-run/apply,
-   deriver on Eien) still come first. Growing the plan with `subject` /
-   planned-hero fields lands HERE, together with the skill honouring them —
-   the drift pin in `test_plans.py` forces the pairing.
+3. **~~`campaign_email`'s planner.~~ DONE — see "What is built".** What
+   remains of this phase is the owner's mile: segments dry-run/apply, the
+   deriver on Eien, go-live — then the planner fills the queue and
+   consumption drafts into Omnisend with no further code. The FIRST live
+   draft round-trip should be watched (every live first has found
+   something).
 4. **Compliance into the surface.** Findings + accept-rewrite (through
    `seo_guard`) as the sweep's child items.
 5. **`ad_creative` planner** (copy-only, absence of imagery named), **`blog`
@@ -349,10 +349,33 @@ Parked by choice, not blocked:
 * `scripts/test_workflow_ui.py` (40 checks, TestClient over the real
   routes) beside `test_plans.py` (71).
 
-**Dormant in production still:** no planner exists and `campaign_email` is
-live for no account. The surface renders every installed system's view today
-— the inbox family's is complete because its ledgers already exist — and the
-plan machinery holds data only where somebody files a plan by hand.
+## What is built (2026-08-21, phase 3 — the campaign planner)
+
+* **`app/planner.py`** — `campaign_rollout`: one campaign per high-value
+  segment, monthly-capped (counting skipped items — a skip was a decision),
+  dates spaced across the horizon, first slot two days out so a proposal is
+  reviewable before the tick could consume it. Every field READ, none
+  written: segment + goal from `segments.CATALOG`'s own key and angle, the
+  date from cadence arithmetic, `subject` deliberately blank (no source
+  holds one). Idempotent by ref; a same-slot refresh cannot touch
+  owner-edited fields. Refusals named (no business model, system off).
+* **Cadence is the owner's number** — defaults 1/segment/month, 21-day
+  horizon; `systems.set_cadence` validates at the knob; the Planned
+  section's fold shows the numbers on its summary line, edits them, and
+  offers **Propose now**. `planner.PLANNERS` is the registry the tick and
+  the button both resolve through; the tick tops up before it consumes.
+* **The skill honours the plan's subject** — declaration and skill grown
+  together, as the drift pin forces; the banned-claims gate validates the
+  line that actually ships, and the run notes where it came from.
+* Exercised against the rendered demo: Propose now → "Planner: 4
+  proposed", proposals born complete, held only by the rung's tap.
+  `test_planner.py` (22 checks); sabotage #34 `planner_month_cap`.
+
+**Dormant in production still:** `campaign_email` is live for no account, so
+the planner runs for nobody until the owner's recorded steps land (segments
+apply, deriver, go-live). The inbox family's surface is complete because its
+ledgers already exist; other systems' queues hold data only where a plan is
+filed by hand.
 
 ## Open decisions for the owner
 

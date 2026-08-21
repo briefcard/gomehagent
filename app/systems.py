@@ -99,9 +99,11 @@ CATALOG = {
         workflow=dict(
             unit="a campaign email to one segment",
             skill="campaign_email",
+            cadence=dict(horizon_days=21, per_segment_monthly=1),
             plan_fields=(
                 dict(key="segment", label="Audience segment", required=True),
                 dict(key="goal", label="Angle / goal", required=True),
+                dict(key="subject", label="Subject line", required=False),
                 dict(key="entity_key", label="Featured entity", required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
@@ -739,7 +741,47 @@ def workflow(key: str) -> dict:
     wf.setdefault("artifact", "")
     wf.setdefault("ship", "")
     wf.setdefault("measure", "")
+    wf.setdefault("cadence", {})
     return wf
+
+
+def set_cadence(system_id: str, horizon_days=None,
+                per_segment_monthly=None) -> dict:
+    """The owner's cadence override, onto `System.config["cadence"]`.
+
+    Validated here rather than trusted at read time, because a bad value
+    written silently sits behind a planner for weeks: a 900-day horizon or a
+    50-a-month cap is refused BY NAME at the knob. Blank means "leave it" —
+    the same blank-is-not-an-edit rule the plan form keeps.
+    """
+    from . import planner as _pl
+    updates: dict[str, int] = {}
+    for name, val, cap in (("horizon_days", horizon_days,
+                            _pl.MAX_HORIZON_DAYS),
+                           ("per_segment_monthly", per_segment_monthly,
+                            _pl.MAX_PER_SEGMENT_MONTHLY)):
+        if val is None or str(val).strip() == "":
+            continue
+        try:
+            n = int(str(val).strip())
+        except (TypeError, ValueError):
+            return {"error": f"{name} must be a whole number, got {val!r}"}
+        if not 0 < n <= cap:
+            return {"error": f"{name} must be between 1 and {cap}, got {n}"}
+        updates[name] = n
+    if not updates:
+        return {"error": "nothing to set — both boxes were blank"}
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if not row:
+            return {"error": "unknown system"}
+        cfg = dict(row.config or {})
+        cad = dict(cfg.get("cadence") or {})
+        cad.update(updates)
+        cfg["cadence"] = cad
+        row.config = cfg
+        s.commit()
+    return {"ok": True, **updates}
 
 
 def plan_capable(key: str) -> bool:

@@ -388,13 +388,55 @@ read as consumed"). And `skill_pack._flag` now parses yes/no strings for
 `draft_visual` / `draft_into_esp` — plans carry text, and `bool("no")` is
 True, so a saved "no" would have switched the thing ON.
 
-**Dormant in production still:** no planner exists and `campaign_email` is
-live for no account; the surface renders every installed system's view today
-(the inbox family's is complete because its ledgers already exist), and the
-plan machinery has data only where somebody files a plan by hand.
-`scripts/test_plans.py` (71 checks) + `scripts/test_workflow_ui.py`
-(40 checks, TestClient over the real routes); sabotage is 33 entries, all
-find-strings re-verified intact after the surface edits.
+**PHASE 3 — THE CAMPAIGN PLANNER (2026-08-21, same day, owner: "Yes lets do
+it").** `app/planner.py` — the top-up half. `campaign_rollout(sysrow)`
+proposes one campaign per HIGH-VALUE segment (common-tier segments are
+flows-in-waiting, not campaigns), monthly-capped per segment, dates spaced
+across the horizon (first slot `LEAD_DAYS`=2 out — a fresh proposal is
+reviewable before the tick could ever consume it; `SPACING_DAYS`=5 apart).
+**Every proposed field is READ, none written:** `segment` and `goal` are the
+business-model catalog's own key and angle (`segments.CATALOG`), the date is
+cadence arithmetic, and `subject` is deliberately NOT proposed — no source
+holds one, so it stays blank for the owner or the drafter rather than a
+template pretending to be a decision. The monthly cap counts EVERY stage
+including `skipped` — a skip was the owner's decision about that month, and
+re-proposing it is a nag wearing an algorithm (sabotage #34
+`planner_month_cap`). Idempotent by ref; a same-slot re-proposal is a
+REFRESH that cannot touch owner-edited fields (proven: edited angle survives
+a refresh). Refusals are named — no `business_model` set, system off.
+
+**Cadence is the owner's number.** `DEFAULT_CADENCE` = 1/segment/month,
+21-day horizon (deliberately conservative — the owner has not named numbers
+yet); `systems.set_cadence` stores overrides on `System.config["cadence"]`,
+validated at the knob (a 900-day horizon is refused BY NAME, not clamped);
+the Planned section carries the fold — current numbers on the summary line,
+two prefilled inputs, and **Propose now** (`/admin/plan_propose`, proposes
+only). `planner.PLANNERS` is the registry: the tick and the button both
+resolve through it, so a system gains a planner by adding a row, never by
+teaching the tick a case. `systems_tick` tops up BEFORE consuming; planner
+refusals ride the quiet-day row.
+
+**The skill honours the plan's subject** (`campaign_email` params +
+`subject`; set before validation so the banned-claims gate reads what ships;
+the run notes "subject line came from the plan"). The declaration and the
+skill grew together — the drift pin forces exactly that.
+
+**Exercised live against the rendered demo page:** Propose now → flash
+"Planner: 4 proposed", queue 3→7, proposals born COMPLETE (catalog angle
+fills the goal) and held only by the shadow-rung approval tap; the
+cannot-produce gate (no ESP on the demo box) keeps saying so above the
+queue. **The live Omnisend round-trip remains the owner's mile:** segments
+dry-run/apply, the deriver on Eien, then go-live — the planner fills the
+queue and consumption drafts into Omnisend from there with no further code.
+
+`scripts/test_planner.py` (22 checks) beside `test_plans.py` (71) and
+`test_workflow_ui.py` (40); `test_campaign_email` gained the plan-subject
+pin. Two assertions in `test_worker_systems` were CHANGED deliberately
+(comments say why): they counted every SystemRun row and pinned "one per
+evaluated system", which the tick's top-up half breaks by design — a
+planner's `planned` rows are queue, not runs, the same rule `stats()`
+keeps; the counts now exclude them and assert the queue separately.
+Sabotage is 34 entries, all find-strings re-verified intact.
 
 ## The front door (2026-08-21)
 
@@ -424,7 +466,7 @@ still broken). Then run the suites:
       echo "$r" | grep -qE "all checks passed|all green" || echo "FAIL $(basename $f)"
     done
 
-**68 suites, 68 pass** (test_plans.py and test_workflow_ui.py joined 2026-08-21). Check the OUTPUT, not the exit code, and skip
+**69 suites, 69 pass** (test_plans.py, test_workflow_ui.py and test_planner.py joined 2026-08-21). Check the OUTPUT, not the exit code, and skip
 `test_brief.py`. That file is not a test — it is an argparse CLI for inspecting
 the brief assembler, it exits 0 whatever happens, and every "41 suites pass"
 claim in this file's history was counting a help screen as a passing test. The

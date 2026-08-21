@@ -3087,6 +3087,57 @@ def plan_skip(key: str = Depends(admin_key), id: str = "", tenant: str = "",
                            anchor="planned")
 
 
+@app.get("/admin/plan_propose")
+def plan_propose(key: str = Depends(admin_key), tenant: str = "",
+                 system: str = ""):
+    """Run the system's planner once, now. Proposes only — nothing consumes,
+    nothing sends; a fresh proposal lands two days out and waits its gates."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import planner, systems
+    row = systems.find(tenant, system)
+    if not row:
+        return _back_to_system(tenant, system,
+                               err=f"no {system} system on this account",
+                               anchor="planned")
+    out = planner.top_up(row)
+    if out is None:
+        return _back_to_system(tenant, system,
+                               err=f"no planner exists for {system}",
+                               anchor="planned")
+    said = f"Planner: {out.get('proposed', 0)} proposed"
+    if out.get("refreshed"):
+        said += f", {out['refreshed']} refreshed"
+    if out.get("refusals"):
+        return _back_to_system(tenant, system,
+                               err=said + " — refused: "
+                                   + "; ".join(out["refusals"])[:300],
+                               anchor="planned")
+    return _back_to_system(tenant, system, ok=said, anchor="planned")
+
+
+@app.get("/admin/plan_cadence")
+def plan_cadence(key: str = Depends(admin_key), tenant: str = "",
+                 system: str = "", horizon_days: str = "",
+                 per_segment_monthly: str = ""):
+    """The owner's cadence numbers for one system's planner."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import systems
+    row = systems.find(tenant, system)
+    if not row:
+        return _back_to_system(tenant, system,
+                               err=f"no {system} system on this account",
+                               anchor="planned")
+    out = systems.set_cadence(row.id, horizon_days=horizon_days,
+                              per_segment_monthly=per_segment_monthly)
+    if out.get("error"):
+        return _back_to_system(tenant, system, err=out["error"], anchor="planned")
+    said = ", ".join(f"{k} = {v}" for k, v in out.items() if k != "ok")
+    return _back_to_system(tenant, system, ok=f"Cadence set — {said}",
+                           anchor="planned")
+
+
 # ---------------------------------------------------------------------------
 # The skill bridge.
 #

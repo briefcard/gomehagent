@@ -852,6 +852,14 @@ def _run_campaign_email(ctx: Context) -> dict:
     offered = {c["claim_id"] for c in ctx.claims}
     cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
 
+    # A subject set on the PLAN is the owner's line and outranks the
+    # drafter's — the plan is the reviewed instruction. Set before
+    # validation, so the banned-claims gate reads what will actually ship.
+    plan_subject = str(ctx.params.get("subject") or "").strip()
+    if plan_subject:
+        copy["subject"] = plan_subject
+        ctx.note("subject line came from the plan, not the drafter")
+
     # The bespoke visual, through the governed loop: an APPROVED, OWNED
     # photograph or nothing — `draft_visual` opts into having a Canva draft
     # created on a miss, which lands in the pictures queue, never in this
@@ -959,8 +967,8 @@ register(Skill(
     system_key="campaign_email",
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
-    params=("segment", "goal", "entity_key", "audience_key", "utterance",
-            "draft_into_esp", "draft_visual"),
+    params=("segment", "goal", "subject", "entity_key", "audience_key",
+            "utterance", "draft_into_esp", "draft_visual"),
     writes=True,
     produces="draft",
     run=_run_campaign_email))

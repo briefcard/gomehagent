@@ -90,10 +90,25 @@ def main() -> int:
     # their runs from triage; a run here would be this tick claiming work it
     # did not do.
     mine = [s for s in all_sys if s.key not in systems.externally_driven()]
-    after = sum(len(systems.runs(s.id, limit=0)) for s in all_sys)
+
+    # CHANGED 2026-08-21, deliberately. This counted every SystemRun row and
+    # pinned "one per evaluated system" — true until the tick gained its
+    # top-up half: a live plan-capable system's PLANNER now files `planned`
+    # rows in the same tick, and a plan is QUEUE, not a run (the same rule
+    # `systems.stats` keeps). The count now excludes them, and the queue is
+    # asserted separately below rather than folded into the run total.
+    def _activity() -> int:
+        return sum(1 for s in all_sys for r in systems.runs(s.id, limit=0)
+                   if r.stage != systems.PLANNED)
+
+    after = _activity()
     ck("the tick recorded a run for every system it evaluates",
        after == len(mine),
        f"{after} runs for {len(mine)} of {len(all_sys)} systems")
+    planned_rows = sum(1 for s in all_sys for r in systems.runs(s.id, limit=0)
+                       if r.stage == systems.PLANNED)
+    ck("…and the planner's proposals are queue, filed apart from the runs",
+       planned_rows > 0, f"{planned_rows} planned")
 
     stages = set()
     for s in all_sys:
@@ -165,7 +180,10 @@ def main() -> int:
     # ---- re-running is safe ------------------------------------------------
     print("\n— running it again —")
     worker.systems_tick()
-    after2 = sum(len(systems.runs(s.id, limit=0)) for s in all_sys)
+    # Activity only, for the same reason as above: the second tick may top
+    # the plan queue up further (a horizon spans two months), and counting
+    # queue growth as a duplicate storm would fail the tick for planning.
+    after2 = _activity()
     ck("a second tick adds one run per system, not a duplicate storm",
        after2 == after * 2, f"{after2}")
 

@@ -736,13 +736,28 @@ def systems_tick() -> None:
         live += 1
 
         # The workflow layer: a plan-capable system runs from its OWN queue.
-        # Due plans are consumed one by one — `take_plan` re-checks the
-        # switch, the completeness bar and the rung structurally, so this
-        # loop cannot execute an under-specified or unapproved instruction
-        # even if it tries. A day where plans ran needs no evaluation row:
-        # the consumed runs ARE the record.
+        # First the planner tops the queue up (propose only — a fresh
+        # proposal lands LEAD_DAYS out, so nothing proposed here can also be
+        # consumed here), then due plans are consumed one by one —
+        # `take_plan` re-checks the switch, the completeness bar and the
+        # rung structurally, so this loop cannot execute an under-specified
+        # or unapproved instruction even if it tries. A day where plans ran
+        # needs no evaluation row: the consumed runs ARE the record.
         queued = held = 0
+        planner_note = ""
         if systems.plan_capable(sysrow.key):
+            try:
+                from . import planner as _planner
+                topped = _planner.top_up(sysrow)
+                if topped and topped.get("refusals"):
+                    planner_note = ("; planner: "
+                                    + "; ".join(topped["refusals"])[:300])
+                if topped and topped.get("proposed"):
+                    log.info("planner proposed %d for %s/%s",
+                             topped["proposed"], sysrow.tenant, sysrow.key)
+            except Exception:                                    # noqa: BLE001
+                log.exception("planner failed for %s/%s",
+                              sysrow.tenant, sysrow.key)
             wf = systems.workflow(sysrow.key)
             open_plans = systems.plans(sysrow.tenant, sysrow.key)
             queued = len(open_plans)
@@ -798,12 +813,17 @@ def systems_tick() -> None:
                 # work in the queue. Filed as `skipped` (correctly produced
                 # nothing), never `not_built`: reporting a wired skill as
                 # unbuilt is the inbox_triage mislabel all over again.
+                from . import planner as _planner
+                has_planner = sysrow.key in _planner.PLANNERS
                 detail = ("no plans were due today"
                           + (f" — {queued} queued" if queued else
-                             " — nothing is queued; the planner is not built "
-                             "yet, so plans are filed by hand for now")
+                             (" — nothing is queued"
+                              + ("" if has_planner else
+                                 "; no planner exists for this system, so "
+                                 "plans are filed by hand")))
                           + (f", {held} held (incomplete or awaiting your "
-                             f"approval)" if held else ""))
+                             f"approval)" if held else "")
+                          + planner_note)
                 systems.finish_run(run_id, "skipped", output=detail)
                 continue
             # The generator lands here. Until it does, say so on the run rather

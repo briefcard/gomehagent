@@ -114,6 +114,18 @@ def main():
        any(d["subject"] == "You're about to run out" for d in _drafted))
     ck("the run reports the ESP draft", r["detail"]["esp_draft"].get("ok") is True)
 
+    print("\n— a subject set on the PLAN outranks the drafter's —")
+    _drafted.clear()
+    r_subj = skill.run("campaign_email", "baci", segment="reorder_due",
+                       subject="The owner's own line")
+    item_s = (r_subj.get("items") or [{}])[0]
+    ck("the plan's subject is what ships",
+       item_s.get("meta", {}).get("subject") == "The owner's own line"
+       and any(d["subject"] == "The owner's own line" for d in _drafted),
+       str(item_s.get("meta", {}).get("subject")))
+    ck("…and the run says where the line came from",
+       any("subject line came from the plan" in n for n in r_subj.get("notes", [])))
+
     print("\n— a banned phrase is BLOCKED before anything is drafted —")
     _drafted.clear()
     skill_pack.draft_campaign = _grounded_stub(banned_phrase="these are made in Italy")

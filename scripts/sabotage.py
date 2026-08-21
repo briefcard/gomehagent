@@ -368,6 +368,16 @@ SABOTAGES = [
                "is the one action whose entire meaning is stop, and the "
                "switch would no longer dictate at the queue",
     },
+    {
+        "name": "planner_month_cap",
+        "file": "app/planner.py",
+        "find": "            if have.get(_month(d), 0) < cad[\"per_segment_monthly\"]:",
+        "replace": "            if True:  # SABOTAGE",
+        "suites": ["test_planner.py"],
+        "why": "the planner ignores the owner's cadence \u2014 a month the owner "
+               "skipped is re-proposed, and every planning pass can pile "
+               "more campaigns onto a month that was already full",
+    },
 ]
 
 

@@ -1592,18 +1592,66 @@ def _planned_section(key: str, row, ppage: int) -> str:
         create = ('<p class="mut">Filing plans needs the system on — the '
                   'switch is above. Existing plans stay editable meanwhile.</p>')
 
+    from . import planner as _pl
+    has_planner = row.key in _pl.PLANNERS
+
     if total:
         empty = ""
+    elif has_planner:
+        empty = ('<p class="mut">Nothing is planned. The planner proposes '
+                 'daily on the tick, or right now with the button below — '
+                 'and plans can always be filed by hand.</p>')
     else:
-        empty = ('<p class="mut">Nothing is planned. The planner is not '
-                 'built yet, so plans are filed by hand for now — each one '
+        empty = ('<p class="mut">Nothing is planned. No planner exists for '
+                 'this system yet, so plans are filed by hand — each one '
                  'says what it still needs before it can run.</p>')
+
+    # The planner's knobs, ON the surface they govern (a knob that exists
+    # only in code is a knob that does not exist). Folded: cadence is set
+    # rarely; the current numbers ride the summary line so the fold never
+    # has to be opened just to know them.
+    planner_ctl = ""
+    if has_planner:
+        cad = _pl.cadence_for(row)
+        if live:
+            propose = f"""
+          <form method="get" action="/admin/plan_propose" class="row" style="margin-top:9px">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+            <input type="hidden" name="system" value="{_esc(row.key)}">
+            <button>Propose now</button>
+            <span class="mut">runs the planner once — proposes only, consumes nothing</span>
+          </form>"""
+        else:
+            propose = ('<p class="mut" style="margin-top:9px">Proposing needs '
+                       'the system on.</p>')
+        planner_ctl = f"""
+        <details class="sec">
+          <summary>Cadence — {cad["per_segment_monthly"]}/segment/month,
+            {cad["horizon_days"]}-day horizon</summary>
+          <p class="mut">High-value segments only, first proposal two days
+          out. The planner proposes from the segment catalog and never
+          overwrites your edits; a skipped month stays skipped.</p>
+          <form method="get" action="/admin/plan_cadence" class="row">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+            <input type="hidden" name="system" value="{_esc(row.key)}">
+            <div class="f" style="max-width:180px"><label>per segment / month</label>
+              <input name="per_segment_monthly" inputmode="numeric"
+                     value="{cad["per_segment_monthly"]}"></div>
+            <div class="f" style="max-width:180px"><label>horizon, days</label>
+              <input name="horizon_days" inputmode="numeric"
+                     value="{cad["horizon_days"]}"></div>
+            <button class="sec">Set cadence</button>
+          </form>
+          {propose}
+        </details>"""
 
     return f"""
     <div class="card"><div class="anchor" id="planned"></div>
       <div class="head"><h2>Planned — the queue</h2>
         <span class="mut">{total} open · runs on its date, through every gate</span></div>
-      {empty}{pager}{cards}{pager}{create}
+      {empty}{planner_ctl}{pager}{cards}{pager}{create}
     </div>"""
 
 
