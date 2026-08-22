@@ -435,6 +435,17 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "health_probe_creates_nothing",
+        "file": "app/web.py",
+        "find": '    tok, why = _cv._token("agency")',
+        "replace": '    tok, why = (_cv.folder("agency").get("folder_id", ""), "")  # SABOTAGE',
+        "suites": ["test_canva.py"],
+        "why": "an UNAUTHENTICATED health page creates a root folder and one "
+               "folder per client inside the owner's Canva on its first hit "
+               "\u2014 the segments dry-run incident again: a read-only "
+               "surface writing to a live account",
+    },
+    {
         "name": "approval_grants_rights",
         "file": "app/kb.py",
         "find": "        if approve and rights in (OWNED, REFERENCE):",

@@ -92,6 +92,24 @@ def main() -> int:
             _s.delete(_r)
         _s.commit()
 
+    print("— the health probe REPORTS, it does not create —")
+    _touched = []
+    _real = canva.call
+
+    def _watch(tenant, method, path, *, payload=None, **kw):
+        _touched.append(f"{method} {path}")
+        return {"ok": True, "data": {"folder": {"id": "fld_x"}}}
+    canva.call = _watch
+    from fastapi.testclient import TestClient
+    import app.web as _web
+    _body = TestClient(_web.app).get("/health/connections").json()
+    canva.call = _real
+    ck("no folder is created by looking at the health page",
+       not [c for c in _touched if "/folders" in c], str(_touched))
+    ck("…and it names the shared connection as shared",
+       any("shared by every account" in k for k in (_body.get("canva") or {})),
+       str(list(_body.get("canva") or {})))
+
     print("— the sign-in that Canva requires —")
     ck("the flow is configured once the app credentials exist",
        oauth.configured("canva") == "", oauth.configured("canva"))

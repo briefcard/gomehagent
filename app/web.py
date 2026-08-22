@@ -335,20 +335,30 @@ def health_connections() -> dict:
     # answer short of the authenticated console — which is exactly the
     # question that stalls a setup. Both report state only, never a secret.
     from . import canva as _cv, esp as _esp, tenants as _tn
+    # Canva is a SHARED connection: the agency's serves every account unless a
+    # client has connected their own, and `credentials.resolve` reports which
+    # did the work. So this reports the agency's once and then only the
+    # clients that override it — a row per tenant would be the same fact
+    # repeated with the wrong owner's name on it.
+    #
+    # It probes the TOKEN and nothing else. The first cut called
+    # `canva.folder`, which CREATES the folder when none exists — so an
+    # unauthenticated GET would have created a root and one folder per client
+    # inside somebody's Canva the moment it was connected, on the first hit.
+    # That is the segments dry-run incident again (a read-only surface writing
+    # to a live account), and a health check must never be the thing that
+    # changes what it is reporting on.
     report["canva"] = {}
-    for key in sorted({"agency", *[t.key for t in _tn.all_tenants()]}):
-        tok, why = _cv._token(key)
-        if not tok:
-            if key != "agency":
-                continue          # only the agency's absence is worth saying
-            report["canva"][key] = f"NOT CONNECTED: {why[:120]}"
+    tok, why = _cv._token("agency")
+    report["canva"]["agency (shared by every account)"] = (
+        "ok — token renews" if tok else f"NOT CONNECTED: {why[:140]}")
+    from . import credentials as _cr
+    for t in _tn.all_tenants():
+        if t.key == "agency":
             continue
-        got = _cv.folder(key)
-        report["canva"][key] = ("ok — folder "
-                                + str(got.get("folder_id", ""))[:24]
-                                if got.get("ok")
-                                else f"token ok, folder ERROR: "
-                                     f"{str(got.get('error', ''))[:120]}")
+        got = _cr.resolve(t.key, "canva") or {}
+        if got.get("secret") and got.get("source") == "client":
+            report["canva"][t.key] = "ok — this client has its own connection"
     report["esp"] = {}
     for t in _tn.all_tenants():
         prov = _esp.provider_for(t.key)

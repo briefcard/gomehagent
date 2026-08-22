@@ -2676,3 +2676,32 @@ level above it.
 The root is one folder for the whole installation, not per tenant, so it now
 lives in a `Setting` and is created once. Never shipped: no Canva call has
 ever run live, and the account is still not connected.
+
+### 2.76 A health page that would have written to a live Canva — 2026-08-22
+
+Found while confirming the owner's understanding that every account defaults
+to the agency's Canva until a brand connects its own. It does — `resolve`
+falls back to `AGENCY_TENANT` for `SHARED_PROVIDERS` and tags the result
+`source: "agency"` so a log can always say whose account did the work. The
+model was right; the probe reporting on it was not.
+
+Yesterday's addition to `/health/connections` called `canva.folder(key)` for
+every tenant that resolved a token. `folder()` CREATES the folder when none is
+remembered. And because the fallback gives every account the agency's token,
+connecting Canva once would have meant a single **unauthenticated** GET
+creating a root folder plus one folder per client inside the owner's
+workspace, on first hit.
+
+That is `segments_dry_run_gate` again — a read-only surface writing to a live
+account — committed by the same person who wrote that guard, three weeks
+later, in the code that reports whether the account is reachable. A health
+check must never be the thing that changes what it is reporting on.
+
+It now probes the TOKEN only, and reports the shared connection once as
+"agency (shared by every account)" with a row per client that overrides it,
+rather than repeating one fact under every tenant's name. Guard
+`health_probe_creates_nothing`.
+
+Worth stating as a rule, since this is the second time: **any function whose
+name is a noun ("folder", "segments") may still be a constructor.** Before a
+read-only surface calls one, read what it does when the thing is absent.
