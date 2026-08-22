@@ -1025,6 +1025,22 @@ class KbClaim(_Provenance, Base):
     evidence = Column(Text)                     # the number: "$6M -> $20M in 18 months"
     proof_type = Column(String)                 # data | case_study | certification | testimonial | spec
     source = Column(Text)                       # where it came from — required for spec claims
+    #: WHO THE READER IS TOLD SAID THIS. Distinct from `source`, which is
+    #: internal provenance ("captured", "stated on https://…", "shopify") and
+    #: must never be shown to a customer.
+    #:
+    #: There was no such field, and a pull-quote block therefore had nowhere
+    #: honest to get a credit line from — so the drafter was asked for one and
+    #: supplied "Eien Health Research", an organisation that does not exist,
+    #: under a real statement in a live email (2026-08-22). The lesson is not
+    #: "tell the model not to invent attributions": a generator asked for a
+    #: field it cannot know will always fill it plausibly. The field has to
+    #: exist and be human-owned.
+    #:
+    #: Empty for ordinary brand claims — those are the brand's own assertions
+    #: and need no credit. Filled for a testimonial, where PROOF_USAGE already
+    #: requires attribution and the words are the evidence.
+    attributed_to = Column(Text, default="")
     situations = Column(JSON, default=list)     # tags the assembler matches on
     # Which entity this is true OF. Blank = true of the brand, usable anywhere.
     # A product FAQ answer, a dimension, a line of product copy — all real, all

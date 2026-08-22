@@ -2320,3 +2320,159 @@ source behind it. The severity split is deliberate — a 9-word subject is not a
 compliance event, and a system that treats it as one teaches its owner to switch
 the checks off. Unbacked urgency earns the block because it is a false statement
 made in the client's name, over their sending domain, at scale.
+
+### 2.67 A rule only the reviewer could see — proof usage was never wired — 2026-08-22
+
+The owner's note was one line: *"Offer / Proof data can be derived from claims."*
+It is correct, and checking it surfaced a defect older and wider than the email
+engine.
+
+`kb.PROOF_USAGE` has always encoded what each KIND of proof permits — a
+testimonial is quoted verbatim with attribution and never paraphrased, a spec is
+stated exactly, data may be restated but the figure may not change — with
+`VERBATIM_ONLY` and `usage_rule()` beside it. Its own comment calls the
+testimonial rule "the load-bearing one", and explains exactly why: a customer's
+review reworded as brand copy is a fabrication however true the sentiment was.
+
+**Nothing enforced it.** `grep` for its three names outside `kb.py` returns
+`admin_ui.py` (twice, to DISPLAY the rule to a human reviewing a claim), a
+comment in `extract.py`, and a test. `resolve` never put `proof_type` in a
+bundle, so no generator could see it, no prompt could state it, and no validator
+could check it. The rule was visible only to the person who is not writing the
+copy.
+
+That became live the moment this build gave the drafter a `quote` block. The
+gate asked one question — is this claim id offered? — and a real id was treated
+as permission to say anything near it. A model could cite a genuine testimonial
+and put different words inside the quotation marks, under a real attribution:
+a sentence invented for a named person, rendered as evidence. Of everything in
+this system's reach that is the worst, and it shipped inside the fix for
+"the emails all look the same".
+
+Fixed: `resolve` carries `proof_type`, `strength` and the resolved `usage_rule`
+into the bundle; the drafting prompt states each claim's rule beside the claim;
+and `_proof_misuse` drops, by name, a quote whose words differ from a verbatim
+claim, a customer quote with no attribution, and a stat whose figure does not
+appear in the evidence it cites. Sabotage guard `proof_used_as_its_kind_allows`.
+
+**The general shape, which is the part worth keeping:** the KB models more than
+the pipeline consumes, and a rule that stops at the console is decoration. The
+audit that follows from this is not "check proof_type" — it is *for every rule
+the knowledge base knows, name the generator that receives it and the validator
+that enforces it*. Where either is missing, the rule is advice to a human who
+has already left the room. `strength` (strong | supporting, "caps how many per
+asset") is the next one on that list: it now reaches the bundle and still
+nothing reads it.
+
+### 2.68 An email that recommended a product nobody could buy — 2026-08-22
+
+Eien's first letter-format campaign told a careful story about GLP-1 and closed
+by recommending **CitroBurn, a product set to `draft` in Shopify**. It also
+signed off as "Maya Chen, Head of Product" — a person who does not exist — and
+its button pointed at `#`. The banned-claims validator passed all of it, which
+is the fact worth sitting with: every gate that existed ran and every gate that
+existed was satisfied.
+
+**Nothing was broken in the usual sense.** The Shopify connection worked. The
+sync ran. CitroBurn came back from `products.json` with `"status": "draft"` in
+the payload. `_available()` read `variants[]` for inventory, found untracked
+variants, and returned `"available"`; `_SYNCED_ATTRS` never recorded `status`
+or `published_at`. So the knowledge base held a confident, wrong answer, and
+every layer downstream was right to believe it. **The API was never the
+problem — the code discarded the two fields that answer the question.**
+
+Three failures stacked, and each one is a general shape:
+
+**(a) A composite fact was modelled as one word.** "Available" for a shop means
+active AND published AND (in stock OR untracked). It was implemented as the
+last clause only. `_available` now returns the REASON — `draft` / `archived` /
+`unpublished` / `oos` / `available` — because "CitroBurn is draft" sends
+somebody to the store admin while "out of stock" sends them to the warehouse.
+The raw `status` and `published` now ride on the entity so the verdict is
+auditable rather than asserted.
+
+**(b) The right check existed at the wrong granularity.**
+`validator.entity_unavailable` has always refused to "route demand to a shelf
+that is empty". It takes ONE `entity_key`; campaigns pass none; and this email
+named its product in a SENTENCE — no card, no key, no parameter. So the new
+`fitness.named_unfit` reads the copy, because what governs is what the words
+say, not what was passed. It is a block, not advice: the click goes to a dead
+page and the sender pays for it in trust.
+
+**(c) A name is a claim about a human being.** The `signature` block accepted
+any non-empty name, so the drafter supplied one, with a job title, over a live
+customer email. A name now comes from `theme.sender` — owner-entered brand data
+— or the letter goes unsigned. Same rule as the hero: the model chooses
+placement, code supplies governed content. This one is the worst of the three
+and was the least visible, because invented people read perfectly.
+
+Also fixed here: a CTA with no URL fell back to `"#"` and shipped a dead button
+(now derives the storefront, and `email_craft.dead_links` blocks what is still
+dead — a send is spent whether or not the link worked); and a model stutter
+("…and why it matters now. now.") that no prompt reliably prevents is now
+removed deterministically, case-sensitively so deliberate emphasis survives.
+
+**The generalisation, which is the reason this is written up at length.**
+Every business has facts that decide whether a thing may be named in outbound
+content, and they are NOT the same facts. `app/fitness.py` declares them per
+business model, so a venue's "bookable" and a shop's "purchasable" can differ
+without one of them quietly meaning the other. Two rules carried into it from
+this defect: absence of a fact is never permission (an entity whose
+availability was never recorded is refused by name, not featured), and the
+declaration starts EMPTY where the owner has not stated a requirement — the
+first draft required a `price` for e-commerce and immediately refused real
+products whose price had not synced, which is how a check earns its way into
+being switched off.
+
+### 2.69 "Eien Health Research" — a field the model was asked to invent — 2026-08-22
+
+The owner asked where that attribution came from, and whether he has to tell
+the model not to do things like that. The answers are worth writing down
+because the second one is the whole architecture.
+
+**Where it came from: I asked for it.** The blocks contract shipped a `quote`
+block whose vocabulary read `"attribution":"optional"`, and `_assemble_blocks`
+passed the value straight through — the only check was that `claim_id` named a
+real claim. So a model that had been handed a genuine, approved statement and a
+field labelled "attribution, optional" filled it with the most plausible thing
+available: the brand's own name plus the word Research. It was not hallucinating
+around a guardrail. It was completing a form nobody should have handed it.
+
+**Do you have to tell it not to? No — and the codebase already said so.** The
+`KbClaim` model has carried this comment since it was written, about `proves`:
+
+> "The one model-WRITTEN field on this table. Everything else is either copied
+> verbatim from the source or chosen by a human."
+
+That is the rule. The defect was that a new rendering block quietly created a
+SECOND model-written field, one that asserts a fact about the world (who said
+this), and no review caught that it broke a rule the schema had already stated.
+A prohibition would not have helped: the surface was mine, the invitation was
+explicit, and "do not invent attributions" competes with a field literally
+labelled optional. The fix is that the field cannot be written, not that the
+model is asked twice not to write it.
+
+**And there was nowhere honest to copy from.** The obvious source, `KbClaim.
+source`, is internal PROVENANCE — its real values are "captured", "shopify",
+"stated on https://…", "proposed while reading the site". Rendering any of
+those under a pull-quote would have replaced an invented credit with a
+nonsensical one. So the field was missing, which is why the generator was asked
+to supply it in the first place. Added `KbClaim.attributed_to` (auto-migrates,
+empty everywhere, human-owned): who the READER may be told said this. A quote
+now renders that or nothing; a testimonial with nobody on file is dropped by
+name, because PROOF_USAGE requires attribution and an uncredited customer quote
+is just a sentence in quotation marks.
+
+**The general rule this produces**, and the one to apply to every future block
+and every future skill: *a generator may choose placement, order, and prose. It
+may never supply an identity, a source, a number, a name, a price, a date, or a
+status.* Each of those is a claim about the world, and the correct design is not
+a prompt that forbids inventing them — it is a schema where they can only be
+copied. Where the field does not exist yet, the honest move is to add it and
+leave it empty, not to let the drafter fill the gap.
+
+Three fields have now failed this test in two days: the hero image (fixed by
+construction from the start), the signature name (§2.68), and the attribution
+(here). All three were "optional" fields on a block. That pattern — an optional
+field on a rendering block that happens to assert a fact — is the thing to grep
+for before adding the next one.

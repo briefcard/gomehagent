@@ -28,16 +28,41 @@ from . import db, kb, provenance as prov, tenants
 
 # Attribute keys the sync owns. Anything else on an entity was authored by a
 # human and is never touched.
-_SYNCED_ATTRS = ("vendor", "product_type", "tags", "variants", "sku")
+_SYNCED_ATTRS = ("vendor", "product_type", "tags", "variants", "sku",
+                 "status", "published")
 
 
 def _available(product: dict) -> str:
-    """available | oos, from live inventory.
+    """available | draft | archived | unpublished | oos — can a customer buy it.
 
-    A variant with no inventory tracking is available — Shopify reports
+    This used to read inventory ALONE, and that is how Eien's first letter
+    campaign came to recommend CitroBurn, a product that was not active and not
+    in stock (owner, 2026-08-22). The Shopify call was fine and the payload
+    carried `status` and `published_at` the whole time; the code looked only at
+    `variants[]`, so an unpublished draft with untracked inventory was recorded
+    as `available` and every layer downstream believed it.
+
+    Order matters: status first, publication second, stock last. A draft that
+    happens to have stock is still a draft, and saying "out of stock" about it
+    would send someone to check the warehouse for a problem that is in the
+    store's admin. The value is the REASON, so whoever reads it — the
+    validator, the console, a run note — can say something true.
+
+    A variant with no inventory tracking counts as in stock: Shopify reports
     `inventory_quantity: 0` for untracked items, and reading that as
     out-of-stock would hide most of a catalogue that does not track stock.
     """
+    status = str(product.get("status") or "").strip().lower()
+    if status == "draft":
+        return "draft"
+    if status == "archived":
+        return "archived"
+    # `published_at` is null for a product not published to the online store.
+    # Only trusted when the key is actually present: a payload that never
+    # carried it must not be read as "unpublished".
+    if "published_at" in product and not product.get("published_at"):
+        return "unpublished"
+
     variants = product.get("variants") or []
     if not variants:
         return "available"
@@ -252,8 +277,8 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                              "field": field, "url": ref})
 
             row.availability = _available(p)   # owned outright — never blocked
-            if row.availability == "oos":
-                oos.append(row.name)
+            if row.availability != "available":
+                oos.append(f"{row.name} ({row.availability})")
 
             attrs = dict(row.attributes or {})
             attrs.update({
@@ -261,6 +286,11 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                 "product_type": p.get("product_type", ""),
                 "tags": p.get("tags", ""),
                 "variants": len(p.get("variants") or []),
+                # The RAW facts behind `availability`, kept so the reason is
+                # auditable rather than a verdict nobody can check. These were
+                # in every payload already and were being dropped.
+                "status": p.get("status", ""),
+                "published": bool(p.get("published_at")),
             })
             # The product's own photograph — what the campaign's product
             # cards and entity-scoped heroes render. The store publishes it

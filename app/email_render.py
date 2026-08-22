@@ -55,6 +55,13 @@ _DEFAULT = {
     "radius": "8px", "width": 600,
     # A working nav, brand data: [{"label","url"}]. Empty renders no nav bar.
     "nav": [],
+    # WHO SIGNS a letter-format email. Brand data, owner-entered, and the only
+    # source a `signature` block may draw on: asked for a sign-off with nobody
+    # on file, a drafter invented "Maya Chen, Head of Product" and signed a
+    # live customer email as her (2026-08-22). A real person's name under a
+    # message they never wrote is not a copy problem, so the name cannot come
+    # from the generator at all. Empty means letters go unsigned.
+    "sender": {"name": "", "role": ""},
     # `socials` [{"name","url"}] and `disclaimer` are brand data too; the
     # unsubscribe/preferences are NEUTRAL TOKENS the ESP layer makes native.
     "footer": {"brand": "", "address": "", "tagline": "",
@@ -66,7 +73,7 @@ def _theme(theme: dict) -> dict:
     """A theme with every field filled from the default, deep enough for the
     nested dicts the renderer reads."""
     t = {**_DEFAULT, **(theme or {})}
-    for k in ("colors", "font", "footer"):
+    for k in ("colors", "font", "footer", "sender"):
         t[k] = {**_DEFAULT[k], **((theme or {}).get(k) or {})}
     return t
 

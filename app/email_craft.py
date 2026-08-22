@@ -80,6 +80,30 @@ def _find(text: str, phrases) -> list[str]:
     return [p for p in phrases if re.search(r"\b" + re.escape(p), low)]
 
 
+def dead_links(blocks: list) -> list[str]:
+    """Links in the layout that go nowhere.
+
+    Eien's first letter shipped a button reading "Learn about CitroBurn"
+    pointing at `#`, and a P.S. link with `href=""`. Both render perfectly and
+    both are worthless — the whole email exists to earn that click. A
+    placeholder URL is the one defect that makes everything upstream of it
+    pointless, so it is found here rather than by a subscriber.
+    """
+    bad: list[str] = []
+    for b in blocks or []:
+        if b.get("type") in ("cta", "button"):
+            url = str(b.get("url") or "").strip()
+            if url in ("", "#") or url.startswith("#"):
+                bad.append(f'the "{b.get("label") or "call to action"}" button '
+                           f"points nowhere")
+        for field in ("html", "text"):
+            for href in re.findall(r'href\s*=\s*"([^"]*)"', str(b.get(field) or "")):
+                if href.strip() in ("", "#"):
+                    bad.append(f"a link in the {b.get('type', 'body')} block "
+                               f"has no destination")
+    return bad
+
+
 def review(*, subject: str = "", preheader: str = "", body: str = "",
            intent: str = "", asks: bool = False, has_proof: bool = False,
            urgency_backed_by: str = "") -> list[dict]:

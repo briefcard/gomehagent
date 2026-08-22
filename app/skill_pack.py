@@ -49,6 +49,7 @@ import html as _htmllib
 import re
 
 from . import compliance, responder, sites
+from . import kb as kb_mod
 from .skill import Context, Skill, register
 
 _TAGS = re.compile(r"<[^>]+>")
@@ -708,7 +709,10 @@ message, never repeat one fixed skeleton:
   {"type":"text","html":"one or two short <p> paragraphs; may use
                          {{FIRST_NAME}}; no <html>/<head>/<style>, no images"}
   {"type":"quote","text":"an approved claim given room","claim_id":"REQUIRED
-                          — an offered claim id","attribution":"optional"}
+                          — an offered claim id"}
+                                              do NOT write an attribution —
+                                              who said it is copied from the
+                                              claim's own source by code
   {"type":"stat","value":"90 days","caption":"what the number means",
    "claim_id":"REQUIRED — numbers come only from offered claims"}
   {"type":"list","items":["3–5 short scannable points"]}
@@ -1079,8 +1083,15 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
         if claims:
             parts.append("\n## APPROVED CLAIMS — your only credibility, cite by id:")
             for c in claims[:6]:
+                # The usage rule rides WITH the claim. What a claim permits
+                # depends on where it came from — a testimonial is quoted
+                # verbatim with attribution, a spec is stated exactly, data
+                # may be restated but the figure may not change — and a
+                # drafter that is not told cannot comply. Code checks this
+                # after the fact; saying it here is how it rarely has to.
                 parts.append(f"- [{c['claim_id']}] {c['claim']}"
-                             + (f" (evidence: {c['evidence']})" if c.get("evidence") else ""))
+                             + (f" (evidence: {c['evidence']})" if c.get("evidence") else "")
+                             + (f"\n    USE: {c['usage_rule']}" if c.get("usage_rule") else ""))
         ents = bundle.get("entities") or []
         if ents:
             parts.append("\n## Products you may feature (cite by key — the "
@@ -1218,8 +1229,94 @@ def _legacy_blocks(copy: dict, ents: list, hero: dict | None) -> list:
     return blocks
 
 
+#: `… and why it matters now. now.` / `… we take seriously every day. day.`
+#: Two of these shipped in one live Eien email (2026-08-22). The model wrote
+#: them — nothing in the render path can duplicate a word — and no amount of
+#: prompting reliably stops a stutter like this. It is exactly the class of
+#: thing to fix in code instead: the pattern is unambiguous (a word plus its
+#: terminal punctuation, immediately repeated, at the very end of the string)
+#: and the correction is not a rewrite, it is the removal of a duplicate.
+#: Trailing close-tags are allowed after it so `…day. day.</p>` is caught too.
+#:
+#: Case-SENSITIVE on purpose. A stutter repeats the word exactly ("now. now.");
+#: a writer repeating for emphasis restarts the sentence and capitalises ("She
+#: said no. No."). Matching case-insensitively would silently edit the second,
+#: which is real writing, to catch nothing extra of the first.
+_STUTTER = re.compile(r"(\b[\w'’]+[.!?])\s+\1(?=\s*(?:<[^>]*>\s*)*$)")
+
+
+def _undouble(s: str) -> str:
+    return _STUTTER.sub(r"\1", str(s or ""))
+
+
+def _undouble_blocks(blocks: list) -> list:
+    for b in blocks or []:
+        for f in ("text", "html", "caption", "attribution"):
+            if b.get(f):
+                b[f] = _undouble(b[f])
+    return blocks
+
+
+def _norm_quote(s: str) -> str:
+    """A quote reduced to what it actually SAYS, for comparison — case,
+    spacing, surrounding quotation marks and a trailing stop are formatting,
+    not wording."""
+    t = re.sub(r"\s+", " ", str(s or "")).strip()
+    t = t.strip("“”‘’\"' ").rstrip(". ")
+    return t.casefold()
+
+
+def _proof_misuse(kind: str, b: dict, claim: dict) -> str:
+    """Why this proof block may not stand, or "" if it may.
+
+    Citing a real claim id is necessary and NOT sufficient, which is the hole
+    this closes. Two ways a block can cite honestly and still lie:
+
+      · A TESTIMONIAL reworded. `kb.PROOF_USAGE` has said from the beginning
+        that a customer's words are quoted verbatim with attribution and never
+        paraphrased — "the colours are better in person" said BY the brand is
+        an unevidenced claim; said as a named customer's quote it is a fact
+        about what someone said, and the words ARE the evidence. A quote block
+        carrying a testimonial's id and different words invents a sentence for
+        a real person, which is the worst thing in this system's reach.
+      · A NUMBER that is not in the claim. A stat block reading "93%" against
+        a claim that never says 93 is an invented figure wearing a real
+        citation — worse than an uncited one, because it looks traceable.
+    """
+    ptype = str(claim.get("proof_type") or "").lower()
+    if kind == "quote":
+        if ptype in kb_mod.VERBATIM_ONLY:
+            said, quoted = _norm_quote(claim.get("claim")), _norm_quote(b.get("text"))
+            if not quoted or quoted != said:
+                return (f"it is a {ptype}, which must be quoted verbatim "
+                        f"({claim.get('usage_rule', '')}) and the words were "
+                        f"changed")
+            if not str(claim.get("attributed_to") or "").strip():
+                # Checked on the RECORD, not on the block: the drafter no
+                # longer supplies an attribution at all (it is copied from the
+                # claim), so the question is whether the KB knows who said it.
+                # A customer quote nobody can be credited for is just an
+                # unevidenced sentence in quotation marks.
+                return (f"it is a {ptype} and nobody is on file to credit — "
+                        f"set who said it on the claim, or do not quote it")
+        return ""
+    # stat: every number in the value must appear in the claim's own evidence.
+    nums = re.findall(r"\d[\d,.]*", str(b.get("value") or ""))
+    if not nums:
+        return "a stat block with no figure in it is a heading, not proof"
+    source = f"{claim.get('evidence', '')} {claim.get('claim', '')}".replace(",", "")
+    missing = [n for n in nums if n.replace(",", "") not in source]
+    if missing:
+        return ("the figure " + ", ".join(missing[:2]) + " is not in the "
+                "claim it cites — a number the evidence does not contain is "
+                "an invented one")
+    return ""
+
+
 def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
-                     offered_claims: set, note, fmt: str = "") -> tuple[list, list]:
+                     offered_claims: dict, note, fmt: str = "",
+                     signatory: dict | None = None,
+                     default_cta_url: str = "") -> tuple[list, list]:
     """The drafter's OWN layout, held to the rules — or the legacy skeleton.
 
     "This is all templates" (owner, 2026-08-21): the fix is that the model
@@ -1288,10 +1385,25 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
                      + ("number" if kind == "stat" else "quote")
                      + " is an invented one")
                 continue
+            claim = offered_claims.get(cid) or {}
+            why = _proof_misuse(kind, b, claim)
+            if why:
+                note(f"layout: a {kind} block was dropped — {why}")
+                continue
             extra_cited.append(cid)
-            out.append({k: b.get(k, "") for k in
-                        (("type", "value", "caption") if kind == "stat"
-                         else ("type", "text", "attribution"))} | {"type": kind})
+            if kind == "stat":
+                out.append({"type": "stat", "value": b.get("value", ""),
+                            "caption": b.get("caption", "")})
+            else:
+                # ATTRIBUTION IS COPIED, NEVER WRITTEN. It says where a
+                # statement came from, which is a claim about the world, so it
+                # comes off the claim record and the drafter's is discarded.
+                # Asked for one, a model supplies something plausible — a live
+                # email credited a line to "Eien Health Research", an
+                # organisation that does not exist. A claim with no source on
+                # file renders unattributed, which is the truth.
+                out.append({"type": "quote", "text": b.get("text", ""),
+                            "attribution": str(claim.get("attributed_to") or "")})
         elif kind == "cta":
             if seen_cta:
                 note("layout: a second CTA was dropped — one ask per email")
@@ -1299,18 +1411,25 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
             seen_cta = True
             out.append({"type": "cta", "label": b.get("label") or
                         copy.get("cta_label") or "Shop now",
-                        "url": b.get("url") or copy.get("cta_url") or "#"})
+                        "url": (b.get("url") or copy.get("cta_url")
+                                or default_cta_url or "#")})
         elif kind == "signature":
-            # The name is BRAND data. A drafter inventing a person to sign a
-            # client's email is the one thing this block must not allow, so a
-            # signature with no real name behind it is dropped, not filled in.
-            who = str(b.get("name") or "").strip()
+            # The name is BRAND data and the drafter's is IGNORED. This block
+            # once accepted any non-empty name, which a model duly filled with
+            # "Maya Chen, Head of Product" — a person who does not exist,
+            # signing a live customer email (2026-08-22). A name is a claim
+            # about a human being; it comes from the record or the letter goes
+            # unsigned. Same rule as the hero: the model chooses PLACEMENT,
+            # code supplies the governed content.
+            who = str((signatory or {}).get("name") or "").strip()
             if not who:
                 note("layout: the sign-off was dropped — no sender name is on "
-                     "file to sign it, and inventing one is not an option")
+                     "file to sign it (set it on the Brand tab), and "
+                     "inventing a person is not an option")
                 continue
             out.append({"type": "signature", "text": b.get("text", ""),
-                        "name": who, "role": b.get("role", "")})
+                        "name": who,
+                        "role": str((signatory or {}).get("role") or "")})
         elif kind in ("heading", "text", "list", "banner", "divider", "ps"):
             out.append(b)
         else:
@@ -1318,7 +1437,7 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
 
     if not seen_cta and copy.get("cta_label"):
         out.append({"type": "cta", "label": copy["cta_label"],
-                    "url": copy.get("cta_url") or "#"})
+                    "url": copy.get("cta_url") or default_cta_url or "#"})
     if not seen_hero and hero and hero.get("url") and (
             not allowed or "hero" in allowed):
         # Media presence outranks the omission: an approved, relevant
@@ -1355,7 +1474,7 @@ def _blocks_text(blocks: list) -> str:
 
 
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import creative, email_craft, email_render, esp
+    from . import creative, email_craft, email_render, esp, fitness
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -1372,10 +1491,16 @@ def _run_campaign_email(ctx: Context) -> dict:
         return {"key": pkey, "name": e.get("name", ""),
                 "price": e.get("price", ""),
                 "description": e.get("description", ""),
+                "availability": e.get("availability", ""),
                 "image": e.get("image") or attrs.get("image", ""),
                 "url": e.get("url") or (f"https://{_dom}/products/{pkey}"
                                         if _dom and pkey else "")}
 
+    # What this business requires of a thing before it may be named at all.
+    # An entity that reaches the drafter WILL be written about — the Eien
+    # letter proved that a product needs no card and no parameter to be
+    # recommended, only a mention — so the screen happens before the offer.
+    _model = str(getattr(_tn.get(ctx.tenant), "business_model", "") or "")
     plan_scoped = bool(ctx.bundle.get("entities"))
     ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
             if e.get("name")]
@@ -1385,7 +1510,18 @@ def _run_campaign_email(ctx: Context) -> dict:
                                  r.name or ""))
         ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
                        "description": r.description or "",
+                       "availability": r.availability or "",
                        "attributes": r.attributes or {}}) for r in rows[:6]]
+    # Where a CTA goes when the drafter supplies no URL. A featured product's
+    # own page first, the storefront second — anything but the `#` that
+    # shipped a button reading "Learn about CitroBurn" straight to nowhere.
+    _cta_home = (f"https://{_dom}" if _dom else "")
+    ents, _refused = fitness.screen(_model, ents)
+    for r in _refused:
+        ctx.note(f"not offered to the drafter: {r['name']} — {r['why']}")
+    if _refused and not ents:
+        ctx.note("nothing in the catalogue may be featured right now — the "
+                 "email will be written without naming a product")
     ctx.bundle["entities"] = ents
 
     if not ctx.claims:
@@ -1417,7 +1553,10 @@ def _run_campaign_email(ctx: Context) -> dict:
     copy = _shape_campaign_copy(copy, ctx.note)
     # The model may only cite claims that were actually offered — an invented id
     # is worse than none, because it looks traceable. Intersect with the bundle.
-    offered = {c["claim_id"] for c in ctx.claims}
+    # The whole claim, not just its id: a proof block has to be checked
+    # against what the claim actually SAYS (see `_proof_misuse`), and an id
+    # alone cannot answer that.
+    offered = {c["claim_id"]: c for c in ctx.claims}
     cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
 
     # When the drafter designed its own layout, product choice lives in its
@@ -1494,7 +1633,12 @@ def _run_campaign_email(ctx: Context) -> dict:
         blocks, extra_cited = _assemble_blocks(c, ents, hero,
                                                offered_claims=offered,
                                                note=ctx.note,
-                                               fmt=craft.get("format", ""))
+                                               fmt=craft.get("format", ""),
+                                               signatory=theme.get("sender"),
+                                               default_cta_url=_cta_home)
+        _undouble_blocks(blocks)
+        c["preheader"] = _undouble(c.get("preheader", ""))
+        c["subject"] = _undouble(c.get("subject", ""))
         html = email_render.render(theme, blocks,
                                    preheader=c.get("preheader", ""),
                                    # Omnisend has no view-in-browser variable —
@@ -1536,7 +1680,8 @@ def _run_campaign_email(ctx: Context) -> dict:
                 retry["subject"] = plan_subject
             left = _craft_review(ctx, retry, _assemble_blocks(
                 retry, ents, hero, offered_claims=offered, note=lambda _m: None,
-                fmt=craft.get("format", ""))[0], craft)
+                fmt=craft.get("format", ""), signatory=theme.get("sender"),
+                default_cta_url=_cta_home)[0], craft)
             # Keep the rewrite only when it is actually better: a second draft
             # that trades a long subject for a fabricated deadline is not.
             if len(email_craft.block_reasons(left)) <= len(
@@ -1604,6 +1749,27 @@ def _run_campaign_email(ctx: Context) -> dict:
     # every other finding is a worse email, this one is a false statement made
     # in the client's name, at scale, over their sending domain.
     hard = email_craft.block_reasons(findings)
+
+    # THE LAST LINE: what the copy actually NAMES. Screening the offer list
+    # stops the common case; it cannot stop a drafter that knows a product
+    # from a claim, a past send, or the brand's own positioning. Eien's letter
+    # named CitroBurn in a sentence — no card, no key, no parameter — so the
+    # only check that could ever have caught it is one that reads the words.
+    # Promoting something a customer cannot buy is a block, not advice: the
+    # click goes to a dead page and the sender pays for it in trust.
+    for _why in email_craft.dead_links(state["blocks"]):
+        hard.append({"severity": "block", "rule": "dead_link", "detail": _why,
+                     "fix": "give it the real destination — a send is spent "
+                            "whether or not the link worked"})
+
+    _all_ents = _kb.entities(ctx.tenant, available_only=False)
+    _named = fitness.named_unfit(_model, to_check, _all_ents)
+    for n in _named:
+        hard.append({"severity": "block", "rule": "unfit_entity_named",
+                     "detail": f"the email recommends {n['name']}, but "
+                               f"{n['why']}",
+                     "fix": "fix it in the store, or send an email that does "
+                            "not name it"})
     if hard:
         ctx.note("not drafted into the ESP: "
                  + "; ".join(f["detail"] for f in hard))

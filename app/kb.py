@@ -1775,7 +1775,8 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
               proof_type: str = "case_study", source: str = "",
               strength: str = "strong", status: str = "active",
               origin: str = "human", entity_key: str = "",
-              proves: str = "", context: str = "") -> str:
+              proves: str = "", context: str = "",
+              attributed_to: str = "") -> str:
     """Add a claim, or record that another source corroborates one on file.
 
     `status="pending"` is kept as the way callers ask for a proposal, and is
@@ -1845,6 +1846,7 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                          situations=tags, strength=strength, status=status,
                          review=review, origin=origin, fingerprint=fp,
                          entity_key=entity_key, proves=proves, context=context,
+                         attributed_to=attributed_to,
                          approved_by="seed" if origin == "seed" else "",
                          approved_at=db.utcnow() if review == prov.APPROVED else None,
                          also_seen=[{"origin": origin, "ref": source or "",

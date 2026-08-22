@@ -98,6 +98,43 @@ composer on every single call. A personalize failure reported "ESP not
 connected" for every cause including its own unknown-token refusal; it now
 reports the real reason.
 
+**PROOF IS NOW DERIVED FROM CLAIMS (owner, 2026-08-22: "Offer / Proof data can
+be derived from claims" — correct, and it exposed §2.67).** `kb.PROOF_USAGE`
+had encoded what each proof KIND permits since the beginning and no generator
+could see it: `resolve` never carried `proof_type`, so the rule reached only
+the console, for a human to read. The bundle now carries `proof_type`,
+`strength` and the resolved `usage_rule`; the prompt states each claim's rule
+beside the claim; `_proof_misuse` drops a reworded verbatim quote, an
+unattributed customer quote, and a stat whose figure is not in its own
+evidence. No new data type was needed for proof OR for offer: an offer's
+substance is what claims already assert (`proves`), its terms are live commerce
+data already wired, and only the deadline is a human's to state — which is why
+that one is a plan field. Guard `proof_used_as_its_kind_allows`. The audit this
+opens is general: for every rule the KB knows, name the generator that receives
+it and the validator that enforces it. `strength` is next — it reaches the
+bundle now and nothing reads it.
+
+**A GENERATOR MAY NEVER SUPPLY A FACT (2026-08-22, DEFECTS §2.68/§2.69).**
+Eien's live letter recommended CitroBurn (Shopify status `draft`), signed off
+as "Maya Chen, Head of Product" (a person who does not exist) and credited a
+line to "Eien Health Research" (an organisation that does not exist). The
+banned-claims validator passed all of it. Root causes were three OPTIONAL
+fields on rendering blocks that each assert a fact, plus a composite fact
+modelled as one word: `catalog_sync._available` read inventory only and
+ignored the `status` that was in every payload. Now: `_available` returns the
+REASON (draft/archived/unpublished/oos/available) and stores status+published;
+`app/fitness.py` declares per business model what may be NAMED at all and
+`fitness.named_unfit` reads the COPY (the product was named in a sentence — no
+card, no key, so no parameter check could ever have seen it); the signature
+name comes only from `theme.sender`; the quote credit comes only from the new
+human-owned `KbClaim.attributed_to` (NOT `source`, which is internal
+provenance). Rule to apply to every future block and skill: **a generator may
+choose placement, order and prose, never an identity, source, name, number,
+price, date or status** — the schema makes it copyable, a prompt does not make
+it forbidden. Guards: `product_status_is_read`, `unfit_entity_named_in_copy`,
+`signature_names_a_real_person`, `attribution_is_copied_not_written`,
+`proof_used_as_its_kind_allows`, plus `dead_link` craft block.
+
 **Owner actions still outstanding:** press Eien's Catalogue sync (the image
 data gap); review Eien's banned-claims list (still the conservative defaults);
 segments dry-run → apply. Then watch the first live draft — every live first

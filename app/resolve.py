@@ -330,7 +330,25 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             {"claim": c.claim, "evidence": c.evidence or "", "claim_id": c.id,
              "situations": sorted(c.situations or []),
              "scope": c.entity_key or "brand-wide",
-             "proves": getattr(c, "proves", "") or ""}
+             "proves": getattr(c, "proves", "") or "",
+             # WHAT KIND of proof this is, and what that kind PERMITS.
+             # `kb.PROOF_USAGE` has always held the rule that a testimonial is
+             # quoted verbatim and never reworded — but it stopped at the
+             # console, where it was shown to a human reviewing the claim. No
+             # bundle carried it, so no generator could obey it and no
+             # validator could enforce it. A rule visible only to the person
+             # who is not writing the copy is not a rule.
+             "proof_type": (getattr(c, "proof_type", "") or "").lower(),
+             "strength": getattr(c, "strength", "") or "",
+             # WHO THE READER MAY BE TOLD SAID THIS — human-owned, and the
+             # ONLY thing a credit line may be built from. Deliberately not
+             # `source`, which is internal provenance ("captured", "stated on
+             # https://…") and would be nonsense under a pull-quote. A
+             # generator asked to supply a credit it cannot know will invent a
+             # plausible one, which is how a live email credited a line to
+             # "Eien Health Research" (2026-08-22).
+             "attributed_to": getattr(c, "attributed_to", "") or "",
+             "usage_rule": kb.usage_rule(getattr(c, "proof_type", "") or "")}
             for c in rows]
         if rows:
             searched.append("claims")

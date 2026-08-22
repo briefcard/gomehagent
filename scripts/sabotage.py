@@ -435,6 +435,62 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "attribution_is_copied_not_written",
+        "file": "app/skill_pack.py",
+        "find": '                            "attribution": str(claim.get("attributed_to") or "")})',
+        "replace": '                            "attribution": b.get("attribution", "")})  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "the drafter credits a statement to whoever sounds right — a "
+               "live email cited \"Eien Health Research\", an organisation "
+               "that does not exist, under a real claim; a credit line is a "
+               "fact about the world and is copied from the record or not "
+               "shown at all",
+    },
+    {
+        "name": "product_status_is_read",
+        "file": "app/catalog_sync.py",
+        "find": "    status = str(product.get(\"status\") or \"\").strip().lower()",
+        "replace": "    status = \"\"  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "a DRAFT or ARCHIVED product is recorded as available — the "
+               "knowledge base says a thing nobody can buy is in stock, and "
+               "every layer downstream believes it (this is how Eien's "
+               "letter came to recommend CitroBurn)",
+    },
+    {
+        "name": "unfit_entity_named_in_copy",
+        "file": "app/skill_pack.py",
+        "find": "    _named = fitness.named_unfit(_model, to_check, _all_ents)",
+        "replace": "    _named = []  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "an email that RECOMMENDS a product in a sentence — no card, "
+               "no key, nothing a parameter check could see — ships even "
+               "when the product is a draft, and the whole list is sent to "
+               "a dead page",
+    },
+    {
+        "name": "signature_names_a_real_person",
+        "file": "app/skill_pack.py",
+        "find": "            who = str((signatory or {}).get(\"name\") or \"\").strip()",
+        "replace": "            who = str(b.get(\"name\") or \"\").strip()  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the drafter signs the client's email as a person it invented "
+               "— a name, a job title, and a statement attributed to a human "
+               "being who does not exist",
+    },
+    {
+        "name": "proof_used_as_its_kind_allows",
+        "file": "app/skill_pack.py",
+        "find": "            why = _proof_misuse(kind, b, claim)",
+        "replace": "            why = \"\"  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "a customer testimonial goes out REWORDED under a real "
+               "attribution — words invented for a named person — and a "
+               "statistic the cited claim never contained ships looking "
+               "traceable; citing a real claim id was treated as permission "
+               "to say anything near it",
+    },
+    {
         "name": "campaign_repair_rerenders",
         "file": "app/skill.py",
         "find": "\"meta\": (meta() if callable(meta) else meta) or {}}",
