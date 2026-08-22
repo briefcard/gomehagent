@@ -143,9 +143,16 @@ def main() -> int:
                             plan={"goal": "warm them up"})
     check("filed", bool(out.get("ok")) and bool(out.get("created")))
     plan_a = out["run_id"]
+    # A missing DATE is no longer a gap: filing without one means "this one,
+    # now", so the creation day is filled in (owner, 2026-08-22). Every other
+    # required field is still named.
     check("incomplete, and the gaps are NAMED",
           not out["complete"] and "Segment" in out["missing"]
-          and "planned date" in out["missing"], str(out.get("missing")))
+          and "planned date" not in out["missing"], str(out.get("missing")))
+    check("a plan filed with no date is dated the day it was created",
+          systems.plans("agency", "plan_probe")[0].brief.get("planned_for")
+          == TODAY,
+          str(systems.plans("agency", "plan_probe")[0].brief.get("planned_for")))
 
     # ---- saving — the owner's edit mechanism ----------------------------
     print("\n— save_plan: validated, tracked, blank is not an edit —")
@@ -187,7 +194,7 @@ def main() -> int:
           "under-specified instruction is not consent",
           "not complete" in (systems.approve_plan(
               systems.open_plan("agency", "plan_probe", ref="probe:3",
-                                plan={"segment": "s"})["run_id"])
+                                plan={"goal": "no segment on this one"})["run_id"])
               .get("error") or ""))
     check("approve_plan clears a complete one",
           systems.approve_plan(plan_a).get("ok") is True)
@@ -201,10 +208,11 @@ def main() -> int:
           not v["ok"] and "on" in v["why"], v["why"])
     systems.update(row.id, status="live")
 
-    incomplete = systems.plans("agency", "plan_probe")[-1]  # probe:3, dateless
+    incomplete = [r for r in systems.plans("agency", "plan_probe")
+                  if r.ref == "probe:3"][0]      # has a date, has no segment
     v = systems.consumable(incomplete, systems.get(row.id))
     check("incomplete → not consumable, gap NAMED",
-          not v["ok"] and "planned date" in v["why"], v["why"])
+          not v["ok"] and "Segment" in v["why"], v["why"])
 
     systems.update(row.id, autonomy="approve_exceptions")
     p4 = systems.open_plan("agency", "plan_probe", ref="probe:4",
@@ -214,11 +222,15 @@ def main() -> int:
           systems.consumable(p4row, systems.get(row.id))["ok"])
     systems.update(row.id, autonomy="shadow")
 
-    print("\n— plans(): dateless is never due —")
+    print("\n— plans(): a plan filed today is due today —")
     due = systems.plans("agency", "plan_probe", due_by=TODAY)
-    check("due today: the dated ones only, dateless excluded",
-          {r.id for r in due} == {plan_a, p4},
-          f"got {len(due)}")
+    # probe:3 is dated (creation day) but INCOMPLETE, so it is due and will be
+    # held at the gate rather than run — being due and being consumable are
+    # two different questions, which is what `consumable` is for.
+    check("due today: everything dated today or earlier",
+          {plan_a, p4} <= {r.id for r in due}, f"got {len(due)}")
+    check("a future-dated plan is still not due",
+          all((r.brief or {}).get("planned_for", "") <= TODAY for r in due))
 
     # ---- consuming through skill.run ------------------------------------
     print("\n— skill.run(run_id=…): the same row becomes the execution —")

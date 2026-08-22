@@ -619,6 +619,40 @@ def main():
        any("own product shot" in n for n in r.get("notes", [])))
 
 
+    print("\n— with no photographs on file, the catalogue is refreshed first —")
+    from app import catalog_sync as _cs
+    with db.SessionLocal() as s:
+        for e in s.query(db.KbEntity).filter(db.KbEntity.tenant == "baci").all():
+            e.attributes = {k: v for k, v in (e.attributes or {}).items()
+                            if k != "image"}
+        s.commit()
+    _calls = []
+    _real_sync = _cs.sync_shopify
+
+    def _fake_sync(tenant, limit=250, dry_run=False):
+        _calls.append(tenant)
+        with db.SessionLocal() as s2:
+            e = (s2.query(db.KbEntity)
+                 .filter(db.KbEntity.tenant == "baci",
+                         db.KbEntity.key == "glp1").first())
+            if e:
+                e.attributes = {"image": "https://cdn.shopify.com/s/f/p/re.jpg?v=2"}
+                s2.commit()
+        return {"products_seen": 3, "images_filed": 1}
+    _cs.sync_shopify = _fake_sync
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "heading", "text": "A table worth setting", "level": 1},
+        {"type": "text", "html": "<p>Hi {{FIRST_NAME}}.</p>"},
+        {"type": "cta", "label": "See it", "url": "https://x/f"}])
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="launch")
+    ck("a catalogue with no photos is refreshed rather than reported",
+       _calls == ["baci"], str(_calls))
+    ck("…and the photograph it fetched is in the email",
+       "/p/re" in (_meta(r, "html") or ""), str(_shape(r)))
+    ck("…and the run says it refreshed, so it is not a silent write",
+       any("catalogue was refreshed" in n for n in r.get("notes", [])))
+    _cs.sync_shopify = _real_sync
+
     print("\n— a link the drafter could not know is FILLED, not fatal —")
     with db.SessionLocal() as s:
         t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()

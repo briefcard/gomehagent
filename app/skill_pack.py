@@ -1571,6 +1571,44 @@ def _run_campaign_email(ctx: Context) -> dict:
     # own page first, the storefront second — anything but the `#` that
     # shipped a button reading "Learn about CitroBurn" straight to nowhere.
     _cta_home = (f"https://{_dom}" if _dom else "")
+    # NO PHOTOGRAPHS ANYWHERE? FETCH THEM. The catalogue sync is what puts a
+    # product's photo on the entity and in the creative library, and an account
+    # whose sync predates that code has products with no imagery — which is a
+    # data gap the owner is then asked to close by hand, before every send, for
+    # ever. Four imageless sends running were spent asking (owner, 2026-08-22).
+    #
+    # Narrow on purpose: only when NOTHING has an image, only when commerce is
+    # actually wired, and never as a substitute for the real sync — this
+    # refreshes what a campaign is about to render and says that it did. The
+    # sync is idempotent and duplicate-safe by URL, so the cost of being wrong
+    # here is one redundant read.
+    if ents and not any(e.get("image") for e in ents):
+        from . import catalog_sync as _cs, tenants as _tnm
+        if _tnm.capabilities(ctx.tenant).get("commerce"):
+            got = _cs.sync_shopify(ctx.tenant)
+            if got.get("error"):
+                ctx.note("no product photographs on file, and the catalogue "
+                         "could not be refreshed: " + str(got["error"])[:120])
+            else:
+                ctx.note(f"no product photographs were on file, so the "
+                         f"catalogue was refreshed first — "
+                         f"{got.get('images_filed', 0)} photo(s) filed from "
+                         f"{got.get('products_seen', 0)} product(s)")
+                rows = _kb.entities(ctx.tenant, available_only=True)
+                rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
+                                         r.name or ""))
+                refreshed = [_prod({"key": r.key, "name": r.name,
+                                    "price": r.price,
+                                    "description": r.description or "",
+                                    "availability": r.availability or "",
+                                    "attributes": r.attributes or {}})
+                             for r in rows[:6]]
+                if any(e.get("image") for e in refreshed):
+                    ents = refreshed
+        else:
+            ctx.note("no product photographs on file and no store is "
+                     "connected, so this email cannot show one")
+
     ents, _refused = fitness.screen(_model, ents)
     for r in _refused:
         ctx.note(f"not offered to the drafter: {r['name']} — {r['why']}")

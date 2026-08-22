@@ -825,6 +825,10 @@ def _valid_date(value: str) -> bool:
         return False
 
 
+def _today() -> str:
+    return dt.date.today().isoformat()
+
+
 def plan_complete(row_or_brief, key: str) -> dict:
     """Is this plan a complete instruction? If not, exactly what is absent.
 
@@ -972,11 +976,17 @@ def open_plan(tenant: str, key: str, *, ref: str, plan: dict | None = None,
             return {"ok": True, "run_id": existing.id, "updated": True,
                     "refreshed": sorted(refreshed),
                     "preserved": sorted(preserved), **comp}
+        # NO DATE MEANS TODAY. A plan filed without one used to sit for ever:
+        # `plan_complete` requires a date and the tick only consumes what is
+        # due, so a dateless plan was permanently incomplete and permanently
+        # invisible to both. Somebody filing an item by hand means "this one,
+        # now" — the planner still sets its own spaced dates deliberately, and
+        # this only fills a blank (owner, 2026-08-22).
         run = db.SystemRun(
             system_id=row.id, tenant=tenant, trigger=trigger, ref=ref,
             stage=PLANNED,
             brief={"plan": dict(plan or {}), "edited": [],
-                   "planned_for": planned_for})
+                   "planned_for": planned_for or _today()})
         s.add(run)
         s.commit()
         comp = plan_complete(run.brief, key)

@@ -122,12 +122,15 @@ def main() -> int:
     loc = r.headers.get("location", "")
     ck("redirects back to the new card", r.status_code == 303
        and "#plan-" in loc and "system=wf_probe" in loc, loc[:90])
-    ck("…saying it is still missing its date", "missing" in loc.lower())
+    # Filed by hand with no date: the creation day is filled in, so this is
+    # COMPLETE on arrival rather than parked as incomplete (owner, 2026-08-22).
+    ck("…and it is complete, because a hand-filed plan means 'this one, now'",
+       "complete" in loc.lower() and "missing" not in loc.lower(), loc[:110])
     new_id = loc.split("#plan-", 1)[1]
     v = c.get(loc).text
-    ck("the flash leads the page", 'class="flash"' in v and "missing" in v)
-    ck("the card names its gaps in its own label",
-       "needs completing" in v and "planned date" in v)
+    ck("the flash leads the page", 'class="flash"' in v)
+    ck("the card carries today's date rather than an empty box",
+       f'value="{TODAY}"' in v)
 
     print("\n— plan_save: blank is not an edit; place is kept —")
     r = c.get(f"/admin/plan_save?key=s3cret&id={new_id}&tenant=agency"
