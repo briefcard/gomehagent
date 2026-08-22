@@ -1260,6 +1260,36 @@ def _undouble(s: str) -> str:
     return _STUTTER.sub(r"\1", str(s or ""))
 
 
+def _fill_dead_links(blocks: list, url: str) -> int:
+    """Point every empty link at the email's one destination. Returns how many.
+
+    A drafter writes `<a href="">the CitroBurn page</a>` because it does not
+    know the URL — it cannot, the link is a fact about the store and the
+    drafter is not given facts. Treating that as a fault and BLOCKING the send
+    was the wrong reading and stopped emails that were otherwise fine (owner,
+    2026-08-22: "it was working before"). The prose is the drafter's; the
+    destination is ours; so we supply it, exactly as the CTA button and the
+    hero image and the signature are supplied.
+
+    One email has one destination, which is enforced elsewhere — so there is
+    never a question of WHICH url an empty link should get. `dead_links` still
+    reports whatever remains, which after this can only mean the email has no
+    destination at all.
+    """
+    if not url or url == "#":
+        return 0
+    filled = 0
+    for b in blocks or []:
+        for f in ("html", "text"):
+            if not b.get(f):
+                continue
+            new, n = re.subn(r'href\s*=\s*"\s*#?\s*"', f'href="{url}"',
+                             str(b[f]))
+            if n:
+                b[f], filled = new, filled + n
+    return filled
+
+
 def _undouble_blocks(blocks: list) -> list:
     for b in blocks or []:
         for f in ("text", "html", "caption", "attribution"):
@@ -1427,9 +1457,16 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
                 note("layout: a second CTA was dropped — one ask per email")
                 continue
             seen_cta = True
+            # A literal "#" is the drafter saying "I do not know the URL",
+            # exactly as an empty string does — it must not outrank the real
+            # destination code can supply.
+            _u = str(b.get("url") or "").strip()
+            if _u == "#":
+                _u = ""
+            _cu = str(copy.get("cta_url") or "").strip()
             out.append({"type": "cta", "label": b.get("label") or
                         copy.get("cta_label") or "Shop now",
-                        "url": (b.get("url") or copy.get("cta_url")
+                        "url": (_u or (_cu if _cu != "#" else "")
                                 or default_cta_url or "#")})
         elif kind == "signature":
             # The name is BRAND data and the drafter's is IGNORED. This block
@@ -1654,6 +1691,18 @@ def _run_campaign_email(ctx: Context) -> dict:
                                                fmt=craft.get("format", ""),
                                                signatory=theme.get("sender"),
                                                default_cta_url=_cta_home)
+        # The email's one destination, in preference order: what the CTA
+        # actually ended up pointing at, then the featured product's page,
+        # then the storefront. Every empty link in the prose gets it.
+        _dest = next((b.get("url") for b in blocks
+                      if b.get("type") == "cta" and b.get("url")
+                      and b.get("url") != "#"), "")
+        _dest = _dest or next((e.get("url") for e in ents if e.get("url")), "")
+        _n = _fill_dead_links(blocks, _dest or _cta_home)
+        if _n:
+            ctx.note(f"{_n} link(s) the drafter left empty now point at "
+                     f"{_dest or _cta_home} — a drafter is not given URLs, "
+                     f"so it cannot supply them")
         _undouble_blocks(blocks)
         c["preheader"] = _undouble(c.get("preheader", ""))
         c["subject"] = _undouble(c.get("subject", ""))
@@ -1700,12 +1749,21 @@ def _run_campaign_email(ctx: Context) -> dict:
                 retry, ents, hero, offered_claims=offered, note=lambda _m: None,
                 fmt=craft.get("format", ""), signatory=theme.get("sender"),
                 default_cta_url=_cta_home)[0], craft)
-            # Keep the rewrite only when it is actually better: a second draft
-            # that trades a long subject for a fabricated deadline is not.
-            if len(email_craft.block_reasons(left)) <= len(
-                    email_craft.block_reasons(findings)) and len(left) < len(findings):
+            # Keep the rewrite only when it is actually better — and BLOCKS
+            # decide that before anything else. The first rule here compared
+            # total finding counts, so a retry that removed the one thing
+            # stopping the send but added a shorter-subject nudge scored
+            # "not fewer" and was thrown away, leaving the email blocked over
+            # a problem the drafter had just fixed.
+            was, now = (email_craft.block_reasons(findings),
+                        email_craft.block_reasons(left))
+            better = (len(now) < len(was)
+                      or (len(now) == len(was) and len(left) < len(findings)))
+            if better:
                 copy, to_check, findings = retry, _build(retry), left
-                ctx.note("craft: redrafted once and it came back better")
+                ctx.note("craft: redrafted once and it came back better"
+                         + (f" — {len(was) - len(now)} blocking problem(s) "
+                            f"resolved" if len(now) < len(was) else ""))
     for f in findings:
         ctx.note(f"craft ({f['severity']}): {f['detail']} → {f['fix']}")
 

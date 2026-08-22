@@ -504,15 +504,42 @@ def main():
        and "Gomeh Saias" in (_meta(r, "html") or "")
        and "Maya Chen" not in (_meta(r, "html") or ""), str(_shape(r)))
 
-    print("\n— a button that goes nowhere never ships —")
+    print("\n— a button with no destination is FILLED where one exists, and "
+          "blocks only where none does —")
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
+        was_domain, t.domain = t.domain, "example-store.com"
+        s.commit()
+    # A drafter that supplies NO url anywhere — which is the real case: the
+    # model is never given the store's URLs, so it cannot write them.
+    _urlless = lambda b, sg, g, craft=None: (
+        {"subject": "A specific enough line", "preheader": "a second line",
+         "blocks": [{"type": "text", "html": "<p>Hello.</p>"},
+                    {"type": "cta", "label": "Learn more", "url": "#"}],
+         "claim_ids": [], "cta_label": "Learn more", "cta_url": ""}, "model", "")
     before = len(_drafted)
-    skill_pack.draft_campaign = _blocks_drafter([
-        {"type": "text", "html": "<p>Hello.</p>"},
-        {"type": "cta", "label": "Learn more", "url": "#"}])
+    skill_pack.draft_campaign = _urlless
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
-    ck("a placeholder CTA url blocks the send", len(_drafted) == before)
+    ck("a placeholder '#' does not outrank the real storefront",
+       len(_drafted) == before + 1
+       and "example-store.com" in (_meta(r, "html") or ""))
+
+    # Nothing to point at anywhere: no domain, and no entity with a URL.
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
+        t.domain = ""
+        s.commit()
+    before = len(_drafted)
+    skill_pack.draft_campaign = _urlless
+    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
+    ck("with NO destination on file anywhere, the send is blocked",
+       len(_drafted) == before)
     ck("…and the run says which control is dead",
        any("points nowhere" in n for n in r.get("notes", [])))
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
+        t.domain = was_domain or ""
+        s.commit()
 
     print("\n— a letter may SHOW the thing it is selling —")
     import re as _re
@@ -557,6 +584,29 @@ def main():
     ck("the run names an imageless send instead of leaving it to be noticed",
        any("NO image" in n for n in r.get("notes", [])))
 
+    print("\n— a link the drafter could not know is FILLED, not fatal —")
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
+        t.domain = "example-store.com"
+        s.commit()
+    before = len(_drafted)
+    skill_pack.draft_campaign = lambda b, sg, g, craft=None: ({
+        "subject": "A specific enough line", "preheader": "a second line",
+        "blocks": [
+            {"type": "text", "html": "<p>Hi {{FIRST_NAME}}.</p>"},
+            {"type": "cta", "label": "See it", "url": ""},
+            {"type": "ps", "html": '<p>P.S. it is on the <a href="">page</a>.</p>'}],
+        "claim_ids": [], "cta_label": "See it", "cta_url": ""}, "model", "")
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
+    html = _meta(r, "html") or ""
+    ck("an email whose links the drafter left empty STILL SHIPS",
+       len(_drafted) == before + 1)
+    ck("…because the empty links were pointed at the store, not blocked",
+       'href=""' not in html and 'href="#"' not in html
+       and "example-store.com" in html)
+    ck("…and the run says it supplied them",
+       any("drafter left empty" in n for n in r.get("notes", [])))
+
     print("\n— an approval is never offered for an email that was not created —")
     row = systems.find("baci", "campaign_email")
     with db.SessionLocal() as s:
@@ -566,8 +616,8 @@ def main():
 
     before = len(_drafted)
     skill_pack.draft_campaign = _blocks_drafter([
-        {"type": "text", "html": '<p>Read <a href="">this</a>.</p>'},
-        {"type": "cta", "label": "Learn more", "url": "#"}])
+        {"type": "text", "html": "<p>CitroBurn came out of that process.</p>"},
+        {"type": "cta", "label": "Learn more", "url": "https://x/c"}])
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
     ck("the copy passed the validator", (r.get("items") or [{}])[0].get("ok") is True)
     ck("…but no draft reached the ESP", len(_drafted) == before)

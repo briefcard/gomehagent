@@ -2517,3 +2517,45 @@ must not outlive the thing.** Anything that queues one before the artifact
 exists has to be able to take it back. Two of the four campaign_email
 approval-queuing paths could already fail after the queue — and every future
 skill that follows this shape inherits the same hole unless it withdraws too.
+
+### 2.71 The gate that stopped every email — 2026-08-22
+
+"It was working before, but now it's not creating an email in Omnisend."
+
+`email_craft.dead_links` was added the day before and made an empty `href` a
+BLOCK. A drafter writes `<a href="">the product page</a>` constantly, and
+correctly: the link is a fact about the store, and the drafter is deliberately
+given no facts. So the check fired on ordinary, well-formed emails and stopped
+essentially all of them — a gate written to catch a broken send instead
+prevented every send.
+
+The reading was simply wrong. Every other fact in this pipeline follows the
+same rule and I had just written it down: *the model chooses placement and
+prose; code supplies identities, sources, names and URLs.* The hero image is
+supplied. The signature is supplied. The attribution is supplied. The link was
+the one that got a validator instead of a supplier.
+
+`_fill_dead_links` now points every empty link at the email's one destination —
+the CTA's, else the featured product's page, else the storefront — and says how
+many it filled. `dead_links` still runs, so a genuinely destination-less email
+is still stopped, but that now means the account has no URL anywhere rather
+than that the drafter left a blank.
+
+Two smaller faults in the same area, both found while fixing it:
+
+A literal `"#"` from the drafter outranked the derived URL, because `b.get
+("url") or default` treats `"#"` as a value. It means "I do not know", exactly
+as an empty string does, and is now read that way.
+
+And the craft-redraft acceptance rule compared TOTAL finding counts, so a
+retry that removed the one blocking problem but added a shorter-subject nudge
+scored "not fewer" and was discarded — leaving the email blocked over
+something the drafter had already fixed. Blocks are now compared first.
+
+**The lesson, and it is the same one two days running: a new gate must be
+judged on what it does to the ORDINARY case, not the bad one.** Both the
+CitroBurn defect and this one came from the same day's work — one gate that
+was missing, one gate that was too eager. The missing gate cost a bad email.
+The eager gate cost every email, and was harder to see, because nothing
+malfunctioned: it reported success, withdrew nothing (until §2.70), and simply
+produced less and less.
