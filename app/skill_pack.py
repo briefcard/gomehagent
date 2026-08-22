@@ -1659,7 +1659,24 @@ def _run_campaign_email(ctx: Context) -> dict:
     if hero_got.get("basis") == "drafted_in_canva":
         ctx.note("bespoke visual: " + hero_got.get("note", ""))
     elif not hero:
-        ctx.note("no hero image: " + hero_got.get("why", ""))
+        # THE PRODUCT'S OWN PHOTOGRAPH IS A HERO. The creative library and the
+        # entity's `attributes.image` are two different stores, both filled by
+        # the same catalogue sync, and only the library was ever reachable
+        # from here — so an account whose products all had photos still sent
+        # imageless emails if nothing had been filed as a library asset
+        # (owner, three sends running: "still no images").
+        #
+        # Rights are not being stretched to do this. It is the same URL, from
+        # the same product, that the sync files as `rights=owned` for exactly
+        # this purpose: the client's photograph of the client's product,
+        # already published on their own storefront.
+        _shot = next((e for e in ents if e.get("image")), None)
+        if _shot:
+            hero = {"url": _shot["image"], "alt": _shot.get("name", "")}
+            ctx.note(f"hero: no library photograph, so {_shot.get('name','')}'s "
+                     f"own product shot leads the email")
+        else:
+            ctx.note("no hero image: " + hero_got.get("why", ""))
 
     theme = _theme_for(ctx.tenant)
     webview = bool(esp.caps(ctx.tenant).get("webview", True))
@@ -1784,10 +1801,22 @@ def _run_campaign_email(ctx: Context) -> dict:
             ctx.note("this email carries NO image — an approved photograph "
                      "was available and the layout did not place it")
         else:
-            ctx.note("this email carries NO image at all, only the logo — "
-                     "no approved, owned photograph was available and no "
-                     "featured product has one on file (run the catalogue "
-                     "sync, or approve a photo in the pictures queue)")
+            # COUNT IT, do not advise. "Run the catalogue sync" was the note
+            # for three imageless sends running and did not settle whether the
+            # sync was the problem. The number does: 0 of 14 is a sync that
+            # has not run, 11 of 14 is a layout that did not place what it had.
+            _all = _kb.entities(ctx.tenant, available_only=False)
+            _with = sum(1 for e in _all
+                        if (e.attributes or {}).get("image"))
+            ctx.note(
+                f"this email carries NO image at all, only the logo — "
+                f"{_with} of {len(_all)} product(s) have a photograph on file"
+                + (" — run the catalogue sync on the Review tab; until it "
+                   "does, there is no product imagery to place"
+                   if not _with else
+                   " — photos exist, so this is the layout, not the data")
+                + (" (and no approved library photograph either)"
+                   if not hero_got.get("image") else ""))
     if not state["native_ok"]:
         # The failure is REPORTED, not assumed. This said "ESP not connected"
         # for every cause, including `personalize`'s unknown-token refusal —

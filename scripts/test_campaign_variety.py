@@ -577,12 +577,47 @@ def main():
        any("garbled" in n and "productionction" in n for n in r.get("notes", [])))
 
     print("\n— an email with no picture in it SAYS so —")
+    # The state this reports on is a catalogue with NO photographs anywhere,
+    # which is what an account that has never run the sync looks like.
+    with db.SessionLocal() as s:
+        kept = {}
+        for e in s.query(db.KbEntity).filter(db.KbEntity.tenant == "baci").all():
+            kept[e.key] = dict(e.attributes or {})
+            e.attributes = {k: v for k, v in (e.attributes or {}).items()
+                            if k != "image"}
+        s.commit()
     skill_pack.draft_campaign = _blocks_drafter([
         {"type": "text", "html": "<p>Words only.</p>"},
         {"type": "cta", "label": "Go", "url": "https://x/g"}])
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
     ck("the run names an imageless send instead of leaving it to be noticed",
        any("NO image" in n for n in r.get("notes", [])))
+    ck("…and COUNTS the photos on file, so the cause is not a guess",
+       any("product(s) have a photograph on file" in n
+           for n in r.get("notes", [])))
+    with db.SessionLocal() as s:
+        for e in s.query(db.KbEntity).filter(db.KbEntity.tenant == "baci").all():
+            if e.key in kept:
+                e.attributes = kept[e.key]
+        s.commit()
+
+    print("\n— a product's own photograph is a hero, with no library at all —")
+    with db.SessionLocal() as s2:
+        s2.add(db.KbEntity(tenant="baci", key="firenze", name="Firenze Set",
+                           type="product", price="129", availability="available",
+                           status="active", review="approved",
+                           attributes={"image": "https://cdn.shopify.com/s/f/p/fz.jpg?v=9"}))
+        s2.commit()
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "heading", "text": "A table worth setting", "level": 1},
+        {"type": "text", "html": "<p>Hi {{FIRST_NAME}}.</p>"},
+        {"type": "cta", "label": "See it", "url": "https://x/f"}])
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="launch")
+    ck("with nothing in the creative library, the product shot leads",
+       "hero" in _shape(r) and "/p/fz" in (_meta(r, "html") or ""), str(_shape(r)))
+    ck("…and the run says where that photograph came from",
+       any("own product shot" in n for n in r.get("notes", [])))
+
 
     print("\n— a link the drafter could not know is FILLED, not fatal —")
     with db.SessionLocal() as s:

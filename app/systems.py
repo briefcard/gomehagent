@@ -123,8 +123,16 @@ CATALOG = {
                      required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
-                dict(key="draft_into_esp", label="Set up as an ESP draft",
-                     required=False, kind="flag"),
+                # `draft_into_esp` is NOT a plan field. Producing the draft in
+                # the client's ESP is what this system IS — a campaign that
+                # stops short of the platform is not a lighter version of the
+                # job, it is the job not done. The real choice sits one level
+                # up, on the autonomy ladder: whether a human launches the
+                # draft or the system is eventually trusted to. Offering it
+                # per-plan invited a queue item that had quietly opted out of
+                # its own purpose (owner, 2026-08-22). The skill still accepts
+                # the parameter so the offline suite can exercise the path
+                # without an ESP.
             ),
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
