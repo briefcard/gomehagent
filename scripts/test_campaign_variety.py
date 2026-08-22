@@ -573,8 +573,11 @@ def main():
     print("\n— the label the renderer owns is not written twice —")
     ck("the drafter's own 'P.S.' prefix is stripped, tags or no tags",
        html.count("P.S.") == 1, str(html.count("P.S.")))
-    ck("a garbled word is reported so it can be rewritten",
-       any("garbled" in n and "productionction" in n for n in r.get("notes", [])))
+    # The stutter is now REMOVED before anyone reads it, rather than reported
+    # for a redraft — one rule covers all four live variants, so the craft
+    # nudge fires only on whatever it cannot repair.
+    ck("a garbled word never reaches the reader",
+       "productionction" not in html and "production" in html, html[:0] or "")
 
     print("\n— an email with no picture in it SAYS so —")
     # The state this reports on is a catalogue with NO photographs anywhere,
@@ -652,6 +655,65 @@ def main():
     ck("…and the run says it refreshed, so it is not a silent write",
        any("catalogue was refreshed" in n for n in r.get("notes", [])))
     _cs.sync_shopify = _real_sync
+
+    print("\n— a link points at a page that EXISTS, not the usual pattern —")
+    from app import links as _links
+    with db.SessionLocal() as s:
+        t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
+        t.domain = "eienhealth.com"
+        s.add(db.KbEntity(tenant="baci", key="shop", name="Shop",
+                          type="collection", availability="available",
+                          status="active", review="approved", attributes={}))
+        s.commit()
+    ck("the store's real catalogue page is found, not /collections/all",
+       _links.shop_url("baci") == "https://eienhealth.com/collections/shop",
+       _links.shop_url("baci"))
+    ck("a URL that does not exist is spotted",
+       _links.check('<a href="https://eienhealth.com/collections/all">x</a>',
+                    "baci") == ["https://eienhealth.com/collections/all"])
+    ck("…and an external link is somebody else's business",
+       _links.check('<a href="https://instagram.com/x">x</a>', "baci") == [])
+
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>Hello.</p>"},
+        {"type": "cta", "label": "See",
+         "url": "https://eienhealth.com/collections/all"},
+        {"type": "ps",
+         "html": '<p>P.S. <a href="https://eienhealth.com/collections/all">here</a>.</p>'}])
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
+    html = _meta(r, "html") or ""
+    ck("an invented collection URL never reaches the reader",
+       "/collections/all" not in html)
+    ck("…every on-site link points at the real catalogue",
+       "/collections/shop" in html)
+    ck("…and the run names what it repointed",
+       any("not a page on this site" in n for n in r.get("notes", [])))
+
+    print("\n— one email, one subject: another product's claims are set aside —")
+    kb.add_claim("baci", "Belongs only to the metabolic formula.", "x",
+                 ["quality"], proof_type="data", entity_key="glp1-support",
+                 origin="human", status="active")
+    _seen = {}
+
+    def _capture_claims(b, sg, g, craft=None):
+        _seen["claims"] = [c.get("claim", "") for c in (b.get("claims") or [])]
+        return _blocks_drafter([
+            {"type": "text", "html": "<p>Hi.</p>"},
+            {"type": "products", "keys": ["glp1"]},
+            {"type": "cta", "label": "See", "url": ""}])(b, sg, g, craft)
+    skill_pack.draft_campaign = _capture_claims
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
+    # `kb.claims` has always scoped this correctly: with no entity named you
+    # get BRAND-WIDE claims only. So a product's own claim cannot leak — and
+    # the live GLP-1 non-sequitur (owner, 2026-08-22) means that claim is
+    # filed brand-wide in the KB, which is a DATA fix, not a code one. The
+    # skill-level screen below is the belt to that braces: it also holds when
+    # an entity IS named and the drafter features a different subset.
+    ck("a claim scoped to a product this email does not feature is withheld",
+       not any("metabolic formula" in c for c in _seen.get("claims", [])),
+       " | ".join(c[:34] for c in _seen.get("claims", [])))
+    ck("…and brand-wide claims still come through",
+       any("Four Seasons" in c for c in _seen.get("claims", [])))
 
     print("\n— a link the drafter could not know is FILLED, not fatal —")
     with db.SessionLocal() as s:

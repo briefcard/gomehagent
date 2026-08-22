@@ -435,6 +435,17 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "links_point_at_real_pages",
+        "file": "app/skill_pack.py",
+        "find": "                if _want.split(\"?\")[0].rstrip(\"/\") not in known_urls:",
+        "replace": "                if False:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the call to action goes to a URL the drafter invented from a "
+               "platform convention \u2014 /collections/all on a store whose "
+               "catalogue is /collections/shop \u2014 so the one click the "
+               "whole email exists to earn lands on a 404",
+    },
+    {
         "name": "no_approval_without_an_artifact",
         "file": "app/skill_pack.py",
         "find": "        if _appr.withdraw(ctx.run_id, why):",

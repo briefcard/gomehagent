@@ -2559,3 +2559,49 @@ was missing, one gate that was too eager. The missing gate cost a bad email.
 The eager gate cost every email, and was harder to see, because nothing
 malfunctioned: it reported success, withdrew nothing (until §2.70), and simply
 produced less and less.
+
+### 2.72 A link to a page that does not exist — 2026-08-22
+
+A campaign's call to action pointed at `https://eienhealth.com/collections/all`.
+That store's catalogue is at `/collections/shop`. The drafter wrote the shape
+Shopify stores *usually* use, and nothing checked it against the site — so the
+one click the entire email exists to earn landed on a 404.
+
+Product links in the same email were correct, which is the whole lesson: those
+came from the catalogue sync's own handles, and the collection link came from
+the model. **A URL is a claim about what exists on somebody's site**, and it
+had been the one fact still left to a generator after names, sources, figures,
+signatories and photographs were all taken away from it.
+
+`app/links.py` reads the real destinations — product handles from the sync,
+collections from Shopify's own `custom_collections`/`smart_collections`, and
+the owner-approved `theme.nav` — and answers the question a generator actually
+has: where should this send people. The most specific true answer wins: the
+featured product's page, else the store's real catalogue page, else home.
+Anything the drafter writes is checked against that set and repointed if it is
+not a page that exists, with the substitution named on the run. External links
+are left alone; they are somebody else's business.
+
+It is a module rather than four lines in the email skill because blogs
+cross-linking within a domain and ads driving to a landing page ask exactly the
+same question, and each would otherwise invent its own answer.
+
+**Two smaller findings from the same email.**
+
+The GLP-1 non-sequitur — an email about omega-3 and a joint formula that
+suddenly discussed metabolic pathways — is a DATA problem, not a code one.
+`kb.claims` has always scoped correctly: with no entity named you get
+brand-wide claims only, and its docstring gives the reason ("a fact that is
+only true of one product must not turn up in a newsletter about something
+else"). So that claim is filed brand-wide in Eien's KB when it belongs to one
+product. The skill now also screens claims against the featured set as a
+second line, and the prompt says plainly: one email, one subject.
+
+And a FOURTH stutter variant shipped — "read it.d it." — after "now. now.",
+"every day. day." and "productionction" had each been chased with their own
+pattern. They were never four bugs. The model finishes a string and emits some
+suffix of it a second time, so that is now the rule: if the last N characters
+repeat the N before them, one copy goes. Five characters minimum, end of
+string only, longest match first — bounds set by testing against all four real
+cases and a list of real words that must survive (couscous, beriberi, "no.
+No."). Chasing the instances instead of the shape cost three deploys.

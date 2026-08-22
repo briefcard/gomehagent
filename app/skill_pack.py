@@ -738,6 +738,16 @@ the email is about. Start in the middle of something — a moment, a number, a
 question the reader already has. Subject lines run 3–8 words and say something
 specific; the preheader EXTENDS the subject, it never repeats it.
 
+ONE EMAIL, ONE SUBJECT. Write about the products offered to you and nothing
+else. Do not introduce another product line, another mechanism, or another
+audience's positioning part-way through — a reader who came for one thing and
+is handed a second stops believing both. If a claim in front of you belongs to
+a different product than the one this email is about, leave it out.
+
+NEVER WRITE A URL. Use "" for every link and every cta_url. You are not given
+the site's addresses and cannot know them; code fills each one in with a page
+that exists. A plausible-looking path is a broken link.
+
 BE SPECIFIC OR SAY NOTHING. "Premium quality", "elevate your space",
 "unmatched craftsmanship" are worth nothing — they are what every brand
 writes. A number, a timeframe, a material, a name, a real detail: that is what
@@ -1240,41 +1250,51 @@ def _legacy_blocks(copy: dict, ents: list, hero: dict | None) -> list:
     return blocks
 
 
-#: `… and why it matters now. now.` / `… we take seriously every day. day.`
-#: Two of these shipped in one live Eien email (2026-08-22). The model wrote
-#: them — nothing in the render path can duplicate a word — and no amount of
-#: prompting reliably stops a stutter like this. It is exactly the class of
-#: thing to fix in code instead: the pattern is unambiguous (a word plus its
-#: terminal punctuation, immediately repeated, at the very end of the string)
-#: and the correction is not a rewrite, it is the removal of a duplicate.
-#: Trailing close-tags are allowed after it so `…day. day.</p>` is caught too.
+#: A GENERATION STUTTER: the text ends by repeating its own tail.
 #:
-#: Case-SENSITIVE on purpose. A stutter repeats the word exactly ("now. now.");
-#: a writer repeating for emphasis restarts the sentence and capitalises ("She
-#: said no. No."). Matching case-insensitively would silently edit the second,
-#: which is real writing, to catch nothing extra of the first.
-_STUTTER = re.compile(r"(\b[\w'’]+[.!?])\s+\1(?=\s*(?:<[^>]*>\s*)*$)")
+#: Four variants shipped live before this was general enough — "matters now.
+#: now.", "every day. day.", "productionction", and "read it.d it." Each was
+#: chased with its own pattern (whole word, then syllable) and the next one
+#: slipped past, because they are not four bugs. They are one: the model
+#: finishes a string, then emits some suffix of it a second time.
+#:
+#: So the rule is stated that way. Take the last N characters; if the N before
+#: them are identical, one copy is spurious. Longest N first, so the whole
+#: repeat goes rather than a fragment of it.
+#:
+#: Five characters minimum, and only at the very END of the string. Shorter
+#: windows match real writing ("bye bye", "couscous", "beriberi"), and a
+#: repeat mid-sentence is usually deliberate. Both bounds were set by testing
+#: against the four real cases and a list of things that must survive.
+STUTTER_MIN, STUTTER_MAX = 5, 14
 
 
 def _undouble(s: str) -> str:
-    return _STUTTER.sub(r"\1", str(s or ""))
+    t = str(s or "")
+    tail = ""
+    while t and t[-1] in " \t\n":
+        tail, t = t[-1] + tail, t[:-1]
+    # Trailing close-tags are markup, not text; the repeat sits before them.
+    m = re.search(r"((?:</[^>]+>\s*)+)$", t)
+    close = m.group(1) if m else ""
+    if close:
+        t = t[:-len(close)]
+    for n in range(STUTTER_MAX, STUTTER_MIN - 1, -1):
+        if len(t) >= 2 * n and t[-n:] == t[-2 * n:-n]:
+            return t[:-n] + close + tail
+    return s
 
 
 def _fill_dead_links(blocks: list, url: str) -> int:
     """Point every empty link at the email's one destination. Returns how many.
 
-    A drafter writes `<a href="">the CitroBurn page</a>` because it does not
-    know the URL — it cannot, the link is a fact about the store and the
-    drafter is not given facts. Treating that as a fault and BLOCKING the send
-    was the wrong reading and stopped emails that were otherwise fine (owner,
+    A drafter writes `<a href="">the product page</a>` because it does not know
+    the URL — it cannot, the link is a fact about the store and the drafter is
+    given no facts. Treating that as a fault and BLOCKING the send was the
+    wrong reading and stopped emails that were otherwise fine (owner,
     2026-08-22: "it was working before"). The prose is the drafter's; the
-    destination is ours; so we supply it, exactly as the CTA button and the
-    hero image and the signature are supplied.
-
-    One email has one destination, which is enforced elsewhere — so there is
-    never a question of WHICH url an empty link should get. `dead_links` still
-    reports whatever remains, which after this can only mean the email has no
-    destination at all.
+    destination is ours; so we supply it, exactly as the CTA button, the hero
+    image and the signature are supplied.
     """
     if not url or url == "#":
         return 0
@@ -1362,7 +1382,8 @@ def _proof_misuse(kind: str, b: dict, claim: dict) -> str:
 def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
                      offered_claims: dict, note, fmt: str = "",
                      signatory: dict | None = None,
-                     default_cta_url: str = "") -> tuple[list, list]:
+                     default_cta_url: str = "",
+                     known_urls: set | None = None) -> tuple[list, list]:
     """The drafter's OWN layout, held to the rules — or the legacy skeleton.
 
     "This is all templates" (owner, 2026-08-21): the fix is that the model
@@ -1464,10 +1485,19 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
             if _u == "#":
                 _u = ""
             _cu = str(copy.get("cta_url") or "").strip()
+            _want = _u or (_cu if _cu != "#" else "")
+            # A destination the drafter wrote is honoured only if it is a page
+            # that actually exists; otherwise the looked-up one stands. This is
+            # the same rule as names and figures — the words are the drafter's,
+            # the fact is ours.
+            if _want and known_urls is not None:
+                if _want.split("?")[0].rstrip("/") not in known_urls:
+                    note(f"the CTA pointed at {_want}, which is not a page on "
+                         f"this site — using {default_cta_url}")
+                    _want = ""
             out.append({"type": "cta", "label": b.get("label") or
                         copy.get("cta_label") or "Shop now",
-                        "url": (_u or (_cu if _cu != "#" else "")
-                                or default_cta_url or "#")})
+                        "url": _want or default_cta_url or "#"})
         elif kind == "signature":
             # The name is BRAND data and the drafter's is IGNORED. This block
             # once accepted any non-empty name, which a model duly filled with
@@ -1529,7 +1559,7 @@ def _blocks_text(blocks: list) -> str:
 
 
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import creative, email_craft, email_render, esp, fitness
+    from . import creative, email_craft, email_render, esp, fitness, links
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -1570,7 +1600,16 @@ def _run_campaign_email(ctx: Context) -> dict:
     # Where a CTA goes when the drafter supplies no URL. A featured product's
     # own page first, the storefront second — anything but the `#` that
     # shipped a button reading "Learn about CitroBurn" straight to nowhere.
-    _cta_home = (f"https://{_dom}" if _dom else "")
+    # WHERE THIS EMAIL SENDS PEOPLE — looked up, never constructed. A CTA on
+    # `/collections/all` shipped to a store whose catalogue is at
+    # `/collections/shop`, because the drafter wrote the platform's usual
+    # shape and nothing checked it against the actual site.
+    _dests = links.destinations(ctx.tenant)
+    _known = {d["url"].split("?")[0].rstrip("/") for d in _dests} or None
+    _cta_home = links.best_for(
+        ctx.tenant,
+        [e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
+        _dests) or (f"https://{_dom}" if _dom else "")
     # NO PHOTOGRAPHS ANYWHERE? FETCH THEM. The catalogue sync is what puts a
     # product's photo on the entity and in the creative library, and an account
     # whose sync predates that code has products with no imagery — which is a
@@ -1610,6 +1649,25 @@ def _run_campaign_email(ctx: Context) -> dict:
                      "connected, so this email cannot show one")
 
     ents, _refused = fitness.screen(_model, ents)
+
+    # ONE EMAIL, ONE SUBJECT. Claims arrive scoped: `brand-wide` ones are true
+    # of the company, the rest belong to a particular product. With no entity
+    # named on the plan they were ALL offered at once, so an email about
+    # Omega-3 and a joint formula was handed a claim about GLP-1 metabolism and
+    # reasonably worked it in — a different product, a different audience, a
+    # different positioning, in the middle of somebody else's story (owner,
+    # 2026-08-22). The scope was on every claim and nothing read it.
+    _feat = {e.get("key", "") for e in ents if e.get("key")}
+    _in_scope = [c for c in ctx.claims
+                 if (c.get("scope") or "brand-wide") == "brand-wide"
+                 or c.get("scope") in _feat]
+    _aside = len(ctx.claims) - len(_in_scope)
+    if _aside and _in_scope:
+        ctx.claims = _in_scope
+        ctx.bundle["claims"] = _in_scope
+        ctx.note(f"{_aside} claim(s) belonging to products this email does "
+                 f"not feature were set aside — one email, one subject")
+
     for r in _refused:
         ctx.note(f"not offered to the drafter: {r['name']} — {r['why']}")
     if _refused and not ents:
@@ -1745,7 +1803,8 @@ def _run_campaign_email(ctx: Context) -> dict:
                                                note=ctx.note,
                                                fmt=craft.get("format", ""),
                                                signatory=theme.get("sender"),
-                                               default_cta_url=_cta_home)
+                                               default_cta_url=_cta_home,
+                                               known_urls=_known)
         # The email's one destination, in preference order: what the CTA
         # actually ended up pointing at, then the featured product's page,
         # then the storefront. Every empty link in the prose gets it.
@@ -1754,6 +1813,14 @@ def _run_campaign_email(ctx: Context) -> dict:
                       and b.get("url") != "#"), "")
         _dest = _dest or next((e.get("url") for e in ents if e.get("url")), "")
         _n = _fill_dead_links(blocks, _dest or _cta_home)
+        for _b in blocks:
+            for _f in ("html", "text"):
+                if _b.get(_f):
+                    _b[_f], _bad = links.repoint(_b[_f], ctx.tenant,
+                                                 _dest or _cta_home, _dests)
+                    for _u in _bad:
+                        ctx.note(f"link repointed — {_u} is not a page on this "
+                                 f"site; sent to {_dest or _cta_home} instead")
         if _n:
             ctx.note(f"{_n} link(s) the drafter left empty now point at "
                      f"{_dest or _cta_home} — a drafter is not given URLs, "
@@ -1803,7 +1870,7 @@ def _run_campaign_email(ctx: Context) -> dict:
             left = _craft_review(ctx, retry, _assemble_blocks(
                 retry, ents, hero, offered_claims=offered, note=lambda _m: None,
                 fmt=craft.get("format", ""), signatory=theme.get("sender"),
-                default_cta_url=_cta_home)[0], craft)
+                default_cta_url=_cta_home, known_urls=_known)[0], craft)
             # Keep the rewrite only when it is actually better — and BLOCKS
             # decide that before anything else. The first rule here compared
             # total finding counts, so a retry that removed the one thing
