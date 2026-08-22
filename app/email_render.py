@@ -107,8 +107,13 @@ def _text(b: dict, t: dict) -> str:
     # `{{FIRST_NAME}}` into text and a link into a string). The validator is the
     # gate on this content, upstream — see the module docstring.
     body = b.get("html") or (f"<p>{_esc(b.get('text',''))}</p>" if b.get("text") else "")
-    return (f'<tr><td style="padding:14px 32px;font-family:{t["font"]["body"]};'
-            f'font-size:16px;line-height:1.6;color:{c["text"]}">{body}</td></tr>')
+    # Bare <p> tags get an inline rhythm — email clients reset paragraph
+    # margins their own way, and "it just looks like long text" (owner,
+    # 2026-08-21) is what default margins read as. Styled tags are left as
+    # the generator wrote them.
+    body = body.replace("<p>", '<p style="margin:0 0 14px">')
+    return (f'<tr><td style="padding:10px 32px 2px;font-family:{t["font"]["body"]};'
+            f'font-size:16px;line-height:1.65;color:{c["text"]}">{body}</td></tr>')
 
 
 def _cta(b: dict, t: dict) -> str:
@@ -126,44 +131,64 @@ def _cta(b: dict, t: dict) -> str:
 
 
 def _products(b: dict, t: dict) -> str:
+    """Product rows, not cramped columns. Three names squeezed into thirds
+    wrapped badly on the owner's phone and nothing about them said
+    "tappable" — each product is a full-width row now: photo left when the
+    sync has one, name in the brand accent with the price under it, an
+    accent arrow on the right, and the WHOLE row is one link."""
     c = t["colors"]
-    cells = []
+    rows = []
     for p in (b.get("items") or [])[:3]:
-        img = (f'<img src="{_esc(p.get("image",""))}" width="168" '
-               f'alt="{_esc(p.get("name",""))}" style="display:block;width:100%;'
-               f'height:auto;border:0;border-radius:{t["radius"]}">'
-               if p.get("image") else "")
+        url = p.get("url") or "#"
+        img_td = (f'<td width="96" valign="top" style="padding:2px 14px 2px 0">'
+                  f'<a href="{_esc(url)}"><img src="{_esc(p["image"])}" width="88" '
+                  f'alt="{_esc(p.get("name", ""))}" style="display:block;width:88px;'
+                  f'height:88px;border:0;border-radius:{t["radius"]};'
+                  f'background:{c["border"]}"></a></td>'
+                  if p.get("image") else "")
         price = (f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
-                 f'color:{c["muted"]};padding-top:2px">{_esc(p.get("price",""))}</div>'
+                 f'color:{c["muted"]};padding-top:2px">{_esc(p.get("price", ""))}</div>'
                  if p.get("price") else "")
-        cells.append(
-            f'<td width="33%" valign="top" style="padding:6px">'
-            f'<a href="{_esc(p.get("url","#"))}" style="text-decoration:none;color:{c["text"]}">'
-            f'{img}<div style="font-family:{t["font"]["body"]};font-size:15px;'
-            f'font-weight:600;padding-top:8px">{_esc(p.get("name",""))}</div>{price}</a></td>')
-    if not cells:
+        rows.append(
+            f'<tr><td style="padding:10px 0;border-bottom:1px solid {c["border"]}">'
+            f'<table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0"><tr>{img_td}'
+            f'<td valign="middle"><a href="{_esc(url)}" style="text-decoration:none">'
+            f'<div style="font-family:{t["font"]["body"]};font-size:16px;'
+            f'font-weight:600;color:{c["accent"]}">{_esc(p.get("name", ""))}</div>'
+            f'{price}</a></td>'
+            f'<td width="30" align="right" valign="middle"><a href="{_esc(url)}" '
+            f'style="font-family:{t["font"]["body"]};font-size:18px;font-weight:700;'
+            f'text-decoration:none;color:{c["accent"]}">→</a></td>'
+            f'</tr></table></td></tr>')
+    if not rows:
         return ""
-    return (f'<tr><td style="padding:10px 26px"><table role="presentation" width="100%" '
-            f'cellpadding="0" cellspacing="0" border="0"><tr>{"".join(cells)}</tr>'
-            f'</table></td></tr>')
+    return (f'<tr><td style="padding:4px 32px 12px"><table role="presentation" '
+            f'width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'{"".join(rows)}</table></td></tr>')
 
 
 def _heading(b: dict, t: dict) -> str:
     """A scannable section heading — level 1 is the email's one headline,
-    anything else a section head. The owner's first live draft was a wall of
-    paragraphs; headings are what let a reader take it in a glance."""
+    anything else a section KICKER: small caps in the brand accent, the
+    device that makes a section read as designed rather than as more
+    paragraph. The owner's live drafts read as "just long text" while the
+    section heads were plain bold lines one size off the body."""
     c = t["colors"]
-    big = int(b.get("level") or 2) <= 1
-    size, pad = (24, "14px 32px 2px") if big else (17, "10px 32px 0")
-    return (f'<tr><td style="padding:{pad}">'
-            f'<div style="font-family:{t["font"]["heading"]};font-size:{size}px;'
-            f'font-weight:700;line-height:1.25;color:{c["text"]}">'
-            f'{_esc(b.get("text", ""))}</div></td></tr>')
+    if int(b.get("level") or 2) <= 1:
+        return (f'<tr><td style="padding:16px 32px 2px">'
+                f'<div style="font-family:{t["font"]["heading"]};font-size:24px;'
+                f'font-weight:700;line-height:1.25;color:{c["text"]}">'
+                f'{_esc(b.get("text", ""))}</div></td></tr>')
+    return (f'<tr><td style="padding:14px 32px 0">'
+            f'<div style="font-family:{t["font"]["body"]};font-size:13px;'
+            f'font-weight:700;letter-spacing:1.5px;text-transform:uppercase;'
+            f'color:{c["accent"]}">{_esc(b.get("text", ""))}</div></td></tr>')
 
 
 def _divider(b: dict, t: dict) -> str:
     return (f'<tr><td style="padding:8px 32px"><div style="height:1px;'
-            f'background:{t["colors"]["border"]};line-height:1px">&nbsp;</div></td></tr>')
+            f'background:{t["colors"]["border"]};line-height:1px"> </div></td></tr>')
 
 
 _BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta,
@@ -194,13 +219,13 @@ def _header(t: dict, webview: bool = True) -> str:
     nav_items = [i for i in (t.get("nav") or []) if i.get("label") and i.get("url")]
     if not nav_items:
         return top
-    links = (f'&nbsp;&nbsp;<span style="color:{c["border"]}">·</span>&nbsp;&nbsp;'.join(
+    links = (f'  <span style="color:{c["border"]}">·</span>  '.join(
         f'<a href="{_esc(i["url"])}" style="color:{c["text"]};text-decoration:none;'
         f'font-family:{t["font"]["body"]};font-size:13px;letter-spacing:.02em;'
         f'text-transform:uppercase">{_esc(i["label"])}</a>' for i in nav_items[:5]))
     nav = (f'<tr><td style="padding:14px 32px 6px" align="center">{links}</td></tr>'
            f'<tr><td style="padding:0 32px"><div style="height:1px;'
-           f'background:{c["border"]};line-height:1px">&nbsp;</div></td></tr>')
+           f'background:{c["border"]};line-height:1px"> </div></td></tr>')
     return top + nav
 
 
@@ -218,7 +243,7 @@ def _footer(t: dict) -> str:
     socials = [s for s in (f.get("socials") or []) if s.get("name") and s.get("url")]
     social_row = ""
     if socials:
-        links = "&nbsp;&nbsp;&nbsp;".join(
+        links = "   ".join(
             f'<a href="{_esc(s["url"])}" style="color:{c["muted"]};'
             f'text-decoration:none;font-weight:600">{_esc(s["name"])}</a>'
             for s in socials[:5])

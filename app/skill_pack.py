@@ -693,6 +693,10 @@ EMAIL CRAFT — these are enforced or measured, not suggestions:
   paragraphs, one or two sentences each. Optional 2–5 word heading per
   section. Nobody reads a wall — write for the scan, let the sections and
   product cards breathe.
+- Products: feature 1–3 FROM THE OFFERED LIST when they serve this segment,
+  and return their keys — the product cards rendered under your copy will
+  be exactly the ones you pick, so your prose and the cards must agree.
+  Never name a product that is not on the list.
 - ONE call to action. No second ask, no invented offer.
 Match the house voice throughout.
 
@@ -702,6 +706,7 @@ Return JSON only, nothing else:
                "short <p> paragraphs; may use {{FIRST_NAME}}; no "
                "<html>/<head>/<style>, no images (added later by code)"}],
  "claim_ids": ["id of each approved claim you actually used"],
+ "featured_keys": ["key of each offered product you actually feature"],
  "cta_label": "...", "cta_url": ""}"""
 
 
@@ -793,9 +798,12 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str) -> tuple:
                              + (f" (evidence: {c['evidence']})" if c.get("evidence") else ""))
         ents = bundle.get("entities") or []
         if ents:
-            parts.append("\n## Products you may feature:")
-            for e in ents[:4]:
-                parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"[:200])
+            parts.append("\n## Products you may feature (cite by key — the "
+                         "cards rendered under your copy will be exactly the "
+                         "ones you pick):")
+            for e in ents[:6]:
+                parts.append(f"- [{e.get('key', '')}] {e.get('name', '')}: "
+                             f"{e.get('description', '')}"[:220])
         objs = bundle.get("objections") or []
         if objs:
             parts.append("\n## Hesitations you may answer:")
@@ -918,6 +926,35 @@ def _run_campaign_email(ctx: Context) -> dict:
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
+    # Products FIRST, so the drafter writes copy that knows what it is
+    # selling: the plan's entity when one was set (resolve matched it into
+    # the bundle), otherwise the catalogue's top available items. Every
+    # field is read from the store sync — name, price, URL, photograph.
+    from . import kb as _kb, tenants as _tn
+    _dom = (getattr(_tn.get(ctx.tenant), "domain", "") or "").strip()
+
+    def _prod(e: dict) -> dict:
+        attrs = e.get("attributes") or {}
+        pkey = e.get("key", "")
+        return {"key": pkey, "name": e.get("name", ""),
+                "price": e.get("price", ""),
+                "description": e.get("description", ""),
+                "image": e.get("image") or attrs.get("image", ""),
+                "url": e.get("url") or (f"https://{_dom}/products/{pkey}"
+                                        if _dom and pkey else "")}
+
+    plan_scoped = bool(ctx.bundle.get("entities"))
+    ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
+            if e.get("name")]
+    if not ents:
+        rows = _kb.entities(ctx.tenant, available_only=True)
+        rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
+                                 r.name or ""))
+        ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
+                       "description": r.description or "",
+                       "attributes": r.attributes or {}}) for r in rows[:6]]
+    ctx.bundle["entities"] = ents
+
     if not ctx.claims:
         ctx.note("no approved claim is in scope, so this email has no credibility "
                  "from the data layer — it can still be written, but authoring a "
@@ -932,6 +969,26 @@ def _run_campaign_email(ctx: Context) -> dict:
     offered = {c["claim_id"] for c in ctx.claims}
     cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
 
+    # Same rule for products as for claims: the drafter names WHICH of the
+    # offered items it actually featured (`featured_keys`), the keys are
+    # intersected with what was offered, and the cards then match the copy —
+    # "random products" under segment-specific prose was the owner's read of
+    # the alternative (2026-08-21). No choice → the offered order stands.
+    by_key = {e["key"]: e for e in ents if e.get("key")}
+    chosen = [by_key[k] for k in (copy.get("featured_keys") or [])
+              if isinstance(k, str) and k in by_key]
+    if chosen:
+        ents = chosen[:3]
+        ctx.note("products: the drafter featured "
+                 + ", ".join(e["name"] for e in ents))
+    else:
+        ents = ents[:3]
+        if ents and not plan_scoped:
+            ctx.note("products: no entity on the plan and no drafter choice "
+                     "— the catalogue's top available items are featured; "
+                     "set Featured entity on the plan to choose them")
+    ctx.bundle["entities"] = ents
+
     # A subject set on the PLAN is the owner's line and outranks the
     # drafter's — the plan is the reviewed instruction. Set before
     # validation, so the banned-claims gate reads what will actually ship.
@@ -939,40 +996,6 @@ def _run_campaign_email(ctx: Context) -> dict:
     if plan_subject:
         copy["subject"] = plan_subject
         ctx.note("subject line came from the plan, not the drafter")
-
-    # Products: the plan's entity when one was set (resolve matched it into
-    # the bundle), and otherwise the catalogue's own top available items,
-    # labelled as such. The owner's first live draft invited readers to
-    # "browse the pairings" with NO products in it (2026-08-21) — the bundle
-    # only carries entities when a plan names one. Every field rendered is
-    # read from the store sync: name, price, the product URL, and the
-    # product's own photograph. Nothing is invented; an item without an
-    # image renders without one.
-    from . import kb as _kb, tenants as _tn
-    _dom = (getattr(_tn.get(ctx.tenant), "domain", "") or "").strip()
-
-    def _prod(e: dict) -> dict:
-        attrs = e.get("attributes") or {}
-        pkey = e.get("key", "")
-        return {"key": pkey, "name": e.get("name", ""),
-                "price": e.get("price", ""),
-                "image": e.get("image") or attrs.get("image", ""),
-                "url": e.get("url") or (f"https://{_dom}/products/{pkey}"
-                                        if _dom and pkey else "")}
-
-    ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
-            if e.get("name")]
-    if not ents:
-        rows = _kb.entities(ctx.tenant, available_only=True)
-        rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
-                                 r.name or ""))
-        ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
-                       "attributes": r.attributes or {}}) for r in rows[:3]]
-        if ents:
-            ctx.note("products: no entity on the plan, so the catalogue's "
-                     "top available items are featured — set Featured entity "
-                     "on the plan to choose them yourself")
-    ctx.bundle["entities"] = ents
 
     # The bespoke visual, through the governed loop: an APPROVED, OWNED
     # photograph or nothing — `draft_visual` opts into having a Canva draft

@@ -530,6 +530,41 @@ closed the same day:
 * The "..com" in the footer's receiving line is the approved THEME's own
   footer text (nothing in code composes it) — one Brand-tab edit.
 
+**Second live pass, same day (owner: "still looks like long text… bsp;
+broken characters… random products, no photos, not clickable").** All
+closed, and this time the rendered output was LOOKED AT before shipping:
+
+* **The " bsp;" was our dividers' `&nbsp;`** — Omnisend's HTML processing
+  mangles entity references into visible text. Every entity in
+  `email_render` is a literal UTF-8 character now (9 sites: both dividers,
+  the footer spacing, the products arrow), and the suite pins
+  "no `&` entities anywhere in a render".
+* **Typographic pass:** bare `<p>` tags get inline rhythm (clients reset
+  margins their own way), section headings became small-caps ACCENT
+  KICKERS between the hairlines (the old heads were a bold line one size
+  off the body — which is why sections still read as more paragraph), and
+  the headline stays 24px serif.
+* **Product ROWS, not cramped thirds:** photo left (88px, when the sync
+  has one), name in the brand accent with price under it, an accent → on
+  the right, the whole row one link, hairline between rows. Three names
+  squeezed into 33% columns wrapped badly on the owner's phone and nothing
+  said "tappable".
+* **The drafter picks the products, claims-style:** the prompt now lists
+  the offered items BY KEY (bundle entities are built BEFORE drafting —
+  they were normalized after, so the model wrote copy blind to the
+  catalogue), and returns `featured_keys`; code intersects with what was
+  offered, the cards match the prose, and the run notes who chose
+  ("drafter featured X, Y" vs "catalogue's top items — set Featured
+  entity"). "Random products under segment-specific prose" was the
+  owner's read of the alternative.
+* His screenshot's missing photos are DATA, not code: Eien's entities
+  predate the image-filing sync — one Catalogue-sync press backfills
+  `attributes.image` + the library heroes.
+* Omnisend-native drag-drop blocks remain the recorded later step —
+  "native sections" today are our renderer's block system, and the
+  rendered sample (hero + kicker sections + product rows + CTA) was
+  verified in a browser before this deploy.
+
 **The skill registry loads itself (2026-08-21, production incident — owner
 pressed Run now on a real campaign plan: "no skill keyed
 'campaign_email'").** Registration was an import side effect of

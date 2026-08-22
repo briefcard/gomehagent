@@ -124,9 +124,14 @@ def main() -> int:
         {"type": "divider"},
         {"type": "heading", "text": "Second idea"},
         {"type": "text", "html": "<p>More.</p>"}])
-    ck("headings render, at two weights",
+    ck("headings render at two weights — the headline big, the section head "
+       "a small-caps accent kicker",
        "The one-line headline" in structured and "Second idea" in structured
-       and "font-size:24px" in structured and "font-size:17px" in structured)
+       and "font-size:24px" in structured
+       and "text-transform:uppercase" in structured)
+    ck("no HTML entities anywhere — Omnisend's import mangled &nbsp; into "
+       "visible 'bsp;' text; literal UTF-8 survives",
+       "&nbsp;" not in structured and "&#" not in structured)
     no_view = er.render(EIEN, BLOCKS, webview=False)
     ck("webview=False drops the view-in-browser link AND its token — "
        "Omnisend has no variable to fill it",
