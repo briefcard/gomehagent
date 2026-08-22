@@ -219,13 +219,30 @@ def folder(tenant: str) -> dict:
     # The root first, then the account inside it. Two levels, so a Canva team
     # that also works by hand is not looking at a flat list of client names at
     # the top of its own workspace.
-    root = call(tenant, "POST", "/folders",
-                payload={"name": ROOT_NAME, "parent_folder_id": "root"})
-    if not root["ok"]:
-        return root
-    root_id = ((root["data"] or {}).get("folder") or {}).get("id", "")
+    #
+    # The ROOT is remembered too, and it did not used to be. Only the
+    # per-tenant folder id was cached, so the first run for every NEW account
+    # created another root — five clients, five folders all called "Client
+    # work — gomehagent" at the top of the workspace, each holding one client.
+    # That is precisely the duplicate-by-name failure `_remember_folder` was
+    # written to prevent, done to the level above it. The root is one folder
+    # for the whole installation, so it belongs in a Setting rather than on a
+    # tenant row.
+    root_id = ""
+    with db.SessionLocal() as _s:
+        _row = _s.get(db.Setting, "canva_root_folder")
+        root_id = (_row.value if _row else "") or ""
     if not root_id:
-        return {"ok": False, "error": "Canva created no root folder id."}
+        root = call(tenant, "POST", "/folders",
+                    payload={"name": ROOT_NAME, "parent_folder_id": "root"})
+        if not root["ok"]:
+            return root
+        root_id = ((root["data"] or {}).get("folder") or {}).get("id", "")
+        if not root_id:
+            return {"ok": False, "error": "Canva created no root folder id."}
+        with db.SessionLocal() as _s:
+            _s.merge(db.Setting(key="canva_root_folder", value=root_id))
+            _s.commit()
 
     made = call(tenant, "POST", "/folders",
                 payload={"name": f"{t.name} ({tenant})",

@@ -59,6 +59,39 @@ def main() -> int:
     db.init_db()
     tenants.seed()
 
+    print("— ONE root folder, whatever the client count —")
+    _made = []
+    _real_call = canva.call
+
+    def _fake_call(tenant, method, path, *, payload=None, **kw):
+        if method == "POST" and path == "/folders":
+            _made.append((payload["name"], payload["parent_folder_id"]))
+            return {"ok": True, "data": {"folder": {"id": f"fld_{len(_made)}"}}}
+        return {"ok": True, "data": {}}
+    canva.call = _fake_call
+    for _t in ("baci", "eien", "coverings"):
+        canva.folder(_t)
+    _roots = [m for m in _made if m[1] == "root"]
+    ck("three accounts share ONE root folder, not one root each",
+       len(_roots) == 1, f"{len(_roots)} roots: {[m[0] for m in _roots]}")
+    ck("…and each account sits inside it",
+       all(m[1] == "fld_1" for m in _made if m[1] != "root"),
+       str([m[1] for m in _made]))
+    ck("a second call reuses the remembered folder, never re-creating it",
+       canva.folder("baci").get("created") is False)
+    canva.call = _real_call
+    # Leave no trace: the rest of this suite expects accounts with no folder
+    # remembered and no root on file.
+    with db.SessionLocal() as _s:
+        for _t in _s.query(db.Tenant).all():
+            _d = dict(_t.design or {})
+            _d.pop("canva_folder_id", None)
+            _t.design = _d
+        _r = _s.get(db.Setting, "canva_root_folder")
+        if _r:
+            _s.delete(_r)
+        _s.commit()
+
     print("— the sign-in that Canva requires —")
     ck("the flow is configured once the app credentials exist",
        oauth.configured("canva") == "", oauth.configured("canva"))

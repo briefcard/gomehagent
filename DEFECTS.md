@@ -2658,3 +2658,21 @@ story for ever. Least-recently-used keeps it turning.
 `/health/connections` now reports Canva and the ESP. Neither was visible
 without the console secret, which is exactly the question that stalls a setup
 — and the reason three rounds were spent asking whether Canva was connected.
+
+### 2.75 One root folder per client, all with the same name — 2026-08-22
+
+Found by reading `canva.folder` to answer "where do the designs get organised
+inside Canva". The intended shape is two levels: a single root, "Client work —
+gomehagent", with one folder per account inside it.
+
+Only the per-account folder id was remembered, on the tenant row. The ROOT id
+was not kept anywhere, so the first run for every NEW account took the
+create-both branch and made another root. Five clients would have produced
+five folders all called "Client work — gomehagent" at the top of the
+workspace, each holding exactly one client — which is the duplicate-by-name
+state that `_remember_folder`'s own docstring exists to prevent, committed one
+level above it.
+
+The root is one folder for the whole installation, not per tenant, so it now
+lives in a `Setting` and is created once. Never shipped: no Canva call has
+ever run live, and the account is still not connected.
