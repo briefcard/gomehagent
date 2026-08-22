@@ -693,7 +693,14 @@ def compliance_sweep() -> None:
         cat = systems.find(t.key, "catalog_compliance")
         if cat and systems.is_on(cat):
             try:
-                skill.run("catalog_compliance", t.key, trigger="schedule")
+                res = skill.run("catalog_compliance", t.key, trigger="schedule")
+                if (res or {}).get("status") == "refused":
+                    # A refusal is OUR bug (an unknown skill, an unknown
+                    # account) and files no run — unlogged, this sweep
+                    # refused for weeks with an empty registry and read as
+                    # a quiet Monday.
+                    log.error("catalog compliance REFUSED for %s: %s", t.key,
+                              "; ".join(res.get("blocked_on") or []))
             except Exception:                                    # noqa: BLE001
                 log.exception("catalog compliance failed for %s", t.key)
 

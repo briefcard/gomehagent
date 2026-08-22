@@ -285,7 +285,22 @@ def health() -> dict:
             "ops_channel": channel.active(),
             "inboxes": list(config.GMAIL_ACCOUNTS),
             "commit": (_os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:12],
-            "routes": len({r.path for r in app.routes})}
+            "routes": len({r.path for r in app.routes}),
+            # How many skills THIS process can actually run. Zero here was
+            # the owner's "no skill keyed 'campaign_email'": registration
+            # was an import side effect nothing on the web path performed.
+            # The registry self-loads now, and this is the curl that proves
+            # it per process rather than per incident.
+            "skills": _skill_count()}
+
+
+def _skill_count() -> int:
+    try:
+        from . import skill as _sk
+        return _sk.registered()
+    except Exception:                                            # noqa: BLE001
+        return -1        # a broken pack must not break liveness — but -1
+                         # reads as "could not load", never as "none exist"
 
 
 @app.get("/health/connections")

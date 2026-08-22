@@ -88,6 +88,41 @@ class Skill:
 
 REGISTRY: dict[str, Skill] = {}
 
+_PACK_LOADED = False
+
+
+def _ensure_pack() -> None:
+    """The registry loads its own contents on first read.
+
+    Registration is an import side effect of `skill_pack`, and WHO imported
+    it was left to chance: only `tool_description` — the agent path — did.
+    So the kernel agent worked while the web process's Run-now route and the
+    worker's compliance sweep both reached `run()` with an EMPTY registry:
+    the owner pressed Run now on a real campaign plan and was told no skill
+    keyed 'campaign_email' existed while skill_pack.py sat one import away,
+    and the Monday catalog sweep had been refusing the same way with nobody
+    logging it (2026-08-21). Structural now: every registry read loads the
+    pack first, so a caller cannot forget. The flag is set BEFORE the
+    import because skill_pack imports this module back.
+    """
+    global _PACK_LOADED
+    if _PACK_LOADED:
+        return
+    _PACK_LOADED = True
+    try:
+        from . import skill_pack  # noqa: F401 — importing registers the pack
+    except Exception:
+        _PACK_LOADED = False
+        raise
+
+
+def registered() -> int:
+    """How many skills the registry holds — the pack loaded first. On
+    /health so 'is the pack actually wired in THIS process' is a curl, not
+    an incident."""
+    _ensure_pack()
+    return len(REGISTRY)
+
 
 def register(skill: Skill) -> Skill:
     if skill.key in REGISTRY:
@@ -97,6 +132,7 @@ def register(skill: Skill) -> Skill:
 
 
 def get(key: str) -> Skill | None:
+    _ensure_pack()
     return REGISTRY.get(key)
 
 
@@ -107,6 +143,7 @@ def catalogue(tenant: str = "") -> list[dict]:
     that is blocked says so here, with the missing field, so the agent does not
     discover it by failing.
     """
+    _ensure_pack()
     out = []
     for sk in sorted(REGISTRY.values(), key=lambda s: s.key):
         row = {"key": sk.key, "name": sk.name, "does": sk.does,
@@ -436,8 +473,7 @@ def tool_description(tenant: str = "") -> str:
     check a catalogue; one that sees "blocked: not connected: commerce" can say
     so to the person asking, which is the answer they actually needed.
     """
-    from . import skill_pack  # noqa: F401 — importing registers the pack
-    rows = catalogue(tenant) if tenant else []
+    rows = catalogue(tenant) if tenant else []  # catalogue loads the pack
     if not rows:
         return ("Run one of the data layer's skills. No account is active, so "
                 "there is nothing to list — switch to a client first.")

@@ -379,6 +379,17 @@ SABOTAGES = [
                "more campaigns onto a month that was already full",
     },
     {
+        "name": "skill_pack_self_load",
+        "file": "app/skill.py",
+        "find": "    global _PACK_LOADED\n    if _PACK_LOADED:\n        return",
+        "replace": "    return  # SABOTAGE",
+        "suites": ["test_workflow_ui.py"],
+        "why": "skill registration falls back to whoever-imports-first — "
+               "the web process answers Run now with 'no skill keyed "
+               "campaign_email' and the Monday catalog sweep refuses "
+               "silently, exactly the production incident of 2026-08-21",
+    },
+    {
         "name": "plan_segment_reference",
         "file": "app/systems.py",
         "find": "        why = _segment_key_check(tenant, v)",

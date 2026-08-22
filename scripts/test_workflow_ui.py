@@ -208,6 +208,17 @@ def main() -> int:
        "plans are only filed" in v)
     systems.update(ag.id, status="live")
 
+    # ---- the registry loads itself --------------------------------------
+    print("\n— the skill registry loads its own contents —")
+    # THIS suite never imports skill_pack — exactly like the production web
+    # process, which is how 'no skill keyed campaign_email' reached the
+    # owner's screen while the pack sat one import away.
+    ck("a registry read finds the real skills without anyone importing "
+       "the pack", skill.get("campaign_email") is not None)
+    ck("…and /health proves it per process, without a secret",
+       c.get("/health").json().get("skills", 0) >= 5,
+       str(c.get("/health").json().get("skills")))
+
     # ---- run now: the human trigger beside the tick's --------------------
     print("\n— Run now: a date makes a plan eligible; a person or the tick "
           "starts it —")

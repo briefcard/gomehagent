@@ -481,6 +481,26 @@ set and maintain segments?" — set yes, maintain was four gaps; all closed).**
   risk. `esp.audiences` stopped defaulting an absent member count to 0 —
   absence survives to the output.
 
+**The skill registry loads itself (2026-08-21, production incident — owner
+pressed Run now on a real campaign plan: "no skill keyed
+'campaign_email'").** Registration was an import side effect of
+`skill_pack`, and the ONLY production import sat inside `tool_description`
+— the agent path. So the kernel agent worked while the web process's
+Run-now route reached `run()` with an EMPTY registry, and the worker's
+Monday `catalog_compliance` sweep had been REFUSING the same way with
+nobody logging it (a refusal files no run — it read as a quiet Monday).
+The day before, the UI suite had exposed exactly this shape — it had
+rendered pages for two phases without ever executing a skill — and the fix
+went to the TEST without anyone asking whether production had the same
+hole. Owner: *"You should not keep missing these details."* Structural
+now: `skill._ensure_pack()` runs on every registry read (`get`,
+`catalogue`), so no caller can forget; `/health` reports `skills` (the
+count THIS process can actually run — zero was this incident, `-1` means
+the pack failed to load) so wiring is a curl, not an incident; the sweep
+logs a `refused` skill.run as an ERROR. Sabotage #37
+`skill_pack_self_load`; pinned in `test_workflow_ui`, which — like the
+production web process — never imports the pack.
+
 **"Run now" — the human trigger beside the tick's (owner, 2026-08-21:
 "putting today's date didn't work").** The date makes a plan ELIGIBLE; the
 only consumer was the 07:00 tick, so a plan filed after it waited a day
