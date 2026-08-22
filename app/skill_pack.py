@@ -1860,10 +1860,30 @@ def _run_campaign_email(ctx: Context) -> dict:
             except Exception as exc:                            # noqa: BLE001
                 ctx.note(f"drafting into the ESP raised {exc.__class__.__name__}")
 
+    # NO DRAFT, NO APPROVAL TO GIVE. `emit` queued one the moment the copy
+    # cleared the validator, but the artifact is created here, afterwards — so
+    # anything that stopped it (a craft block, an ESP refusal, a raised
+    # exception) leaves a queue item describing an email that exists nowhere.
+    # Approving it produced nothing and removed it from the queue, which is how
+    # an approved campaign became impossible to find (owner, 2026-08-22).
+    if not esp_draft.get("ok") and _flag(ctx.params.get("draft_into_esp"),
+                                         default=True):
+        why = ("; ".join(f["detail"] for f in hard) if hard
+               else esp_draft.get("error")
+               or ("the copy did not pass the validator" if not item.get("ok")
+                   else "; ".join(missing) if missing
+                   else "personalization did not run, so nothing was drafted"
+                   if not native_ok else "the ESP draft was not created"))
+        from . import approvals as _appr
+        if _appr.withdraw(ctx.run_id, why):
+            ctx.note("the approval for this email was withdrawn — there is no "
+                     "draft in the ESP to approve: " + why)
+
     return {"summary": (f"campaign email for '{seg['name']}' — {basis}, "
                         + ("sendable" if not missing else "not yet sendable")
                         + (", hero image" if hero else ", no hero image")
-                        + (", drafted in ESP" if esp_draft.get("ok") else "")),
+                        + (", drafted in ESP" if esp_draft.get("ok")
+                           else ", NOT DRAFTED IN ESP")),
             "segment": seg, "basis": basis, "cited_claims": cited,
             "hero": {"basis": hero_got.get("basis", ""),
                      "asset_id": hero_got.get("asset_id", ""),

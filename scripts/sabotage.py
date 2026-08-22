@@ -435,6 +435,17 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "no_approval_without_an_artifact",
+        "file": "app/skill_pack.py",
+        "find": "        if _appr.withdraw(ctx.run_id, why):",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the owner is asked to approve an email that exists nowhere \u2014 "
+               "approving it reports success, clears it from the queue and "
+               "produces nothing, so an approved campaign simply cannot be "
+               "found afterwards",
+    },
+    {
         "name": "letter_may_show_the_product",
         "file": "app/skill_pack.py",
         "find": '            items = _product_items(picked)[:1 if fmt == "letter" else 3]',

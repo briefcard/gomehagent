@@ -34,8 +34,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'cv.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import (brand_theme, db, email_craft, esp, kb,  # noqa: E402
-                 skill, skill_pack, systems, tenants)
+from app import (approvals, brand_theme, db, email_craft, esp,  # noqa: E402
+                 kb, skill, skill_pack, systems, tenants)
 
 _fail = []
 
@@ -556,6 +556,54 @@ def main():
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
     ck("the run names an imageless send instead of leaving it to be noticed",
        any("NO image" in n for n in r.get("notes", [])))
+
+    print("\n— an approval is never offered for an email that was not created —")
+    row = systems.find("baci", "campaign_email")
+    with db.SessionLocal() as s:
+        rr = s.get(db.System, row.id)
+        rr.autonomy = "approve_all"
+        s.commit()
+
+    before = len(_drafted)
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": '<p>Read <a href="">this</a>.</p>'},
+        {"type": "cta", "label": "Learn more", "url": "#"}])
+    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
+    ck("the copy passed the validator", (r.get("items") or [{}])[0].get("ok") is True)
+    ck("…but no draft reached the ESP", len(_drafted) == before)
+    ck("the summary SAYS it was not drafted",
+       "NOT DRAFTED IN ESP" in (r.get("summary") or ""), r.get("summary", "")[:70])
+    with db.SessionLocal() as s:
+        ap = (s.query(db.Approval)
+              .filter(db.Approval.run_id == (r.get("run_id") or ""))
+              .first())
+    ck("the approval for it was WITHDRAWN, not left waiting",
+       ap is not None and ap.status == "withdrawn",
+       ap.status if ap else "no approval row")
+    ck("…and it records why, so the queue is not a mystery",
+       bool((ap.payload or {}).get("withdrawn_because")) if ap else False)
+    ck("approving it can no longer report success over nothing",
+       "Already withdrawn" in approvals.apply_decision(ap.id, "approved")
+       if ap else False)
+
+    before = len(_drafted)
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>An ordinary email.</p>"},
+        {"type": "cta", "label": "Shop", "url": "https://example.com/shop"}])
+    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
+    with db.SessionLocal() as s:
+        ap = (s.query(db.Approval)
+              .filter(db.Approval.run_id == (r.get("run_id") or "")).first())
+    ck("a real draft still queues a real approval",
+       len(_drafted) == before + 1 and ap is not None and ap.status == "pending")
+    said = approvals.apply_decision(ap.id, "approved") if ap else ""
+    ck("…and approving says what it actually did — reviewed, not sent",
+       "Nothing was sent" in said and "Launch it" in said, said[:70])
+
+    with db.SessionLocal() as s:
+        rr = s.get(db.System, row.id)
+        rr.autonomy = "auto"
+        s.commit()
 
     print("\n— the composer still works when there is no model —")
     skill_pack.draft_campaign = lambda b, s, g, craft=None: (None, "composed", "no key")

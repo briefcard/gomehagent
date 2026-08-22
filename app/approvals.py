@@ -136,6 +136,39 @@ def notify_pending(title: str | None = None) -> int:
     return len(items)
 
 
+def withdraw(run_id: str, why: str) -> int:
+    """Close the pending approvals for a run whose artifact never appeared.
+
+    `emit` queues an approval as soon as the copy clears the validator, and for
+    campaign_email the artifact — the ESP draft — is only attempted AFTER that.
+    So anything that stops the draft (a craft block, an ESP error, an orphaned
+    template) used to leave an approval sitting in the queue describing an
+    email that does not exist anywhere. Approving it reported success, removed
+    it from the queue, and produced nothing: the owner approved an email and
+    then could not find it in Omnisend (2026-08-22).
+
+    An approval is a question about a REAL thing. When the thing was not
+    created, the question is withdrawn and says why, rather than being left to
+    be answered about nothing.
+    """
+    if not run_id:
+        return 0
+    n = 0
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.run_id == run_id,
+                        db.Approval.status == "pending").all())
+        for ap in rows:
+            ap.status = "withdrawn"
+            ap.decided_at = db.utcnow()
+            ap.payload = {**(ap.payload or {}), "withdrawn_because": why}
+            ap.summary = f"[not created] {ap.summary}"
+            n += 1
+        if n:
+            s.commit()
+    return n
+
+
 def decide(token: str) -> str:
     """Resolve a signed decision link; execute if approved."""
     try:
@@ -175,6 +208,17 @@ def apply_decision(ap_id: str, decision: str) -> str:
             ap.status = "executed"
             ap.executed_at = db.utcnow()
             s.commit()
+            # `skill_output` has no executable side — the artifact already
+            # exists in the destination platform (an ESP draft, a proposal
+            # row) and approving it means "reviewed, ready to launch there".
+            # Saying "executed" made that indistinguishable from an approval
+            # that actually sent something, which is how approving a campaign
+            # read as sending it and left the owner looking for an email that
+            # nothing had promised to move.
+            if ap.kind == "skill_output":
+                return (f"Approved: {ap.summary}. Nothing was sent — this "
+                        f"marks the draft reviewed. Launch it in the platform "
+                        f"where it lives.")
             return f"Approved and executed: {ap.summary}"
         return f"Denied: {ap.summary}"
 

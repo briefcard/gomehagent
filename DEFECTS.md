@@ -2476,3 +2476,44 @@ construction from the start), the signature name (§2.68), and the attribution
 (here). All three were "optional" fields on a block. That pattern — an optional
 field on a rendering block that happens to assert a fact — is the thing to grep
 for before adding the next one.
+
+### 2.70 An approved email that existed nowhere — 2026-08-22
+
+The owner approved a campaign and then could not find it in Omnisend. Nothing
+had deleted it. It had never been created.
+
+`Context.emit` queues the approval the moment the copy clears the validator.
+For campaign_email the ARTIFACT — the ESP draft — is attempted afterwards,
+further down the same function. So every reason the draft might not happen (a
+craft block, an ESP refusal, a raised exception, an un-personalized body) left
+a pending approval describing an email that existed in no system. The gap had
+been there since the skill was written; the craft blocks shipped a day earlier
+just made it reachable, because now a perfectly valid email could be stopped
+after its approval was already queued.
+
+Approving it then did nothing and said the opposite. `_execute` has a branch
+per kind — `send_email`, `refile_moves`, `seo_update`, and four more — and none
+for `skill_output`, so the call fell through every branch, `apply_decision` set
+the status to `executed` and returned "Approved and executed". The queue item
+vanished, the log recorded success, and Omnisend was empty. Three separate
+surfaces agreed that something had happened.
+
+Two fixes, and the second is the more important one.
+
+`approvals.withdraw(run_id, why)` closes the pending approvals for a run whose
+artifact never appeared, records the reason on the payload, and prefixes the
+summary "[not created]". campaign_email calls it whenever the ESP draft did not
+land, and the run summary now ends "NOT DRAFTED IN ESP" rather than quietly
+omitting the clause that would have said so.
+
+And `skill_output` no longer reports execution it did not perform. Its
+approval genuinely has no executable side — the draft already lives in the
+destination platform and approving means "reviewed, ready to launch there" —
+which is a fine design and was never the problem. Claiming to have executed it
+is what made a review indistinguishable from a send.
+
+**The rule worth extracting: an approval is a question about a real thing, and
+must not outlive the thing.** Anything that queues one before the artifact
+exists has to be able to take it back. Two of the four campaign_email
+approval-queuing paths could already fail after the queue — and every future
+skill that follows this shape inherits the same hole unless it withdraws too.
