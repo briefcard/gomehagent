@@ -514,6 +514,49 @@ def main():
     ck("…and the run says which control is dead",
        any("points nowhere" in n for n in r.get("notes", [])))
 
+    print("\n— a letter may SHOW the thing it is selling —")
+    import re as _re
+    with db.SessionLocal() as s:
+        s.add(db.KbEntity(tenant="baci", key="glp1", name="GLP-1 Support",
+                          type="product", price="59", availability="available",
+                          status="active", review="approved",
+                          attributes={"image": "https://cdn.shopify.com/s/f/p/g.jpg?v=1"}))
+        s.add(db.KbEntity(tenant="baci", key="second", name="Second Thing",
+                          type="product", price="19", availability="available",
+                          status="active", review="approved",
+                          attributes={"image": "https://cdn.shopify.com/s/f/p/s.jpg?v=1"}))
+        s.commit()
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>Hi {{FIRST_NAME}}.</p>"},
+        {"type": "products", "keys": ["glp1", "second"]},
+        {"type": "list", "items": ["Supports natural GLP-1 productionction"]},
+        {"type": "cta", "label": "See it", "url": "https://x/g"},
+        {"type": "ps", "html": "<p>P.S. The science is fascinating.</p>"}])
+    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="launch")
+    html = _meta(r, "html") or ""
+    imgs = _re.findall(r'<img[^>]+src="([^"]+)"', html)
+    ck("a warm-segment letter is still a letter", _meta(r, "format") == "letter")
+    ck("…and it now carries the product's photograph",
+       any("/p/g" in u for u in imgs), str(imgs))
+    ck("…sized for the slot, not the full-resolution original",
+       any("_176x" in u for u in imgs), str(imgs))
+    ck("a letter shows ONE product, never a grid",
+       html.count("Second Thing") == 0, str(imgs))
+
+    print("\n— the label the renderer owns is not written twice —")
+    ck("the drafter's own 'P.S.' prefix is stripped, tags or no tags",
+       html.count("P.S.") == 1, str(html.count("P.S.")))
+    ck("a garbled word is reported so it can be rewritten",
+       any("garbled" in n and "productionction" in n for n in r.get("notes", [])))
+
+    print("\n— an email with no picture in it SAYS so —")
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>Words only.</p>"},
+        {"type": "cta", "label": "Go", "url": "https://x/g"}])
+    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
+    ck("the run names an imageless send instead of leaving it to be noticed",
+       any("NO image" in n for n in r.get("notes", [])))
+
     print("\n— the composer still works when there is no model —")
     skill_pack.draft_campaign = lambda b, s, g, craft=None: (None, "composed", "no key")
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")

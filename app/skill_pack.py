@@ -827,12 +827,23 @@ CAMPAIGN_INTENTS: dict[str, dict] = {
 CAMPAIGN_FORMATS: dict[str, dict] = {
     "letter": {
         "label": "Personal letter",
-        "brief": "Write it as a letter from one person to one person. No hero "
-                 "image, no product grid, no banner. Short paragraphs, plain "
-                 "words, a signature at the end, and a P.S. that carries the "
-                 "one link — the P.S. is the most-read line you have.",
-        "blocks": ("heading", "text", "quote", "list", "cta", "divider",
-                   "signature", "ps")},
+        "brief": "Write it as a letter from one person to one person. Short "
+                 "paragraphs, plain words, a signature at the end, and a P.S. "
+                 "that carries the one link — the P.S. is the most-read line "
+                 "you have. ONE photograph at most and no banner: the point "
+                 "is that it reads as written, not designed. When the letter "
+                 "is about a specific product, SHOW that product — a reader "
+                 "asked to buy something they cannot see is being asked to "
+                 "take it on trust.",
+        # `hero` and `products` are here on purpose, and were not at first.
+        # A letter with no imagery at all was the strict reading of the
+        # plain-text school, and it shipped a supplement LAUNCH — to repeat
+        # buyers, about a product they had never seen — containing nothing but
+        # the logo (owner, 2026-08-22). One photograph does not stop a letter
+        # being a letter. The grid is what does, so `_assemble_blocks` caps a
+        # letter at a single product card.
+        "blocks": ("hero", "heading", "text", "quote", "list", "products",
+                   "cta", "divider", "signature", "ps")},
     "designed": {
         "label": "Designed",
         "brief": "Use the full designed frame — the photograph up top, the "
@@ -1254,6 +1265,11 @@ def _undouble_blocks(blocks: list) -> list:
         for f in ("text", "html", "caption", "attribution"):
             if b.get(f):
                 b[f] = _undouble(b[f])
+        # Checklist lines are copy too, and were being skipped — the live
+        # garbled word ("productionction") was in one.
+        if isinstance(b.get("items"), list):
+            b["items"] = [_undouble(i) if isinstance(i, str) else i
+                          for i in b["items"]]
     return blocks
 
 
@@ -1374,7 +1390,9 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
             if ghosts:
                 note("layout: product key(s) not on the offered list were "
                      "dropped: " + ", ".join(ghosts[:4]))
-            items = _product_items(picked)
+            # A letter shows ONE thing. More than that is a catalogue page
+            # with a signature at the bottom, which is not the format.
+            items = _product_items(picked)[:1 if fmt == "letter" else 3]
             if items:
                 out.append({"type": "products", "items": items})
         elif kind in ("quote", "stat"):
@@ -1693,6 +1711,25 @@ def _run_campaign_email(ctx: Context) -> dict:
 
     ctx.note("layout: " + ", ".join(b.get("type", "?")
                                     for b in state["blocks"]))
+
+    # AN EMAIL WITH NO PICTURE IN IT SAYS SO. One shipped carrying nothing but
+    # the logo (owner, 2026-08-22) and the run did not remark on it, because
+    # each individual decision — this format has no hero, this product has no
+    # photo — was reported separately and nobody adds them up. The reader sees
+    # the total, so the run reports the total, and names which of the two
+    # reasons it was.
+    if not any(b.get("type") == "hero" or
+               (b.get("type") == "products"
+                and any(i.get("image") for i in (b.get("items") or [])))
+               for b in state["blocks"]):
+        if hero and hero.get("url"):
+            ctx.note("this email carries NO image — an approved photograph "
+                     "was available and the layout did not place it")
+        else:
+            ctx.note("this email carries NO image at all, only the logo — "
+                     "no approved, owned photograph was available and no "
+                     "featured product has one on file (run the catalogue "
+                     "sync, or approve a photo in the pictures queue)")
     if not state["native_ok"]:
         # The failure is REPORTED, not assumed. This said "ESP not connected"
         # for every cause, including `personalize`'s unknown-token refusal —

@@ -80,6 +80,32 @@ def _find(text: str, phrases) -> list[str]:
     return [p for p in phrases if re.search(r"\b" + re.escape(p), low)]
 
 
+#: A syllable or word-ending immediately repeated INSIDE a word —
+#: "productionction", which shipped live (2026-08-22). Related to the
+#: end-of-sentence stutter ("now. now.") but not fixable the same way: that one
+#: is an exact duplicate token and can be deleted safely, while this one cannot
+#: be corrected without knowing which of the two readings was meant. Real words
+#: do contain doubled syllables — murmur, couscous, bonbon, beriberi — so
+#: guessing would mangle them. It is REPORTED and the drafter rewrites; nothing
+#: here edits the word.
+_INWORD_REPEAT = re.compile(r"\b\w*?(\w{4,})\1\w*\b")
+
+#: Words that legitimately contain a doubled run of four or more characters.
+#: Short, and only needed because the pattern above is otherwise perfect.
+_REAL_DOUBLES = ("couscous", "beriberi", "aloha", "tartar")
+
+
+def duplicated_text(text: str) -> list[str]:
+    """Words that look like a generation stutter. Reported, never edited."""
+    out: list[str] = []
+    for m in _INWORD_REPEAT.finditer(str(text or "")):
+        word = m.group(0)
+        if word.lower() in _REAL_DOUBLES or len(word) < 8:
+            continue
+        out.append(word)
+    return sorted(set(out))[:4]
+
+
 def dead_links(blocks: list) -> list[str]:
     """Links in the layout that go nowhere.
 
@@ -144,6 +170,14 @@ def review(*, subject: str = "", preheader: str = "", body: str = "",
             "empty superlatives: " + ", ".join(sorted(set(said))[:4]),
             "replace each with something specific — a number, a material, a "
             "timeframe, a name — or cut the sentence")
+
+    stutters = duplicated_text(f"{subject} {preheader} {body}")
+    if stutters:
+        add("nudge", "duplicated_text",
+            "a word came out garbled: " + ", ".join(stutters),
+            "write it once, correctly — this is a generation stutter, not a "
+            "style choice, and it is the kind of thing a reader notices "
+            "before they notice anything else")
 
     longs = [s for s in _sentences(body) if len(_words(s)) > LONG_SENTENCE]
     if len(longs) >= 2:

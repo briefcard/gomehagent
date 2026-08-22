@@ -435,6 +435,17 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "letter_may_show_the_product",
+        "file": "app/skill_pack.py",
+        "find": '            items = _product_items(picked)[:1 if fmt == "letter" else 3]',
+        "replace": '            items = []  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "a product launch to people who have bought before goes out "
+               "with no picture of the product in it — the reader is asked "
+               "to buy something they cannot see, which is what shipped on "
+               "2026-08-22 when the letter format carried no imagery at all",
+    },
+    {
         "name": "attribution_is_copied_not_written",
         "file": "app/skill_pack.py",
         "find": '                            "attribution": str(claim.get("attributed_to") or "")})',

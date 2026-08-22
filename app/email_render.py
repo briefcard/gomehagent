@@ -292,6 +292,25 @@ def _divider(b: dict, t: dict) -> str:
             f'background:{t["colors"]["border"]};line-height:1px"> </div></td></tr>')
 
 
+#: The drafter's own "P.S." prefix, stripped so it does not sit under the
+#: renderer's label and read "P.S. P.S." — which shipped live (2026-08-22).
+#:
+#: The first cut allowed at most ONE optional `<p>` before the label, so it
+#: worked on `<p>P.S. …` and missed `<p>P.S.</p><p>…` and
+#: `<p><strong>P.S.</strong> …`. Any run of tags is skipped now, before and
+#: after the label, because where a writer puts their emphasis tags is not
+#: something a prompt should have to standardise. The lookahead stops it
+#: eating a word that merely starts with those letters ("PS5", "Psychology").
+#:
+#: Only whitespace and punctuation are consumed AFTER the label — never a
+#: closing tag. Eating one leaves its opener unbalanced (`<p><strong>P.S.
+#: </strong> …` became `<p><strong>…` with nothing to close it, which bolds
+#: the rest of the email). The empty `<p></p>` a stripped label can leave
+#: behind is cleaned separately, where it cannot unbalance anything.
+_PS_LABEL = _re.compile(
+    r"^((?:\s|<[^>]+>)*)P\.?\s?S\.?(?![A-Za-z0-9])[\s:—\-]*", _re.I)
+
+
 def _signature(b: dict, t: dict) -> str:
     """A sign-off — the block that makes a letter a letter.
 
@@ -327,8 +346,8 @@ def _ps(b: dict, t: dict) -> str:
     # The label is the renderer's, so a drafter that also wrote "P.S." — which
     # is the natural thing to write — must not produce "P.S. P.S.". Strip one
     # leading label rather than asking the prompt to remember not to type it.
-    body = _re.sub(r'^(\s*(?:<p[^>]*>)?\s*)P\.?\s?S\.?[:\s—-]+', r"\1",
-                   body, count=1, flags=_re.I)
+    body = _PS_LABEL.sub(r"\1", body, count=1)
+    body = _re.sub(r"^(?:\s|<p[^>]*>\s*</p>)+", "", body)
     return (f'<tr><td style="padding:18px 32px 6px">'
             f'<div style="border-top:1px solid {c["border"]};padding-top:14px;'
             f'font-family:{t["font"]["body"]};font-size:15px;line-height:1.6;'
