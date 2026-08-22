@@ -375,6 +375,32 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         if requirements or entity_key:
             entities = kb.match_entities(tenant, requirements or {},
                                          limit=limit, include_unavailable=True)
+            # A NAMED entity is an INSTRUCTION, not a ranking hint. `entity_key`
+            # only ever opened this branch — it was never passed to the ranker —
+            # so with no `requirements` (which is every campaign) the caller got
+            # whatever `match_entities` ranks first with nothing to rank on:
+            # alphabetical order. An owner who set "Featured entity: Firenze" on
+            # a plan got the catalogue's first three rows and no way to tell.
+            # The named one leads; a ranked window that missed it is not a
+            # reason to drop it, so it is fetched directly.
+            if entity_key:
+                rest = [e for e in entities if e.get("key") != entity_key]
+                named = [e for e in entities if e.get("key") == entity_key]
+                if not named:
+                    named = [{"key": r.key, "name": r.name, "type": r.type,
+                              "price": r.price, "description": r.description,
+                              "attributes": r.attributes or {},
+                              "availability": r.availability or ""}
+                             for r in kb.entities(tenant, available_only=False)
+                             if r.key == entity_key]
+                if named:
+                    entities = named + rest
+                else:
+                    gaps.append({"missing": f"the entity {entity_key!r}",
+                                 "means": "it was named but is not in the "
+                                          "catalogue under that key",
+                                 "fix": "re-run catalog_sync, or pick the "
+                                        "entity again from the list"})
             searched.append("entities")
             if not entities:
                 gaps.append({"missing": "a matching entity",

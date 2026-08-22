@@ -29,7 +29,8 @@ def record(tenant: str, system_key: str, *, situation: str = "",
            angle: str = "", format: str = "", status: str = "draft",
            blocked_on: list[str] | None = None, destination: str = "",
            body: str = "", conversation_id: str = "", touch_id: str = "",
-           run_id: str = "", lookups: list[str] | None = None) -> db.Output:
+           run_id: str = "", lookups: list[str] | None = None,
+           shape: list[str] | None = None) -> db.Output:
     """File one output and the brief behind it.
 
     A **blocked** run is recorded too, and that is the point of taking
@@ -45,6 +46,7 @@ def record(tenant: str, system_key: str, *, situation: str = "",
         objection_id=objection_id, claim_ids=list(claim_ids or []),
         lookups=list(lookups or []),
         media_ids=list(media_ids or []), theme=theme, angle=angle,
+        shape=list(shape or []),
         format=format, status=status, blocked_on=list(blocked_on or []),
         destination=destination, body=body[:2000],
         body_hash=hashlib.sha256(body.lower().encode()).hexdigest()[:32]

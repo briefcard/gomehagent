@@ -105,8 +105,22 @@ CATALOG = {
                      kind="segment"),
                 dict(key="goal", label="Angle / goal", required=True),
                 dict(key="subject", label="Subject line", required=False),
+                # WHAT THE SEND IS FOR. Left blank the planner rotates it, so
+                # a list is given to about three times for every time it is
+                # asked; set here, the owner's choice stands. It is a choice
+                # over a fixed vocabulary, not free text, for the same reason
+                # segment is: an unknown value would silently mean "no intent".
+                dict(key="intent", label="What this send is for",
+                     required=False, kind="choice",
+                     choices=("story", "education", "proof", "offer")),
                 dict(key="entity_key", label="Featured entity", required=False,
                      kind="entity"),
+                # The SOURCE for any urgency in the email. Blank means there
+                # is no deadline — and then the craft check refuses to let the
+                # copy imply one. Urgency is only honest when something real
+                # is behind it, so the real thing is a field.
+                dict(key="deadline", label="Real deadline or limit (optional)",
+                     required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
                 dict(key="draft_into_esp", label="Set up as an ESP draft",
@@ -859,11 +873,21 @@ def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
     allowed — completeness owns 'required'; this owns 'genuine'."""
     checks = {"segment": _segment_key_check, "entity": _entity_key_check}
     for f in workflow(key)["plan_fields"]:
-        fn = checks.get(f.get("kind", ""))
-        if fn is None:
-            continue
         v = str(values.get(f["key"], "") or "").strip()
         if not v:
+            continue
+        # A `choice` field carries its own vocabulary, so it is checked here
+        # rather than against a live catalogue. Same reason as the reference
+        # kinds: a value the skill does not know reads downstream as unset,
+        # which silently changes what gets produced instead of refusing.
+        if f.get("kind") == "choice":
+            allowed = tuple(f.get("choices") or ())
+            if allowed and v.lower() not in allowed:
+                return (f"{f.get('label', f['key'])}: {v!r} is not one of "
+                        + ", ".join(allowed))
+            continue
+        fn = checks.get(f.get("kind", ""))
+        if fn is None:
             continue
         why = fn(tenant, v)
         if why:

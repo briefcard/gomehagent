@@ -694,20 +694,56 @@ EMAIL CRAFT — these are enforced or measured, not suggestions:
   section. Nobody reads a wall — write for the scan, let the sections and
   product cards breathe.
 - Products: feature 1–3 FROM THE OFFERED LIST when they serve this segment,
-  and return their keys — the product cards rendered under your copy will
-  be exactly the ones you pick, so your prose and the cards must agree.
-  Never name a product that is not on the list.
+  by key — the cards rendered are exactly the ones you pick, so your prose
+  and the cards must agree. Never name a product that is not on the list.
 - ONE call to action. No second ask, no invented offer.
 Match the house voice throughout.
 
+YOU DESIGN THE EMAIL, not just the words. Compose 5–10 blocks from this
+vocabulary, in the order the message wants — vary the structure to fit THIS
+message, never repeat one fixed skeleton:
+  {"type":"heading","text":"...","level":1}   the one big headline (level 1
+                                              once); omit level for a small
+                                              section kicker
+  {"type":"text","html":"one or two short <p> paragraphs; may use
+                         {{FIRST_NAME}}; no <html>/<head>/<style>, no images"}
+  {"type":"quote","text":"an approved claim given room","claim_id":"REQUIRED
+                          — an offered claim id","attribution":"optional"}
+  {"type":"stat","value":"90 days","caption":"what the number means",
+   "claim_id":"REQUIRED — numbers come only from offered claims"}
+  {"type":"list","items":["3–5 short scannable points"]}
+  {"type":"banner","text":"one short emphasis line on the brand colour"}
+  {"type":"products","keys":["1–3 offered product keys"]}
+  {"type":"hero"}                             where the hero image sits —
+                                              placement only; code supplies
+                                              the approved photograph
+  {"type":"cta","label":"...","url":""}       exactly once
+  {"type":"signature","text":"the sign-off line","name":"REQUIRED — a real
+                      person on file","role":"optional"}
+  {"type":"ps","html":"the postscript — the most-read line after the subject;
+                       one link, the same destination as the CTA"}
+  {"type":"divider"}
+A launch might open on a banner; an education piece might run
+heading→text→stat→list; a winback might lead with the quote. Choose what
+serves the message — code drops any block that breaks a rule (an uncited
+stat, an unoffered product) and says so, rather than softening it.
+
+HOW TO OPEN. The subject earns the open and the first line earns the read, so
+spend them: no "Hi {{FIRST_NAME}}, we hope you're well", no announcing what
+the email is about. Start in the middle of something — a moment, a number, a
+question the reader already has. Subject lines run 3–8 words and say something
+specific; the preheader EXTENDS the subject, it never repeats it.
+
+BE SPECIFIC OR SAY NOTHING. "Premium quality", "elevate your space",
+"unmatched craftsmanship" are worth nothing — they are what every brand
+writes. A number, a timeframe, a material, a name, a real detail: that is what
+a reader believes. If you cannot be specific about something, leave it out.
+
 Return JSON only, nothing else:
-{"subject": "...", "preheader": "...", "headline": "...",
- "sections": [{"heading": "optional, 2-5 words", "body_html": "one or two "
-               "short <p> paragraphs; may use {{FIRST_NAME}}; no "
-               "<html>/<head>/<style>, no images (added later by code)"}],
- "claim_ids": ["id of each approved claim you actually used"],
- "featured_keys": ["key of each offered product you actually feature"],
- "cta_label": "...", "cta_url": ""}"""
+{"subject": "...", "preheader": "...",
+ "blocks": [ ...the email, in order, from the vocabulary above... ],
+ "claim_ids": ["id of each approved claim you used anywhere"],
+ "cta_label": "fallback CTA if you somehow omit the cta block", "cta_url": ""}"""
 
 
 #: Inbox display cuts a subject around 40 characters on mobile; 45 is the
@@ -716,6 +752,92 @@ Return JSON only, nothing else:
 #: run says so. The PLAN's subject is the owner's line and is never touched.
 SUBJECT_TARGET, SUBJECT_HARD = 45, 60
 PREHEADER_HARD = 90
+
+#: A composed layout (5–10 blocks, each with its own strings) is several times
+#: the size of the old single-blob draft. 900 was the ceiling while the drafter
+#: returned two paragraphs; at that size a block layout comes back cut in half
+#: and unparseable, which reads downstream as "the model failed" and serves the
+#: composer's fixed skeleton — the sameness this whole path exists to end.
+CAMPAIGN_MAX_TOKENS = 2400
+
+#: WHAT A SEND IS FOR. The owner's complaint (2026-08-21) was "this is all
+#: templates … we want variety and true generation of content and different
+#: sections", and the honest reading is that variety is not a prompt adjective:
+#: a story email, a teaching email, a proof email and an offer email are
+#: DIFFERENT EMAILS, not one email reshuffled. So intent is a field on the
+#: plan, the planner rotates it, and it changes the brief, the shape and the
+#: length budget. The ratio the rotation holds is Hormozi's give:ask (~3.5:1 in
+#: $100M Leads): three sends that give for every one that asks.
+CAMPAIGN_INTENTS: dict[str, dict] = {
+    "story": {
+        "label": "Story",
+        "asks": False,
+        "brief": "Tell ONE true, specific story — an origin, a customer, a "
+                 "decision, a moment in the workshop. Earn the read before "
+                 "you earn the click. Open in the middle of the scene, never "
+                 "with a greeting or a summary of what you are about to say.",
+        "shape": "Lead with text, not a hero. A pull-quote or a single image "
+                 "can land mid-story. Products come late and small, if at all.",
+        "words": (180, 320)},
+    "education": {
+        "label": "Education",
+        "asks": False,
+        "brief": "Teach one thing the reader can use today, whether or not "
+                 "they ever buy — how to choose, how to care for it, what the "
+                 "difference actually is. The payoff must be usable standing "
+                 "in a kitchen, not a brochure paragraph.",
+        "shape": "A checklist or numbered points is the natural spine here; "
+                 "heading → text → list → a short close reads better than "
+                 "prose alone.",
+        "words": (150, 280)},
+    "proof": {
+        "label": "Proof",
+        "asks": False,
+        "brief": "Let the evidence carry it: what people actually said, what "
+                 "the numbers actually are. Your own adjectives are worth "
+                 "nothing here — every strong statement must trace to an "
+                 "approved claim.",
+        "shape": "Quote and stat blocks are the point of this send; build "
+                 "around them rather than burying them in paragraphs.",
+        "words": (120, 240)},
+    "offer": {
+        "label": "Offer",
+        "asks": True,
+        "brief": "Make the offer plainly and early — what it is, who it is "
+                 "for, what it costs, what happens next. No throat-clearing. "
+                 "If there is a real deadline or a real stock limit, say the "
+                 "actual number; if there is not, do not manufacture one.",
+        "shape": "Offer first, proof second, deadline third, one CTA. A "
+                 "banner can carry the offer line; product cards belong here.",
+        "words": (90, 200)},
+}
+
+#: HOW IT LOOKS, chosen from how warm the segment is — the one genuine fork in
+#: the research. Halbert's A-pile (a personal-looking letter survives the sort
+#: a commercial-looking mailer does not) and Ben Settle's plain-text school
+#: pull one way; e-commerce's designed templates pull the other. Chase Dimond
+#: resolves it by AUDIENCE rather than by taste: people who know you and are
+#: engaged do better on a letter that reads like a person wrote it; colder or
+#: visually-driven audiences need the designed frame to remember who you are.
+#: So the engine picks per segment, and neither pole is a house style.
+CAMPAIGN_FORMATS: dict[str, dict] = {
+    "letter": {
+        "label": "Personal letter",
+        "brief": "Write it as a letter from one person to one person. No hero "
+                 "image, no product grid, no banner. Short paragraphs, plain "
+                 "words, a signature at the end, and a P.S. that carries the "
+                 "one link — the P.S. is the most-read line you have.",
+        "blocks": ("heading", "text", "quote", "list", "cta", "divider",
+                   "signature", "ps")},
+    "designed": {
+        "label": "Designed",
+        "brief": "Use the full designed frame — the photograph up top, the "
+                 "product cards, a banner when one line deserves emphasis. "
+                 "Keep live text under every image: a reader with images off "
+                 "must still get the message.",
+        "blocks": ("hero", "heading", "text", "quote", "stat", "list",
+                   "banner", "products", "cta", "divider", "ps")},
+}
 
 
 def _trim_words(text: str, limit: int) -> str:
@@ -775,20 +897,183 @@ def _segment_brief(tenant: str, segment) -> dict:
             "angle": "", "definition": ""}
 
 
-def _draft_campaign_live(bundle: dict, seg: dict, goal: str) -> tuple:
+#: How many recent sends the drafter is shown, and how far back the give:ask
+#: rotation looks. Four is one full turn of the ratio (three gives, one ask).
+CRAFT_HISTORY = 4
+
+
+def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
+    """The last few campaign emails to THIS list — shape, subject, opening.
+
+    Read from the output ledger, which is where "what have we already done"
+    has always lived. Only sends that actually cleared the validator count:
+    a blocked draft was never seen by anyone, so avoiding its shape would be
+    avoiding a ghost.
+    """
+    from . import db
+    out: list[dict] = []
+    try:
+        with db.SessionLocal() as s:
+            rows = (s.query(db.Output)
+                    .filter(db.Output.tenant == tenant,
+                            db.Output.format == "campaign_email",
+                            db.Output.angle == segment_key,
+                            db.Output.status.notin_(("blocked", "superseded")))
+                    .order_by(db.Output.created_at.desc())
+                    .limit(CRAFT_HISTORY).all())
+            for r in rows:
+                lines = [ln.strip() for ln in (r.body or "").split("\n")
+                         if ln.strip()]
+                out.append({"shape": list(r.shape or []),
+                            "intent": r.theme or "",
+                            "subject": lines[0] if lines else "",
+                            "opening": next((ln for ln in lines[3:]), "")})
+    except Exception:                                            # noqa: BLE001
+        # History is an improvement, never a precondition: a brand-new
+        # account, or a column an old database has not grown yet, must still
+        # be able to send. No history simply means nothing to avoid.
+        return []
+    return out
+
+
+def _craft_review(ctx, copy: dict, blocks: list, craft: dict) -> list[dict]:
+    """The craft checks, with this send's own facts filled in.
+
+    Two of the checks need to know things only the run knows: whether this
+    send ASKS (its intent), whether it carries PROOF (a quote or stat block
+    built from an approved claim), and whether any urgency in it has a real
+    source. `deadline` is a plan field the owner fills; an empty one means
+    there is no deadline, which is a fact, not a gap to paper over.
+    """
+    from . import email_craft
+    intent = str(craft.get("intent") or "")
+    deadline = str(ctx.params.get("deadline") or "").strip()
+    return email_craft.review(
+        subject=copy.get("subject", ""), preheader=copy.get("preheader", ""),
+        body=_blocks_text(blocks), intent=intent,
+        asks=bool(CAMPAIGN_INTENTS.get(intent, {}).get("asks")),
+        has_proof=any(b.get("type") in ("quote", "stat") for b in blocks),
+        urgency_backed_by=deadline)
+
+
+def _campaign_craft(ctx, seg: dict) -> dict:
+    """What KIND of email this is, how it should LOOK, and what to avoid.
+
+    Three decisions the drafter should not be making from scratch each time:
+
+    * **intent** — the plan's when the owner set one, otherwise rotated so the
+      list is given to roughly three times for every time it is asked (the
+      give:ask ratio Hormozi puts at ~3.5:1). Counting the last few sends is
+      what makes the ratio real rather than a sentence in a prompt.
+    * **format** — from how warm the cohort is, not from taste. See
+      `segments.warmth`.
+    * **avoid** — the shapes, subjects and openings already used on this list.
+    """
+    from . import segments as segmod
+    hist = _recent_sends(ctx.tenant, seg["key"])
+
+    intent = str(ctx.params.get("intent") or "").strip().lower()
+    why = ""
+    if intent and intent not in CAMPAIGN_INTENTS:
+        ctx.note(f"unknown intent {intent!r} on the plan — the ones that exist "
+                 f"are: " + ", ".join(CAMPAIGN_INTENTS))
+        intent = ""
+    if intent:
+        why = "set on the plan"
+    else:
+        # Rotate. An ask is due only when the last few sends gave enough;
+        # otherwise take the give-intent this list has gone longest without,
+        # so a segment does not receive three stories in a row either.
+        recent = [h.get("intent") for h in hist]
+        gives = [k for k, v in CAMPAIGN_INTENTS.items() if not v["asks"]]
+        asked_recently = any(
+            CAMPAIGN_INTENTS.get(str(i or ""), {}).get("asks") for i in recent[:3])
+        if not hist:
+            intent, why = "story", "first send to this list — earn the read first"
+        elif not asked_recently and len(hist) >= 3:
+            intent, why = "offer", "three sends have given; this one may ask"
+        else:
+            used = [i for i in recent if i in gives]
+            intent = next((g for g in gives if g not in used), gives[0])
+            why = "rotating so this list gets a different kind of email"
+
+    warmth = segmod.warmth(seg["key"])
+    fmt = "letter" if warmth == "warm" else "designed"
+    return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
+            "deadline": str(ctx.params.get("deadline") or "").strip(),
+            "avoid": [h for h in hist if h.get("shape") or h.get("subject")]}
+
+
+def _craft_brief(craft: dict) -> str:
+    """The per-send half of the prompt: what this email is FOR, how it should
+    look, and what the last few sends already did.
+
+    The anti-repetition half is the part that makes "vary the structure" more
+    than a hope. Told once per call, a model will happily produce the same
+    shape twice; shown the shapes and opening lines it already used, it has
+    something concrete to move away from. Same discipline as the claims
+    anti-repeat, applied to form instead of content.
+    """
+    intent = CAMPAIGN_INTENTS.get(str(craft.get("intent") or ""), {})
+    fmt = CAMPAIGN_FORMATS.get(str(craft.get("format") or ""), {})
+    out: list[str] = []
+    if intent:
+        lo, hi = intent["words"]
+        out += [f"\n## WHAT THIS SEND IS FOR: {intent['label']}",
+                intent["brief"], intent["shape"],
+                f"Length: about {lo}–{hi} words of body copy.",
+                ("This send MAKES THE ASK." if intent["asks"] else
+                 "This send GIVES — it does not push the sale. One soft "
+                 "invitation at the end is the whole ask.")]
+    if fmt:
+        out += [f"\n## HOW IT LOOKS: {fmt['label']}", fmt["brief"],
+                "Blocks available to you for this send: "
+                + ", ".join(fmt["blocks"]) + " (use no others)."]
+    if craft.get("deadline"):
+        out += ["\n## THE REAL DEADLINE (state it exactly, never soften or "
+                "inflate it)", str(craft["deadline"])]
+    else:
+        out.append("\n## NO DEADLINE EXISTS for this send. Do not imply one — "
+                   "no 'last chance', no 'ends tonight', no 'while supplies "
+                   "last'. Urgency nobody can point at is a lie, and code "
+                   "will stop the send over it.")
+    prev = craft.get("avoid") or []
+    if prev:
+        out.append("\n## DO NOT REPEAT THE LAST SENDS")
+        for p in prev[:3]:
+            bits = []
+            if p.get("shape"):
+                bits.append("shape " + " → ".join(p["shape"]))
+            if p.get("subject"):
+                bits.append(f"subject {p['subject']!r}")
+            if p.get("opening"):
+                bits.append(f"opened {p['opening'][:60]!r}")
+            if bits:
+                out.append("- " + "; ".join(bits))
+        out.append("Use a different structure and a different opening move "
+                   "from every one of those. Not a reworded version of the "
+                   "same email — a different email.")
+    return "\n".join(out)
+
+
+def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
+                         craft: dict | None = None) -> tuple:
     """One model call for one email. Returns `(data|None, basis, why_not)`.
 
-    `data` is the JSON the model returned (subject/preheader/body_html/claim_ids).
+    `data` is the JSON the model returned (subject/preheader/blocks/claim_ids).
     Degrades to the composer when the model is unavailable, and says why on the
     row — the `basis` field, exactly as `ad_copy` does.
+
+    `craft` carries the per-send direction that makes two campaigns different
+    emails rather than one email twice: the `intent` (what this send is FOR),
+    the `format` (letter or designed, chosen from segment warmth), and
+    `avoid` — the shapes and lines the last few sends already used.
     """
-    from . import config
+    from . import config, llm
     if not config.ANTHROPIC_API_KEY:
         return None, "composed", "ANTHROPIC_API_KEY is not set"
     try:
         import json as _json
-
-        import anthropic
         parts = [bundle.get("rules", {}).get("block", "").strip()]
         claims = bundle.get("claims") or []
         if claims:
@@ -812,24 +1097,38 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str) -> tuple:
         parts.append(f"\n## Segment you are writing to:\n{seg['name']} — "
                      f"{seg.get('definition', '')}")
         parts.append(f"## The action to drive:\n{goal or seg.get('angle', '')}")
+        parts.append(_craft_brief(craft or {}))
 
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL, max_tokens=900,
-            system=_CAMPAIGN_SYSTEM,
-            messages=[{"role": "user", "content": "\n".join(parts)}])
-        try:
-            from . import usage
-            usage.log_usage("campaign_email", config.CLAUDE_MODEL, msg,
-                            tenant=str(bundle.get("tenant") or ""))
-        except Exception:                                        # noqa: BLE001
-            pass
-        text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        # Through `llm.ask`: one door, so the purpose is logged, the model is
+        # chosen by the same map as everything else, and a failure comes back
+        # classified. This call used to build its own Anthropic client and log
+        # its own usage — the exact per-call drift `llm.py` exists to end.
+        reply = llm.ask("campaign_email", "\n".join(parts),
+                        tenant=str(bundle.get("tenant") or ""),
+                        system=_CAMPAIGN_SYSTEM, max_tokens=CAMPAIGN_MAX_TOKENS)
+        if not reply.ok:
+            return None, "composed", (reply.error or reply.degraded
+                                      or "the model call failed")
+        # A composed layout is several times the size of the old sections
+        # blob, and a JSON object cut off mid-block does not parse. Truncation
+        # must be NAMED: silently composing here would turn "the emails all
+        # look the same" back on without anything saying why.
+        if reply.stop_reason == "max_tokens":
+            return None, "composed", (
+                f"the model hit the {CAMPAIGN_MAX_TOKENS}-token ceiling and the "
+                f"layout came back incomplete")
+        text = reply.text
         s, e = text.find("{"), text.rfind("}")
         data = _json.loads(text[s:e + 1])
+        # `blocks` is the current contract; `sections`/`body_html` are the older
+        # shapes, still accepted because the composer speaks one of them and a
+        # model may fall back to it. Checking only the old two — which is what
+        # this line did when the prompt started asking for `blocks` — rejected
+        # every well-formed composed layout and quietly served the composer.
         usable = isinstance(data, dict) and bool(
-            data.get("sections") or data.get("body_html"))
-        return (data if usable else None), "model", ""
+            data.get("blocks") or data.get("sections") or data.get("body_html"))
+        return (data if usable else None), "model", (
+            "" if usable else "the model returned no usable email body")
     except Exception as exc:                                     # noqa: BLE001
         from . import model_error
         return None, "composed", model_error.explain(exc)
@@ -884,12 +1183,16 @@ def _theme_for(tenant: str) -> dict:
                        "disclaimer": ""}}
 
 
-def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list:
-    """Canonical blocks around the grounded copy. Product cards carry the
-    store's own name, price, URL and photograph — read by the catalogue sync,
-    never invented; an item the sync found no image for renders without one.
-    The hero image, when there is one, arrived through
-    `creative.hero_for_campaign` — approved and owned, or absent."""
+def _product_items(ents: list) -> list:
+    return [{"name": e.get("name", ""), "price": e.get("price", ""),
+             "url": e.get("url", ""), "image": e.get("image", "")}
+            for e in ents[:3] if e.get("name")]
+
+
+def _legacy_blocks(copy: dict, ents: list, hero: dict | None) -> list:
+    """The fixed skeleton, kept as the fallback shape — the composer and any
+    old-shape draft land here: hero, headline, headed sections with
+    dividers, product cards, one CTA."""
     blocks: list = []
     if hero and hero.get("url"):
         blocks.append({"type": "hero", "image": hero["url"],
@@ -897,9 +1200,6 @@ def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list
     if (copy.get("headline") or "").strip():
         blocks.append({"type": "heading", "text": copy["headline"].strip(),
                        "level": 1})
-    # SECTIONS, not a wall: each idea gets its own text block, headed when
-    # the drafter named it, with a divider breathing between sections — the
-    # owner's first live draft was one unbroken run of paragraphs.
     sections = copy.get("sections") or (
         [{"heading": "", "body_html": copy.get("body_html") or ""}])
     for i, sec in enumerate(sections):
@@ -908,10 +1208,7 @@ def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list
         if (sec.get("heading") or "").strip():
             blocks.append({"type": "heading", "text": sec["heading"].strip()})
         blocks.append({"type": "text", "html": sec.get("body_html") or ""})
-    ents = bundle.get("entities") or []
-    items = [{"name": e.get("name", ""), "price": e.get("price", ""),
-              "url": e.get("url", ""), "image": e.get("image", "")}
-             for e in ents[:3] if e.get("name")]
+    items = _product_items(ents)
     if items:
         blocks.append({"type": "divider"})
         blocks.append({"type": "products", "items": items})
@@ -921,8 +1218,144 @@ def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list
     return blocks
 
 
+def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
+                     offered_claims: set, note, fmt: str = "") -> tuple[list, list]:
+    """The drafter's OWN layout, held to the rules — or the legacy skeleton.
+
+    "This is all templates" (owner, 2026-08-21): the fix is that the model
+    composes the email's structure from the renderer's vocabulary, and THIS
+    function is why that stays safe — it validates every block against the
+    same lines code always held, drops what breaks one BY NAME, and never
+    rewords anything:
+
+      · images only from governed sources — a `hero` block is placement
+        only, filled from the approved library, dropped (named) when no
+        approved photograph exists; the model cannot supply a URL;
+      · products only from the offered keys;
+      · a `stat` or `quote` must cite an OFFERED claim id — an uncited
+        number is an invented number;
+      · exactly one CTA — the first stands, extras are dropped;
+      · a block the chosen FORMAT does not carry is dropped — a personal
+        letter with a product grid in it is not a personal letter;
+      · unknown block types are dropped, not guessed.
+
+    Returns (blocks, extra_cited_claim_ids).
+    """
+    raw = copy.get("blocks")
+    if not isinstance(raw, list) or not raw:
+        return _legacy_blocks(copy, ents, hero), []
+
+    allowed = set(CAMPAIGN_FORMATS.get(str(fmt or ""), {}).get("blocks") or ())
+    by_key = {e["key"]: e for e in ents if e.get("key")}
+    out: list = []
+    extra_cited: list[str] = []
+    seen_cta = seen_hero = False
+    for b in raw[:12]:
+        if not isinstance(b, dict):
+            continue
+        kind = str(b.get("type") or "").strip()
+        if allowed and kind and kind not in allowed:
+            note(f"layout: a {kind} block was dropped — this send is a "
+                 f"{CAMPAIGN_FORMATS[fmt]['label'].lower()} and does not "
+                 f"carry one")
+            continue
+        if kind == "hero":
+            if seen_hero:
+                continue
+            seen_hero = True
+            if hero and hero.get("url"):
+                out.append({"type": "hero", "image": hero["url"],
+                            "alt": hero.get("alt", "")})
+            else:
+                note("layout: the hero block was dropped — no approved "
+                     "photograph is available for it")
+        elif kind == "products":
+            picked = [by_key[k] for k in (b.get("keys") or [])
+                      if isinstance(k, str) and k in by_key]
+            ghosts = [k for k in (b.get("keys") or [])
+                      if isinstance(k, str) and k not in by_key]
+            if ghosts:
+                note("layout: product key(s) not on the offered list were "
+                     "dropped: " + ", ".join(ghosts[:4]))
+            items = _product_items(picked)
+            if items:
+                out.append({"type": "products", "items": items})
+        elif kind in ("quote", "stat"):
+            cid = str(b.get("claim_id") or "").strip()
+            if cid not in offered_claims:
+                note(f"layout: a {kind} block was dropped — it cited no "
+                     f"offered claim, and an uncited "
+                     + ("number" if kind == "stat" else "quote")
+                     + " is an invented one")
+                continue
+            extra_cited.append(cid)
+            out.append({k: b.get(k, "") for k in
+                        (("type", "value", "caption") if kind == "stat"
+                         else ("type", "text", "attribution"))} | {"type": kind})
+        elif kind == "cta":
+            if seen_cta:
+                note("layout: a second CTA was dropped — one ask per email")
+                continue
+            seen_cta = True
+            out.append({"type": "cta", "label": b.get("label") or
+                        copy.get("cta_label") or "Shop now",
+                        "url": b.get("url") or copy.get("cta_url") or "#"})
+        elif kind == "signature":
+            # The name is BRAND data. A drafter inventing a person to sign a
+            # client's email is the one thing this block must not allow, so a
+            # signature with no real name behind it is dropped, not filled in.
+            who = str(b.get("name") or "").strip()
+            if not who:
+                note("layout: the sign-off was dropped — no sender name is on "
+                     "file to sign it, and inventing one is not an option")
+                continue
+            out.append({"type": "signature", "text": b.get("text", ""),
+                        "name": who, "role": b.get("role", "")})
+        elif kind in ("heading", "text", "list", "banner", "divider", "ps"):
+            out.append(b)
+        else:
+            note(f"layout: unknown block type {kind!r} dropped")
+
+    if not seen_cta and copy.get("cta_label"):
+        out.append({"type": "cta", "label": copy["cta_label"],
+                    "url": copy.get("cta_url") or "#"})
+    if not seen_hero and hero and hero.get("url") and (
+            not allowed or "hero" in allowed):
+        # Media presence outranks the omission: an approved, relevant
+        # photograph exists, so it leads. The drafter still owns everything
+        # below it. A letter-format send is the exception — it has no hero by
+        # definition, and forcing one in would undo the format.
+        out.insert(0, {"type": "hero", "image": hero["url"],
+                       "alt": hero.get("alt", "")})
+        note("layout: the drafter omitted the hero; the approved photograph "
+             "was placed on top")
+    # The P.S. belongs at the end, under everything — it is a postscript, and
+    # a drafter that put it mid-email meant it as one.
+    tail = [b for b in out if b.get("type") == "ps"]
+    if tail:
+        out = [b for b in out if b.get("type") != "ps"] + tail[:1]
+    return out, extra_cited
+
+
+def _blocks_text(blocks: list) -> str:
+    """Every human-readable string in the layout, for the validator — a
+    banned phrase in a banner or a quote is as banned as one in a
+    paragraph."""
+    parts: list[str] = []
+    for b in blocks or []:
+        for f in ("text", "value", "caption", "attribution", "label"):
+            if b.get(f):
+                parts.append(str(b[f]))
+        if b.get("html"):
+            parts.append(_strip(b["html"]))
+        for item in (b.get("items") or []):
+            if isinstance(item, str):
+                parts.append(item)
+    return "\n".join(parts)
+
+
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import creative, email_render, esp
+    from . import creative, email_craft, email_render, esp
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -960,8 +1393,26 @@ def _run_campaign_email(ctx: Context) -> dict:
                  "from the data layer — it can still be written, but authoring a "
                  "claim or two for this brand is what makes it persuasive.")
 
-    copy, basis, why = draft_campaign(ctx.bundle, seg, goal)
+    # WHAT KIND of email this is, HOW it should look, and what the last few
+    # sends to this list already did. Without these three the drafter is asked
+    # for "an email" every time and — reasonably — writes the same one, which
+    # is what "this is all templates" actually described.
+    craft = _campaign_craft(ctx, seg)
+    if craft.get("intent"):
+        _label = CAMPAIGN_INTENTS[craft["intent"]]["label"]
+        ctx.note(f"this send is {'an' if _label[0] in 'AEIOU' else 'a'} "
+                 f"{_label} email in "
+                 f"{CAMPAIGN_FORMATS[craft['format']]['label'].lower()} form"
+                 + (f" — {craft['why']}" if craft.get("why") else ""))
+    if craft.get("avoid"):
+        ctx.note(f"varying from the last {len(craft['avoid'])} send(s): "
+                 + " / ".join(" → ".join(p.get("shape") or []) or "?"
+                              for p in craft["avoid"]))
+
+    copy, basis, why = draft_campaign(ctx.bundle, seg, goal, craft)
     if copy is None:
+        if why:
+            ctx.note("the model did not draft this one: " + why)
         copy = _compose_campaign(ctx.bundle, seg, goal)
     copy = _shape_campaign_copy(copy, ctx.note)
     # The model may only cite claims that were actually offered — an invented id
@@ -969,25 +1420,28 @@ def _run_campaign_email(ctx: Context) -> dict:
     offered = {c["claim_id"] for c in ctx.claims}
     cited = [cid for cid in (copy.get("claim_ids") or []) if cid in offered]
 
-    # Same rule for products as for claims: the drafter names WHICH of the
-    # offered items it actually featured (`featured_keys`), the keys are
-    # intersected with what was offered, and the cards then match the copy —
-    # "random products" under segment-specific prose was the owner's read of
-    # the alternative (2026-08-21). No choice → the offered order stands.
-    by_key = {e["key"]: e for e in ents if e.get("key")}
-    chosen = [by_key[k] for k in (copy.get("featured_keys") or [])
-              if isinstance(k, str) and k in by_key]
-    if chosen:
-        ents = chosen[:3]
-        ctx.note("products: the drafter featured "
-                 + ", ".join(e["name"] for e in ents))
-    else:
-        ents = ents[:3]
-        if ents and not plan_scoped:
-            ctx.note("products: no entity on the plan and no drafter choice "
-                     "— the catalogue's top available items are featured; "
-                     "set Featured entity on the plan to choose them")
-    ctx.bundle["entities"] = ents
+    # When the drafter designed its own layout, product choice lives in its
+    # `products` blocks and the full offered list stays available to them.
+    # The legacy shapes keep the `featured_keys` intersection: the drafter
+    # names WHICH offered items it featured, or the offered order stands —
+    # "random products" under segment-specific prose was the owner's read
+    # of the alternative (2026-08-21).
+    if not copy.get("blocks"):
+        by_key = {e["key"]: e for e in ents if e.get("key")}
+        chosen = [by_key[k] for k in (copy.get("featured_keys") or [])
+                  if isinstance(k, str) and k in by_key]
+        if chosen:
+            ents = chosen[:3]
+            ctx.note("products: the drafter featured "
+                     + ", ".join(e["name"] for e in ents))
+        else:
+            ents = ents[:3]
+            if ents and not plan_scoped:
+                ctx.note("products: no entity on the plan and no drafter "
+                         "choice — the catalogue's top available items are "
+                         "featured; set Featured entity on the plan to "
+                         "choose them")
+        ctx.bundle["entities"] = ents
 
     # A subject set on the PLAN is the owner's line and outranks the
     # drafter's — the plan is the reviewed instruction. Set before
@@ -1014,56 +1468,152 @@ def _run_campaign_email(ctx: Context) -> dict:
         ctx.note("no hero image: " + hero_got.get("why", ""))
 
     theme = _theme_for(ctx.tenant)
-    blocks = _campaign_blocks(copy, ctx.bundle, hero=hero)
-    html = email_render.render(
-        theme, blocks, preheader=copy.get("preheader", ""),
-        # Omnisend has no view-in-browser variable — its caps say so, and a
-        # header link no variable can fill would ship as literal text.
-        webview=bool(esp.caps(ctx.tenant).get("webview", True)))
-    native = esp.personalize(ctx.tenant, html)
-    final_html = native["html"] if native.get("ok") else html
-    if not native.get("ok"):
-        ctx.note("ESP not connected, so personalization stayed neutral — connect "
-                 "one to make {{FIRST_NAME}}/unsubscribe native and to draft it in.")
-
+    webview = bool(esp.caps(ctx.tenant).get("webview", True))
     missing = email_render.missing_to_send(theme)
     if missing:
         ctx.note("not yet sendable: " + "; ".join(missing)
                  + " (comes from the brand theme, which needs deriving/review)")
 
+    # ONE function builds everything downstream of the copy — layout, HTML,
+    # native personalization — and returns the exact text the validator will
+    # read. It runs again on every repair, which is the point.
+    #
+    # It used to be a straight line: render, personalize, then emit with the
+    # HTML already in `meta`. Two defects lived in that gap. (1) A repair
+    # rewrote the copy and re-validated it, but `meta["html"]` still held the
+    # render of the REJECTED draft — so a repaired email filed clean text and
+    # shipped the failing HTML to the ESP. (2) The repair returned only
+    # `body_html`, so the re-check no longer contained the subject: a banned
+    # phrase in a SUBJECT LINE was "repaired" by rewriting the body, and the
+    # second check passed because the subject was no longer being looked at.
+    # Rebuilding from the copy, and checking the same shape every time, closes
+    # both — the thing validated and the thing sent are now the same artifact.
+    state: dict = {}
+
+    def _build(c: dict) -> str:
+        blocks, extra_cited = _assemble_blocks(c, ents, hero,
+                                               offered_claims=offered,
+                                               note=ctx.note,
+                                               fmt=craft.get("format", ""))
+        html = email_render.render(theme, blocks,
+                                   preheader=c.get("preheader", ""),
+                                   # Omnisend has no view-in-browser variable —
+                                   # its caps say so, and a header link no
+                                   # variable can fill ships as literal text.
+                                   webview=webview)
+        native = esp.personalize(ctx.tenant, html)
+        state.update(
+            copy=c, blocks=blocks,
+            cited=list(dict.fromkeys(
+                [cid for cid in (c.get("claim_ids") or []) if cid in offered]
+                + extra_cited)),
+            html=native["html"] if native.get("ok") else html,
+            native_ok=bool(native.get("ok")),
+            native_why=str(native.get("error") or native.get("why") or ""))
+        # Subject and preheader are read by a human in the inbox before
+        # anything else, so they are checked with the body, always.
+        return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n"
+                f"{c.get('headline', '')}\n" + _blocks_text(blocks))
+
+    to_check = _build(copy)
+
+    # CRAFT, checked in code and given ONE chance to be fixed. This is
+    # deliberately not the banned-claims loop: compliance blocks forever,
+    # craft is advice — except for urgency with nothing behind it, which is a
+    # lie told in the client's name and is therefore a block. A second model
+    # pass is worth it because the findings are specific enough to act on;
+    # a third would be paying for diminishing returns on a taste question.
+    findings = _craft_review(ctx, copy, state["blocks"], craft)
+    if findings and basis == "model":
+        again, _b2, _w2 = draft_campaign(
+            {**ctx.bundle,
+             "rules": {**ctx.bundle.get("rules", {}),
+                       "block": ctx.bundle.get("rules", {}).get("block", "")
+                       + email_craft.as_prompt(findings)}}, seg, goal, craft)
+        if again:
+            retry = _shape_campaign_copy(again, ctx.note)
+            if plan_subject:
+                retry["subject"] = plan_subject
+            left = _craft_review(ctx, retry, _assemble_blocks(
+                retry, ents, hero, offered_claims=offered, note=lambda _m: None,
+                fmt=craft.get("format", ""))[0], craft)
+            # Keep the rewrite only when it is actually better: a second draft
+            # that trades a long subject for a fabricated deadline is not.
+            if len(email_craft.block_reasons(left)) <= len(
+                    email_craft.block_reasons(findings)) and len(left) < len(findings):
+                copy, to_check, findings = retry, _build(retry), left
+                ctx.note("craft: redrafted once and it came back better")
+    for f in findings:
+        ctx.note(f"craft ({f['severity']}): {f['detail']} → {f['fix']}")
+
+    ctx.note("layout: " + ", ".join(b.get("type", "?")
+                                    for b in state["blocks"]))
+    if not state["native_ok"]:
+        # The failure is REPORTED, not assumed. This said "ESP not connected"
+        # for every cause, including `personalize`'s unknown-token refusal —
+        # the guard that exists to catch a drafter typo. One stray token made
+        # a connected account read as disconnected and the draft vanish with
+        # no reason given.
+        ctx.note("personalization stayed neutral, so nothing was drafted into "
+                 "the ESP: " + (state["native_why"] or "no ESP is connected — "
+                                "connect one to make {{FIRST_NAME}} and the "
+                                "unsubscribe link native"))
+
     def _repair(previous: str, failures: list) -> str:
-        note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
+        why = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
         again, _b, _w = draft_campaign(
             {**ctx.bundle,
              "rules": {**ctx.bundle.get("rules", {}),
                        "block": ctx.bundle.get("rules", {}).get("block", "")
                        + f"\n\n## Your previous copy was rejected\n{previous}"
-                         f"\n\n## Why, and what to change\n{note}\nRewrite it so "
+                         f"\n\n## Why, and what to change\n{why}\nRewrite it so "
                          f"none of these apply; keep it truthful and keep the "
-                         f"claims you cited."}}, seg, goal)
-        return (again or {}).get("body_html", "")
+                         f"claims you cited."}}, seg, goal, craft)
+        if not again:
+            return ""
+        # Rebuild through the same path, so the repaired email is the one that
+        # gets rendered, personalized, re-checked and — if it passes — sent.
+        return _build(_shape_campaign_copy(again, ctx.note))
 
-    # Validate the COPY (clean text, not HTML tags): subject + preheader + body.
-    # The banned-claims gate runs here, before anything is drafted into an ESP.
-    to_check = (f"{copy.get('subject', '')}\n{copy.get('preheader', '')}\n"
-                f"{copy.get('headline', '')}\n"
-                + _strip(copy.get("body_html", "")))
     item = ctx.emit(
-        to_check, claim_ids=cited, angle=seg["key"], fmt="campaign_email",
+        to_check, claim_ids=state["cited"], angle=seg["key"],
+        fmt="campaign_email",
         require_citation=False,      # a promo email need not cite; banned always runs
         destination=f"esp:{esp.provider_for(ctx.tenant) or 'none'}",
-        meta={"subject": copy.get("subject", ""),
-              "preheader": copy.get("preheader", ""),
-              "html": final_html, "segment": seg["key"], "basis": basis,
-              "sendable": not missing, "missing_to_send": missing},
+        # Filed so the NEXT send can be a different one: the shape it must not
+        # repeat, and the intent that decides whether the list is owed a give
+        # or has earned an ask.
+        theme=craft.get("intent", ""),
+        shape=lambda: [b.get("type", "?") for b in state["blocks"]],
+        # A CALLABLE, read after the repair loop settles: meta must describe
+        # the email that finally passed, not the one that was replaced.
+        meta=lambda: {"subject": state["copy"].get("subject", ""),
+                      "preheader": state["copy"].get("preheader", ""),
+                      "html": state["html"], "segment": seg["key"],
+                      "basis": basis, "intent": craft.get("intent", ""),
+                      "format": craft.get("format", ""),
+                      "shape": [b.get("type", "?") for b in state["blocks"]],
+                      "sendable": not missing, "missing_to_send": missing},
         redraft=_repair if basis == "model" else None)
+
+    copy, cited = state["copy"], state["cited"]
+    final_html, native_ok = state["html"], state["native_ok"]
+
+    # A craft BLOCK stops the send the same way a banned claim does. There is
+    # exactly one of them — urgency with no source — and it earns the severity:
+    # every other finding is a worse email, this one is a false statement made
+    # in the client's name, at scale, over their sending domain.
+    hard = email_craft.block_reasons(findings)
+    if hard:
+        ctx.note("not drafted into the ESP: "
+                 + "; ".join(f["detail"] for f in hard))
 
     # Set it up in the ESP as a DRAFT — only when the copy passed, the ESP is
     # connected, and there is nothing blocking a send. A draft is safe (nothing
     # sends); LAUNCHING is `esp.backend().send_campaign(confirm=True)`, which the
     # substrate never calls — that is the final approval the owner keeps.
     esp_draft, esp_target = {}, {}
-    if (item.get("ok") and not missing and native.get("ok")
+    if (item.get("ok") and not missing and native_ok and not hard
             and _flag(ctx.params.get("draft_into_esp"), default=True)):
         mod, refusal = esp.backend(ctx.tenant)
         if refusal:
@@ -1091,7 +1641,13 @@ def _run_campaign_email(ctx: Context) -> dict:
                 if not esp_draft.get("ok"):
                     ctx.note("the ESP rejected the draft: "
                              + esp_draft.get("error", "")[:200])
-                elif hero_got.get("asset_id"):
+                elif esp_draft.get("images_not_rehosted"):
+                    # Rehosted images cannot be broken by the ESP; these
+                    # stayed hotlinked and might be.
+                    ctx.note("image(s) the ESP would not rehost — kept "
+                             "hotlinked, may render broken there: "
+                             + ", ".join(esp_draft["images_not_rehosted"][:3]))
+                if esp_draft.get("ok") and hero_got.get("asset_id"):
                     # Feedback signal one: the photograph actually went into
                     # a drafted campaign. Publishing is the explicit act the
                     # creative library's `uses` counter exists for.
@@ -1123,8 +1679,8 @@ register(Skill(
     system_key="campaign_email",
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
-    params=("segment", "goal", "subject", "entity_key", "audience_key",
-            "utterance", "draft_into_esp", "draft_visual"),
+    params=("segment", "goal", "subject", "intent", "deadline", "entity_key",
+            "audience_key", "utterance", "draft_into_esp", "draft_visual"),
     writes=True,
     produces="draft",
     run=_run_campaign_email))

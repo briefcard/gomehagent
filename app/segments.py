@@ -192,6 +192,33 @@ def by_model(model: str) -> list[dict]:
     return rows
 
 
+#: Cohorts that already know the brand — they have bought, booked, quoted or
+#: trialled. Everyone else is treated as cold.
+_WARM = {"reorder_due", "vip_high_aov", "lapsed_60_90", "repeat_buyers",
+         "first_time_buyers", "win_back", "past_bookers", "hot_enquiries",
+         "quote_no_order", "sample_requested", "trade_accounts",
+         "trial_no_convert", "churned", "upsell_candidates"}
+
+
+def warmth(key: str) -> str:
+    """`warm` if this cohort already knows the brand, else `cold`.
+
+    This is the one genuine fork in the email-craft literature, and it is
+    settled by AUDIENCE rather than by taste. Halbert's A-pile argument (a
+    personal-looking letter survives a sort that a commercial-looking mailer
+    does not) and the plain-text school pull one way; e-commerce's designed
+    templates pull the other. Chase Dimond's resolution is the one worth
+    encoding: people who have bought from you do better on a letter that
+    reads like a person wrote it, while people who might not remember who you
+    are need the designed frame to place you.
+
+    Unknown keys are COLD on purpose. A designed email is merely less
+    intimate for a warm reader; a bare letter from a brand a cold reader does
+    not recognise is a stranger's email, and that is the worse failure.
+    """
+    return "warm" if str(key or "") in _WARM else "cold"
+
+
 def for_tenant(tenant: str) -> dict:
     """The segments worth building for this client, from its business model.
 

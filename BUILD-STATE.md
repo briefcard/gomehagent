@@ -20,6 +20,89 @@ never for state.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
+**CORRECTION to the line above (2026-08-21): `campaign_email` is NOT dormant.**
+The first live Omnisend round-trip landed, real plans have run, and the owner
+has pressed Run-now on a real campaign. The "DEPLOYED BUT DORMANT" phrasing is
+stale text this file's own header warns about; the pipeline is live for Eien.
+
+## Campaign email: variety, craft, and the images (2026-08-21, uncommitted)
+
+The owner's two complaints after the first live sends — *"images are still
+broken"* and *"this is all templates … we want variety and true generation of
+content and different sections"* — plus three live defects a full read of the
+path turned up. 77 suites green (new: `test_campaign_variety.py`, 38 checks),
+41 sabotage guards, no stale anchors (4 new + `campaign_draft_gate` re-pointed;
+each one verified to actually fail its suite when removed). Review artifact:
+https://claude.ai/code/artifact/7a90a078-7742-458b-8aac-1328bff32b70
+
+**IMAGES — two independent causes, and fixing one alone still looks broken.**
+(1) DATA: Eien's entities predate the image-filing sync, so there are no
+photos to render; an imageless product renders text-only with no placeholder.
+**One Catalogue-sync press backfills it — owner action, still outstanding.**
+(2) OMNISEND'S SANITIZER drops hotlinked CDN images: `omnisend._rehost_images`
+now uploads every `<img src>` into Omnisend's own store and rewrites the HTML
+before import — an image the ESP hosts cannot be broken by the ESP. Verified
+against the live API: `POST /api/images` takes `{"url"}`, is idempotent per
+URL, and **caps at 5 MB** — which is why `email_render._sized` now asks
+Shopify for `photo_1200x.jpg` (hero) and `_176x` (cards) via the FILENAME
+convention, never `?width=`: a query parameter would add an `&`, `_esc` would
+render it `&amp;`, and Omnisend has already been caught turning entities into
+literal text. Full-resolution originals were both slow enough to read as
+broken and large enough to fail that 5 MB upload. The rehost uploads the
+UNESCAPED src, skips images Omnisend already hosts, and any image it could not
+rehost is NAMED on the run instead of riding a detail field nobody reads.
+
+**VARIETY — the sameness was architectural, so the fix is too.** Four layers:
+(1) the drafter now composes the LAYOUT (5–10 blocks from a vocabulary that
+grew `quote`/`stat`/`list`/`banner`/`signature`/`ps`), with `_assemble_blocks`
+holding every old line block-by-block — hero only from the approved library,
+products only from offered keys, a quote or stat only against an OFFERED claim
+id, exactly one CTA, each drop NAMED. (2) INTENT (`story`/`education`/`proof`/
+`offer`) is a plan field the planner leaves blank and the run rotates, so a
+list is given to ~3× for every ask (Hormozi's give:ask); it changes the brief,
+the shape guidance and the length budget. (3) FORMAT follows AUDIENCE, not
+taste: `segments.warmth` sends warm cohorts a personal letter (no hero, no
+grid, sign-off + P.S.) and cold ones the designed frame — unknown keys are
+cold on purpose; a block the format does not carry is dropped by name.
+(4) ANTI-REPETITION: `Output.shape` (new column, auto-migrates) records the
+block sequence, and the next send to that list is shown the last four shapes,
+subjects and openings and told not to repeat them. Two campaigns for one
+tenant now differ in kind, structure and form, not just wording.
+
+**CRAFT — encoded as checks (`app/email_craft.py`), from the direct-response
+record rather than from taste.** Nudges (advice, one free redraft, never a
+block): subject 3–8 words, preview text must extend not repeat the subject,
+platitudes named with the actual words, over-long sentences, an ask with no
+proof. ONE block-severity rule: urgency with nothing behind it. `deadline` is
+now a plan field, and with it blank the prompt is told no deadline exists and
+code refuses to let the copy imply one — a fabricated "ends tonight" over the
+client's sending domain is a false statement in their name, at scale.
+
+**THREE LIVE DEFECTS FIXED** (all reachable in production, none by the suite):
+· `resolve` never passed `entity_key` to the ranker, so an owner setting
+"Featured entity" got the alphabetically-first three catalogue rows, sold-out
+ones included — the named entity now leads and is fetched directly if the
+ranked window missed it (`match_entities` also returns `availability` now).
+· The HTML was rendered BEFORE validation, so a repaired email filed clean
+text and shipped the REJECTED render to the ESP; `emit` now accepts a callable
+`meta`/`shape` read after the repair loop, and the campaign rebuilds through
+one `_build()` so the thing validated is the thing sent.
+· The repair returned only `body_html`, so the re-check no longer contained
+the subject — a banned phrase in a SUBJECT survived by rewriting the body.
+The checked text is now the same shape every pass.
+Also: the drafter went through its own Anthropic client at `max_tokens=900`
+(a composed layout truncates there and silently became the composer) — now
+`llm.ask` at 2400, with truncation NAMED; and `usable` still required
+`sections`/`body_html`, so the blocks contract would have degraded to the
+composer on every single call. A personalize failure reported "ESP not
+connected" for every cause including its own unknown-token refusal; it now
+reports the real reason.
+
+**Owner actions still outstanding:** press Eien's Catalogue sync (the image
+data gap); review Eien's banned-claims list (still the conservative defaults);
+segments dry-run → apply. Then watch the first live draft — every live first
+so far has found a defect, and the rehost path has never met a real image.
+
 ## Architectural remediation — first batch LIVE at 5761a17 (2026-08-21)
 
 A full top-down audit was run against `39659a4`: the data layer is sound, the

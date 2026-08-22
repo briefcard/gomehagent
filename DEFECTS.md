@@ -2248,3 +2248,75 @@ localised this to one header value in one read. And when an external API names
 a format, look the value up in its docs at fix time; the first fix invented
 `2024-06` from the error's shape, which is how a second deploy got spent on
 one header.
+
+### 2.66 The campaign engine, read end to end — five defects behind two complaints — 2026-08-21
+
+The owner's report was two sentences: *"Images are still broken"* and *"the goal
+is not to have one template for all emails … this is all templates."* Reading
+the whole path for both turned up five defects, three of them live-reachable and
+none of them visible to a passing 77-suite run. They are grouped here because
+the grouping is the lesson: every one of them is a place where **two things that
+had to stay identical were derived separately**, and nothing compared them.
+
+**(a) The rendered HTML predated validation.** `emit` validates and repairs a
+STRING; the HTML and the `meta` dict were built before the call. A draft that
+failed the ban list, was repaired, and passed therefore filed the repaired text
+and shipped the REJECTED render to the ESP. The ledger said the email was clean;
+the client's ESP held the banned one. Fixed by making `meta` (and the new
+`shape`) accept a callable read AFTER the loop settles, and by routing the
+campaign through a single `_build(copy)` that re-renders, re-personalizes and
+re-derives the checked text together. The thing validated is now the artifact
+sent, by construction rather than by ordering.
+
+**(b) The repair narrowed what was checked.** `_repair` returned only
+`body_html`, and `emit` replaces the whole body with whatever it returns — so
+the second pass no longer contained the subject or preheader. A banned phrase in
+a SUBJECT LINE was therefore "repairable" by rewriting the body: pass two saw
+clean text, `ok` went true, and the banned subject shipped. The repair now
+returns the same shape it was given. Worth stating plainly: this is a validator
+ESCAPE that a green suite reported as a working gate for as long as it existed.
+
+**(c) `entity_key` opened a branch and was never used.** `resolve` fetched
+entities when a key was named but passed only `requirements` to the ranker —
+which, for a campaign, is empty. `match_entities` then ranked on nothing and
+returned rows in NAME order, `include_unavailable=True`. So "Featured entity:
+Firenze" on a plan produced the catalogue's alphabetically-first three rows,
+sold-out ones included, labelled plan-scoped so no warning fired. The named
+entity now leads and is fetched directly when the ranked window missed it;
+`match_entities` returns `availability` so downstream can see what it was
+already being blocked on.
+
+**(d) The contract changed and its own usability check did not.** The prompt was
+rewritten to ask for `blocks`; `usable` still tested `sections or body_html`.
+Every well-formed composed layout was therefore discarded and the deterministic
+composer served instead — the feature was off, and because the composer is a
+legitimate fallback, the output looked merely dull rather than broken. Same
+class as §2.64's header check: a guard that passes through the exact failure it
+names. Fixed, plus the ceiling that would have produced the same silence a
+different way — `max_tokens=900` truncates a 5–10 block JSON, so it is 2400 now
+and a truncated reply is NAMED rather than composed over.
+
+**(e) One error message for every cause.** Any `personalize` failure — including
+the unknown-token refusal built to catch drafter typos — printed "ESP not
+connected, so personalization stayed neutral" and skipped the draft. One stray
+`{{TOKEN}}` made a wired account read as disconnected, with the real reason
+discarded. It now reports what actually happened.
+
+**The images, for the record, were not one bug.** They were a DATA gap (Eien's
+entities predate the image-filing sync — imageless products render text-only,
+silently) *and* Omnisend's importer dropping hotlinked CDN references. Fixing
+either alone still looks broken, which is why the first fix appeared not to
+work. The rehost path (upload to `POST /api/images`, rewrite the src) was
+verified against the live API before shipping: `{"url"}`, idempotent per URL,
+**5 MB cap** — and the 5 MB cap is why full-resolution originals had to be
+sized down as well. Sizing uses Shopify's `_1200x` FILENAME convention rather
+than `?width=`, because a query parameter adds an `&`, escaping renders it
+`&amp;`, and this importer is already on record turning `&nbsp;` into visible
+" bsp;" (§ the design pass). The fix for one defect must not re-create another.
+
+Craft rules (subject length, platitudes, proof on an ask) landed as `nudge`
+findings that buy one redraft, and exactly one as a `block`: urgency with no
+source behind it. The severity split is deliberate — a 9-word subject is not a
+compliance event, and a system that treats it as one teaches its owner to switch
+the checks off. Unbacked urgency earns the block because it is a false statement
+made in the client's name, over their sending domain, at scale.

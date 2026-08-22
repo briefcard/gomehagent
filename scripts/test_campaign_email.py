@@ -87,7 +87,7 @@ def main():
     assert ok.get("ok") and ok["gaps"] == [], ok
 
     def _grounded_stub(banned_phrase=""):
-        def _d(bundle, seg, goal):
+        def _d(bundle, seg, goal, craft=None):
             claims = bundle.get("claims") or []
             cid = claims[0]["claim_id"] if claims else ""
             body = (f"<p>Hi {{{{FIRST_NAME}}}}, {banned_phrase or 'our tableware is Italian-designed'}. "
@@ -133,7 +133,7 @@ def main():
 
     print("\n— email craft is enforced by code, not hoped from the prompt —")
     _drafted.clear()
-    skill_pack.draft_campaign = lambda bundle, seg, goal: (
+    skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
         {"subject": "This is a very long subject line that would be cut off "
                     "by every mobile inbox long before the point lands",
          "preheader": "p", "claim_ids": [],
@@ -148,7 +148,7 @@ def main():
     ck("a wall of paragraphs is broken into sections with a divider",
        item_c.get("meta", {}).get("html", "").count("height:1px") >= 1)
 
-    skill_pack.draft_campaign = lambda bundle, seg, goal: (
+    skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
         {"subject": "Short and specific", "preheader": "p",
          "headline": "The one-line hook", "claim_ids": [],
          "sections": [

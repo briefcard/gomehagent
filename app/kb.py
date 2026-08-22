@@ -1236,8 +1236,13 @@ def match_entities(tenant: str, requirements: dict | None = None,
     modes = cfg.get("modes") or [{"mode": "keyword"}]
 
     def _base(r: db.KbEntity) -> dict:
+        # `availability` rides along because out-of-stock rows are returned on
+        # purpose (see above) and every caller downstream — the drafter that
+        # must not route demand to an empty shelf, the validator that blocks on
+        # exactly that — was having to guess. Returned, never interpreted here.
         return {"key": r.key, "name": r.name, "type": r.type, "price": r.price,
-                "description": r.description, "attributes": r.attributes or {}}
+                "description": r.description, "attributes": r.attributes or {},
+                "availability": r.availability or ""}
 
     # --- what a word is worth -------------------------------------------
     # Keyword hits search the entity's WORDS — name, description and attribute

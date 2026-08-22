@@ -30,6 +30,7 @@ the footer is added by the renderer and cannot be forgotten by a generator.
 from __future__ import annotations
 
 import html as _html
+import re as _re
 
 # The neutral tokens the footer always carries; the body may carry these too.
 # They stay neutral here and become native in `esp.personalize`.
@@ -74,6 +75,36 @@ def _esc(s) -> str:
     return _html.escape(str(s or ""))
 
 
+def _sized(url: str, width: int) -> str:
+    """A Shopify CDN photo asked for at the size the email actually shows.
+
+    The catalogue sync stores the storefront's own image URL, which is the
+    full-resolution original — a several-megabyte file behind a 600px hero and
+    an 88px thumbnail. That is slow enough on a phone to read as a broken
+    image, and it is the kind of payload a sanitising importer drops.
+
+    Shopify's FILENAME convention (`photo_1200x.jpg`) is used rather than the
+    `?width=` parameter on purpose: a query parameter would put a second `&`
+    in the src, `_esc` would render it `&amp;`, and Omnisend's importer has
+    already been caught turning entity references into literal text (the
+    `&nbsp;` → " bsp;" incident). No new `&`, no new failure mode.
+
+    Only Shopify's CDN is touched — guessing a resize scheme for an unknown
+    host would break the URL rather than shrink it. Anything else, and any URL
+    already carrying a size, is returned exactly as given.
+    """
+    u = str(url or "")
+    if "cdn.shopify.com" not in u and "/cdn/shop/" not in u:
+        return u
+    base, sep, query = u.partition("?")
+    stem, dot, ext = base.rpartition(".")
+    if not dot or len(ext) > 5 or "/" in ext:
+        return u
+    if _re.search(r"_\d+x\d*$", stem):          # already sized — leave it alone
+        return u
+    return f"{stem}_{width}x{dot}{ext}{sep}{query}"
+
+
 # ---------------------------------------------------------------------------
 # Blocks — the canonical, ESP-agnostic vocabulary a generator emits. Unknown
 # block types are skipped with an HTML comment rather than raising: a renderer
@@ -85,7 +116,8 @@ def _hero(b: dict, t: dict) -> str:
     c = t["colors"]
     img = ""
     if b.get("image"):
-        img = (f'<tr><td style="padding:0"><img src="{_esc(b["image"])}" '
+        img = (f'<tr><td style="padding:0">'
+               f'<img src="{_esc(_sized(b["image"], t["width"] * 2))}" '
                f'width="{t["width"]}" alt="{_esc(b.get("alt",""))}" '
                f'style="display:block;width:100%;max-width:{t["width"]}px;'
                f'height:auto;border:0;border-radius:{t["radius"]} {t["radius"]} 0 0"></td></tr>')
@@ -141,7 +173,8 @@ def _products(b: dict, t: dict) -> str:
     for p in (b.get("items") or [])[:3]:
         url = p.get("url") or "#"
         img_td = (f'<td width="96" valign="top" style="padding:2px 14px 2px 0">'
-                  f'<a href="{_esc(url)}"><img src="{_esc(p["image"])}" width="88" '
+                  f'<a href="{_esc(url)}">'
+                  f'<img src="{_esc(_sized(p["image"], 176))}" width="88" '
                   f'alt="{_esc(p.get("name", ""))}" style="display:block;width:88px;'
                   f'height:88px;border:0;border-radius:{t["radius"]};'
                   f'background:{c["border"]}"></a></td>'
@@ -186,13 +219,120 @@ def _heading(b: dict, t: dict) -> str:
             f'color:{c["accent"]}">{_esc(b.get("text", ""))}</div></td></tr>')
 
 
+def _quote(b: dict, t: dict) -> str:
+    """A pull-quote — an approved claim given room. Serif, larger, an accent
+    rule on the left; the one block that makes proof read as proof."""
+    c = t["colors"]
+    who = (f'<div style="font-family:{t["font"]["body"]};font-size:13px;'
+           f'color:{c["muted"]};padding-top:8px">{_esc(b.get("attribution", ""))}'
+           f'</div>') if b.get("attribution") else ""
+    return (f'<tr><td style="padding:16px 32px">'
+            f'<table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0"><tr>'
+            f'<td width="4" style="background:{c["accent"]};border-radius:2px;'
+            f'font-size:0;line-height:0"> </td>'
+            f'<td style="padding:2px 0 2px 18px;font-family:{t["font"]["heading"]};'
+            f'font-size:19px;line-height:1.5;font-style:italic;color:{c["text"]}">'
+            f'{_esc(b.get("text", ""))}{who}</td>'
+            f'</tr></table></td></tr>')
+
+
+def _list(b: dict, t: dict) -> str:
+    """A checklist — short scannable points with accent marks, for the
+    education-shaped email a paragraph run would bury."""
+    c = t["colors"]
+    rows = "".join(
+        f'<tr><td width="26" valign="top" style="font-family:{t["font"]["body"]};'
+        f'font-size:16px;font-weight:700;color:{c["accent"]};padding:5px 0">✓</td>'
+        f'<td style="font-family:{t["font"]["body"]};font-size:16px;'
+        f'line-height:1.55;color:{c["text"]};padding:5px 0">{_esc(item)}</td></tr>'
+        for item in (b.get("items") or [])[:6] if str(item or "").strip())
+    if not rows:
+        return ""
+    return (f'<tr><td style="padding:8px 32px"><table role="presentation" '
+            f'width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'{rows}</table></td></tr>')
+
+
+def _stat(b: dict, t: dict) -> str:
+    """One big number with its caption — a claim's figure, given weight."""
+    c = t["colors"]
+    return (f'<tr><td align="center" style="padding:18px 32px 14px">'
+            f'<div style="font-family:{t["font"]["heading"]};font-size:44px;'
+            f'font-weight:700;line-height:1;color:{c["accent"]}">'
+            f'{_esc(b.get("value", ""))}</div>'
+            f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
+            f'color:{c["muted"]};padding-top:6px">{_esc(b.get("caption", ""))}'
+            f'</div></td></tr>')
+
+
+def _banner(b: dict, t: dict) -> str:
+    """A full-width accent strip carrying one short line — announcement
+    emphasis without a second CTA."""
+    c = t["colors"]
+    return (f'<tr><td style="padding:14px 32px">'
+            f'<table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0"><tr>'
+            f'<td align="center" style="background:{c["accent"]};'
+            f'border-radius:{t["radius"]};padding:16px 20px;'
+            f'font-family:{t["font"]["body"]};font-size:16px;font-weight:600;'
+            f'color:{c["accent_text"]}">{_esc(b.get("text", ""))}</td>'
+            f'</tr></table></td></tr>')
+
+
 def _divider(b: dict, t: dict) -> str:
     return (f'<tr><td style="padding:8px 32px"><div style="height:1px;'
             f'background:{t["colors"]["border"]};line-height:1px"> </div></td></tr>')
 
 
+def _signature(b: dict, t: dict) -> str:
+    """A sign-off — the block that makes a letter a letter.
+
+    An email that closes with a person's name is a different object from one
+    that closes with a logo: it reads as written TO someone rather than
+    broadcast AT them, which is the whole A-pile idea (a personal-looking
+    letter survives the sort a commercial-looking mailer does not). The name
+    is brand data, never invented here.
+    """
+    c = t["colors"]
+    role = (f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
+            f'color:{c["muted"]};padding-top:2px">{_esc(b.get("role", ""))}'
+            f'</div>') if b.get("role") else ""
+    return (f'<tr><td style="padding:14px 32px 4px">'
+            f'<div style="font-family:{t["font"]["body"]};font-size:16px;'
+            f'line-height:1.6;color:{c["text"]}">{_esc(b.get("text", ""))}</div>'
+            f'<div style="font-family:{t["font"]["heading"]};font-size:17px;'
+            f'color:{c["text"]};padding-top:6px">{_esc(b.get("name", ""))}</div>'
+            f'{role}</td></tr>')
+
+
+def _ps(b: dict, t: dict) -> str:
+    """The postscript, set apart above the footer.
+
+    Kept as its own block rather than an ordinary paragraph because of what it
+    is: the line most likely to be read after the subject, and — by Hormozi's
+    own reported numbers — the highest click-through element in his sends. It
+    gets a rule above it and its own rhythm, and any link inside it points at
+    the SAME destination as the CTA; one ask per email is enforced upstream.
+    """
+    c = t["colors"]
+    body = b.get("html") or _esc(b.get("text", ""))
+    # The label is the renderer's, so a drafter that also wrote "P.S." — which
+    # is the natural thing to write — must not produce "P.S. P.S.". Strip one
+    # leading label rather than asking the prompt to remember not to type it.
+    body = _re.sub(r'^(\s*(?:<p[^>]*>)?\s*)P\.?\s?S\.?[:\s—-]+', r"\1",
+                   body, count=1, flags=_re.I)
+    return (f'<tr><td style="padding:18px 32px 6px">'
+            f'<div style="border-top:1px solid {c["border"]};padding-top:14px;'
+            f'font-family:{t["font"]["body"]};font-size:15px;line-height:1.6;'
+            f'color:{c["text"]}"><span style="font-weight:600">P.S.</span> '
+            f'{body}</div></td></tr>')
+
+
 _BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta,
-           "heading": _heading, "products": _products, "divider": _divider}
+           "heading": _heading, "products": _products, "divider": _divider,
+           "quote": _quote, "list": _list, "stat": _stat, "banner": _banner,
+           "signature": _signature, "ps": _ps}
 
 
 def _header(t: dict, webview: bool = True) -> str:

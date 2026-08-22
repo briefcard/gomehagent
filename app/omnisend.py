@@ -330,6 +330,41 @@ def upload_image(tenant: str, url: str) -> dict:
             "url": d.get("url", "")}
 
 
+def _rehost_images(tenant: str, html: str) -> tuple[str, int, list[str]]:
+    """Every <img src> uploaded to Omnisend's own image store, the HTML
+    rewritten to their URLs. Returns (html, rehosted_count, failures).
+
+    Hotlinked CDN images arrived BROKEN in the owner's live drafts
+    (2026-08-21) — Omnisend's import/sanitizer does not reliably keep
+    external references. `upload_image` had been built and wired nowhere
+    (the known-fixes list carried it); this is its job: an image the ESP
+    hosts itself cannot be broken by the ESP. A failed upload keeps the
+    original URL — a hotlinked image that MIGHT break beats a hole — and
+    is reported by URL so the run can say so.
+    """
+    import html as _htmlmod
+    import re as _re
+    srcs = list(dict.fromkeys(_re.findall(r'<img[^>]+src="([^"]+)"', html)))
+    rehosted, failures = 0, []
+    for src in srcs[:12]:
+        # The src comes out of the MARKUP, so it is HTML-escaped: a CDN URL
+        # with a query string reads `?v=1&amp;width=600` here. Uploading that
+        # literally asks the image host for a URL that does not exist. Unescape
+        # for the fetch, match on the escaped form for the rewrite.
+        real = _htmlmod.unescape(src)
+        if not real.startswith(("http://", "https://")):
+            continue
+        if "omnisend.com/images/" in real:
+            continue          # already theirs — re-uploading would copy it
+        got = upload_image(tenant, real)
+        if got.get("ok") and got.get("url"):
+            html = html.replace(f'src="{src}"', f'src="{_htmlmod.escape(got["url"])}"')
+            rehosted += 1
+        else:
+            failures.append(real)
+    return html, rehosted, failures
+
+
 def draft_from_html(tenant: str, *, name: str, subject: str, sender_name: str,
                     html: str, preheader: str = "",
                     include_segments: list[str] | None = None) -> dict:
@@ -340,6 +375,7 @@ def draft_from_html(tenant: str, *, name: str, subject: str, sender_name: str,
     up, and returning only the error would leave an orphan in the account with
     nothing naming it.
     """
+    html, rehosted, rehost_failed = _rehost_images(tenant, html)
     tpl = import_template(tenant, name, html)
     if not tpl["ok"]:
         return {**tpl, "stage": "template"}
@@ -351,4 +387,5 @@ def draft_from_html(tenant: str, *, name: str, subject: str, sender_name: str,
         return {**camp, "stage": "campaign", "template_id": tpl["template_id"],
                 "orphan": f"template {tpl['template_id']} was created and is "
                           f"not referenced by any campaign"}
-    return {**camp, "stage": "done", "template_id": tpl["template_id"]}
+    return {**camp, "stage": "done", "template_id": tpl["template_id"],
+            "images_rehosted": rehosted, "images_not_rehosted": rehost_failed}

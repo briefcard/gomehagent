@@ -296,6 +296,20 @@ class Output(Base):
     theme = Column(String, default="")
     angle = Column(String, default="")
     format = Column(String, default="")
+    #: The STRUCTURAL fingerprint of what was produced — for an email, the
+    #: block sequence it was built from (`["hero","heading","text",…]`).
+    #:
+    #: Anti-repeat is already this table's first job, but it could only answer
+    #: "has this CLAIM been used lately". The owner's complaint about the email
+    #: engine was the other half: every send was the same SHAPE, and nothing
+    #: could tell, because shape was never recorded. With it here, a drafter
+    #: can be shown the last few layouts and asked for a different one, and
+    #: "are we sending the same email every week" becomes a query.
+    #:
+    #: Empty for skills that have no meaningful structure, which is most of
+    #: them, and empty for every row written before this column existed —
+    #: honestly unknown rather than falsely uniform.
+    shape = Column(JSON, default=list)
 
     # --- what happened to it ----------------------------------------------
     status = Column(String, default="draft", index=True)  # draft|blocked|approved|published

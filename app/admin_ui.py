@@ -1508,6 +1508,19 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         return (f'<div class="f"><label>{label}</label>{req}{note}'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
                 f'</div>')
+    if f.get("kind") == "choice":
+        # A fixed vocabulary the skill understands. Rendered as a select for
+        # the same reason segment is: a typo in a free-text field would read
+        # downstream as "unset" and silently change what the send is.
+        cur = str(value or "").strip().lower()
+        opts = "".join(
+            f'<option value="{_esc(v)}"{" selected" if v == cur else ""}>'
+            f'{_esc(v)}</option>'
+            for v in ("",) + tuple(f.get("choices") or ()))
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<div class="what">blank = the planner decides, rotating so '
+                f'this list is given to more often than it is asked</div>'
+                f'<select name="{_esc(f["key"])}">{opts}</select></div>')
     if f.get("kind") == "flag":
         cur = str(value or "").strip().lower()
         state = ("yes" if cur in ("1", "true", "yes", "y", "on")

@@ -147,7 +147,7 @@ def main() -> int:  # noqa: PLR0915
        got["image"] is None and "review queue" in got.get("note", ""))
 
     print("\n— the whole skill: photograph into the email, use filed —")
-    skill_pack.draft_campaign = lambda bundle, seg, goal: (
+    skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
         {"subject": "Back in stock", "preheader": "the aqua returns",
          "body_html": "<p>Hi {{FIRST_NAME}}, Designed in Milan and used in "
                       "leading hotels.</p>",

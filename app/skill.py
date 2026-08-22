@@ -260,8 +260,8 @@ class Context:
              entity_key: str = "", situation: str = "", audience_key: str = "",
              angle: str = "", fmt: str = "", destination: str = "",
              conversation_id: str = "", require_citation: bool | None = None,
-             redraft=None, meta: dict | None = None,
-             lookups: list | None = None) -> dict:
+             redraft=None, meta: "dict | callable | None" = None,
+             lookups: list | None = None, shape=None, theme: str = "") -> dict:
         """Validate one produced thing, repair it if it fails, file it.
 
         The only exit. `require_citation` defaults to whether the skill claims
@@ -282,6 +282,14 @@ class Context:
         history is on the record — so `repair_rate` is measurable and a rule
         that fires constantly is visible as a rule to revisit rather than as
         background noise.
+
+        **`meta` may be a zero-argument callable, and then it is read AFTER the
+        repair loop settles.** A repair replaces the body; a `meta` dict built
+        before that describes the draft that was REPLACED. campaign_email hit
+        exactly this: the rendered HTML was built from the pre-repair copy, so
+        a repaired email filed the repaired text and shipped the failing HTML
+        to the ESP. Anything whose meta is derived from the body — a render, a
+        word count, a diff — passes a callable so the two cannot drift.
         """
         cite = (self.skill.produces in ("draft", "proposal")
                 if require_citation is None else require_citation)
@@ -334,7 +342,11 @@ class Context:
             situation=situation, entity_key=entity_key,
             audience_key=audience_key, claim_ids=claim_ids or [],
             angle=angle, format=fmt or self.skill.produces,
-            status=status,
+            # What KIND of thing this was, in the skill's own vocabulary —
+            # campaign_email files its intent here (story / education / proof /
+            # offer), which is what lets the next send read back how often this
+            # list has been given to versus asked.
+            theme=theme, status=status,
             blocked_on=[f["rule"] for f in verdict["failures"]],
             destination=destination, body=body,
             # Which LIVE lookups fed this. A skill that answered partly from a
@@ -342,6 +354,11 @@ class Context:
             # ledger has to know which, or `ledger.perishable` cannot tell a
             # brand fact from a reading a fortnight later.
             lookups=list(lookups or []),
+            # The STRUCTURE that was produced, when the skill has one. Read
+            # after the repair loop for the same reason `meta` is: a repair can
+            # change the layout, and recording the shape of a superseded draft
+            # would teach the next send to avoid the wrong thing.
+            shape=list((shape() if callable(shape) else shape) or []),
             conversation_id=conversation_id, run_id=self.run_id)
 
         # Every attempt is filed as a CHECK, not just the ones that produced
@@ -419,7 +436,9 @@ class Context:
                 "claim_ids": list(claim_ids or []),
                 "repairs": len(attempts),
                 "repair_history": attempts,
-                "needs": needs, "meta": meta or {}}
+                # Read now, not at call time: a callable meta describes what
+                # FINALLY passed, after any repair rewrote the body.
+                "needs": needs, "meta": (meta() if callable(meta) else meta) or {}}
         self.items.append(item)
         return item
 

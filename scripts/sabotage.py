@@ -143,8 +143,8 @@ SABOTAGES = [
     {
         "name": "campaign_draft_gate",
         "file": "app/skill_pack.py",
-        "find": "    if (item.get(\"ok\") and not missing and native.get(\"ok\")",
-        "replace": "    if (not missing and native.get(\"ok\")  # SABOTAGE",
+        "find": "    if (item.get(\"ok\") and not missing and native_ok and not hard",
+        "replace": "    if (not missing and native_ok  # SABOTAGE",
         "suites": ["test_campaign_email.py"],
         "why": "a campaign email that FAILED the banned-claims check still gets "
                "drafted into the client's live ESP",
@@ -411,6 +411,50 @@ SABOTAGES = [
                "goes untargeted or to the wrong cohort, and the Canva-"
                "folder lesson (the id is remembered, never searched for "
                "by name) is unlearned",
+    },
+    {
+        "name": "campaign_honest_urgency",
+        "file": "app/email_craft.py",
+        "find": "    if urgent and not urgency_backed_by:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the engine invents deadlines — \"last chance, ends "
+               "tonight\" goes out over the client's sending domain with "
+               "nothing behind it, at scale, which is a false statement "
+               "made in their name and the exact scarcity both Kennedy "
+               "and Hormozi call the dishonest kind",
+    },
+    {
+        "name": "campaign_claim_backed_figures",
+        "file": "app/skill_pack.py",
+        "find": "            if cid not in offered_claims:",
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "a quote or a STATISTIC the model made up renders as proof "
+               "in a customer email — an uncited number looks more "
+               "traceable than no number, so this is worse than silence",
+    },
+    {
+        "name": "campaign_repair_rerenders",
+        "file": "app/skill.py",
+        "find": "\"meta\": (meta() if callable(meta) else meta) or {}}",
+        "replace": "\"meta\": ({} if callable(meta) else meta) or {}}  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "a repaired email files the CLEAN copy and ships the "
+               "REJECTED render — the banned phrase the validator "
+               "caught reaches the ESP anyway, and the ledger says it did "
+               "not",
+    },
+    {
+        "name": "campaign_format_by_audience",
+        "file": "app/skill_pack.py",
+        "find": "        if allowed and kind and kind not in allowed:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the letter-format send to warm buyers grows a banner and a "
+               "product grid — every email collapses back to one house "
+               "layout, which is the sameness the composed-layout work "
+               "exists to end",
     },
 ]
 
