@@ -1482,6 +1482,32 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         return (f'<div class="f"><label>{label}</label>{req}'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
                 f'</div>')
+    if f.get("kind") == "entity":
+        # Same rule as segments: a reference into the catalogue, never free
+        # text. Options are this account's real entities, in-stock first;
+        # the data layer refuses any key outside them.
+        cur = str(value or "").strip()
+        rows = sorted(kb.entities(tenant, available_only=False),
+                      key=lambda r: ((r.availability or "available") != "available",
+                                     (r.name or "").lower()))
+        opts = [f'<option value=""{"" if cur else " selected"}>— none — the '
+                f'top catalogue items are featured —</option>']
+        seen = False
+        for r in rows:
+            seen = seen or r.key == cur
+            oos = " · out of stock" if (r.availability or "") == "oos" else ""
+            opts.append(f'<option value="{_esc(r.key)}"'
+                        f'{" selected" if r.key == cur else ""}>'
+                        f'{_esc(r.name or r.key)}{oos}</option>')
+        if cur and not seen:
+            opts.append(f'<option value="{_esc(cur)}" selected>{_esc(cur)} '
+                        f'(unknown key)</option>')
+        note = ("" if rows else
+                '<div class="what">the catalogue is empty — run the '
+                'catalogue sync on the Review tab first</div>')
+        return (f'<div class="f"><label>{label}</label>{req}{note}'
+                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
+                f'</div>')
     if f.get("kind") == "flag":
         cur = str(value or "").strip().lower()
         state = ("yes" if cur in ("1", "true", "yes", "y", "on")

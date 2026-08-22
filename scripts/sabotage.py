@@ -392,12 +392,12 @@ SABOTAGES = [
     {
         "name": "plan_segment_reference",
         "file": "app/systems.py",
-        "find": "        why = _segment_key_check(tenant, v)",
+        "find": "        why = fn(tenant, v)",
         "replace": "        why = \"\"  # SABOTAGE",
         "suites": ["test_plans.py"],
-        "why": "a plan's segment becomes free text again — a typo'd or "
-               "invented key slides through to the campaign's generic "
-               "stand-in cohort and an email composes for a segment that "
+        "why": "a plan's segment and entity become free text again — a "
+               "typo'd or invented key slides through to a stand-in cohort "
+               "or product, and the campaign composes for something that "
                "does not exist",
     },
     {

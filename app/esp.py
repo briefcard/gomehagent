@@ -69,15 +69,25 @@ PROFILES: dict[str, dict] = {
         name="Omnisend",
         adapter="omnisend",
         audience_fn="segments", audience_key="segments",
-        # VERIFY on first real send. Omnisend renders Liquid-style properties.
+        # VERIFIED against Omnisend's own docs on 2026-08-21 (support
+        # articles 1061845 "Use Personalization" + 11197418 "Liquid
+        # Templating"), after the first live draft rendered the previous
+        # guess as LITERAL TEXT in the owner's preview — camelCase curly
+        # braces were wrong twice over. Omnisend is modified Liquid:
+        # SQUARE brackets, snake_case, quoted defaults. There is NO
+        # view-in-browser variable in their tag set, so the token is absent
+        # here ON PURPOSE — `caps.webview=False` keeps the renderer from
+        # emitting a link no variable can fill, and `personalize` refusing
+        # an unmapped token is the backstop if one slips through. Their
+        # logic tags ([% if %]) work only in Automations, never campaigns.
         merge={
-            "FIRST_NAME": "{{ contact.firstName | default: \"there\" }}",
-            "LAST_NAME": "{{ contact.lastName | default: \"\" }}",
-            "EMAIL": "{{ contact.email }}",
-            "UNSUBSCRIBE": "{{ unsubscribeUrl }}",
-            "VIEW_IN_BROWSER": "{{ webviewUrl }}",
+            "FIRST_NAME": "[[contact.first_name | default: 'there']]",
+            "LAST_NAME": "[[contact.last_name | default: '']]",
+            "EMAIL": "[[contact.email]]",
+            "UNSUBSCRIBE": "[[unsubscribe_link]]",
         },
-        caps=dict(hosts_images=True, dynamic_products=True, segments=True),
+        caps=dict(hosts_images=True, dynamic_products=True, segments=True,
+                  webview=False),
     ),
     "klaviyo": dict(
         name="Klaviyo",

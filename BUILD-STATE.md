@@ -481,6 +481,55 @@ set and maintain segments?" — set yes, maintain was four gaps; all closed).**
   risk. `esp.audiences` stopped defaulting an absent member count to 0 —
   absence survives to the output.
 
+**THE FIRST LIVE OMNISEND ROUND-TRIP LANDED (2026-08-21)** — the owner ran a
+real campaign plan and a branded, validated, CAN-SPAM-complete draft
+appeared in Eien's Omnisend. His punch list from the rendered email, all
+closed the same day:
+
+* **Native personalization was WRONG, live** — the greeting rendered as
+  literal `{{ contact.firstName … }}`. The PROFILES merge strings were
+  always marked VERIFY; verified now against Omnisend's own docs (support
+  1061845 + 11197418): modified Liquid, SQUARE brackets, snake_case —
+  `[[contact.first_name | default: 'there']]`, `[[unsubscribe_link]]` (the
+  old guess also meant a BROKEN unsubscribe href). Omnisend has NO
+  view-in-browser variable at all: `caps.webview=False`, and
+  `email_render.render(webview=)` drops the header link a variable cannot
+  fill. `test_esp`'s pins repointed deliberately — including the one that
+  told providers apart by BRACKET STYLE, which square-bracket Omnisend
+  broke; vocabulary, not brackets, is the isolation test now.
+* **No products, no media** — the bundle carries entities only when a plan
+  names one, so the email invited "browse the pairings" with nothing in
+  it. `sync_shopify` now reads each product's own photograph onto the
+  entity (`attributes.image`) AND files it in the creative library
+  (owned/approved via `origin="store_sync"`, entity-scoped, dupe-safe by
+  URL) — so product cards carry name + price + the store's photo, and the
+  ENTITY-SCOPED HERO is the featured product's own shot. The skill
+  falls back to the catalogue's top available items when no entity is set,
+  labelled on the run. Fixed in passing, exposed by that change:
+  `hero_for_campaign` fetched brand-wide photos ONLY when no entity was
+  named — the moment a campaign carried entities, an approved brand
+  photograph became structurally unreachable. The brand-wide shelf is
+  always fetched now; scoped still outranks it (`test_campaign_visual`'s
+  pin repointed deliberately — the MORE relevant hero is the point).
+  `Featured entity` on the plan is a REFERENCE select now, like segment
+  (kind="entity", `_entity_key_check` in both write paths, empty catalogue
+  refusal says "run the catalogue sync").
+* **Email craft is enforced, not hoped (owner: subjects too long, one
+  unbroken wall of text).** The drafter's contract is now SECTIONS —
+  subject ≤45 chars, preheader ≤80 completing it, a ≤50-char headline,
+  2–3 one-idea sections with optional 2–5-word headings, one CTA — and
+  `_shape_campaign_copy` is the code that holds when the prompt is
+  ignored: a subject past 60 chars is trimmed at a word boundary (noted on
+  the run; the PLAN's subject is never touched), and a single blob is
+  split into ≤2-paragraph sections. `_campaign_blocks` renders headline +
+  headed sections with dividers breathing between them, then products,
+  then the CTA; `email_render` gained the `heading` block at two weights.
+  "Native sections" here means OUR renderer's block system — Omnisend's
+  HTML import takes the finished document; their drag-drop blocks are the
+  recorded later step, unchanged.
+* The "..com" in the footer's receiving line is the approved THEME's own
+  footer text (nothing in code composes it) — one Brand-tab edit.
+
 **The skill registry loads itself (2026-08-21, production incident — owner
 pressed Run now on a real campaign plan: "no skill keyed
 'campaign_email'").** Registration was an import side effect of

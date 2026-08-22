@@ -117,6 +117,23 @@ def main() -> int:
     ck("a complete theme has nothing blocking a send",
        er.missing_to_send(EIEN) == [])
 
+    print("\n— sections and the provider's own limits —")
+    structured = er.render(EIEN, [
+        {"type": "heading", "text": "The one-line headline", "level": 1},
+        {"type": "text", "html": "<p>First idea.</p>"},
+        {"type": "divider"},
+        {"type": "heading", "text": "Second idea"},
+        {"type": "text", "html": "<p>More.</p>"}])
+    ck("headings render, at two weights",
+       "The one-line headline" in structured and "Second idea" in structured
+       and "font-size:24px" in structured and "font-size:17px" in structured)
+    no_view = er.render(EIEN, BLOCKS, webview=False)
+    ck("webview=False drops the view-in-browser link AND its token — "
+       "Omnisend has no variable to fill it",
+       "View in browser" not in no_view and "{{VIEW_IN_BROWSER}}" not in no_view)
+    ck("…while the default keeps it for providers that have one",
+       "View in browser" in er.render(EIEN, BLOCKS))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

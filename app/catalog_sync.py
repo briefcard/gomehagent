@@ -188,6 +188,7 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     violations: list[dict] = []
     oos: list[str] = []
     held: list[dict] = []      # fields the store wanted to change and could not
+    to_file: list[dict] = []   # product photos for the creative library
 
     with db.SessionLocal() as s:
         existing = {e.key: e for e in s.query(db.KbEntity).filter(
@@ -261,6 +262,17 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                 "tags": p.get("tags", ""),
                 "variants": len(p.get("variants") or []),
             })
+            # The product's own photograph — what the campaign's product
+            # cards and entity-scoped heroes render. The store publishes it
+            # on the product page already, so reading it invents nothing;
+            # a product without one simply carries no image.
+            img = ((p.get("image") or {}).get("src")
+                   or next((i.get("src") for i in (p.get("images") or [])
+                            if i.get("src")), ""))
+            if img:
+                attrs["image"] = img
+                to_file.append({"key": key, "url": img,
+                                "title": p.get("title") or key})
             if hits:
                 attrs["_compliance"] = f"storefront copy uses: {', '.join(hits)}"
             else:
@@ -271,9 +283,29 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
         if not dry_run:
             s.commit()
 
+    # File each product photo in the creative library, OUTSIDE the entity
+    # session (add_asset opens its own). rights=owned is a fact, not a guess:
+    # these are the client's photographs of the client's products, already
+    # published on their own storefront — and `origin="store_sync"` lands
+    # them usable for the same reason the entities themselves do, so the
+    # campaign hero can be a real, RELEVANT product shot instead of an
+    # imageless send. `add_asset` is duplicate-safe by URL, so a re-sync
+    # re-files nothing.
+    images_filed = 0
+    if not dry_run:
+        from . import kb
+        for f in to_file:
+            said = kb.add_asset(tenant, f["url"], rights="owned",
+                                title=f["title"], kind="image",
+                                subject="object", source="shopify",
+                                entity_key=f["key"], origin="store_sync")
+            if said.startswith("Filed"):
+                images_filed += 1
+
     return {
         "tenant": tenant, "dry_run": dry_run,
         "products_seen": len(products),
+        "images_filed": images_filed,
         "added": added, "updated": updated, "skipped": skipped,
         "out_of_stock": len(oos),
         "out_of_stock_examples": oos[:8],

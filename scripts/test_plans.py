@@ -367,6 +367,19 @@ def main() -> int:
           "one past the form's select",
           "unknown segment 'nope'" in (systems.save_plan(
               out["run_id"], {"segment": "nope"}).get("error") or ""))
+    check("the featured ENTITY is a reference too — empty catalogue named",
+          "unknown entity 'ghost-product'" in (systems.save_plan(
+              out["run_id"], {"entity_key": "ghost-product"}).get("error") or "")
+          and "catalogue sync" in (systems.save_plan(
+              out["run_id"], {"entity_key": "ghost-product"}).get("error") or ""))
+    with db.SessionLocal() as s:
+        s.add(db.KbEntity(tenant="baci", key="real-product", type="product",
+                          name="Real Product", origin="store_sync",
+                          review="approved"))
+        s.commit()
+    check("…and a real catalogue key saves",
+          systems.save_plan(out["run_id"],
+                            {"entity_key": "real-product"}).get("ok") is True)
     check("…while the probe's kindless segment field stays free text",
           systems.open_plan("agency", "plan_probe", ref="freetext:1",
                             plan={"segment": "anything at all"},

@@ -70,8 +70,14 @@ def main() -> int:
     print("\n— personalization becomes each provider's native syntax —")
     body = "<p>Hi {{FIRST_NAME}}, <a href='{{UNSUBSCRIBE}}'>unsubscribe</a></p>"
     om = esp.personalize("baci", body)
-    ck("omnisend gets Liquid contact.firstName",
-       om["ok"] and "contact.firstName" in om["html"]
+    # CHANGED 2026-08-21, deliberately: the old pin held the camelCase
+    # curly-brace GUESS, and the first live draft rendered it as literal
+    # text in the owner's preview. Verified against Omnisend's own docs
+    # (support articles 1061845 + 11197418): modified Liquid, SQUARE
+    # brackets, snake_case, quoted default.
+    ck("omnisend gets [[contact.first_name | default: 'there']]",
+       om["ok"] and "[[contact.first_name | default: 'there']]" in om["html"]
+       and "[[unsubscribe_link]]" in om["html"]
        and "{{FIRST_NAME}}" not in om["html"], om.get("html", "")[:60])
     cc = esp.personalize("coverings", body)
     ck("constant contact gets [[FirstName]]",
@@ -116,8 +122,13 @@ def main() -> int:
     print("\n— isolation: one client's ESP never decides another's —")
     ck("baci and coverings resolve to different providers",
        esp.provider_for("baci") != esp.provider_for("coverings"))
-    ck("baci's personalization carries no constant-contact syntax",
-       "[[" not in esp.personalize("baci", body)["html"])
+    # CHANGED 2026-08-21: bracket style no longer separates the providers —
+    # verified Omnisend is square-bracket Liquid too. What still must never
+    # cross is the VOCABULARY: Constant Contact's tags on an Omnisend
+    # account (or vice versa) ship as literal text.
+    ck("baci's personalization carries no constant-contact tag names",
+       "[[FirstName]]" not in esp.personalize("baci", body)["html"]
+       and "[[UnsubscribeLink]]" not in esp.personalize("baci", body)["html"])
 
     print()
     if _fail:

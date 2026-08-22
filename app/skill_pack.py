@@ -683,17 +683,77 @@ material, origin, guarantee or statistic that is not in the context — the hard
 rules are enforced in code after you write, so a draft that breaks one is thrown
 away, not softened, and you will have wasted the slot.
 
-Write copy that DRIVES ACTION: a subject line that earns the open, a one-line
-preheader, and body copy that hooks on the segment's situation, leads with the
-benefit backed by an approved claim, and ends on ONE clear call to action. Match
-the house voice. Short. No fluff, no second CTA, no invented offer.
+EMAIL CRAFT — these are enforced or measured, not suggestions:
+- Subject: UNDER 45 characters (mobile inboxes cut around 40). One specific
+  benefit or curiosity, sentence case, no clickbait, no ALL CAPS, at most one
+  emoji and usually none. Code trims anything longer.
+- Preheader: under 80 characters, COMPLETES the subject — never repeats it.
+- Headline: one short line (under 50 chars) a reader gets in a glance.
+- Body: 2–3 SECTIONS, each ONE idea. A section is one or two short
+  paragraphs, one or two sentences each. Optional 2–5 word heading per
+  section. Nobody reads a wall — write for the scan, let the sections and
+  product cards breathe.
+- ONE call to action. No second ask, no invented offer.
+Match the house voice throughout.
 
 Return JSON only, nothing else:
-{"subject": "...", "preheader": "...",
- "body_html": "the body copy as simple <p> paragraphs; may use {{FIRST_NAME}}; "
-              "no <html>/<head>/<style>, no images (added later by code)",
+{"subject": "...", "preheader": "...", "headline": "...",
+ "sections": [{"heading": "optional, 2-5 words", "body_html": "one or two "
+               "short <p> paragraphs; may use {{FIRST_NAME}}; no "
+               "<html>/<head>/<style>, no images (added later by code)"}],
  "claim_ids": ["id of each approved claim you actually used"],
  "cta_label": "...", "cta_url": ""}"""
+
+
+#: Inbox display cuts a subject around 40 characters on mobile; 45 is the
+#: writing target the prompt asks for, 60 the hard line code enforces — a
+#: drafter that ignores the brief gets trimmed at a word boundary and the
+#: run says so. The PLAN's subject is the owner's line and is never touched.
+SUBJECT_TARGET, SUBJECT_HARD = 45, 60
+PREHEADER_HARD = 90
+
+
+def _trim_words(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit + 1]
+    return (cut[:cut.rfind(" ")] if " " in cut else cut[:limit]).rstrip(" ,;:—-")
+
+
+def _shape_campaign_copy(copy: dict, note) -> dict:
+    """Deterministic email craft — a prompt mostly obeys, code always holds.
+
+    The owner's first live drafts came back with long subjects and one
+    unbroken wall of paragraphs (2026-08-21). The prompt now asks for
+    sections and short lines; THIS is what happens when a drafter ignores
+    it: the subject is trimmed at a word boundary past the hard line (the
+    plan's own subject is never touched — it is applied after this), and a
+    single body blob is split into sections of at most two paragraphs so
+    the rendered email breathes whatever came back. Nothing is reworded.
+    """
+    subject = str(copy.get("subject") or "").strip()
+    if len(subject) > SUBJECT_HARD:
+        copy["subject"] = _trim_words(subject, SUBJECT_TARGET)
+        note(f"subject trimmed from {len(subject)} to "
+             f"{len(copy['subject'])} chars — inbox display cuts around 40")
+    pre = str(copy.get("preheader") or "").strip()
+    if len(pre) > PREHEADER_HARD:
+        copy["preheader"] = _trim_words(pre, PREHEADER_HARD)
+
+    sections = [s for s in (copy.get("sections") or [])
+                if isinstance(s, dict) and (s.get("body_html") or "").strip()]
+    if not sections:
+        blob = str(copy.get("body_html") or "")
+        paras = [p for p in re.split(r"(?i)</p>\s*", blob) if p.strip()]
+        paras = [p if p.rstrip().lower().endswith("</p>") else p + "</p>"
+                 for p in paras]
+        sections = [{"heading": "", "body_html": "".join(paras[i:i + 2])}
+                    for i in range(0, len(paras), 2)]
+    copy["sections"] = sections[:4]
+    copy["body_html"] = "".join(s.get("body_html", "")
+                                for s in copy["sections"])
+    return copy
 
 
 def _segment_brief(tenant: str, segment) -> dict:
@@ -759,8 +819,9 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str) -> tuple:
         text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
         s, e = text.find("{"), text.rfind("}")
         data = _json.loads(text[s:e + 1])
-        return (data if isinstance(data, dict) and data.get("body_html")
-                else None), "model", ""
+        usable = isinstance(data, dict) and bool(
+            data.get("sections") or data.get("body_html"))
+        return (data if usable else None), "model", ""
     except Exception as exc:                                     # noqa: BLE001
         from . import model_error
         return None, "composed", model_error.explain(exc)
@@ -775,11 +836,14 @@ def _compose_campaign(bundle: dict, seg: dict, goal: str) -> dict:
     top = claims[0] if claims else None
     line = (goal or seg.get("angle") or "A quick note").split(".")[0]
     proof = top["claim"].rstrip(". ") if top else ""
-    body = (f"<p>Hi {{{{FIRST_NAME}}}},</p><p>{proof}.</p>" if proof
-            else "<p>Hi {{FIRST_NAME}},</p>")
-    return {"subject": f"{seg['name']}: {line}"[:78],
-            "preheader": seg.get("definition", "")[:100],
-            "body_html": body,
+    sections = [{"heading": "", "body_html": "<p>Hi {{FIRST_NAME}},</p>"}]
+    if proof:
+        sections.append({"heading": "", "body_html": f"<p>{proof}.</p>"})
+    return {"subject": _trim_words(line, SUBJECT_TARGET) or seg["name"],
+            "preheader": seg.get("definition", "")[:80],
+            "headline": _trim_words(line, 50),
+            "sections": sections,
+            "body_html": "".join(s["body_html"] for s in sections),
             "claim_ids": [top["claim_id"]] if top else [],
             "cta_label": "Shop now", "cta_url": ""}
 
@@ -813,20 +877,35 @@ def _theme_for(tenant: str) -> dict:
 
 
 def _campaign_blocks(copy: dict, bundle: dict, hero: dict | None = None) -> list:
-    """Canonical blocks around the grounded copy. Products by NAME only for now —
-    photos and prices come with the catalogue/deriver, and inventing them would
-    be the exact fabrication this layer exists to prevent. The hero image, when
-    there is one, arrived through `creative.hero_for_campaign` — approved and
-    owned, or absent."""
+    """Canonical blocks around the grounded copy. Product cards carry the
+    store's own name, price, URL and photograph — read by the catalogue sync,
+    never invented; an item the sync found no image for renders without one.
+    The hero image, when there is one, arrived through
+    `creative.hero_for_campaign` — approved and owned, or absent."""
     blocks: list = []
     if hero and hero.get("url"):
         blocks.append({"type": "hero", "image": hero["url"],
                        "alt": hero.get("alt", "")})
-    blocks.append({"type": "text", "html": copy.get("body_html") or ""})
+    if (copy.get("headline") or "").strip():
+        blocks.append({"type": "heading", "text": copy["headline"].strip(),
+                       "level": 1})
+    # SECTIONS, not a wall: each idea gets its own text block, headed when
+    # the drafter named it, with a divider breathing between sections — the
+    # owner's first live draft was one unbroken run of paragraphs.
+    sections = copy.get("sections") or (
+        [{"heading": "", "body_html": copy.get("body_html") or ""}])
+    for i, sec in enumerate(sections):
+        if i:
+            blocks.append({"type": "divider"})
+        if (sec.get("heading") or "").strip():
+            blocks.append({"type": "heading", "text": sec["heading"].strip()})
+        blocks.append({"type": "text", "html": sec.get("body_html") or ""})
     ents = bundle.get("entities") or []
     items = [{"name": e.get("name", ""), "price": e.get("price", ""),
-              "url": e.get("url", "")} for e in ents[:3] if e.get("name")]
+              "url": e.get("url", ""), "image": e.get("image", "")}
+             for e in ents[:3] if e.get("name")]
     if items:
+        blocks.append({"type": "divider"})
         blocks.append({"type": "products", "items": items})
     if copy.get("cta_label"):
         blocks.append({"type": "cta", "label": copy["cta_label"],
@@ -847,6 +926,7 @@ def _run_campaign_email(ctx: Context) -> dict:
     copy, basis, why = draft_campaign(ctx.bundle, seg, goal)
     if copy is None:
         copy = _compose_campaign(ctx.bundle, seg, goal)
+    copy = _shape_campaign_copy(copy, ctx.note)
     # The model may only cite claims that were actually offered — an invented id
     # is worse than none, because it looks traceable. Intersect with the bundle.
     offered = {c["claim_id"] for c in ctx.claims}
@@ -859,6 +939,40 @@ def _run_campaign_email(ctx: Context) -> dict:
     if plan_subject:
         copy["subject"] = plan_subject
         ctx.note("subject line came from the plan, not the drafter")
+
+    # Products: the plan's entity when one was set (resolve matched it into
+    # the bundle), and otherwise the catalogue's own top available items,
+    # labelled as such. The owner's first live draft invited readers to
+    # "browse the pairings" with NO products in it (2026-08-21) — the bundle
+    # only carries entities when a plan names one. Every field rendered is
+    # read from the store sync: name, price, the product URL, and the
+    # product's own photograph. Nothing is invented; an item without an
+    # image renders without one.
+    from . import kb as _kb, tenants as _tn
+    _dom = (getattr(_tn.get(ctx.tenant), "domain", "") or "").strip()
+
+    def _prod(e: dict) -> dict:
+        attrs = e.get("attributes") or {}
+        pkey = e.get("key", "")
+        return {"key": pkey, "name": e.get("name", ""),
+                "price": e.get("price", ""),
+                "image": e.get("image") or attrs.get("image", ""),
+                "url": e.get("url") or (f"https://{_dom}/products/{pkey}"
+                                        if _dom and pkey else "")}
+
+    ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
+            if e.get("name")]
+    if not ents:
+        rows = _kb.entities(ctx.tenant, available_only=True)
+        rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
+                                 r.name or ""))
+        ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
+                       "attributes": r.attributes or {}}) for r in rows[:3]]
+        if ents:
+            ctx.note("products: no entity on the plan, so the catalogue's "
+                     "top available items are featured — set Featured entity "
+                     "on the plan to choose them yourself")
+    ctx.bundle["entities"] = ents
 
     # The bespoke visual, through the governed loop: an APPROVED, OWNED
     # photograph or nothing — `draft_visual` opts into having a Canva draft
@@ -878,7 +992,11 @@ def _run_campaign_email(ctx: Context) -> dict:
 
     theme = _theme_for(ctx.tenant)
     blocks = _campaign_blocks(copy, ctx.bundle, hero=hero)
-    html = email_render.render(theme, blocks, preheader=copy.get("preheader", ""))
+    html = email_render.render(
+        theme, blocks, preheader=copy.get("preheader", ""),
+        # Omnisend has no view-in-browser variable — its caps say so, and a
+        # header link no variable can fill would ship as literal text.
+        webview=bool(esp.caps(ctx.tenant).get("webview", True)))
     native = esp.personalize(ctx.tenant, html)
     final_html = native["html"] if native.get("ok") else html
     if not native.get("ok"):
@@ -905,6 +1023,7 @@ def _run_campaign_email(ctx: Context) -> dict:
     # Validate the COPY (clean text, not HTML tags): subject + preheader + body.
     # The banned-claims gate runs here, before anything is drafted into an ESP.
     to_check = (f"{copy.get('subject', '')}\n{copy.get('preheader', '')}\n"
+                f"{copy.get('headline', '')}\n"
                 + _strip(copy.get("body_html", "")))
     item = ctx.emit(
         to_check, claim_ids=cited, angle=seg["key"], fmt="campaign_email",

@@ -131,6 +131,55 @@ def main():
     ck("…and the run reports the target",
        (r_bind.get("detail") or {}).get("esp_target", {}).get("id") == "seg-lnk-1")
 
+    print("\n— email craft is enforced by code, not hoped from the prompt —")
+    _drafted.clear()
+    skill_pack.draft_campaign = lambda bundle, seg, goal: (
+        {"subject": "This is a very long subject line that would be cut off "
+                    "by every mobile inbox long before the point lands",
+         "preheader": "p", "claim_ids": [],
+         "body_html": "<p>One.</p><p>Two.</p><p>Three.</p><p>Four.</p>",
+         "cta_label": "Shop", "cta_url": "https://x/s"}, "model", "")
+    r_craft = skill.run("campaign_email", "baci", segment="reorder_due")
+    item_c = (r_craft.get("items") or [{}])[0]
+    ck("a rambling subject is trimmed at a word boundary",
+       len(item_c.get("meta", {}).get("subject", "")) <= 46
+       and any("subject trimmed" in n for n in r_craft.get("notes", [])),
+       item_c.get("meta", {}).get("subject", ""))
+    ck("a wall of paragraphs is broken into sections with a divider",
+       item_c.get("meta", {}).get("html", "").count("height:1px") >= 1)
+
+    skill_pack.draft_campaign = lambda bundle, seg, goal: (
+        {"subject": "Short and specific", "preheader": "p",
+         "headline": "The one-line hook", "claim_ids": [],
+         "sections": [
+             {"heading": "Why now", "body_html": "<p>Because.</p>"},
+             {"heading": "What you get", "body_html": "<p>This.</p>"}],
+         "cta_label": "Shop", "cta_url": "https://x/s"}, "model", "")
+    r_sec = skill.run("campaign_email", "baci", segment="reorder_due")
+    html_s = (r_sec.get("items") or [{}])[0].get("meta", {}).get("html", "")
+    ck("the drafter's sections render native: headline + headed sections",
+       "The one-line hook" in html_s and "Why now" in html_s
+       and "What you get" in html_s)
+
+    print("\n— products: the catalogue is IN the email, photo and all —")
+    with db.SessionLocal() as s:
+        s.add(db.KbEntity(tenant="baci", key="aqua-pitcher-x",
+                          type="product", name="Aqua Pitcher",
+                          price="$95", availability="available",
+                          origin="store_sync", review="approved",
+                          source="shopify",
+                          attributes={"image": "https://cdn.x/aqua.jpg"}))
+        s.commit()
+    r_prod = skill.run("campaign_email", "baci", segment="reorder_due")
+    html_p = (r_prod.get("items") or [{}])[0].get("meta", {}).get("html", "")
+    ck("the product card carries name, price and the store's own photo",
+       "Aqua Pitcher" in html_p and "https://cdn.x/aqua.jpg" in html_p
+       and "$95" in html_p)
+    ck("…and the run says the catalogue chose it, since no entity was set",
+       any("top available items" in n for n in r_prod.get("notes", [])))
+    ck("omnisend's header carries NO view-in-browser — it has no variable "
+       "for one", "View in browser" not in html_p)
+
     print("\n— a subject set on the PLAN outranks the drafter's —")
     _drafted.clear()
     r_subj = skill.run("campaign_email", "baci", segment="reorder_due",

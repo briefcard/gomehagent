@@ -157,13 +157,21 @@ def main() -> int:  # noqa: PLR0915
     item = (r.get("items") or [{}])[0]
     html = item.get("meta", {}).get("html", "")
     ck("the run produced", r.get("status") == "produced", str(r.get("status")))
-    ck("the approved photograph IS the hero in the rendered HTML",
-       'src="https://cdn.example/brandwide.jpg"' in html)
+    # CHANGED 2026-08-21, deliberately. This pinned brandwide.jpg — true only
+    # while a plan with no entity meant an email with no products. The
+    # catalogue fallback now features real items (the aqua pitcher is baci's
+    # whole catalogue here), and a featured product's own photograph
+    # outranks the brand-wide shelf — which is this file's own header rule,
+    # "entity-scoped beats brand-wide". The MORE relevant hero is the point.
+    ck("the featured product's own photograph IS the hero in the HTML",
+       'src="https://cdn.example/aqua-hero.jpg"' in html)
+    ck("…and the featured product is IN the email, by name",
+       "Aqua pitcher" in html)
     ck("the run names the hero's basis",
        r["detail"]["hero"]["basis"] == "approved_asset", str(r["detail"]["hero"]))
     ck("the email still drafted into the ESP", r["detail"]["esp_draft"].get("ok") is True)
     used = [a for a in kb.assets("baci", publishable_only=False)
-            if a.url.endswith("brandwide.jpg")][0]
+            if a.url.endswith("aqua-hero.jpg")][0]
     ck("the use was filed on the asset (feedback signal one)",
        used.uses == "1" and used.last_used_at is not None, used.uses)
 

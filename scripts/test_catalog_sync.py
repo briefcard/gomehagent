@@ -37,6 +37,7 @@ PRODUCTS = {"products": [
     {"id": 1, "handle": "aqua-set", "title": "Aqua Dinner Set",
      "body_html": "<p>A colourful six-piece set for the table.</p>",
      "vendor": "Baci Milano", "product_type": "Tableware", "tags": "set,aqua",
+     "image": {"src": "https://cdn.shopify.example/aqua-set.jpg"},
      "variants": [{"price": "180.00", "inventory_management": "shopify",
                    "inventory_quantity": 12}]},
     # Copy that violates the brand's own rules.
@@ -115,6 +116,21 @@ def main() -> int:
     ck("stamped so freshness can expire it",
        ents["aqua-set"].verified_at is not None and ents["aqua-set"].freshness_days)
     ck("attributed to the store", ents["aqua-set"].source == "shopify")
+
+    # ---- the product's own photograph -------------------------------------
+    print("\n— product photos land: on the entity, and in the library —")
+    ck("the image URL rides the entity for product cards",
+       (ents["aqua-set"].attributes or {}).get("image", "").endswith("aqua-set.jpg"))
+    ck("…and a product without one simply carries none",
+       "image" not in (ents["rosa-plate"].attributes or {}))
+    shots = [a for a in kb.assets("baci", publishable_only=True, kind="image",
+                                  entity_key="aqua-set")]
+    ck("the photo is FILED in the creative library — owned, approved, "
+       "entity-scoped, so it can be this product's campaign hero",
+       len(shots) == 1 and shots[0].rights == "owned"
+       and shots[0].url.endswith("aqua-set.jpg"), str(len(shots)))
+    ck("the sync reports what it filed", r.get("images_filed", 0) == 1,
+       str(r.get("images_filed")))
 
     # ---- stock ------------------------------------------------------------
     print("\n— stock —")

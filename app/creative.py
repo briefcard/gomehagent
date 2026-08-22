@@ -62,7 +62,12 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
     """
     ents = {k for k in (entity_keys or []) if k}
     rows: list = []
-    for ek in ents or {""}:
+    # The brand-wide shelf ("" ) is ALWAYS fetched alongside the scoped keys.
+    # It used to be fetched only when no entity was named — so the moment a
+    # campaign carried entities, an approved brand photograph became
+    # structurally unreachable and the email went imageless past a perfectly
+    # good hero. Ordering still prefers scoped over brand-wide (`_usable`).
+    for ek in ents | {""}:
         rows += kb.assets(tenant, publishable_only=True, kind="image",
                           entity_key=ek or "")
     seen: set[str] = set()

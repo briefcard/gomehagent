@@ -148,24 +148,42 @@ def _products(b: dict, t: dict) -> str:
             f'</table></td></tr>')
 
 
+def _heading(b: dict, t: dict) -> str:
+    """A scannable section heading — level 1 is the email's one headline,
+    anything else a section head. The owner's first live draft was a wall of
+    paragraphs; headings are what let a reader take it in a glance."""
+    c = t["colors"]
+    big = int(b.get("level") or 2) <= 1
+    size, pad = (24, "14px 32px 2px") if big else (17, "10px 32px 0")
+    return (f'<tr><td style="padding:{pad}">'
+            f'<div style="font-family:{t["font"]["heading"]};font-size:{size}px;'
+            f'font-weight:700;line-height:1.25;color:{c["text"]}">'
+            f'{_esc(b.get("text", ""))}</div></td></tr>')
+
+
 def _divider(b: dict, t: dict) -> str:
     return (f'<tr><td style="padding:8px 32px"><div style="height:1px;'
             f'background:{t["colors"]["border"]};line-height:1px">&nbsp;</div></td></tr>')
 
 
 _BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta,
-           "products": _products, "divider": _divider}
+           "heading": _heading, "products": _products, "divider": _divider}
 
 
-def _header(t: dict) -> str:
+def _header(t: dict, webview: bool = True) -> str:
     c = t["colors"]
     logo = (f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t["logo_alt"] or t["name"])}" '
             f'height="30" style="display:block;border:0;height:30px">'
             if t["logo_url"] else
             f'<span style="font-family:{t["font"]["heading"]};font-size:20px;'
             f'font-weight:600;color:{c["text"]}">{_esc(t["name"])}</span>')
-    view = (f'<a href="{BROWSER}" style="font-family:{t["font"]["body"]};'
-            f'font-size:12px;color:{c["muted"]};text-decoration:underline">View in browser</a>')
+    # Omnisend has no view-in-browser variable at all (their docs, verified
+    # 2026-08-21) — a link whose href no ESP variable can fill ships as a
+    # literal token, so the caller passes the provider's `webview` cap and a
+    # provider without one gets a header without the link.
+    view = ((f'<a href="{BROWSER}" style="font-family:{t["font"]["body"]};'
+             f'font-size:12px;color:{c["muted"]};text-decoration:underline">'
+             f'View in browser</a>') if webview else "")
     top = (f'<tr><td style="padding:18px 32px 0"><table role="presentation" width="100%" '
            f'cellpadding="0" cellspacing="0" border="0"><tr>'
            f'<td align="left">{logo}</td><td align="right">{view}</td>'
@@ -218,17 +236,21 @@ def _footer(t: dict) -> str:
             f'Unsubscribe</a></div>{disc}</td></tr>')
 
 
-def render(theme: dict, blocks: list, *, preheader: str = "") -> str:
+def render(theme: dict, blocks: list, *, preheader: str = "",
+           webview: bool = True) -> str:
     """Canonical blocks + a client theme → send-ready, email-safe HTML.
 
     The output carries NEUTRAL tokens still (`{{FIRST_NAME}}`, `{{UNSUBSCRIBE}}`,
-    `{{VIEW_IN_BROWSER}}`) — `esp.personalize` renders those native for whichever
-    platform the client is on. The header (logo) and the legal footer are added
-    here, so no generator can omit them.
+    and — only when `webview` is true — `{{VIEW_IN_BROWSER}}`) —
+    `esp.personalize` renders those native for whichever platform the client
+    is on. `webview` comes from the provider's caps: Omnisend has no
+    view-in-browser variable, and emitting the token for it would either ship
+    literal text or trip personalize's unknown-token refusal. The header
+    (logo) and the legal footer are added here, so no generator can omit them.
     """
     t = _theme(theme)
     c = t["colors"]
-    rows = [_header(t)]
+    rows = [_header(t, webview=webview)]
     for b in (blocks or []):
         fn = _BLOCKS.get((b or {}).get("type", ""))
         rows.append(fn(b, t) if fn else f"<!-- skipped unknown block: {_esc(b.get('type',''))} -->")

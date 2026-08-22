@@ -280,6 +280,9 @@ def main() -> int:
        "never free text",
        '<select name="segment">' in seg_v and "choose a segment" in seg_v
        and "trial_no_convert" in seg_v, "agency = digital_products")
+    ck("the featured entity is a select too, and an empty catalogue says "
+       "what to do about it",
+       '<select name="entity_key">' in seg_v and "catalogue sync" in seg_v)
     ck("…while a kindless probe field stays a text input",
        '<input name="segment"' in _view(c, "agency"))
     ck("the campaign system's view carries the Segments card",

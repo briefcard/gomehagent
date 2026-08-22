@@ -105,7 +105,8 @@ CATALOG = {
                      kind="segment"),
                 dict(key="goal", label="Angle / goal", required=True),
                 dict(key="subject", label="Subject line", required=False),
-                dict(key="entity_key", label="Featured entity", required=False),
+                dict(key="entity_key", label="Featured entity", required=False,
+                     kind="entity"),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
                 dict(key="draft_into_esp", label="Set up as an ESP draft",
@@ -839,16 +840,32 @@ def _segment_key_check(tenant: str, value: str) -> str:
             + ", ".join(keys))
 
 
+def _entity_key_check(tenant: str, value: str) -> str:
+    """'' when the value is a real catalogue entity; the named refusal
+    otherwise — same rule as segments: a plan field that references the KB
+    must point at a row that exists, or the campaign features a stand-in."""
+    rows = kb.entities(tenant, available_only=False)
+    keys = [r.key for r in rows]
+    if value in keys:
+        return ""
+    sample = ", ".join(keys[:8]) + (", …" if len(keys) > 8 else "")
+    return (f"unknown entity {value!r} — pick one from this account's "
+            f"catalogue" + (f" ({sample})" if keys else
+                            " (it is empty — run the catalogue sync first)"))
+
+
 def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
     """Reference-kind plan fields must point at something real. Blank stays
     allowed — completeness owns 'required'; this owns 'genuine'."""
+    checks = {"segment": _segment_key_check, "entity": _entity_key_check}
     for f in workflow(key)["plan_fields"]:
-        if f.get("kind") != "segment":
+        fn = checks.get(f.get("kind", ""))
+        if fn is None:
             continue
         v = str(values.get(f["key"], "") or "").strip()
         if not v:
             continue
-        why = _segment_key_check(tenant, v)
+        why = fn(tenant, v)
         if why:
             return why
     return ""
