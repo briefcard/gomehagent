@@ -2605,3 +2605,56 @@ repeat the N before them, one copy goes. Five characters minimum, end of
 string only, longest match first — bounds set by testing against all four real
 cases and a list of real words that must survive (couscous, beriberi, "no.
 No."). Chasing the instances instead of the shape cost three deploys.
+
+### 2.73 Approving a photograph did nothing — 2026-08-22
+
+"Make sure that the approval process for photos is working, it wasn't working
+before" (owner). It was not.
+
+`may_publish` asks two questions: has this been reviewed, and are the rights
+`owned`. The pictures queue only ever answered the first. So a picture the
+owner explicitly approved still failed the second test, no email could select
+it, and no surface said why — the queue reported success and the library
+stayed unusable. Every photograph that arrived as `reference` (a crawl, and
+now Drive) was in that state permanently.
+
+`review_asset` now settles rights on approval, and says which kind of approval
+it was. Per the owner's instruction, approving grants `owned`; "Reference
+only" stays as a separate button, because a competitor's picture kept for
+inspiration is a real and different decision from one the client may publish.
+
+### 2.74 Three capabilities that were never reachable — 2026-08-22
+
+Reported as gaps rather than found as bugs, which is its own lesson: each had
+code, and none had a caller.
+
+**Canva could create a design and never turn it into an image.**
+`create_design` files `kind="design"`, which `hero_for_campaign` cannot select
+— correctly, a blank canvas is not a photograph. The owner was meant to finish
+it and have the result reach the pictures queue, but nothing exported
+anything: `reconcile` reports drift and stops, and had no caller either. So
+the visual loop was open at the far end. `canva.harvest` exports finished
+designs and files each as an owned, entity-scoped IMAGE, which is what makes
+it selectable next run. Idempotent by design id.
+
+**Drive photographs were unreachable.** The creative library only ever
+received Shopify product shots, so an account could send imageless emails with
+a folder of real photography one connection away. `creative.harvest_drive`
+files them — as REFERENCE, awaiting review, because Drive carries no proof of
+who owns a picture. Where a filename names a product, that product is
+SUGGESTED on the row for the approver to confirm; a wrong guess would put the
+wrong photograph on that product's emails, so it is a recommendation and never
+an action.
+
+**Format never varied.** Warmth mapped to format one-to-one, so a warm list
+got a letter every single time. Intent rotated underneath and the email still
+looked identical. Warmth now BIASES and history breaks the pattern: two sends
+in the same form and the next switches, and an offer leans designed whatever
+the warmth because an offer wants the product shown. The intent rotation was
+wrong in the same way — "first give not used" fell back to the first entry
+once all three were in the window, so a list that had seen everything got
+story for ever. Least-recently-used keeps it turning.
+
+`/health/connections` now reports Canva and the ESP. Neither was visible
+without the console secret, which is exactly the question that stalls a setup
+— and the reason three rounds were spent asking whether Canva was connected.

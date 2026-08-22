@@ -2400,13 +2400,26 @@ def proposed_assets(tenant: str) -> list[db.KbAsset]:
         return rows
 
 
-def review_asset(asset_id: str, approve: bool, by: str = "owner") -> str:
-    """Approve or reject one picture.
+def review_asset(asset_id: str, approve: bool, by: str = "owner",
+                 rights: str = "") -> str:
+    """Approve or reject one picture — and, on approval, settle its RIGHTS.
 
     Rejecting RETIRES rather than deletes, so a second crawl of the same site
     does not re-propose what somebody has already turned down — the dedupe in
     `add_asset` is on the URL, and a deleted row would look like a new find
     every time.
+
+    **`rights` is why approving used to appear not to work** (owner,
+    2026-08-22). `may_publish` demands two things: a review that is not
+    pending, AND `rights == owned`. This only ever set the first. So a picture
+    approved in the queue still failed the second test, no email could select
+    it, and nothing said why — the queue reported success and the library
+    stayed unusable. A crawled or Drive-found picture arrives as `reference`
+    precisely because nobody has yet said the client may use it, and the
+    person clicking approve is the one making that statement. Passing
+    `rights="owned"` records it; approving without it keeps the picture as
+    reference, which is a real and different decision (a competitor's shot
+    kept for inspiration).
     """
     with db.SessionLocal() as s:
         row = s.get(db.KbAsset, asset_id)
@@ -2415,11 +2428,16 @@ def review_asset(asset_id: str, approve: bool, by: str = "owner") -> str:
         row.review = prov.APPROVED if approve else prov.REJECTED
         row.approved_by = by if approve else ""
         row.approved_at = db.utcnow() if approve else None
+        if approve and rights in (OWNED, REFERENCE):
+            row.rights = rights
         if not approve:
             row.status = "retired"
         s.commit()
-        title = row.title or row.url
-    return f"{'Approved' if approve else 'Rejected'}: {title[:60]}"
+        title, usable = row.title or row.url, (row.rights or REFERENCE) == OWNED
+    if not approve:
+        return f"Rejected: {title[:60]}"
+    return (f"Approved for use: {title[:60]}" if usable else
+            f"Approved as REFERENCE only (not usable in emails): {title[:60]}")
 
 
 def may_publish(asset_id: str) -> tuple[bool, str]:

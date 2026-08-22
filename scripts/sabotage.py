@@ -435,6 +435,17 @@ SABOTAGES = [
                "traceable than no number, so this is worse than silence",
     },
     {
+        "name": "approval_grants_rights",
+        "file": "app/kb.py",
+        "find": "        if approve and rights in (OWNED, REFERENCE):",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_assets.py"],
+        "why": "approving a picture flips its review and leaves its rights at "
+               "`reference`, so `may_publish` still refuses it \u2014 the "
+               "owner approves photographs, nothing can use them, and no "
+               "surface says why",
+    },
+    {
         "name": "links_point_at_real_pages",
         "file": "app/skill_pack.py",
         "find": "                if _want.split(\"?\")[0].rstrip(\"/\") not in known_urls:",

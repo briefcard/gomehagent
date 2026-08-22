@@ -263,7 +263,8 @@ def main():
         {"type": "text", "html": "<p>Hello.</p>"},
         {"type": "stat", "value": "2 days", "caption": "to your door", "claim_id": did},
         {"type": "cta", "label": "Shop", "url": "https://x/s"}])
-    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="sell")
+    # A `stat` belongs to the designed frame, so ask a cold, unused segment.
+    r = skill.run("campaign_email", "baci", segment="unengaged_sunset", goal="sell")
     ck("the figure the claim DOES contain stands", "stat" in _shape(r), str(_shape(r)))
 
     print("\n— the proof rule reaches the drafter, not just the reviewer —")
@@ -301,9 +302,11 @@ def main():
         {"type": "ps", "html": "One more thing."},
     ]
     skill_pack.draft_campaign = _blocks_drafter(letter_blocks)
-    warm = skill.run("campaign_email", "baci", segment="repeat_buyers",
+    # Segments with NO history, so warmth alone decides — format now cycles
+    # once a list has seen two of the same form, which is tested below.
+    warm = skill.run("campaign_email", "baci", segment="vip_high_aov",
                      goal="cross-sell")
-    cold = skill.run("campaign_email", "baci", segment="new_subscribers",
+    cold = skill.run("campaign_email", "baci", segment="engaged_non_buyers",
                      goal="introduce")
     ck("a WARM cohort gets the personal letter", _meta(warm, "format") == "letter",
        str(_meta(warm, "format")))
@@ -489,7 +492,7 @@ def main():
             "role": "Head of Product"},
            {"type": "cta", "label": "Go", "url": "https://x/g"}]
     skill_pack.draft_campaign = _blocks_drafter(sig)
-    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
+    r = skill.run("campaign_email", "baci", segment="reorder_due", goal="x")
     ck("a person the drafter INVENTED never signs the email",
        "signature" not in _shape(r)
        and "Maya Chen" not in (_meta(r, "html") or ""), str(_shape(r)))
@@ -498,7 +501,7 @@ def main():
 
     brand_theme.approve("baci", {"sender.name": "Gomeh Saias",
                                  "sender.role": "Founder"})
-    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
+    r = skill.run("campaign_email", "baci", segment="reorder_due", goal="x")
     ck("with a real signatory on file the letter is signed — by THEM",
        "signature" in _shape(r)
        and "Gomeh Saias" in (_meta(r, "html") or "")
@@ -559,7 +562,7 @@ def main():
         {"type": "list", "items": ["Supports natural GLP-1 productionction"]},
         {"type": "cta", "label": "See it", "url": "https://x/g"},
         {"type": "ps", "html": "<p>P.S. The science is fascinating.</p>"}])
-    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="launch")
+    r = skill.run("campaign_email", "baci", segment="win_back", goal="launch")
     html = _meta(r, "html") or ""
     imgs = _re.findall(r'<img[^>]+src="([^"]+)"', html)
     ck("a warm-segment letter is still a letter", _meta(r, "format") == "letter")
@@ -615,7 +618,7 @@ def main():
         {"type": "heading", "text": "A table worth setting", "level": 1},
         {"type": "text", "html": "<p>Hi {{FIRST_NAME}}.</p>"},
         {"type": "cta", "label": "See it", "url": "https://x/f"}])
-    r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="launch")
+    r = skill.run("campaign_email", "baci", segment="lapsed_60_90", goal="launch")
     ck("with nothing in the creative library, the product shot leads",
        "hero" in _shape(r) and "/p/fz" in (_meta(r, "html") or ""), str(_shape(r)))
     ck("…and the run says where that photograph came from",

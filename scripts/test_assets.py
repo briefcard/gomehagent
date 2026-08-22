@@ -189,6 +189,21 @@ def main() -> int:
     ok, why = kb.may_publish(kb.proposed_assets("ironside")[0].id)
     ck("  may_publish says WHY, not just no", not ok and "review" in why, why[:60])
     hall = [a for a in kb.proposed_assets("ironside") if a.title == "Main hall"][0]
+    # Approving GRANTS USE: review alone left rights at `reference` and
+    # `may_publish` kept refusing, so the owner's approvals did nothing
+    # (owner, 2026-08-22).
+    _ref = kb.add_asset("ironside", "https://x/rights-probe.jpg",
+                        rights="reference", title="Rights probe", kind="image",
+                        origin="drive_sync")
+    _row = [r for r in kb.assets("ironside", publishable_only=False)
+            if r.url.endswith("rights-probe.jpg")][0]
+    kb.review_asset(_row.id, approve=True, rights="owned")
+    ck("approving a picture grants use, not just review",
+       kb.may_publish(_row.id)[0] is True, str(kb.may_publish(_row.id)))
+    kb.review_asset(_row.id, approve=True, rights="reference")
+    ck("…and 'reference only' is still a real, separate decision",
+       kb.may_publish(_row.id)[0] is False)
+
     kb.review_asset(hall.id, approve=True)
     ck("approving one makes it usable", len(kb.assets("ironside")) == 1)
     ck("  LOGOS ARE TRACKED APART from the photography — a creative needing "

@@ -330,6 +330,30 @@ def health_connections() -> dict:
         drive_ok = ("drive ok" if not drive_res.startswith("Drive not accessible")
                     else "drive NOT AUTHORIZED (re-run google_oauth.py with new scopes)")
         report["google"][alias] = f"{gmail_ok} · {drive_ok}"
+
+    # CANVA and the ESP were invisible here, so "is it connected?" had no
+    # answer short of the authenticated console — which is exactly the
+    # question that stalls a setup. Both report state only, never a secret.
+    from . import canva as _cv, esp as _esp, tenants as _tn
+    report["canva"] = {}
+    for key in sorted({"agency", *[t.key for t in _tn.all_tenants()]}):
+        tok, why = _cv._token(key)
+        if not tok:
+            if key != "agency":
+                continue          # only the agency's absence is worth saying
+            report["canva"][key] = f"NOT CONNECTED: {why[:120]}"
+            continue
+        got = _cv.folder(key)
+        report["canva"][key] = ("ok — folder "
+                                + str(got.get("folder_id", ""))[:24]
+                                if got.get("ok")
+                                else f"token ok, folder ERROR: "
+                                     f"{str(got.get('error', ''))[:120]}")
+    report["esp"] = {}
+    for t in _tn.all_tenants():
+        prov = _esp.provider_for(t.key)
+        if prov:
+            report["esp"][t.key] = prov
     return report
 
 
@@ -569,6 +593,34 @@ def segments_sync(key: str = Depends(admin_key), tenant: str = "",
             + (f"; {len(out.get('drift', []))} drift finding(s) — see the card"
                if out.get("drift") else ""))
     return _back_to_system(tenant, syskey, ok=said, anchor="segments")
+
+
+@app.get("/admin/canva_harvest")
+def canva_harvest(key: str = Depends(admin_key), tenant: str = "agency",
+                  design_id: str = "") -> dict:
+    """Export finished Canva designs into the pictures queue as usable images.
+
+    /admin/canva_harvest?tenant=eien           every recorded design
+    /admin/canva_harvest?tenant=eien&design_id=X   just that one
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import canva as _cv
+    return _cv.harvest(tenant, design_id=design_id)
+
+
+@app.get("/admin/drive_photos")
+def drive_photos(key: str = Depends(admin_key), tenant: str = "",
+                 folder: str = "", limit: int = 40) -> dict:
+    """File the client's Drive photographs into the pictures queue for review.
+
+    /admin/drive_photos?tenant=eien             the 40 most recent images
+    /admin/drive_photos?tenant=eien&folder=<id> one folder
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import creative as _cr
+    return _cr.harvest_drive(tenant, folder=folder, limit=limit)
 
 
 @app.get("/admin/canva_probe")
@@ -3480,11 +3532,19 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     ids = [str(i) for i in form.getlist("asset_ids") if str(i).strip()]
     if not ids:
         return _back_to_content(tenant, msg="no pictures were selected")
-    approve = action == "approve"
+    # Three outcomes, not two. Approving a picture for USE is a statement
+    # about rights — it is what lets an email select it — and it is a
+    # different decision from keeping a picture the client does not own as
+    # reference. Collapsing them is why approving appeared to do nothing:
+    # review flipped, rights stayed `reference`, `may_publish` kept refusing.
+    approve = action in ("approve", "approve_use", "approve_reference")
+    rights = ("owned" if action in ("approve", "approve_use")
+              else "reference" if action == "approve_reference" else "")
     for aid in ids:
-        kbm.review_asset(aid, approve=approve)
-    verb = "approved" if approve else "rejected"
-    return _back_to_content(tenant, msg=f"{verb} {len(ids)} picture(s)",
+        kbm.review_asset(aid, approve=approve, rights=rights)
+    verb = ("approved for use" if rights == "owned"
+            else "kept as reference" if approve else "rejected")
+    return _back_to_content(tenant, msg=f"{verb}: {len(ids)} picture(s)",
                             anchor="pics")
 
 

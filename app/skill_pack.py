@@ -949,8 +949,10 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
             for r in rows:
                 lines = [ln.strip() for ln in (r.body or "").split("\n")
                          if ln.strip()]
+                _theme = str(r.theme or "")
+                _intent, _, _fmt = _theme.partition("|")
                 out.append({"shape": list(r.shape or []),
-                            "intent": r.theme or "",
+                            "intent": _intent, "format": _fmt,
                             "subject": lines[0] if lines else "",
                             "opening": next((ln for ln in lines[3:]), "")})
     except Exception:                                            # noqa: BLE001
@@ -1018,12 +1020,32 @@ def _campaign_craft(ctx, seg: dict) -> dict:
         elif not asked_recently and len(hist) >= 3:
             intent, why = "offer", "three sends have given; this one may ask"
         else:
+            # LEAST RECENTLY USED, not "first one unused". Once every give
+            # had appeared in the window, "first unused" found none and fell
+            # back to gives[0] — so a list that had seen all three got story,
+            # story, story for ever. Ordering by how long ago each was last
+            # sent keeps the rotation turning however long the history is.
             used = [i for i in recent if i in gives]
-            intent = next((g for g in gives if g not in used), gives[0])
+            intent = min(gives, key=lambda g: (-(used.index(g) if g in used
+                                                 else len(used) + 1)))
             why = "rotating so this list gets a different kind of email"
 
+    # FORMAT VARIES, warmth only BIASES it. Fixed per segment, a warm list got
+    # a letter every single time and a cold list a designed frame every single
+    # time — the intent axis rotated underneath and the email still arrived
+    # looking identical (owner, 2026-08-22). So warmth sets the default and the
+    # history breaks the pattern: after two sends in the same form, the next
+    # one switches. An offer intent also leans designed whatever the warmth,
+    # because an offer wants the product shown.
     warmth = segmod.warmth(seg["key"])
     fmt = "letter" if warmth == "warm" else "designed"
+    recent_fmt = [h.get("format") for h in hist if h.get("format")]
+    if len(recent_fmt) >= 2 and recent_fmt[0] == recent_fmt[1] == fmt:
+        fmt = "designed" if fmt == "letter" else "letter"
+        why = (why + "; " if why else "") + "switching form after two the same"
+    elif CAMPAIGN_INTENTS.get(intent, {}).get("asks") and fmt == "letter":
+        fmt = "designed"
+        why = (why + "; " if why else "") + "an offer shows the product"
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
             "deadline": str(ctx.params.get("deadline") or "").strip(),
             "avoid": [h for h in hist if h.get("shape") or h.get("subject")]}
@@ -1957,7 +1979,10 @@ def _run_campaign_email(ctx: Context) -> dict:
         # Filed so the NEXT send can be a different one: the shape it must not
         # repeat, and the intent that decides whether the list is owed a give
         # or has earned an ask.
-        theme=craft.get("intent", ""),
+        # `intent|format` — both axes of the last send, so the next one can
+        # differ on either. Shape alone cannot tell them apart now that a
+        # letter may also carry a hero and a product.
+        theme=f"{craft.get('intent', '')}|{craft.get('format', '')}",
         shape=lambda: [b.get("type", "?") for b in state["blocks"]],
         # A CALLABLE, read after the repair loop settles: meta must describe
         # the email that finally passed, not the one that was replaced.

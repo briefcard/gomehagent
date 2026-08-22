@@ -570,3 +570,81 @@ def editable_from_image(tenant: str, blob: bytes, *, title: str,
     return {**made, "stage": "done", "asset_id": up["asset_id"],
             "note": "the image is fixed and correct; the text and layout are "
                     "editable in Canva. Nothing here is published."}
+
+
+# ---------------------------------------------------------------------------
+# From a finished design to an image an email can actually use
+# ---------------------------------------------------------------------------
+
+#: How long to wait for Canva to render an export, and how often to ask.
+#: Exports are asynchronous; a header image is a few seconds of work, and a
+#: caller that cannot wait that long gets `pending` back rather than a block.
+HARVEST_TIMEOUT_S, HARVEST_POLL_S = 25, 2.0
+
+
+def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
+            wait: bool = True) -> dict:
+    """Export finished designs and file them as USABLE images.
+
+    This was the missing half of the visual loop. `create_design` files a row
+    of `kind="design"`, which `creative.hero_for_campaign` can never select —
+    deliberately, because a blank canvas is not a photograph. The owner was
+    then meant to finish it in Canva and have the result "enter the pictures
+    queue", except nothing ever exported anything: `reconcile` reports drift
+    and stops, and no caller existed at all. So a design could be created for
+    ever and never become an image (owner, 2026-08-22).
+
+    Each export is filed as `kind="image"`, owned, against the same entity as
+    the design it came from — which is what makes it selectable as a hero on
+    the next run. Idempotent by URL through `kb.add_asset`, so re-running
+    re-files nothing.
+    """
+    import time as _time
+    rows = [r for r in kb.assets(tenant, publishable_only=False)
+            if r.canva_design_id and (not design_id
+                                      or r.canva_design_id == design_id)]
+    if not rows:
+        return {"ok": True, "filed": 0, "pending": [], "failed": [],
+                "note": "no Canva designs are recorded for this account"}
+
+    # A design that has ALREADY produced an image is finished with. Matching on
+    # the design id keeps this from re-exporting the same canvas every sweep.
+    done = {r.canva_design_id for r in kb.assets(tenant, publishable_only=False)
+            if r.kind == "image" and r.canva_design_id}
+    filed, pending, failed = 0, [], []
+    for r in rows:
+        if r.kind == "image" or r.canva_design_id in done:
+            continue
+        started = export(tenant, r.canva_design_id, "png")
+        if not started.get("ok"):
+            failed.append(f"{r.title or r.canva_design_id}: "
+                          f"{str(started.get('error', ''))[:100]}")
+            continue
+        urls, job = list(started.get("urls") or []), started.get("job_id", "")
+        deadline = _time.monotonic() + (HARVEST_TIMEOUT_S if wait else 0)
+        while not urls and job and _time.monotonic() < deadline:
+            _time.sleep(HARVEST_POLL_S)
+            got = export_result(tenant, job)
+            if not got.get("ok"):
+                failed.append(f"{r.title or job}: {str(got.get('error',''))[:100]}")
+                break
+            if got.get("status") == "failed":
+                failed.append(f"{r.title or job}: Canva could not render it")
+                break
+            urls = list(got.get("urls") or [])
+        if not urls:
+            pending.append({"design_id": r.canva_design_id, "job_id": job,
+                            "title": r.title or ""})
+            continue
+        said = kb.add_asset(
+            tenant, urls[0], rights=kb.OWNED,
+            title=(r.title or "Canva design") + " (export)",
+            kind="image", subject="graphic", source="exported from Canva",
+            entity_key=entity_key or (r.entity_key or ""),
+            canva_design_id=r.canva_design_id, origin="human")
+        if str(said).startswith("Filed"):
+            filed += 1
+    return {"ok": True, "filed": filed, "pending": pending, "failed": failed,
+            "note": ("an exported design is filed as an IMAGE, owned and "
+                     "entity-scoped, which is what makes it selectable as an "
+                     "email hero — the design row never was")}

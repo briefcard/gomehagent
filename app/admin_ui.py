@@ -3271,7 +3271,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
         <span class="grow"></span>
         <button form="pics" name="action" value="reject" class="sec">Reject
           selected</button>
-        <button form="pics" name="action" value="approve">Approve selected</button>
+        <button form="pics" name="action" value="approve_reference" class="sec"
+          title="Keep it on file but never publish it — for a picture the
+                 client does not own">Reference only</button>
+        <button form="pics" name="action" value="approve"
+          title="Approving grants use: the picture becomes selectable as an
+                 email hero">Approve selected</button>
       </div>
       <div class="picgrid">{pic_cards}</div>
       <script>
