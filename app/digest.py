@@ -41,6 +41,37 @@ def build_digest(hours_back: int = 12) -> str:
             lines.append(f"  • [{ap.kind}] {ap.summary}")
         lines.append("")
 
+    # DRAFTS THAT SHIPPED NEEDING A FIX. They carry no pending approval — by
+    # design, since nothing defective is launchable — so before this they were
+    # invisible in the one place the owner actually reads. A draft the owner
+    # never hears about is the same as no draft, and the whole point of putting
+    # it in the ESP was that they could see it (owner, 2026-08-22).
+    with db.SessionLocal() as s:
+        defective = (
+            s.query(db.SystemRun)
+            .filter(db.SystemRun.blocked_on.isnot(None),
+                    db.SystemRun.created_at >= since)
+            .order_by(db.SystemRun.created_at.desc())
+            .all()
+        )
+    defective = [r for r in defective if (r.blocked_on or [])]
+    if defective:
+        lines.append(f"🔧 DRAFTED BUT NEEDS FIXING ({len(defective)}):")
+        counts: dict[str, int] = {}
+        for r in defective:
+            for reason in (r.blocked_on or []):
+                counts[str(reason)] = counts.get(str(reason), 0) + 1
+            lines.append(f"  • {r.tenant} — {', '.join(r.blocked_on or [])}")
+        # The same cause twice is an ACCOUNT problem, not an unlucky send —
+        # which is the difference between fixing one email and fixing the
+        # field that broke every one of them.
+        repeat = sorted(((n, k) for k, n in counts.items() if n > 1),
+                        reverse=True)
+        for n, k in repeat:
+            lines.append(f"  ↳ {k} hit {n} sends — fix this at the account, "
+                         f"not one email at a time")
+        lines.append("")
+
     by_action: dict[str, list] = {}
     for e in emails:
         by_action.setdefault(e.action or "other", []).append(e)

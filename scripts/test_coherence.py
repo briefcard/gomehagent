@@ -63,7 +63,7 @@ def _fake_esp():
         @staticmethod
         def draft_from_html(tenant, *, name, subject, sender_name, html,
                             preheader="", include_segments=None):
-            _drafted.append({"subject": subject, "html": html})
+            _drafted.append({"subject": subject, "html": html, "name": name})
             return {"ok": True, "campaign_id": "c1", "stage": "done"}
     esp.backend = lambda t: (_Mod, "")
 
@@ -279,7 +279,18 @@ def live():
     ck("an email that spends one proof twice is BLOCKED at the gate",
        i3.get("ok") is False and "coherence:proof_repeated" in _rules3,
        str(sorted(_rules3)))
-    ck("…and nothing reached the ESP", not _drafted, str(len(_drafted)))
+    ck("…and the draft still reaches the ESP, marked, so it can be looked at",
+       len(_drafted) == 1 and "[NEEDS FIX" in (_drafted[-1].get("name") or ""),
+       (_drafted[-1].get("name") or "")[:70] if _drafted else "no draft")
+    # NOT approvable, and by the stronger route: `emit` only ever queues an
+    # approval for an item that PASSED, so an incoherent email never gets one
+    # to withdraw. The draft exists to be looked at; it cannot be launched
+    # through this system.
+    with db.SessionLocal() as _s:
+        _pending = [a for a in _s.query(db.Approval).all()
+                    if (a.payload or {}).get("output_id") == i3.get("output_id")]
+    ck("…but it is not approvable — nothing incoherent becomes launchable",
+       not _pending and i3.get("ok") is False, str(len(_pending)))
     ck("…and the rule is namespaced, so it is not read as an authoring gap",
        all(r.startswith("coherence:") or r == "no_ban_list" for r in _rules3),
        str(sorted(_rules3)))

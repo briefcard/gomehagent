@@ -3153,3 +3153,26 @@ which is what stops somebody later forcing a round-up through a
 single-subject gate; (4) surface the commitment on the run detail in the
 console, so "what was this supposed to be about" is answerable without
 reading the ledger.
+
+## The ESP draft is how the owner sees the work (2026-08-22)
+
+`draft_into_esp` is GONE as a parameter. The draft is made whenever there is
+HTML to make it from. See DEFECTS §2.79.
+
+* **Defects ride in the campaign NAME** — `[NEEDS FIX — …]`, internal to the
+  ESP. The SUBJECT stays exactly what a customer would receive.
+* **A defect costs the approval, not the draft.** Nothing defective is
+  launchable through the system; `emit` only ever queues an approval for an
+  item that passed, so a blocked one never gets one to withdraw.
+* **`WITHHOLD_FROM_ESP`** = `banned_claim`, `no_ban_list`, `unbacked_urgency`,
+  `unfit_entity_named` — false or forbidden statements, kept out of the
+  sending platform entirely. Everything else is drafted and marked. Guard
+  `withhold_false_or_forbidden`.
+* **Fixed at the source rather than blocked:** `_legacy_blocks` now takes
+  `default_cta_url` (the composer's `"#"` CTA made every model-less send
+  unshippable), and an empty `_cta_home` is reported as the account gap it is
+  ("no storefront URL is on file") instead of as a dead button.
+* **Recorded and notified:** `systems.record_defects` writes to the run;
+  `blocked_reasons` counts defective-but-shipped alongside blocked; the digest
+  has a `DRAFTED BUT NEEDS FIXING` section that names a repeated cause as an
+  account problem.

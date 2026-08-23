@@ -130,9 +130,11 @@ CATALOG = {
                 # up, on the autonomy ladder: whether a human launches the
                 # draft or the system is eventually trusted to. Offering it
                 # per-plan invited a queue item that had quietly opted out of
-                # its own purpose (owner, 2026-08-22). The skill still accepts
-                # the parameter so the offline suite can exercise the path
-                # without an ESP.
+                # its own purpose (owner, 2026-08-22). The parameter was removed
+                # from the skill entirely later the same day: the draft is how
+                # the owner SEES the work, so it is made whenever there is HTML
+                # to make it from, and anything wrong with it rides in the
+                # campaign name instead of withholding the draft.
             ),
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
@@ -698,13 +700,43 @@ def runs(system_id: str, limit: int = 10) -> list[db.SystemRun]:
         return rows
 
 
+def record_defects(run_id: str, rules: list) -> int:
+    """File what was wrong with an output that still shipped. Returns how many.
+
+    A campaign whose button pointed nowhere used to be withheld entirely, and
+    the reason lived only in the run's notes — read once, by whoever happened
+    to be looking. Now the draft goes to the ESP marked, and the REASON comes
+    here, where `blocked_reasons` ranks it: one email needing a fix is noise,
+    the same account shipping six sends with a dead button because nobody put
+    a domain on file is a thing to go and fix at the source.
+    """
+    rules = [str(r) for r in (rules or []) if r]
+    if not run_id or not rules:
+        return 0
+    with db.SessionLocal() as s:
+        row = s.get(db.SystemRun, run_id)
+        if row is None:
+            return 0
+        row.blocked_on = list(dict.fromkeys(list(row.blocked_on or []) + rules))
+        s.commit()
+        return len(rules)
+
+
 def blocked_reasons(tenant: str = "", days: int = 30) -> list[tuple[str, int]]:
-    """What the pipelines refused on, most frequent first — the KB backlog,
-    ordered by how often each gap actually cost an output."""
+    """What cost the pipelines an output or shipped a defective one, most
+    frequent first — the backlog, ordered by how often each gap actually bit.
+
+    Reads runs that were BLOCKED and runs that shipped with defects recorded,
+    because after 2026-08-22 a campaign with a dead button is drafted rather
+    than withheld — and if only blocked runs were counted, fixing the symptom
+    (ship it anyway) would have silently emptied the list that says to fix the
+    cause.
+    """
     since = db.utcnow() - dt.timedelta(days=days)
     with db.SessionLocal() as s:
-        q = s.query(db.SystemRun).filter(db.SystemRun.stage == "blocked",
-                                         db.SystemRun.created_at >= since)
+        q = s.query(db.SystemRun).filter(
+            db.SystemRun.blocked_on.isnot(None),
+            db.SystemRun.created_at >= since)
         if tenant:
             q = q.filter(db.SystemRun.tenant == tenant)
         rows = q.all()

@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "withhold_false_or_forbidden",
+        "file": "app/skill_pack.py",
+        "find": "    if final_html and not _forbidden:",
+        "replace": "    if final_html:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py", "test_campaign_email.py"],
+        "why": "an email carrying a banned claim, a fabricated deadline or a "
+               "product nobody can buy is placed in the client's sending "
+               "platform, one click from a list",
+    },
+    {
         "name": "coherence_gate",
         "file": "app/skill.py",
         "find": "            found = _coherence(text)",

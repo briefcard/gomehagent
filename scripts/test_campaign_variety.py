@@ -62,7 +62,7 @@ def _fake_esp():
         @staticmethod
         def draft_from_html(tenant, *, name, subject, sender_name, html,
                             preheader="", include_segments=None):
-            _drafted.append({"subject": subject, "html": html})
+            _drafted.append({"subject": subject, "html": html, "name": name})
             return {"ok": True, "campaign_id": "c1", "stage": "done"}
     esp.backend = lambda t: (_Mod, "")
 
@@ -535,10 +535,25 @@ def main():
     before = len(_drafted)
     skill_pack.draft_campaign = _urlless
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
-    ck("with NO destination on file anywhere, the send is blocked",
-       len(_drafted) == before)
+    # CHANGED 2026-08-22. A dead button is BROKEN, not false — and withholding
+    # the draft over it left the owner with nothing to look at, which is how a
+    # send "that was working before" became invisible. The draft now goes to
+    # the ESP carrying the problem in its INTERNAL name; what it does not get
+    # is an approval. Withholding is reserved for `WITHHOLD_FROM_ESP` — the
+    # things that would be false or forbidden if a human did click send.
+    ck("the draft still reaches the ESP, because a draft cannot send itself",
+       len(_drafted) == before + 1, str(len(_drafted) - before))
+    ck("…marked [NEEDS FIX] in the name the ESP shows the OWNER",
+       "[NEEDS FIX" in (_drafted[-1].get("name") or "") if _drafted else False,
+       (_drafted[-1].get("name") or "")[:70] if _drafted else "")
+    ck("…while the SUBJECT stays what a customer would receive",
+       not (_drafted[-1].get("subject") or "").startswith("[") if _drafted else False,
+       (_drafted[-1].get("subject") or "")[:50] if _drafted else "")
     ck("…and the run says which control is dead",
        any("points nowhere" in n for n in r.get("notes", [])))
+    ck("…and it is recorded, so a repeat is visible as an account gap",
+       any(k == "dead_link" for k, _ in systems.blocked_reasons("baci")),
+       str(systems.blocked_reasons("baci")[:3]))
     with db.SessionLocal() as s:
         t = s.query(db.Tenant).filter(db.Tenant.key == "baci").first()
         t.domain = was_domain or ""

@@ -48,7 +48,7 @@ from __future__ import annotations
 import html as _htmllib
 import re
 
-from . import coherence, compliance, responder, sites
+from . import coherence, compliance, responder, sites, systems
 from . import kb as kb_mod
 from .skill import Context, Skill, register
 
@@ -1270,7 +1270,8 @@ def _product_items(ents: list) -> list:
             for e in ents[:3] if e.get("name")]
 
 
-def _legacy_blocks(copy: dict, ents: list, hero: dict | None) -> list:
+def _legacy_blocks(copy: dict, ents: list, hero: dict | None,
+                   default_cta_url: str = "") -> list:
     """The fixed skeleton, kept as the fallback shape — the composer and any
     old-shape draft land here: hero, headline, headed sections with
     dividers, product cards, one CTA."""
@@ -1294,8 +1295,14 @@ def _legacy_blocks(copy: dict, ents: list, hero: dict | None) -> list:
         blocks.append({"type": "divider"})
         blocks.append({"type": "products", "items": items})
     if copy.get("cta_label"):
+        # THE DESTINATION IS OURS TO SUPPLY, on this path too. This read
+        # `or "#"`, and "#" is precisely what `email_craft.dead_links` blocks —
+        # so the COMPOSER, the deterministic fallback that exists to always
+        # produce something shippable, produced an email that could never ship.
+        # Every send with no model available died on a button the drafter was
+        # never given the URL for (owner, 2026-08-22).
         blocks.append({"type": "cta", "label": copy["cta_label"],
-                       "url": copy.get("cta_url") or "#"})
+                       "url": (copy.get("cta_url") or default_cta_url or "#")})
     return blocks
 
 
@@ -1456,7 +1463,7 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
     """
     raw = copy.get("blocks")
     if not isinstance(raw, list) or not raw:
-        return _legacy_blocks(copy, ents, hero), []
+        return _legacy_blocks(copy, ents, hero, default_cta_url), []
 
     allowed = set(CAMPAIGN_FORMATS.get(str(fmt or ""), {}).get("blocks") or ())
     by_key = {e["key"]: e for e in ents if e.get("key")}
@@ -1611,6 +1618,24 @@ def _blocks_text(blocks: list) -> str:
 #: a choice; `coherence.BACKGROUND_BUDGET` holds the finished email to one.
 BACKGROUND_OFFERED = 2
 
+#: THE ONE LINE THE DRAFT DOES NOT CROSS.
+#:
+#: Everything else wrong with an email — a dead button, an incoherent hero, a
+#: missing address, merge tags that stayed neutral — is drafted into the ESP
+#: marked, because the owner cannot judge what they cannot see and a draft
+#: cannot send itself. These four are different in kind: an email carrying one
+#: of them is not an imperfect email, it is a FALSE OR FORBIDDEN STATEMENT made
+#: in the client's name. Putting it in the sending platform, one careless click
+#: from a list, is the one case where withholding buys real safety rather than
+#: only removing visibility. The run still says exactly what it was and why.
+#:
+#:   banned_claim        the brand has forbidden this phrase, usually in writing
+#:   no_ban_list         nothing was checked at all, so "clean" is unfounded
+#:   unbacked_urgency    a deadline nobody can point at — a lie, at scale
+#:   unfit_entity_named  recommends something a customer cannot buy
+WITHHOLD_FROM_ESP = frozenset({
+    "banned_claim", "no_ban_list", "unbacked_urgency", "unfit_entity_named"})
+
 
 def _run_campaign_email(ctx: Context) -> dict:
     from . import creative, email_craft, email_render, esp, fitness, links
@@ -1664,6 +1689,17 @@ def _run_campaign_email(ctx: Context) -> dict:
         ctx.tenant,
         [e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
         _dests) or (f"https://{_dom}" if _dom else "")
+    # NAME THE CAUSE, NOT THE SYMPTOM. `destinations` always includes the site
+    # root when a domain is on file, so an empty `_cta_home` means one thing
+    # and only one thing: this account has no domain. The run used to report
+    # that as 'the "Shop now" button points nowhere', which reads as a drafting
+    # mistake and sends whoever is fixing it to the wrong place — the drafter
+    # is never given URLs and could not have supplied one. One field on the
+    # account closes it, for every send.
+    if not _cta_home:
+        ctx.note("no storefront URL is on file for this account, so no link in "
+                 "this email can point anywhere — set the domain on the "
+                 "Accounts tab and every future send fixes itself")
     # NO PHOTOGRAPHS ANYWHERE? FETCH THEM. The catalogue sync is what puts a
     # product's photo on the entity and in the creative library, and an account
     # whose sync predates that code has products with no imagery — which is a
@@ -2188,16 +2224,43 @@ def _run_campaign_email(ctx: Context) -> dict:
                      "fix": "fix it in the store, or send an email that does "
                             "not name it"})
     if hard:
-        ctx.note("not drafted into the ESP: "
+        ctx.note("this draft is not fit to launch as it stands: "
                  + "; ".join(f["detail"] for f in hard))
 
-    # Set it up in the ESP as a DRAFT — only when the copy passed, the ESP is
-    # connected, and there is nothing blocking a send. A draft is safe (nothing
-    # sends); LAUNCHING is `esp.backend().send_campaign(confirm=True)`, which the
-    # substrate never calls — that is the final approval the owner keeps.
+    # THE DRAFT IS HOW THE OWNER SEES IT, so it is always made.
+    #
+    # This used to require the copy to pass, the theme to be complete,
+    # personalization to have run and nothing to be blocking — and produced
+    # NOTHING when any of them failed. That collapsed two different states into
+    # one outcome: "this must not be sent" and "you may not look at this". A
+    # draft cannot send — launching is `send_campaign(confirm=True)`, which the
+    # substrate never calls — so withholding it bought no safety at all and
+    # cost the owner the only view they had of the work (owner, 2026-08-22:
+    # "how else will I see it and send it?").
+    #
+    # So the draft is made whenever there is HTML to make it from, and anything
+    # wrong with it rides in the campaign NAME, which is internal to the ESP.
+    # The owner sees "[NEEDS FIX — …]" in their campaign list while the SUBJECT
+    # stays exactly what a customer would receive. What a defect still costs is
+    # the approval: nothing defective becomes launchable through this system.
+    defects = [f["detail"] for f in hard]
+    if not item.get("ok"):
+        defects += [f["detail"] for f in (item.get("failures") or [])]
+    if not native_ok:
+        defects.append("merge tags stayed neutral — "
+                       + (state["native_why"] or "no ESP personalization"))
+    defects += list(missing)
+
+    _forbidden = [f for f in (hard + list(item.get("failures") or []))
+                  if str(f.get("rule", "")) in WITHHOLD_FROM_ESP]
+    if _forbidden:
+        ctx.note("NOT drafted into the ESP — this email would state something "
+                 "false or forbidden in the client's name, and a draft sitting "
+                 "in the sending platform is one click from a list: "
+                 + "; ".join(f["detail"] for f in _forbidden))
+
     esp_draft, esp_target = {}, {}
-    if (item.get("ok") and not missing and native_ok and not hard
-            and _flag(ctx.params.get("draft_into_esp"), default=True)):
+    if final_html and not _forbidden:
         mod, refusal = esp.backend(ctx.tenant)
         if refusal:
             ctx.note("could not draft into the ESP: " + refusal)
@@ -2215,8 +2278,14 @@ def _run_campaign_email(ctx: Context) -> dict:
             elif target.get("why"):
                 ctx.note(target["why"])
             try:
+                # INTERNAL name, customer-facing subject. Omnisend shows the
+                # name in the campaign list and never to a reader, which makes
+                # it the one place a warning can live without altering the
+                # email the customer would get.
+                _mark = ("[NEEDS FIX — " + "; ".join(defects)[:70] + "] "
+                         if defects else "")
                 esp_draft = mod.draft_from_html(
-                    ctx.tenant, name=copy.get("subject", "")[:120],
+                    ctx.tenant, name=(_mark + copy.get("subject", ""))[:120],
                     subject=copy.get("subject", ""),
                     sender_name=theme["name"], html=final_html,
                     preheader=copy.get("preheader", ""),
@@ -2246,24 +2315,53 @@ def _run_campaign_email(ctx: Context) -> dict:
     # exception) leaves a queue item describing an email that exists nowhere.
     # Approving it produced nothing and removed it from the queue, which is how
     # an approved campaign became impossible to find (owner, 2026-08-22).
-    if not esp_draft.get("ok") and _flag(ctx.params.get("draft_into_esp"),
-                                         default=True):
-        why = ("; ".join(f["detail"] for f in hard) if hard
-               else esp_draft.get("error")
-               or ("the copy did not pass the validator" if not item.get("ok")
-                   else "; ".join(missing) if missing
-                   else "personalization did not run, so nothing was drafted"
-                   if not native_ok else "the ESP draft was not created"))
+    # AN APPROVAL IS A QUESTION ABOUT SOMETHING LAUNCHABLE. The draft now
+    # exists either way, so the approval is withdrawn for a narrower reason
+    # than before: not "there is nothing to look at" but "this one is not fit
+    # to launch yet". The note says which, and says where to go and look.
+    if defects or not esp_draft.get("ok"):
+        why = ("; ".join(defects) if defects
+               else esp_draft.get("error") or "the ESP draft was not created")
+        why = ("; ".join(f["detail"] for f in _forbidden) if _forbidden
+               else why)
         from . import approvals as _appr
         if _appr.withdraw(ctx.run_id, why):
-            ctx.note("the approval for this email was withdrawn — there is no "
-                     "draft in the ESP to approve: " + why)
+            ctx.note(("the draft IS in the ESP, marked [NEEDS FIX] — but the "
+                      "approval was withdrawn, because it is not fit to launch "
+                      "as it stands: " if esp_draft.get("ok") else
+                      "the approval for this email was withdrawn — there is no "
+                      "draft in the ESP to approve: ") + why)
+
+    # RECORDED SO IT CAN STOP HAPPENING. Every defect goes on the run, where
+    # `systems.blocked_reasons` ranks it by how often it actually cost a send —
+    # which is the difference between "an email needed fixing once" and "this
+    # account has no storefront URL on file and every send has been landing
+    # with a dead button". Coherence rules stay namespaced and out of that
+    # ranking; these are exactly the kind that belong in it.
+    if defects:
+        _rules = ([f["rule"] for f in hard]
+                  + [f["rule"] for f in (item.get("failures") or [])
+                     if not item.get("ok")]
+                  + (["personalize_failed"] if not native_ok else [])
+                  + (["theme_incomplete"] if missing else []))
+        systems.record_defects(ctx.run_id, _rules)
+        ctx.note("recorded so it can be fixed at the source: "
+                 + ", ".join(dict.fromkeys(_rules)))
 
     return {"summary": (f"campaign email for '{seg['name']}' — {basis}, "
                         + ("sendable" if not missing else "not yet sendable")
                         + (", hero image" if hero else ", no hero image")
-                        + (", drafted in ESP" if esp_draft.get("ok")
-                           else ", NOT DRAFTED IN ESP")),
+                        + (", drafted in ESP" if esp_draft.get("ok") and not defects
+                           else ", DRAFTED IN ESP but NEEDS FIX: "
+                                + "; ".join(defects)[:120]
+                           if esp_draft.get("ok")
+                           else ", NOT DRAFTED IN ESP (false or forbidden): "
+                                + "; ".join(f["detail"] for f in _forbidden)[:120]
+                           if _forbidden
+                           else ", NOT DRAFTED IN ESP: "
+                                + (esp_draft.get("error")
+                                   or "no HTML was produced")[:120])),
+            "defects": defects,
             "segment": seg, "basis": basis, "cited_claims": cited,
             "hero": {"basis": hero_got.get("basis", ""),
                      "asset_id": hero_got.get("asset_id", ""),
@@ -2283,7 +2381,7 @@ register(Skill(
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
     params=("segment", "goal", "subject", "intent", "deadline", "entity_key",
-            "audience_key", "utterance", "draft_into_esp", "draft_visual"),
+            "audience_key", "utterance", "draft_visual"),
     writes=True,
     produces="draft",
     run=_run_campaign_email))

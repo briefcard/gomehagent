@@ -2783,3 +2783,59 @@ necessary and sufficient.
 
 The pattern to distrust: a branch whose condition is false in every test
 fixture is not covered by those tests passing, however many of them there are.
+
+### 2.79 An email nobody could see, withheld for its own good — 2026-08-22
+
+Owner, on a live run reading *"composed, sendable, hero image, NOT DRAFTED IN
+ESP"*: **"Why would it not be drafted in ESP? It should always show in the ESP
+because how else will I see it and send it?"**
+
+Correct, and the gate was wrong in three separate ways.
+
+**(a) The gate collapsed two different states.** Drafting required
+`item.ok and not missing and native_ok and not hard`, and produced NOTHING when
+any of them failed. But a draft cannot send — launching is
+`send_campaign(confirm=True)`, which the substrate never calls. Withholding it
+therefore bought no safety at all; it only removed the owner's single view of
+the work. "This must not be sent" and "you may not look at this" had become the
+same outcome.
+
+**(b) The composer could never ship.** `_legacy_blocks` built the CTA as
+`copy.get("cta_url") or "#"` — and `"#"` is exactly what `email_craft.dead_links`
+blocks. So the deterministic fallback, the path that exists to always produce
+something usable when no model is available, produced an email that was
+guaranteed to be refused. Every `basis: composed` send died on a button whose
+URL the drafter is never given and could not have supplied. `_legacy_blocks`
+now receives `default_cta_url` like every other path.
+
+**(c) The run blamed the symptom.** An empty `_cta_home` has exactly one cause:
+`links.destinations` always includes the site root when a domain is on file, so
+no destination means **no domain on the account**. Reported as *'the "Shop now"
+button points nowhere'*, which reads as a drafting mistake and sends whoever is
+fixing it to the wrong place. One field closes it for every future send, and
+the run now says so.
+
+**What changed.** The draft is made whenever there is HTML to make it from.
+Anything wrong with it rides in the campaign NAME — internal to Omnisend, so
+the owner sees `[NEEDS FIX — …]` in their campaign list while the SUBJECT stays
+exactly what a customer would receive. The defect costs the approval, not the
+draft: nothing defective is launchable through the system. `draft_into_esp` is
+gone as a parameter entirely — producing the draft is what this system IS.
+
+**One line the draft does not cross** (`WITHHOLD_FROM_ESP`): `banned_claim`,
+`no_ban_list`, `unbacked_urgency`, `unfit_entity_named`. These are not imperfect
+emails, they are false or forbidden statements made in the client's name, and a
+draft sitting in the sending platform is one careless click from a list. That is
+the one case where withholding buys real safety rather than only removing
+visibility. Everything else — dead link, incoherent hero, missing address,
+neutral merge tags — is drafted and marked. Guard
+`withhold_false_or_forbidden`.
+
+**Recorded, and notified.** Defects go on the run via `systems.record_defects`,
+and `blocked_reasons` now counts runs that shipped defective as well as runs
+that were blocked — otherwise fixing the symptom (ship it anyway) would have
+silently emptied the very list that says to fix the cause. The digest gained a
+`DRAFTED BUT NEEDS FIXING` section, because a defective draft carries no
+pending approval and was therefore invisible in the one place the owner reads.
+The same cause twice is called out as an account problem rather than an unlucky
+send.
