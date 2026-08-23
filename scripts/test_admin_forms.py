@@ -106,6 +106,23 @@ def main() -> int:
         ck(f"content/{k}: it is the section that rendered",
            f'class="subtab on"' in html and f'sub={k}' in html)
 
+    # THE DIAGNOSTICS VIEWS. Systems check is a second page behind the same
+    # tab, so checking `diagnostics` once checks half of it.
+    from app.admin_ui import DIAG_VIEWS
+    for v, label in DIAG_VIEWS:
+        html = client.get(
+            f"/admin/ui?tab=diagnostics&view={v}&tenant=baci&key={KEY}").text
+        ids = _ids(html)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        ck(f"diagnostics/{v}: no duplicate element ids", not dupes,
+           ", ".join(dupes[:4]))
+        forms = set(re.findall(r'<form[^>]*\bid="([^"]+)"', html))
+        wanted = set(re.findall(r'\bform="([^"]+)"', html))
+        ck(f"diagnostics/{v}: every form= points at a real <form>",
+           not (wanted - forms), ", ".join(sorted(wanted - forms)[:4]))
+        ck(f"diagnostics/{v}: it is the view that rendered",
+           'class="subtab on"' in html and f"view={v}" in html)
+
     # A report about pages already published is not a decision, so it is not on
     # the decision queue.
     rev = client.get(f"/admin/ui?tab=content&tenant=baci&key={KEY}").text

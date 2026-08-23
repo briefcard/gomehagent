@@ -722,6 +722,173 @@ def record_defects(run_id: str, rules: list) -> int:
         return len(rules)
 
 
+#: What KIND of thing a refusal is, which decides who fixes it and where.
+#: Ordered — the first pattern that matches wins — and deliberately small: a
+#: taxonomy nobody can hold in their head gets ignored, and every unmatched
+#: reason falls through to "other" rather than being forced into a bucket that
+#: would send somebody to the wrong page.
+#:
+#: `where` is the console tab that can actually fix it. That is the whole point
+#: of classifying at all — a list of things that went wrong is only useful if
+#: each line knows where its fix lives (owner, 2026-08-23: the console should
+#: let you act where it tells you something is wrong).
+ATTENTION_KINDS = (
+    ("connection", "Connection", "accounts",
+     ("is not connected", "no credentials", "connect ", "not connected",
+      "no ESP", "token")),
+    ("install", "Not installed or switched off", "systems",
+     ("is not installed", "is designed", "is paused", "is retired",
+      "the contract is optional", "turn it on")),
+    ("knowledge", "Missing knowledge", "kb",
+     ("nothing on file at", "cannot say anything true without", "no_ban_list",
+      "no approved", "author one", "banned_claims")),
+    ("compliance", "Compliance", "content",
+     ("banned_claim", "unfit_entity_named", "unbacked_urgency")),
+    ("quality", "Quality", "diagnostics",
+     ("coherence:", "dead_link", "proof_repeated", "personalize_failed",
+      "theme_incomplete")),
+)
+
+
+def classify_reason(reason: str) -> dict:
+    """One refusal string → {kind, label, where}. Never raises, never guesses."""
+    text = str(reason or "").lower()
+    for kind, label, where, needles in ATTENTION_KINDS:
+        if any(n.lower() in text for n in needles):
+            return {"kind": kind, "label": label, "where": where}
+    return {"kind": "other", "label": "Other", "where": "diagnostics"}
+
+
+def attention(tenant: str = "", days: int = 30, system_key: str = "",
+              examples: int = 3) -> list[dict]:
+    """What needs attention, ranked, WITH THE RUNS THAT PROVE IT.
+
+    `blocked_reasons` answers "what, and how often" and throws away everything
+    else — no run id, no system, no timestamp, no body. The content was on the
+    row the whole time and was never joined, so the console could rank the
+    backlog and never show you one example of anything on it (owner,
+    2026-08-23). This is that join.
+
+    Differences from `blocked_reasons`, all deliberate:
+
+    * `coherence:` rules are INCLUDED here and excluded there. That is not an
+      inconsistency — the other list is the authoring backlog, and no amount
+      of authoring fixes an incoherent email. This list is "what needs a
+      person", and a quality failure needs one. It is labelled by kind so the
+      two never get confused again.
+    * Every entry carries the SYSTEMS it happened to, resolved through
+      `System.key` rather than left as a bare `system_id`.
+    * Every entry carries example runs with their own content — when, stage,
+      the source ref, the error in the platform's words, and the head of
+      whatever the run produced.
+    """
+    since = db.utcnow() - dt.timedelta(days=max(1, int(days or 1)))
+    with db.SessionLocal() as s:
+        q = (s.query(db.SystemRun)
+             .filter(db.SystemRun.blocked_on.isnot(None),
+                     db.SystemRun.created_at >= since))
+        if tenant:
+            q = q.filter(db.SystemRun.tenant == tenant)
+        runs = q.order_by(db.SystemRun.created_at.desc()).all()
+        # One extra query, not one per run: a per-row lookup here is the
+        # classic N+1 on the page that is supposed to diagnose slowness.
+        names = {r.id: r.key for r in s.query(db.System).all()}
+
+    buckets: dict[str, dict] = {}
+    for r in runs:
+        skey = names.get(r.system_id or "", "") or "(unknown system)"
+        if system_key and skey != system_key:
+            continue
+        for reason in (r.blocked_on or []):
+            reason = str(reason)
+            b = buckets.setdefault(reason, {
+                "reason": reason, "count": 0, "systems": {},
+                "tenants": set(), "first_at": r.created_at,
+                "last_at": r.created_at, "examples": [],
+                **classify_reason(reason)})
+            b["count"] += 1
+            b["systems"][skey] = b["systems"].get(skey, 0) + 1
+            b["tenants"].add(r.tenant)
+            if r.created_at and b["first_at"] and r.created_at < b["first_at"]:
+                b["first_at"] = r.created_at
+            if r.created_at and b["last_at"] and r.created_at > b["last_at"]:
+                b["last_at"] = r.created_at
+            if len(b["examples"]) < max(1, int(examples)):
+                # THE CONTENT. Everything a person needs to judge the item
+                # without opening a database — which is what "surface the
+                # items and their content" means.
+                b["examples"].append({
+                    "run_id": r.id, "system": skey, "tenant": r.tenant,
+                    "at": r.created_at, "stage": r.stage or "",
+                    "ref": r.ref or "", "trigger": r.trigger or "",
+                    "error": (r.error or "")[:400],
+                    "output": (r.output or "")[:400],
+                    "blocked_on": list(r.blocked_on or []),
+                })
+
+    out = list(buckets.values())
+    for b in out:
+        b["tenants"] = sorted(b["tenants"])
+    # Frequency first, then most recent — a thing that happened nine times
+    # last month outranks one that happened twice yesterday, but between
+    # equals the live one comes first.
+    out.sort(key=lambda b: (-b["count"], -(b["last_at"].timestamp()
+                                           if b["last_at"] else 0)))
+    return out
+
+
+def per_system(tenant: str = "", days: int = 30) -> list[dict]:
+    """One row per installed system: what it did in the window, and what bit.
+
+    Reads the runs once and groups in Python rather than issuing a query per
+    system — this page exists to diagnose slowness and must not be a source of
+    it.
+    """
+    since = db.utcnow() - dt.timedelta(days=max(1, int(days or 1)))
+    with db.SessionLocal() as s:
+        sysq = s.query(db.System)
+        if tenant:
+            sysq = sysq.filter(db.System.tenant == tenant)
+        rows = sysq.all()
+        ids = {r.id: r for r in rows}
+        runq = (s.query(db.SystemRun)
+                .filter(db.SystemRun.created_at >= since))
+        if tenant:
+            runq = runq.filter(db.SystemRun.tenant == tenant)
+        runs = runq.all()
+
+    by_sys: dict[str, list] = {}
+    for r in runs:
+        by_sys.setdefault(r.system_id or "", []).append(r)
+
+    SHIPPED = {"sent", "approved", "published"}
+    out = []
+    for sid, row in ids.items():
+        mine = by_sys.get(sid, [])
+        blocked = [r for r in mine if (r.stage or "") in ("blocked", "failed")]
+        defective = [r for r in mine
+                     if (r.blocked_on or []) and (r.stage or "") not in ("blocked", "failed")]
+        last = max((r.created_at for r in mine if r.created_at), default=None)
+        out.append({
+            "key": row.key, "name": row.name, "system_id": sid,
+            "tenant": row.tenant, "status": row.status or "",
+            "autonomy": row.autonomy or "",
+            "runs": len(mine),
+            "shipped": len([r for r in mine if (r.stage or "") in SHIPPED]),
+            "planned": len([r for r in mine if (r.stage or "") == "planned"]),
+            "blocked": len(blocked),
+            "defective": len(defective),
+            "last_at": last,
+            # The single most useful number on the row: of everything this
+            # system attempted, how much needed a person. A system with a
+            # hundred clean runs and a system with two are not comparable on
+            # counts alone.
+            "needs_person": len(blocked) + len(defective),
+        })
+    out.sort(key=lambda r: (-r["needs_person"], -r["runs"], r["key"]))
+    return out
+
+
 def blocked_reasons(tenant: str = "", days: int = 30) -> list[tuple[str, int]]:
     """What cost the pipelines an output or shipped a defective one, most
     frequent first — the backlog, ordered by how often each gap actually bit.

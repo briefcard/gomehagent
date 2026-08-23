@@ -3251,3 +3251,51 @@ Still open from the owner's page-1 notes: nothing. Next pages, in their order:
 Systems (3) is the big one — tabs for active vs available, status top-right,
 on/off as a toggle, workflow as the primary button, and the "refused" list
 moved to Diagnostics.
+
+## Systems check — a per-system diagnosis, on Diagnostics (2026-08-23)
+
+Owner's page-by-page walkthrough, item 3 + item 6. The Systems tab opened on a
+flat `<ul>` reading "12× no_ban_list" — no dates, nothing clickable, no way to
+see a single instance — sitting ABOVE the systems it was about.
+
+**The defect underneath it:** `systems.blocked_reasons()` collapses every
+`SystemRun` to `(reason, count)` and drops the run id, the system, the
+timestamp, the stage, the error and the output. The content was on the row the
+whole time and was never joined, so the console could RANK the backlog and
+never show one example of anything on it.
+
+**New in `app/systems.py`:**
+
+* `attention(tenant, days, system_key="", examples=3)` — the join. Per reason:
+  count, which systems (resolved through `System.key`, not a bare
+  `system_id`), first/last seen, and the runs themselves — when, stage, ref,
+  the platform's own error, the head of what the run produced, and the other
+  reasons that run also carried. One extra query for the system names, not one
+  per run: this is the page that diagnoses slowness.
+* `per_system(tenant, days)` — one row per installed system: runs, shipped,
+  planned, **blocked vs defective counted separately** (a run that shipped
+  WITH a defect is invisible otherwise), last run, worst first.
+* `classify_reason()` + `ATTENTION_KINDS` — connection · install · knowledge ·
+  compliance · quality, each carrying the console tab that can actually fix
+  it. Unmatched reasons fall through to "other" rather than being forced into
+  a bucket that would send somebody to the wrong page.
+
+**The two lists disagree ON PURPOSE, and both behaviours are pinned together**
+so neither can be "fixed" into agreement by someone who meets only one:
+`coherence:` rules are IN `attention` (they need a person) and OUT of
+`blocked_reasons` (they are not an authoring gap — no amount of authoring
+fixes an incoherent email).
+
+**UI:** `DIAG_VIEWS` = Overview · Systems check, `?tab=diagnostics&view=…`,
+same sub-tab strip built for Review. Systems check renders the per-system
+table, then every item ranked, each with its kind, the systems it hit, when it
+was first and last seen, a button to the tab that fixes it, and the runs folded
+underneath. The Systems tab keeps a one-line signpost with the count — a tab
+that silently drops a number people relied on teaches them the number was
+never real.
+
+`scripts/test_systems_check.py` (30 checks) and `test_admin_forms.py` extended
+to both Diagnostics views. Guard `attention_carries_the_runs`. 80/80 green.
+
+Still open from the owner's item 3: the Systems tab itself — active/available
+sub-tabs, status top-right, on/off as a toggle, workflow as the primary button.

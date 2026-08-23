@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "attention_carries_the_runs",
+        "file": "app/systems.py",
+        "find": '            if len(b["examples"]) < max(1, int(examples)):',
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_systems_check.py"],
+        "why": "Systems check goes back to ranking problems it cannot show you "
+               "one example of — the exact uselessness of the flat refused "
+               "list it replaced",
+    },
+    {
         "name": "picture_queue_form_wiring",
         "file": "app/admin_ui.py",
         "find": '<form id="picsform" method="post" action="/admin/assets_decide"></form>',

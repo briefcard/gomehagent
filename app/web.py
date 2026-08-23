@@ -1523,6 +1523,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
                 return default
         return ui.render_diagnostics(
             link_key, tenant,
+            view=request.query_params.get("view", ""),
             days=_int("days", 7, 1, 365),
             level=request.query_params.get("level", ""),
             system=request.query_params.get("system", ""),

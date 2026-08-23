@@ -2044,16 +2044,31 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     # Scoped to the account too. An unscoped backlog ranks another client's
     # missing knowledge above this one's, and the fix it points at is filed
     # against a knowledge base this page cannot reach.
-    backlog = systems.blocked_reasons("" if every else tenant)
+    # THE REFUSED LIST MOVED TO DIAGNOSTICS (owner, 2026-08-23: "I dont even
+    # think that belongs here but rather on the diagnostics page"). It was a
+    # flat `<ul>` of "12× no_ban_list" — no dates, nothing clickable, no way to
+    # see a single example — sitting ABOVE the systems it was about, so the
+    # first thing this tab showed was a diagnosis you could not act on and the
+    # installed systems needed a scroll to reach.
+    #
+    # What replaces it is a SIGNPOST, not the list: one line with the count and
+    # the way through. A tab that silently drops a number people relied on
+    # teaches them the number was never real.
+    backlog = systems.attention("" if every else tenant, 30)
     backlog_html = ""
     if backlog:
-        items = "".join(f"<li><b>{n}×</b> {_esc(reason)}</li>" for reason, n in backlog[:10])
+        _n = sum(a["count"] for a in backlog)
+        _href = ("/admin/ui?tab=diagnostics&amp;view=systems&amp;tenant="
+                 + _esc(tenant) + (f"&amp;key={_esc(key)}" if key else ""))
         backlog_html = f"""
         <div class="card">
-          <div class="head"><h2>What the systems refused on</h2></div>
-          <p class="mut">Last 30 days, most frequent first. This is the knowledge-base
-          backlog ranked by how often each gap actually cost an output — fix from the top.</p>
-          <ul class="bl">{items}</ul>
+          <div class="head"><h2>Something needs attention</h2>
+            <span class="chip off">{_n} in 30 days</span></div>
+          <p class="mut">{len(backlog)} distinct thing(s) refused a run or
+          shipped with it. The diagnosis lives on Diagnostics now, with the runs
+          themselves — dates, which system, and what each one actually said.</p>
+          <div class="row"><a class="btn sec" href="{_href}">Systems check
+            &rarr;</a></div>
         </div>"""
 
     # The installer, per account. The old version was two dropdowns and a
@@ -4463,9 +4478,150 @@ def _dur(ms) -> str:
 LIVE_EVERY = (0, 15, 60)
 
 
+#: Where each kind of problem is actually fixed. The label is what the button
+#: says; the tab is where it goes. A list of things that went wrong is only
+#: useful if every line knows where its fix lives.
+_FIX_WHERE = {
+    "accounts": ("Connections", "connect the account"),
+    "systems": ("Systems", "install or switch it on"),
+    "kb": ("Knowledge", "author what is missing"),
+    "content": ("Review", "decide what is queued"),
+    "diagnostics": ("", ""),
+}
+
+
+def _systems_check(key: str, tenant: str, days: int, need: list,
+                   scope: str, system: str) -> str:
+    """Per-system health, and every item needing attention WITH its content.
+
+    Three things, in the order somebody actually works: which system is unwell,
+    what keeps going wrong, and — the part that did not exist before — the runs
+    themselves, so a line reading "12x no_ban_list" can be opened and read.
+    """
+    rows = systems.per_system(scope, days)
+    if system:
+        rows = [r for r in rows if r["key"] == system]
+
+    def _when(dt_):
+        return _esc(db.as_utc(dt_).strftime("%b %d, %H:%M")) if dt_ else "never"
+
+    if rows:
+        table = ('<table class="tbl"><tr><th>system</th><th>state</th>'
+                 '<th class="num">runs</th><th class="num">shipped</th>'
+                 '<th class="num">blocked</th><th class="num">defective</th>'
+                 '<th>last run</th></tr>' + "".join(
+            f'<tr><td><a href="/admin/ui?tab=systems&amp;tenant={_esc(r["tenant"])}'
+            f'&amp;system={_esc(r["key"])}'
+            + (f'&amp;key={_esc(key)}' if key else "")
+            + f'">{_esc(r["name"] or r["key"])}</a>'
+            + (f'<div class="when">{_esc(r["tenant"])}</div>' if not tenant or tenant == ALL else "")
+            + f'</td>'
+            f'<td><span class="chip {"on" if r["status"] == "live" else "off"}">'
+            f'{_esc(r["status"] or "designed")}</span> '
+            f'<span class="mut">{_esc(r["autonomy"] or "")}</span></td>'
+            f'<td class="num">{r["runs"]}</td>'
+            f'<td class="num">{r["shipped"]}</td>'
+            f'<td class="num">{r["blocked"] or ""}</td>'
+            f'<td class="num">{r["defective"] or ""}</td>'
+            f'<td class="when">{_when(r["last_at"])}</td></tr>'
+            for r in rows) + "</table>")
+    else:
+        table = ('<p class="mut">No systems installed for this account yet — '
+                 'install one on the Systems tab and its runs appear here.</p>')
+
+    # --- the items, with their content ------------------------------------
+    cards = ""
+    for a in need:
+        where_tab, verb = _FIX_WHERE.get(a["where"], ("", ""))
+        fix = ""
+        if where_tab:
+            fix = (f'<a class="btn sec" href="/admin/ui?tab={_esc(a["where"])}'
+                   f'&amp;tenant={_esc(tenant)}'
+                   + (f'&amp;key={_esc(key)}' if key else "")
+                   + f'">{_esc(where_tab)} &rarr;</a>'
+                   f'<span class="mut">{_esc(verb)}</span>')
+        # THE RUNS THEMSELVES. Folded, because twelve examples open at once is
+        # the wall of text this page is replacing — but present, because
+        # "12x no_ban_list" with no way to see one is what made the old list
+        # useless.
+        egs = "".join(
+            f'<div class="msg"><div class="when">{_when(e["at"])} · '
+            f'{_esc(e["system"])} · {_esc(e["stage"] or "?")}'
+            + (f' · {_esc(e["tenant"])}' if not tenant or tenant == ALL else "")
+            + (f' · ref {_esc(e["ref"])}' if e["ref"] else "")
+            + '</div>'
+            + (f'<div class="det">{_esc(e["error"])}</div>' if e["error"] else "")
+            + (f'<div class="msg esc">{_esc(e["output"])}</div>'
+               if e["output"] else "")
+            + (f'<div class="when">also: '
+               + _esc(", ".join(x for x in e["blocked_on"]
+                                if x != a["reason"])) + "</div>"
+               if len(e["blocked_on"]) > 1 else "")
+            + "</div>"
+            for e in a["examples"])
+        seen = (f'first {_when(a["first_at"])} · last {_when(a["last_at"])}'
+                if a["count"] > 1 else f'{_when(a["last_at"])}')
+        cards += f"""
+    <div class="card">
+      <div class="head">
+        <h2 style="font-size:.95rem">{_esc(a["reason"])[:140]}</h2>
+        <span class="chip off">{a["count"]}&times;</span></div>
+      <p class="mut"><span class="chip">{_esc(a["label"])}</span>
+        {_esc(" · ".join(f"{k} ({n})" for k, n in
+                         sorted(a["systems"].items(), key=lambda kv: -kv[1])))}
+        &nbsp;·&nbsp; {seen}</p>
+      <div class="row">{fix}</div>
+      <details class="sec"><summary>The {len(a["examples"])} most recent
+        {"run" if len(a["examples"]) == 1 else "runs"}</summary>
+        <div class="thread">{egs}</div></details>
+    </div>"""
+
+    if not need:
+        cards = ('<div class="card"><p class="mut">Nothing was refused and '
+                 f'nothing shipped with a defect in the last {days} days. '
+                 'That is either a quiet period or a healthy one — the table '
+                 'above says which.</p></div>')
+
+    return f"""
+<div>
+  <h1>Systems check</h1>
+  <p class="mut">Which system is unwell, since when, and what exactly went
+  wrong — with the runs that prove it. Ranked by how often each thing bit,
+  most recent first between equals.</p>
+</div>
+
+<div class="card">
+  <div class="head"><h2>Every system, last {days} days</h2>
+    <span class="mut">worst first</span></div>
+  {table}
+  <p class="mut"><b>blocked</b> is a run that produced nothing.
+  <b>defective</b> is a run that shipped anyway and needs fixing — those are
+  the ones nobody notices without this column.</p>
+</div>
+
+<div class="card">
+  <div class="head"><h2>Needs attention</h2>
+    <span class="chip {'off' if need else 'on'}">{len(need)} distinct</span></div>
+  <p class="mut">Every reason a run was refused or shipped defective in the
+  window, with the runs themselves. <b>Quality</b> items are deliberately here
+  and deliberately absent from the Systems backlog: no amount of authoring
+  fixes an incoherent email, so counting it as an authoring gap would send
+  somebody to write rows that could not have helped.</p>
+</div>
+{cards}
+"""
+
+
+#: Diagnostics has two jobs and they want different pages. The timeline
+#: answers "what is happening right now, across everything"; Systems check
+#: answers "which system is unwell, since when, and what exactly went wrong".
+#: One scroll served the first and buried the second (owner, 2026-08-23).
+DIAG_VIEWS = (("overview", "Overview"), ("systems", "Systems check"))
+
+
 def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                        level: str = "", system: str = "",
-                       limit: int = 200, live: int = 0) -> str:
+                       limit: int = 200, live: int = 0, view: str = "") -> str:
     """Live reports and logs for one account's systems.
 
     Ordered by what a person triaging actually does: the per-system verdict
@@ -4660,11 +4816,52 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
     # change from the page is a URL-editing exercise). The whole report is
     # computed from `days`, so the bar governs everything below it, not just
     # the log it used to sit on.
+    # --- Systems check ------------------------------------------------------
+    #
+    # The Systems tab used to open on a flat `<ul>` of "12x no_ban_list" with
+    # nothing clickable, no dates, and no way to see a single example — the
+    # content was on the run row the whole time and was never joined (owner,
+    # 2026-08-23). It lives here instead, because it is a diagnosis and not a
+    # thing you install.
+    view = (view or "").strip().lower()
+    if view not in dict(DIAG_VIEWS):
+        view = DIAG_VIEWS[0][0]
+
+    def _dv(v: str) -> str:
+        bits = [f"tab=diagnostics", f"view={v}", f"days={days}",
+                f"tenant={_esc(tenant)}"]
+        if system:
+            bits.append(f"system={_esc(system)}")
+        if key:
+            bits.append(f"key={_esc(key)}")
+        return "/admin/ui?" + "&amp;".join(bits)
+
+    need = systems.attention("" if every else tenant, days,
+                             system_key=system or "")
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if v == view else ""}" href="{_dv(v)}">{label}'
+        + (f'<span class="cnt">{sum(a["count"] for a in need)}</span>'
+           if v == "systems" else "") + "</a>"
+        for v, label in DIAG_VIEWS) + "</div>"
+
+    if view == "systems":
+        return _shell(key, "diagnostics", "Diagnostics", tenant=tenant,
+                      head=refresh, suffix=f"&amp;days={days}",
+                      body=_every_note(
+                          every, "Every account's systems in one table. Each "
+                                 "row names the client it belongs to.")
+                      + f'<div class="filters">{windows}<span class="sep">'
+                        f'</span>{sysfilter}</div>'
+                      + strip
+                      + _systems_check(key, tenant, days, need,
+                                       "" if every else tenant, system))
+
     body = f"""
 {_every_note(every, "Every account's runs, calls and checks in one timeline. "
              "Each row names the client it belongs to.")}
 <div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
   <span class="sep"></span>{livebar}</div>
+{strip}
 <details class="sec">
   <summary>How to read this page</summary>
   <p class="mut">Where a system is breaking, and at which layer.
