@@ -125,6 +125,8 @@ button.sec{background:transparent;color:var(--acc)}
 .pic img{display:block;width:100%;height:112px;object-fit:cover;background:var(--rule2)}
 .pic input{position:absolute;top:7px;left:7px;z-index:2;transform:scale(1.25)}
 .pic:has(input:checked){outline:2px solid var(--acc);outline-offset:-2px}
+.pictile{display:flex;flex-direction:column;gap:4px}
+.pictile .sec summary{font-size:.7rem}
 .picmeta{display:block;font-size:.68rem;color:var(--mut);padding:5px 7px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .inst{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
@@ -2668,7 +2670,32 @@ and hand-set fields survive future re-derives.</p>
 </div>""")
 
 
-def _photo_library(tenant: str) -> str:
+def _remove_control(key: str, tenant: str, kind: str, row_id: str,
+                    name: str = "", note: str = "") -> str:
+    """The one way to take a row out, wherever it is listed.
+
+    Folded, because removing is rare next to reading, and a delete control
+    sitting open beside every row is an invitation. Named, because "Remove"
+    alone does not say what happens — nothing here is deleted, and a person who
+    believes it was will not trust the undo.
+    """
+    return f"""
+    <details class="sec" style="margin-top:6px">
+      <summary class="mut">Remove{(" " + _esc(name)) if name else ""}</summary>
+      <p class="mut" style="margin-top:6px">It stops being offered to every
+      generator immediately. Nothing is deleted — it can be put back.
+      {_esc(note)}</p>
+      <form method="post" action="/admin/kb_remove" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="kind" value="{_esc(kind)}">
+        <input type="hidden" name="id" value="{_esc(row_id)}">
+        <button class="sec">Remove</button>
+      </form>
+    </details>"""
+
+
+def _photo_library(tenant: str, key_: str = "") -> str:
     """Every photograph the creative pipeline is allowed to publish.
 
     There was nowhere in the console to see this (owner, 2026-08-23). The
@@ -2698,7 +2725,12 @@ def _photo_library(tenant: str) -> str:
         used = int(a.uses or "0")
         when = (db.as_utc(a.last_used_at).strftime("%b %d")
                 if a.last_used_at else "")
-        return (f'<a class="pic" href="{_esc(a.url)}" target="_blank" '
+        # The one CONTROL in an otherwise read-only library. Approving a
+        # photograph grants publication, so un-approving it has to live
+        # wherever the approved ones are listed — the pending queue on Review
+        # cannot reach a row that already left it.
+        return (f'<div class="pictile">'
+                f'<a class="pic" href="{_esc(a.url)}" target="_blank" '
                 f'rel="noopener" title="{_esc(a.title or "")}">'
                 f'<img src="{_esc(a.url)}" loading="lazy" alt="">'
                 f'<span class="picmeta">{_esc((a.title or "untitled")[:34])}'
@@ -2706,7 +2738,10 @@ def _photo_library(tenant: str) -> str:
                 f'<span class="picmeta">{_esc(scope[:22])}'
                 + (f' &middot; used {used}&times;'
                    + (f" {_esc(when)}" if when else "") if used else "")
-                + '</span></a>')
+                + '</span></a>'
+                + _remove_control(key_, tenant, "asset", a.id,
+                                  a.title or "this photograph")
+                + '</div>')
 
     if not shots and not marks:
         return ('<div class="card"><div class="head">'
@@ -2860,6 +2895,12 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
                    if kb.usage_rule(r.proof_type or "") else "")
                 + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
                 + (_claim_editor(r) if editable else "")
+                # A claim has always been rejectable from the REVIEW queue,
+                # which an approved claim has already left. Removing one it
+                # turns out the brand should not be making meant re-finding it
+                # there, where it no longer is.
+                + (_remove_control(key, tenant, "claim", r.id, "this claim")
+                   if editable else "")
                 + "</div>")
 
     def _claim_block(title: str, rows_, empty: str, note: str = "",
@@ -2894,6 +2935,7 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
                ("buying trigger", _esc(r.buying_trigger) or _mut("not set")),
                ("decides in", _esc(r.decision_timeline) or _mut("not set"))]
               + ([("notes", _esc(r.notes))] if r.notes else []))
+        + _remove_control(key, tenant, "audience", r.id, r.name or r.key)
         for r in kb.audiences(tenant)],
         "No segments. Selection cannot narrow to a buyer.")
 
@@ -2993,7 +3035,10 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
     # merge warnings, which is how "claims vs objections" stopped reading as
     # two different things (owner, 2026-08-21). The merge card now lives with
     # the situations it is about.
-    obj_html = _kb_list("All objections", [_obj(r) for r in obj_rows],
+    obj_html = _kb_list("All objections",
+                        [_obj(r) + _remove_control(key, tenant, "objection",
+                                                   r.id, "this answer")
+                         for r in obj_rows],
                         "None. This is human-authored and it is half of the "
                         "intake.", open=len(obj_rows) <= 12)
     obj_html += ('<datalist id="objents">'
@@ -3015,6 +3060,11 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
         + (f" · goes stale after {_esc(r.freshness_days)} days"
            if r.freshness_days else "")
         + "</div>"
+        + _remove_control(key, tenant, "entity", r.id, r.name,
+                          "Anything scoped only to it — its claims, its "
+                          "objections, its photographs — comes out with it, "
+                          "because a claim about a catalogue row that no "
+                          "longer exists cannot even be edited.")
         for r in ents],
         "Nothing catalogued. Selection has nothing to offer.")
 
@@ -3062,7 +3112,11 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
             f'<div class="when">triggers on: '
             + (_esc(", ".join(" ".join(p) for p in (r.patterns or []) if p))
                or _mut("no patterns — diagnosis can never assign this tag"))
-            + "</div></div>" for r in sits)
+            + "</div>"
+            + _remove_control(key, tenant, "situation", r.id, r.tag,
+                              "Claims already tagged with it keep the tag, but "
+                              "no new claim may carry it.")
+            + "</div>" for r in sits)
         sit_note = (f'<p class="mut">These {len(sits)} tags are the only ones a claim '
                     f'for {_esc(t.name)} may carry. A claim tagged with anything else '
                     f'is refused on the way in.</p>')
@@ -3226,7 +3280,7 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
   <div class="thread">{sit_body}</div>
 </div>
 
-{_photo_library(tenant)}
+{_photo_library(tenant, key)}
 {over_html}
 
 {unk_card}

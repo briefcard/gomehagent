@@ -38,6 +38,35 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "drafts_are_not_catalogued",
+        "file": "app/catalog_sync.py",
+        "find": '            if state in ("draft", "archived"):',
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_kb_removal.py"],
+        "why": "every Shopify draft becomes an approved catalogue entity again "
+               "— the pollution the owner reported, in every account",
+    },
+    {
+        "name": "removing_an_entity_takes_its_claims",
+        "file": "app/kb.py",
+        "find": "        if kind == \"entity\":",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_kb_removal.py"],
+        "why": "a claim scoped to a removed entity is left behind unreachable "
+               "— it cannot be offered and cannot even be edited, because the "
+               "editor validates its key against active entities",
+    },
+    {
+        "name": "a_removed_tag_is_not_vocabulary",
+        "file": "app/kb.py",
+        "find": ('                if (r.review or "") != prov.REJECTED\n'
+                 '                and (include_proposed or (r.review or "") != prov.PROPOSED)}'),
+        "replace": "                if True}  # SABOTAGE",
+        "suites": ["test_kb_removal.py"],
+        "why": "a situation tag somebody removed goes on validating new claims "
+               "for ever",
+    },
+    {
         "name": "angle_is_not_the_subject",
         "file": "app/skill_pack.py",
         "find": '    line = _named or (proof.split(".")[0] if proof else "") or seg["name"]',

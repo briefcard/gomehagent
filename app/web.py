@@ -4284,6 +4284,40 @@ def email_harvest_route(key: str = Depends(admin_key), tenant: str = "",
     return eh.mine(tenant, days=days, limit=limit, apply=bool(apply))
 
 
+@app.post("/admin/kb_remove")
+async def kb_remove(request: Request, key: str = Depends(admin_key)):
+    """Take one thing out of the knowledge base.
+
+    POST, not GET, even though nothing here is deleted: a GET that changes
+    state is fired by anything that loads a URL, and the console's own purge
+    routes already draw that line. Reversible, and the flash says what else
+    came out with it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    f = await request.form()
+    tenant = str(f.get("tenant") or "")
+    out = kbm.remove(tenant, str(f.get("kind") or ""), str(f.get("id") or ""))
+    if not out.get("ok"):
+        return _back_to_kb(tenant, err=out.get("error", "could not remove it"))
+    return _back_to_kb(tenant, ok=out["said"])
+
+
+@app.post("/admin/kb_restore")
+async def kb_restore(request: Request, key: str = Depends(admin_key)):
+    """Put back something removed by hand."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    f = await request.form()
+    tenant = str(f.get("tenant") or "")
+    out = kbm.restore(tenant, str(f.get("kind") or ""), str(f.get("id") or ""))
+    if not out.get("ok"):
+        return _back_to_kb(tenant, err=out.get("error", "could not restore it"))
+    return _back_to_kb(tenant, ok=out["said"])
+
+
 @app.get("/admin/purge_proposals")
 def purge_proposals_route(key: str = Depends(admin_key), tenant: str = "",
                           origin: str = "") -> dict:

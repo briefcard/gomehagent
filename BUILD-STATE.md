@@ -3436,3 +3436,27 @@ blank now means "choose one and tell me what you chose", recorded as
 
 All 81 suites in parallel, failures only, ~98s instead of 5m+. Takes a
 substring filter (`./scripts/test_all.sh campaign`). See DEFECTS §2.84.
+
+## Removing knowledge, and keeping drafts out (2026-08-23)
+
+See DEFECTS §2.85–2.86.
+
+* **`catalog_sync`** skips `draft` and `archived` products, and RETIRES an
+  entity whose product has since become one. Counted separately from
+  `out_of_stock` on the return.
+* **`kb.remove(tenant, kind, id)` / `kb.restore(...)`** — one door for claim ·
+  entity · objection · audience · situation · asset. Soft (`review=rejected`,
+  plus `status=retired` where the column exists), reversible, and it calls
+  `embed.forget` for every kind rather than only for claims.
+* **Removing an entity cascades** to what was scoped only to it, and says how
+  many. Restore does not undo the cascade.
+* **`POST /admin/kb_remove` / `/admin/kb_restore`** — POST because a GET that
+  changes state is fired by anything that loads a URL, the line the purge
+  routes already drew.
+* **A remove control on every Knowledge list** — entities, claims, objections,
+  audiences, situations, and the photo library. Folded, and it says nothing is
+  deleted, because a person who believes it was will not trust the undo.
+
+`scripts/test_kb_removal.py` (30 checks). Guards
+`drafts_are_not_catalogued`, `removing_an_entity_takes_its_claims`,
+`a_removed_tag_is_not_vocabulary`. 82/82 green in 90s.

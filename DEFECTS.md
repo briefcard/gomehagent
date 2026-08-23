@@ -2933,3 +2933,76 @@ takes a substring filter for targeted runs while iterating.
 Worth stating as a rule: a check slow enough to skip is a check that will be
 skipped, and then it is protecting nothing. The cost of a slow suite is not the
 minutes — it is the runs that stop happening.
+
+### 2.85 Draft products were catalogued as products — 2026-08-23
+
+Owner: **"In the example with Eien Health, we have draft products polluting our
+entities and therefore all of our systems."** Correct, and the mechanism is one
+missing line.
+
+`catalog_sync.sync_shopify` had exactly ONE skip in its whole loop:
+
+    key = (p.get("handle") or str(p.get("id") or "")).strip().lower()
+    if not key:
+        continue
+
+No `status=active` on the request, no filter in the loop. So a Shopify **draft**
+became a `KbEntity` with `review=APPROVED`, its title, price, description and
+photograph imported, and only `availability="draft"` to mark it.
+
+Labelling was the right first move — §2.68 is exactly that fix, and it is what
+stopped a draft being RECOMMENDED. It was not enough, **because a label only
+protects the readers that check it.** `fitness.screen` checks it. The catalogue
+counts, the completeness score, the claim editor's entity picker and the
+coherence proof scopes do not — they ask `kb.entities()` and get a product.
+
+Drafts and archived products are now skipped, and a product that has BECOME a
+draft since the last sync is retired rather than left behind — a fix that only
+protects new accounts leaves every existing one polluted for ever, which is the
+half that actually bit this owner. Both are counted and named on the sync's
+return (`drafts_skipped`, `retired_now_draft`), separately from `out_of_stock`,
+because an out-of-stock product is real and coming back and a draft was never a
+product. Guard `drafts_are_not_catalogued`.
+
+Not fixed, worth knowing: `published_scope` is read nowhere in the codebase, so
+a product published to POS only still reads as available.
+
+### 2.86 Nothing could be taken out of the knowledge base — 2026-08-23
+
+Same message: *"Lets add the ability to remove entities from our knowledgebase
+… This is true for approved photos, claims, objections, etc. We should be able
+to remove / edit as needed."*
+
+There was no removal path for an entity, an audience or an objection at all,
+and the two that existed were reachable only from the REVIEW queue — which an
+approved row has already left. An approved photograph could not be
+un-approved; a claim that turned out to be wrong could not be retired without
+re-finding it in a queue it was no longer in.
+
+`kb.remove(tenant, kind, id)` is one door for all six tables. It is SOFT by
+design: every read accessor already filters `review == APPROVED` and
+`kb.entities` filters `status == "active"` unconditionally, so rejecting IS
+removal from the pipeline — and it is reversible via `kb.restore`, which is
+what makes it safe to offer. Hard deletion stays where it was, in the bulk
+machine-origin purges.
+
+**The part that is not obvious: removing an entity strands what was scoped to
+it.** A claim whose `entity_key` names a row that is no longer active cannot
+even be EDITED — `claim_update` validates the key against `entities()` and
+refuses with "has nothing in its catalogue keyed …" — so it becomes
+unreachable rather than merely unused. So anything scoped ONLY to the entity
+comes out with it and the return value names how many. Brand-wide rows are
+untouched. `restore` deliberately does NOT undo the cascade: putting a
+collection of rows back in bulk resurrects the thing you meant to remove.
+Guard `removing_an_entity_takes_its_claims`.
+
+**Two bugs found while wiring it:**
+
+* `situations()` tested `(r.review or "") != prov.PROPOSED`. That test was
+  chosen so pre-review legacy rows would not vanish — and a row somebody had
+  explicitly REJECTED passed it too, so a removed situation tag went on
+  validating new claims for ever. Guard `a_removed_tag_is_not_vocabulary`.
+* `embed.forget` was called from exactly one place, the claim-reject branch —
+  "leaving the vector behind is the index-drift this design exists to avoid".
+  Every other removal left its vector, so a rejected objection stayed findable
+  by similarity. `remove()` calls it for every kind.

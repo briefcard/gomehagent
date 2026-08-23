@@ -300,8 +300,13 @@ def situations(tenant: str, include_proposed: bool = False) -> set[str]:
     with db.SessionLocal() as s:
         q = s.query(db.KbSituation).filter(db.KbSituation.tenant == tenant)
         rows = q.all()
+        # REJECTED IS NOT MERELY "NOT PROPOSED". The test was
+        # `!= PROPOSED`, chosen so pre-review legacy rows (review == "") would
+        # not vanish — and a row a person had explicitly REJECTED passed it
+        # too, so removing a situation tag left it validating claims for ever.
         tags = {r.tag for r in rows
-                if include_proposed or (r.review or "") != prov.PROPOSED}
+                if (r.review or "") != prov.REJECTED
+                and (include_proposed or (r.review or "") != prov.PROPOSED)}
     return tags or set(SITUATIONS)
 
 
@@ -1891,6 +1896,117 @@ def pending_claims(tenant: str = "") -> list[db.KbClaim]:
         rows = q.order_by(db.KbClaim.verified_at.desc()).all()
         s.expunge_all()
         return rows
+
+
+#: The six knowledge tables, by the name a caller uses. One map, so a new kind
+#: is added in one place rather than in every branch of every remover.
+REMOVABLE = {
+    "claim": db.KbClaim, "entity": db.KbEntity, "objection": db.KbObjection,
+    "audience": db.KbAudience, "situation": db.KbSituation, "asset": db.KbAsset,
+}
+
+
+def _label(kind: str, row) -> str:
+    """What to call this row in a sentence."""
+    for attr in ("name", "objection", "claim", "title", "tag", "key"):
+        got = str(getattr(row, attr, "") or "").strip()
+        if got:
+            return got[:80]
+    return str(getattr(row, "id", ""))[:8]
+
+
+def remove(tenant: str, kind: str, row_id: str, by: str = "owner") -> dict:
+    """Take one thing out of the knowledge base. Reversible, and it says what
+    else went with it.
+
+    Owner, 2026-08-23: Eien's draft products polluted the entities and
+    therefore every system downstream, and there was no way to take one out.
+    There still is no hard delete here, deliberately — every read accessor
+    already filters on `review == APPROVED` and `kb.entities` filters
+    `status == "active"` unconditionally, so rejecting IS removal from the
+    pipeline, and it can be undone by a person who removed the wrong thing.
+    Hard deletion stays where it was: the bulk, machine-origin purges.
+
+    THE PART THAT IS NOT OBVIOUS: removing an entity strands what was scoped to
+    it. A claim whose `entity_key` names a row that is no longer active cannot
+    even be EDITED in the console — the editor validates the key against
+    `entities()` and refuses ("has nothing in its catalogue keyed …"), so the
+    claim becomes unreachable rather than merely unused. So anything scoped to
+    ONLY this entity comes out with it, and the return value names how many.
+    Nothing scoped brand-wide is touched.
+    """
+    model = REMOVABLE.get((kind or "").strip().lower())
+    if model is None:
+        return {"ok": False, "error": f"nothing removable is called {kind!r}",
+                "known": sorted(REMOVABLE)}
+    with db.SessionLocal() as s:
+        row = s.get(model, row_id)
+        if row is None or row.tenant != tenant:
+            return {"ok": False, "error": "not found on this account"}
+        name = _label(kind, row)
+        row.review = prov.REJECTED
+        # `status` exists on claims, entities and assets and is the axis
+        # `entities()` filters on; the other three have review only.
+        if hasattr(row, "status"):
+            row.status = "retired"
+
+        also: dict = {}
+        if kind == "entity":
+            ekey = row.key
+            for label, m in (("claims", db.KbClaim),
+                             ("objections", db.KbObjection),
+                             ("photographs", db.KbAsset)):
+                hit = [r for r in s.query(m).filter(
+                    m.tenant == tenant, m.entity_key == ekey).all()
+                    if (r.review or "") != prov.REJECTED]
+                for r in hit:
+                    r.review = prov.REJECTED
+                    if hasattr(r, "status"):
+                        r.status = "retired"
+                if hit:
+                    also[label] = len(hit)
+        s.commit()
+
+    # THE VECTOR HAS TO GO TOO. `review_claim` has always called this on
+    # reject — "leaving the vector behind is the index-drift this design exists
+    # to avoid" — and no other removal path did, so a rejected objection stayed
+    # findable by similarity forever.
+    try:
+        embed.forget(tenant, "media" if kind == "asset" else kind, row_id)
+    except Exception:                                            # noqa: BLE001
+        pass                        # never let index bookkeeping lose the edit
+
+    return {"ok": True, "kind": kind, "name": name, "also": also,
+            "said": (f"Removed {kind} {name!r}"
+                     + (" — and " + ", ".join(f"{n} {k}" for k, n in also.items())
+                        + " scoped to it" if also else "")
+                     + ". Nothing was deleted; it can be restored.")}
+
+
+def restore(tenant: str, kind: str, row_id: str, by: str = "owner") -> dict:
+    """Put back something removed by hand.
+
+    Removal is reversible or it is not safe to offer, and a person who takes
+    out the wrong row should not have to re-author it. What this does NOT do is
+    restore what came out alongside — an entity's claims are put back by name,
+    one decision at a time, because bulk-undoing a cascade is how you
+    resurrect the thing you meant to remove.
+    """
+    model = REMOVABLE.get((kind or "").strip().lower())
+    if model is None:
+        return {"ok": False, "error": f"nothing removable is called {kind!r}"}
+    with db.SessionLocal() as s:
+        row = s.get(model, row_id)
+        if row is None or row.tenant != tenant:
+            return {"ok": False, "error": "not found on this account"}
+        row.review = prov.APPROVED
+        row.approved_by, row.approved_at = by, db.utcnow()
+        if hasattr(row, "status"):
+            row.status = "active"
+        name = _label(kind, row)
+        s.commit()
+    return {"ok": True, "kind": kind, "name": name,
+            "said": f"Restored {kind} {name!r}."}
 
 
 def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:

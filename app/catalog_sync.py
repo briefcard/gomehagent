@@ -215,6 +215,11 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     held: list[dict] = []      # fields the store wanted to change and could not
     to_file: list[dict] = []   # product photos for the creative library
 
+    # Named, not silent: a sync that quietly imports nothing looks identical to
+    # a sync that had nothing to import.
+    skipped: list[str] = []
+    retired: list[str] = []
+
     with db.SessionLocal() as s:
         existing = {e.key: e for e in s.query(db.KbEntity).filter(
             db.KbEntity.tenant == tenant).all()}
@@ -222,6 +227,39 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
         for p in products:
             key = (p.get("handle") or str(p.get("id") or "")).strip().lower()
             if not key:
+                continue
+
+            # A DRAFT IS NOT A PRODUCT YET, AND IT NEVER BECOMES ONE HERE.
+            #
+            # This loop had exactly one skip — an empty handle — so every
+            # product the API returned became a KbEntity with `review=APPROVED`,
+            # its title, price, description and photograph imported, and only
+            # `availability="draft"` to mark it. Exclusion happened downstream,
+            # at read time, in whichever caller remembered to ask. Anything
+            # that did not — the catalogue counts, the completeness score, the
+            # claim editor's entity picker, the coherence proof scopes — saw a
+            # real product. Eien's drafts went through all of them (owner,
+            # 2026-08-23: "draft products polluting our entities and therefore
+            # all of our systems").
+            #
+            # Labelling was the right first move (DEFECTS §2.68 — it is what
+            # stopped a draft being RECOMMENDED). It was not enough, because a
+            # label only protects the readers that check it.
+            #
+            # A draft that was already synced is RETIRED rather than left
+            # behind: the fix has to clean up after the bug, or every existing
+            # account keeps the pollution for ever. Retiring is reversible and
+            # `kb.entities` filters `status == "active"`, so it leaves through
+            # the same door as a hand-removed row.
+            state = _available(p)
+            if state in ("draft", "archived"):
+                was = existing.get(key)
+                if was is not None and (was.status or "active") == "active":
+                    was.status = "retired"
+                    was.availability = state
+                    retired.append(f"{was.name or key} ({state})")
+                else:
+                    skipped.append(f"{p.get('title') or key} ({state})")
                 continue
             hits = check_compliance(tenant, _text(p))
             if hits:
@@ -339,6 +377,14 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
         "added": added, "updated": updated, "skipped": skipped,
         "out_of_stock": len(oos),
         "out_of_stock_examples": oos[:8],
+        # NOT the same thing as out of stock, and the difference matters: an
+        # out-of-stock product is real and coming back, a draft is not a
+        # product yet. Both used to be catalogued and only one of them should
+        # ever have been.
+        "drafts_skipped": len(skipped),
+        "drafts_skipped_examples": skipped[:8],
+        "retired_now_draft": len(retired),
+        "retired_now_draft_examples": retired[:8],
         "compliance_violations": violations,
         "held_back": held,
         "held_back_count": len(held),
