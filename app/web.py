@@ -1495,6 +1495,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         except ValueError:
             pp = 1
         return ui.render_systems(link_key, tenant,
+                                 sub=request.query_params.get("sub", ""),
                                  msg=request.query_params.get("ok", ""),
                                  err=request.query_params.get("err", ""),
                                  system=request.query_params.get("system", ""),

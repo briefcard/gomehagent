@@ -106,6 +106,20 @@ def main() -> int:
         ck(f"content/{k}: it is the section that rendered",
            f'class="subtab on"' in html and f'sub={k}' in html)
 
+    # THE SYSTEMS SUB-TABS. Active is where the work is; Available is the
+    # catalogue. Different markup, so checking the tab once checks half of it.
+    from app.admin_ui import SYSTEM_SUBS
+    for v, label in SYSTEM_SUBS:
+        html = client.get(
+            f"/admin/ui?tab=systems&sub={v}&tenant=baci&key={KEY}").text
+        ids = _ids(html)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        ck(f"systems/{v}: no duplicate element ids", not dupes, ", ".join(dupes[:4]))
+        forms = set(re.findall(r'<form[^>]*\bid="([^"]+)"', html))
+        wanted = set(re.findall(r'\bform="([^"]+)"', html))
+        ck(f"systems/{v}: every form= points at a real <form>",
+           not (wanted - forms), ", ".join(sorted(wanted - forms)[:4]))
+
     # THE DIAGNOSTICS VIEWS. Systems check is a second page behind the same
     # tab, so checking `diagnostics` once checks half of it.
     from app.admin_ui import DIAG_VIEWS

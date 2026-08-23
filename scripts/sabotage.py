@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "toggle_says_why_it_cannot_move",
+        "file": "app/admin_ui.py",
+        "find": '    elif r["ready"]:',
+        "replace": "    elif True:  # SABOTAGE",
+        "suites": ["test_systems_check.py"],
+        "why": "a system that cannot go live offers a switch that will be "
+               "refused by the server, instead of a disabled one naming the "
+               "connection it is missing",
+    },
+    {
         "name": "attention_carries_the_runs",
         "file": "app/systems.py",
         "find": '            if len(b["examples"]) < max(1, int(examples)):',

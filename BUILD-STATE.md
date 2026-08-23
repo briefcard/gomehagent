@@ -3299,3 +3299,45 @@ to both Diagnostics views. Guard `attention_carries_the_runs`. 80/80 green.
 
 Still open from the owner's item 3: the Systems tab itself — active/available
 sub-tabs, status top-right, on/off as a toggle, workflow as the primary button.
+
+## Systems tab: work first, catalogue second (2026-08-23)
+
+Owner's item 3, the remainder. `SYSTEM_SUBS` = Active · Available,
+`?tab=systems&sub=…`, each with its count. They are not two halves of one page:
+Active is where you work every day, Available is a catalogue you visit once per
+system ever — and stacking them put the shop first and made the daily work
+scroll. The strip is suppressed on the all-accounts view, where there is no
+account for an install to mean.
+
+**Status is one toggle, top right.** It was two different buttons that swapped
+places — "Switch on" when off, "Pause" when on — so the same pixel meant
+opposite things and the only way to read the state was to read the label of the
+control that would change it. Now a switch shows the state AND changes it, as a
+plain `<a>` through the unchanged `/admin/system_set?…&status=` route: no JS,
+degrades like everything else on the page.
+
+**Three states, because there are three.** A system that cannot go live —
+`campaign_email` with no ESP connected — used to render NO control at all, so
+the page fell silent exactly where it owed an explanation. It now renders a
+disabled toggle carrying the reason (`title="not connected: esp"`). The
+server-side rule is untouched: `systems.update(status="live")` still refuses
+with its blockers.
+
+**Workflow is the primary button** (`class="btn"`, was `btn sec`), on its own
+row under the head with a line saying what it is for — "that's where people
+will live and work".
+
+Two latent CSS bugs fixed while in there, both the same shape: `.grow` was
+defined only as `.insthead .grow` and `.bulkbar .grow`, and `.when` only as
+`.log .ev .when` and `.msg .when` — so both classes silently did nothing in
+every other place they were used (~60 for `.when`). Both now have bare rules.
+
+`test_systems_check.py` grew a Systems-tab section; `test_admin_forms.py`
+covers both sub-tabs. Guard `toggle_says_why_it_cannot_move`. The installer
+assertions in `test_review_ui.py` were re-pointed at `sub=available`, not
+deleted. 80/80 green.
+
+Owner's remaining console items: 4 (inside a workflow — too many fields),
+5 (Assurance never invested in), 6 (Diagnostics overwhelming / no actions —
+Systems check is the first half of this), 8 (Data layer outdated, cannot fix
+from there).

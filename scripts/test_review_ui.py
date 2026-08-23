@@ -222,10 +222,19 @@ def installer() -> int:
                                            "tenant": "baci"}).text
     ck("the tab renders per account", 'tab=systems&amp;tenant=baci' in html
        or 'tab=systems&tenant=baci' in html)
+    # THE CATALOGUE IS ITS OWN SUB-TAB NOW (owner, 2026-08-23). Installing is
+    # something you do once per system ever; the systems you already have are
+    # what you work in every day, and stacking them put the shop first. The
+    # installer assertions are unchanged — they are just asked for by name.
+    avail = client.get("/admin/ui", params={"key": KEY, "tab": "systems",
+                                            "tenant": "baci",
+                                            "sub": "available"}).text
     ck("  with a met and an unmet prerequisite chip",
-       'class="pre yes"' in html and 'class="pre no"' in html)
+       'class="pre yes"' in avail and 'class="pre no"' in avail)
     ck("  and an install link carrying the account",
-       'system_add' in html and 'tenant=baci' in html)
+       'system_add' in avail and 'tenant=baci' in avail)
+    ck("  while the default view is the systems you already have",
+       "Installed" in html and "Install a system" not in html)
     return 0
 
 

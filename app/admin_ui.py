@@ -133,7 +133,8 @@ button.sec{background:transparent;color:var(--acc)}
 .inst.gap{border-left:3px solid var(--gap)}
 .inst.done{border-left:3px solid var(--rule);opacity:.72}
 .insthead{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-.insthead .grow{flex:1}
+.grow{flex:1}
+.when{color:var(--mut);font-size:.8rem}
 .prereqs{display:flex;gap:6px;flex-wrap:wrap}
 .pre{font-size:.72rem;border-radius:100px;padding:2px 9px;border:1px solid var(--rule);
   white-space:nowrap}
@@ -288,6 +289,13 @@ border-radius:4px;background:var(--panel);color:var(--ink);width:100%;resize:ver
 ul.bl{margin:0;padding-left:18px;font-size:.85rem;color:var(--ink2)}
 ul.bl li{margin:2px 0}
 .chip.nb{background:var(--rule2);color:var(--ink2);border:1px solid var(--rule)}
+.tog{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--mut);font-size:.75rem;font-weight:700;letter-spacing:.03em}
+.tog .tr{width:34px;height:19px;border-radius:10px;background:var(--rule2);border:1px solid var(--rule);position:relative;transition:background .12s}
+.tog .kn{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--mut);transition:left .12s,background .12s}
+.tog.on{color:var(--ok)}
+.tog.on .tr{background:var(--oks);border-color:var(--ok)}
+.tog.on .kn{left:17px;background:var(--ok)}
+.tog.dis{opacity:.45;cursor:not-allowed}
 .kv{display:grid;grid-template-columns:130px 1fr;gap:5px 14px;margin:0;font-size:.85rem}
 .kv dt{color:var(--mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
 font-weight:700;padding-top:2px}
@@ -1404,24 +1412,44 @@ def _system_card(key: str, row) -> str:
     else:
         promo = '<span class="mut">Top of the ladder.</span>'
 
-    live = ""
-    if row.status != "live" and r["ready"]:
-        live = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}&amp;status=live">'
-                f'<button type="button">Switch on</button></a>')
-    elif row.status == "live":
-        live = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}&amp;status=paused">'
-                f'<button class="sec" type="button">Pause</button></a>')
+    # ONE CONTROL THAT SHOWS THE STATE AND CHANGES IT (owner, 2026-08-23).
+    # This was two different buttons that swapped places — "Switch on" when
+    # off, "Pause" when on — so the same pixel meant opposite things and the
+    # only way to know the state was to read the label of the thing that would
+    # change it. And when a system could not go live, NEITHER rendered, so the
+    # page fell silent exactly where it needed to explain itself.
+    #
+    # The route and its semantics are unchanged: a system that is not ready
+    # still cannot be switched on. What changes is that the refusal is now
+    # visible and says why, instead of being an absence.
+    on = row.status == "live"
+    if on:
+        live = (f'<a class="tog on" title="Live — click to pause" '
+                f'href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
+                f'&amp;status=paused"><span class="tr"><span class="kn"></span>'
+                f'</span>ON</a>')
+    elif r["ready"]:
+        live = (f'<a class="tog" title="Off — click to switch on" '
+                f'href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
+                f'&amp;status=live"><span class="tr"><span class="kn"></span>'
+                f'</span>OFF</a>')
+    else:
+        why = "; ".join(r["impossible"] or r["thin"])[:120] or "it is not ready"
+        live = (f'<span class="tog dis" title="{_esc(why)}">'
+                f'<span class="tr"><span class="kn"></span></span>OFF</span>')
 
     return f"""
     <div class="card">
       <div class="head">
         <h3>{_esc(row.name)}</h3>
         <code>{_esc(row.key)}</code>
-        <span class="chips">
-          <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
-          <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
-        </span>
-        <a class="btn sec" href="{_sysview_url(key, row)}">Workflow &rarr;</a>
+        <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+        <span class="grow"></span>
+        {live}
+      </div>
+      <div class="row">
+        <a class="btn" href="{_sysview_url(key, row)}">Workflow &rarr;</a>
+        <span class="mut">plan the work, see what ran, correct it</span>
       </div>
       <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
       {_work_strip(key, row)}
@@ -1971,8 +1999,15 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
                   suffix=f"&amp;system={_esc(row.key)}")
 
 
+#: The Systems tab's two jobs. They are not two halves of one page: one is a
+#: place you WORK (the systems that exist, every day) and the other is a place
+#: you SHOP (the catalogue, rarely, once per system ever). Stacking them put
+#: the shop first and made the daily work scroll (owner, 2026-08-23).
+SYSTEM_SUBS = (("active", "Active"), ("available", "Available"))
+
+
 def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
-                   system: str = "", ppage: int = 1) -> str:
+                   system: str = "", ppage: int = 1, sub: str = "") -> str:
     """One account's pipelines.
 
     This tab used to render `systems.all_systems()` grouped by client, so the
@@ -2142,6 +2177,27 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
   {cards}
 </div>"""
 
+    sub = (sub or "").strip().lower()
+    if sub not in dict(SYSTEM_SUBS):
+        sub = SYSTEM_SUBS[0][0]
+
+    # The catalogue is per-account, so on the all-accounts view there is
+    # nothing to install and the strip would offer an empty room.
+    n_avail = 0 if every else len(
+        [p for p in (systems.installable(tenant) if tenant else [])
+         if not p["installed"]])
+
+    def _sub_href(v: str) -> str:
+        return ("/admin/ui?tab=systems&amp;sub=" + v
+                + f"&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = "" if every else '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if v == sub else ""}" href="{_sub_href(v)}">'
+        f'{label}<span class="cnt">'
+        f'{len(rows) if v == "active" else n_avail}</span></a>'
+        for v, label in SYSTEM_SUBS) + "</div>"
+
     return _shell(key, "systems", "Systems", tenant=tenant, body=f"""
 {flash}
 {_every_note(every, "Every account's pipelines, grouped by client. "
@@ -2155,10 +2211,9 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
 </div>
 
 {backlog_html}
-
-{installer}
-
-{body}
+{strip}
+{installer if sub == "available" and not every else ""}
+{body if sub == "active" or every else ""}
 
 <p class="mut">Guidance shapes drafting. Rules are enforced by code. When a correction
 matters every single time, make it a rule — a prompt that usually obeys is not a control.</p>

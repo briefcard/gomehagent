@@ -157,6 +157,47 @@ def main() -> int:
        "Something needs attention" in sysview
        and "view=systems" in sysview)
 
+    print("\n— the Systems tab: work first, catalogue second —")
+    act = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    avail = client.get(f"/admin/ui?tab=systems&sub=available&tenant=baci&key={KEY}").text
+    ck("it opens on the systems you already have, not the shop",
+       "Installed" in act and "Install a system" not in act)
+    ck("…and the catalogue is one click away, not above the work",
+       "Install a system" in avail and "sub=available" in act)
+
+    print("\n— status is a toggle, top right, and says why when it cannot move —")
+    with db.SessionLocal() as s:
+        s.get(db.System, ce.id).status = "live"
+        s.commit()
+    on = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    ck("a live system shows an ON toggle", 'class="tog on"' in on and ">ON<" in on)
+    ck("…that switches it off, through the same route as before",
+       "system_set" in on and "status=paused" in on)
+    with db.SessionLocal() as s:
+        s.get(db.System, ce.id).status = "designed"
+        s.commit()
+    off = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    ck("a system that is off shows an OFF toggle", ">OFF<" in off)
+    # A system with a missing CONNECTION cannot go live — `campaign_email` on
+    # this fixture is blocked on `esp`. Before, NO control rendered at all, so
+    # the page fell silent exactly where it needed to explain itself. Asserted
+    # hard: the earlier version of this check carried an `or status=live`
+    # escape and passed without ever seeing the disabled state.
+    blocked_now = not systems.ready(systems.get(ce.id))["can_produce"]
+    ck("the fixture really does have a system that cannot go live",
+       blocked_now, "nothing here would exercise the disabled toggle")
+    ck("…and it renders a DISABLED toggle rather than no control at all",
+       'tog dis' in off, off[off.find('class="tog'):][:80] if 'class="tog' in off
+       else "no toggle in the page")
+    ck("…carrying the reason, so the page says why it cannot move",
+       'not connected' in off)
+
+    print("\n— the workflow is the primary action —")
+    ck("Workflow is the primary button, not a secondary one",
+       '<a class="btn" href' in off and "Workflow &rarr;" in off)
+    ck("…and it says what it is for, so it reads as the place you work",
+       "plan the work" in off)
+
     print("\n" + ("all checks passed" if not _fails
                   else f"{len(_fails)} FAILED: " + "; ".join(_fails)))
     return 1 if _fails else 0
