@@ -3086,3 +3086,70 @@ about two minutes — check `/health` for the commit rather than theorising.
   offered — if the Assurance tab's grounding rate stays at zero, the prompt is
   being ignored rather than the knowledge being absent, and those are opposite
   fixes.
+
+## Coherence — one artifact, one subject (2026-08-22)
+
+**The second axis at the one door.** `validator.check` answers *does this say
+anything forbidden*; it reads a string. `coherence.review` answers *is this
+about one thing, and do its parts agree*; it reads the artifact. Both run
+inside `Context.emit`, in one loop, so a single repair addresses whichever
+failed and the thing that was checked is the thing that ships. See DEFECTS
+§2.77 for the send that made this necessary.
+
+**The contract** (`app/coherence.py`, no model call in the file):
+
+* `commit(kind, key, label=, audience=, action=, also=, expects=)` — declared
+  BEFORE any selector runs. `kind` is the referent type, because half the
+  systems here have no product: `entity` (a campaign, an ad, an SEO rewrite),
+  `situation` (a reply — its subject is the question), `topic`, `audience`,
+  `period`, and `survey` — the declared escape where many subjects are the
+  point and the check inverts to completeness + non-duplication rather than
+  being switched off. `also` is the COMPANION set, named at commit time: the
+  difference between an email that shows three products and one that shows
+  three products nobody chose.
+* `parts(text=, prominent=, images=, items=, claims=)` — the artifact as its
+  parts. `prominent` is what earns the open. Every image carries `subject_key`
+  (what it is a picture of) and `basis`; an unattributed image is REPORTED,
+  never assumed innocent.
+* `review(commitment, parts, brand_name=)` → findings in the same
+  `{severity, rule, detail, fix}` shape the validator and `email_craft` use.
+  Checks: `subject_absent`, `prominent_off_subject` (nudge), `image_off_subject`,
+  `image_unattributed`, `image_brand_wide` (nudge), `item_off_subject`,
+  `proof_repeated`, `background_overrun`, and in survey mode
+  `survey_incomplete` / `survey_repeats` (both nudges).
+
+**Invariant, system-wide: no selector may run before the commitment is final.**
+The tablecloth was chosen fifty lines before the drafter said what the email
+was about. `_usable` now honours the caller's ORDER of entity keys rather than
+taking a set, so "the thing this is about" outranks "something it also
+features" when both have a photograph.
+
+**Wired:** `campaign_email` (entity or audience commitment; parts carry hero,
+cards and cited claims, rebuilt on every repair) and `inbound_reply` (situation
+commitment; text and claims — the image clauses are vacuous and the proof rules
+still catch a reply that spends the brand's credentials at someone asking where
+their order is). `parts` may be a callable; it is offered the CURRENT text, for
+the same reason `meta` is a callable — a repair replaces the body.
+
+**Budgets.** `BACKGROUND_OFFERED = 2` brand-wide claims reach the drafter,
+labelled BACKGROUND in the prompt; `coherence.BACKGROUND_BUDGET = 1` holds the
+finished artifact to spending one. Both apply only when an entity is the
+subject — with no product featured the brand IS the subject and its
+credentials are the only proof there is.
+
+**Not a knowledge gap.** Coherence rules are namespaced `coherence:` and
+`systems.blocked_reasons` skips them: that list ranks the authoring backlog,
+and authoring cannot fix a wrong photograph.
+
+`scripts/test_coherence.py` (26 checks, incl. the failing email reconstructed
+part-for-part and a live block that stops an ESP draft). Guards
+`coherence_gate`, `commitment_narrowing`, `coherence_not_a_kb_gap` — all three
+verified caught. 68 suites green; the 10 red were red before this change.
+
+**Next on this rail, in order:** (1) `ad_copy` — it has a creative image and
+nothing checks it today; (2) `catalog_seo_rewrite` (entity + query intent);
+(3) the reports (`brief`, `client_report`) as declared `survey` commitments,
+which is what stops somebody later forcing a round-up through a
+single-subject gate; (4) surface the commitment on the run detail in the
+console, so "what was this supposed to be about" is answerable without
+reading the ledger.

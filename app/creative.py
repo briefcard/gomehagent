@@ -39,15 +39,25 @@ from . import kb
 HERO_W, HERO_H = 1200, 600
 
 
-def _usable(rows: list, entity_keys: set[str]) -> list:
-    """Publishable images, heroes only, entity-scoped first.
+def _usable(rows: list, entity_keys) -> list:
+    """Publishable images, heroes only, in the caller's order of preference.
 
     `kb.assets` already enforced approved+owned; this layer only ORDERS and
     excludes logos — a brand mark as the hero reads as a letterhead, and the
     header already carries the logo from the theme.
+
+    `entity_keys` is a SEQUENCE and its order is honoured: the caller passes
+    the thing the artifact is actually about first, then whatever else it
+    features. A set discarded that, so an email about the glasses could take a
+    photograph scoped to a companion — technically "entity-scoped", and still
+    the wrong picture. Ranking by position makes the caller's priority the
+    picture's priority.
     """
+    order = {k: i for i, k in enumerate(
+        [k for k in (entity_keys or []) if k])}
     heroes = [r for r in rows if (r.subject or "") != kb.LOGO and (r.url or "")]
-    scoped = [r for r in heroes if (r.entity_key or "") in entity_keys]
+    scoped = sorted((r for r in heroes if (r.entity_key or "") in order),
+                    key=lambda r: order[r.entity_key or ""])
     brandwide = [r for r in heroes if not (r.entity_key or "")]
     return scoped + brandwide
 
@@ -62,7 +72,8 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
       {ok, basis: "drafted_in_canva", image: None, drafted: {...}, note}
       {ok, basis: "none", image: None, why}   — absence, named
     """
-    ents = {k for k in (entity_keys or []) if k}
+    ordered = list(dict.fromkeys(k for k in (entity_keys or []) if k))
+    ents = set(ordered)
     rows: list = []
     # The brand-wide shelf ("" ) is ALWAYS fetched alongside the scoped keys.
     # It used to be fetched only when no entity was named — so the moment a
@@ -74,14 +85,22 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
                           entity_key=ek or "")
     seen: set[str] = set()
     rows = [r for r in rows if not (r.id in seen or seen.add(r.id))]
-    pick = next(iter(_usable(rows, ents)), None)
+    pick = next(iter(_usable(rows, ordered)), None)
     if pick is not None:
         # Belt to the braces `kb.assets` already provides: the use-gate names
         # its own refusal, and a row that fails it is skipped, not shipped.
         allowed, why = kb.may_publish(pick.id)
         if allowed:
+            # WHAT THIS IS A PICTURE OF, carried out with the picture. The
+            # caller placing a hero had no way to know whether it depicted the
+            # product the email is about or a brand-wide shelf photograph, so
+            # nothing could tell a fitting hero from a tablecloth on an email
+            # about glasses (owner, 2026-08-22). `coherence.review` reads this
+            # field; without it an image is unattributed and reported as such.
             return {"ok": True, "basis": "approved_asset",
                     "asset_id": pick.id,
+                    "subject_key": (getattr(pick, "entity_key", "") or ""
+                                    ) or "brand-wide",
                     "image": {"url": pick.url,
                               "alt": pick.title or segment_key or ""}}
 

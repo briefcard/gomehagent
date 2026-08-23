@@ -39,12 +39,13 @@ opposite outcomes and must not both arrive as an empty list.
 """
 from __future__ import annotations
 
+import inspect
 import traceback
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import (assurance, kb, ledger, resolve as rs, systems, tenants,
-               validator)
+from . import (assurance, coherence, kb, ledger, resolve as rs, systems,
+               tenants, validator)
 
 # ---------------------------------------------------------------------------
 # The contract
@@ -261,7 +262,9 @@ class Context:
              angle: str = "", fmt: str = "", destination: str = "",
              conversation_id: str = "", require_citation: bool | None = None,
              redraft=None, meta: "dict | callable | None" = None,
-             lookups: list | None = None, shape=None, theme: str = "") -> dict:
+             lookups: list | None = None, shape=None, theme: str = "",
+             commitment: dict | None = None,
+             parts: "dict | callable | None" = None) -> dict:
         """Validate one produced thing, repair it if it fails, file it.
 
         The only exit. `require_citation` defaults to whether the skill claims
@@ -294,11 +297,60 @@ class Context:
         cite = (self.skill.produces in ("draft", "proposal")
                 if require_citation is None else require_citation)
 
+        # THE SECOND AXIS. `validator.check` answers "does this say anything
+        # forbidden"; it reads a STRING and therefore could never answer "is
+        # this about one thing, and do its parts agree" — the hero image and
+        # the product cards are not in the string. Both axes run in ONE loop so
+        # a single repair addresses whichever failed, and so the thing that was
+        # checked is the thing that ships.
+        #
+        # Coherence rules are NAMESPACED `coherence:`. A blocked output feeds
+        # `systems.blocked_reasons`, which ranks the knowledge-base backlog by
+        # what actually cost an output — and an incoherent email is a quality
+        # failure that no amount of authoring would have prevented. Filing it
+        # there unnamespaced would inflate the backlog with work nobody can do.
+        _brand = (self.bundle.get("rules", {}) or {}).get("brand_name", "") \
+            or self.tenant
+
+        def _coherence(text):
+            if commitment is None:
+                return []
+            if callable(parts):
+                # The CURRENT text is offered to the callable, because a repair
+                # replaces the body and a parts dict that closed over the old
+                # one would describe the draft that was thrown away — the exact
+                # defect `meta` being a callable already exists to prevent.
+                # A zero-argument callable (one that rebuilds from its own
+                # state, as campaign_email does) is still honoured.
+                try:
+                    _n = len(inspect.signature(parts).parameters)
+                except (TypeError, ValueError):
+                    _n = 0
+                got = parts(text) if _n else parts()
+            else:
+                got = parts
+            if got is None:
+                return []
+            found = coherence.review(commitment, got, brand_name=_brand)
+            return [{**f, "rule": "coherence:" + f["rule"]} for f in found]
+
         def _check(text):
-            return validator.check(
+            verdict = validator.check(
                 self.tenant, text, claim_ids=claim_ids or [],
                 entity_key=entity_key, conversation_id=conversation_id,
                 require_citation=cite)
+            found = _coherence(text)
+            if not found:
+                return verdict
+            hard = [f for f in found if f.get("severity") == "block"]
+            return {**verdict,
+                    "ok": verdict["ok"] and not hard,
+                    "failures": list(verdict["failures"]) + hard,
+                    "checked": list(verdict.get("checked") or []) + ["coherence"],
+                    # Advice survives the loop so it can be reported once the
+                    # body has settled; only blocks stop the artifact.
+                    "coherence_advice": [f for f in found
+                                         if f.get("severity") != "block"]}
 
         verdict = _check(body)
         attempts = []          # every rejected draft, in order, with its reasons
@@ -429,8 +481,17 @@ class Context:
                 + (needs[0]["why"] if needs else
                    "; ".join(f["fix"] for f in verdict["failures"])[:200]))
 
+        # Coherence ADVICE — the nudges, reported once the body has settled so
+        # they describe what shipped rather than a draft that was replaced.
+        for f in (verdict.get("coherence_advice") or []):
+            self.note(f"coherence ({f['severity']}): {f['detail']} → {f['fix']}")
+
         item = {"body": body, "ok": verdict["ok"],
                 "failures": verdict["failures"], "checked": verdict["checked"],
+                # What this artifact was committed to, on the item, so a run
+                # can be read back and the question "what was this supposed to
+                # be about" has an answer that is not a guess.
+                "commitment": dict(commitment or {}),
                 "disposition": disposition, "status": status,
                 "output_id": row.id, "entity_key": entity_key,
                 "claim_ids": list(claim_ids or []),

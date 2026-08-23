@@ -48,7 +48,7 @@ from __future__ import annotations
 import html as _htmllib
 import re
 
-from . import compliance, responder, sites
+from . import coherence, compliance, responder, sites
 from . import kb as kb_mod
 from .skill import Context, Skill, register
 
@@ -417,9 +417,28 @@ def _run_inbound_reply(ctx: Context) -> dict:
         return {"summary": "nothing to draft",
                 "grounding": (res.get("grounding") or {}).get("level", "")}
 
+    # THE SAME CONTRACT, A DIFFERENT REFERENT. A reply's subject is the
+    # QUESTION, not a product — which is why the commitment is typed by kind
+    # rather than assuming an entity. The image clause is then vacuous (a reply
+    # has no pictures) and the checks that remain are the ones that matter
+    # here: a reply must not spend the same proof twice, and must not volunteer
+    # the brand's credentials at a customer who asked where their order is.
+    _ev = [c for c in (res.get("evidence") or []) if c.get("claim_id")]
+    _commit = coherence.commit(
+        "situation", res.get("situation") or "the question asked",
+        audience=str(ctx.params.get("contact_id") or ""),
+        action="answer it",
+        also=[k for k in [str(ctx.params.get("entity_key") or "")] if k])
+
     ctx.emit(body,
-             claim_ids=[c.get("claim_id") for c in (res.get("evidence") or [])
-                        if c.get("claim_id")],
+             claim_ids=[c.get("claim_id") for c in _ev],
+             commitment=_commit,
+             parts=lambda _text: coherence.parts(
+                 text=_text,
+                 claims=[{"claim_id": c.get("claim_id", ""),
+                          "text": c.get("claim", "") or c.get("text", ""),
+                          "scope": c.get("scope", "brand-wide")}
+                         for c in _ev]),
              entity_key=str(ctx.params.get("entity_key") or ""),
              situation=res.get("situation") or "",
              conversation_id=res.get("conversation_id") or "",
@@ -1134,6 +1153,14 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                 # after the fact; saying it here is how it rarely has to.
                 parts.append(f"- [{c['claim_id']}] {c['claim']}"
                              + (f" (evidence: {c['evidence']})" if c.get("evidence") else "")
+                             # BACKGROUND, said out loud. A credential true of
+                             # the company is not proof about the product this
+                             # email is about, and a list that does not say so
+                             # invites a drafter to spend all of them.
+                             + ("\n    BACKGROUND — true of the brand, not of "
+                                "this product. Use AT MOST ONE, once, and only "
+                                "if it earns its place."
+                                if c.get("background") else "")
                              + (f"\n    USE: {c['usage_rule']}" if c.get("usage_rule") else ""))
         ents = bundle.get("entities") or []
         if ents:
@@ -1580,6 +1607,11 @@ def _blocks_text(blocks: list) -> str:
     return "\n".join(parts)
 
 
+#: How many BRAND-WIDE claims are put in front of the drafter. Two, so there is
+#: a choice; `coherence.BACKGROUND_BUDGET` holds the finished email to one.
+BACKGROUND_OFFERED = 2
+
+
 def _run_campaign_email(ctx: Context) -> dict:
     from . import creative, email_craft, email_render, esp, fitness, links
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
@@ -1680,15 +1712,47 @@ def _run_campaign_email(ctx: Context) -> dict:
     # different positioning, in the middle of somebody else's story (owner,
     # 2026-08-22). The scope was on every claim and nothing read it.
     _feat = {e.get("key", "") for e in ents if e.get("key")}
-    _in_scope = [c for c in ctx.claims
-                 if (c.get("scope") or "brand-wide") == "brand-wide"
-                 or c.get("scope") in _feat]
+    _own = [c for c in ctx.claims if (c.get("scope") or "brand-wide") in _feat]
+    # BACKGROUND IS BUDGETED, NOT FREE. Brand-wide claims used to pass this
+    # filter unconditionally — the rule below read "brand-wide OR in scope" —
+    # so every credential the company owns arrived with the same standing as
+    # the subject's own proof, under a heading reading "your only credibility,
+    # cite by id". A drafter handed six of those reasonably used them all, and
+    # a product email became a company profile: the Four Seasons placement
+    # asserted twice and "designed in Milan" asserted twice, in an email about
+    # shatterproof glasses (owner, 2026-08-22).
+    #
+    # Two of them are offered so there is a CHOICE; `coherence.review` holds
+    # the artifact to spending one. Marked `background` so the prompt can say
+    # what they are for rather than hoping the ordering implies it.
+    # BACKGROUND IS RELATIVE TO A SUBJECT. With no product featured — a story,
+    # a letter, an account with an empty catalogue — the brand IS what the
+    # email is about, and its brand-wide claims are the only proof in
+    # existence. Capping them there does not stop stuffing; it starves the
+    # email of everything it had. So the budget applies only when there is a
+    # product for the credential to be background TO.
+    _brandwide = [c for c in ctx.claims
+                  if (c.get("scope") or "brand-wide") == "brand-wide"]
+    if ents:
+        _bg = [{**c, "background": True}
+               for c in _brandwide][:BACKGROUND_OFFERED]
+    else:
+        _bg = _brandwide
+    _in_scope = _own + _bg
     _aside = len(ctx.claims) - len(_in_scope)
     if _aside and _in_scope:
-        ctx.claims = _in_scope
+        # `ctx.claims` is a READ-ONLY property deriving from `bundle["claims"]`,
+        # so assigning to it raised AttributeError and killed the whole run.
+        # It never fired before today because the old rule let every brand-wide
+        # claim through, which made `_aside` zero on every test account — the
+        # "one email, one subject" scoping added 2026-08-22 would have crashed
+        # the first campaign that genuinely had a claim to set aside. Writing
+        # the bundle is both necessary and sufficient: the property reads it,
+        # and so does the drafter.
         ctx.bundle["claims"] = _in_scope
-        ctx.note(f"{_aside} claim(s) belonging to products this email does "
-                 f"not feature were set aside — one email, one subject")
+        ctx.note(f"{_aside} claim(s) set aside — one email, one subject "
+                 f"({len(_own)} about what this email features, "
+                 f"{len(_bg)} brand credential(s) offered as background)")
 
     for r in _refused:
         ctx.note(f"not offered to the drafter: {r['name']} — {r['why']}")
@@ -1738,22 +1802,70 @@ def _run_campaign_email(ctx: Context) -> dict:
     # names WHICH offered items it featured, or the offered order stands —
     # "random products" under segment-specific prose was the owner's read
     # of the alternative (2026-08-21).
-    if not copy.get("blocks"):
-        by_key = {e["key"]: e for e in ents if e.get("key")}
-        chosen = [by_key[k] for k in (copy.get("featured_keys") or [])
-                  if isinstance(k, str) and k in by_key]
-        if chosen:
-            ents = chosen[:3]
-            ctx.note("products: the drafter featured "
-                     + ", ".join(e["name"] for e in ents))
-        else:
-            ents = ents[:3]
-            if ents and not plan_scoped:
-                ctx.note("products: no entity on the plan and no drafter "
-                         "choice — the catalogue's top available items are "
-                         "featured; set Featured entity on the plan to "
-                         "choose them")
-        ctx.bundle["entities"] = ents
+    # WHAT THE DRAFTER ACTUALLY CHOSE — read the same way whichever contract it
+    # answered in, and read BEFORE anything else selects.
+    #
+    # This used to be gated `if not copy.get("blocks")`, so on the CURRENT
+    # contract — the one that ships — the offered list was never narrowed. Four
+    # selectors then read it independently and disagreed: the product cards came
+    # from the drafter's `products` block, the hero came from `hero_for_campaign`
+    # over the WHOLE offered list, and the imageless fallback took whichever
+    # offered product happened to have a photograph. That is how an email whose
+    # subject line and body were about shatterproof glasses shipped with a
+    # tablecloth as its hero and a pitcher bundle on its card (owner,
+    # 2026-08-22). Nothing in it was false; the parts simply never agreed.
+    by_key = {e["key"]: e for e in ents if e.get("key")}
+    picked = [k for k in (copy.get("featured_keys") or [])
+              if isinstance(k, str) and k in by_key]
+    for b in (copy.get("blocks") or []):
+        if isinstance(b, dict) and b.get("type") == "products":
+            picked += [k for k in (b.get("keys") or [])
+                       if isinstance(k, str) and k in by_key]
+    picked = list(dict.fromkeys(picked))
+    if picked:
+        ents = [by_key[k] for k in picked][:3]
+        ctx.note("products: the drafter featured "
+                 + ", ".join(e["name"] for e in ents))
+    else:
+        ents = ents[:3]
+        if ents and not plan_scoped and not copy.get("blocks"):
+            ctx.note("products: no entity on the plan and no drafter "
+                     "choice — the catalogue's top available items are "
+                     "featured; set Featured entity on the plan to "
+                     "choose them")
+    ctx.bundle["entities"] = ents
+
+    # THE COMMITMENT: what this email is about, declared now, so every selector
+    # below derives from one decision instead of re-deciding for itself. The
+    # plan's entity outranks the drafter's — the plan is the reviewed
+    # instruction — and the rest of what was featured are declared COMPANIONS,
+    # which is the difference between "this email shows three products" and
+    # "this email shows three products nobody chose".
+    # ONLY WHAT SOMEBODY ACTUALLY CHOSE. Falling back to `ents[0]` committed the
+    # email to whichever product the catalogue happened to rank first — a
+    # decision nobody made, asserted as though somebody had, which is the very
+    # thing this contract exists to stop. When neither the plan nor the drafter
+    # named one, there is no entity subject and the email is committed to its
+    # audience instead; the parts are then held to agreeing with each other.
+    _subject = str(ctx.params.get("entity_key") or "").strip() or (
+        picked[0] if picked else "")
+    if _subject:
+        _sub_name = next((e.get("name", "") for e in ents
+                          if e.get("key") == _subject), _subject)
+        commitment = coherence.commit(
+            "entity", _subject, label=_sub_name, audience=seg["key"],
+            action=goal or seg.get("angle", ""),
+            also=[e.get("key", "") for e in ents if e.get("key") != _subject])
+    else:
+        # No product at all is a legitimate email — a story, a letter. It has
+        # no entity subject, so the subject checks are vacuous; the proof and
+        # image checks still hold, and those are the ones that matter here.
+        commitment = coherence.commit("audience", seg["key"],
+                                      audience=seg["key"],
+                                      action=goal or seg.get("angle", ""))
+    ctx.note(f"this email is about: {commitment.get('label') or seg['name']}"
+             + (f" (with " + ", ".join(commitment["also"]) + ")"
+                if commitment.get("also") else ""))
 
     # A subject set on the PLAN is the owner's line and outranks the
     # drafter's — the plan is the reviewed instruction. Set before
@@ -1768,12 +1880,25 @@ def _run_campaign_email(ctx: Context) -> dict:
     # created on a miss, which lands in the pictures queue, never in this
     # email. The refusal/note is surfaced either way, so an imageless send
     # is a decision the owner can see, not a silent default.
+    # SELECTED FROM THE COMMITMENT, not from the offered list. The subject
+    # leads, its companions follow — so a photograph of the thing this email is
+    # about is preferred over a photograph of something that merely happened to
+    # be on the shortlist.
     hero_got = creative.hero_for_campaign(
         ctx.tenant, segment_key=seg["key"],
-        entity_keys=[e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
+        # THE SUBJECT FIRST, then everything this email actually features.
+        # Scoping to the commitment ALONE starved the legacy path, where the
+        # drafter names nothing and the catalogue fallback still puts real
+        # products in the email — the hero then dropped to the brand-wide shelf
+        # past a perfectly good photograph of the product on the card.
+        # `_usable` honours this order, so priority is expressed here once.
+        entity_keys=[k for k in ([commitment.get("key")]
+                                 + list(commitment.get("also") or [])
+                                 + [e.get("key", "") for e in ents]) if k],
         title=f"Email hero — {seg['name']}"[:120],
         draft_if_missing=_flag(ctx.params.get("draft_visual")))
     hero = hero_got.get("image")
+    hero_subject = str(hero_got.get("subject_key") or "")
     if hero_got.get("basis") == "drafted_in_canva":
         ctx.note("bespoke visual: " + hero_got.get("note", ""))
     elif not hero:
@@ -1788,11 +1913,22 @@ def _run_campaign_email(ctx: Context) -> dict:
         # the same product, that the sync files as `rights=owned` for exactly
         # this purpose: the client's photograph of the client's product,
         # already published on their own storefront.
-        _shot = next((e for e in ents if e.get("image")), None)
+        #
+        # THE SUBJECT'S OWN SHOT FIRST. `next(... if e.get("image"))` over the
+        # offered order took whichever product happened to have a photograph,
+        # which on an unnarrowed list meant the alphabetically-first one — a
+        # second route to the same wrong picture. The committed subject leads;
+        # a companion only stands in when the subject has no photograph, and
+        # then the run says so.
+        _order = sorted(ents, key=lambda e: e.get("key") != commitment.get("key"))
+        _shot = next((e for e in _order if e.get("image")), None)
         if _shot:
             hero = {"url": _shot["image"], "alt": _shot.get("name", "")}
+            hero_subject = _shot.get("key", "")
             ctx.note(f"hero: no library photograph, so {_shot.get('name','')}'s "
-                     f"own product shot leads the email")
+                     f"own product shot leads the email"
+                     + ("" if _shot.get("key") == commitment.get("key")
+                        else " — the subject itself has no photograph on file"))
         else:
             ctx.note("no hero image: " + hero_got.get("why", ""))
 
@@ -1971,9 +2107,36 @@ def _run_campaign_email(ctx: Context) -> dict:
         # gets rendered, personalized, re-checked and — if it passes — sent.
         return _build(_shape_campaign_copy(again, ctx.note))
 
+    def _parts() -> dict:
+        """The email AS ITS PARTS, read after every rebuild.
+
+        A callable for the same reason `meta` is one: a repair replaces the
+        copy, and a parts dict built before that describes the artifact that
+        was thrown away. It is also the whole reason the hero is checkable at
+        all — `emit` validates a STRING, and the picture was never in it.
+        """
+        _items = [{"key": i.get("key", ""), "name": i.get("name", "")}
+                  for b in state["blocks"] if b.get("type") == "products"
+                  for i in (b.get("items") or [])]
+        _imgs = [{"url": hero.get("url", ""), "alt": hero.get("alt", ""),
+                  "subject_key": hero_subject or "",
+                  "basis": hero_got.get("basis", "")}
+                 for b in state["blocks"] if b.get("type") == "hero" and hero]
+        _c = state["copy"]
+        return coherence.parts(
+            text=_blocks_text(state["blocks"]),
+            prominent=f"{_c.get('subject', '')} {_c.get('headline', '')}",
+            images=_imgs, items=_items,
+            claims=[{"claim_id": cid, "text": offered[cid]["claim"],
+                     "scope": offered[cid].get("scope", "brand-wide")}
+                    for cid in state["cited"] if cid in offered])
+
     item = ctx.emit(
         to_check, claim_ids=state["cited"], angle=seg["key"],
         fmt="campaign_email",
+        # ONE ARTIFACT, ONE SUBJECT — checked at the same door, repaired by the
+        # same loop, on the parts rather than on the prose.
+        commitment=commitment, parts=_parts,
         require_citation=False,      # a promo email need not cite; banned always runs
         destination=f"esp:{esp.provider_for(ctx.tenant) or 'none'}",
         # Filed so the NEXT send can be a different one: the shape it must not

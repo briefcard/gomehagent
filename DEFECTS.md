@@ -2705,3 +2705,81 @@ rather than repeating one fact under every tenant's name. Guard
 Worth stating as a rule, since this is the second time: **any function whose
 name is a noun ("folder", "segments") may still be a constructor.** Before a
 read-only surface calls one, read what it does when the thing is absent.
+
+### 2.77 An email in which nothing was false and nothing agreed — 2026-08-22
+
+The owner's read of a live Baci send: the hero photograph was a **tablecloth**,
+the subject line and body were about **shatterproof glasses**, the featured card
+was a **pitcher bundle**, the Four Seasons placement was asserted twice and
+"designed in Milan" twice. Every claim in it was approved. Every product in it
+was in the catalogue. The picture was owned and publishable. The banned-claims
+validator passed it, correctly. It was still not client-facing.
+
+Three causes, only one of which is a model behaving badly.
+
+**(a) The hero was selected before the email had a subject.** `skill_pack`
+narrowed the offered products to the drafter's choice under
+`if not copy.get("blocks")` — the LEGACY contract. On the `blocks` contract,
+which is the one that ships, the bundle was never narrowed, so
+`hero_for_campaign` was handed the whole offered list and the imageless
+fallback took `next(e for e in ents if e.get("image"))` — the
+alphabetically-first product with a photograph. Four selectors read one
+candidate list and each collapsed it differently.
+
+**(b) Brand-wide claims passed unconditionally.** Yesterday's "one email, one
+subject" scoping (§2.66) read `brand-wide OR in scope`, so every credential the
+company owns arrived beside the subject's own proof under a heading reading
+"your only credibility, cite by id". A drafter handed six of those uses six.
+
+**(c) `emit` validates a STRING.** The hero, the cards and the citations are
+not in it, so no rule written in `validator.py` could ever have seen a wrong
+picture. This is the structural one: the other two are bugs, this was a missing
+layer.
+
+Fixed by a contract rather than a patch, because the same pathology is
+available to every generator here — an ad whose creative is off-subject, a
+reply that answers a shipping question and pitches the collection. `app/
+coherence.py` holds it: a COMMITMENT declared before any selector runs, typed
+by referent (`entity` / `situation` / `topic` / `audience` / `period`, plus a
+declared `survey` mode where multiplicity is the point and the check inverts),
+and `emit(commitment=…, parts=…)` checking the artifact's PARTS on the same
+rail the banned-claims loop already uses — same finding shape, same repair,
+same run notes. Guards `coherence_gate`, `commitment_narrowing`,
+`coherence_not_a_kb_gap`.
+
+Three things learned while building it, each one a bug I wrote and the suite
+caught:
+
+* **Background is relative to a subject.** Capping brand-wide claims
+  unconditionally starved every email that features no product — where the
+  brand IS the subject and its credentials are the only proof in existence.
+* **Never commit to a subject nobody chose.** The first draft fell back to
+  `ents[0]`, which asserts a decision the catalogue's sort order made. When
+  neither the plan nor the drafter names a product there is no entity subject,
+  and the parts are held to agreeing with each other instead.
+* **A safety net must not be a tripwire.** Whole-word matching judged "GLP-1
+  Support" absent from "Supports natural GLP-1 production" and blocked a good
+  email over a plural. Subject-presence is stemmed; the checks that carry the
+  weight — picture, cards, proof — match on keys, not on prose.
+
+**A coherence failure is deliberately NOT a knowledge gap.** Its rules are
+namespaced `coherence:` and `systems.blocked_reasons` skips them, because that
+list ranks what to go and AUTHOR — and no amount of authoring would have
+prevented an email whose hero was a photograph of something else.
+
+### 2.78 The scoping fix that would have crashed on its first real use — 2026-08-22
+
+Found by the suite while building §2.77. §2.66's claim scoping ended:
+
+    ctx.claims = _in_scope
+    ctx.bundle["claims"] = _in_scope
+
+`Context.claims` is a read-only property deriving from `bundle["claims"]`, so
+the first line raises `AttributeError` and kills the run. It never fired
+because the old rule let every brand-wide claim through, which made the
+`_aside` count zero on every account it was tested against — the guard could
+only fail on the day it first had something to do. Writing the bundle is both
+necessary and sufficient.
+
+The pattern to distrust: a branch whose condition is false in every test
+fixture is not covered by those tests passing, however many of them there are.

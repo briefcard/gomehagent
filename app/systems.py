@@ -711,6 +711,14 @@ def blocked_reasons(tenant: str = "", days: int = 30) -> list[tuple[str, int]]:
     counts: dict[str, int] = {}
     for r in rows:
         for reason in (r.blocked_on or []):
+            # `coherence:` rules are deliberately NOT the knowledge backlog.
+            # This list ranks what to go and AUTHOR — a missing claim, an
+            # unwritten objection. An artifact blocked because its hero was a
+            # photograph of something else is a quality failure no amount of
+            # authoring would have prevented, and counting it here would send
+            # somebody to write rows that could not have helped.
+            if str(reason).startswith("coherence:"):
+                continue
             counts[reason] = counts.get(reason, 0) + 1
     return sorted(counts.items(), key=lambda kv: -kv[1])
 

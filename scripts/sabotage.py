@@ -38,6 +38,35 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "coherence_gate",
+        "file": "app/skill.py",
+        "find": "            found = _coherence(text)",
+        "replace": "            found = []  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "an email ships whose hero photograph is of a different product "
+               "than the one it is selling, and whose proof is asserted twice — "
+               "every part grounded, none of them agreeing",
+    },
+    {
+        "name": "commitment_narrowing",
+        "file": "app/skill_pack.py",
+        "find": "    picked = list(dict.fromkeys(picked))",
+        "replace": "    picked = []  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "the offered candidate list is never collapsed to what the "
+               "drafter chose, so the hero, the cards and the copy are each "
+               "selected from a different set and drift apart",
+    },
+    {
+        "name": "coherence_not_a_kb_gap",
+        "file": "app/systems.py",
+        "find": '            if str(reason).startswith("coherence:"):',
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "quality failures pile into the knowledge-base backlog, sending "
+               "somebody to author claims that could never have prevented them",
+    },
+    {
         "name": "tenant_scope",
         "file": "app/diagnostics.py",
         "find": "    return q.filter(model.tenant == tenant) if tenant else q",
