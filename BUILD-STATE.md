@@ -3213,3 +3213,41 @@ three parts: the check itself, the live email path, and the ad path.
 Wired so far: `campaign_email`, `inbound_reply`, `ad_copy`. Remaining:
 `catalog_seo_rewrite` (entity + query intent), then `brief` / `client_report`
 as declared `survey` commitments.
+
+## Review tab: six sub-tabs, and compliance moved out (2026-08-23)
+
+Owner's page-by-page walkthrough, page 1. The tab was SEVEN stacked cards in
+one scroll, with the picture queue buried inside the claims card — which is
+part of why nobody noticed its buttons were dead for weeks (DEFECTS §2.80).
+
+* **`REVIEW_SUBS`** — Claims · Pictures · Everything else · Plans · Conflicts ·
+  Catalogue, each a different DECISION made by a different person on a
+  different day, not chapters of one document. `?tab=content&sub=<key>`.
+* **Each tab carries its own count**, computed from lists already built, so
+  the strip says where the work is without opening anything. A zero is muted,
+  not hidden — "nothing here" is information, and a tab that disappears when
+  empty moves the others under the cursor.
+* **With no section asked for, it opens the first one that has something in
+  it.** Landing on an empty Claims queue while twelve pictures wait is the
+  scroll problem again, one click deeper.
+* **Only the selected section renders.** The claim-similarity pass, the
+  conflict query and the catalogue read are the expensive parts of a page
+  measured at 2.5–4.5s; six sections behind one strip means one section's work
+  per render.
+* **Claims were ALREADY paginated** at 15/page with a working pager — the
+  "endless scroll" was the seven cards, not the claim list.
+* **Compliance moved to Assurance** (owner's call). It is a finding about what
+  ALREADY SHIPPED, which is Assurance's job; Review is a queue of decisions
+  waiting on a person. `_compliance_body()` is shared, and on Assurance it is
+  built ABOVE the empty-state return — an account with no validated drafts yet
+  is exactly the one whose live site nobody has checked.
+
+`scripts/test_admin_forms.py` covers all eight tabs plus all six sub-tabs for
+duplicate ids and orphaned `form=` attributes. `test_kb_ui`'s compliance
+assertions were re-pointed at Assurance rather than deleted — same guarantee,
+new page. 79/79 suites green.
+
+Still open from the owner's page-1 notes: nothing. Next pages, in their order:
+Systems (3) is the big one — tabs for active vs available, status top-right,
+on/off as a toggle, workflow as the primary button, and the "refused" list
+moved to Diagnostics.

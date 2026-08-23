@@ -1536,6 +1536,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         except ValueError:
             cp = 1
         return ui.render_content(link_key, tenant, started=started,
+                                 sub=request.query_params.get("sub", ""),
                                  err=request.query_params.get("err", ""),
                                  msg=request.query_params.get("ok", ""),
                                  cpage=cp)

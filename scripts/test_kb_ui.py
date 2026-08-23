@@ -187,8 +187,11 @@ def main() -> int:
     # "Review" to match the nav (two names for one tab read as two places).
     # "Proposed, awaiting you" is body-specific, which the old needle never
     # was — "Content" also appeared in prose on other tabs.
-    ck("the Review tab renders", "Proposed, awaiting you" in page
-       and len(page) > 800)
+    # Needle CHANGED AGAIN (2026-08-23): Review is six sub-tabs now, so the
+    # claims queue is asked for by name rather than assumed to be on screen.
+    page = admin_ui.render_content(KEY, "baci", sub="claims")
+    ck("the Review tab renders", "Claims proposed, awaiting you" in page
+       and "subtabs" in page and len(page) > 800)
     ck("a pending proposal is shown", has(page, "PROPOSED CLAIM AWAITING REVIEW"))
     ck("with its provenance", has(page, "review on /products/x"))
     ck("and can be edited, tagged and approved without leaving the page",
@@ -197,16 +200,24 @@ def main() -> int:
                                "Save &amp; approve", "Reject")))
     ck("the tag options are the account's own vocabulary",
        all(f'value="{t}"' in page for t in list(kb.situations("baci"))[:3]))
+    # COMPLIANCE MOVED TO ASSURANCE (owner, 2026-08-23). The guarantee is
+    # unchanged and so are these assertions — only the page they are made
+    # against. Review is a queue of decisions; a report about pages already
+    # published is not a decision.
+    asr = admin_ui.render_assurance(KEY, "baci")
     ck("the compliance finding names the live URL",
-       has(page, "https://bacimilanousa.com/pages/about"))
+       has(asr, "https://bacimilanousa.com/pages/about"))
     ck("and quotes the sentence, so it is fixable without opening the page",
-       has(page, "Every piece is handmade in Italy."))
-    ck("the phrase is ranked", has(page, "handmade"))
-    ck("each action can be run from the tab",
-       all(r in page for r in ("/admin/harvest", "/admin/compliance_scan",
-                               "/admin/catalog_sync")))
+       has(asr, "Every piece is handmade in Italy."))
+    ck("the phrase is ranked", has(asr, "handmade"))
+    ck("the scan can be run from Assurance",
+       "/admin/compliance_scan" in asr)
+    ck("each Review action can be run from its own section",
+       "/admin/harvest" in page
+       and "/admin/catalog_sync" in admin_ui.render_content(
+           KEY, "baci", sub="catalogue"))
     ck("an account never scanned says so rather than looking clean",
-       "Never scanned" in admin_ui.render_content(KEY, "coverings"))
+       "Never scanned" in admin_ui.render_assurance(KEY, "coverings"))
 
     # ---- 4. the work the provenance spine creates is visible --------------
     # A conflict nobody can see is worse than the silent overwrite it replaced:
@@ -223,7 +234,11 @@ def main() -> int:
                   source="https://bacimilanousa.com/products/aqua")
     kb.add_objection("baci", "Is it dishwasher safe?", "Yes, every piece.",
                      origin="client", source="submitted by Dana")
-    page = admin_ui.render_content(KEY, "baci")
+    # Each queue is now its own section, asked for by name — see the sub-tab
+    # note above. Conflicts and the four-table proposals were previously two
+    # more cards on the same scroll.
+    page = admin_ui.render_content(KEY, "baci", sub="conflicts")
+    other = admin_ui.render_content(KEY, "baci", sub="other")
 
     ck("a disagreement between sources reaches the page",
        "Sources disagree" in page and len(prov.conflicts("baci")) == 1)
@@ -234,12 +249,12 @@ def main() -> int:
        all(x in page for x in ("/admin/conflict_resolve", 'value="approved"',
                                'value="incoming"')))
     ck("a proposal from a table that never had a review queue is shown",
-       "Everything else awaiting you" in page
-       and has(page, "Is it dishwasher safe?"))
-    ck("attributed to whoever submitted it", has(page, "submitted by Dana"))
+       "Everything else awaiting you" in other
+       and has(other, "Is it dishwasher safe?"))
+    ck("attributed to whoever submitted it", has(other, "submitted by Dana"))
     ck("and approvable from the tab",
-       "/admin/proposal_review" in page
-       and 'name="action" value="approve"' in page)
+       "/admin/proposal_review" in other
+       and 'name="action" value="approve"' in other)
     ck("nothing proposed is usable in the meantime",
        not [o for o in kb.objections("baci")
             if o.objection == "Is it dishwasher safe?"])

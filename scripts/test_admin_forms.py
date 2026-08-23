@@ -88,9 +88,35 @@ def main() -> int:
         ck(f"{tab}: every form= points at a real <form>", not orphans,
            ", ".join(orphans[:4]))
 
+    # THE REVIEW SUB-TABS, each rendered on its own. The strip splits one
+    # scroll into six sections (owner, 2026-08-23: "endless scrolls"), and each
+    # is markup the others never render — so checking the tab once checks one
+    # sixth of it.
+    from app.admin_ui import REVIEW_SUBS
+    for k, label in REVIEW_SUBS:
+        r = client.get(f"/admin/ui?tab=content&sub={k}&tenant=baci&key={KEY}")
+        html = r.text
+        ids = _ids(html)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        ck(f"content/{k}: no duplicate element ids", not dupes, ", ".join(dupes[:4]))
+        forms = set(re.findall(r'<form[^>]*\bid="([^"]+)"', html))
+        wanted = set(re.findall(r'\bform="([^"]+)"', html))
+        ck(f"content/{k}: every form= points at a real <form>",
+           not (wanted - forms), ", ".join(sorted(wanted - forms)[:4]))
+        ck(f"content/{k}: it is the section that rendered",
+           f'class="subtab on"' in html and f'sub={k}' in html)
+
+    # A report about pages already published is not a decision, so it is not on
+    # the decision queue.
+    rev = client.get(f"/admin/ui?tab=content&tenant=baci&key={KEY}").text
+    asr = client.get(f"/admin/ui?tab=assurance&tenant=baci&key={KEY}").text
+    ck("compliance left the Review tab", "Live site compliance" not in rev)
+    ck("…and is on Assurance, with its scan control",
+       "Live site compliance" in asr and "compliance_scan" in asr)
+
     # The specific one, named, so a regression reads as itself rather than as
     # "some tab has a duplicate id".
-    html = client.get(f"/admin/ui?tab=content&tenant=baci&key={KEY}").text
+    html = client.get(f"/admin/ui?tab=content&sub=pictures&tenant=baci&key={KEY}").text
     ck("the picture queue rendered at all (else the checks above prove nothing)",
        'name="asset_ids"' in html)
     ck("…and its checkboxes reach the approve/reject form",

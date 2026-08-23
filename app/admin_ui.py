@@ -332,6 +332,12 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
    scrolled its own confirmation out of view. */
 .flash{position:sticky;top:0;z-index:60}
 .pager{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:.85rem}
+.subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 16px;border-bottom:1px solid var(--rule);padding-bottom:0}
+.subtab{display:flex;align-items:center;gap:7px;padding:9px 14px;text-decoration:none;color:var(--mut);font-size:.9rem;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
+.subtab:hover{color:var(--ink)}
+.subtab.on{color:var(--ink);border-bottom-color:var(--acc)}
+.subtab .cnt{font-size:.75rem;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--rule);color:var(--mut)}
+.subtab.on .cnt{background:var(--acc);color:#0b0e13}
 .navbadge{margin-left:auto;background:var(--gap);color:#fff;border-radius:9px;
 font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 /* The workflow surface: the strip is STATE (counts that link into the
@@ -3162,8 +3168,69 @@ def _act(key: str, action: str, label: str, tenant: str = "",
             f'{hidden}<button{cls}>{_esc(label)}</button></form>')
 
 
+def _compliance_body(tenant: str) -> str:
+    """The live-site compliance readout, as HTML.
+
+    Extracted 2026-08-23 so it can live on Assurance instead of Review.
+    Compliance is a FINDING ABOUT WHAT ALREADY SHIPPED, which is what the
+    Assurance tab is for; Review is a queue of decisions waiting on a
+    person. Mixing the two made Review a place you scrolled past your own
+    work to read a report (owner, 2026-08-23).
+    """
+    from . import compliance
+    # --- compliance --------------------------------------------------------
+    scan = compliance.last_scan(tenant)
+    if not scan:
+        comp = ('<p class="mut">Never scanned. This checks every public page '
+                'against this account\'s banned claims and lists the ones that '
+                'break them.</p>')
+    elif scan.get("stage") == "blocked":
+        comp = ('<div class="note">Could not scan: '
+                + _esc("; ".join(scan.get("blocked_on") or [])) + "</div>")
+    else:
+        n = scan.get("violations", 0)
+        head = (f'<div class="stat"><span><b>{scan.get("pages_checked", 0)}</b> '
+                f'pages checked</span><span><b>{n}</b> with a violation</span>'
+                f'<span>{_esc(scan["at"].strftime("%b %d, %H:%M")) if scan.get("at") else ""}</span></div>')
+        if not n:
+            comp = head + '<p class="mut">Nothing on the live site breaks the rules.</p>'
+        else:
+            ranked = "".join(
+                f'<span class="chip off">{_esc(p)} ×{c}</span>'
+                for p, c in sorted((scan.get("by_phrase") or {}).items(),
+                                   key=lambda kv: -kv[1]))
+            items = "".join(
+                f'<div class="msg esc">'
+                f'<div><a href="{_esc(d["url"])}" target="_blank" rel="noopener">'
+                f'{_esc(d["url"])}</a></div>'
+                f'<div class="when">{_esc(", ".join(d["phrases"]))}</div>'
+                f'<div class="when">“{_esc(d.get("context", ""))}”</div></div>'
+                for d in (scan.get("detail") or []))
+            more = (f'<p class="mut">+{scan["truncated"]} more not shown.</p>'
+                    if scan.get("truncated") else "")
+            comp = (head + f'<div class="chips">{ranked}</div>'
+                    + f'<div class="thread">{items}</div>' + more)
+    return comp
+
+
+#: The Review tab's own sections, as sub-tabs. Seven cards stacked in one
+#: scroll is what the owner met (2026-08-23: "endless scrolls") — and the
+#: picture queue was buried INSIDE the claims card, which is part of why
+#: nobody noticed its buttons were dead. Each of these is a different DECISION,
+#: made by a different person on a different day; they are not chapters of one
+#: document.
+#:
+#: Every entry carries its own count, so the tab strip says where the work is
+#: without opening anything — the point of splitting is lost if you have to
+#: visit six tabs to find the one with something in it.
+REVIEW_SUBS = (("claims", "Claims"), ("pictures", "Pictures"),
+               ("other", "Everything else"), ("plans", "Plans"),
+               ("conflicts", "Conflicts"), ("catalogue", "Catalogue"))
+
+
 def render_content(key: str, tenant: str = "", started: str = "",
-                   err: str = "", msg: str = "", cpage: int = 1) -> str:
+                   err: str = "", msg: str = "", cpage: int = 1,
+                   sub: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     tenant, t, rows = _account(tenant)
@@ -3482,11 +3549,15 @@ def render_content(key: str, tenant: str = "", started: str = "",
                   .forEach(function(b) {{ b.checked = e.target.checked; }});
         }});
         </script>"""
-        proposals = (catlist + assets_form + bulk
+        # `assets_form` USED to be concatenated here, so the picture queue
+        # rendered inside the claims card — which is how a queue with dead
+        # buttons went unnoticed for weeks: nobody scrolled past 15 claim
+        # cards to reach it. It is its own section now.
+        proposals = (catlist + bulk
                      + '<div class="grid" style="grid-template-columns:1fr">'
                      + "".join(_card(p) for p in shown) + "</div>" + pager)
     else:
-        proposals = (assets_form + '<p class="mut">Nothing waiting. Harvest reads the account\'s '
+        proposals = ('<p class="mut">Nothing waiting. Harvest reads the account\'s '
                      'own site and files what it finds here — as proposals, never '
                      'as facts.</p>')
 
@@ -3620,39 +3691,6 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     else:
         clear_all = ""
 
-    # --- compliance --------------------------------------------------------
-    scan = compliance.last_scan(tenant)
-    if not scan:
-        comp = ('<p class="mut">Never scanned. This checks every public page '
-                'against this account\'s banned claims and lists the ones that '
-                'break them.</p>')
-    elif scan.get("stage") == "blocked":
-        comp = ('<div class="note">Could not scan: '
-                + _esc("; ".join(scan.get("blocked_on") or [])) + "</div>")
-    else:
-        n = scan.get("violations", 0)
-        head = (f'<div class="stat"><span><b>{scan.get("pages_checked", 0)}</b> '
-                f'pages checked</span><span><b>{n}</b> with a violation</span>'
-                f'<span>{_esc(scan["at"].strftime("%b %d, %H:%M")) if scan.get("at") else ""}</span></div>')
-        if not n:
-            comp = head + '<p class="mut">Nothing on the live site breaks the rules.</p>'
-        else:
-            ranked = "".join(
-                f'<span class="chip off">{_esc(p)} ×{c}</span>'
-                for p, c in sorted((scan.get("by_phrase") or {}).items(),
-                                   key=lambda kv: -kv[1]))
-            items = "".join(
-                f'<div class="msg esc">'
-                f'<div><a href="{_esc(d["url"])}" target="_blank" rel="noopener">'
-                f'{_esc(d["url"])}</a></div>'
-                f'<div class="when">{_esc(", ".join(d["phrases"]))}</div>'
-                f'<div class="when">“{_esc(d.get("context", ""))}”</div></div>'
-                for d in (scan.get("detail") or []))
-            more = (f'<p class="mut">+{scan["truncated"]} more not shown.</p>'
-                    if scan.get("truncated") else "")
-            comp = (head + f'<div class="chips">{ranked}</div>'
-                    + f'<div class="thread">{items}</div>' + more)
-
     # --- catalogue ---------------------------------------------------------
     ents = kbm.entities(tenant, available_only=False)
     oos = [e for e in ents if (e.availability or "available") != "available"]
@@ -3731,23 +3769,48 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   fails while it waits; it just waits.</p>
   <div class="thread">{prows}</div>
 </div>"""
+    # --- the sub-tab strip -------------------------------------------------
+    #
+    # Counts come from the lists already built above, so the strip costs
+    # nothing extra and can be trusted: a tab reading 0 is a tab with nothing
+    # in it, not a tab whose count was estimated.
+    counts = {"claims": len(pending), "pictures": len(waiting),
+              "other": n_other, "plans": len(plans_wait),
+              "conflicts": len(open_conflicts), "catalogue": len(flagged)}
+    sub = (sub or "").strip().lower()
+    if sub not in dict(REVIEW_SUBS):
+        # LAND ON THE WORK. With no section asked for, open the first one that
+        # has something waiting rather than always the first in the list — the
+        # tab exists to be worked through, and opening an empty Claims queue
+        # when twelve pictures are waiting is the scroll problem again, one
+        # click deeper.
+        sub = next((k for k, _ in REVIEW_SUBS if counts.get(k)),
+                   REVIEW_SUBS[0][0])
+
+    def _sub_href(k: str) -> str:
+        return (f"/admin/ui?tab=content&amp;sub={k}&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
+        f'{label}<span class="cnt">{counts.get(k, 0)}</span></a>'
+        for k, label in REVIEW_SUBS) + "</div>"
+
     # Order (owner, 2026-08-21): the queues this tab exists for come first —
     # the destructive start-over card used to be the FIRST thing on the page,
     # a rare, dangerous action sitting above the daily work. It now lives
     # folded at the bottom. The heading matches the nav ("Review"): two names
     # for one tab made it read like two places.
-    return _shell(key, "content", "Review", tenant=tenant, body=f"""
-<div class="flash">{banner}</div>
-<div>
-  <h1>Review</h1>
-  <p class="mut">What has been proposed for this account and not yet approved.
-  Nothing here is published — it is the difference between what the brand
-  allows and what is live.</p>
-</div>
-
+    # Each section renders only when it is the one being looked at. That is
+    # not only tidiness: the claim similarity pass, the conflict query and the
+    # catalogue read all cost real time, and this page was measured at 2.5-4.5s
+    # (owner, 2026-08-21: "why does it take so long to load tabs"). Six
+    # sections behind one strip means one section's work per render.
+    sections = {
+        "claims": f"""
 <div class="anchor" id="proposals"></div>
 <div class="card">
-  <div class="head"><h2>Proposed, awaiting you</h2>
+  <div class="head"><h2>Claims proposed, awaiting you</h2>
     <span class="chip {'off' if pending else 'on'}">{len(pending)} pending</span></div>
   <p class="mut">Found on {_esc(t.name)}'s own site. Invisible to every generator
   until approved. Anything using a banned phrase was dropped, not queued.</p>
@@ -3759,8 +3822,9 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     objections exist, because the brand has been answering the same questions
     for years. Only the buckets triage flagged as worth mining are opened.</span></div>
   {clear_all}
-</div>
-{plans_card}
+</div>""",
+        "pictures": assets_form,
+        "other": f"""
 <div class="anchor" id="others"></div>
 <div class="card">
   <div class="head"><h2>Everything else awaiting you</h2>
@@ -3769,8 +3833,14 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   proposed by a client, a spreadsheet or a crawl. Approving one makes it final —
   no machine source can change it afterwards.</p>
   {others_html}
-</div>
-
+</div>""",
+        "plans": plans_card or """
+<div class="card">
+  <div class="head"><h2>Plans awaiting you</h2></div>
+  <p class="mut">Nothing held. Work a system has planned appears here when it
+  cannot run yet — a missing field, or a rung that needs your go-ahead.</p>
+</div>""",
+        "conflicts": f"""
 <div class="card">
   <div class="head"><h2>Sources disagree</h2>
     <span class="chip {'off' if open_conflicts else 'on'}">{len(open_conflicts)} open</span></div>
@@ -3778,21 +3848,27 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   store sync. The approved value is still what gets used — nothing was
   overwritten. Pick one and the disagreement closes.</p>
   {conflicts_html}
-</div>
-
-<div class="card">
-  <div class="head"><h2>Live site compliance</h2></div>
-  {comp}
-  <div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}
-    <span class="mut">checks every public page against this account's rules</span></div>
-</div>
-
+</div>""",
+        "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Catalogue</h2></div>
   {cat}
   <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
     <span class="mut">names, prices and live stock — the store owns those</span></div>
+</div>""",
+    }
+
+    return _shell(key, "content", "Review", tenant=tenant, body=f"""
+<div class="flash">{banner}</div>
+<div>
+  <h1>Review</h1>
+  <p class="mut">Decisions waiting on you for this account. Nothing here is
+  published — it is the difference between what the brand allows and what is
+  live. (Compliance moved to Assurance: a report about pages already published
+  is not a decision.)</p>
 </div>
+{strip}
+{sections[sub]}
 
 <details class="sec">
   <summary>Start this account's machine-read half over (destructive)</summary>
@@ -4250,6 +4326,25 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
         for d, lbl in ((1, "24h"), (7, "7d"), (30, "30d"), (90, "90d")))
         + "</div>")
 
+    # COMPLIANCE IS INDEPENDENT OF WHETHER ANYTHING WAS DRAFTED. Built here,
+    # above the empty-state return, because an account with no validated drafts
+    # yet is exactly the one whose live site nobody has checked — and letting
+    # the early return swallow it would have moved the report off Review and
+    # into a page that does not always render it.
+    comp_card = f"""
+    <div class="card">
+      <div class="head"><h2>Live site compliance</h2></div>
+      <p class="mut">The other half of assurance: everything else on this page
+      is what the layer caught BEFORE anything shipped, and this is what is
+      already live on the client&#39;s own site. Moved here from Review (owner,
+      2026-08-23) — Review is a queue of decisions waiting on you, and a report
+      about published pages is not a decision.</p>
+      {_compliance_body("" if every else tenant)}
+      <div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}
+        <span class="mut">checks every public page against this account&#39;s
+        rules</span></div>
+    </div>"""
+
     if not rep["events"]:
         body = (_every_note(every, "Checks recorded across every account.")
                 + windows
@@ -4257,7 +4352,8 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
                 f'{_esc(_account_name(tenant, here))} in the last {days} '
                 f'days.</strong><br>That is not the same as '
                 f'nothing being wrong — it means no draft passed through a '
-                f'validator, so this page has no evidence either way.</div>')
+                f'validator, so this page has no evidence either way.</div>'
+                + comp_card)
         return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
 
     catch_rows = "".join(
@@ -4330,6 +4426,8 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
       <table class="tbl"><tr><th>gap</th><th>runs affected</th></tr>
       {thin_rows}</table>
     </details>
+
+    {comp_card}
     """
     return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
 
