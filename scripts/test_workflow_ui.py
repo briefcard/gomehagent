@@ -301,6 +301,89 @@ def main() -> int:
     ck("system= on the all-accounts view falls back to the grouped list",
        "All accounts" in va and 'id="planned"' not in va)
 
+    # ---- getting things moving (owner, 2026-08-23) ----------------------
+    #
+    # "Inside each workflow it should be easier to get things moving and it
+    # should be more clear right now it's a lot of different fields."
+    #
+    # Two separate problems, and only one of them was the fields:
+    #   · PROPOSE produces COMPLETE plans in one press — every required field
+    #     filled — and it was folded inside a <details> whose summary reads
+    #     "Cadence", a word that does not mean "make some work now". The empty
+    #     queue meanwhile opened the hand-fill form. The page led with the slow
+    #     path and hid the fast one.
+    #   · Every declared field rendered flat with equal weight, when only the
+    #     required ones decide whether the plan can run at all.
+    print("\n— the fast path is the one on offer —")
+    import re as _re
+    from app import systems as _sys
+    _row = _sys.find("agency", "wf_probe")
+    empty_q = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                    "&system=wf_probe&ppage=99").text
+    live_page = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                      "&system=wf_probe").text
+
+    # Asserted against a system that REALLY has a planner. `wf_probe` declares
+    # none, so testing the ordering on it passes without ever exercising the
+    # thing this change is about — the same empty-fixture false pass sabotage.py
+    # exists to find.
+    from app import db as _db
+    _ce = _sys.find("baci", "campaign_email") or _sys.create("baci", "campaign_email")
+    with _db.SessionLocal() as _s:
+        _s.get(_db.System, _ce.id).status = "live"
+        _s.commit()
+    _u = "/admin/ui?key=s3cret&tab=systems&tenant=baci&system=campaign_email"
+    _empty = c.get(_u).text
+    ck("a real planner system offers Propose", "plan_propose" in _empty)
+    ck("…above the cadence fold, not inside it — an empty queue leads with "
+       "the one press that fills every required field",
+       _empty.index("plan_propose") < _empty.index("<summary>Cadence"),
+       "propose is still buried under the word Cadence")
+    ck("…and the hand-fill form is still there for whoever wants it",
+       "plan_new" in _empty)
+
+    c.get("/admin/plan_propose?key=s3cret&tenant=baci&system=campaign_email")
+    _full = c.get(_u).text
+    ck("once there are plans, proposing again is a cadence decision and "
+       "goes back into the fold",
+       _full.index("plan_propose") > _full.index("<summary>Cadence"))
+    _plans = _sys.plans("baci", "campaign_email")
+    ck("…and what it proposed is COMPLETE — nothing left to fill in",
+       bool(_plans) and all(_sys.plan_complete(pl, "campaign_email")["complete"]
+                            for pl in _plans),
+       str([_sys.plan_complete(pl, "campaign_email") for pl in _plans[:2]]))
+    ck("the optional fields on a real plan are folded",
+       "Optional &mdash;" in _full)
+    ck("…while both required ones stay visible",
+       'name="segment"' in _full and 'name="goal"' in _full)
+
+    print("\n— required in the open, optional folded and named —")
+    fields = _sys.workflow("wf_probe")["plan_fields"]
+    req = [f for f in fields if f.get("required")]
+    opt = [f for f in fields if not f.get("required")]
+    if opt:
+        ck("the optional fields are behind a fold that says what is in it",
+           "Optional &mdash;" in live_page, "no optional fold rendered")
+        ck("…and the fold names them rather than being a mystery drawer",
+           any(str(f.get("label", "")).lower()[:12] in live_page.lower()
+               for f in opt))
+    else:
+        ck("this system declares no optional fields, so nothing to fold",
+           "Optional &mdash;" not in live_page)
+    for f in req:
+        ck(f"the required field {f.get('label', f['key'])!r} stays visible",
+           f'name="{f["key"]}"' in live_page)
+
+    print("\n— a refusal keeps you where you were —")
+    # Asserted because a propose that fails must not strand the reader on a
+    # blank Systems page with no way back to the system they were working on.
+    bad = c.get("/admin/plan_propose?key=s3cret&tenant=agency&system=not_a_system",
+                follow_redirects=False)
+    loc = str(bad.headers.get("location") or "")
+    ck("a failed propose carries the account and the system back",
+       "tenant=agency" in loc and "system=not_a_system" in loc, loc[:90])
+    ck("…and says what went wrong", "err=" in loc, loc[:90])
+
     print()
     if _failures:
         print(f"{len(_failures)} FAILED: {_failures}")

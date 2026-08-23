@@ -38,6 +38,25 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "library_shows_only_owned",
+        "file": "app/admin_ui.py",
+        "find": '    shots = [a for a in kbm.assets(tenant, publishable_only=True, kind="image")',
+        "replace": '    shots = [a for a in kbm.assets(tenant, publishable_only=False, kind="image")  # SABOTAGE',
+        "suites": ["test_photo_library.py"],
+        "why": "a picture the client does not own is listed as theirs to "
+               "publish, in the one place that reads as 'these are yours'",
+    },
+    {
+        "name": "propose_leads_an_empty_queue",
+        "file": "app/admin_ui.py",
+        "find": "        lead = propose if not total else \"\"",
+        "replace": '        lead = ""  # SABOTAGE',
+        "suites": ["test_workflow_ui.py"],
+        "why": "the one press that fills every required field goes back under "
+               "a fold labelled 'Cadence', and an empty queue leads with the "
+               "eight-field hand form again",
+    },
+    {
         "name": "toggle_says_why_it_cannot_move",
         "file": "app/admin_ui.py",
         "find": '    elif r["ready"]:',

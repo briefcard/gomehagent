@@ -1472,6 +1472,34 @@ def _system_card(key: str, row) -> str:
 PLANS_PAGE = 15
 
 
+def _plan_fields_split(key_: str, get, tenant: str) -> str:
+    """Required fields in the open; everything else folded, and named.
+
+    Every declared field rendered flat with equal weight is what "it's a lot of
+    different fields" described (owner, 2026-08-23). For campaign_email it is
+    eight boxes of which TWO decide whether the plan can run — the rest change
+    what the send is LIKE, and none of them stop it. Showing all eight the same
+    way makes a two-field job look like an eight-field one, and the person
+    filling it in cannot tell which boxes they are allowed to leave alone.
+
+    Nothing is hidden that was not already optional, and the fold names what is
+    inside it, so it is never a mystery drawer.
+    """
+    fields = systems.workflow(key_)["plan_fields"]
+    req = [f for f in fields if f.get("required")]
+    rest = [f for f in fields if not f.get("required")]
+    out = "".join(_plan_field_input(f, get(f["key"]), tenant) for f in req)
+    if rest:
+        names = ", ".join(str(f.get("label") or f["key"]).lower() for f in rest)
+        out += ('<details class="sec" style="grid-column:1/-1">'
+                '<summary>Optional &mdash; ' + _esc(names[:110]) + '</summary>'
+                + "".join(_plan_field_input(f, get(f["key"]), tenant)
+                          for f in rest)
+                + '<p class="mut">None of these stop the plan running. They '
+                  'change what the send is like.</p></details>')
+    return out
+
+
 def _plan_field_input(f: dict, value, tenant: str = "") -> str:
     """One declared plan field as a prefilled control — rule 13: nothing the
     owner can see is display-only, and the control shows what IS before
@@ -1613,8 +1641,8 @@ def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
         approve = (f'<a href="/admin/plan_run?{_actions}">'
                    f'<button type="button">Run now</button></a>')
 
-    fields = "".join(_plan_field_input(f, plan.get(f["key"], ""), row.tenant)
-                     for f in systems.workflow(row.key)["plan_fields"])
+    fields = _plan_fields_split(row.key,
+                                lambda k: plan.get(k, ""), row.tenant)
     return f"""
     <div class="plan {'ok' if ok else 'gap'}" id="plan-{_esc(p.id)}">
       <div class="planhead">
@@ -1691,8 +1719,7 @@ def _planned_section(key: str, row, ppage: int) -> str:
                     if ppage < pages else "")
                  + "</div>")
 
-    new_fields = "".join(_plan_field_input(f, "", row.tenant)
-                         for f in wf["plan_fields"])
+    new_fields = _plan_fields_split(row.key, lambda _k: "", row.tenant)
     if live:
         create = f"""
         <details class="sec"{"" if total else " open"}>
@@ -1747,7 +1774,20 @@ def _planned_section(key: str, row, ppage: int) -> str:
         else:
             propose = ('<p class="mut" style="margin-top:9px">Proposing needs '
                        'the system on.</p>')
-        planner_ctl = f"""
+        # PROPOSE IS THE FAST PATH AND IT WAS THE HIDDEN ONE. Pressing it
+        # produces COMPLETE plans — every required field filled from the
+        # segment catalog, nothing missing — and it was folded inside a
+        # <details> whose summary says "Cadence", a word that does not read as
+        # "make some work now". Meanwhile the empty queue opened the 8-field
+        # hand form. So the page led with the slow path and hid the fast one
+        # (owner, 2026-08-23: "it should be easier to get things moving").
+        #
+        # Out of the fold, above the queue, and only when the queue is empty —
+        # once there ARE plans, proposing again is a cadence decision and
+        # belongs back with cadence.
+        lead = propose if not total else ""
+        planner_ctl = (f'<div class="row" style="margin-top:4px">{lead}</div>'
+                       if lead else "") + f"""
         <details class="sec">
           <summary>Cadence — {cad["per_segment_monthly"]}/segment/month,
             {cad["horizon_days"]}-day horizon</summary>
@@ -1766,7 +1806,7 @@ def _planned_section(key: str, row, ppage: int) -> str:
                      value="{cad["horizon_days"]}"></div>
             <button class="sec">Set cadence</button>
           </form>
-          {propose}
+          {"" if lead else propose}
         </details>"""
 
     return f"""
@@ -2628,6 +2668,75 @@ and hand-set fields survive future re-derives.</p>
 </div>""")
 
 
+def _photo_library(tenant: str) -> str:
+    """Every photograph the creative pipeline is allowed to publish.
+
+    There was nowhere in the console to see this (owner, 2026-08-23). The
+    picture grid rendered ONLY the proposed queue, and the number of approved
+    ones appeared in a sentence inside `if waiting:` — so an account that had
+    worked its queue to empty could not see the library it had just built, or
+    even its size. Approving was a decision with no visible consequence.
+
+    Read-only on purpose. Approving and rejecting belong to the queue on
+    Review, where the decision is; this is the answer to "what do we have",
+    which is a knowledge question and belongs with the rest of what the
+    account knows.
+    """
+    from . import kb as kbm
+    shots = [a for a in kbm.assets(tenant, publishable_only=True, kind="image")
+             if (a.subject or "") != kbm.LOGO]
+    marks = kbm.logos(tenant)
+    names = {e.key: e.name for e in kbm.entities(tenant, available_only=False)}
+
+    def _tile(a) -> str:
+        # WHAT IT IS OF, and WHETHER IT HAS EARNED ANYTHING. Both are on the
+        # row and neither was rendered anywhere: `entity_key` is what
+        # `coherence.review` checks a hero against, so a library that does not
+        # show it cannot be used to answer "why did that email pick this one".
+        scope = (names.get(a.entity_key or "", a.entity_key or "")
+                 or "brand-wide")
+        used = int(a.uses or "0")
+        when = (db.as_utc(a.last_used_at).strftime("%b %d")
+                if a.last_used_at else "")
+        return (f'<a class="pic" href="{_esc(a.url)}" target="_blank" '
+                f'rel="noopener" title="{_esc(a.title or "")}">'
+                f'<img src="{_esc(a.url)}" loading="lazy" alt="">'
+                f'<span class="picmeta">{_esc((a.title or "untitled")[:34])}'
+                f'</span>'
+                f'<span class="picmeta">{_esc(scope[:22])}'
+                + (f' &middot; used {used}&times;'
+                   + (f" {_esc(when)}" if when else "") if used else "")
+                + '</span></a>')
+
+    if not shots and not marks:
+        return ('<div class="card"><div class="head">'
+                '<h2>Photographs the creative may use</h2></div>'
+                '<p class="mut">Nothing approved yet. Pictures found on the '
+                'account&#39;s own site queue up on <b>Review &rarr; '
+                'Pictures</b>; approving one there grants use and it appears '
+                'here. A picture on a client&#39;s site is a candidate, not a '
+                'licence — approve what is genuinely theirs.</p></div>')
+
+    return f"""
+<div class="card">
+  <div class="head"><h2>Photographs the creative may use</h2>
+    <span class="chip on">{len(shots)} approved</span>
+    {f'<span class="chip">{len(marks)} logo(s)</span>' if marks else ''}</div>
+  <p class="mut">Owned and approved, so a generator may publish them — an
+  email hero comes from this shelf or the email goes without one. What each is
+  OF is shown beneath it, because that is what a hero is checked against;
+  brand-wide means it is not tied to one product. Decisions live on
+  <b>Review &rarr; Pictures</b>.</p>
+  <div class="picgrid">{"".join(_tile(a) for a in shots[:60])}</div>
+  {f'<p class="mut">Showing 60 of {len(shots)}.</p>' if len(shots) > 60 else ''}
+  {('<h3 style="font-size:.9rem;margin:14px 0 6px">Logos</h3>'
+    '<div class="picgrid">' + "".join(_tile(a) for a in marks[:12]) + "</div>"
+    + '<p class="mut">Held apart on purpose: the header already carries the '
+      'logo, so a brand mark is never chosen as a hero — it would read as a '
+      'letterhead.</p>') if marks else ''}
+</div>"""
+
+
 def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
     # One resolver for the frame and the body, so the pill cannot name an
     # account the numbers below it are not about.
@@ -3116,6 +3225,8 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
   {sit_note}
   <div class="thread">{sit_body}</div>
 </div>
+
+{_photo_library(tenant)}
 {over_html}
 
 {unk_card}

@@ -3341,3 +3341,49 @@ Owner's remaining console items: 4 (inside a workflow — too many fields),
 5 (Assurance never invested in), 6 (Diagnostics overwhelming / no actions —
 Systems check is the first half of this), 8 (Data layer outdated, cannot fix
 from there).
+
+## Approved photographs, and getting work moving (2026-08-23)
+
+**Photo library on Knowledge** (owner: "add a place to see all approved photos
+in the knowledge"). There was nowhere: `.picgrid` rendered only the PROPOSED
+queue, and the approved count lived in a sentence nested inside `if waiting:`
+— so an account that had worked its queue to empty could not see the library it
+had just built, or even its size. Approving was a decision with no visible
+consequence.
+
+`_photo_library(tenant)` renders on the Knowledge tab, after Situations:
+`kb.assets(publishable_only=True, kind="image")`, logos held apart (a brand
+mark is never a hero — it reads as a letterhead), each tile naming what it is
+OF (`entity_key` resolved to the product name, or "brand-wide") because that is
+what `coherence.review` checks a hero against, plus `uses` / `last_used_at`
+where a photograph has been published. **Read-only on purpose** — deciding
+belongs to the queue on Review, and two queues over the same rows would
+disagree. Reuses `.picgrid/.pic/.picmeta`; no CSS added. Guard
+`library_shows_only_owned` — a REFERENCE-rights picture must never appear in a
+list that reads as "these are yours to publish".
+
+**Getting work moving** (owner: "it should be easier to get things moving …
+it's a lot of different fields"). Two problems, only one of them the fields:
+
+* `plan_propose` produces COMPLETE plans in one press — every required field
+  filled from the segment catalog, `missing: []` — and it was folded inside a
+  `<details>` whose summary reads **"Cadence"**, which does not mean "make some
+  work now". Meanwhile an empty queue opened the 8-field hand form. The page
+  led with the slow path and hid the fast one. Propose is now lifted out of the
+  fold **when the queue is empty**; once there are plans, proposing again is a
+  cadence decision and goes back inside. Guard
+  `propose_leads_an_empty_queue`.
+* `_plan_fields_split()` — required fields in the open, optional folded behind
+  a summary that NAMES them. For `campaign_email` that is 2 visible instead of
+  8; the other six change what the send is like and none of them stop it.
+  Used by both the per-plan edit form and the file-by-hand form.
+
+Corrected in passing: I reported `plan_propose` losing tenant/system on its
+error path. It does not — I had called it with `id=` instead of
+`tenant=`/`system=`, so both were empty and the redirect faithfully echoed
+empties. Asserted properly now in `test_workflow_ui`.
+
+`scripts/test_photo_library.py` (14 checks) + a workflow-view section in
+`test_workflow_ui.py` asserted against `campaign_email`, which really has a
+planner — the first version tested the ordering on `wf_probe`, which declares
+none, and passed without exercising anything. 81/81 green.
