@@ -811,6 +811,12 @@ the email is about. Start in the middle of something — a moment, a number, a
 question the reader already has. Subject lines run 3–8 words and say something
 specific; the preheader EXTENDS the subject, it never repeats it.
 
+THE ANGLE YOU CHOSE. When no angle was set for you, return the one you picked
+as `"angle": "..."` alongside the subject and blocks — one short sentence
+describing the IDEA, not the subject line. It is recorded on the run so a
+person can read back what you decided and set it themselves next time. When an
+angle WAS given to you, do not echo it back.
+
 ONE EMAIL, ONE SUBJECT. Write about the products offered to you and nothing
 else. Do not introduce another product line, another mechanism, or another
 audience's positioning part-way through — a reader who came for one thing and
@@ -1231,7 +1237,31 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                 parts.append(f"- {o.get('objection', '')}")
         parts.append(f"\n## Segment you are writing to:\n{seg['name']} — "
                      f"{seg.get('definition', '')}")
-        parts.append(f"## The action to drive:\n{goal or seg.get('angle', '')}")
+        # DIRECTION, NAMED AS DIRECTION. Handed over under a bare heading the
+        # angle reads as copy, and a drafter short of a subject line will
+        # reach for the nearest sentence it was given.
+        _angle = (goal or "").strip()
+        if _angle:
+            parts.append(
+                "\n## THE ANGLE — the idea this email is built around\n"
+                + _angle
+                + "\nThis is a brief written FOR you, not copy: never quote "
+                  "it, never use it as the subject line, never paste it into "
+                  "the body. Write the email this idea implies.")
+        else:
+            # NO ANGLE IS A JOB, NOT A GAP. Choosing one from the segment and
+            # what is actually in stock is the thing a model is genuinely good
+            # at, and demanding it up front made a person invent a concept
+            # before anything could run.
+            parts.append(
+                "\n## NO ANGLE WAS SET — choose one\n"
+                "Nobody has said what this email should be about. Decide it "
+                "yourself from the segment above, the products you have been "
+                "offered and the approved proof, and pick the one a person in "
+                "that segment would actually open. Return it in `angle` as one "
+                "short sentence describing the idea — not the subject line, "
+                "the IDEA — so it can be read back and corrected.")
+        parts.append(f"## The action to drive:\n{seg.get('angle', '') or 'one click to the product'}")
         parts.append(_craft_brief(craft or {}))
 
         # Through `llm.ask`: one door, so the purpose is logged, the model is
@@ -1275,9 +1305,19 @@ draft_campaign = _draft_campaign_live   # the seam the offline suite replaces
 def _compose_campaign(bundle: dict, seg: dict, goal: str) -> dict:
     """The deterministic grounded fallback — dull, honest, provable offline."""
     claims = bundle.get("claims") or []
+    ents = bundle.get("entities") or []
     top = claims[0] if claims else None
-    line = (goal or seg.get("angle") or "A quick note").split(".")[0]
     proof = top["claim"].rstrip(". ") if top else ""
+    # THE ANGLE IS NOT THE SUBJECT LINE. This read
+    # `line = (goal or seg.get("angle") or ...)` and put it straight into both
+    # `subject` and `headline` — so the internal brief written FOR the drafter
+    # ("A reason to come back now, while the habit is recoverable and before a
+    # win-back discount is needed") arrived in a customer's inbox as the
+    # subject (owner, 2026-08-23). It is direction, and direction is never
+    # copy. The composer cannot invent a line, so it uses what it actually
+    # has: the thing being sold, or failing that the proof.
+    _named = next((e.get("name", "") for e in ents if e.get("name")), "")
+    line = _named or (proof.split(".")[0] if proof else "") or seg["name"]
     sections = [{"heading": "", "body_html": "<p>Hi {{FIRST_NAME}},</p>"}]
     if proof:
         sections.append({"heading": "", "body_html": f"<p>{proof}.</p>"})
@@ -1878,6 +1918,15 @@ def _run_campaign_email(ctx: Context) -> dict:
             ctx.note("the model did not draft this one: " + why)
         copy = _compose_campaign(ctx.bundle, seg, goal)
     copy = _shape_campaign_copy(copy, ctx.note)
+    # WHAT IT DECIDED, SAID OUT LOUD. An angle the system chose for itself is
+    # a decision the owner never made, so it is reported rather than left to be
+    # inferred from the copy — and it is the thing they would want to correct
+    # on the plan next time.
+    chosen_angle = str(copy.get("angle") or "").strip()
+    if chosen_angle and not goal:
+        ctx.note(f"no angle was set, so the drafter chose one: {chosen_angle}")
+    elif goal:
+        ctx.note(f"angle from the plan: {goal[:120]}")
     # The model may only cite claims that were actually offered — an invented id
     # is worse than none, because it looks traceable. Intersect with the bundle.
     # The whole claim, not just its id: a proof block has to be checked
@@ -2246,7 +2295,10 @@ def _run_campaign_email(ctx: Context) -> dict:
         shape=lambda: [b.get("type", "?") for b in state["blocks"]],
         # A CALLABLE, read after the repair loop settles: meta must describe
         # the email that finally passed, not the one that was replaced.
-        meta=lambda: {"subject": state["copy"].get("subject", ""),
+        meta=lambda: {"angle": chosen_angle or goal,
+                      "angle_chosen_by": ("drafter" if chosen_angle and not goal
+                                          else "plan" if goal else ""),
+                      "subject": state["copy"].get("subject", ""),
                       "preheader": state["copy"].get("preheader", ""),
                       "html": state["html"], "segment": seg["key"],
                       "basis": basis, "intent": craft.get("intent", ""),

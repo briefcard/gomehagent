@@ -2884,3 +2884,52 @@ The caller was fixed to pass it once, as `prominent`. More importantly the
 contract was hardened: `whole` no longer concatenates when `prominent` is
 already contained in `text`, because the next caller with a short artifact
 would have written exactly the same line.
+
+### 2.83 The brief went out as the subject line — 2026-08-23
+
+Owner: **"we have incorrectly wired the Angle/Concept field in the email
+campaign prompt into the subject line which is not the point."** Exactly that.
+`_compose_campaign` read:
+
+    line = (goal or seg.get("angle") or "A quick note").split(".")[0]
+
+and put `line` into BOTH `subject` and `headline`. So the planner's internal
+brief — *"A reason to come back now, while the habit is recoverable and before
+a win-back discount is needed"* — arrived in a customer's inbox as the subject
+line. And because an account with no model always takes the composer path, and
+this owner's runs were all coming back `basis: composed`, **every send they had
+seen was like that**.
+
+Three changes, because the field was wrong in three ways:
+
+* **The composer no longer uses it.** It cannot invent a line, so it uses what
+  it actually has: the featured product's name, then the proof's first
+  sentence, then the segment. Direction is never copy.
+* **The prompt names it as direction.** Handed over under a bare heading, an
+  angle reads as copy, and a drafter short of a subject reaches for the
+  nearest sentence it was given. It now arrives as "THE ANGLE — the idea this
+  email is built around … a brief written FOR you, not copy: never quote it,
+  never use it as the subject line."
+* **It is optional, and blank is a job.** `required=True` forced a person to
+  invent a concept before anything could run — when proposing one from the
+  segment, the products and the approved proof is the thing a model is
+  genuinely good at. Left blank the drafter chooses, returns it as `angle`,
+  and the run says *"no angle was set, so the drafter chose one: …"* so the
+  owner can read back what it decided and set it themselves next time.
+
+Guard `angle_is_not_the_subject`.
+
+### 2.84 A test suite nobody would run — 2026-08-23
+
+Owner, watching me run all 81 suites after every edit: **"The full suite run
+every single time is wasteful isn't it?"** It was — five minutes on a quiet
+machine, over ten under load.
+
+Every suite sets its own `DATABASE_URL` to a fresh temp file at import, so
+there was never a shared resource to serialise around. It had simply never been
+parallelised. `scripts/test_all.sh` runs them at `-P 8`: **5m+ → 1m28s**, and
+takes a substring filter for targeted runs while iterating.
+
+Worth stating as a rule: a check slow enough to skip is a check that will be
+skipped, and then it is protecting nothing. The cost of a slow suite is not the
+minutes — it is the runs that stop happening.

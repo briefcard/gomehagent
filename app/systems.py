@@ -103,7 +103,15 @@ CATALOG = {
             plan_fields=(
                 dict(key="segment", label="Audience segment", required=True,
                      kind="segment"),
-                dict(key="goal", label="Angle / goal", required=True),
+                # THE ANGLE IS DIRECTION, AND IT IS OPTIONAL. It was
+                # required, which forced a person to invent a concept for
+                # every send before anything could run — and the one thing a
+                # model is genuinely good at here is proposing an angle from
+                # the segment and what is in stock. Left blank the drafter
+                # chooses one and the run records which, so the owner can read
+                # it back and correct it next time.
+                dict(key="goal", label="Angle / concept (optional)",
+                     required=False),
                 dict(key="subject", label="Subject line", required=False),
                 # WHAT THE SEND IS FOR. Left blank the planner rotates it, so
                 # a list is given to about three times for every time it is

@@ -812,6 +812,73 @@ def main():
        _meta(r, "basis") == "composed"
        and any("did not draft" in n for n in r.get("notes", [])))
 
+    print("\n— the angle is direction, not copy —")
+    #
+    # Owner, 2026-08-23: "we have incorrectly wired the Angle/Concept field in
+    # the email campaign prompt into the subject line which is not the point."
+    # It was exactly that: `_compose_campaign` did
+    #     line = (goal or seg.get("angle") or "A quick note").split(".")[0]
+    # and put `line` into BOTH `subject` and `headline`. So the internal brief
+    # written FOR the drafter arrived in a customer's inbox as the subject —
+    # and because a model-less account always takes the composer path, every
+    # send they had seen was like that.
+    kb.add_entity("baci", "product", "glasses", "Clear Acrylic Water Glasses",
+                  description="Shatterproof.",
+                  attributes={"availability": "in stock"})
+    _brief = ("A reason to come back now, while the habit is recoverable and "
+              "before a win-back discount is needed.")
+    skill_pack.draft_campaign = lambda b, s, g, craft=None: (None, "composed", "no key")
+    r = skill.run("campaign_email", "baci", segment="win_back", goal=_brief)
+    _m = (r.get("items") or [{}])[0].get("meta") or {}
+    ck("the composer does not put the brief in the subject line",
+       _brief[:24] not in _m.get("subject", ""), _m.get("subject", ""))
+    # A PRODUCT NAME, whichever one the bundle led with — not this suite's
+    # most recently seeded product. Pinning the exact name made the check about
+    # fixture ordering rather than about the behaviour.
+    _catalogue = {e.name for e in kb.entities("baci", available_only=False)}
+    ck("…it uses something a customer would recognise instead",
+       _m.get("subject", "") in _catalogue,
+       f'{_m.get("subject", "")!r} not one of {sorted(_catalogue)[:4]}')
+    ck("…nor in the headline", _brief[:24] not in (_m.get("html") or ""))
+    ck("the angle is still RECORDED, so nothing is lost",
+       _brief[:24] in (_m.get("angle") or ""))
+    ck("…and the run says where it came from",
+       any("angle from the plan" in n for n in r.get("notes", [])))
+
+    print("\n— with no angle at all, one gets chosen and named —")
+    skill_pack.draft_campaign = _blocks_drafter(
+        [{"type": "text", "html": "<p>A short note.</p>"},
+         {"type": "cta", "label": "See", "url": "https://x/p"}],
+        subject="Six that do not shatter")
+
+    def _with_angle(bundle, seg, goal, craft=None):
+        data, basis, why = _blocks_drafter(
+            [{"type": "text", "html": "<p>A short note.</p>"},
+             {"type": "cta", "label": "See", "url": "https://x/p"}],
+            subject="Six that do not shatter")(bundle, seg, goal, craft)
+        data["angle"] = "The set that survives the pool deck"
+        return data, basis, why
+
+    skill_pack.draft_campaign = _with_angle
+    r2 = skill.run("campaign_email", "baci", segment="new_subscribers", goal="")
+    _m2 = (r2.get("items") or [{}])[0].get("meta") or {}
+    ck("the drafter's own angle is filed on the run",
+       _m2.get("angle") == "The set that survives the pool deck", str(_m2.get("angle")))
+    ck("…attributed to the drafter, not to the plan",
+       _m2.get("angle_chosen_by") == "drafter", str(_m2.get("angle_chosen_by")))
+    ck("…and the run says it chose one, so it is correctable next time",
+       any("drafter chose one" in n for n in r2.get("notes", [])))
+    ck("the angle it chose is NOT the subject the customer sees",
+       "The set that survives" not in _m2.get("subject", ""),
+       _m2.get("subject", ""))
+
+    print("\n— an angle is no longer demanded before anything can run —")
+    from app import systems as _sysmod
+    _goal_field = next(f for f in _sysmod.workflow("campaign_email")["plan_fields"]
+                       if f["key"] == "goal")
+    ck("the angle field is optional", not _goal_field.get("required"),
+       str(_goal_field))
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + "; ".join(_fail)))
     return 1 if _fail else 0

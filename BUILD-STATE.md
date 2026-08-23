@@ -3423,3 +3423,16 @@ the tab and coming back; Diagnostics always did this and Assurance did not.
 Found by a mapping agent reading the page while I was editing it — it flagged
 the mutation itself, and caught a transient `NameError` I had introduced and
 fixed a minute later. 81/81 green.
+
+## The angle is direction, not copy (2026-08-23)
+
+See DEFECTS §2.83. `goal` (now **"Angle / concept (optional)"**) is a brief for
+the drafter and was being pasted into the customer-facing subject line by the
+composer. Fixed in the composer, reframed in the prompt, and made optional —
+blank now means "choose one and tell me what you chose", recorded as
+`meta["angle"]` + `meta["angle_chosen_by"]` and said out loud on the run.
+
+## scripts/test_all.sh (2026-08-23)
+
+All 81 suites in parallel, failures only, ~98s instead of 5m+. Takes a
+substring filter (`./scripts/test_all.sh campaign`). See DEFECTS §2.84.

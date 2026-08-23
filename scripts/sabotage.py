@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "angle_is_not_the_subject",
+        "file": "app/skill_pack.py",
+        "find": '    line = _named or (proof.split(".")[0] if proof else "") or seg["name"]',
+        "replace": '    line = (goal or seg.get("angle") or "A quick note").split(".")[0]  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "the internal brief written for the drafter goes back into the "
+               "customer-facing subject line, on every model-less send",
+    },
+    {
         "name": "library_shows_only_owned",
         "file": "app/admin_ui.py",
         "find": '    shots = [a for a in kbm.assets(tenant, publishable_only=True, kind="image")',
