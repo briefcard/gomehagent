@@ -1515,7 +1515,10 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
             days = int(request.query_params.get("days", "30"))
         except ValueError:
             days = 30
-        return ui.render_assurance(link_key, tenant, days=max(1, min(days, 365)))
+        return ui.render_assurance(
+            link_key, tenant, days=max(1, min(days, 365)),
+            system=request.query_params.get("system", ""),
+            rule=request.query_params.get("rule", ""))
     if tab == "diagnostics":
         def _int(name: str, default: int, lo: int, hi: int) -> int:
             try:
@@ -4746,7 +4749,14 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
             tenant, limit=limit, since=since))
     if ui:
         _run_bg("compliance scan", _scan_and_record)
-        return _back_to_content(tenant, "scan")
+        # BACK TO THE PAGE THE BUTTON IS ON. Compliance moved to Assurance
+        # (2026-08-23) and this redirect did not move with it, so pressing the
+        # one button on Assurance landed you on Review — the very tab the card
+        # had just been taken off.
+        from fastapi.responses import RedirectResponse as _RR
+        from urllib.parse import quote as _qt
+        return _RR(f"/admin/ui?tab=assurance&tenant={_qt(tenant)}"
+                   f"&started=scan", 303)
     result = compliance.scan(tenant, limit=limit, since=since)
     compliance.record_scan(tenant, result)
     return result

@@ -4477,7 +4477,8 @@ def render_schema(key: str, tenant: str = "") -> str:
 """, suffix=f"&amp;tenant={_esc(tenant)}")
 
 
-def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
+def render_assurance(key: str, tenant: str = "", days: int = 30,
+                     system: str = "", rule: str = "") -> str:
     """What the layer checked, what it caught, and what cannot be measured yet.
 
     Ordered by how much each number can be trusted: catches first because they
@@ -4494,7 +4495,12 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
     # for by name.
     tenant, here, _rows = _account(tenant)
     every = tenant == ALL
-    rep = assurance.report("" if every else tenant, days)
+    # Named once, used by every query below. `"" if every else tenant` was
+    # written out at each call site, and the moment a new one was added it was
+    # the thing most likely to be got wrong — an all-accounts page is the exact
+    # case where a missed scope shows one client's numbers under another's name.
+    scope = "" if every else tenant
+    rep = assurance.report(scope, days)
     who = f" · {_esc(_account_name(tenant, here))}"
 
     # The window is a CONTROL, not a caption (owner, 2026-08-21) — and it
@@ -4520,10 +4526,14 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
       already live on the client&#39;s own site. Moved here from Review (owner,
       2026-08-23) — Review is a queue of decisions waiting on you, and a report
       about published pages is not a decision.</p>
-      {_compliance_body("" if every else tenant)}
-      <div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}
-        <span class="mut">checks every public page against this account&#39;s
-        rules</span></div>
+      {_compliance_body(tenant) if not every else
+       '<p class="mut">A scan reads one client&#39;s own site against one '
+       'client&#39;s ban list, so there is nothing to pool here. Pick an '
+       'account to see and run it.</p>'}
+      {'' if every else
+       f'<div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}'
+       '<span class="mut">checks every public page against this account&#39;s '
+       'rules</span></div>'}
     </div>"""
 
     if not rep["events"]:
@@ -4535,10 +4545,26 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
                 f'nothing being wrong — it means no draft passed through a '
                 f'validator, so this page has no evidence either way.</div>'
                 + comp_card)
-        return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
+        return _shell(key, "assurance", "Assurance", body=body, tenant=tenant,
+                      suffix=f"&amp;days={days}")
+
+    # A NUMBER YOU CANNOT OPEN IS A NUMBER YOU TAKE ON FAITH. `catches()`
+    # accepts `system_key` and `rule` filters; the first version of this page
+    # passed neither, so the drill-down existed in the model layer and was
+    # reachable from nowhere.
+    def _drill(system_: str = "", rule_: str = "") -> str:
+        bits = ["tab=assurance", f"tenant={_esc(tenant)}", f"days={days}"]
+        if system_:
+            bits.append(f"system={_esc(system_)}")
+        if rule_:
+            bits.append(f"rule={_esc(rule_)}")
+        if key:
+            bits.append(f"key={_esc(key)}")
+        return "/admin/ui?" + "&amp;".join(bits)
 
     catch_rows = "".join(
-        f'<tr><td><code>{_esc(r)}</code></td><td class="num">{n}</td></tr>'
+        f'<tr><td><a href="{_drill(rule_=r)}"><code>{_esc(r)}</code></a></td>'
+        f'<td class="num">{n}</td></tr>'
         for r, n in rep["caught"].items()) or \
         '<tr><td colspan="2" class="mut">nothing caught in this window</td></tr>'
 
@@ -4546,6 +4572,54 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
         f'<tr><td>{_esc(src)}</td><td class="num">{d["checks"]}</td>'
         f'<td class="num">{d["caught"]}</td><td class="num">{d["blocked"]}</td></tr>'
         for src, d in sorted(rep["by_source"].items()))
+
+    # PER SYSTEM. `report()` groups by SOURCE — which layer did the checking —
+    # and that answers a question nobody asks. "Which system keeps getting
+    # caught" is the one people actually have, `system_key` is on every row and
+    # indexed, and nothing grouped by it.
+    sysrows = "".join(
+        f'<tr><td><a href="{_drill(system_=e["system"])}">{_esc(e["system"])}</a></td>'
+        f'<td class="num">{e["checks"]}</td>'
+        f'<td class="num">{e["catches"]}</td>'
+        f'<td class="num">{e["blocked"] or ""}</td>'
+        f'<td class="num">{e["repaired"] or ""}</td>'
+        f'<td>{"".join(f"<code>{_esc(k)}</code> {n} " for k, n in e["top_rules"])}</td>'
+        f'</tr>' for e in assurance.by_system(scope, days)) or \
+        '<tr><td colspan="6" class="mut">nothing checked in this window</td></tr>'
+
+    # THE CATCHES THEMSELVES. The page could say "14 caught" and never show one
+    # of them — the draft was on the Output row the event already points at and
+    # was never joined. A page whose whole job is to be believed has to be able
+    # to show its work.
+    got = assurance.catches(scope, days, limit=40,
+                            system_key=system, rule=rule)
+    narrowed = ""
+    if system or rule:
+        what = " · ".join(x for x in (system, rule) if x)
+        narrowed = (f'<p class="mut">Showing only <b>{_esc(what)}</b>. '
+                    f'<a href="{_drill()}">show everything &rarr;</a></p>')
+    catch_cards = "".join(
+        '<div class="msg">'
+        f'<div class="when">{_esc(c["when"])} · {_esc(c["system"] or "—")} · '
+        f'{_esc(c["where"])}'
+        + (f' · {_esc(c["tenant"])}' if every else "")
+        + (f' · attempt {_esc(str(c["attempt"]))}' if str(c["attempt"]) not in ("0", "") else "")
+        + '</div>'
+        + '<div>' + "".join(f'<code>{_esc(r)}</code> ' for r in c["rules"])
+        + f'<span class="chip {"off" if c["verdict"] == "blocked" else "on"}">'
+          f'{_esc(c["verdict"])}</span></div>'
+        + (f'<div class="msg esc">{_esc(c["body"])}</div>' if c["body"] else
+           '<div class="when">no draft was filed — the gate refused before '
+           'anything reached the ledger</div>')
+        + '</div>' for c in got)
+    if not got and (system or rule):
+        catch_cards = ('<p class="mut">Nothing matches that filter in this '
+                       'window.</p>')
+    elif not got:
+        catch_cards = ('<p class="mut">Nothing was caught in this window. On a '
+                       'live account that is worth reading twice: it means '
+                       'either the drafts were clean or nothing was drafted, '
+                       'and the count above says which.</p>')
 
     g = rep["grounding"]
     grate = ("not measured" if g["rate"] is None
@@ -4576,6 +4650,19 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
       <table class="tbl"><tr><th>rule</th><th>times</th></tr>
       {catch_rows}</table>
       <p class="when"><strong>{rep['caught_total']}</strong> total.</p>
+
+      <h3 style="font-size:.9rem;margin:16px 0 6px">Which system</h3>
+      <table class="tbl"><tr><th>system</th><th class="num">checks</th>
+        <th class="num">caught</th><th class="num">blocked</th>
+        <th class="num">repaired</th><th>most often</th></tr>
+      {sysrows}</table>
+
+      <h3 style="font-size:.9rem;margin:16px 0 6px">The drafts themselves</h3>
+      <p class="mut">What the model actually wrote, and what stopped it. A
+      number you cannot open is a number you have to take on faith — and this
+      is the page whose whole job is to be believed.</p>
+      {narrowed}
+      <div class="thread">{catch_cards}</div>
     </details>
 
     <details class="conns" open><summary>Where the checking happens</summary>
@@ -4610,7 +4697,11 @@ def render_assurance(key: str, tenant: str = "", days: int = 30) -> str:
 
     {comp_card}
     """
-    return _shell(key, "assurance", "Assurance", body=body, tenant=tenant)
+    # `suffix` rides the CURRENT tab's own nav link, so the window survives a
+    # trip to another tab and back. Diagnostics has always done this; Assurance
+    # did not, so every visit silently reset to 30 days.
+    return _shell(key, "assurance", "Assurance", body=body, tenant=tenant,
+                  suffix=f"&amp;days={days}")
 
 
 # ---------------------------------------------------------------------------

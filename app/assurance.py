@@ -169,9 +169,86 @@ def edited_share(tenant: str = "", days: int = 30) -> dict:
                      if not with_diff else "")}
 
 
-def catches(tenant: str = "", days: int = 30, limit: int = 50) -> list[dict]:
-    """The list to show somebody who asks what the layer is for."""
-    return [{"when": db.as_utc(r.created_at).date().isoformat(),
-             "tenant": r.tenant, "where": r.source, "system": r.system_key,
-             "rules": r.caught, "verdict": r.verdict, "run_id": r.run_id}
-            for r in _rows(tenant, days) if r.caught][:limit]
+def catches(tenant: str = "", days: int = 30, limit: int = 50,
+            system_key: str = "", rule: str = "") -> list[dict]:
+    """Every catch, WITH the draft it caught.
+
+    This used to return the event and nothing else — when, where, which rules,
+    a run id — so the one page whose job is to be believed could say "14
+    caught" and never show a single thing it caught. The draft is on the
+    `Output` row the event already points at via `output_id`; it was simply
+    never joined. Same defect as the Systems refused list (DEFECTS §2.82),
+    found in the same week, in a second place.
+
+    `body` is the text the validator actually read, truncated by `ledger`
+    itself at 2000 chars. `blocked_on` is what the ledger recorded stopping it,
+    which is not always the same as `rules`: `rules` is what THIS attempt
+    caught, and a later attempt may have been repaired.
+    """
+    rows = [r for r in _rows(tenant, days) if r.caught]
+    if system_key:
+        rows = [r for r in rows if (r.system_key or "") == system_key]
+    if rule:
+        rows = [r for r in rows if rule in (r.caught or [])]
+    rows = rows[:limit]
+
+    # One query for every output, not one per catch — this is a page people
+    # open when they are already worried about the system being slow.
+    ids = {r.output_id for r in rows if r.output_id}
+    bodies: dict = {}
+    if ids:
+        with db.SessionLocal() as s:
+            for o in s.query(db.Output).filter(db.Output.id.in_(ids)).all():
+                bodies[o.id] = {"body": (o.body or "")[:400],
+                                "status": o.status or "",
+                                "blocked_on": list(o.blocked_on or []),
+                                "format": o.format or "",
+                                "destination": o.destination or ""}
+    out = []
+    for r in rows:
+        got = bodies.get(r.output_id or "", {})
+        out.append({
+            "when": db.as_utc(r.created_at).date().isoformat(),
+            "at": r.created_at,
+            "tenant": r.tenant, "where": r.source, "system": r.system_key,
+            "rules": list(r.caught or []), "verdict": r.verdict,
+            "run_id": r.run_id, "output_id": r.output_id or "",
+            "attempt": r.attempt or "0",
+            # Absent rather than blank: an event with no output_id is one the
+            # gate refused before anything was filed, and saying so is more
+            # useful than an empty quotation.
+            "body": got.get("body", ""),
+            "status": got.get("status", ""),
+            "blocked_on": got.get("blocked_on", []),
+            "format": got.get("format", ""),
+        })
+    return out
+
+
+def by_system(tenant: str = "", days: int = 30) -> list[dict]:
+    """Checks and catches per system, worst first.
+
+    `report()` groups by SOURCE — skill, responder, agent — which answers
+    "which layer is doing the checking" and never "which system keeps getting
+    caught". `system_key` is on every row and indexed, and nothing grouped by
+    it.
+    """
+    per: dict = {}
+    for r in _rows(tenant, days):
+        k = r.system_key or "(none)"
+        e = per.setdefault(k, {"system": k, "checks": 0, "catches": 0,
+                               "blocked": 0, "repaired": 0, "rules": {}})
+        e["checks"] += 1
+        if r.caught:
+            e["catches"] += 1
+            for rule in r.caught:
+                e["rules"][rule] = e["rules"].get(rule, 0) + 1
+        if r.verdict == "blocked":
+            e["blocked"] += 1
+        elif r.verdict == "repaired":
+            e["repaired"] += 1
+    out = list(per.values())
+    for e in out:
+        e["top_rules"] = sorted(e["rules"].items(), key=lambda kv: -kv[1])[:4]
+    out.sort(key=lambda e: (-e["blocked"], -e["catches"], e["system"]))
+    return out

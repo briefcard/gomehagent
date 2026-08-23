@@ -3387,3 +3387,39 @@ empties. Asserted properly now in `test_workflow_ui`.
 `test_workflow_ui.py` asserted against `campaign_email`, which really has a
 planner — the first version tested the ordering on `wf_probe`, which declares
 none, and passed without exercising anything. 81/81 green.
+
+## Assurance shows its work (2026-08-23)
+
+Owner's item 5. The page whose whole job is to be believed could say "14
+caught" and never show one of them — the draft was on the `Output` row the
+event already points at via `output_id`, and was never joined. Same defect as
+the Systems refused list, in a second place.
+
+* `assurance.catches()` joins `Output`: each catch carries the draft body
+  (400 chars), its status, `blocked_on`, and format — plus `system_key` and
+  `rule` filters.
+* `assurance.by_system()` — `report()` groups by SOURCE (which layer did the
+  checking), which answers a question nobody asks. `system_key` is on every
+  row and indexed and nothing grouped by it.
+* The page renders "Which system" and "The drafts themselves", and the rule
+  and system names are LINKS that narrow the drafts below (`?system=`,
+  `?rule=`). The first version passed neither filter — the drill-down existed
+  in the model layer and was reachable from nowhere.
+
+Three defects fixed, all introduced by moving compliance here:
+
+1. **All-accounts compliance always read "Never scanned"** — `_compliance_body("")`
+   resolves no system row, so the pooled view reported never-scanned however
+   many clients had been scanned that week. It now says scanning is
+   per-account and offers no button.
+2. **The scan button on that view submitted `tenant="*"`** — a real background
+   scan against an account that does not exist.
+3. **The one button on Assurance returned you to Review** — `_back_to_content`,
+   the tab the card had just been taken off.
+
+Also: `suffix=&days=` now rides the nav link, so the window survives leaving
+the tab and coming back; Diagnostics always did this and Assurance did not.
+
+Found by a mapping agent reading the page while I was editing it — it flagged
+the mutation itself, and caught a transient `NameError` I had introduced and
+fixed a minute later. 81/81 green.
