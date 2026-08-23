@@ -314,9 +314,77 @@ def live():
        not any(k.startswith("coherence:") for k in backlog), str(backlog))
 
 
+# --------------------------------------------------------------------------
+# Part three: the SAME contract on a system with no product cards and no
+# imagery. If it only fits the email it is not a contract, it is a patch.
+# --------------------------------------------------------------------------
+def ads():
+    print("\n— an ad commits to an entity; its proof must be about that entity —")
+    c = coherence.commit("entity", "aqua-pitcher", label="Aqua pitcher",
+                         proof_scopes=["aqua-pitcher", "aqua"])
+    borrowed = coherence.parts(
+        text="The Aqua pitcher. Holds a generous 32 cm footprint.",
+        claims=[{"claim_id": "C7", "scope": "firenze-platter",
+                 "text": "A generous 32 cm footprint."}])
+    r = rules(coherence.review(c, borrowed))
+    ck("another product's fact is not evidence about this one",
+       "proof_off_subject" in r, str(sorted(r)))
+
+    # A GROUP's claim IS true of its members. `kb.claims` walks the ancestor
+    # chain deliberately, so a check that called this off-subject would refuse
+    # exactly the case the data layer exists to serve.
+    inherited = coherence.parts(
+        text="The Aqua pitcher. Every Aqua piece is acrylic, so it travels.",
+        claims=[{"claim_id": "C8", "scope": "aqua",
+                 "text": "Every Aqua piece is acrylic."}])
+    ck("…but the GROUP's claim is, and is not flagged",
+       "proof_off_subject" not in rules(coherence.review(c, inherited)),
+       str(sorted(rules(coherence.review(c, inherited)))))
+
+    print("\n— a two-sentence ad is not destroyed by a weak word match —")
+    short = coherence.parts(text="It does not shatter. Ever.")
+    sev = {f["rule"]: f["severity"] for f in coherence.review(c, short)}
+    ck("a short artifact that never names its subject ADVISES",
+       sev.get("subject_absent") == "nudge", str(sev))
+    long_miss = coherence.parts(text=("It does not shatter. " * 30))
+    sev2 = {f["rule"]: f["severity"] for f in coherence.review(c, long_miss)}
+    ck("…while a long one that never names it BLOCKS",
+       sev2.get("subject_absent") == "block", str(sev2))
+
+    print("\n— the live ad skill —")
+    _ad = systems.find("baci", "ad_creative") or systems.create("baci", "ad_creative")
+    with db.SessionLocal() as s:
+        s.get(db.System, _ad.id).status = "live"
+        s.commit()
+    kb.add_entity("baci", "product", "aqua-pitcher", "Aqua pitcher",
+                  description="Acrylic.", attributes={"availability": "in stock"})
+    kb.add_claim("baci", "The Aqua pitcher pours without dripping.", "tested",
+                 [], origin="human", status="active", entity_key="aqua-pitcher")
+    skill_pack.draft_ad = lambda b, c, a, o: (
+        "The Aqua pitcher pours without dripping.", "")
+    r = skill.run("ad_copy", "baci", entity_key="aqua-pitcher", variants=1)
+    it = (r.get("items") or [{}])[0]
+    ck("an ad carries a commitment like everything else",
+       (it.get("commitment") or {}).get("key") == "aqua-pitcher",
+       str(it.get("commitment")))
+    ck("…and a clean one passes", it.get("ok") is True, str(it.get("failures")))
+
+    print("\n— an ad that spends its one proof twice —")
+    skill_pack.draft_ad = lambda b, c, a, o: (
+        "The Aqua pitcher pours without dripping. It really does pour "
+        "without dripping.", "")
+    r2 = skill.run("ad_copy", "baci", entity_key="aqua-pitcher", variants=1)
+    i2 = (r2.get("items") or [{}])[0]
+    ck("…is caught by the same rule the email is",
+       i2.get("ok") is False
+       and "coherence:proof_repeated" in {f["rule"] for f in (i2.get("failures") or [])},
+       str([f["rule"] for f in (i2.get("failures") or [])]))
+
+
 def main():
     unit()
     live()
+    ads()
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + "; ".join(_fail)))
     return 1 if _fail else 0

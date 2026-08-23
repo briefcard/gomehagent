@@ -3176,3 +3176,40 @@ HTML to make it from. See DEFECTS §2.79.
   `blocked_reasons` counts defective-but-shipped alongside blocked; the digest
   has a `DRAFTED BUT NEEDS FIXING` section that names a repeated cause as an
   account problem.
+
+## Coherence on `ad_copy` — the contract without a card or a picture (2026-08-22)
+
+`ad_copy` produces COPY ONLY — no imagery (build map steps 05/06 are what
+supply it), so every variant is flagged `needs_art_direction`. That makes it
+the useful test of whether the contract generalises: with no images and no
+product cards, the image and item clauses are vacuous and something must still
+be checked, or the contract is an email patch wearing a general name.
+
+What holds for an ad:
+
+* **`proof_off_subject` (new).** A claim scoped to a different product is not
+  evidence about this one. The email path FILTERED these before drafting;
+  nothing ever CHECKED it, so any generator that skipped the filter — or had no
+  entity to filter by — could substantiate one product with another's facts.
+* **`proof_scopes` on the commitment (new), separate from `also`.** `kb.claims`
+  walks the ancestor chain on purpose: "every Aqua piece is acrylic" is filed
+  against the group and is true of each member. A check without ancestry would
+  refuse exactly the case the data layer exists to serve. It is NOT folded into
+  `also`, because a group is not a thing that may be featured on a card.
+* **`proof_repeated`, extended.** Proper nouns and figures catch a proof
+  restated by name ("the Four Seasons" twice). They cannot catch it restated in
+  ordinary words — "pours without dripping … it really does pour without
+  dripping". Stem SEQUENCES catch that: `RESTATED_RUN = 3` consecutive content
+  words from the claim, appearing twice, is the proof spent twice.
+* **`subject_absent` severity now follows length.** It is a coarse stem match,
+  and its false-positive rate scales inversely with text length. Below
+  `SUBJECT_MATCH_MIN_WORDS = 40` it advises; above, it blocks. Destroying a
+  two-sentence ad on a weak signal is the same mistake as withholding a draft
+  "for its own good" (DEFECTS §2.79).
+
+Guard `proof_belongs_to_subject`. `test_coherence.py` is now 36 checks across
+three parts: the check itself, the live email path, and the ad path.
+
+Wired so far: `campaign_email`, `inbound_reply`, `ad_copy`. Remaining:
+`catalog_seo_rewrite` (entity + query intent), then `brief` / `client_report`
+as declared `survey` commitments.

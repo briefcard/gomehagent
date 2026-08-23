@@ -71,6 +71,10 @@ KINDS = {
 #: profile wearing a product email's clothes.
 BACKGROUND_BUDGET = 1
 
+#: Below this many words, `subject_absent` advises rather than blocks — a stem
+#: match over a label needs enough text to be trustworthy.
+SUBJECT_MATCH_MIN_WORDS = 40
+
 _STOP = {
     "the", "and", "for", "with", "from", "this", "that", "they", "their",
     "have", "has", "was", "were", "are", "our", "your", "its", "it",
@@ -81,7 +85,7 @@ _STOP = {
 
 def commit(kind: str, key: str = "", *, label: str = "", audience: str = "",
            action: str = "", also: list | None = None,
-           expects: list | None = None) -> dict:
+           expects: list | None = None, proof_scopes: list | None = None) -> dict:
     """Declare what one artifact is about, before anything is selected.
 
     `also` is the COMPANION set — the other keys this artifact may legitimately
@@ -93,6 +97,14 @@ def commit(kind: str, key: str = "", *, label: str = "", audience: str = "",
 
     `expects` is survey-mode only — the things a round-up is supposed to cover,
     so the inverted check has something to measure completeness against.
+
+    `proof_scopes` is which entity keys' claims are legitimately ABOUT this
+    subject, and it is deliberately separate from `also`. A claim filed against
+    a GROUP — "every Aqua piece is acrylic" — is true of each member, which is
+    why `kb.claims` walks the ancestor chain; but the group is not a thing that
+    may be featured on a card. Folding ancestry into `also` would have made
+    every collection featurable as a product. Defaults to the subject and its
+    companions, so a caller that knows of no groups need not think about it.
     """
     kind = (kind or "").strip().lower()
     return {"kind": kind if kind in KINDS else "",
@@ -101,7 +113,8 @@ def commit(kind: str, key: str = "", *, label: str = "", audience: str = "",
             "audience": (audience or "").strip(),
             "action": (action or "").strip(),
             "also": [k for k in (also or []) if k],
-            "expects": [e for e in (expects or []) if e]}
+            "expects": [e for e in (expects or []) if e],
+            "proof_scopes": [k for k in (proof_scopes or []) if k]}
 
 
 def parts(*, text: str = "", prominent: str = "", images: list | None = None,
@@ -164,6 +177,48 @@ def _distinctive(claim_text: str, brand: str = "") -> list[str]:
             seen.add(k)
             uniq.append(p)
     return uniq[:6]
+
+
+def _words(s: str) -> list[str]:
+    return re.findall(r"[A-Za-z0-9']+", str(s or ""))
+
+
+#: Consecutive content words from a claim that, appearing twice, mean the proof
+#: was spent twice. Three is the shortest run that is not a coincidence.
+RESTATED_RUN = 3
+
+
+def _stems(text: str) -> list[str]:
+    """Content words reduced to stems, in order.
+
+    Proper nouns and figures catch a proof restated by NAME — "the Four
+    Seasons" twice, "Milan" twice. They cannot catch it restated in ordinary
+    words: "pours without dripping … it really does pour without dripping" is
+    the same proof spent twice and every word of it is lowercase. Comparing
+    stem SEQUENCES catches that, and stemming is what makes "pours" and "pour"
+    the same spend.
+    """
+    out = []
+    for w in re.findall(r"[A-Za-z]+", str(text or "")):
+        if len(w) < 4 or w.lower() in _STOP:
+            continue
+        out.append(w.lower()[:max(4, len(w) - 2)])
+    return out
+
+
+def _restated(claim_text: str, artifact_text: str) -> str:
+    """The run of the claim's own words that this artifact says twice, or ""."""
+    claim = _stems(claim_text)
+    body = _stems(artifact_text)
+    if len(claim) < RESTATED_RUN or len(body) < RESTATED_RUN * 2:
+        return ""
+    for i in range(len(claim) - RESTATED_RUN + 1):
+        window = claim[i:i + RESTATED_RUN]
+        hits = sum(1 for j in range(len(body) - RESTATED_RUN + 1)
+                   if body[j:j + RESTATED_RUN] == window)
+        if hits > 1:
+            return " ".join(window)
+    return ""
 
 
 def _count(text: str, phrase: str) -> int:
@@ -249,7 +304,16 @@ def review(commitment: dict, artifact: dict, *,
     label = str(c.get("label") or "")
     if label and kind in ("entity", "topic"):
         if not _mentions(whole, label):
-            add("block", "subject_absent",
+            # SEVERITY FOLLOWS HOW RELIABLE THE MATCH CAN BE. This is a coarse
+            # stem match over the label, and its false-positive rate scales
+            # inversely with length: across an email it is near-certain to find
+            # the subject if the subject is there, but an ad is two sentences
+            # and may name the thing only by what it does. Destroying a short
+            # artifact on a weak signal reproduces the exact failure of
+            # withholding a draft "for its own good" (DEFECTS §2.79), so below
+            # the threshold it advises instead.
+            add("block" if len(_words(whole)) >= SUBJECT_MATCH_MIN_WORDS
+                else "nudge", "subject_absent",
                 f"this was committed to {label!r} and the copy never mentions it",
                 "write about the committed subject, or commit to what was "
                 "actually written")
@@ -303,6 +367,12 @@ def review(commitment: dict, artifact: dict, *,
     # The Four Seasons line twice and Milan twice is not emphasis. It is the
     # model demonstrating it read the brief, and it reads to a customer as a
     # brand with one thing to say.
+    # WHOSE PROOF IS THIS? A claim scoped to a different product is not
+    # evidence about this one, and labelling it would not make it one. The
+    # email path filters these before drafting; nothing CHECKED it, so any
+    # generator that skipped the filter — or was given no entity to filter by —
+    # could substantiate one product with another product's facts.
+    proof_ok = set(c.get("proof_scopes") or []) or set(committed)
     background = 0
     for cl in (a.get("claims") or []):
         scope = str(cl.get("scope") or "brand-wide")
@@ -310,15 +380,27 @@ def review(commitment: dict, artifact: dict, *,
         cid = str(cl.get("claim_id") or "?")
         if scope == "brand-wide":
             background += 1
+        elif kind == "entity" and proof_ok and scope not in proof_ok:
+            add("block", "proof_off_subject",
+                f"claim {cid} is about {scope!r}, and this is about "
+                f"{c.get('key') or 'something else'}",
+                "prove this subject with its own claims, or with a brand-wide "
+                "one — another product's facts are not evidence about it")
+        said_twice, times = "", 0
         for phrase in _distinctive(body, brand_name):
             n = _count(whole, phrase)
             if n > 1:
-                add("block", "proof_repeated",
-                    f"{phrase!r} (claim {cid}) is asserted {n} times",
-                    "make the point once and spend the space on something "
-                    "else — a proof restated reads as a brand with one thing "
-                    "to say")
+                said_twice, times = phrase, n
                 break          # one finding per claim, not one per phrase
+        if not said_twice:
+            run = _restated(body, whole)
+            said_twice, times = (run, 2) if run else ("", 0)
+        if said_twice:
+            add("block", "proof_repeated",
+                f"{said_twice!r} (claim {cid}) is asserted {times} times",
+                "make the point once and spend the space on something "
+                "else — a proof restated reads as a brand with one thing "
+                "to say")
 
     # Only an ENTITY commitment has background. When the subject is the brand
     # itself — a story email, a reply about the company — its own credentials

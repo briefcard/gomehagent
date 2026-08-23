@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "proof_belongs_to_subject",
+        "file": "app/coherence.py",
+        "find": "        elif kind == \"entity\" and proof_ok and scope not in proof_ok:",
+        "replace": "        elif False:  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "one product is substantiated with another product's facts — an "
+               "ad for the pitcher proved by a claim about the platter",
+    },
+    {
         "name": "withhold_false_or_forbidden",
         "file": "app/skill_pack.py",
         "find": "    if final_html and not _forbidden:",

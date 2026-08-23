@@ -613,6 +613,24 @@ def _run_ad_copy(ctx: Context) -> dict:
     by_basis: dict[str, int] = {}
     degraded_note = ""
 
+    # ONE AD, ONE SUBJECT — the same contract the campaign runs under, with a
+    # different referent shape. An ad has no imagery yet (see the note above),
+    # so the picture clauses are vacuous; what is NOT vacuous is whose proof it
+    # is. `kb.claims` hands back the brand's claims plus this entity's plus its
+    # GROUPS', which is correct and is exactly why the check needs the ancestor
+    # chain: "every Aqua piece is acrylic" is true of an Aqua pitcher, and
+    # calling that off-subject would refuse the case the data layer was built
+    # to serve.
+    _label = ""
+    _scopes: list[str] = []
+    if entity_key:
+        _row = next((e for e in kb_mod.entities(ctx.tenant, available_only=False)
+                     if e.key == entity_key), None)
+        _label = (getattr(_row, "name", "") or "") if _row else ""
+        _scopes = [entity_key] + list(kb_mod.ancestors(ctx.tenant, entity_key))
+    _commit_base = dict(label=_label, audience=audience_key,
+                        proof_scopes=_scopes)
+
     for i, claim in enumerate(ctx.claims[:want]):
         angle = _ANGLES[i % len(_ANGLES)]
 
@@ -650,8 +668,19 @@ def _run_ad_copy(ctx: Context) -> dict:
                 _c, _a, objections)
             return fixed
 
+        _commit = (coherence.commit("entity", entity_key, action=angle,
+                                    **_commit_base)
+                   if entity_key else
+                   coherence.commit("audience", audience_key or "everyone",
+                                    action=angle))
         ctx.emit(text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
                  audience_key=audience_key, angle=angle, fmt="ad_copy",
+                 commitment=_commit,
+                 parts=lambda _t, _c=claim: coherence.parts(
+                     text=_t,
+                     claims=[{"claim_id": _c.get("claim_id", ""),
+                              "text": _c.get("claim", ""),
+                              "scope": _c.get("scope", "brand-wide")}]),
                  redraft=_repair if basis == "model" else None,
                  meta={"needs_art_direction": True, "basis": basis})
 
@@ -1888,10 +1917,17 @@ def _run_campaign_email(ctx: Context) -> dict:
     if _subject:
         _sub_name = next((e.get("name", "") for e in ents
                           if e.get("key") == _subject), _subject)
+        _also = [e.get("key", "") for e in ents if e.get("key") != _subject]
         commitment = coherence.commit(
             "entity", _subject, label=_sub_name, audience=seg["key"],
-            action=goal or seg.get("angle", ""),
-            also=[e.get("key", "") for e in ents if e.get("key") != _subject])
+            action=goal or seg.get("angle", ""), also=_also,
+            # A group's claim is true of its members, so the ancestor chain of
+            # everything featured is legitimate proof — but a group is not a
+            # thing that may appear on a product card, which is why it lands
+            # here and not in `also`.
+            proof_scopes=[_subject] + _also + [
+                a for k in [_subject] + _also
+                for a in _kb.ancestors(ctx.tenant, k)])
     else:
         # No product at all is a legitimate email — a story, a letter. It has
         # no entity subject, so the subject checks are vacuous; the proof and
