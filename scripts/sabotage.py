@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "picture_queue_form_wiring",
+        "file": "app/admin_ui.py",
+        "find": '<form id="picsform" method="post" action="/admin/assets_decide"></form>',
+        "replace": '<form id="pics" method="post" action="/admin/assets_decide"></form>',
+        "suites": ["test_admin_forms.py"],
+        "why": "the id collides with the anchor div above it, every control "
+               "associates with a non-form element, and approving a photograph "
+               "silently does nothing on a page that looks perfectly normal",
+    },
+    {
         "name": "proof_belongs_to_subject",
         "file": "app/coherence.py",
         "find": "        elif kind == \"entity\" and proof_ok and scope not in proof_ok:",

@@ -227,7 +227,16 @@ def _run_catalog_compliance(ctx: Context) -> dict:
     for (fname, phrase), rows in found["ranked"]:
         lines.append(f"{len(rows)}x  {fname}  —  {phrase!r}")
         lines.append(f"      e.g. {rows[0]['handle']}: {rows[0]['context'][:160]}")
-    ctx.emit("\n".join(lines), fmt="report", require_citation=False)
+    # A COMPLIANCE REPORT IS MANY SUBJECTS ON PURPOSE — one line per product
+    # that broke a rule. Holding it to one subject would be wrong, and leaving
+    # it uncommitted would make `no_commitment` fire on every run. `survey` is
+    # the declared escape: the check inverts to non-duplication instead of
+    # being switched off, which for a report that ranks repeated patterns is
+    # exactly the property worth having.
+    ctx.emit("\n".join(lines), fmt="report", require_citation=False,
+             commitment=coherence.commit(
+                 "survey", "catalogue", action="list what breaks a rule"),
+             parts=lambda _t: coherence.parts(text=_t))
 
     return {"summary": f"{len(violations)} violation(s), "
                        f"{len(found['ranked'])} distinct pattern(s)", **found}
@@ -311,8 +320,24 @@ def _run_catalog_seo_rewrite(ctx: Context) -> dict:
             continue
         pick = pool[0]
         body = _compose_meta(f["name"], pick["claim"], positioning)
+        # ONE PRODUCT, ONE META DESCRIPTION. This skill already picked proof
+        # scoped-first — the commitment is what lets code CHECK that it did,
+        # and catches the case the fallback allows: a brand-wide claim is fine,
+        # another product's claim never is. The ancestor chain rides along so a
+        # collection's claim about its members is not mistaken for a stray.
+        _commit = coherence.commit(
+            "entity", handle, label=f["name"], action="rank for this product",
+            proof_scopes=[handle] + list(kb_mod.ancestors(ctx.tenant, handle)))
         ctx.emit(body, claim_ids=[pick["claim_id"]], entity_key=handle,
                  angle="compliance_rewrite", fmt="seo_description",
+                 commitment=_commit,
+                 # A meta description is ALL prominent — it is the whole of
+                 # what a searcher reads — so it is passed once, as that.
+                 parts=lambda _t, _p=pick: coherence.parts(
+                     prominent=_t,
+                     claims=[{"claim_id": _p.get("claim_id", ""),
+                              "text": _p.get("claim", ""),
+                              "scope": _p.get("scope", "brand-wide")}]),
                  destination="shopify:product.metafield.global.description_tag",
                  meta={"replaces": f["context"], "phrase": f["phrase"],
                        "product_id": f["product_id"],

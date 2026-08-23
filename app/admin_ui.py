@@ -3246,7 +3246,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
         is_logo = (a.subject or "") == kbm.LOGO
         pic_cards += f"""
         <label class="pic">
-          <input type="checkbox" name="asset_ids" value="{_esc(a.id)}" form="pics">
+          <input type="checkbox" name="asset_ids" value="{_esc(a.id)}" form="picsform">
           <img src="{_esc(a.url)}" loading="lazy" alt="">
           <span class="picmeta">{'&#9679; logo' if is_logo else ''}
             {_esc((a.title or '')[:38])}</span>
@@ -3263,18 +3263,18 @@ def render_content(key: str, tenant: str = "", started: str = "",
       licence</b> — plenty of sites carry stock licensed for the web and
       nothing else. Approve what is genuinely theirs. Rejecting retires it, so
       the next crawl will not offer it again.</p>
-      <form id="pics" method="post" action="/admin/assets_decide"></form>
-      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="pics">
+      <form id="picsform" method="post" action="/admin/assets_decide"></form>
+      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="picsform">
       <div class="bulkbar">
         <label class="pick"><input type="checkbox" id="allpics"> select all
           {len(waiting)}</label>
         <span class="grow"></span>
-        <button form="pics" name="action" value="reject" class="sec">Reject
+        <button form="picsform" name="action" value="reject" class="sec">Reject
           selected</button>
-        <button form="pics" name="action" value="approve_reference" class="sec"
+        <button form="picsform" name="action" value="approve_reference" class="sec"
           title="Keep it on file but never publish it — for a picture the
                  client does not own">Reference only</button>
-        <button form="pics" name="action" value="approve"
+        <button form="picsform" name="action" value="approve"
           title="Approving grants use: the picture becomes selectable as an
                  email hero">Approve selected</button>
       </div>

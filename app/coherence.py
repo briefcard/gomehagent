@@ -263,7 +263,14 @@ def review(commitment: dict, artifact: dict, *,
     a = artifact or {}
     text = str(a.get("text") or "")
     prominent = str(a.get("prominent") or "")
-    whole = f"{prominent}\n{text}"
+    # NEVER COUNT THE SAME WORDS TWICE. `whole` is what the repetition rules
+    # read, so a caller that passes one string as BOTH — which is the natural
+    # thing to do for an artifact that is all headline, like a meta
+    # description — made every phrase in it look asserted twice and blocked a
+    # perfectly good rewrite. Concatenating is only correct when the two parts
+    # are genuinely different text.
+    whole = text if prominent and prominent.strip() in text else \
+        f"{prominent}\n{text}".strip()
     out: list[dict] = []
 
     def add(sev, rule, detail, fix):

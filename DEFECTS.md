@@ -2839,3 +2839,48 @@ silently emptied the very list that says to fix the cause. The digest gained a
 pending approval and was therefore invisible in the one place the owner reads.
 The same cause twice is called out as an account problem rather than an unlucky
 send.
+
+### 2.80 Approving a photograph did nothing, on a page that looked fine — 2026-08-23
+
+Owner: **"Photo approvals are not working."** They were not. The picture queue
+rendered an anchor `<div class="anchor" id="pics">` and, nine lines later,
+`<form id="pics" …>`. Every checkbox, the hidden tenant field and all three
+buttons carried `form="pics"` — and HTML resolves that to the FIRST element
+with the id, which was the div. A `form=` attribute pointing at a non-form
+element associates with nothing, so every control on the queue was orphaned:
+the page looked completely normal, the buttons submitted an empty request, and
+approving a photograph silently did nothing.
+
+Nothing that reads a page for WORDS could have caught it. So it is checked
+structurally, on every tab rather than the one that broke, in
+`scripts/test_admin_forms.py`: no duplicate ids on any page, and every
+`form="x"` resolves to a real `<form id="x">`. Guard
+`picture_queue_form_wiring`.
+
+Two things worth keeping from writing that test, both of which made it pass
+for the wrong reason first:
+
+* **`_TABS` keys are not the labels.** The tabs are `content` (shown as
+  "Review"), `kb` ("Knowledge"), `schema` ("Data layer"). Requesting
+  `?tab=review` renders the DEFAULT tab, so the first version of this suite
+  checked the same page eight times and reported eight passes.
+* **The admin key is `APPROVAL_SECRET`,** not `ADMIN_KEY`. With the wrong one
+  the console returns the public landing page — HTTP 200, 2.7KB, and every
+  "no duplicate ids" assertion trivially true.
+
+Both were caught only by the deliberate check that the queue had rendered at
+all. An assertion about absence, run against a page that was never generated,
+is the empty-table false pass again.
+
+### 2.81 A parts contract that counted its own words twice — 2026-08-23
+
+Introduced and caught the same hour, while wiring `catalog_seo_rewrite` to the
+coherence contract. A meta description is entirely headline, so the natural
+call is `coherence.parts(text=t, prominent=t)` — and `review` built its search
+text as `prominent + "\n" + text`, so every phrase in it appeared twice and
+`proof_repeated` blocked a correct rewrite over the word "Milan".
+
+The caller was fixed to pass it once, as `prominent`. More importantly the
+contract was hardened: `whole` no longer concatenates when `prominent` is
+already contained in `text`, because the next caller with a short artifact
+would have written exactly the same line.

@@ -133,6 +133,19 @@ def unit():
     ck("an image with no subject_key is reported",
        "image_unattributed" in rules(coherence.review(c, mystery)))
 
+    print("\n— one string passed as both parts is not said twice —")
+    # The natural call for an artifact that is all headline — a meta
+    # description, an SMS — is `parts(text=t, prominent=t)`. Concatenated, every
+    # phrase in it looked asserted twice and a good rewrite was blocked.
+    both = coherence.parts(
+        text="Clear Acrylic Water Glasses, designed in Milan.",
+        prominent="Clear Acrylic Water Glasses, designed in Milan.",
+        claims=[{"claim_id": "C1", "scope": "acrylic-water-glasses",
+                 "text": "Designed in Milan."}])
+    ck("the same words in text and prominent count once",
+       "proof_repeated" not in rules(coherence.review(c, both)),
+       str(sorted(rules(coherence.review(c, both)))))
+
     print("\n— no commitment must never read as coherent —")
     ck("an artifact with no commitment BLOCKS",
        rules(coherence.review({}, coherence.parts(text="anything")))
