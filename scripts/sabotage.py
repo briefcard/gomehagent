@@ -38,6 +38,26 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "data_layer_lists_every_table",
+        "file": "app/admin_ui.py",
+        "find": "        if not name.startswith(\"Kb\"):",
+        "replace": '        if name not in described:  # SABOTAGE',
+        "suites": ["test_data_layer.py"],
+        "why": "the Data layer tab goes back to a hand-maintained list and "
+               "silently stops showing any table nobody remembered to add — "
+               "which is how the photograph library became invisible",
+    },
+    {
+        "name": "data_layer_says_what_to_fix",
+        "file": "app/admin_ui.py",
+        "find": "{_fix_list(key, tenant)}",
+        "replace": "",
+        "suites": ["test_data_layer.py"],
+        "why": "the page goes back to a wall of row counts with nothing "
+               "clickable, and the ranked work list readiness() already "
+               "computes is rendered nowhere again",
+    },
+    {
         "name": "positioning_is_scoped",
         "file": "app/kb.py",
         "find": '                        db.KbClaim.entity_key != "",',

@@ -3481,3 +3481,31 @@ email. Guard `positioning_is_scoped`.
 NOTE: `scripts/test_harvest.py` reaches the live bacimilanousa.com and fails
 when the network does not cooperate. Verified environmental — it fails
 identically with all local changes stashed.
+
+## Data layer: current with the models, and act-where-you-report (2026-08-23)
+
+Owner's item 8, the last of the page-by-page list. Measured before changing
+anything: the page rendered **zero forms, zero buttons, zero body links** —
+every number a dead end — and its table list was a literal that had drifted.
+
+* **`_kb_tables()` derives membership from the models** (`Kb*` with a `tenant`
+  column) and keeps the hand-written prose, because "what this table is FOR" is
+  the one thing introspection cannot produce. `KbAsset` — the photograph
+  library — was missing from the literal, so the surface whose job is to show
+  the shape of the data did not know the pictures existed. A table nobody has
+  described appears named, saying the sentence is missing, rather than not at
+  all. Guard `data_layer_lists_every_table`.
+* **`_fix_list()` renders `resolve.readiness()["next_actions"]`** — already
+  ranked by how many situations each fix releases, already naming its
+  destination, and previously rendered NOWHERE (two callers: a dossier and a
+  JSON route). Each row now links to the tab that fixes it. Guard
+  `data_layer_says_what_to_fix`.
+* The counts, identifiers and relationship tables are untouched — the shape of
+  the data is what the page is for. They just stop being the first thing.
+
+`scripts/test_data_layer.py` (19 checks). The undescribed-table fallback is
+asserted by REMOVING a description at runtime, not by reading a docstring — the
+first version of that check ended in `or True`, which is not a check.
+
+**The owner's 8-page walkthrough is now complete.** Remaining from the wider
+conversation: structural variety in email, and Diagnostics' timeline density.

@@ -4308,7 +4308,45 @@ again — not on this page, and not to us. This link is private to {name}.</p>
 # to add it — the same reason `test_kb_ui` asserts against rendered HTML.
 # ---------------------------------------------------------------------------
 
-_KB_TABLES = [
+def _kb_tables() -> list:
+    """Every knowledge table, derived — with the written-down prose kept.
+
+    The list below was a literal, and it had drifted: `KbAsset` — the
+    photograph library, a whole table of the knowledge base — was not on it, so
+    the page whose job is to show the shape of the data did not know the
+    pictures existed (owner, 2026-08-23: "the Data Layer tab I believe is
+    outdated"). The page's own lede already promised "read from the models, so
+    a new column shows up here on its own", which was true of COLUMNS and false
+    of TABLES.
+
+    So the models decide membership and the prose stays hand-written, because
+    "what this table is FOR" is the one thing introspection cannot produce. A
+    table nobody has described yet appears with its name and its columns rather
+    than not at all — visible and obviously undocumented, which is the honest
+    state and the one that prompts somebody to write the sentence.
+    """
+    from . import db as _dbm
+    described = {name: (headline, why) for name, _t, headline, why in _KB_DESCRIBED}
+    out = []
+    for model in sorted(_dbm.Base.__subclasses__(), key=lambda m: m.__name__):
+        name = model.__name__
+        if not name.startswith("Kb"):
+            continue
+        if not hasattr(model, "tenant"):
+            continue
+        headline, why = described.get(
+            name, (name, "No description written yet. It is listed because it "
+                         "is part of the knowledge base — what it is FOR is a "
+                         "sentence somebody has to write."))
+        out.append((name, model.__tablename__, headline, why))
+    # Described tables first, in their authored order: the curated ones are the
+    # narrative and the derived ones are the appendix.
+    order = {n: i for i, (n, _t, _h, _w) in enumerate(_KB_DESCRIBED)}
+    out.sort(key=lambda r: (order.get(r[0], len(order)), r[0]))
+    return out
+
+
+_KB_DESCRIBED = [
     ("KbBrand", "kb_brand", "Who they are, how they sound, what they may never say",
      "One row per account. Voice, positioning, banned claims, and the config "
      "that tells selection what this account sells."),
@@ -4330,6 +4368,15 @@ _KB_TABLES = [
     ("KbUnknown", "kb_unknowns", "Questions the catalogue could not answer",
      "Counted by how often each gap actually cost an answer, so the backlog is "
      "ranked by real cost rather than by guesswork."),
+    ("KbAsset", "kb_assets", "Pictures the creative may publish",
+     "`rights` is the gate and has no default: anything that is not exactly "
+     "`owned` is inspiration, never inventory. `entity_key` is what a hero "
+     "gets checked against, and `uses`/`outcome` are what publishing writes "
+     "back. Approved ones are listed on the Knowledge tab."),
+    ("KbEmbedding", "kb_embeddings", "The vector index over the rows above",
+     "Derived, never authored — it is how near-duplicate proposals and "
+     "same-fact-different-tag pairs are found. Removing a row must forget its "
+     "vector or the index drifts away from the knowledge base."),
     ("KbConflict", "kb_conflicts", "Two sources disagree about an approved value",
      "Both values kept, neither applied. The row keeps what a human approved "
      "until someone settles it."),
@@ -4389,6 +4436,76 @@ def _fill_bar(pct: int) -> str:
             f'</span><span class="fillpct">{pct}%</span>')
 
 
+#: Where each `readiness` blocker is actually fixed. `resolve.readiness` already
+#: names a destination in prose — "Knowledge tab", "Content tab" — and prose is
+#: not a link. This is the same "act where you report" line the Systems check
+#: draws, one page over.
+_READINESS_WHERE = {
+    "knowledge tab": ("kb", "Knowledge"),
+    "content tab": ("content", "Review"),
+    "brand tab": ("brand", "Brand"),
+    "connections": ("accounts", "Connections"),
+}
+
+
+def _fix_list(key: str, tenant: str) -> str:
+    """What to fix, in the order that unblocks the most.
+
+    `resolve.readiness()` has always returned this list, already ranked by how
+    many situations each fix releases and already naming where it lives — and
+    it was rendered NOWHERE. Two callers existed: a dossier and a JSON route.
+    So the console had a ranked, account-specific work list and showed the
+    operator a wall of row counts instead (owner, 2026-08-23: the Data layer
+    tab "doesnt allow us to fix data layer issues from there, we have to
+    navigate to the places where the data layer tells us needs attention").
+
+    The counts stay — the shape of the data is what this page is for. They just
+    stop being the first thing, and the thing above them is clickable.
+    """
+    from . import resolve as _rs
+    r = _rs.readiness(tenant)
+    acts = r.get("next_actions") or []
+
+    def _link(where: str) -> str:
+        tab, label = _READINESS_WHERE.get(str(where or "").strip().lower(),
+                                          ("", ""))
+        if not tab:
+            # Telegram and intake links are real destinations that are not
+            # tabs. Naming them plainly beats inventing a link that goes
+            # somewhere else.
+            return f'<span class="mut">{_esc(where)}</span>'
+        return (f'<a class="btn sec" href="/admin/ui?tab={tab}'
+                f'&amp;tenant={_esc(tenant)}'
+                + (f'&amp;key={_esc(key)}' if key else "")
+                + f'">{label} &rarr;</a>')
+
+    if not acts:
+        body = (f'<p class="mut">Nothing is blocking this account. It can '
+                f'answer {r.get("answerable", 0)} of {r.get("situations", 0)} '
+                f'situations, {r.get("proven", 0)} of them with proof '
+                f'attached.</p>')
+    else:
+        body = "".join(
+            '<div class="msg">'
+            f'<div><strong>{_esc(a.get("fix", ""))}</strong></div>'
+            f'<div class="when">unblocks {_esc(str(a.get("unblocks", "")))}'
+            + (f' · {a.get("situations", 0)} situation(s)'
+               if a.get("situations") else "")
+            + '</div>'
+            f'<div class="row">{_link(a.get("where", ""))}</div>'
+            "</div>" for a in acts[:6])
+
+    return f"""
+<div class="card">
+  <div class="head"><h2>What to fix, in order</h2>
+    <span class="chip {'off' if acts else 'on'}">{_esc(r.get("score", ""))}
+      situations answerable</span></div>
+  <p class="mut">Ranked by how many situations each one releases, not by how
+  quick it is. {_esc(r.get("verdict", ""))}</p>
+  <div class="thread">{body}</div>
+</div>"""
+
+
 def render_schema(key: str, tenant: str = "") -> str:
     from . import db as _db, kb as kbm, provenance as prov
 
@@ -4398,7 +4515,7 @@ def render_schema(key: str, tenant: str = "") -> str:
                       body=_every_note(True, "Row counts are per client. "
                                        "Pick an account to read its tables."))
     blocks = []
-    for cls_name, table, headline, why in _KB_TABLES:
+    for cls_name, table, headline, why in _kb_tables():
         model = getattr(_db, cls_name)
         cols = [c for c in model.__table__.columns]
         with _db.SessionLocal() as s:
@@ -4518,6 +4635,8 @@ def render_schema(key: str, tenant: str = "") -> str:
   whether a human has approved them. Read from the models, so a new column shows
   up here on its own.</p>
 </div>
+{_fix_list(key, tenant)}
+
 <div class="card">
   <div class="head"><h2>This account at a glance</h2></div>
   {top}
