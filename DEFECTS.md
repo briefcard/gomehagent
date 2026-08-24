@@ -3006,3 +3006,59 @@ Guard `removing_an_entity_takes_its_claims`.
   "leaving the vector behind is the index-drift this design exists to avoid".
   Every other removal left its vector, so a rejected objection stayed findable
   by similarity. `remove()` calls it for every kind.
+
+### 2.87 A theory of taste built out of one range — 2026-08-23
+
+Owner, on a Baci Milano send that was otherwise the best the system had
+produced:
+
+> "That's the quiet trick of a well-considered table. It doesn't announce
+> itself."
+>
+> "…even though this positioning is true of the Joke collection, as a brand
+> Baci Milano has many maximalist designs so we dont want to sell the idea of a
+> good evening as one where the table doesn't take too much attention because
+> the next email might say the opposite."
+
+Nothing in that email was false, and nothing in it was incoherent by §2.77's
+test: one subject, one product, proof in scope, hero of the right thing. It
+argued a **theory of taste** generalised from one range — and the range next
+door argues the opposite, so the brand ends up on both sides of its own
+aesthetic. This is coherence ACROSS artifacts, which the within-artifact
+contract cannot see.
+
+**The root cause is one column.** `positioning` exists on `KbBrand` and nowhere
+else — one brand, one position. There was no way to record that Joke is minimal
+and Baroque & Rock is maximal. A drafter handed a single brand positioning and a
+minimalist product generalised from it, reasonably, because nothing told it the
+catalogue disagrees with itself.
+
+Three layers, weakest last:
+
+1. **Positioning is a proof kind.** `PROOF_USAGE["positioning"]` — scoped,
+   reviewed, and arriving with what its scope permits, on the same rails every
+   other claim rides: *"True of what it is scoped to, and ONLY that … never as
+   a claim about the brand, about taste, or about what a good example of the
+   category is."* Not `VERBATIM_ONLY`: a position may be rewritten, it may not
+   be widened.
+2. **The bundle carries the disagreement.** `kb.contested_positioning()` →
+   `bundle["contested_positioning"]`, on EVERY bundle rather than fetched by
+   whichever generator remembers — a copywriter, a script and an ad go wrong
+   here identically. The prompt names which ranges hold which positions,
+   because a drafter told abstractly to "avoid generalising" has advice, and
+   one told *"joke — minimal; baroque — maximalist"* has a fact.
+3. **A lint catches the shape.** `email_craft.generalisations()` flags generic
+   normative constructions ("the trick of a", "a well-", "the best ",
+   "doesn't announce") in sentences that do NOT name what is being sold —
+   naming the subject makes it a description, and describing what you sell is
+   the whole job. Advisory on purpose: code cannot know whether the brand
+   holds the position, only that the sentence claims it of a category.
+
+Guard `positioning_is_scoped` — which reported MISSED first time, because the
+fixture had no brand-wide positioning row and relaxing the scope filter
+therefore changed nothing. The row was added and the check bit.
+
+Worth stating as the general rule: **the within-artifact contract stops one
+email contradicting itself; only the data layer can stop two emails
+contradicting each other.** An aesthetic that lives in one text field cannot be
+scoped, and anything that cannot be scoped will eventually be generalised.

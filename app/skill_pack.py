@@ -817,6 +817,15 @@ describing the IDEA, not the subject line. It is recorded on the run so a
 person can read back what you decided and set it themselves next time. When an
 angle WAS given to you, do not echo it back.
 
+DO NOT BUILD A WORLDVIEW OUT OF ONE PRODUCT. Write about the thing in front of
+you, not about what good taste is. "The Joke set is minimal and durable" is a
+fact about a product. "A well-considered table doesn't announce itself" is a
+theory of taste — and a catalogue that also sells maximalist ranges will have
+to contradict it in the next send. A brand caught arguing both sides is
+believed on neither. Sentences that begin "the trick of a good…", "the best
+X…", "a well-considered Y…" are the shape to avoid: say it about the subject,
+in the subject's name, or do not say it.
+
 ONE EMAIL, ONE SUBJECT. Write about the products offered to you and nothing
 else. Do not introduce another product line, another mechanism, or another
 audience's positioning part-way through — a reader who came for one thing and
@@ -1059,7 +1068,11 @@ def _craft_review(ctx, copy: dict, blocks: list, craft: dict) -> list[dict]:
         body=_blocks_text(blocks), intent=intent,
         asks=bool(CAMPAIGN_INTENTS.get(intent, {}).get("asks")),
         has_proof=any(b.get("type") in ("quote", "stat") for b in blocks),
-        urgency_backed_by=deadline)
+        urgency_backed_by=deadline,
+        # WHAT IS BEING SOLD, so a sentence that names it reads as a
+        # description rather than as a theory of taste.
+        featured=", ".join(e.get("name", "") for e in
+                           (ctx.bundle.get("entities") or [])[:3]))
 
 
 def _campaign_craft(ctx, seg: dict) -> dict:
@@ -1222,6 +1235,18 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                                 "if it earns its place."
                                 if c.get("background") else "")
                              + (f"\n    USE: {c['usage_rule']}" if c.get("usage_rule") else ""))
+        contested = bundle.get("contested_positioning") or []
+        if contested:
+            parts.append(
+                "\n## THIS CATALOGUE ARGUES WITH ITSELF, ON PURPOSE\n"
+                "Positions are filed against particular ranges here, not "
+                "against the brand: "
+                + "; ".join(f"{c.get('scope', '?')} — {c.get('claim', '')[:90]}"
+                            for c in contested[:4])
+                + "\nSo a sentence about what a good table, room or evening is "
+                  "like will be contradicted by the next send. Write the "
+                  "position of the thing you are selling, named as its own.")
+
         ents = bundle.get("entities") or []
         if ents:
             parts.append("\n## Products you may feature (cite by key — the "

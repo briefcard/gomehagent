@@ -352,6 +352,17 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             for c in rows]
         if rows:
             searched.append("claims")
+
+        # WHETHER THIS BRAND HOLDS MORE THAN ONE POSITION, and which ranges
+        # hold them. Carried on every bundle rather than fetched by the one
+        # generator that happens to think of it: a copywriter, a script and an
+        # ad all have the same way of going wrong here — arguing from the
+        # product in front of them to a theory of taste the catalogue next
+        # door contradicts.
+        bundle["contested_positioning"] = [
+            {"claim": c.claim, "scope": c.entity_key or "brand-wide",
+             "claim_id": c.id}
+            for c in kb.contested_positioning(tenant)]
     else:
         bundle["claims"] = []
 

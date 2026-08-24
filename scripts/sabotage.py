@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "positioning_is_scoped",
+        "file": "app/kb.py",
+        "find": '                        db.KbClaim.entity_key != "",',
+        "replace": "                        db.KbClaim.entity_key == db.KbClaim.entity_key,  # SABOTAGE",
+        "suites": ["test_positioning.py"],
+        "why": "a brand-wide position is reported as a contested one, so the "
+               "drafter is warned about a disagreement that does not exist",
+    },
+    {
         "name": "drafts_are_not_catalogued",
         "file": "app/catalog_sync.py",
         "find": '            if state in ("draft", "archived"):',

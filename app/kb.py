@@ -58,10 +58,55 @@ PROOF_USAGE = {
     "data": "May be restated. The figure may not change.",
     "certification": "State exactly as certified. No embellishment.",
     "spec": "State exactly. A spec restated loosely is a wrong spec.",
+    # THE ONE THAT IS TRUE AND MUST NOT BE GENERALISED.
+    #
+    # Baci Milano's Joke collection is minimalist and its Baroque & Rock
+    # collection is maximalist. Both positions are true of their own
+    # collection; neither is true of the brand. A send that argued "the quiet
+    # trick of a well-considered table is that it does not announce itself"
+    # was not wrong about Joke — it was asserting a theory of taste that the
+    # next email, about a maximalist range, would have to contradict (owner,
+    # 2026-08-23).
+    #
+    # So positioning is proof like any other: scoped, reviewed, and carrying
+    # what its scope permits. A positioning claim filed against a collection
+    # may be said ABOUT that collection and never promoted into a claim about
+    # the brand, about taste, or about what a good anything is.
+    "positioning": "True of what it is scoped to, and ONLY that. State it "
+                   "about the thing itself — never as a claim about the "
+                   "brand, about taste, or about what a good example of the "
+                   "category is. Other ranges in this catalogue may argue the "
+                   "opposite, and a brand that contradicts itself across two "
+                   "sends is believed on neither.",
 }
 
 # Proof whose wording IS the evidence, so the text is immutable once captured.
 VERBATIM_ONLY = ("testimonial",)
+
+
+def contested_positioning(tenant: str) -> list:
+    """The positioning claims scoped to particular things, not the brand.
+
+    Their EXISTENCE is the fact a drafter needs: if this catalogue holds a
+    position filed against one range, then the range next door may hold the
+    opposite one, and no sentence about "a good table" is safe. Returned as
+    the rows so the caller can name which ranges disagree rather than assert
+    it abstractly.
+    """
+    # Queried directly, NOT through `claims()`: that accessor returns only
+    # brand-wide rows when no entity is named — which is correct for selection
+    # and exactly wrong here, where the entity-SCOPED ones are the whole point.
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim)
+                .filter(db.KbClaim.tenant == tenant,
+                        db.KbClaim.review == prov.APPROVED,
+                        db.KbClaim.status == "active",
+                        db.KbClaim.proof_type == "positioning",
+                        db.KbClaim.entity_key != "",
+                        db.KbClaim.entity_key.isnot(None))
+                .all())
+        s.expunge_all()
+        return rows
 
 
 def usage_rule(proof_type: str) -> str:

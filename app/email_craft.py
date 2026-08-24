@@ -130,9 +130,55 @@ def dead_links(blocks: list) -> list[str]:
     return bad
 
 
+#: The shape of a sentence that stops describing the product and starts
+#: legislating taste. Each is a GENERIC construction — an indefinite or
+#: universal reference to a category, in a normative frame — which is what
+#: turns "this set is minimal" into "a good table is minimal".
+#:
+#: This is a LINT and is deliberately advisory. It cannot know whether the
+#: brand genuinely holds the position; what it knows is that the sentence
+#: claims it of a category rather than of the thing being sold, and that a
+#: catalogue with more than one aesthetic will contradict it next month. The
+#: load-bearing fixes are upstream: positioning is a scoped, reviewed proof
+#: kind now, and the prompt is told which ranges disagree.
+_GENERALISING = (
+    "the trick of", "the secret of", "the point of a", "the best ",
+    "a well-", "a good ", "a great ", "the right kind of", "what makes a ",
+    "every good ", "any good ", "the whole point of",
+    "isn't about", "is not about", "doesn't announce", "does not announce",
+    "the quiet ", "true luxury", "real luxury", "good design is",
+    "the mark of a",
+)
+
+
+def generalisations(text: str, subject: str = "") -> list[str]:
+    """Sentences that argue for a way of living rather than for the product.
+
+    The send that prompted this (owner, 2026-08-23) read: "That's the quiet
+    trick of a well-considered table. It doesn't announce itself." True of the
+    minimalist range it was selling, and a position the brand's maximalist
+    ranges flatly contradict — so the next send would have to argue the
+    opposite, and a brand caught arguing both sides is believed on neither.
+
+    A sentence is only flagged when it does NOT name what is being sold: said
+    about the subject by name it is a description, and descriptions are the
+    whole job.
+    """
+    subj = [w.lower() for w in re.findall(r"[A-Za-z]{4,}", str(subject or ""))]
+    out: list[str] = []
+    for sentence in _sentences(text):
+        low = sentence.lower()
+        if not any(g in low for g in _GENERALISING):
+            continue
+        if subj and any(w in low for w in subj):
+            continue                    # it names the thing; that is a claim
+        out.append(sentence.strip()[:140])
+    return out[:3]
+
+
 def review(*, subject: str = "", preheader: str = "", body: str = "",
            intent: str = "", asks: bool = False, has_proof: bool = False,
-           urgency_backed_by: str = "") -> list[dict]:
+           urgency_backed_by: str = "", featured: str = "") -> list[dict]:
     """Craft findings for one email. `[]` means nothing to say.
 
     `urgency_backed_by` is the SOURCE of any deadline or scarcity — a plan's
@@ -184,6 +230,15 @@ def review(*, subject: str = "", preheader: str = "", body: str = "",
         add("nudge", "long_sentences",
             f"{len(longs)} sentences run over {LONG_SENTENCE} words",
             "break them up; email is read on a phone, at a glance")
+
+    # --- arguing for a way of living rather than for the product ----------
+    for line in generalisations(body, featured):
+        add("nudge", "generalised_positioning",
+            f"this argues a position, not a product: {line!r}",
+            "say it about " + (featured or "the thing you are selling")
+            + " by name, or cut it — another range in this catalogue may hold "
+              "the opposite position, and the next send would contradict this "
+              "one")
 
     # --- the ask ----------------------------------------------------------
     if asks and not has_proof:

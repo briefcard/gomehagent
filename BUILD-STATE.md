@@ -3460,3 +3460,24 @@ See DEFECTS §2.85–2.86.
 `scripts/test_kb_removal.py` (30 checks). Guards
 `drafts_are_not_catalogued`, `removing_an_entity_takes_its_claims`,
 `a_removed_tag_is_not_vocabulary`. 82/82 green in 90s.
+
+## Positioning is scoped proof (2026-08-23)
+
+See DEFECTS §2.87. `positioning` was a single `KbBrand` column, so a catalogue
+whose ranges argue different aesthetics could not say so, and a drafter
+generalised from the product in front of it.
+
+* `PROOF_USAGE["positioning"]` — a proof kind, so it is scoped, reviewed and
+  carries its own usage rule into every prompt.
+* `kb.contested_positioning(tenant)` → `bundle["contested_positioning"]` on
+  every bundle: which ranges hold which positions, so the drafter has the fact
+  rather than the advice.
+* `email_craft.generalisations()` — an advisory lint for the shape, exempting
+  any sentence that names what is being sold.
+
+`scripts/test_positioning.py` (17 checks), asserted against the owner's own
+email. Guard `positioning_is_scoped`.
+
+NOTE: `scripts/test_harvest.py` reaches the live bacimilanousa.com and fails
+when the network does not cooperate. Verified environmental — it fails
+identically with all local changes stashed.
