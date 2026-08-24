@@ -3,6 +3,15 @@
 This file orients any new Claude Code / Cowork session on this repo so it can
 continue the build without re-deriving context. Read it first.
 
+## Next initiative (2026-08-23)
+**`INITIATIVE-moments.md`** — triggered sends (a vertical-neutral `Moment`
+spine) and planner orchestration. Not started. Read it before touching
+`planner.py`, `segments.py`, `ledger.py` or the campaign path; it opens with
+six facts, each with a file reference, so its own staleness is checkable in a
+minute. Build map: <https://claude.ai/code/artifact/489c224e-a381-43b3-892f-3287e4f5bb81>
+
+Run the suites with **`./scripts/test_all.sh`** (parallel, ~90s; serial is 5m+).
+
 ## What this is
 An always-on, self-hosted operations agent on Render for three businesses —
 Baci Milano USA (imports/wholesale/e-com), Eien Distributions / Eien Health
