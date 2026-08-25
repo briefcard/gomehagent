@@ -404,6 +404,29 @@ def main() -> int:  # noqa: C901 — one suite, read top to bottom
         ck("and the account no longer reports analytics",
            not tenants.capabilities("baci")["analytics"])
 
+    # --- the redirect URI a provider console has to hold -----------------
+    #
+    # Added after a live `Error 400: redirect_uri_mismatch`. The value is
+    # built from `PUBLIC_BASE_URL`, which is `sync: false` in render.yaml and
+    # therefore visible nowhere — so the one string that had to match was the
+    # one string nobody could read back.
+    print("\n— /health names the exact redirect URI —")
+    from app import oauth as _oa, web as _web
+    ck("it is the callback route, not a guess",
+       _oa.redirect_uri("google").endswith("/oauth/google/callback"),
+       _oa.redirect_uri("google"))
+    _oa.config.PUBLIC_BASE_URL = "https://example.onrender.com/"
+    ck("a trailing slash does not become a double slash",
+       _oa.redirect_uri("google") == "https://example.onrender.com/oauth/google/callback",
+       _oa.redirect_uri("google"))
+    got = _web._oauth_setup()
+    ck("a configured base is not flagged", "MISCONFIGURED" not in got, str(got)[:110])
+    _oa.config.PUBLIC_BASE_URL = "http://localhost:8000"
+    got = _web._oauth_setup()
+    ck("the localhost default IS flagged", "MISCONFIGURED" in got,
+       "a hosted instance building a loopback redirect fails every consent, "
+       "and the provider's own error does not say which half is wrong")
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + ", ".join(_fail)))
     return 1 if _fail else 0

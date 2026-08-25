@@ -291,7 +291,41 @@ def health() -> dict:
             # was an import side effect nothing on the web path performed.
             # The registry self-loads now, and this is the curl that proves
             # it per process rather than per incident.
-            "skills": _skill_count()}
+            "skills": _skill_count(),
+            # The exact strings a provider console has to hold. Added after a
+            # `redirect_uri_mismatch` that took a Google error page and three
+            # files to explain: the value is computed from `PUBLIC_BASE_URL`,
+            # which is `sync: false` in render.yaml and therefore invisible
+            # everywhere. It is not a secret — it travels in the address bar
+            # during every consent round trip — and "which URI do I register"
+            # recurs for every provider and every client.
+            "oauth": _oauth_setup()}
+
+
+def _oauth_setup() -> dict:
+    """Per configured provider: the redirect URI its console must hold."""
+    from . import oauth
+    out: dict = {"public_base_url": config.PUBLIC_BASE_URL, "redirect_uris": {}}
+    if config.PUBLIC_BASE_URL.startswith("http://localhost"):
+        # A hosted instance building a loopback redirect will fail EVERY
+        # consent, and Google's own error does not say which of the two
+        # halves is wrong. Say it here.
+        out["MISCONFIGURED"] = (
+            "PUBLIC_BASE_URL is still the localhost default, so every OAuth "
+            "redirect points at a machine the provider cannot reach. Set it "
+            "on Render to this service's public URL.")
+    for prov, spec in oauth.FLOWS.items():
+        try:
+            cid, secret = spec["client"]()
+        except Exception:                                        # noqa: BLE001
+            cid = secret = ""
+        if cid and secret:
+            out["redirect_uris"][prov] = oauth.redirect_uri(prov)
+    if not out["redirect_uris"]:
+        out["note"] = ("no provider has both a client id and secret set — "
+                       "the connect page renders nothing rather than a button "
+                       "that cannot work")
+    return out
 
 
 def _skill_count() -> int:
