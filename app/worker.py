@@ -738,6 +738,62 @@ def segments_sweep() -> None:
             log.exception("segments sweep failed for %s", t.key)
 
 
+def moments_sweep() -> None:
+    """Hourly: notice what has gone quiet, and retire what has gone stale.
+
+    Two halves, and the second is the one that is easy to forget. Producers
+    only ever ADD; without an expiry pass the table grows for ever and, far
+    worse, "what is open" stops meaning anything — an operator looking at the
+    queue could no longer tell live work from a year of things nobody got to.
+
+    Hourly rather than daily because a moment has a window. `enquiry_quiet`
+    opens three days after the last touch and a daily sweep would serve it up
+    to a day late, which for a `back_in_stock` (one hour) would miss the window
+    entirely. Cheap: one indexed query per account, and it files nothing when
+    nothing has changed.
+
+    NOT gated on the campaign switch. Filing a moment sends nothing — the
+    planner that consumes them is what decides whether anybody is written to,
+    and gating the WATCHING on the sending would mean an account switching on
+    starts with no history of what it just missed.
+    """
+    from . import inbox_events, moments as _mo
+
+    try:
+        got = inbox_events.sweep()
+        if got.get("filed"):
+            log.info("moments: filed %s quiet-enquiry moment(s)", got["filed"])
+    except Exception:                                            # noqa: BLE001
+        log.exception("moments sweep (inbox) failed")
+    try:
+        n = _mo.expire_stale()
+        if n:
+            log.info("moments: expired %s past their window", n)
+    except Exception:                                            # noqa: BLE001
+        log.exception("moments sweep (expiry) failed")
+
+
+def performance_sweep() -> None:
+    """Daily: ask the sending platform what actually happened.
+
+    After the 07:00 tick rather than before it, so a campaign launched
+    yesterday has its numbers on the row before today's planner reads the
+    ledger to decide which cohort is most owed a send.
+
+    Daily and not hourly because of the rate limit — Omnisend allows 55
+    analytics requests a day per brand, and this spends one per account.
+    """
+    from . import performance
+
+    got = performance.sync_all()
+    for tenant, res in got.items():
+        if not res.get("ok"):
+            log.warning("performance: %s — %s", tenant, res.get("why", ""))
+        elif res.get("confirmed"):
+            log.info("performance: %s confirmed %s send(s), %s still waiting",
+                     tenant, res["confirmed"], res.get("waiting", 0))
+
+
 def systems_tick() -> None:
     """Evaluate every installed system once, and record what happened.
 
@@ -1045,6 +1101,14 @@ def main() -> None:
     # the week's campaigns against those segments.
     sched.add_job(_safe(segments_sweep, "segments sweep"), "cron",
                   day_of_week="mon", hour=5, minute=15)
+    # Moments: watch for windows opening, and close the ones that shut. Every
+    # hour, because a window is measured in hours and a daily pass would serve
+    # a one-hour moment a day late — which is to say, never.
+    sched.add_job(_safe(moments_sweep, "moments sweep"), "interval", hours=1)
+    # After the tick, so today's results are on the rows before tomorrow's
+    # planner reads them.
+    sched.add_job(_safe(performance_sweep, "performance sweep"), "cron",
+                  hour=9, minute=15)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",
                   hour=8, minute=30)  # the 'expert second look'

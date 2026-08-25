@@ -61,7 +61,15 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",
               "seo_snapshots", "voice_profiles", "follow_ups",
               "seo_site_config", "system_docs", "assurance_events",
-              "tool_calls", "reported_figures", "compliance_events"}
+              "tool_calls", "reported_figures", "compliance_events",
+              "moments"}
+# `moments` is OPERATIONS, classified in the same change that adds the table —
+# which is the whole lesson of the comments below. It records that a signal was
+# SEEN and what was decided about it, including the ones deliberately not acted
+# on; no store re-sync or mailbox crawl rebuilds that. Leaving it behind on a
+# reset would also be the worst possible kind of survival: an emptied account
+# whose first tick writes to people about carts and enquiries from a life the
+# client believes was deleted.
 # `assurance_events` is operations, not knowledge: it records what the system
 # DID — which drafts were checked and what was caught — and no crawl or sync
 # can rebuild it. Classified in the same change that added the table, because

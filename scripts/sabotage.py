@@ -307,11 +307,20 @@ SABOTAGES = [
     {
         "name": "campaign_draft_gate",
         "file": "app/skill_pack.py",
-        "find": "    if (item.get(\"ok\") and not missing and native_ok and not hard",
-        "replace": "    if (not missing and native_ok  # SABOTAGE",
-        "suites": ["test_campaign_email.py"],
-        "why": "a campaign email that FAILED the banned-claims check still gets "
-               "drafted into the client's live ESP",
+        # RE-POINTED 2026-08-24. The old target — a single `if` that withheld
+        # the draft when anything at all was wrong — was removed on 2026-08-22,
+        # because withholding it also took away the only view the owner had of
+        # the work ("how else will I see it and send it?"). The gate did not
+        # disappear, it narrowed: a defective draft is still made and marked
+        # [NEEDS FIX], and only a FORBIDDEN one is kept out of the platform.
+        # This entry had been covering nothing since that change.
+        "find": ("    _forbidden = [f for f in (hard + list(item.get(\"failures\") or []))\n"
+                 "                  if str(f.get(\"rule\", \"\")) in WITHHOLD_FROM_ESP]"),
+        "replace": "    _forbidden = []  # SABOTAGE",
+        "suites": ["test_campaign_email.py", "test_campaign_variety.py"],
+        "why": "a campaign email that states something false or forbidden in "
+               "the client's name is drafted into their live ESP anyway — one "
+               "click from a list, over their sending domain",
     },
     {
         "name": "banned_claims_mail",
@@ -730,6 +739,237 @@ SABOTAGES = [
                "product grid — every email collapses back to one house "
                "layout, which is the sameness the composed-layout work "
                "exists to end",
+    },
+    {
+        "name": "moments_route_checks_the_key",
+        "file": "app/web.py",
+        "find": ("    # Same omission, and worse here: `due_now` carries `person_key`, which is\n"
+                 "    # a customer's email address. An unauthenticated read of this was a\n"
+                 "    # personal-data leak, not just an internal one.\n"
+                 "    if key != config.APPROVAL_SECRET:\n"
+                 "        return {\"error\": \"unauthorized\"}"),
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_strategy.py"],
+        "why": "anyone who finds the URL reads a client's open moments — and "
+               "`due_now` carries `person_key`, which is a customer's email "
+               "address. `admin_key` RESOLVES the credential and returns '' "
+               "rather than rejecting, so a route that forgets to check is "
+               "wide open and looks identical to one that does",
+    },
+    {
+        "name": "planner_follows_the_ledger",
+        "file": "app/planner.py",
+        "find": "    for seg in _by_neglect(sysrow.tenant, got[\"high_value\"]):",
+        "replace": "    for seg in got[\"high_value\"]:  # SABOTAGE",
+        "suites": ["test_strategy.py"],
+        "why": "the planner goes back to walking the catalogue in the order "
+               "somebody typed it, so the cohort listed first is written to "
+               "first every month whether or not it has just been written to "
+               "— a programme shaped by a list order rather than by what has "
+               "actually been sent",
+    },
+    {
+        "name": "only_a_finished_send_is_published",
+        "file": "app/performance.py",
+        "find": '        if status not in getattr(mod, "FINISHED", ("sent",)):',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_strategy.py"],
+        "why": "a campaign still going out is recorded as finished, so its "
+               "partial-subset open rate — Omnisend verifies a brand's first "
+               "send against a small sample — is filed as the campaign's "
+               "result and never looked at again",
+    },
+    {
+        "name": "a_send_confirmed_once_stays_confirmed",
+        "file": "app/ledger.py",
+        "find": '        if row.status != "published":\n            row.status = "published"\n            row.published_at = at or db.utcnow()',
+        "replace": '        row.status = "published"  # SABOTAGE\n        row.published_at = db.utcnow()\n        if False:\n            pass',
+        "suites": ["test_strategy.py"],
+        "why": "`published_at` is rewritten on every sweep, so it means the "
+               "last time we asked rather than when the email went out — and "
+               "every anti-repeat window measured from it silently slides "
+               "forward for ever",
+    },
+    {
+        "name": "campaign_results_cost_one_call",
+        "file": "app/performance.py",
+        "find": "    got = mod.campaign_metrics(tenant, days=days)",
+        "replace": "    got = mod.campaign_metrics(tenant, days=days)  # SABOTAGE\n    [mod.campaign_metrics(tenant, days=days) for _ in waiting]",
+        "suites": ["test_strategy.py"],
+        "why": "one analytics request per campaign instead of one per account "
+               "— Omnisend allows 55 a day per brand, so a fortnight of sends "
+               "exhausts the budget and then reporting fails for everything",
+    },
+    {
+        "name": "pressure_never_becomes_a_second_send",
+        "file": "app/planner.py",
+        "find": "        queued = _open_plan_ref(sysrow.tenant, seg)\n        if queued:",
+        "replace": "        queued = _open_plan_ref(sysrow.tenant, seg)\n        if False:  # SABOTAGE",
+        "suites": ["test_moment_pressure.py"],
+        "why": "a cohort that already has a campaign queued gets a SECOND one "
+               "from the moment path — and for a venue every moment segment "
+               "is also a calendar segment, so that is the normal case, not a "
+               "corner one. Two sends to the same list about the same week",
+    },
+    {
+        "name": "pressure_needs_enough_people",
+        "file": "app/moments.py",
+        "find": '            "ready": n >= MIN_PRESSURE,',
+        "replace": '            "ready": True,  # SABOTAGE',
+        "suites": ["test_moment_pressure.py"],
+        "why": "one person abandoning a cart proposes a campaign to the whole "
+               "list — a message to a thousand people about something true of "
+               "one, which is the exact failure the per-person design would "
+               "have shipped",
+    },
+    {
+        "name": "pressure_buys_timing_not_volume",
+        "file": "app/planner.py",
+        "find": '        if have_by_segment.get(seg, {}).get(_month(today), 0) >= cad["per_segment_monthly"]:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_moment_pressure.py"],
+        "why": "a cohort earns extra campaigns by having a bad week — the "
+               "monthly cap stops binding on the pressure path, so the busier "
+               "a segment gets the more it is written to",
+    },
+    {
+        "name": "an_order_closes_the_cart",
+        "file": "app/commerce_events.py",
+        "find": '        return {"ok": True, "filed": [], "closed": _order_supersedes(tenant, who)}',
+        "replace": '        return {"ok": True, "filed": [], "closed": 0}  # SABOTAGE',
+        "suites": ["test_moments.py"],
+        "why": "the cart moment survives the purchase, comes due five hours "
+               "later, and asks somebody to finish buying a thing they have "
+               "already paid for — not a wasted send but the send that tells "
+               "a customer nobody is watching",
+    },
+    {
+        "name": "a_moment_belongs_to_its_business_model",
+        "file": "app/moments.py",
+        "find": "    sp = spec(model, kind)\n    if not sp:",
+        "replace": "    sp = spec(model, kind) or by_model(model)[0]  # SABOTAGE\n    if False:",
+        "suites": ["test_moments.py"],
+        "why": "a producer can file a cart moment against a venue — the row "
+               "looks like work in the queue, and dies at consumption with a "
+               "key nothing recognises. Wiring mistakes stop being catchable "
+               "at the only cheap moment there is",
+    },
+    {
+        "name": "quiet_clock_starts_at_the_last_touch",
+        "file": "app/inbox_events.py",
+        "find": "            conversation_id=conv_id, source=\"inbox\", occurred_at=last,",
+        "replace": "            conversation_id=conv_id, source=\"inbox\",  # SABOTAGE",
+        "suites": ["test_moments.py"],
+        "why": "the window is measured from when a cron happened to run "
+               "instead of from when the person last heard from us — so "
+               "'three days quiet' becomes three days after we noticed, and "
+               "the moment is served days late or not at all",
+    },
+    {
+        "name": "a_stale_enquiry_is_not_a_moment",
+        "file": "app/inbox_events.py",
+        "find": "                        db.Conversation.last_touch_at > too_old)",
+        "replace": "                        )  # SABOTAGE",
+        "suites": ["test_moments.py"],
+        "why": "every enquiry that ever went quiet files a moment that is "
+               "already past its own expiry — rows that can never be served, "
+               "filling the table and slowing every `due()` behind them",
+    },
+    {
+        "name": "commerce_webhook_is_verified",
+        "file": "app/web.py",
+        "find": ("    raw = await request.body()\n"
+                 "    if not swh.verify(raw, request.headers.get(\"X-Shopify-Hmac-Sha256\", \"\")):\n"
+                 "        return JSONResponse({\"error\": \"unverified\"}, status_code=401)\n"
+                 "\n"
+                 "    topic = request.headers.get(\"X-Shopify-Topic\", \"\")\n"
+                 "    shop = request.headers.get(\"X-Shopify-Shop-Domain\", \"\")\n"
+                 "    try:\n"
+                 "        payload = json.loads(raw or b\"{}\")\n"
+                 "        if not isinstance(payload, dict):\n"
+                 "            payload = {}"),
+        "replace": ("    raw = await request.body()  # SABOTAGE\n"
+                    "    topic = request.headers.get(\"X-Shopify-Topic\", \"\")\n"
+                    "    shop = request.headers.get(\"X-Shopify-Shop-Domain\", \"\")\n"
+                    "    try:\n"
+                    "        payload = json.loads(raw or b\"{}\")\n"
+                    "        if not isinstance(payload, dict):\n"
+                    "            payload = {}"),
+        "suites": ["test_moments.py"],
+        "why": "anyone who finds the URL can file moments into a client's "
+               "account — inventing the people, the products and the timing "
+               "of emails sent over that client's own sending domain",
+    },
+    {
+        "name": "declared_index_reaches_the_database",
+        "file": "app/db.py",
+        "find": ("                    conn.execute(text(\n"
+                 "                        f'CREATE INDEX IF NOT EXISTS \"{ix.name}\" '\n"
+                 "                        f'ON \"{table.name}\" ({target})'))"),
+        "replace": "                    pass  # SABOTAGE",
+        "suites": ["test_strategy_ledger.py"],
+        "why": "marking a column `index=True` goes back to changing nothing on "
+               "a table that already exists — the declaration reads as done, "
+               "the query stays a sequential scan over every output the "
+               "account has ever produced, and the only symptom is a latency "
+               "nobody is measuring",
+    },
+    {
+        "name": "index_migration_is_reached_at_startup",
+        "file": "app/db.py",
+        "find": "    _auto_index()\n\n\ndef _auto_index() -> None:",
+        "replace": "    pass  # SABOTAGE\n\n\ndef _auto_index() -> None:",
+        "suites": ["test_strategy_ledger.py"],
+        "why": "the index migration still works perfectly and is never called "
+               "— the same failure as a rule that reaches no validator, and "
+               "invisible for exactly as long",
+    },
+    {
+        "name": "campaign_row_names_subject_and_list",
+        "file": "app/skill_pack.py",
+        "find": '        entity_key=_subject, audience_key=seg["key"],',
+        "replace": '        entity_key="", audience_key="",  # SABOTAGE',
+        "suites": ["test_strategy_ledger.py"],
+        "why": "the ledger goes back to holding every campaign ever sent with "
+               "no record of which product went to which list — and the "
+               "answer comes back EMPTY, which reads as 'nothing was sent' "
+               "rather than 'nobody wrote it down'. Every strategy question "
+               "downstream is then answered from a blank",
+    },
+    {
+        "name": "repaired_draft_is_not_a_send",
+        "file": "app/skill_pack.py",
+        "find": "                            db.Output.status.notin_(ledger.NOT_A_SEND))",
+        "replace": '                            db.Output.status.notin_(("blocked", "superseded")))  # SABOTAGE',
+        "suites": ["test_strategy_ledger.py"],
+        "why": "a draft the validator THREW AWAY re-enters the four rows the "
+               "drafter varies against — filed with an empty theme and shape, "
+               "so it reads as a real send with no intent, displaces one that "
+               "actually went out, and teaches the next email to differ from "
+               "something nobody ever received",
+    },
+    {
+        "name": "campaign_destination_is_an_outcome",
+        "file": "app/skill_pack.py",
+        "find": '    ledger.delivered(ctx.tenant, item["output_id"], _landed)',
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_strategy_ledger.py"],
+        "why": "`destination` goes back to what was written ninety lines "
+               "before the ESP call — every campaign row says `esp:omnisend` "
+               "whether or not anything reached Omnisend, so a refusal and a "
+               "landing are indistinguishable in the one table anybody later "
+               "queries",
+    },
+    {
+        "name": "strategy_read_spans_the_column_change",
+        "file": "app/ledger.py",
+        "find": "                        or_(db.Output.audience_key == audience_key,\n                            db.Output.angle == audience_key),",
+        "replace": "                        db.Output.audience_key == audience_key,  # SABOTAGE",
+        "suites": ["test_strategy_ledger.py"],
+        "why": "every campaign written before `audience_key` was passed drops "
+               "out of the window — the brand reads as having no history at "
+               "all, which is the most misleading possible answer to 'what "
+               "have we been telling these people'",
     },
 ]
 

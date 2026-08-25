@@ -289,6 +289,73 @@ def create_draft_campaign(tenant: str, *, name: str, subject: str,
                     "explicit act."}
 
 
+#: Statuses that mean the send is over and the numbers are final enough to
+#: believe. `paused` is deliberately NOT here: Omnisend pauses a brand's first
+#: campaign — or the first after ~90 idle days — while it verifies delivery
+#: against a small subset, and that can last around an hour. Reading a
+#: partial-subset open rate as the campaign's result would file a number that
+#: is wrong by an order of magnitude and never revisit it.
+FINISHED = ("sent",)
+#: Over, but not a send. Recorded so a row stops being asked about.
+DEAD = ("canceled", "stopped", "expired", "error", "onHold")
+
+
+def campaign(tenant: str, campaign_id: str) -> dict:
+    """One campaign as Omnisend currently sees it — status above all."""
+    res = call(tenant, "GET", f"/api/campaigns/{campaign_id}")
+    if not res.get("ok"):
+        return res
+    d = res.get("data") or {}
+    return {"ok": True, "campaign_id": campaign_id,
+            "status": str(d.get("status") or ""),
+            "name": d.get("name") or "",
+            "sent_at": d.get("sentAt") or d.get("startedAt") or "",
+            "segment_ids": [str(x) for x in (d.get("segmentIDs") or [])]}
+
+
+def campaign_metrics(tenant: str, *, days: int = 30) -> dict:
+    """Every campaign's numbers in ONE call, keyed by campaign id.
+
+    One call on purpose. The analytics endpoint allows **10 requests a minute
+    and 55 a day per brand** — an order of magnitude stricter than the rest of
+    the API — so asking per campaign would exhaust a client's daily budget on
+    a fortnight of sends and then start failing for everything else. Asking
+    for a breakdown by `marketingActivityID` returns a row per campaign for
+    the price of one request.
+
+    Grouped by SEND date, which is what the Omnisend UI shows: every open and
+    click for Monday's campaign lands on Monday whenever it happened. That is
+    the right grouping for "did this send work" and the wrong one for "what
+    happened last Tuesday" — the other endpoint answers that, and mixing the
+    two produces comparisons that look meaningful and are not.
+    """
+    interval = ("last7Days" if days <= 7 else
+                "last30Days" if days <= 30 else "last90Days")
+    res = call(tenant, "POST", "/api/analytics/reports", payload={"queries": [{
+        "alias": "campaign-performance",
+        "metrics": [{"name": n} for n in (
+            "sent", "openedUnique", "openRate", "clickedUnique", "clickRate",
+            "unsubscribedUnique", "unsubscribeRate", "failRate",
+            "attributedOrders", "attributedRevenue")],
+        "dimensions": [{"name": "marketingActivityID"}],
+        "dateRange": {"interval": interval},
+        "filters": [{"name": "marketingActivityType", "operator": "in",
+                     "values": ["Campaign"]}]}]})
+    if not res.get("ok"):
+        return res
+    out: dict[str, dict] = {}
+    for report in ((res.get("data") or {}).get("reports") or []):
+        for row in (report.get("rows") or report.get("data") or []):
+            cid = str((row.get("dimensions") or {}).get("marketingActivityID")
+                      or row.get("marketingActivityID") or "")
+            if not cid:
+                continue
+            vals = row.get("metrics") or {k: v for k, v in row.items()
+                                          if k != "dimensions"}
+            out[cid] = {k: v for k, v in vals.items() if k != "marketingActivityID"}
+    return {"ok": True, "campaigns": out, "interval": interval}
+
+
 def send_campaign(tenant: str, campaign_id: str, confirm: bool = False) -> dict:
     """Send a drafted campaign. Irreversible.
 

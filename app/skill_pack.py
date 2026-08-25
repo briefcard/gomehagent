@@ -1023,7 +1023,7 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
     a blocked draft was never seen by anyone, so avoiding its shape would be
     avoiding a ghost.
     """
-    from . import db
+    from . import db, ledger
     out: list[dict] = []
     try:
         with db.SessionLocal() as s:
@@ -1031,7 +1031,15 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
                     .filter(db.Output.tenant == tenant,
                             db.Output.format == "campaign_email",
                             db.Output.angle == segment_key,
-                            db.Output.status.notin_(("blocked", "superseded")))
+                            # `repaired` belongs here too, and its absence was
+                            # costing the window silently. It marks an attempt
+                            # the validator REJECTED and a later one replaced —
+                            # never seen by anybody — and it is filed with an
+                            # empty `theme` and `shape`. So it entered these
+                            # four rows as a send with no intent and no layout,
+                            # displacing a real one and teaching the drafter to
+                            # vary from a draft that was thrown away.
+                            db.Output.status.notin_(ledger.NOT_A_SEND))
                     .order_by(db.Output.created_at.desc())
                     .limit(CRAFT_HISTORY).all())
             for r in rows:
@@ -1757,7 +1765,8 @@ WITHHOLD_FROM_ESP = frozenset({
 
 
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import creative, email_craft, email_render, esp, fitness, links
+    from . import (creative, email_craft, email_render, esp, fitness,
+                   ledger, links)
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -1830,6 +1839,13 @@ def _run_campaign_email(ctx: Context) -> dict:
     # refreshes what a campaign is about to render and says that it did. The
     # sync is idempotent and duplicate-safe by URL, so the cost of being wrong
     # here is one redundant read.
+    # Which LIVE reads fed this email, as opposed to stored facts of unknown
+    # age. The distinction is the whole of `ledger.perishable`: a claim is true
+    # until somebody changes it, a reading was true when it was taken. The
+    # entities below normally come from the SYNCED catalogue — a stored row,
+    # not a reading — so this stays empty unless the sync actually runs in this
+    # run and the email is written from what the store said just now.
+    live_reads: list[str] = []
     if ents and not any(e.get("image") for e in ents):
         from . import catalog_sync as _cs, tenants as _tnm
         if _tnm.capabilities(ctx.tenant).get("commerce"):
@@ -1851,6 +1867,9 @@ def _run_campaign_email(ctx: Context) -> dict:
                                     "availability": r.availability or "",
                                     "attributes": r.attributes or {}})
                              for r in rows[:6]]
+                # The store was read just now, so availability and price in
+                # this email are a READING with a half-life, not a stored fact.
+                live_reads.append("shopify_inventory")
                 if any(e.get("image") for e in refreshed):
                     ents = refreshed
         else:
@@ -2305,6 +2324,38 @@ def _run_campaign_email(ctx: Context) -> dict:
     item = ctx.emit(
         to_check, claim_ids=state["cited"], angle=seg["key"],
         fmt="campaign_email",
+        # WHICH PRODUCT WENT TO WHICH LIST. Both columns existed and neither
+        # was written for a campaign, so the ledger held every email ever sent
+        # and could not answer the first question anybody asks of it: what have
+        # we already pushed at these people, and how recently. `ad_copy` has
+        # passed both since it was written; this path never did.
+        #
+        # `_subject` is what somebody actually CHOSE — the plan's entity or the
+        # drafter's — and is deliberately empty for a letter that features no
+        # product, which is a real state and not a gap to be filled in.
+        entity_key=_subject, audience_key=seg["key"],
+        # The intent, in its own indexed column rather than only inside
+        # `theme`. `theme` is `"{intent}|{format}"` and answering "how often
+        # has this list been given to rather than asked" from it means a
+        # string split across every row in the period. It is the same fact,
+        # filed where it can be grouped by.
+        situation=craft.get("intent", ""),
+        # The photograph that CARRIED it. Read from the FINAL blocks, after
+        # the repair loop, for the same reason `shape` is.
+        #
+        # Both current formats list `hero`, so today this cannot differ from
+        # "an asset was chosen" — the condition is defensive, not load-bearing,
+        # and no sabotage entry claims otherwise. It is here because the moment
+        # a format omits `hero` (a plain-text send is the obvious one) the
+        # difference becomes real and silent: an asset would be credited, its
+        # `uses` counter incremented, and "which picture worked" answered with
+        # a photograph nobody ever received.
+        media_ids=lambda: ([hero_got["asset_id"]]
+                           if hero_got.get("asset_id") and hero
+                           and any(b.get("type") == "hero"
+                                   for b in state["blocks"]) else []),
+        # Only reads actually taken in this run — see `live_reads` above.
+        lookups=list(live_reads),
         # ONE ARTIFACT, ONE SUBJECT — checked at the same door, repaired by the
         # same loop, on the parts rather than on the prose.
         commitment=commitment, parts=_parts,
@@ -2446,6 +2497,21 @@ def _run_campaign_email(ctx: Context) -> dict:
                                         destination="campaign_email draft")
             except Exception as exc:                            # noqa: BLE001
                 ctx.note(f"drafting into the ESP raised {exc.__class__.__name__}")
+
+    # WHERE IT ACTUALLY LANDED. `emit` wrote `esp:omnisend` a hundred lines
+    # above, before any of this ran — so the column said the same thing whether
+    # the draft reached the platform, was refused by it, raised, or was
+    # deliberately withheld. It recorded the intention and was read as the
+    # outcome. Now it names a campaign somebody can open, or says plainly that
+    # nothing was created. Status is untouched: a draft is not a send.
+    _prov = esp.provider_for(ctx.tenant) or "none"
+    if esp_draft.get("ok") and esp_draft.get("campaign_id"):
+        _landed = f"esp:{_prov}:campaign/{esp_draft['campaign_id']}"
+    elif _forbidden:
+        _landed = f"esp:{_prov}:withheld"
+    else:
+        _landed = f"esp:{_prov}:not-drafted"
+    ledger.delivered(ctx.tenant, item["output_id"], _landed)
 
     # NO DRAFT, NO APPROVAL TO GIVE. `emit` queued one the moment the copy
     # cleared the validator, but the artifact is created here, afterwards — so

@@ -245,6 +245,86 @@ class Commitment(Base):
     settled_note = Column(String, default="")
 
 
+class Moment(Base):
+    """A known person is in a window where a message is welcome.
+
+    **Never "abandoned cart".** This platform serves an e-commerce store, a
+    venue, a B2B specifier and a digital-products account. A property rental
+    has no carts; it has enquiries that go quiet and dates that expire. Name
+    the row after the cart and the venue can never use it, and the vertical
+    bakes into the generic layer where nobody finds it for a year.
+
+    So the abstraction is the WINDOW, and everything specific to how the window
+    was noticed stays in `payload`, which is opaque to every reader. A producer
+    files moments; it does not know what they are for, and it must not — the
+    proof that this layer is real is that a venue enquiry going quiet and a
+    cart going cold land in this table side by side, from two producers,
+    neither of which knows the other exists.
+
+    Three timestamps, because they answer three different questions:
+
+        occurred_at   when the signal happened in the world
+        due_at        when a message becomes WELCOME — a cart is not cold the
+                      instant it is abandoned, and writing then reads as
+                      surveillance rather than service
+        expires_at    after which it must not be acted on at all. A moment is
+                      perishable by definition; one acted on late is worse
+                      than one missed, because it proves nobody was looking.
+    """
+
+    __tablename__ = "moments"
+    #: Idempotency, at the database rather than in a producer's head. Webhooks
+    #: retry, pollers overlap, and two workers can see the same signal in the
+    #: same second. The producer composes `dedup_key` to include whatever
+    #: window it considers one occurrence, so a cart cooling twice in March is
+    #: two moments and the same delivery arriving twice is one.
+    __table_args__ = (UniqueConstraint("tenant", "dedup_key",
+                                       name="uq_moment_tenant_dedup"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    #: A key from `moments.CATALOG`. Not free text — an unknown kind is a
+    #: producer filing something no planner can be asked to consume.
+    kind = Column(String, default="", index=True)
+    #: WHO. The lowercased email, because it is the one identity every channel
+    #: in this system already shares — Contact, the ESP, the store and the
+    #: inbox all key on it. `contact_id` when we happen to have the row.
+    person_key = Column(String, default="", index=True)
+    contact_id = Column(String, default="", index=True)
+    #: WHAT it is about — a product, an enquiry's subject, an offer. Empty is
+    #: legitimate and common: "this person went quiet" is about nothing.
+    entity_key = Column(String, default="", index=True)
+    conversation_id = Column(String, default="", index=True)
+    #: WHICH PRODUCER filed it, for the same reason `Output.basis` exists: when
+    #: a moment turns out to be wrong, the question is always which watcher
+    #: was mistaken.
+    source = Column(String, default="", index=True)
+    dedup_key = Column(String, default="", index=True)
+
+    occurred_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    due_at = Column(DateTime(timezone=True), index=True)
+    expires_at = Column(DateTime(timezone=True), index=True)
+
+    #: open | consumed | expired | suppressed
+    #:
+    #: `suppressed` is its own state and not a deletion: "we chose not to write
+    #: to this person" is a fact worth keeping, and a moment that vanishes when
+    #: a cap declines it makes a frequency rule impossible to audit.
+    status = Column(String, default="open", index=True)
+    #: The run that consumed it, so a draft can be traced back to the signal.
+    consumed_by = Column(String, default="", index=True)
+    #: Why it is not open, in words — the expiry that passed, the cap that
+    #: declined it. Named, never a bare "suppressed".
+    closed_reason = Column(String, default="")
+    closed_at = Column(DateTime(timezone=True))
+
+    #: PRODUCER-SPECIFIC AND OPAQUE. The cart's line items, the enquiry's last
+    #: subject. Nothing in the generic layer may read a key out of here — the
+    #: moment the planner special-cases `payload["cart_total"]`, commerce has
+    #: leaked into the spine and the venue is a second-class citizen again.
+    payload = Column(JSON, default=dict)
+
+
 class Output(Base):
     """One thing a system produced, and the brief that produced it.
 
@@ -276,7 +356,7 @@ class Output(Base):
     # --- the brief: what was chosen, and why this rather than that ---------
     situation = Column(String, default="", index=True)
     entity_key = Column(String, default="", index=True)
-    audience_key = Column(String, default="")
+    audience_key = Column(String, default="", index=True)
     objection_id = Column(String, default="", index=True)
     claim_ids = Column(JSON, default=list)
     media_ids = Column(JSON, default=list)
@@ -293,9 +373,20 @@ class Output(Base):
     #: quoting it forward. Empty means no live data went in, which is the
     #: common case and is genuinely different from unknown.
     lookups = Column(JSON, default=list)
-    theme = Column(String, default="")
-    angle = Column(String, default="")
-    format = Column(String, default="")
+    # INDEXED, all three. These four columns are the strategy substrate — what
+    # was said, to whom, in what form — and every question worth asking of them
+    # is a filter or a group-by over a 90-day window: which intents went to
+    # this list, how often, with what spacing. Unindexed that is a sequential
+    # scan of every output the account has ever produced, which is why the one
+    # reader that exists takes four rows for one segment and nothing has ever
+    # aggregated them.
+    #
+    # `shape` below is deliberately NOT indexed: it is a JSON list, a btree on
+    # it would answer no question anybody asks, and it is read by fetching the
+    # last few rows rather than by filtering on it.
+    theme = Column(String, default="", index=True)
+    angle = Column(String, default="", index=True)
+    format = Column(String, default="", index=True)
     #: The STRUCTURAL fingerprint of what was produced — for an email, the
     #: block sequence it was built from (`["hero","heading","text",…]`).
     #:
@@ -1689,6 +1780,49 @@ def _auto_migrate() -> None:
                     conn.execute(text(
                         f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{default}'))
                 except Exception:  # noqa: BLE001 — already exists / dialect quirk
+                    pass
+    _auto_index()
+
+
+def _auto_index() -> None:
+    """Create any model index missing from an existing table.
+
+    The sibling of `_auto_migrate`, and needed for the same reason one level
+    down. `create_all` builds indexes for tables it creates and never touches
+    ones it finds, and `_auto_migrate` adds columns without them — so marking an
+    EXISTING column `index=True` changed nothing in production. The declaration
+    read as done, the query stayed a sequential scan, and the only place the
+    difference showed was a latency nobody was measuring.
+
+    `IF NOT EXISTS` rather than a catalogue diff: the names come from the
+    model, so re-running this is free, and an index somebody added by hand
+    under our name is left exactly where it is.
+
+    Unlike `_regrade_uniques` this does NOT skip non-Postgres. `CREATE INDEX IF
+    NOT EXISTS` is the same statement in SQLite, and every suite runs on SQLite
+    — a migration that returns immediately under test is a migration whose only
+    execution is in production.
+    """
+    from sqlalchemy import inspect as sa_inspect, text
+
+    insp = sa_inspect(engine)
+    existing_tables = set(insp.get_table_names())
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+            have = {i["name"] for i in insp.get_indexes(table.name)}
+            cols = {c["name"] for c in insp.get_columns(table.name)}
+            for ix in table.indexes:
+                names = [c.name for c in ix.columns]
+                if ix.name in have or not set(names) <= cols:
+                    continue
+                target = ", ".join(f'"{c}"' for c in names)
+                try:
+                    conn.execute(text(
+                        f'CREATE INDEX IF NOT EXISTS "{ix.name}" '
+                        f'ON "{table.name}" ({target})'))
+                except Exception:  # noqa: BLE001 — dialect quirk / raced
                     pass
 
 

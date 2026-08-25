@@ -25,6 +25,349 @@ The first live Omnisend round-trip landed, real plans have run, and the owner
 has pressed Run-now on a real campaign. The "DEPLOYED BUT DORMANT" phrasing is
 stale text this file's own header warns about; the pipeline is live for Eien.
 
+## Strategy — the reader, the planner, and the result (2026-08-24, UNCOMMITTED)
+
+Phases 2.2, 2.3 and 2.4. **The initiative is now complete.** 88 suites green
+(new: `test_strategy.py`), 87 sabotage guards, none stale. Nothing committed,
+nothing deployed.
+
+**2.2 — `strategy.py`, the reader.** Everything it reports was already on the
+rows; the only thing missing was something that asked. Per cohort: how many
+sends, the median gap, which intents, which products, whether the last two
+shared a layout. Brand-wide: give:ask, how concentrated the product mix is,
+how many cohorts have been touched at all.
+
+Findings are **named, not scored** — a "strategy health: 62%" tells nobody
+what to do. Each says what is true, why it matters and what would change it,
+the shape `systems.ready()` already uses. A cohort with ZERO sends appears in
+the table, because it is the most actionable row there and a view built from
+sends alone omits exactly the ones worth acting on.
+
+`GET /admin/strategy?tenant=…` serves it.
+
+**2.3 — the planner proposes against it.** `campaign_rollout` now orders
+high-value cohorts by `_by_neglect` — longest without a send first, never-sent
+ahead of everything — so the earliest slot goes to the cohort most owed one
+rather than to whichever was typed first in the catalogue. That is the proof
+the initiative asked for: **write to a cohort, and the planner's order changes
+on the next read.** A strategy read that fails does not stop planning; it
+falls back to catalogue order.
+
+**2.4 — the result comes back.** `Output.outcome` has said "metrics, filled in
+later" since the table was written and nothing ever filled it.
+`performance.sync` joins Omnisend's numbers to our rows on the campaign id —
+which only works because 2.1 made `destination` an outcome rather than an
+intention. Before that fix every row said `esp:omnisend` and which campaign it
+became was lost.
+
+Three things worth knowing about it:
+
+* **`status` decides `published`, numbers do not.** Only `sent` counts.
+  Omnisend verifies a brand's first campaign — or the first after ~90 idle
+  days — by sending to a small subset and pausing, and that subset already has
+  opens. Recording those as the campaign's result files a number wrong by an
+  order of magnitude and never looks again.
+* **One analytics call per account.** That endpoint allows 10 requests a
+  minute and **55 a day per brand**, far stricter than the rest of the API, so
+  the sweep asks for a breakdown by `marketingActivityID` in a single request
+  and matches locally. Per-campaign polling would burn a client's daily budget
+  on a fortnight of sends.
+* **`confirm_sent` is not `publish`.** `publish` is us deciding to send, so it
+  refuses when an attached asset is reference-only. This is a REPORT that a
+  send already happened — refusing would change nothing about the world and
+  leave the ledger claiming an email was never sent that a thousand people
+  received. It records, and shouts if something went out that should not have.
+  Assets are not re-credited (`mark_asset_used` increments, and the draft path
+  already counted); they get `record_asset_outcome` instead, so the creative
+  library finally learns which photograph earned its opens.
+
+**`ledger.used_recently` can see campaign email at last.** `published` was
+written on the reply path alone, so the anti-repeat half of the ledger was
+blind to every campaign ever sent. Pinned both ways in the suite: invisible
+before confirmation, spent after.
+
+### A defect I introduced and caught in the same session
+
+**Both admin routes I added — `/admin/strategy` and `/admin/moments` — were
+unauthenticated.** `admin_key` RESOLVES the credential and returns `""` when
+there is none; it does not reject. Every route has to check
+`key != config.APPROVAL_SECRET` itself, and I omitted it twice.
+`/admin/moments` was the worse one: `due_now` carries `person_key`, a
+customer's email address, so it was a personal-data leak rather than an
+internal one. Fixed, pinned, and given a sabotage entry.
+
+Worth recording how nearly it was missed twice over: the smoke test that
+found it then appeared to show the FIX not working, because `TestClient`
+keeps a cookie jar and `admin_key` also accepts a session cookie — the second
+request was authenticated by the first. That is the "authorisation check on a
+client that had already signed in" already listed among this repo's six
+historical false passes. The suite now builds a fresh client per request and
+says why.
+
+## Moments inform the plan — the correction (2026-08-24, UNCOMMITTED)
+
+**Supersedes the section below in one important way.** That section described
+`moment_email` as a system that files a plan per PERSON and drafts through the
+campaign path. It would not have worked, and the owner caught it by asking how
+moments and campaigns avoid conflicting.
+
+**The defect.** `_run_campaign_email` binds its ESP draft to
+`segments.esp_id_for(...)` — the whole SEGMENT. There is no per-contact send
+anywhere in the ESP layer: an Omnisend campaign targets a segment, and
+per-contact logic lives in Automations, which nothing here pushes events to
+(`esp.py` says exactly this at the top and it was not read closely enough). So
+one plan per person meant one whole-segment campaign per person. Two cold
+carts would have been two identical sends to the entire list; one venue
+enquiry going quiet would have written to every warm enquiry on file. The
+per-person frequency cap was meaningless on top of that, because the send was
+never per-person.
+
+**The shape it should have had, and now does.** A moment contributes EVIDENCE,
+not a send. `moments.pressure(tenant)` answers "how many people are in the
+same window, what are they about, when does the earliest close", and
+`planner.campaign_rollout` reads it. One planner, one queue, one decision
+about who gets written to — a moment and a campaign cannot collide because
+there is no second sender to collide with.
+
+This also lands where the initiative pointed in §2.1: the `common` tier
+(`cart_abandoners`, `hot_enquiries`, `win_back`) is never worth a scheduled
+campaign, and **live pressure is what promotes it into being worth one.**
+
+### The four rules that keep them apart
+
+* **The honesty floor** — `moments.MIN_PRESSURE = 5`. Under it nothing is
+  proposed, because a segment send on behalf of three people is a message to a
+  thousand about something true of three. Those moments stay open and
+  `/admin/moments` reports them under `too_few_for_a_campaign`, which is the
+  list a person should work one at a time.
+* **Attach, do not add.** If the cohort already has an open plan, the evidence
+  goes ONTO it (as the featured entity it may be missing) and no second
+  campaign is filed. Not a corner case: for a venue, every moment segment is
+  also a high-value calendar segment, so this is the normal path.
+* **Pressure buys timing, never volume.** The monthly cap still binds. A
+  cohort does not earn extra sends by having a bad week.
+* **A cohort rests** — `segment_rest_days`, default 6, capped at 60 and
+  settable through `set_cadence`.
+
+### What changed in the tree
+
+* `moment_email` is now a **watcher**: no skill, no `plan_fields`, no queue.
+  It is the switch for whether windows inform planning at all.
+* `moment_rollout` and its `PLANNERS` entry are **gone**. So is
+  `systems.system_for_plan` and the `preflight(system_key=…)` override — with
+  one planner nothing consumes a plan from a system declaring another skill,
+  and carrying that generality with a guard around it was structure for a case
+  that no longer exists. The finding stays recorded here because it is real:
+  **if a second plan-capable system ever shares a skill, `skill.run` resolves
+  the system from the SKILL and `take_plan` will refuse the row.**
+* **The per-person cap is gone, and its absence is deliberate.** The owner set
+  two-per-person-per-seven-days on 2026-08-24 under the wrong model. Every send
+  goes to a segment whose membership Omnisend knows and we do not, so a
+  per-person number is a claim, not a rule. `segment_rest_days` is what this
+  side of the wire can actually enforce, and `set_cadence` no longer offers a
+  per-person box — offering it would be worse than not having it.
+* Two bugs found while testing, both real: `_nearest_campaign` originally took
+  the LATEST plan ref and subtracted, so a campaign scheduled for next month
+  reported as "written to -12 days ago" and tripped the rest check with a
+  negative number — a future plan collides exactly as much as a past one, so
+  it now measures the nearest in either direction. And the top entity handed
+  to a plan comes from a Shopify line-item handle, which `open_plan` refuses
+  if it is not in our catalogue — it is checked now, because a renamed product
+  should not throw away the whole plan over a field that was only a suggestion.
+
+**87 suites green** (`test_moment_pressure.py` replaces
+`test_moment_planner.py`), **82 sabotage guards**, none stale.
+
+**What real 1:1 triggered email would need:** pushing customer EVENTS to
+Omnisend and letting an Automation send per contact. `esp.py` has no event
+surface, and building one is its own piece of work. Until then, moments decide
+*which cohort and when* — which is what they are for.
+
+---
+
+## Moments — the spine (2026-08-24, UNCOMMITTED)
+
+> Read with the correction above. The spine, the catalogue, both producers,
+> the webhook and the sweep are all as described; what changed is that nothing
+> downstream files a plan per person any more.
+
+
+
+Phases 1.1–1.4 of `INITIATIVE-moments.md`. **87 suites green** (new:
+`test_moments.py` 40 checks, `test_moment_planner.py` 29 checks), **84 sabotage
+guards, none stale, none undetected.** Nothing committed, nothing deployed.
+
+**Nothing runs for anybody yet.** `moment_email` is a new system and a new
+system is `designed`, which is off. It is installed for no account. Switching
+it on is a deliberate act per client, and even then the first thing it does is
+file plans that wait for approval.
+
+### What exists
+
+* **`db.Moment`** — a known person in a window where a message is welcome.
+  Three timestamps because they answer three questions: `occurred_at` (the
+  signal), `due_at` (when a message becomes welcome — a cart is not cold the
+  instant it is left), `expires_at` (after which acting is worse than not).
+  `(tenant, dedup_key)` is unique, so idempotency is the database's job rather
+  than a producer's memory. Classified in `reset.OPERATIONS` in the same change
+  — two suites caught that it was not, which is exactly what they are for.
+* **`moments.CATALOG`** — keyed on `business_model` like `segments.CATALOG`,
+  covering `ecom_inventory`, `local_venue`, `b2b_spec`, `digital_products` from
+  the first line. Each entry declares the capability a producer needs, the
+  segment it bridges to, and its two delays. Three import-time asserts: the
+  segment must exist for that model, the capability must be real, and the
+  window must be at least 24h wide — the tick is daily, so a narrower window
+  could open and close between two runs and never fire.
+* **Two producers, and this is the load-bearing part.** `commerce_events.py`
+  (Shopify webhook → cart cooling, first order) and `inbox_events.py` (a sweep
+  over `Conversation.last_touch_at` → enquiry gone quiet). Neither knows what a
+  moment is for and neither knows the other exists. The suite asserts that
+  against the SOURCE — no cart vocabulary in the inbox producer, no
+  conversation vocabulary in the commerce one, no function in the spine
+  mentioning either — because with one vertical the vertical bakes into the
+  generic layer and nobody finds out for a year.
+* **`POST /webhooks/shopify/commerce`** — the same `verify()` over the raw
+  body, the same 401, the same never-500 as the compliance route. Register it
+  against `checkouts/create|update`, `orders/create|paid|fulfilled`.
+  `orders/create` files nothing and is the most important topic on the list: it
+  is what closes the cart moment when somebody actually buys.
+* **`planner.moment_rollout`** — the second planner, registered under
+  `moment_email`. One person, one moment per run; **soonest to expire wins**
+  and the losers stay open; **two per person per rolling seven days** (owner,
+  2026-08-24), tunable through `set_cadence` and capped there.
+* **`GET /admin/moments`** — what is due, and the three-way split: live,
+  unwatched (no connection), unproduced (nothing files it). Those are different
+  jobs and collapsing them is how a missing producer waits a year for the wrong
+  person to fix it.
+
+### Proven end to end, not just declared
+
+A venue enquiry going quiet produces a real ESP draft through the **unchanged
+`campaign_email` path** — same coherence contract (`audience hot_enquiries`),
+same validator (`banned_claims`, `citation`, `not_repeated`), same repair loop
+— and the ledger row carries the phase-2.1 writes. Pinned in
+`test_moment_planner.py`, not a one-off.
+
+### One thing the initiative got wrong, and the fix
+
+§2.6 said the planner registry "already supports a second; nothing needs
+redesigning". True of `PLANNERS` and **false of the consumption path**:
+`skill.run` resolved the system from the SKILL's declaration, so a
+`moment_email` plan asked whether `campaign_email` was installed and was then
+refused by `take_plan` as belonging to a different system. Every triggered
+email would have been held for ever by a check meant to catch a tenant-boundary
+error. New `systems.system_for_plan()` resolves the system from the PLAN, and
+fails closed: **a plan may only be consumed by the skill its own system
+declares.** Blank falls back to the old behaviour, so no existing refusal
+moved.
+
+### What triggered does NOT mean here
+
+It is the timing of the PROPOSAL, not an unattended send. A moment files a
+plan; on `approve_all` that plan waits for the owner; the draft then goes
+through the normal approval and is launched by a human in the ESP. And the
+frequency cap counts triggered emails only — a scheduled campaign goes to an
+ESP segment whose membership the ESP knows and we do not, so a person can
+receive a newsletter and their two triggered emails in the same week. That is
+stated rather than quietly meaning something narrower than it reads.
+
+### Still open
+
+* **2.2 `strategy.py`** (the reader over `ledger.sends_to`), **2.3** (the
+  planner proposing against strategy state), **2.4** (ESP performance back into
+  the ledger — the only honest source for `published`).
+* Five catalogued moments have no producer yet (`browsed_no_cart`,
+  `back_in_stock`, `date_approaching`, `event_just_held`, and both b2b/digital
+  entries). Declared on purpose so the model is complete before the plumbing —
+  `/admin/moments` reports each as unproduced.
+
+## The ledger can say what went to whom (2026-08-24, UNCOMMITTED — not pushed)
+
+Phase 2.1 of `INITIATIVE-moments.md`, which that plan puts first for a reason:
+every later phase reads these rows, and building moments on a ledger that
+cannot say which product went to which segment means rebuilding the analysis
+afterwards. **85 suites green** (new: `scripts/test_strategy_ledger.py`, 31
+checks), **74 sabotage guards, none stale, none undetected.**
+
+Nothing is committed and nothing is deployed. `main` auto-deploys to Render, so
+pushing this is a production deploy and is the owner's call.
+
+**What was actually wrong.** Every column below already existed on `Output` and
+had existed since the table did. `record()` has accepted all of them since it
+was written. For a campaign email they were simply never passed — so the table
+that holds a record of every send answered the first question anybody asks of
+it with an empty result, which reads as *"nothing was sent"* rather than
+*"nobody wrote it down"*.
+
+* **`entity_key` / `audience_key`** — now the product somebody actually chose
+  and the segment the plan named. `ad_copy` has passed both since it was
+  written; the campaign path never did. `entity_key` is deliberately empty for
+  a letter that features no product: that is a real state, not a gap.
+* **`situation`** — the campaign intent, in its own indexed column instead of
+  only inside `theme` as `"{intent}|{format}"`. No metric misreads it:
+  `situations_seen` is declared under `service_desk` only.
+* **`media_ids`** — had **no writer anywhere**, because `Context.emit` did not
+  accept it. It does now, and files it on the SURVIVING row only; crediting the
+  hero to each superseded attempt would count one photograph three times.
+* **`lookups`** — written only when the catalogue sync actually runs in that
+  run. Entities normally come from the synced table, which is a stored fact of
+  unknown age, not a reading. Tagging those `shopify_inventory` would date the
+  staleness from the wrong moment, so `ledger.perishable()` still skips them —
+  correctly.
+
+**`destination` was an intention, and is now an outcome.** It was written at
+`emit` about ninety lines before the ESP call that may refuse, raise, or be
+skipped — so every row said `esp:omnisend` whether or not anything reached
+Omnisend. New `ledger.delivered()` rewrites it afterwards to
+`esp:omnisend:campaign/<id>`, `:not-drafted`, or `:withheld`. It deliberately
+does **not** touch `status`: for a campaign this system creates a DRAFT and the
+owner launches it, which `apply_decision` goes out of its way to say. A row
+becoming `published` is Phase 2.4's job, from the ESP, not this one's.
+
+**A rejected draft was counting as a send.** `_recent_sends` excluded only
+`("blocked", "superseded")`, so `repaired` rows — attempts the validator threw
+away and a later one replaced — entered the four-row window the drafter varies
+against. They keep `angle` and `format` and lose `theme` and `shape`, so each
+one read as a real send with no intent, displaced a real one, and taught the
+next email to differ from something nobody ever received. One shared constant
+now, `ledger.NOT_A_SEND`.
+
+**The indexes were declared and never created.** `_auto_migrate` adds columns
+to existing tables and nothing added indexes, so marking a column `index=True`
+changed nothing in production — the declaration read as done and the query
+stayed a sequential scan. New `_auto_index()`, called from `_auto_migrate`, and
+it does **not** skip non-Postgres: `CREATE INDEX IF NOT EXISTS` is the same
+statement in SQLite, and a migration that returns immediately under test is one
+whose only execution is in production. `audience_key`, `theme`, `angle`,
+`format` are now indexed for real.
+
+**What proves it** — the plan's own criterion. `ledger.sends_to(tenant,
+audience_key, days=90)` answers, for one list: which intents, which products,
+which claims, which angles, **at what spacing**. It matches on `audience_key`
+OR `angle`, because `angle` carried the segment on every row written before the
+fix and a strategy read that silently began today would show a brand with no
+history — the most misleading available answer.
+
+**One pre-existing gap found and closed.** `campaign_draft_gate` had been
+STALE since 2026-08-22 — its target was the single `if` that withheld a draft
+when anything was wrong, removed that day because withholding it also removed
+the owner's only view of the work. The gate narrowed rather than vanished, so
+the entry is re-pointed at `WITHHOLD_FROM_ESP` / `_forbidden`, which is what
+now keeps a false or forbidden email out of a live sending platform. Verified
+by removal against two suites.
+
+**Not covered, and said so rather than implied.** The `media_ids` condition
+also requires a hero block to survive into the final email. Both current
+formats list `hero` and the assembler re-inserts one when the library has it,
+so that half is defensive today and carries no sabotage entry. It matters the
+moment a format omits `hero` — a plain-text send — when an asset would
+otherwise be credited and `uses` incremented for a photograph nobody received.
+
+**Next**, in the plan's order: 1.1 `db.Moment`, 1.2 `moments.CATALOG`, 1.3 two
+producers (Shopify commerce webhook + inbox-quiet), 1.4 the second planner.
+**§5.1 is still open and is load-bearing** — the per-person cap and per-moment
+dedup must be decided before 1.4, not after.
+
 ## Campaign email: variety, craft, and the images (2026-08-21, uncommitted)
 
 The owner's two complaints after the first live sends — *"images are still

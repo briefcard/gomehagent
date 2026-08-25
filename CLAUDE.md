@@ -5,10 +5,16 @@ continue the build without re-deriving context. Read it first.
 
 ## Next initiative (2026-08-23)
 **`INITIATIVE-moments.md`** — triggered sends (a vertical-neutral `Moment`
-spine) and planner orchestration. Not started. Read it before touching
-`planner.py`, `segments.py`, `ledger.py` or the campaign path; it opens with
-six facts, each with a file reference, so its own staleness is checkable in a
-minute. Build map: <https://claude.ai/code/artifact/489c224e-a381-43b3-892f-3287e4f5bb81>
+spine) and planner orchestration. **COMPLETE 2026-08-24 — all eight phases,
+uncommitted and deployed nowhere.** Moments INFORM
+`campaign_rollout` — they do not send, because every send this system makes is
+bound to a whole segment. `moment_email` is a watcher with no queue, and it is
+off for every account. Read it before touching `planner.py`,
+`segments.py`, `ledger.py` or the campaign path; it opens with six facts, each
+with a file reference, so its own staleness is checkable in a minute — the
+three that 2.1 changed are marked CLOSED in place. `BUILD-STATE.md` has the
+record of what 2.1 actually did.
+Build map: <https://claude.ai/code/artifact/489c224e-a381-43b3-892f-3287e4f5bb81>
 
 Run the suites with **`./scripts/test_all.sh`** (parallel, ~90s; serial is 5m+).
 

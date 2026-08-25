@@ -263,6 +263,7 @@ class Context:
              conversation_id: str = "", require_citation: bool | None = None,
              redraft=None, meta: "dict | callable | None" = None,
              lookups: list | None = None, shape=None, theme: str = "",
+             media_ids: "list | callable | None" = None,
              commitment: dict | None = None,
              parts: "dict | callable | None" = None) -> dict:
         """Validate one produced thing, repair it if it fails, file it.
@@ -411,6 +412,20 @@ class Context:
             # change the layout, and recording the shape of a superseded draft
             # would teach the next send to avoid the wrong thing.
             shape=list((shape() if callable(shape) else shape) or []),
+            # WHICH ASSET CARRIED IT. `Output.media_ids` has existed since the
+            # table did and nothing ever wrote it, so `ledger.publish` — whose
+            # whole second job is crediting the creative that went out — has
+            # been crediting an empty list, and "which photograph actually
+            # worked" had no answer for any skill that used one.
+            #
+            # On the SURVIVING row only. The superseded attempts above are the
+            # same email drafted again; crediting the hero to each of them
+            # would count one photograph three times in any question about
+            # which creative was used.
+            # A CALLABLE for the same reason `shape` is: a repair can rewrite
+            # the layout, and the hero block is one of the things it can drop.
+            media_ids=list((media_ids() if callable(media_ids) else media_ids)
+                           or []),
             conversation_id=conversation_id, run_id=self.run_id)
 
         # Every attempt is filed as a CHECK, not just the ones that produced

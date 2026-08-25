@@ -1,7 +1,16 @@
 # INITIATIVE — Moments and orchestration
 
-> **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-08-23. Nothing in it has
-> been built. `BUILD-STATE.md` remains the record of what exists.
+> **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-08-23. `BUILD-STATE.md`
+> remains the record of what exists.
+>
+> **COMPLETE (2026-08-24), uncommitted and deployed nowhere.** All eight
+> phases are built; `BUILD-STATE.md` has three dated sections covering them. 1.4 landed differently from how it is
+> written below — moments INFORM `campaign_rollout` rather than running a
+> second planner, because there is no per-contact sending surface for a
+> per-person plan to use. See BUILD-STATE's correction section. The built phases changed several of the
+> facts below, so those are marked CLOSED in place rather than left to read as
+> still-true — a plan whose facts have quietly gone false is the exact failure
+> this file was written to avoid. `BUILD-STATE.md` has what was actually done.
 >
 > `HANDOFF-content-platform.md` is in this repo and is WRONG — it described
 > state that moved underneath it. This file avoids that failure the only way a
@@ -58,23 +67,28 @@ aggregates them; nothing shows them to the owner.
 
 `theme`, `angle`, `format` and `shape` are all **unindexed** on `db.Output`.
 
-### 2.3 The ledger cannot answer "which product went to which segment"
-`skill_pack._run_campaign_email` calls `ctx.emit(...)` **without**
-`entity_key=` or `audience_key=`, so both columns are empty on every
-campaign_email row. `_run_ad_copy` **does** pass them. One-line fix, and it
-gates the whole of Phase 2.
+### 2.3 ~~The ledger cannot answer "which product went to which segment"~~
+**CLOSED by 2.1 (2026-08-24).** `_run_campaign_email` now passes `entity_key`,
+`audience_key`, `situation` and `media_ids`; `Context.emit` gained `media_ids`,
+which had no writer anywhere. `lookups` is written only when the catalogue sync
+actually runs — entities normally come from the synced table, a stored fact of
+unknown age rather than a reading, so `ledger.perishable()` still skips those
+rows and is right to. `objection_id` stays empty: nothing in the campaign path
+answers an objection, and inventing one would be worse than the gap.
 
-Also empty for email, with consequences: `situation` (metrics count nothing),
-`objection_id` (same), `lookups` (so `ledger.perishable()` skips every email),
-`media_ids` (no writer anywhere).
+The read that proves it is `ledger.sends_to()`.
 
 ### 2.4 Nothing records that an email shipped
-`ledger.publish()` — the only writer of `status="published"` / `published_at` —
-is called from exactly one place, `responder.py` (the reply path). No campaign
-row ever becomes `published`, so `ledger.used_recently()` / `is_repeat()` are
-**blind to every email ever sent**. `destination` is written at `emit` time
-(`esp:omnisend`) roughly ninety lines before the ESP call that may fail, so it
-records intent, not outcome.
+**HALF CLOSED by 2.1 (2026-08-24).** `destination` is now an outcome:
+`ledger.delivered()` rewrites it after the ESP call to
+`esp:{provider}:campaign/<id>`, `:not-drafted` or `:withheld`.
+
+Still true, and deliberately so: no campaign row becomes `published`, so
+`used_recently()` / `is_repeat()` remain blind to sent email. This system
+creates a DRAFT and the owner launches it in the platform — `apply_decision`
+goes out of its way to say approving one is not sending it. The truth about
+what shipped has to come back FROM the ESP, which is Phase 2.4, not something
+2.1 could honestly assert.
 
 ### 2.5 There is no commerce event path
 One Shopify webhook route exists: `POST /webhooks/shopify/compliance`, serving
@@ -86,8 +100,13 @@ Event-driven paths that do exist: WhatsApp inbound, Telegram, the mail poller.
 All human/compliance channels. None commerce.
 
 ### 2.6 Other things worth knowing before touching the planner
-- `PLANNERS = {"campaign_email": campaign_rollout}` — one entry. The registry
-  already supports a second; nothing needs redesigning to add one.
+- ~~`PLANNERS` — one entry. The registry already supports a second; nothing
+  needs redesigning to add one.~~ **HALF WRONG, and it cost a debugging pass.**
+  True of `PLANNERS`. False of the CONSUMPTION path: `skill.run` resolved the
+  system from the SKILL's declaration, so a `moment_email` plan asked whether
+  `campaign_email` was installed and was then refused by `take_plan` as
+  belonging to a different system. Fixed by `systems.system_for_plan()`, which
+  resolves the system from the plan and fails closed. Two entries now.
 - `planner` reads the ledger **not at all**. It knows only how many plans are
   open per segment per month (`_existing_by_month`).
 - A comment in `systems.py` says the planner rotates intent. **It does not** —
@@ -95,9 +114,8 @@ All human/compliance channels. None commerce.
 - `worker.systems_tick` is the only path that turns a planned run into a
   `skill.run`. `LEAD_DAYS = 2`, so nothing proposed in a tick is consumable in
   the same tick.
-- Repaired attempt rows are written with `theme=""` and `shape=[]` but keep
-  `angle` and `format`, and `_recent_sends` excludes only
-  `("blocked", "superseded")` — so they enter the 4-row window and dilute it.
+- ~~Repaired attempt rows dilute the 4-row window.~~ **CLOSED by 2.1** — one
+  shared constant, `ledger.NOT_A_SEND`, which includes `repaired`.
 
 ---
 
@@ -110,26 +128,35 @@ which segment means rebuilding the analysis afterwards.
 
 | # | Work | Rests on |
 |---|------|----------|
-| 2.1 | Complete the per-send writes + indexes | §2.3, §2.4, §2.6 |
-| 1.1 | `db.Moment` table | — |
-| 1.2 | `moments.CATALOG` per business_model, per capability | §2.1 |
-| 1.3 | Two producers: Shopify commerce webhook + inbox-quiet | §2.5 |
-| 1.4 | A second planner that consumes due moments | §2.6 |
-| 2.2 | `strategy.py` — the reader | 2.1 |
-| 2.3 | Planner proposes against strategy state | 2.2 |
-| 2.4 | ESP performance back into the ledger | 2.1 |
+| ~~2.1~~ | ~~Complete the per-send writes + indexes~~ **DONE 2026-08-24** | §2.3, §2.4, §2.6 |
+| ~~1.1~~ | ~~`db.Moment` table~~ **DONE 2026-08-24** | — |
+| ~~1.2~~ | ~~`moments.CATALOG`~~ **DONE 2026-08-24** | §2.1 |
+| ~~1.3~~ | ~~Two producers: commerce webhook + inbox-quiet~~ **DONE** | §2.5 |
+| ~~1.4~~ | ~~A second planner~~ → **moments INFORM `campaign_rollout`** (2026-08-24; a second planner would have sent one whole-segment campaign per person) | §2.6 |
+| ~~2.2~~ | ~~`strategy.py` — the reader~~ **DONE** + `/admin/strategy` | 2.1 |
+| ~~2.3~~ | ~~Planner proposes against strategy state~~ **DONE** — ordered by neglect | 2.2 |
+| ~~2.4~~ | ~~ESP performance back into the ledger~~ **DONE** — `performance.sync` | 2.1 |
 
 ### What proves each phase
 
-- **2.1** — a query answers, for one segment over 90 days: which intents, which
-  products, which claims, which angles, at what spacing.
-- **1.3** — a venue enquiry going quiet and a cart going cold both create a
-  `Moment`, and **neither producer knows what the other is for**. Build with
-  `ecom_inventory` AND `local_venue` from day one; with one vertical the
-  vertical bakes into the generic layer and nobody finds out for a year.
-- **1.4** — a moment produces a draft through the unchanged `campaign_email`
-  path: same coherence contract, same claims, same validator.
-- **2.3** — the planner's choice of segment changes when the ledger changes.
+- **2.1** — ✅ `ledger.sends_to(tenant, audience_key, days=90)` answers exactly
+  that. Pinned by `scripts/test_strategy_ledger.py`; four of its guards fail on
+  removal (`python3 scripts/sabotage.py`).
+- **1.3** — ✅ both create a `Moment`, and the suite asserts the mutual
+  ignorance against the SOURCE: no cart vocabulary in the inbox producer, no
+  conversation vocabulary in the commerce one, no function in the spine
+  mentioning either. Built with `ecom_inventory` AND `local_venue` from the
+  first line, plus `b2b_spec` and `digital_products`.
+- **1.4** — ✅ but NOT as written. "A moment produces a draft" was the wrong
+  proof, because every draft this system makes is bound to a whole segment.
+  What is proven instead, in `test_moment_pressure.py`: enough people in one
+  window promotes a common-tier cohort the calendar never proposes for; under
+  the floor nothing is proposed and the moments stay open for a person; and a
+  cohort that already has a plan gets the evidence ATTACHED rather than a
+  second campaign.
+- **2.3** — ✅ the planner's choice of segment changes when the ledger
+  changes. `test_strategy.py` writes history, reads the order, writes one more
+  send and checks the order moved.
 
 ---
 
@@ -167,13 +194,18 @@ Non-obvious, and each one cost time to learn.
 
 ## 5. Open decisions
 
-1. **Suppression and expiry are load-bearing, not polish.** A moment is a
-   message to a named person about a specific thing — a different consent and
-   frequency question from a segment campaign. Decide the per-person cap and
-   the per-moment dedup before 1.4, not after.
-2. **Which `local_venue` moment ships first.** "Enquiry gone quiet" needs only
-   `Conversation.last_touch_at`, which is already maintained — it is the
-   cheapest second producer and it is the one that proves the abstraction.
+1. ~~Suppression and expiry.~~ **DECIDED, then REVISED once the sending
+   surface was read properly.** The owner set two-per-person-per-seven-days on
+   2026-08-24. It is not enforceable: every send goes to a segment whose
+   membership Omnisend knows and we do not, so a per-person number is a claim
+   rather than a rule. What replaced it, and what the code now does:
+   `MIN_PRESSURE` (a cohort needs five people in a window before a campaign is
+   an honest response), `segment_rest_days` (how long a cohort rests), and the
+   existing monthly cap, which pressure may never exceed. Per-moment dedup is
+   still structural — `(tenant, dedup_key)` is unique.
+2. ~~Which `local_venue` moment ships first.~~ **"Enquiry gone quiet", as
+   suggested** — `Conversation.last_touch_at` was already maintained, and it
+   shares no concept whatsoever with a cart, which is what made it the proof.
 3. **`published_scope` is read nowhere** (noted in DEFECTS §2.85), so a product
    published to POS only still reads as available. Adjacent, not blocking.
 

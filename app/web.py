@@ -2032,6 +2032,121 @@ async def shopify_compliance(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/webhooks/shopify/commerce")
+async def shopify_commerce(request: Request):
+    """Shopify commerce events, turned into moments. One endpoint, many topics.
+
+    The same shape as the compliance endpoint above and deliberately so — same
+    `verify()` over the RAW body, same 401 for an unverified delivery, same
+    never-500 — because the security question is identical and a second,
+    slightly different implementation of it is how one of them ends up weaker.
+
+    Register the same URL against `checkouts/create`, `checkouts/update`,
+    `orders/create`, `orders/paid` and `orders/fulfilled`. `orders/create` is
+    on that list even though it FILES nothing: it is what closes the cart
+    moment when somebody actually buys, and without it this endpoint would
+    write to people about baskets they have already paid for.
+    """
+    from fastapi.responses import JSONResponse
+
+    from . import commerce_events, shopify_webhooks as swh
+
+    raw = await request.body()
+    if not swh.verify(raw, request.headers.get("X-Shopify-Hmac-Sha256", "")):
+        return JSONResponse({"error": "unverified"}, status_code=401)
+
+    topic = request.headers.get("X-Shopify-Topic", "")
+    shop = request.headers.get("X-Shopify-Shop-Domain", "")
+    try:
+        payload = json.loads(raw or b"{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:                                            # noqa: BLE001
+        payload = {}
+
+    try:
+        commerce_events.handle(topic, shop, payload)
+    except Exception:                                            # noqa: BLE001
+        log.exception("shopify commerce webhook failed: %s", topic)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/admin/strategy")
+def admin_strategy(key: str = Depends(admin_key), tenant: str = "",
+                   days: int = 90) -> dict:
+    """What this brand has been saying, to whom, how often — and what to fix.
+
+    The reader the ledger has been owed since it was written. Every figure
+    here is a query over rows that already existed; the only thing that was
+    missing was something that asked.
+
+    `findings` first in the response on purpose: a person opening this wants
+    to know what to do, and the per-cohort table is the evidence behind it
+    rather than the point of it.
+    """
+    from . import strategy as _st
+
+    # `admin_key` RESOLVES the credential and returns "" when there is none —
+    # it does not reject. Every route has to say so itself, which is easy to
+    # forget and was forgotten here: this endpoint served a client's whole
+    # programme to anyone who found the URL until it was checked.
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account: /admin/strategy?tenant=baci"}
+    return _st.read(tenant, days=days)
+
+
+@app.get("/admin/moments")
+def admin_moments(key: str = Depends(admin_key), tenant: str = "",
+                  open_only: bool = True) -> dict:
+    """What the windows are arguing for, and what nothing is watching for.
+
+    Two readings in one place, because they answer different questions.
+
+    The CATALOGUE side has three states, and the fixes are three different
+    jobs: a moment can be live, unwatched because the client has not connected
+    the thing that sees it, or unproduced because nobody has written the
+    producer. Reporting those as one "not available" is how a missing producer
+    gets mistaken for a missing integration.
+
+    The PRESSURE side splits on the honesty floor. Over it, a cohort argues
+    for a campaign and the planner will act on the next tick. Under it,
+    nothing will ever happen automatically — and those are precisely the ones
+    a person should pick up, one at a time.
+    """
+    from . import moments as _mo
+
+    # Same omission, and worse here: `due_now` carries `person_key`, which is
+    # a customer's email address. An unauthenticated read of this was a
+    # personal-data leak, not just an internal one.
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    cat = _mo.for_tenant(tenant) if tenant else {}
+    press = _mo.pressure(tenant) if tenant else []
+    rows = _mo.due(tenant) if open_only else []
+    return {"tenant": tenant,
+            "catalog": {k: cat.get(k) for k in
+                        ("ok", "error", "business_model", "live",
+                         "unwatched", "unproduced")} if tenant else {},
+            # WHAT THE PLANNER WILL SEE. A cohort at or over the floor argues
+            # for a campaign on the next tick; one under it does not, and
+            # never will on its own.
+            "arguing_for_a_campaign": [g for g in press if g["ready"]],
+            # AND WHAT IT WILL NOT. These are the ones worth a person: four
+            # enquiries that went quiet are four replies somebody should
+            # write, and they are invisible unless something says so. A floor
+            # that silently swallows them would be worse than no floor.
+            "too_few_for_a_campaign": [
+                {"segment": g["segment"], "people": g["people"],
+                 "kinds": g["kinds"], "why_not": g["why_not"]}
+                for g in press if not g["ready"]],
+            "due_now": [{"id": m.id, "kind": m.kind, "who": m.person_key,
+                         "entity_key": m.entity_key, "source": m.source,
+                         "occurred_at": m.occurred_at, "due_at": m.due_at,
+                         "expires_at": m.expires_at} for m in rows]}
+
+
 @app.get("/admin/privacy_requests")
 def privacy_requests(key: str = Depends(admin_key), open_only: bool = True) -> dict:
     """What Shopify has asked us to do about somebody's data, and what is left.

@@ -99,7 +99,8 @@ CATALOG = {
         workflow=dict(
             unit="a campaign email to one segment",
             skill="campaign_email",
-            cadence=dict(horizon_days=21, per_segment_monthly=1),
+            cadence=dict(horizon_days=21, per_segment_monthly=1,
+                         segment_rest_days=6),
             plan_fields=(
                 dict(key="segment", label="Audience segment", required=True,
                      kind="segment"),
@@ -147,6 +148,35 @@ CATALOG = {
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
             measure="generated HTML vs the ESP draft at launch")),
+    "moment_email": dict(
+        name="Moments (windows worth writing into)",
+        does="Watches for windows opening — a cart gone cold, an enquiry gone "
+             "quiet — and lets what it finds decide which cohort the campaign "
+             "planner writes to next, and when.",
+        # `commerce` is not required: the inbox producer alone is a complete,
+        # useful watcher for a venue or a specifier, and demanding a store
+        # would make this switchable only for shops.
+        requires=(), requires_any=("commerce", "inbox"), needs_kb=False,
+        kb_needs=(),
+        # NO `skill` AND NO `plan_fields`, deliberately — this system sends
+        # nothing and owns no queue.
+        #
+        # The first cut gave it both: it filed one plan per PERSON, and every
+        # one of those drafted a campaign bound to that person's whole
+        # segment, because `esp_id_for` is what an Omnisend campaign targets.
+        # Two cold carts would have been two identical sends to the entire
+        # list. There is no per-contact sending surface here to fix that with
+        # — per-contact logic lives in Automations, which nothing pushes
+        # events to — so the honest shape is that moments INFORM
+        # `campaign_rollout` rather than running beside it. One queue, one
+        # decision about who gets written to, and nothing to collide with.
+        workflow=dict(
+            unit="a window noticed, and the cohort it argues for",
+            artifact="none — it proposes nothing and sends nothing",
+            ship="informs the campaign planner; the campaign system does the "
+                 "sending, under its own switch and its own rung",
+            measure="moments consumed into a plan vs moments that expired "
+                    "unserved")),
     "blog": dict(
         name="Blog / content",
         does="Publishes grounded articles against the keyword map.",
@@ -985,20 +1015,32 @@ def workflow(key: str) -> dict:
 
 
 def set_cadence(system_id: str, horizon_days=None,
-                per_segment_monthly=None) -> dict:
+                per_segment_monthly=None, segment_rest_days=None) -> dict:
     """The owner's cadence override, onto `System.config["cadence"]`.
 
     Validated here rather than trusted at read time, because a bad value
     written silently sits behind a planner for weeks: a 900-day horizon or a
     50-a-month cap is refused BY NAME at the knob. Blank means "leave it" —
     the same blank-is-not-an-edit rule the plan form keeps.
+
+    Three knobs, one planner. `horizon_days` and `per_segment_monthly` pace
+    the calendar path; `segment_rest_days` is the floor under the pressure
+    path, so a cohort with a bad week cannot be written to twice in three
+    days.
+
+    There is no per-PERSON knob, and its absence is deliberate rather than
+    missing: every send goes to a segment whose membership the ESP knows and
+    we do not, so a per-person number would be a claim rather than a rule.
+    Offering the box would be worse than not having it.
     """
     from . import planner as _pl
     updates: dict[str, int] = {}
     for name, val, cap in (("horizon_days", horizon_days,
                             _pl.MAX_HORIZON_DAYS),
                            ("per_segment_monthly", per_segment_monthly,
-                            _pl.MAX_PER_SEGMENT_MONTHLY)):
+                            _pl.MAX_PER_SEGMENT_MONTHLY),
+                           ("segment_rest_days", segment_rest_days,
+                            _pl.MAX_SEGMENT_REST_DAYS)):
         if val is None or str(val).strip() == "":
             continue
         try:
@@ -1009,7 +1051,7 @@ def set_cadence(system_id: str, horizon_days=None,
             return {"error": f"{name} must be between 1 and {cap}, got {n}"}
         updates[name] = n
     if not updates:
-        return {"error": "nothing to set — both boxes were blank"}
+        return {"error": "nothing to set — every box was blank"}
     with db.SessionLocal() as s:
         row = s.get(db.System, system_id)
         if not row:

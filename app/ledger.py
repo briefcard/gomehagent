@@ -19,6 +19,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 
+from sqlalchemy import or_
+
 from . import db
 
 
@@ -98,6 +100,169 @@ def publish(tenant: str, output_id: str, destination: str = "") -> str:
     for aid in media:
         kb.mark_asset_used(aid, destination)
     return "Published." + (f" {len(media)} asset(s) credited." if media else "")
+
+
+def delivered(tenant: str, output_id: str, destination: str) -> bool:
+    """Correct `destination` to where the artifact ACTUALLY landed.
+
+    **This is not `publish`.** It does not touch `status`, and it must not: for
+    a campaign the thing this system creates is a DRAFT in the sending
+    platform, and the owner launches it there. Approving one means "reviewed",
+    which `apply_decision` goes out of its way to say — calling it published
+    here would undo that in the one table anybody later queries.
+
+    It exists because `destination` was written at `emit` time, roughly ninety
+    lines before the ESP call that may refuse, raise, or be skipped entirely.
+    Every campaign row therefore read `esp:omnisend` whether or not anything
+    reached Omnisend, so the column recorded an INTENTION and was indexed,
+    displayed and believed as an outcome. A row that names a campaign id can be
+    checked; a row that says the draft was never made is a fact somebody can
+    act on. Both are worth more than a uniform claim that is sometimes false.
+    """
+    with db.SessionLocal() as s:
+        row = (s.query(db.Output)
+               .filter(db.tenant_filter(db.Output, tenant),
+                       db.Output.id == output_id).first())
+        if not row:
+            return False
+        row.destination = destination
+        s.commit()
+    return True
+
+
+#: Statuses that are NOT a send. `repaired` is the trap: it marks a rejected
+#: attempt whose SUCCESSOR passed, so the email it describes was never seen by
+#: anybody — but it keeps `angle` and `format` and loses `theme` and `shape`,
+#: which makes it look exactly like a real send with an empty intent. Counting
+#: one is counting a draft the validator threw away.
+NOT_A_SEND = ("blocked", "superseded", "repaired")
+
+
+def audiences_written_to(tenant: str, *, days: int = 90,
+                         fmt: str = "campaign_email") -> list[str]:
+    """Every cohort this account has actually sent to in the window.
+
+    Read from the rows rather than from the catalogue, so a segment that was
+    written to and later removed from `segments.CATALOG` still shows up. A
+    strategy view built only from the catalogue would quietly omit exactly the
+    sends nobody remembers making.
+    """
+    since = db.utcnow() - dt.timedelta(days=days)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Output.audience_key, db.Output.angle)
+                .filter(db.tenant_filter(db.Output, tenant),
+                        db.Output.format == fmt,
+                        db.Output.created_at >= since,
+                        db.Output.status.notin_(NOT_A_SEND)).all())
+    return sorted({(aud or ang or "") for aud, ang in rows} - {""})
+
+
+def sends_to(tenant: str, audience_key: str, *, days: int = 90,
+             fmt: str = "campaign_email") -> list[dict]:
+    """What this list has actually been sent, in order, with the gaps.
+
+    The question the ledger has always held the answer to and never been asked:
+    for one audience over a window, which intents went out, about which
+    products, drawing on which proof, at what spacing. Every field was already
+    on the row — `record` has taken all of them since it was written — but for
+    a campaign three of them were never passed, so the answer came back empty
+    in a way that looked like "nothing was sent" rather than "nobody wrote it
+    down".
+
+    Matched on `audience_key` OR `angle`. `angle` carried the segment for every
+    campaign row written before `audience_key` was passed, and a strategy read
+    that silently began at the fix would show a brand with no history — the
+    most misleading possible answer to "what have we been telling these
+    people". Both are read until the old rows age out of every window.
+
+    `gap_days` is from the PREVIOUS send in the list, and is None on the
+    earliest — the spacing before it is outside the window and unknown, which
+    is different from zero.
+    """
+    since = db.utcnow() - dt.timedelta(days=days)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Output)
+                .filter(db.tenant_filter(db.Output, tenant),
+                        db.Output.format == fmt,
+                        db.Output.created_at >= since,
+                        or_(db.Output.audience_key == audience_key,
+                            db.Output.angle == audience_key),
+                        db.Output.status.notin_(NOT_A_SEND))
+                .order_by(db.Output.created_at.asc()).all())
+        out, prev = [], None
+        for r in rows:
+            at = db.as_utc(r.created_at)
+            theme_intent, _, theme_fmt = str(r.theme or "").partition("|")
+            out.append({
+                "output_id": r.id,
+                "at": at,
+                "gap_days": None if prev is None else round(
+                    (at - prev).total_seconds() / 86400, 1),
+                # `situation` is where the intent is filed now; `theme` is where
+                # it was filed before, and still is. Reading both means the
+                # window does not go blank across the change.
+                "intent": (r.situation or theme_intent or ""),
+                "shape_format": theme_fmt,
+                "entity_key": r.entity_key or "",
+                "claim_ids": list(r.claim_ids or []),
+                "angle": r.angle or "",
+                "shape": list(r.shape or []),
+                "media_ids": list(r.media_ids or []),
+                "status": r.status,
+                "destination": r.destination or "",
+            })
+            prev = at
+    return out
+
+
+def confirm_sent(tenant: str, output_id: str, *, at=None,
+                 outcome: dict | None = None) -> dict:
+    """The platform says this went out. Record that, and what it did.
+
+    **Not `publish`, and the difference is the whole point.** `publish` is us
+    deciding to send something, so it refuses when an attached asset is
+    reference-only — that is the last place the decision can still be caught.
+    This is a REPORT that a send already happened, from the platform that did
+    it. Refusing here would change nothing about the world and would leave the
+    ledger claiming an email was never sent that a thousand people received.
+
+    So it records, and if something went out that should not have, it says so
+    loudly rather than quietly declining. A rights problem discovered after
+    the fact is still a rights problem somebody has to act on.
+
+    Assets are NOT re-credited. `mark_asset_used` increments a counter and the
+    draft path already counted this one; what goes on the asset here is
+    `record_asset_outcome` — feedback signal two, the one that exists to say
+    which photograph actually earned its opens.
+    """
+    from . import kb
+    warn: list[str] = []
+    with db.SessionLocal() as s:
+        row = (s.query(db.Output)
+               .filter(db.tenant_filter(db.Output, tenant),
+                       db.Output.id == output_id).first())
+        if not row:
+            return {"ok": False, "why": "No such output for this account."}
+        media = list(row.media_ids or [])
+        row.outcome = {**(row.outcome or {}), **(outcome or {}),
+                       "confirmed_at": db.utcnow().isoformat()}
+        # `published` at last, and from the only source entitled to say so.
+        # Until now this status was written on the reply path alone, so
+        # `used_recently` and `is_repeat` were blind to every campaign email
+        # ever sent — the anti-repeat half of this table could not see the
+        # half of the programme that goes out at scale.
+        if row.status != "published":
+            row.status = "published"
+            row.published_at = at or db.utcnow()
+        s.commit()
+
+    for aid in media:
+        ok, why = kb.may_publish(aid)
+        if not ok:
+            warn.append(f"asset {aid[:8]} went out and should not have: {why}")
+        if outcome:
+            kb.record_asset_outcome(aid, "email", dict(outcome))
+    return {"ok": True, "warnings": warn, "assets": len(media)}
 
 
 # ---------------------------------------------------------------------------
