@@ -2,7 +2,7 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import (JSON, Column, DateTime, Integer, String, Text,
+from sqlalchemy import (JSON, Column, DateTime, Float, Integer, String, Text,
                         UniqueConstraint, create_engine)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -891,6 +891,108 @@ class SeoSiteConfig(Base):
     gsc_site = Column(String, default="")     # e.g. sc-domain:bacimilanousa.com
     ga4_property = Column(String, default="")  # numeric GA4 property id
     updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class KeywordTarget(Base):
+    """One keyword this account intends to rank for, and how it plans to.
+
+    THE INTENT TO RANK, NOT THE OBSERVED RANK. Every position question is
+    answered from `KeywordReading`, deliberately: a cached `current_position`
+    is a number that goes stale silently, and this codebase already lost a
+    afternoon to `capabilities()` reporting a stored declaration as a live
+    fact. What is stored here is what somebody DECIDED — which phrase, at what
+    tier, in which cluster, against which URL.
+
+    `SeoSnapshot` does not replace this and never could: it holds the top 50
+    keywords BY TRAFFIC SHARE for a domain, so a phrase you are targeting and
+    do not yet rank for has no row there at all. That is the whole population
+    this table exists for.
+
+    **`cluster_key` + `role` are the mechanism, not decoration.** A head term
+    is not won with an article; it is won with a pillar page and the long-tail
+    supports that link into it. A cluster half-built is the most common way
+    this work produces nothing, and it is only countable if the grouping is
+    data.
+    """
+
+    __tablename__ = "keyword_targets"
+    __table_args__ = (UniqueConstraint("tenant", "phrase", name="uq_kwt_tenant_phrase"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    phrase = Column(String, nullable=False, index=True)
+    database = Column(String, default="us")     # Semrush regional market
+
+    # --- what kind of keyword this is (computed, never typed) -------------
+    tier = Column(String, default="", index=True)     # head | body | long_tail
+    intent = Column(String, default="", index=True)   # informational | commercial
+                                                      # | transactional | navigational
+    volume = Column(Integer, default=0)
+    #: Semrush KD, 0-100. NULLABLE ON PURPOSE — unknown is not zero. Semrush's
+    #: `phrase_related` projection carries `competition` (paid, 0-1) and no KD,
+    #: and filling this from that would be DEFECTS §1's "ranking across
+    #: incomparable scales" written deliberately. A row with no KD scores no
+    #: difficulty penalty AND no difficulty bonus; see `keywords.score`.
+    difficulty = Column(Float)
+    cpc = Column(Float, default=0.0)
+
+    #: Which harvester found it. Kept because the four answer different
+    #: questions and their yields should be comparable — a source that never
+    #: produces a win is one to stop spending calls on.
+    source = Column(String, default="", index=True)
+
+    # --- the plan ---------------------------------------------------------
+    cluster_key = Column(String, default="", index=True)
+    role = Column(String, default="support")          # pillar | support
+    target_url = Column(String, default="")
+    #: candidate -> planned -> published -> won | parked. `published` means an
+    #: artifact exists; `won` is a JUDGEMENT about position and is set from
+    #: readings, never by the thing that published.
+    status = Column(String, default="candidate", index=True)
+    output_id = Column(String, default="", index=True)   # -> Output.id
+    run_id = Column(String, default="", index=True)      # -> SystemRun.id
+    published_at = Column(DateTime(timezone=True))
+
+    #: Last computed priority + its components, so a ranking can be argued
+    #: with rather than only obeyed.
+    priority = Column(Float, default=0.0, index=True)
+    priority_parts = Column(JSON, default=dict)
+
+    first_seen = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    notes = Column(Text, default="")
+
+
+class KeywordReading(Base):
+    """One observation of one phrase, from one source, at one time.
+
+    TWO SOURCES ON PURPOSE, because they disagree and the disagreement is the
+    information. GSC is the truth about YOUR traffic — impressions, clicks and
+    an average position over the devices and places your buyers actually are.
+    Semrush is the truth about the MARKET — where a competitor sits, what the
+    term is worth. Semrush saying 7 while GSC says 11.3 is not an error to
+    reconcile, and storing one would mean re-deriving the other every time
+    somebody asked.
+
+    `SeoSnapshot.source` has been declared `semrush | gsc` since it was written
+    and only `semrush` was ever written to it. This table is where the GSC half
+    finally lands.
+    """
+
+    __tablename__ = "keyword_readings"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    phrase = Column(String, nullable=False, index=True)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    source = Column(String, default="gsc", index=True)   # gsc | semrush
+    database = Column(String, default="")                # Semrush market, if any
+
+    position = Column(Float)          # NULL means "not ranking", not zero
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    ctr = Column(Float, default=0.0)
+    url = Column(String, default="")  # the page that ranked, when reported
 
 
 class Setting(Base):

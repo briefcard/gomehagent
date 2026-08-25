@@ -36,7 +36,21 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
         ap_id = ap.id
 
     if notify:
-        notify_pending()
+        # THE APPROVAL IS ALREADY COMMITTED. Letting a notification failure
+        # raise out of here told every caller the REQUEST had failed when only
+        # the telling had — and the queue filled silently behind the error. It
+        # surfaced from `blog_article`, where an exception here marks the whole
+        # skill run `failed` and discards a drafted article whose approval was
+        # sitting in the database the entire time.
+        #
+        # Logged rather than swallowed: a channel that is down for a week is a
+        # real problem, just not this function's problem to have.
+        try:
+            notify_pending()
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger("approvals").exception(
+                "approval %s was filed but could not be announced", ap_id)
     return ap_id
 
 
@@ -270,6 +284,26 @@ def reconcile_drafts() -> dict:
                     "already done"}
 
 
+def _published(res: str) -> bool:
+    """Did a backend write actually happen? Every SEO arm below asks this.
+
+    A BACKEND REFUSAL IS A STRING, NOT AN EXCEPTION. `seo_guard.check` returns
+    a reason so an agent gets a sentence rather than a stack trace, and a
+    backend's `_ok` reports an unconfigured store the same way — both arrive
+    here as an ordinary return value. An arm that interpolates that value
+    after the word "created" therefore announces a BLOCKED write as a done
+    one: "📄 Page created (baci): Refused — banned_claim: ...".
+    Three of the five kinds below read that way, which hid the ban list from
+    the only person who could act on it.
+
+    A write that succeeded returns a URL; anything else failed. WordPress
+    falls back to "(created)"/"(updated)" when its REST response omits `link`,
+    so a rare success is reported here as a failure — that is the safe
+    direction of this error, because somebody investigates it.
+    """
+    return str(res or "").startswith("http")
+
+
 def _execute(ap: db.Approval) -> None:
     if ap.kind == "send_email":
         p = ap.payload
@@ -328,22 +362,48 @@ def _execute(ap: db.Approval) -> None:
         from . import sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
-        url = sites.backend(profile).update_seo(
+        res = sites.backend(profile).update_seo(
             profile, p["resource"], p["resource_id"], p["fields"])
-        whatsapp.send_text(f"🔎 SEO updated ({p.get('site')}): {url}")
+        whatsapp.send_text(
+            f"🔎 SEO updated ({p.get('site')}): {res}" if _published(res)
+            else f"⛔ SEO NOT updated ({p.get('site')}): {res}")
     elif ap.kind == "seo_new_collection":
         from . import sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
-        url = sites.backend(profile).create_collection(
+        res = sites.backend(profile).create_collection(
             profile, p["fields"], p.get("item_ids"))
-        whatsapp.send_text(f"🆕 Created ({p.get('site')}): {url}")
+        whatsapp.send_text(
+            f"🆕 Created ({p.get('site')}): {res}" if _published(res)
+            else f"⛔ NOT created ({p.get('site')}): {res}")
     elif ap.kind == "seo_new_page":
         from . import sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
-        url = sites.backend(profile).create_page(profile, p["fields"])
-        whatsapp.send_text(f"📄 Page created ({p.get('site')}): {url}")
+        res = sites.backend(profile).create_page(profile, p["fields"])
+        whatsapp.send_text(
+            f"📄 Page created ({p.get('site')}): {res}" if _published(res)
+            else f"⛔ Page NOT created ({p.get('site')}): {res}")
+    elif ap.kind == "seo_new_article":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        res = sites.backend(profile).create_article(
+            profile, p.get("blog_id") or None, p["fields"])
+        whatsapp.send_text(
+            f"📝 Article created ({p.get('site')}): {res}"
+            if _published(res)
+            else f"⛔ Article NOT created ({p.get('site')}): {res}")
+    elif ap.kind == "seo_article_revision":
+        from . import sites, whatsapp
+        p = ap.payload
+        profile = sites.get(p.get("site"))
+        res = sites.backend(profile).update_article(
+            profile, p.get("blog_id") or None, p["article_id"], p["fields"])
+        whatsapp.send_text(
+            f"✏️ Article revised ({p.get('site')}): {res}"
+            if _published(res)
+            else f"⛔ Article NOT revised ({p.get('site')}): {res}")
     elif ap.kind == "shopify_theme_asset":
         from . import sites, whatsapp
         p = ap.payload

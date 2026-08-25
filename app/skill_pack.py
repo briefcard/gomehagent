@@ -2589,3 +2589,246 @@ register(Skill(
     writes=True,
     produces="draft",
     run=_run_campaign_email))
+
+
+# ---------------------------------------------------------------------------
+# blog_article — one article against one keyword
+# ---------------------------------------------------------------------------
+_ARTICLE_SYSTEM = """You write articles that answer a search query better than
+anything already ranking for it, for a brand whose rules you are given.
+
+ANSWER FIRST. The opening paragraph answers the query in plain language, before
+any preamble, context or brand history. A reader who leaves after one paragraph
+should have their answer, and an answer engine quoting one passage should be
+able to quote that one.
+
+STRUCTURE: an H1 that is the article's title, then H2 sections whose headings
+are the sub-questions a reader actually has. Short paragraphs. Use an H3 + one
+paragraph for anything that is literally a question.
+
+GROUND EVERY FACTUAL ASSERTION in the approved claims you are given. If a claim
+does not cover something, write around it or leave it out. Never invent a
+statistic, a date, a material, a place of manufacture, or a superlative.
+
+NEVER write a link you were not given. If you were given internal links, use
+them once each, in the sentence where they are genuinely useful.
+
+Return HTML: h1, h2, h3, p, ul/li, and a href only for links you were given.
+No <script>, no <style>, no inline styles, no image tags."""
+
+
+def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
+                    questions: list, links: list, entity: dict | None) -> str:
+    parts = [bundle["rules"]["block"].strip(),
+             f"\n## The query this must answer\n{keyword}"]
+    parts.append(
+        "\n## What kind of article this is\n" + (
+            "A PILLAR. It is the main page for this topic and the supporting "
+            "articles will link into it, so it must cover the whole subject "
+            "broadly rather than exhaustively on one narrow point."
+            if role == "pillar" else
+            "A SUPPORT. It answers ONE narrow question thoroughly and links "
+            "back to the pillar. Do not try to cover the whole topic."))
+    claims = bundle.get("claims") or []
+    if claims:
+        parts.append("\n## The only facts you may assert")
+        for c in claims[:12]:
+            parts.append(f"- {c['claim']}"
+                         + (f" (evidence: {c['evidence']})" if c.get("evidence") else "")
+                         + f" [true of: {c.get('scope') or 'the brand'}]")
+    # No `else`: the skill refuses before reaching here when there are no
+    # claims, because `emit` would block the result as uncited anyway.
+    if entity:
+        parts.append(f"\n## What this is about\n{entity.get('name', '')}: "
+                     f"{entity.get('description', '')}"[:400])
+    if questions:
+        parts.append("\n## Real questions people search, to answer as H3s")
+        for q in questions[:8]:
+            parts.append(f"- {q}")
+    if links:
+        parts.append("\n## Internal links you may use (and no others)")
+        for L in links[:6]:
+            parts.append(f'- <a href="{L["url"]}">{L["anchor"]}</a>')
+    if angle:
+        parts.append(f"\n## Angle\n{angle}")
+    return "\n".join(parts)
+
+
+def _draft_article_live(bundle: dict, keyword: str, role: str, angle: str,
+                        questions: list, links: list,
+                        entity: dict | None) -> tuple[str, str]:
+    """One model call for one article. Returns `(html, why_not)`."""
+    from . import config
+    if not config.ANTHROPIC_API_KEY:
+        return "", "ANTHROPIC_API_KEY is not set"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=3000,
+            system=_ARTICLE_SYSTEM,
+            messages=[{"role": "user", "content": _article_prompt(
+                bundle, keyword, role, angle, questions, links, entity)}])
+        try:
+            from . import usage
+            usage.log_usage("blog_article_draft", config.CLAUDE_MODEL, msg,
+                            tenant=str(bundle.get("tenant") or ""))
+        except Exception:  # noqa: BLE001 — accounting must not fail a draft
+            pass
+        return "".join(b.text for b in msg.content if b.type == "text").strip(), ""
+    except Exception as exc:  # noqa: BLE001
+        # Classified, not truncated, for the same reason `ad_copy` does it: a
+        # spend limit reported as "BadRequestError" reads as a code fault
+        # rather than an account one, and this skill REFUSES on a failed draft
+        # rather than degrading, so the message is the whole explanation.
+        from . import model_error
+        return "", model_error.explain(exc)
+
+
+def _meta_description(keyword: str, body_html: str) -> str:
+    """155 characters, from the article's own opening. Formulaic on purpose —
+    the same reasoning that keeps `catalog_seo_rewrite` deterministic: there is
+    nothing here for a model to decide, and a generated one is a second place
+    for a banned claim to enter."""
+    import re as _re
+    text = _re.sub(r"<[^>]+>", " ", body_html or "")
+    text = _re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+    return (text[:152].rsplit(" ", 1)[0] + "…") if len(text) > 155 else text
+
+
+def _run_blog_article(ctx: Context) -> dict:
+    from . import keywords as kw_mod, seo_tools, sites, tenants
+
+    keyword = str(ctx.params.get("keyword") or "").strip()
+    if not keyword:
+        return {"summary": "no keyword — this skill writes one article against "
+                           "one query, and without it there is nothing to aim at"}
+    role = str(ctx.params.get("role") or "").strip() or "support"
+    angle = str(ctx.params.get("angle") or "").strip()
+    entity_key = str(ctx.params.get("entity_key") or "").strip()
+
+    # NO CLAIMS, NO ARTICLE — checked before the model is called, not after.
+    # `emit` defaults `require_citation` to True for a draft, so an article
+    # written without approved claims is blocked as uncited every time. The
+    # first cut had a prompt branch for "you have no claims", which meant
+    # spending a model call to produce something the validator was always
+    # going to refuse — and reporting it as a validation failure rather than
+    # as the authoring backlog it actually is. `ad_copy` already says this
+    # better: it is not a bug, it is a queue of writing nobody has done.
+    if not ctx.claims:
+        ctx.note("no approved claim is in scope for this keyword, so there is "
+                 "nothing an article could assert. This is the KB backlog, not "
+                 "a failure — approve a claim and re-run.")
+        return {"summary": "no proof in scope", "keyword": keyword}
+
+    row = next((r for r in kw_mod.targets(ctx.tenant) if r.phrase == keyword), None)
+    cluster_key = str(ctx.params.get("cluster") or "") or (row.cluster_key if row else "")
+    if row is not None:
+        role = ctx.params.get("role") or row.role or role
+
+    # The AEO half, and it is not an extra: `semrush_questions` harvested these
+    # into the map, so the questions this article answers are ones people
+    # actually searched rather than ones a model imagined. They become H3s in
+    # the body AND the FAQPage schema, from one list.
+    siblings = [r for r in kw_mod.targets(ctx.tenant, cluster_key=cluster_key)
+                if r.phrase != keyword] if cluster_key else []
+    # A sibling that is ALREADY PUBLISHED is a link, never an FAQ answer.
+    # Answering inline what you are also linking to as its own article
+    # competes with your own page for the same query — and the FAQ block is
+    # where a support's whole reason to exist would quietly get duplicated
+    # into its pillar.
+    questions = [r.phrase for r in siblings
+                 if kw_mod.is_question(r.phrase)
+                 and not (r.target_url or "").strip()][:8]
+
+    # Only links that RESOLVE. A sibling with no target_url has not been
+    # published, and inventing the URL it will one day have is exactly what
+    # `_link_grounding` blocks at the queue — better not to offer it.
+    links = [{"url": r.target_url, "anchor": r.phrase}
+             for r in siblings if (r.target_url or "").strip()]
+    if role == "support":
+        pillar = next((r for r in siblings if r.role == "pillar"
+                       and (r.target_url or "").strip()), None)
+        if pillar is None:
+            ctx.note("no published pillar to link back to yet — this support "
+                     "will need its link added when the pillar goes live")
+
+    entity = None
+    if entity_key:
+        entity = next((e for e in (ctx.bundle.get("entities") or [])
+                       if e.get("key") == entity_key), None)
+
+    body, why_not = _draft_article_live(
+        ctx.bundle, keyword, role, angle, questions, links, entity)
+    if not body:
+        # NO COMPOSED FALLBACK, unlike `ad_copy`. A three-line ad assembled
+        # from a claim is a usable placeholder; a template article is a thin
+        # page, and thin pages are actively harmful to the thing this system
+        # exists to improve. Refusing is the better output.
+        ctx.note(f"not drafted — {why_not}. Nothing was filed: a templated "
+                 f"article would rank worse than no article.")
+        return {"summary": f"not drafted ({why_not})", "keyword": keyword}
+
+    title = keyword[:1].upper() + keyword[1:]
+    faqs = [{"question": q, "answer": ""} for q in questions]
+    ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
+             entity_key=entity_key, angle=angle or f"{role} article",
+             fmt="cms_article",
+             meta={"keyword": keyword, "role": role, "cluster": cluster_key,
+                   "questions": questions, "internal_links": len(links)})
+
+    # --- queue the publish, through the ONE path that queues articles ------
+    #
+    # `seo_tools._propose` owns `_build_content_fields` (FAQ HTML + JSON-LD,
+    # routed per platform), `_link_grounding` and the approval. Composing the
+    # fields here instead would be a second copy of the AEO half — the same
+    # two-lists defect this initiative has now fixed twice.
+    queued = ""
+    t = tenants.get(ctx.tenant)
+    blog_id = ((t.cms or {}) if t else {}).get("blog_id") or ""
+    profile = sites.get(ctx.tenant)
+    if profile.get("platform") != "wordpress" and not blog_id:
+        ctx.note("no blog_id on the tenant's cms config, so the publish was "
+                 "not queued — a Shopify store can hold several blogs and "
+                 "guessing one writes to the wrong place. Set it with "
+                 "/admin/tenant_set, then re-run.")
+    else:
+        queued = seo_tools._propose("propose_article", {
+            "blog_id": blog_id, "title": title, "body_html": body,
+            "handle": kw_mod.slug(keyword),
+            "seo_title": title[:60], "seo_description": _meta_description(keyword, body),
+            "faqs": [f for f in faqs if f["answer"]],
+            "published": False}, profile)
+
+    if row is not None:
+        kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,
+                      output_id=(ctx.items[-1] or {}).get("output_id", "")
+                      if ctx.items else "")
+    return {"summary": f"{role} article for {keyword!r}"
+                       + (f", {len(questions)} question(s) answered" if questions else "")
+                       + (f", {len(links)} internal link(s)" if links else ""),
+            "keyword": keyword, "role": role, "cluster": cluster_key,
+            "questions": questions, "queued": queued}
+
+
+register(Skill(
+    key="blog_article",
+    name="Blog article",
+    does="Write one answer-first article against one keyword from the map — "
+         "grounded in approved claims, answering the questions people actually "
+         "searched, with FAQ structured data and only internal links that "
+         "resolve. Queues the publish for approval; never publishes itself.",
+    system_key="blog",
+    tier=3,
+    needs=("rules.voice_tone", "rules.positioning"),
+    # A ban list is CONSTITUTIVE here and nowhere else in this pack. An article
+    # is the longest thing this system writes and the only one that lands on a
+    # public page under the client's own domain; drafting one against an empty
+    # ban list is not a thinner article, it is an unchecked one.
+    constitutive=("banned_claims",),
+    params=("keyword", "role", "cluster", "angle", "entity_key", "utterance"),
+    writes=True,
+    produces="draft",
+    run=_run_blog_article))

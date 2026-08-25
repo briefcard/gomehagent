@@ -123,11 +123,16 @@ SCOPED: dict[str, tuple[str, str]] = {
     "find_items":           ("site", ""),
     "get_seo":              ("site", ""),
     "verify_links":         ("site", ""),
+    "list_blogs":           ("site", ""),
+    "list_articles":        ("site", ""),
+    "get_article":          ("site", ""),
     # --- seo: writes to a live storefront ----------------------------------
     "propose_seo_update":            ("site", ""),
     "propose_new_collection":        ("site", ""),
     "propose_content_page":          ("site", ""),
     "propose_theme_schema_renderer": ("site", ""),
+    "propose_article":               ("site", ""),
+    "propose_article_revision":      ("site", ""),
     # --- the data layer, as one tool ---------------------------------------
     "run_skill":            ("tenant", ""),
 }

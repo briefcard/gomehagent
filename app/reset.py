@@ -62,7 +62,15 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "seo_snapshots", "voice_profiles", "follow_ups",
               "seo_site_config", "system_docs", "assurance_events",
               "tool_calls", "reported_figures", "compliance_events",
-              "moments"}
+              "moments", "keyword_targets", "keyword_readings"}
+# Both classified in the change that adds them, per the lesson below.
+# `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
+# it looks like research about the brand, but what it stores is what somebody
+# DECIDED — which phrase, at what tier, in which cluster, against which URL.
+# A knowledge reset means "re-learn this brand"; it must not silently discard a
+# quarter of publishing plan. `keyword_readings` sits beside `seo_snapshots`
+# for the same reason those do: a measurement taken is something the system
+# did, and no crawl rebuilds a series.
 # `moments` is OPERATIONS, classified in the same change that adds the table —
 # which is the whole lesson of the comments below. It records that a signal was
 # SEEN and what was decided about it, including the ones deliberately not acted

@@ -28,14 +28,140 @@ def _primary() -> dict:
             "gsc_site": config.SEO_GSC_SITE, "ga4_property": config.SEO_GA4_PROPERTY}
 
 
+class UnknownSite(Exception):
+    """A site was NAMED and does not resolve.
+
+    It exists because the alternative was silence. `get()` fell back to the
+    primary site for any key it did not hold, so `site="coverings"` returned
+    BACI — same shape as `capabilities()` reporting a declared capability as
+    wired (§2.29): the name says one client and the resolution quietly becomes
+    another. On this path it writes. An article proposed for Coverings would
+    have queued against Baci's store, under a summary reading
+    `[SEO/coverings]`, checked against Baci's ban list — because
+    `seo_guard.tenant_for` resolves from the PROFILE's domain, not the key
+    that was asked for. Three of five tenants had no profile at all.
+    """
+
+
+def _brand_rules(brand) -> dict:
+    """Voice, guardrail and exclude_terms FROM THE KB.
+
+    These three used to exist only in `SEO_SITES_JSON`, which meant a new
+    organisation got `voice: ""`, `guardrail: ""`, `exclude_terms: []` and the
+    SEO role wrote for it with no brand rules at all — while `KbBrand` held
+    exactly these fields for that same account. Baci's env `exclude_terms` is
+    literally its banned-claims list, keyed in a second place by hand: the same
+    two-lists-of-one-thing defect as the site registry, one field down.
+
+    The KB is the multi-tenant store and it is the one a CLIENT can fill
+    themselves through `/intake/<token>`. Env stays as an override for the
+    accounts that already have entries.
+    """
+    if not brand:
+        return {"voice": "", "guardrail": "", "exclude_terms": []}
+    voice = brand.voice or {}
+    tone = ", ".join(t for t in (voice.get("tone") or []) if t)
+    never = [n for n in (voice.get("never_say") or []) if n]
+    banned = [b.strip().lower() for b in (brand.banned_claims or []) if b.strip()]
+    guard = " ".join(filter(None, [
+        (brand.positioning or "").strip(),
+        ("Never say: " + "; ".join(never) + "." if never else ""),
+        ("Banned claims: " + "; ".join(banned) + "." if banned else "")]))
+    return {"voice": tone, "guardrail": guard, "exclude_terms": banned}
+
+
+def _from_tenants() -> dict:
+    """Site profiles derived from the tenant registry.
+
+    THE TENANT ROWS DECIDE WHICH CLIENTS EXIST, THE CONNECTION DECIDES THE
+    PLATFORM, AND THE KB DECIDES THE BRAND RULES. None of the three is a thing
+    an operator declares by hand, which is the point: a new organisation is
+    created at `/admin/tenant_add`, connects its store or site at
+    `/connect/<token>`, fills its KB at `/intake/<token>`, and has a working
+    SEO profile without anybody editing Python or an env blob.
+
+    `platform` resolves through `credentials.wired_capabilities` rather than a
+    local rule, because that function is the single source of truth for "is
+    this connected" (§2.29 exists because a second one drifted). A DECLARED
+    platform is the fallback, not the primary — it is how Ironside says
+    "squarespace", a platform nothing can connect to yet, and `backend()`
+    refuses it by name rather than borrowing another platform's client.
+
+    Degrades to {} when the database is unreachable, which is what exists
+    today anyway — the refusal in `get()` is what makes that safe.
+    """
+    from . import credentials, db, tenants
+    out: dict = {}
+    try:
+        rows = tenants.all_tenants()
+    except Exception:  # noqa: BLE001 — no DB (offline suites, boot order)
+        return out
+    try:
+        with db.SessionLocal() as s:
+            brands = {b.tenant: b for b in s.query(db.KbBrand).all()}
+    except Exception:  # noqa: BLE001
+        brands = {}
+    for t in rows:
+        domain = (getattr(t, "domain", "") or "").strip()
+        if not domain:
+            continue
+        cms = getattr(t, "cms", None) or {}
+        # What is CONNECTED, first. "client:shopify" / "env:wordpress" both
+        # end in the provider, and a provider is a platform here.
+        try:
+            wired = credentials.wired_capabilities(t.key).get("cms", "")
+        except Exception:  # noqa: BLE001
+            wired = ""
+        platform = (wired.rsplit(":", 1)[-1] if wired else
+                    (cms.get("platform") or "")).strip().lower()
+        out[t.key] = {
+            "key": t.key, "domain": domain,
+            "database": ((getattr(t, "analytics", None) or {}).get("semrush_db")
+                         or config.SEO_DATABASE),
+            "platform": platform,
+            # The tenant key is a valid store key: `credentials.shopify_config`
+            # falls back to treating an unmatched key AS the tenant, which is
+            # exactly how a client-connected store resolves. So a new account
+            # needs no `creds_key` at all.
+            "creds_key": (cms.get("creds_key")
+                          or getattr(t, "shopify_store", "") or t.key),
+            "google_alias": getattr(t, "gmail_alias", "") or config.SEO_GOOGLE_ALIAS,
+            "gsc_site": "", "ga4_property": "",
+            **_brand_rules(brands.get(t.key))}
+    return out
+
+
 def all_profiles() -> dict:
-    """All site profiles keyed by site key (primary + SEO_SITES_JSON)."""
-    sites: dict = {}
+    """All site profiles keyed by site key (tenants + SEO_SITES_JSON + primary).
+
+    An env entry merges ONTO the tenant profile it matches — by key, or failing
+    that by domain, which is the join `seo_guard.tenant_for` and
+    `tenant_scope` already use. Matching by domain is what keeps the `mtw`
+    entry attached to the `agency` tenant instead of standing beside it as a
+    fourth client; the env key stays registered as an alias so anything that
+    already says `site=mtw` keeps working.
+    """
+    sites: dict = _from_tenants()
+    by_domain = {_norm(v["domain"]): k for k, v in sites.items() if v["domain"]}
     try:
         raw = json.loads(config.SEO_SITES_JSON)
     except (ValueError, TypeError):
         raw = {}
     for k, v in raw.items():
+        target = k if k in sites else by_domain.get(_norm(v.get("domain", "")), "")
+        if target:
+            # Only the fields the env actually sets, so a tenant-derived
+            # domain/platform is not overwritten by this block's defaults.
+            for fld in ("domain", "database", "platform", "creds_key", "voice",
+                        "guardrail", "google_alias", "gsc_site", "ga4_property"):
+                if v.get(fld):
+                    sites[target][fld] = v[fld]
+            if v.get("exclude_terms"):
+                sites[target]["exclude_terms"] = [
+                    t.strip().lower() for t in v["exclude_terms"] if t.strip()]
+            if target != k:
+                sites[k] = sites[target]      # alias: site=mtw still resolves
+            continue
         sites[k] = {
             "key": k, "domain": v.get("domain", ""),
             "database": v.get("database", "us"),
@@ -54,18 +180,60 @@ def all_profiles() -> dict:
 
 
 def get(site_key: str = "") -> dict:
-    """Resolve a site profile; falls back to the primary site."""
+    """Resolve a site profile. NO SITE NAMED falls back to the primary; a site
+    named that does not resolve RAISES.
+
+    The difference is the whole point. Blank means "use the default" and is a
+    real request. A key we do not hold means somebody meant a specific client,
+    and answering with a different one is worse than answering with nothing —
+    see `UnknownSite`.
+    """
     sites = all_profiles()
-    if site_key and site_key in sites:
-        return sites[site_key]
+    if site_key:
+        if site_key in sites:
+            return sites[site_key]
+        raise UnknownSite(
+            f"No site profile for {site_key!r}. Known: "
+            + (", ".join(sorted(sites)) or "none")
+            + ". A client needs a tenant row with a domain (and a cms platform), "
+              "or an entry in SEO_SITES_JSON — I will not fall back to another "
+              "client's site.")
     return sites.get(config.SEO_PRIMARY_SITE) or next(iter(sites.values()))
+
+
+#: platform -> the module that implements it. A NAME PER ARM, never a bare
+#: `else`. It used to read `wordpress if platform == "wordpress" else shopify`,
+#: which was harmless only while every site was one of the two — Ironside is
+#: `squarespace` and resolved, silently, to the Shopify backend, where it would
+#: have tried to write articles to a store named "ironside" that does not
+#: exist. Same shape as the `token_style` bare `else` in `oauth.exchange`
+#: (§2.31): an unlisted value inheriting the behaviour of the last one.
+BACKENDS = {"shopify": "shopify_seo", "wordpress": "wordpress_seo"}
 
 
 def backend(profile: dict):
     """The implementation module for a profile's platform (duck-typed: same
-    function surface across backends)."""
-    from . import shopify_seo, wordpress_seo
-    return wordpress_seo if profile.get("platform") == "wordpress" else shopify_seo
+    function surface across backends). An unimplemented platform REFUSES by
+    name rather than borrowing another platform's client."""
+    import importlib
+    who = profile.get("key") or "this site"
+    # `or "shopify"` lived here and was the same defect as the bare `else` it
+    # replaced: an account with NOTHING CONNECTED resolved to the Shopify
+    # backend and would have tried to write to a store that does not exist.
+    # Absent is not a platform, and it has its own sentence because the fix is
+    # different — connect something, rather than build a backend.
+    platform = (profile.get("platform") or "").strip().lower()
+    if not platform:
+        raise UnknownSite(
+            f"{who} has no CMS connected, so there is nothing to publish to. "
+            f"Connect a site or store at /connect/<token> — the platform "
+            f"follows from the connection.")
+    mod = BACKENDS.get(platform)
+    if not mod:
+        raise UnknownSite(
+            f"{who} is on {platform!r}, which has no backend built. "
+            f"Implemented: {', '.join(sorted(BACKENDS))}.")
+    return importlib.import_module(f".{mod}", __package__)
 
 
 def block() -> str:
@@ -131,6 +299,15 @@ def jsonld_script(structured: list) -> str:
     """Inline <script> JSON-LD for platforms that allow it in content (WordPress)."""
     return ('<script type="application/ld+json">' + json.dumps(structured)
             + "</script>")
+
+
+def _norm(domain: str) -> str:
+    """Bare host, lowercased — the join key shared with `tenant_scope`."""
+    d = (domain or "").strip().lower()
+    for pre in ("https://", "http://"):
+        if d.startswith(pre):
+            d = d[len(pre):]
+    return d.split("/")[0].removeprefix("www.")
 
 
 def _domain_host(profile: dict) -> str:

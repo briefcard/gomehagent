@@ -3,7 +3,38 @@
 This file orients any new Claude Code / Cowork session on this repo so it can
 continue the build without re-deriving context. Read it first.
 
-## Next initiative (2026-08-23)
+## Next initiative (2026-08-25)
+**`INITIATIVE-seo-blog.md`** — the organic-growth build: a programmatic keyword
+plan (head + long-tail, clustered), the measurement loop that verifies it
+against GSC and Semrush, the `blog` skill + planner, and `MANUAL_PUBLISH` for
+platforms with no content write API (Squarespace).
+
+**Phases 1-4 are BUILT on `feat/blog-path`. Phase 5 is not, and is mostly not
+code.** Read §2 before touching `seo_tools.py`, `sites.py`, either platform
+backend, `planner.py` or `keywords.py` — it opens with eleven facts, each with
+a file reference, so its own staleness is checkable in a minute.
+
+* **1 — the article path is reachable.** `list_blogs`/`list_articles`/
+  `get_article` + `propose_article`/`propose_article_revision`, two approval
+  kinds, and the ban list moved forward so a banned claim never reaches the
+  queue.
+* **2 — `app/keywords.py` is the keyword map.** Tier + intent classifiers,
+  pillar/support clustering, a priority score that stores its own components,
+  four harvest seams. `/admin/keywords`, `_harvest`, `_rescore`.
+* **3 — the measurement loop.** `keywords.sync_all` nightly at `SWEEP_HOUR:05`;
+  `keywords.progress` compares tracked against a CONTROL, withholds attribution
+  inside 14 days, and NEVER invents a goal — `systems.set_goal` is the owner's.
+* **4 — `blog_article` + `planner.blog_rollout`.** A support is never planned
+  before its pillar; a failed draft files nothing; no claims means no article
+  and no model call.
+* **5 — NOT BUILT.** `squarespace_seo` into `sites.BACKENDS`, then connections.
+
+**Before anything else on this initiative, read §2.11 and run
+`/health/blog?key=…&probe=1`.** Nothing in this repo had ever verified Search
+Console — three Google scope lists disagree and `gmail_client.SCOPES` omits
+`webmasters.readonly` — and the whole Phase 3 loop rides on GSC.
+
+## Previous initiative (2026-08-23)
 **`INITIATIVE-moments.md`** — triggered sends (a vertical-neutral `Moment`
 spine) and planner orchestration. **COMPLETE 2026-08-24 — all eight phases,
 uncommitted and deployed nowhere.** Moments INFORM

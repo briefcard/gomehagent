@@ -693,6 +693,31 @@ def health_seo(key: str = Depends(admin_key)) -> dict:
     return out
 
 
+@app.get("/health/blog")
+def health_blog(key: str = Depends(admin_key), tenant: str = "",
+                probe: int = 1) -> dict:
+    """Can each account actually run the blog pipeline — publish, measure, and
+    know what to write. /health/blog?key=APPROVAL_SECRET
+
+    `probe=1` makes a REAL Search Console call per site, which is the only
+    honest answer to "is Google connected": `credentials` can say a Google
+    credential exists, but whether the consent behind it covered
+    `webmasters.readonly` is a different question — and the env-group Google
+    grants `inbox` alone, so an account can show a working mailbox and have no
+    Search Console at all. `probe=0` skips the calls and reports the
+    capability only, saying that is what it did.
+    """
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "bad key"}
+    if tenant:
+        return keywords.readiness(tenant, probe=bool(probe))
+    got = keywords.readiness_all(probe=bool(probe))
+    return {"ready": sorted(k for k, v in got.items() if v.get("ok")),
+            "not_ready": sorted(k for k, v in got.items() if not v.get("ok")),
+            "accounts": got}
+
+
 @app.get("/decide/{token}", response_class=HTMLResponse)
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
@@ -1924,6 +1949,102 @@ def admin_forget_note(key: str = Depends(admin_key), id: str = "") -> dict:
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     return {"ok": True, "result": memory.retire(id)}
+
+
+@app.get("/admin/keywords")
+def admin_keywords(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """The keyword map for one account: clusters, pillars, and how far through
+    each is. Read-only — nothing here spends an API call."""
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    return keywords.map_for(tenant)
+
+
+@app.get("/admin/keywords_harvest")
+def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
+                           sources: str = "", seeds: str = "",
+                           days: int = 28, limit: int = 40) -> dict:
+    """Build or top up the map. THIS ONE SPENDS API CALLS.
+
+    `sources` and `seeds` are comma-separated. Separate from /admin/keywords on
+    purpose: the map is a thing to read often and a thing to rebuild rarely,
+    and one URL doing both is one somebody refreshes into a Semrush bill.
+    """
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    src = tuple(s.strip() for s in sources.split(",") if s.strip())
+    sd = tuple(s.strip() for s in seeds.split(",") if s.strip())
+    try:
+        return keywords.harvest(tenant, seeds=sd, days=max(1, min(days, 180)),
+                                limit=max(1, min(limit, 200)),
+                                **({"sources": src} if src else {}))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+
+
+@app.get("/admin/keywords_rescore")
+def admin_keywords_rescore(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Re-cluster and re-score without fetching anything — what to run after
+    an article publishes, since finishing a cluster changes what comes next."""
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    return {**keywords.cluster(tenant), **keywords.score(tenant)}
+
+
+@app.get("/admin/keywords_progress")
+def admin_keywords_progress(key: str = Depends(admin_key), tenant: str = "",
+                            days: int = 28) -> dict:
+    """Did the work move anything, and can we honestly say it was the work."""
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    return keywords.progress(tenant, days=max(1, min(days, 365)))
+
+
+@app.get("/admin/keywords_sync")
+def admin_keywords_sync(key: str = Depends(admin_key), tenant: str = "",
+                        days: int = 28) -> dict:
+    """Pull fresh Search Console readings now, instead of waiting for the
+    nightly job. Spends Search Console quota."""
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    try:
+        if tenant:
+            return keywords.sync(tenant, days=max(1, min(days, 365)))
+        return keywords.sync_all(days=max(1, min(days, 365)))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+
+
+@app.get("/admin/keywords_goal")
+def admin_keywords_goal(key: str = Depends(admin_key), tenant: str = "",
+                        organic_clicks: str = "", top3: str = "",
+                        top10: str = "", horizon_days: str = "") -> dict:
+    """Declare the growth goal the progress report measures against.
+
+    There is deliberately no default: a target nobody chose is a bar nobody
+    can fail. Blank fields are left alone.
+    """
+    from . import systems
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    row = systems.find(tenant, "blog") if tenant else None
+    if not row:
+        return {"error": f"the blog system is not installed for {tenant!r}"}
+    return systems.set_goal(row.id, organic_clicks=organic_clicks, top3=top3,
+                            top10=top10, horizon_days=horizon_days)
 
 
 @app.get("/admin/sweep")

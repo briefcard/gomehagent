@@ -182,14 +182,36 @@ CATALOG = {
         does="Publishes grounded articles against the keyword map.",
         requires=("cms",), requires_any=(), needs_kb=True,
         kb_needs=("tone", "banned_claims", "audience", "claim"),
-        # No `plan_fields` yet: plans exist only once a skill can consume
-        # them, or they would queue forever. The keyword-map planner and the
-        # drafting skill land together.
+        # The planner and the skill landed together, 2026-08-25, which is what
+        # the note here used to be waiting for.
         workflow=dict(
             unit="one article against one keyword",
+            skill="blog_article",
+            cadence=dict(horizon_days=45, articles_monthly=4),
+            plan_fields=(
+                # THE KEYWORD IS THE PLAN. Everything else about an article is
+                # derivable from it once the map exists — which cluster, which
+                # role, which questions to answer — so it is the one field the
+                # planner must fill and the one a person may not leave blank.
+                dict(key="keyword", label="Target keyword", required=True),
+                # Derived by the planner from the map, editable by the owner.
+                # A pillar and a support are different articles for the same
+                # phrase, and getting it wrong is not a style difference: a
+                # support that thinks it is a pillar links nowhere.
+                dict(key="role", label="Pillar or support", required=False,
+                     kind="choice", choices=("pillar", "support")),
+                dict(key="cluster", label="Cluster", required=False),
+                # OPTIONAL, and blank on purpose. No source holds an angle, so
+                # the planner proposes none; the drafter picks one and the run
+                # records which, so the owner can read it back and correct it.
+                dict(key="angle", label="Angle (optional)", required=False),
+                dict(key="entity_key", label="Featured entity", required=False,
+                     kind="entity"),
+            ),
             artifact="cms_article",
             ship="publishes the draft article, behind seo_guard",
-            measure="draft-vs-published delta")),
+            measure="draft-vs-published delta; position change in "
+                    "`keywords.progress`, against a control")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",
@@ -1063,6 +1085,68 @@ def set_cadence(system_id: str, horizon_days=None,
         row.config = cfg
         s.commit()
     return {"ok": True, **updates}
+
+
+#: The growth goal, per system. Every field optional individually; at least one
+#: required, because a goal with nothing in it is not a goal.
+#:
+#: There is NO DEFAULT and there will not be one. A target nobody chose is a
+#: bar nobody can fail, and inventing "+20%" so a report has a number is the
+#: exact shape of the false assurance `validator` and `seo_guard` refuse to
+#: give. `keywords.progress` reports everything that does not depend on a goal
+#: and NAMES this as missing — the system's own rule about refusing rather than
+#: inventing, applied to the one input no amount of connected data supplies.
+GOAL_FIELDS = {
+    "organic_clicks": ("monthly organic clicks from tracked pages", 1_000_000),
+    "top3": ("tracked keywords ranking 1-3", 10_000),
+    "top10": ("tracked keywords ranking 1-10", 10_000),
+    "horizon_days": ("days the goal runs for", 730),
+}
+
+
+def set_goal(system_id: str, **fields) -> dict:
+    """The owner's growth goal, onto `System.config["goal"]`.
+
+    Validated at the knob for the same reason `set_cadence` is: a bad value
+    written silently sits behind a report for weeks. Blank means "leave it".
+    """
+    updates: dict[str, int] = {}
+    for name, val in fields.items():
+        if name not in GOAL_FIELDS:
+            return {"error": f"unknown goal field {name!r}. "
+                             f"Known: {', '.join(sorted(GOAL_FIELDS))}"}
+        if val is None or str(val).strip() == "":
+            continue
+        try:
+            n = int(str(val).strip())
+        except (TypeError, ValueError):
+            return {"error": f"{name} must be a whole number, got {val!r}"}
+        cap = GOAL_FIELDS[name][1]
+        if not 0 < n <= cap:
+            return {"error": f"{name} must be between 1 and {cap}, got {n}"}
+        updates[name] = n
+    if not updates:
+        return {"error": "nothing to set — every box was blank"}
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if not row:
+            return {"error": "unknown system"}
+        cfg = dict(row.config or {})
+        goal = dict(cfg.get("goal") or {})
+        goal.update(updates)
+        # Stamped so a goal can be seen to have gone stale. A target set for a
+        # quarter and still being reported against a year later is worse than
+        # no target, because it reads as current.
+        goal["set_at"] = db.utcnow().date().isoformat()
+        cfg["goal"] = goal
+        row.config = cfg
+        s.commit()
+    return {"ok": True, **updates}
+
+
+def goal_for(sysrow) -> dict:
+    """The declared goal, or {} — never a default."""
+    return dict(((sysrow.config or {}) if sysrow else {}).get("goal") or {})
 
 
 def plan_capable(key: str) -> bool:

@@ -1,0 +1,176 @@
+"""Are the connectors actually set up — publish, measure, and know what to write.
+
+The question that prompted this (owner, 2026-08-25): *"make sure that our
+connectors for these are set up correctly."* Asking it properly found the hole:
+**nothing in this codebase had ever verified Search Console.**
+
+`/health/connections` probes gmail and drive. `/health/seo` probes Semrush.
+Neither asks Google whether the token can read Search Console — and there are
+THREE Google scope lists here: `scripts/google_oauth.py` and
+`oauth.FLOWS["google"]` both request `webmasters.readonly`,
+`gmail_client.SCOPES` does not, and `ENV_GRANTS["google"]` grants `inbox`
+ALONE. So an account reads "gmail ok · drive ok" forever while every GSC call
+fails — and the entire Phase 3 measurement loop runs on GSC.
+
+`systems.ready()` is not this. It checks the `requires` the catalogue declares,
+which for `blog` is `cms`, and that is the right gate for PUBLISHING. Measuring
+fails independently and for different reasons, fixed by different people —
+so it is reported independently rather than folded into one green light.
+
+    python3 scripts/test_blog_readiness.py
+"""
+import os
+import sys
+import tempfile
+
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'br.db')}"
+os.environ["APPROVAL_SECRET"] = "s3cret"
+os.environ["SEO_SITES_JSON"] = "{}"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import credentials, db, google_seo, kb, keywords, systems  # noqa: E402
+
+_fail: list[str] = []
+
+
+def ck(label, cond, detail=""):
+    print(f"[{'  ok  ' if cond else ' FAIL '}] {label}" + (f"  — {detail}" if detail else ""))
+    if not cond:
+        _fail.append(label)
+
+
+def org(key, domain, cms=None, model="ecom_inventory"):
+    with db.SessionLocal() as s:
+        s.add(db.Tenant(key=key, name=key.title(), kind="client", domain=domain,
+                        business_model=model, cms=cms or {}, systems=[]))
+        s.commit()
+
+
+def connect(tenant, provider="shopify", scopes="write_content"):
+    with db.SessionLocal() as s:
+        s.add(db.Credential(tenant=tenant, provider=provider, site="", kind="oauth",
+                            secret=credentials._encrypt("t"),
+                            meta={"domain": f"{tenant}.myshopify.com"},
+                            scopes=scopes, status="active", granted_at=db.utcnow()))
+        s.commit()
+
+
+def main() -> int:
+    db.init_db()
+    # Stubbed at the `google_seo` seam, never by replacing `_gsc_probe` — the
+    # probe's own contract (a SENTENCE means failure, JSON means data) is one
+    # of the things worth pinning, and a stubbed probe would assert nothing
+    # about it.
+    google_seo.gsc_list_sites = lambda profile: '[{"siteUrl": "sc-domain:x"}]'
+    google_seo._resolve_gsc_site = lambda profile: "sc-domain:x"
+
+    print("— an unknown account is refused, not reported as unready —")
+    ck("named", keywords.readiness("nobody").get("error") == "unknown account")
+
+    print("\n— publish: what is missing, and whose job it is —")
+    org("nocms", "nocms.example")
+    r = keywords.readiness("nocms")
+    ck("no CMS is reported", r["publish"]["ok"] is False)
+    ck("with the fix, not just the fault", "/connect/" in r["publish"]["fix"],
+       r["publish"]["fix"][:80])
+
+    org("noblog", "noblog.example", cms={"platform": "shopify"})
+    connect("noblog")
+    r = keywords.readiness("noblog")
+    ck("a connected store with no blog_id is NOT ready",
+       r["publish"]["ok"] is False and "blog_id" in r["publish"]["detail"],
+       str(r["publish"])[:110])
+    ck("and says why guessing is refused", "several blogs" in r["publish"]["fix"])
+
+    org("sq", "sq.example", cms={"platform": "squarespace"}, model="local_venue")
+    r = keywords.readiness("sq")
+    ck("squarespace fails at the CONNECTION, before the backend",
+       r["publish"]["ok"] is False and "no CMS connected" in r["publish"]["detail"],
+       "there is no squarespace provider to connect, so it never reaches "
+       "sites.backend — and the fix it names is the true one")
+    ck("and it names the platform in the fix",
+       "squarespace" in r["publish"]["fix"], r["publish"]["fix"][:70])
+
+    org("good", "good.example", cms={"platform": "shopify", "blog_id": "77"})
+    connect("good")
+    r = keywords.readiness("good")
+    ck("a fully connected store publishes", r["publish"]["ok"] is True,
+       str(r["publish"])[:100])
+    ck("and says how it is wired", r["publish"]["via"] == "client:shopify")
+
+    print("\n— measure: the capability is not the answer, the API is —")
+    ck("the capability is reported alongside",
+       keywords.readiness("good")["measure"]["capability"] == "not wired",
+       "env-group Google grants `inbox` ALONE, so a working mailbox says "
+       "nothing about Search Console")
+
+    google_seo.gsc_list_sites = lambda profile: (
+        "Search Console is not connected. Re-run scripts/google_oauth.py.")
+    r = keywords.readiness("good")
+    ck("a SENTENCE from the tool means failure, not data",
+       r["measure"]["ok"] is False, str(r["measure"])[:120])
+    ck("and the fix names the scope", "webmasters.readonly" in r["measure"]["fix"],
+       r["measure"]["fix"][:90])
+
+    google_seo.gsc_list_sites = lambda profile: '[{"siteUrl": "sc-domain:good.example"}]'
+    google_seo._resolve_gsc_site = lambda profile: ""
+    r = keywords.readiness("good")
+    ck("a readable token with NO matching property is still not ready",
+       r["measure"]["ok"] is False and "no property matches" in r["measure"]["detail"],
+       str(r["measure"])[:130])
+
+    google_seo._resolve_gsc_site = lambda profile: "sc-domain:good.example"
+    r = keywords.readiness("good")
+    ck("a token that reads the right property is ready",
+       r["measure"]["ok"] is True, str(r["measure"])[:100])
+
+    print("\n— knows what to write —")
+    ck("an empty map is named", any("keyword map" in f for f in
+                                    keywords.readiness("good")["knows_what_to_write"]["fix"]))
+    keywords.upsert("good", "acrylic jug", volume=5000)
+    kb.ensure_brand("good", "Good Co")
+    r = keywords.readiness("good")
+    ck("no claims is named", any("approved claims" in f
+                                 for f in r["knows_what_to_write"]["fix"]),
+       str(r["knows_what_to_write"]["fix"]))
+    ck("no ban list is named", any("banned_claims" in f
+                                   for f in r["knows_what_to_write"]["fix"]))
+    kb.add_claim("good", "Made from BPA-free acrylic.", "spec sheet", [])
+    with db.SessionLocal() as s:
+        s.get(db.KbBrand, "good").banned_claims = ["handmade"]
+        s.commit()
+    r = keywords.readiness("good")
+    ck("with a map, a claim and a ban list it knows what to write",
+       r["knows_what_to_write"]["ok"] is True, str(r["knows_what_to_write"])[:130])
+
+    print("\n— the switch counts too —")
+    ck("every connector green but NOT INSTALLED is not ready",
+       r["ok"] is False and r["switch"]["ok"] is False,
+       "a green light on a pipeline that cannot run is the false assurance "
+       "this whole check exists to refuse")
+    ck("and it says to install it", "install" in r["switch"]["fix"],
+       r["switch"]["fix"][:60])
+    row = systems.create("good", "blog")
+    with db.SessionLocal() as s:
+        s.get(db.System, row.id).status = "live"
+        s.commit()
+    r = keywords.readiness("good")
+    ck("installed and live, with all three green, is ready", r["ok"] is True,
+       str({k: v.get("ok") for k, v in r.items() if isinstance(v, dict)}))
+    google_seo._resolve_gsc_site = lambda profile: ""
+    ck("one red is not ready", keywords.readiness("good")["ok"] is False,
+       "publishing and measuring fail independently; a single green light "
+       "would hide whichever one is broken")
+
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED:")
+        for f in _fail:
+            print(f"  - {f}")
+        return 1
+    print("all checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

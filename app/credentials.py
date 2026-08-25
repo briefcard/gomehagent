@@ -184,9 +184,30 @@ SITE_SCOPED = tuple(k for k, v in PROVIDERS.items() if "site" in (v.get("also") 
 # grants the mailbox AND Search Console AND GA4 in the same consent, so
 # reporting it as `inbox` alone left `analytics` reading "not wired" on an
 # account that had just wired it.
+#: A capability that needs a specific SCOPE, beyond the provider being
+#: connected. Shopify grants `cms` because this codebase publishes articles and
+#: pages to it (`shopify_seo.create_article`) and the OAuth flow already asks
+#: for `write_content` and discloses it on the connect page — but a custom app
+#: built before those scopes existed holds a live token that cannot write one.
+#: Granting `cms` off the provider alone would be §2.29 again: a capability
+#: that reads wired and fails at the write.
+#:
+#: Unrecorded scopes are NOT treated as absent. The api_key and env paths carry
+#: no scope list at all, and refusing there would disconnect every account that
+#: works today. Known-and-missing refuses; unknown grants and says how it knows.
+CAPABILITY_SCOPES: dict[tuple[str, str], str] = {
+    ("shopify", "cms"): "write_content",
+}
+
+
 GRANTS: dict[str, tuple[str, ...]] = {
     "google": ("inbox", "analytics"),
-    "shopify": ("commerce",),
+    # `cms` because a Shopify store HAS a blog and this codebase writes to it.
+    # Without it a client who connects their store is told the blog system is
+    # not ready, forever, and the only cure is an operator hand-writing
+    # `cms={"platform": "shopify"}` onto the tenant row — which is not
+    # onboarding, it is a developer task wearing a product's clothes.
+    "shopify": ("commerce", "cms"),
     "omnisend": ("esp",),
     "klaviyo": ("esp",),
     "constant_contact": ("esp",),
@@ -364,7 +385,7 @@ def _from_env(tenant: str, provider: str) -> dict:
 #   never have happened. Granting `analytics` off it would be inventing a
 #   capability — the same false-positive this whole function exists to remove.
 ENV_GRANTS: dict[str, tuple[str, ...]] = {
-    "shopify": ("commerce",),
+    "shopify": ("commerce", "cms"),
     "google": ("inbox",),
     "wordpress": ("cms",),
 }
@@ -423,9 +444,14 @@ def wired_capabilities(tenant: str) -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     client = connected_providers(tenant)
+    granted = granted_scopes(tenant)
     for prov in PROVIDERS:
         if prov in client:
             for cap in GRANTS.get(prov, ()):
+                need = CAPABILITY_SCOPES.get((prov, cap))
+                have = granted.get(prov)
+                if need and have is not None and need not in have:
+                    continue          # known, and this scope was not granted
                 out.setdefault(cap, f"client:{prov}")
     for prov, caps in ENV_GRANTS.items():
         if prov in client:
@@ -1285,6 +1311,27 @@ def needed_for(tenant: str) -> list[str]:
     # system needing `analytics` is served by a Google sign-in, whose nominal
     # capability is `inbox`.
     return [k for k in PROVIDERS if set(GRANTS.get(k, ())) & caps]
+
+
+def granted_scopes(tenant: str) -> dict[str, set[str] | None]:
+    """provider -> the scopes actually granted, or None when unrecorded.
+
+    `store_oauth` writes the provider's OWN scope list onto the row, which is
+    authoritative in a way our configured scopes are not — a merchant can be
+    shown one set and approve a subset. None means the path carried no scope
+    information (api_key, env), which is a different fact from an empty grant
+    and must not be collapsed into one.
+    """
+    out: dict[str, set[str] | None] = {}
+    with db.SessionLocal() as s:
+        for r in s.query(db.Credential).filter(
+                db.Credential.tenant == tenant,
+                db.Credential.status == "active").all():
+            if not r.secret:
+                continue
+            raw = (r.scopes or "").replace(",", " ").split()
+            out[r.provider] = set(raw) if raw else None
+    return out
 
 
 def connected_providers(tenant: str) -> set[str]:

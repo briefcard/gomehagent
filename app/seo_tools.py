@@ -345,6 +345,69 @@ def _propose(name: str, args: dict, profile: dict) -> str:
                 + (f" with {len(item_ids)} items" if item_ids else "")
                 + (", FAQ schema" if args.get("faqs") else "")
                 + f" on {site}. Not created until you approve.")
+    if name in ("propose_article", "propose_article_revision"):
+        revision = name.endswith("revision")
+        fields = _build_content_fields(profile, args)
+        for k in ("author", "tags", "summary_html"):
+            if args.get(k) is not None:
+                fields[k] = args[k]
+        if args.get("published") is not None:
+            fields["published"] = bool(args["published"])
+        if not revision and not (fields.get("title") and fields.get("body_html")):
+            return ("A new article needs a title and body_html — answer-first: "
+                    "the answer in the opening paragraph, then H2/H3 sections.")
+        if revision and not fields:
+            return ("Nothing to change. A revision touches only the fields you "
+                    "send, so read the live text with get_article first and "
+                    "pass back just what should differ.")
+        blocked = _link_grounding(profile, fields)
+        if blocked:
+            return blocked
+        # THE BAN LIST FIRES HERE, not only at the backend. Both run: the
+        # backend check is what protects a caller that never came through a
+        # proposal, and this one is what stops a banned claim reaching the
+        # approval queue at all. Asking somebody to approve prose that cannot
+        # publish spends the scarcest thing this system has — the owner's
+        # attention on a queue — on a decision with no outcome.
+        from . import seo_guard
+        refusal = seo_guard.check(
+            profile, fields,
+            what="article revision" if revision else "new article")
+        if refusal:
+            return refusal
+        # Shopify stores can hold several blogs and the write path is
+        # blogs/<id>/articles.json, so a missing id would 404 at the API rather
+        # than here. Name the field instead of guessing one.
+        blog_id = str(args.get("blog_id") or "")
+        if not blog_id and profile.get("platform") != "wordpress":
+            return ("Which blog? This store can have several — call list_blogs "
+                    "and pass blog_id.")
+        if revision:
+            if not args.get("article_id"):
+                return "A revision needs article_id — find it with list_articles."
+            ap_id = approvals.request_approval(
+                "seo_article_revision",
+                f"[SEO/{site}] Revise article {args['article_id']}: "
+                + (fields.get("title") or "copy/structured-data"),
+                {"site": site, "blog_id": blog_id,
+                 "article_id": str(args["article_id"]), "fields": fields,
+                 "bucket": "seo"})
+            return (f"Queued for your approval ({ap_id[:8]}): revise article "
+                    f"{args['article_id']} on {site}, touching only "
+                    + ", ".join(sorted(fields))
+                    + ". Nothing changes until you approve.")
+        ap_id = approvals.request_approval(
+            "seo_new_article",
+            f"[SEO/{site}] New article: {fields['title']}"
+            + (" (+FAQ schema)" if args.get("faqs") else ""),
+            {"site": site, "blog_id": blog_id, "fields": fields, "bucket": "seo"})
+        return (f"Queued for your approval ({ap_id[:8]}): create article "
+                f"'{fields['title']}' on {site}"
+                + (", PUBLISHED on approval" if fields.get("published")
+                   else ", saved as a draft")
+                + (" with FAQPage structured data" if args.get("faqs") else "")
+                + ". Not written until you approve.")
+
     # propose_content_page
     fields = _build_content_fields(profile, args)
     if not fields.get("title") or not fields.get("body_html"):
@@ -545,6 +608,54 @@ TOOLS = [
          "faqs": {"type": "array", "items": {"type": "object", "properties": {
              "question": {"type": "string"}, "answer": {"type": "string"}}}},
          "jsonld": {"type": "string"}}, required=["title", "body_html"])},
+    {"name": "list_blogs",
+     "description": "The blogs on this site (Shopify can have several; "
+                    "WordPress has one posts stream). Needed before writing an "
+                    "article — get blog_id from here.",
+     "input_schema": _t({})},
+    {"name": "list_articles",
+     "description": "Existing articles/posts (id, title, handle, status, "
+                    "updated). Use it to find what to revise, and to avoid "
+                    "writing a second article on a topic already covered.",
+     "input_schema": _t({"blog_id": {"type": "string"},
+                         "limit": {"type": "integer"}})},
+    {"name": "get_article",
+     "description": "One article IN FULL, including its live body. READ THIS "
+                    "BEFORE ANY REVISION — rewriting a page that already ranks "
+                    "is how a site loses the position it had.",
+     "input_schema": _t({"blog_id": {"type": "string"},
+                         "article_id": {"type": "string"}},
+                        required=["article_id"])},
+    {"name": "propose_article",
+     "description": "PROPOSE a NEW article (SEO/GEO). Answer-first body_html: "
+                    "the answer in the opening paragraph, then H2/H3 sections; "
+                    "pass faqs for FAQPage JSON-LD. Link only to REAL URLs "
+                    "(find_items). Saved as a DRAFT unless published=true. "
+                    "Queues for approval.",
+     "input_schema": _t({
+         "blog_id": {"type": "string"},
+         "title": {"type": "string"}, "handle": {"type": "string"},
+         "body_html": {"type": "string"}, "summary_html": {"type": "string"},
+         "seo_title": {"type": "string"}, "seo_description": {"type": "string"},
+         "author": {"type": "string"}, "tags": {"type": "string"},
+         "published": {"type": "boolean"},
+         "faqs": {"type": "array", "items": {"type": "object", "properties": {
+             "question": {"type": "string"}, "answer": {"type": "string"}}}},
+         "jsonld": {"type": "string"}}, required=["title", "body_html"])},
+    {"name": "propose_article_revision",
+     "description": "PROPOSE a revision to an EXISTING article. PARTIAL — send "
+                    "only the fields that should change; anything omitted is "
+                    "left alone. Call get_article first. Queues for approval.",
+     "input_schema": _t({
+         "blog_id": {"type": "string"}, "article_id": {"type": "string"},
+         "title": {"type": "string"}, "handle": {"type": "string"},
+         "body_html": {"type": "string"}, "summary_html": {"type": "string"},
+         "seo_title": {"type": "string"}, "seo_description": {"type": "string"},
+         "author": {"type": "string"}, "tags": {"type": "string"},
+         "published": {"type": "boolean"},
+         "faqs": {"type": "array", "items": {"type": "object", "properties": {
+             "question": {"type": "string"}, "answer": {"type": "string"}}}},
+         "jsonld": {"type": "string"}}, required=["article_id"])},
     {"name": "propose_theme_schema_renderer",
      "description": "ONE-TIME (Shopify only): install the theme snippet that "
                     "outputs our JSON-LD metafield into <head>. No-op on "
@@ -636,6 +747,15 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
                                                args.get("proposal", ""))
         if name == "verify_links":
             return json.dumps(sites.verify_links(profile, args.get("html", "")))
+        if name in ("list_blogs", "list_articles", "get_article"):
+            backend = sites.backend(profile)
+            if name == "list_blogs":
+                return backend.list_blogs(profile)
+            if name == "list_articles":
+                return backend.list_articles(profile, args.get("blog_id"),
+                                             int(args.get("limit", 20)))
+            return backend.get_article(profile, args.get("blog_id"),
+                                       args["article_id"])
         if name in ("list_collections", "find_items", "get_seo"):
             backend = sites.backend(profile)
             if name == "list_collections":
@@ -645,7 +765,8 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
                                           int(args.get("limit", 20)))
             return backend.get_seo(profile, args["resource"], args["resource_id"])
         if name in ("propose_seo_update", "propose_new_collection",
-                    "propose_content_page", "propose_theme_schema_renderer"):
+                    "propose_content_page", "propose_theme_schema_renderer",
+                    "propose_article", "propose_article_revision"):
             return _propose(name, args, profile)
         if name in _GOOGLE_TOOLS:
             from . import google_seo
@@ -659,5 +780,10 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
         if name == "semrush_opportunity_finder":
             args["exclude_terms"] = profile["exclude_terms"]
         return _HANDLERS[name](**args)[:8000]
+    except sites.UnknownSite as exc:
+        # A refusal, not a crash. The generic arm below would render this as
+        # "Tool error (UnknownSite)", which reads like something broke rather
+        # than like a client that needs setting up.
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"Tool error ({exc.__class__.__name__}): {str(exc)[:200]}"

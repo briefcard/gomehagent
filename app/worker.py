@@ -1091,6 +1091,12 @@ def main() -> None:
     from . import correlate
     sched.add_job(_safe(correlate.nightly, "nightly sweep"), "cron",
                   hour=config.SWEEP_HOUR, minute=10)
+    # Readings BEFORE the sweep reads them, which is why this is :05 and not
+    # :10 — a sweep that runs first reports on yesterday's positions and calls
+    # them today's.
+    from . import keywords
+    sched.add_job(_safe(keywords.sync_all, "keyword sync"), "cron",
+                  hour=config.SWEEP_HOUR, minute=5)
     # Weekly and overnight: a full site crawl is the expensive kind of job, a
     # site's copy does not change hourly, and a violations queue that grows
     # every morning stops being read. After the first pass it only walks what

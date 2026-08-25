@@ -168,9 +168,15 @@ def main() -> int:
           got["proposed"] == 0 and any("off" in r or "paused" in r
                                        for r in got["refusals"]))
     _force(row.id, status="live")
+    # DISCOVERED, not named. This said "blog" until blog got a planner
+    # (2026-08-25), at which point the suite failed for a change that was
+    # correct — the same shape as the `test_tenant_isolation` assertion that
+    # pinned literal source text. What is being asserted is a property of
+    # systems absent from the registry, so ask the registry.
+    _no_planner = next(k for k in systems.CATALOG if k not in planner.PLANNERS)
     check("a system with no planner returns None — a different fact from "
           "'proposed nothing'",
-          planner.top_up(systems.get(systems.create("baci", "blog").id)) is None)
+          planner.top_up(systems.get(systems.create("baci", _no_planner).id)) is None)
 
     # ---- the tick reaches planners through the registry ------------------
     print("\n— the tick tops up through the registry —")

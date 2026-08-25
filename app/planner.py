@@ -103,6 +103,21 @@ def rest_days_for(sysrow) -> int:
                     )["segment_rest_days"]
 
 
+#: Articles are paced by the month like campaigns, but the unit is different
+#: enough to need its own numbers: a cohort tires of being written TO, while a
+#: site does not tire of being written ABOUT. The ceiling is higher and the
+#: default is still conservative, because the constraint on publishing is
+#: rarely appetite and almost always review.
+BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4}
+MAX_ARTICLES_MONTHLY = 30
+
+
+def blog_cadence_for(sysrow) -> dict:
+    return _cadence(sysrow, BLOG_CADENCE,
+                    {"horizon_days": MAX_HORIZON_DAYS,
+                     "articles_monthly": MAX_ARTICLES_MONTHLY})
+
+
 def _month(d: dt.date) -> str:
     return d.strftime("%Y-%m")
 
@@ -418,8 +433,112 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
 
 #: system key -> planner. The tick and the console both resolve through this,
 #: so a new planner is a row here and nothing else.
+def blog_rollout(sysrow) -> dict:
+    """Propose the next articles, off the keyword map, in cluster order.
+
+    `keywords.score` already ranks what is worth writing — striking distance,
+    then cluster completion, then demand minus difficulty — so this does not
+    re-rank. It applies the ONE rule a score cannot express, and then paces.
+
+    **A support is never planned before its pillar.** A cluster of five
+    supports pointing at a page that does not exist is five articles with
+    nothing to link to and a head term still unwon; it is also the single
+    most common way this work produces motion and no result. When the top of
+    the queue is a support whose pillar is still a candidate, the PILLAR is
+    filed instead — and the run says so, because silently planning something
+    other than the thing that ranked first is the kind of helpfulness nobody
+    can audit.
+
+    Everything else is `campaign_rollout`'s shape: one `article:` ref space,
+    idempotent per keyword, monthly cap, `open_plan` carrying owner edits
+    forward. `angle` is deliberately NOT proposed — no source holds one, and a
+    template pretending to be a decision is worse than a blank the drafter
+    fills and records.
+    """
+    from . import keywords
+    cad = blog_cadence_for(sysrow)
+    today = dt.date.today()
+    horizon_end = today + dt.timedelta(days=cad["horizon_days"])
+
+    rows = keywords.targets(sysrow.tenant, status="candidate")
+    if not rows:
+        return {"ok": True, "proposed": 0, "refreshed": 0,
+                "refusals": ["no candidate keywords — run keywords.harvest "
+                             "first, or every candidate is already planned"]}
+
+    # Who is a pillar, and has it been dealt with. Read once: asking per
+    # keyword would be a query per row on a map of several hundred.
+    by_cluster_pillar = {r.cluster_key: r for r in keywords.targets(sysrow.tenant)
+                         if r.role == "pillar"}
+
+    prefix = f"article:{sysrow.tenant}:"
+    have = _existing_by_month(sysrow, prefix)
+    proposed = refreshed = 0
+    refusals: list[str] = []
+    promoted: list[str] = []
+    filed: set[str] = set()
+    slot = today + dt.timedelta(days=LEAD_DAYS)
+
+    # ORDER FIRST, FILE SECOND. The first cut promoted the pillar in place of
+    # the support and moved on, so the highest-priority keyword in the whole
+    # map was silently never queued at all — it was CONSUMED by the promotion
+    # rather than delayed by it. A pillar goes AHEAD of its support, not
+    # instead of it.
+    order: list[str] = []
+    by_phrase = {r.phrase: r for r in rows}
+    for row in rows:                     # already priority-ordered
+        if row.role == "support":
+            pillar = by_cluster_pillar.get(row.cluster_key)
+            if pillar is not None and pillar.status == "candidate" \
+                    and pillar.phrase not in order:
+                order.append(pillar.phrase)
+                by_phrase.setdefault(pillar.phrase, pillar)
+                promoted.append(f"{pillar.phrase!r} goes first — "
+                                f"{row.phrase!r} supports it and would have "
+                                f"nothing to link to")
+        if row.phrase not in order:
+            order.append(row.phrase)
+
+    for phrase in order:
+        target = by_phrase[phrase]
+        if target.phrase in filed:
+            continue
+
+        while slot <= horizon_end and have.get(_month(slot), 0) >= cad["articles_monthly"]:
+            slot = _next_month(slot)     # strictly month-forward: it terminates
+        if slot > horizon_end:
+            refusals.append(f"horizon full at {cad['articles_monthly']}/month "
+                            f"— {len(order) - len(filed)} keyword(s) still waiting")
+            break
+
+        out = systems.open_plan(
+            sysrow.tenant, sysrow.key,
+            ref=prefix + keywords.slug(target.phrase),
+            plan={"keyword": target.phrase,
+                  "role": target.role or "support",
+                  "cluster": target.cluster_key or ""},
+            planned_for=slot.isoformat(), trigger="planner")
+        if out.get("error"):
+            refusals.append(out["error"])
+            continue
+        filed.add(target.phrase)
+        if out.get("created"):
+            proposed += 1
+            have[_month(slot)] = have.get(_month(slot), 0) + 1
+            # Marked so the next run does not re-rank something already
+            # queued, and so `score` stops offering it as available work.
+            keywords.upsert(sysrow.tenant, target.phrase, status="planned")
+        else:
+            refreshed += 1
+        slot += dt.timedelta(days=max(1, 30 // cad["articles_monthly"]))
+
+    return {"ok": True, "proposed": proposed, "refreshed": refreshed,
+            "pillar_first": promoted, "refusals": refusals}
+
+
 PLANNERS = {
     "campaign_email": campaign_rollout,
+    "blog": blog_rollout,
 }
 
 
