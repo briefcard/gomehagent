@@ -187,6 +187,47 @@ def main() -> int:
     ck("carrying the claim it was built on", bool(out_row.claim_ids),
        "attribution is what makes anti-repeat and hygiene answerable")
 
+    print("\n— drafted is not published, and the summary knows the difference —")
+    ck("a queued publish says so", r["summary"].startswith("drafted and queued"),
+       r["summary"][:90])
+    ck("and says approving is the next step", "approve" in r["detail"]["next"],
+       r["detail"]["next"][:70])
+    ck("the approval id is carried",
+       "Queued for your approval" in r["detail"]["publish"]["detail"],
+       r["detail"]["publish"]["detail"][:70])
+
+    # The exact shape the owner hit: a tenant with a connected store and no
+    # blog_id. The old summary read "support article for 'x'" and the harness
+    # printed "1 item(s)", so it looked published; nothing had been queued.
+    with db.SessionLocal() as s:
+        row_t = s.get(db.Tenant, "acme")
+        row_t.cms = {"platform": "shopify", "creds_key": "acme"}   # blog_id gone
+        s.commit()
+    r_noid = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
+    ck("no blog_id is NOT reported as a success",
+       r_noid["summary"].startswith("DRAFTED ONLY"), r_noid["summary"][:90])
+    ck("the reason is in the summary, not only in a note",
+       "blog_id" in r_noid["summary"], r_noid["summary"][:120])
+    ck("and it is still filed in the ledger, so nothing is lost",
+       len(r_noid.get("items") or []) == 1,
+       "the draft is real work; what is false is calling it published")
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "acme").cms = {"platform": "shopify", "creds_key": "acme",
+                                        "blog_id": "77"}
+        s.commit()
+
+    print("\n— a refusal from the queue path is a refusal, not a success —")
+    import app.seo_tools as _st
+    _real = _st._propose
+    _st._propose = lambda *a, **k: ("BLOCKED — these internal links don't "
+                                    "resolve on acme.example: /nope")
+    r_blocked = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
+    ck("a BLOCKED propose reads as not queued",
+       r_blocked["detail"]["publish"]["queued"] is False
+       and r_blocked["summary"].startswith("DRAFTED ONLY"),
+       r_blocked["summary"][:100])
+    _st._propose = _real
+
     print("\n— a banned claim is blocked BY THE VALIDATOR, with the claim in scope —")
     skill_pack._draft_article_live = lambda *a, **k: (
         "<h1>Jugs</h1><p>Every jug is handmade in our workshop.</p>", "")

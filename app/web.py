@@ -1594,6 +1594,10 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
             live=_int("live", 0, 0, 300))
     if tab == "schema":
         return ui.render_schema(link_key, tenant)
+    if tab == "plan":
+        return ui.render_plan(link_key, tenant,
+                              msg=request.query_params.get("ok", ""),
+                              err=request.query_params.get("err", ""))
     if tab == "content":
         try:
             cp = int(request.query_params.get("cpage", "1"))
@@ -2000,7 +2004,7 @@ def admin_keywords(key: str = Depends(admin_key), tenant: str = "") -> dict:
 @app.get("/admin/keywords_harvest")
 def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
                            sources: str = "", seeds: str = "",
-                           days: int = 28, limit: int = 40) -> dict:
+                           days: int = 28, limit: int = 40, ui: int = 0):
     """Build or top up the map. THIS ONE SPENDS API CALLS.
 
     `sources` and `seeds` are comma-separated. Separate from /admin/keywords on
@@ -2015,15 +2019,57 @@ def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
     src = tuple(s.strip() for s in sources.split(",") if s.strip())
     sd = tuple(s.strip() for s in seeds.split(",") if s.strip())
     try:
-        return keywords.harvest(tenant, seeds=sd, days=max(1, min(days, 180)),
-                                limit=max(1, min(limit, 200)),
-                                **({"sources": src} if src else {}))
+        got = keywords.harvest(tenant, seeds=sd, days=max(1, min(days, 180)),
+                               limit=max(1, min(limit, 200)),
+                               **({"sources": src} if src else {}))
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+        out = {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+        return _plan_back(tenant, key, err=out["error"]) if ui else out
+    if not ui:
+        return got
+    added = got.get("added") or {}
+    said = ("found " + ", ".join(f"{n} from {s}" for s, n in added.items() if n)
+            if any(added.values()) else "found nothing new")
+    return _plan_back(tenant, key, msg=f"{said}; {got.get('clusters', 0)} cluster(s)"
+                      + ("  " + " ".join(got.get("notes") or [])))
+
+
+def _plan_back(tenant: str, key: str, msg: str = "", err: str = ""):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import urlencode
+    # `ok`, not `msg` — the name every other tab's redirect already uses. A
+    # second name for one thing is how a message silently stops appearing.
+    return RedirectResponse("/admin/ui?" + urlencode(
+        {k: v for k, v in {"key": key, "tab": "plan", "tenant": tenant,
+                           "ok": msg, "err": err}.items() if v}), 303)
+
+
+@app.get("/admin/keywords_propose")
+def admin_keywords_propose(key: str = Depends(admin_key), tenant: str = "",
+                           ui: int = 0):
+    """Run the article planner now — the human trigger beside the tick's."""
+    from . import planner, systems
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    row = systems.find(tenant, "blog")
+    if not row:
+        out = {"error": f"the blog system is not installed for {tenant!r}"}
+        return _plan_back(tenant, key, err=out["error"]) if ui else out
+    got = planner.blog_rollout(row) or {}
+    if not ui:
+        return got
+    if got.get("refusals") and not got.get("proposed"):
+        return _plan_back(tenant, key, err="; ".join(got["refusals"])[:300])
+    said = (f"proposed {got.get('proposed', 0)}, refreshed "
+            f"{got.get('refreshed', 0)} — they are waiting in Review")
+    if got.get("pillar_first"):
+        said += ". " + got["pillar_first"][0]
+    return _plan_back(tenant, key, msg=said)
 
 
 @app.get("/admin/keywords_rescore")
-def admin_keywords_rescore(key: str = Depends(admin_key), tenant: str = "") -> dict:
+def admin_keywords_rescore(key: str = Depends(admin_key), tenant: str = "",
+                           ui: int = 0):
     """Re-cluster and re-score without fetching anything — what to run after
     an article publishes, since finishing a cluster changes what comes next."""
     from . import keywords
@@ -2031,7 +2077,12 @@ def admin_keywords_rescore(key: str = Depends(admin_key), tenant: str = "") -> d
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "name an account, e.g. ?tenant=baci"}
-    return {**keywords.cluster(tenant), **keywords.score(tenant)}
+    got = {**keywords.cluster(tenant), **keywords.score(tenant)}
+    if not ui:
+        return got
+    return _plan_back(tenant, key,
+                      msg=f"re-clustered {got.get('assigned', 0)} and re-scored "
+                          f"{got.get('scored', 0)} keyword(s)")
 
 
 @app.get("/admin/keywords_progress")

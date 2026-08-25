@@ -371,6 +371,11 @@ font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 #: connected to, then the plumbing.
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("brand", "Brand", "❖"),
+         # The SEO plan the blog is built from. It sits beside Systems rather
+         # than inside Review because it is not a queue of things to decide —
+         # it is the standing answer to "what are we writing, and why that
+         # next", which had no surface at all and lived in a JSON endpoint.
+         ("plan", "Plan", "◎"),
          ("systems", "Systems", "◧"), ("assurance", "Assurance", "◉"),
          ("diagnostics", "Diagnostics", "⚕"),
          ("accounts", "Connections", "⚯"), ("schema", "Data layer", "⛁"))
@@ -5327,3 +5332,129 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
 """
     return _shell(key, "diagnostics", "Diagnostics", body=body, tenant=tenant,
                   head=refresh, suffix=f"&amp;days={days}")
+
+
+def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
+    """The keyword plan the blog is built from.
+
+    STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
+    entirely: the map lived in `/admin/keywords` as JSON and the console had
+    no idea it existed, so planning an article meant typing a keyword in by
+    hand — the one thing the map is for.
+
+    Read top to bottom it answers, in order: can this account do this at all,
+    what is the plan, and what would you like to do about it. The readiness
+    strip is first because every other section is meaningless if publishing or
+    measuring is broken, and each red verdict carries ITS OWN fix rather than
+    sending you to a page that explains all four.
+    """
+    from . import keywords as kw
+
+    tenant, here, _rows = _account(tenant)
+    if tenant == ALL:
+        return _shell(key, "plan", "Plan", tenant=tenant,
+                      body=_every_note(True, "A keyword plan belongs to one "
+                                       "site — head terms, clusters and "
+                                       "positions are all per-domain."))
+
+    def _link(route: str, **over) -> str:
+        # `ui=1` is what makes these buttons and not API calls: the route
+        # comes back to this page with a sentence, instead of leaving the
+        # owner looking at raw JSON with no way back.
+        q = {"key": key, "tenant": tenant, "ui": 1}
+        q.update(over)
+        return f"/admin/{route}?" + "&amp;".join(f"{k}={_esc(v)}" for k, v in q.items())
+
+    # `probe=False` — this page renders on every visit and a live Search
+    # Console round trip per load would make the console feel broken on a slow
+    # morning. The real probe is /health/blog, and the strip says which it did.
+    ready = kw.readiness(tenant, probe=False)
+    chips = ""
+    for label, part, hint in (
+            ("Switch", "switch", "installed and on"),
+            ("Publish", "publish", "a CMS that can take an article"),
+            ("Measure", "measure", "Search Console, for positions"),
+            ("Knows what to write", "knows_what_to_write", "map, claims, ban list")):
+        got = ready.get(part) or {}
+        ok = bool(got.get("ok"))
+        fix = got.get("fix") or ""
+        fix = "; ".join(fix) if isinstance(fix, list) else fix
+        detail = got.get("detail") or ("ready" if ok else "")
+        chips += (
+            f'<div class="card {"" if ok else "warn"}">'
+            f'<div class="lbl">{"✓" if ok else "!"} {_esc(label)}</div>'
+            f'<div class="big">{_esc(str(detail) or ("ready" if ok else "not ready"))}</div>'
+            f'<p class="when">{_esc(fix or hint)}</p></div>')
+
+    m = kw.map_for(tenant)
+    by_tier = m["by_tier"]
+    tiers = " · ".join(f"{n} {t.replace('_', '-')}" for t, n in sorted(by_tier.items())) or "none"
+
+    if not m["clusters"]:
+        body_map = (
+            '<p class="mut">No keyword map for this account yet — so there is '
+            'nothing to plan an article against, and asking you to type a '
+            'keyword is the system admitting it has not done its half.</p>'
+            f'<p><a href="{_link("keywords_harvest")}"><button>Build the map'
+            '</button></a> <span class="when">Reads Search Console for terms '
+            'you already rank near, Semrush for the gap against competitors, '
+            'and the questions people actually ask. Spends API calls.</span></p>')
+    else:
+        rows_html = ""
+        for c in m["clusters"]:
+            done = c["supports_published"]
+            total = c["supports"]
+            head = (f'{_esc(c["pillar"] or c["cluster"])}'
+                    + ('' if c["pillar"] else ' <span class="mut">(no pillar)</span>'))
+            state = ("pillar live" if c["pillar_published"] else "pillar not written")
+            rows_html += (
+                f'<tr class="grp"><td colspan="5"><strong>{head}</strong> '
+                f'<span class="when">{_esc(state)} · {done}/{total} supports '
+                f'published</span></td></tr>')
+            for k in c["keywords"]:
+                rows_html += (
+                    f'<tr><td>{_esc(k["phrase"])}</td>'
+                    f'<td>{_esc((k["tier"] or "").replace("_", "-"))}</td>'
+                    f'<td>{_esc(k["role"])}</td>'
+                    f'<td>{_esc(k["status"])}</td>'
+                    f'<td class="num">{k["priority"] or 0:.0f}</td></tr>')
+        body_map = f"""
+        <table class="tbl">
+          <tr><th>keyword</th><th>tier</th><th>role</th><th>status</th>
+              <th>priority</th></tr>
+          {rows_html}
+        </table>"""
+
+    actions = (
+        f'<a href="{_link("keywords_propose")}"><button>Propose the next articles'
+        '</button></a> '
+        f'<a href="{_link("keywords_harvest")}"><button class="sec">Top up the map'
+        '</button></a> '
+        f'<a href="{_link("keywords_rescore")}"><button class="sec">Re-score'
+        '</button></a>')
+
+    note = (f'<p class="ok">{_esc(msg)}</p>' if msg else "") + (
+        f'<p class="bad">{_esc(err)}</p>' if err else "")
+
+    return _shell(key, "plan", "Plan", tenant=tenant, body=f"""
+      {note}
+      <div class="cards">{chips}</div>
+      <h3>The plan — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
+      {body_map}
+      <p>{actions}</p>
+      <details><summary>How this decides what to write next</summary>
+        <p class="when">A head term is never targeted with an article. It is
+        targeted with a <strong>pillar</strong> page plus the long-tail
+        <strong>supports</strong> that link into it, which is what makes
+        ranking for a short phrase a build you can count rather than a hope.
+        Priority is striking distance first — a page already sitting 11-20 is
+        the biggest single lever, because Google already considers it relevant
+        — then finishing a cluster over starting one, then demand weighted by
+        intent, minus difficulty where it is known. A keyword already ranking
+        1-3 scores nothing: rewriting a page that ranks is how a site loses the
+        position it had.</p>
+        <p class="when">"Propose the next articles" never plans a support
+        before its pillar. Proposals land in Review as plans, and an article is
+        drafted, checked against the ban list, and queued for your approval —
+        nothing reaches the store until you approve it.</p>
+      </details>""")

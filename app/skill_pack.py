@@ -2785,32 +2785,64 @@ def _run_blog_article(ctx: Context) -> dict:
     # routed per platform), `_link_grounding` and the approval. Composing the
     # fields here instead would be a second copy of the AEO half — the same
     # two-lists defect this initiative has now fixed twice.
-    queued = ""
+    # --- what happened to the PUBLISH, said out loud -----------------------
+    #
+    # DRAFTED IS NOT PUBLISHED, and the first version's summary did not know
+    # the difference: it read "support article for 'x'" whether the publish
+    # had been queued, refused, or never attempted, while the harness added
+    # "1 item(s)" from the ledger row. The owner read that as an article on
+    # their store and went looking for it in Shopify. Nothing was there,
+    # because `eien` has no `blog_id` — the one branch here that queues
+    # nothing at all.
+    #
+    # `ctx.note` said so and nobody saw it: notes are not in the one line a
+    # "Run now" prints. So the state goes in the SUMMARY, first, before the
+    # things that went right.
     t = tenants.get(ctx.tenant)
     blog_id = ((t.cms or {}) if t else {}).get("blog_id") or ""
     profile = sites.get(ctx.tenant)
+    publish: dict = {"queued": False}
     if profile.get("platform") != "wordpress" and not blog_id:
-        ctx.note("no blog_id on the tenant's cms config, so the publish was "
-                 "not queued — a Shopify store can hold several blogs and "
-                 "guessing one writes to the wrong place. Set it with "
-                 "/admin/tenant_set, then re-run.")
+        publish["detail"] = (
+            f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
+            f"can hold several blogs and guessing one writes to the wrong "
+            f"place. Find it with list_blogs, set it with /admin/tenant_set"
+            f"?tenant={ctx.tenant}&field=cms&value=..., then re-run.")
     else:
-        queued = seo_tools._propose("propose_article", {
+        said = seo_tools._propose("propose_article", {
             "blog_id": blog_id, "title": title, "body_html": body,
             "handle": kw_mod.slug(keyword),
             "seo_title": title[:60], "seo_description": _meta_description(keyword, body),
             "faqs": [f for f in faqs if f["answer"]],
             "published": False}, profile)
+        # `_propose` returns a SENTENCE either way — "Queued for your approval
+        # (id): ..." on success, and a refusal ("BLOCKED — these internal links
+        # don't resolve...", "Which blog?...") otherwise. Reading which is the
+        # difference between an article waiting for a human and one that was
+        # silently dropped.
+        publish["queued"] = said.startswith("Queued for your approval")
+        publish["detail"] = said if publish["queued"] else f"NOT queued — {said}"
+    ctx.note(publish["detail"])
 
     if row is not None:
         kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,
                       output_id=(ctx.items[-1] or {}).get("output_id", "")
                       if ctx.items else "")
-    return {"summary": f"{role} article for {keyword!r}"
+
+    head = ("drafted and queued for approval" if publish["queued"]
+            else "DRAFTED ONLY, nothing queued")
+    return {"summary": f"{head} — {role} article for {keyword!r}"
                        + (f", {len(questions)} question(s) answered" if questions else "")
-                       + (f", {len(links)} internal link(s)" if links else ""),
+                       + (f", {len(links)} internal link(s)" if links else "")
+                       + (f". {publish['detail']}" if not publish["queued"] else ""),
             "keyword": keyword, "role": role, "cluster": cluster_key,
-            "questions": questions, "queued": queued}
+            "questions": questions, "publish": publish,
+            # Said on EVERY run, including the successful one. "Where is my
+            # article" is the question this skill will be asked most often,
+            # and approving is the step between here and the answer.
+            "next": ("approve it in the queue — nothing reaches the store "
+                     "until you do" if publish["queued"]
+                     else "fix the reason above, then run this keyword again")}
 
 
 register(Skill(

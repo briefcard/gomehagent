@@ -162,6 +162,29 @@ def main() -> int:
        "publishing and measuring fail independently; a single green light "
        "would hide whichever one is broken")
 
+    print("\n— and it is a SURFACE, not a JSON endpoint —")
+    # The design flaw this closes (owner, 2026-08-25): *"where do I see the
+    # high level SEO plan from which the blogs are built out?"* Nowhere. The
+    # map lived in `/admin/keywords` as JSON, the console had no idea it
+    # existed, and planning an article therefore meant typing a keyword in by
+    # hand — the one thing the map exists to stop.
+    from app import admin_ui
+    page = admin_ui.render_plan("s3cret", "good")
+    for probe, why in (
+            ("Switch", "readiness leads: every other section is meaningless "
+                       "if publishing or measuring is broken"),
+            ("Publish", ""), ("Measure", ""), ("Knows what to write", ""),
+            ("acrylic jug", "the map itself, not a link to it"),
+            ("Propose the next articles", "the action is on the page that "
+                                          "shows the state")):
+        ck(f"the page shows {probe!r}", probe in page, why)
+    ck("an empty map SAYS it is the system's half that is missing",
+       "has not done its half" in admin_ui.render_plan("s3cret", "nocms"),
+       "asking the owner to invent a keyword is the failure, not the prompt")
+    ck("cross-account refuses rather than blending domains",
+       "one site" in admin_ui.render_plan("s3cret", admin_ui.ALL),
+       "head terms, clusters and positions are all per-domain")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
