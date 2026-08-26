@@ -1043,8 +1043,24 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
         except sites.UnknownSite as exc:
             meas = {"ok": False, "detail": str(exc)[:180], "fix": "see publish"}
     else:
-        meas = {"ok": "analytics" in caps, "detail": caps.get("analytics", "not wired"),
-                "fix": "capability only — run with probe=1 to ask the API"}
+        # UNKNOWN IS NOT OK. `ok=None`, never a boolean.
+        #
+        # This read `ok = "analytics" in caps`, so the Plan tab showed a green
+        # tick beside Measure for an account whose Search Console returns 403
+        # insufficientPermissions — the capability said wired because Google
+        # was connected, and the capability is exactly what cannot answer this
+        # question. That is §2.29's defect, on the page built to detect it,
+        # introduced by the person who had spent the day removing it.
+        #
+        # A third state, which this console already speaks elsewhere:
+        # `credentials.status` reports "not verifying" between connected and
+        # missing for the same reason. Collapsing unknown into either one is
+        # how a console starts lying.
+        meas = {"ok": None,
+                "detail": f"not checked ({caps.get('analytics', 'not wired')})",
+                "fix": "the capability says a Google account is connected, "
+                       "which is not the same as Search Console answering. "
+                       "Check it to find out."}
     # Said explicitly, because it is the one people assume: the env-group
     # Google grants `inbox` ALONE (`ENV_GRANTS`), so an account can show a
     # working mailbox and have no Search Console at all.
@@ -1113,7 +1129,9 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
                     f"the system is {out['status']}; turn it on to run")}
     else:
         out["switch"] = {"ok": True, "detail": "live"}
-    out["ok"] = bool(live and pub.get("ok") and meas.get("ok") and know["ok"])
+    # `meas["ok"] is True`, not truthiness: None must not read as ready.
+    out["ok"] = bool(live and pub.get("ok") and meas.get("ok") is True
+                     and know["ok"])
     return out
 
 

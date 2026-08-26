@@ -1847,6 +1847,7 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                               msg=request.query_params.get("ok", ""),
                               err=request.query_params.get("err", ""),
                               pick=bool(request.query_params.get("pick")),
+                              probe=bool(request.query_params.get("probe")),
                               days=_plan_days(request.query_params.get("days")))
     if tab == "content":
         try:

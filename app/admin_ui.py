@@ -18,6 +18,16 @@ from . import config, db, kb, systems, tenants
 # The instructions that used to live in a separate manual. Kept beside the
 # fields so a value is never entered from memory.
 FIELD_HELP = {
+    "domain": (
+        "The brand's website — scraping, compliance, and SEO",
+        "NO CONNECTION NEEDED. The site is public, so this is the one field "
+        "that works for a client on any platform, or on none: Squarespace, "
+        "Wix, a hand-built site, anything. It is what the claim crawler reads "
+        "to propose brand claims, what the compliance sweep checks against "
+        "the ban list, and what a Search Console property is matched to. "
+        "Bare host, no scheme and no path — acme.com, not "
+        "https://acme.com/. An account with no domain has no site profile at "
+        "all, so nothing here can run for it."),
     "gmail_alias": (
         "Inbox monitoring + sending drafts",
         "The account's Google connection. To add one, use Connect beside "
@@ -1058,8 +1068,18 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
             caps = tenants.capabilities(t.key)
             missing = [c for c, ok in caps.items() if not ok]
             fields = "".join(_field(t, key, f) for f in
-                             ("gmail_alias", "shopify_store", "esp", "cms",
-                              "ads", "analytics", "crm", "design", "systems"))
+                             # `domain` FIRST, and it was missing entirely.
+                             # It is the most load-bearing field on the row —
+                             # `harvest` and `compliance` both refuse without
+                             # it, `sites` builds no profile without it, and
+                             # `seo_guard` joins on it — and it was settable
+                             # only at /admin/tenant_add, so a client whose
+                             # site moved could not be corrected from the
+                             # console at all. `tenant_set` has always
+                             # accepted it; nothing ever rendered the box.
+                             ("domain", "gmail_alias", "shopify_store", "esp",
+                              "cms", "ads", "analytics", "crm", "design",
+                              "systems"))
             body += f"""
             <div class="card">
               <div class="head">
@@ -5528,7 +5548,7 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
 
 
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
-                pick: bool = False, days: int = 28) -> str:
+                pick: bool = False, days: int = 28, probe: bool = False) -> str:
     """The keyword plan the blog is built from.
 
     STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
@@ -5562,7 +5582,10 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     # `probe=False` — this page renders on every visit and a live Search
     # Console round trip per load would make the console feel broken on a slow
     # morning. The real probe is /health/blog, and the strip says which it did.
-    ready = kw.readiness(tenant, probe=False)
+    # Not probed on every visit — a live Search Console round trip per page
+    # load makes the console feel broken on a slow morning — but one click
+    # away, and honest about not having asked.
+    ready = kw.readiness(tenant, probe=probe)
     chips = ""
     for label, part, hint in (
             ("Switch", "switch", "installed and on"),
@@ -5570,7 +5593,12 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
             ("Measure", "measure", "Search Console, for positions"),
             ("Knows what to write", "knows_what_to_write", "map, claims, ban list")):
         got = ready.get(part) or {}
-        ok = bool(got.get("ok"))
+        # THREE STATES, not two. `ok is None` means nobody has asked — and a
+        # tick for "we did not check" is the failure this whole strip exists
+        # to prevent.
+        raw_ok = got.get("ok")
+        ok = raw_ok is True
+        unknown = raw_ok is None
         # `fix` is a SENTENCE for the connection verdicts and a LIST for the
         # knowledge one, and `notes` is always a list. Normalise both rather
         # than assuming either shape — concatenating them blind was a
@@ -5587,9 +5615,17 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
             # ACT WHERE YOU REPORT. Naming a missing value and then sending
             # somebody to a URL bar to set it is two pages for one decision.
             extra = _blog_picker(key, tenant, pick)
+        if unknown:
+            # The one control that turns it into an answer, beside the thing
+            # that says it has no answer.
+            extra += (f'<p><a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
+                      f'&amp;tenant={_esc(tenant)}&amp;probe=1">'
+                      f'<button class="sec" type="button">Check Search Console '
+                      f'now</button></a></p>')
         chips += (
             f'<div class="card {"" if ok else "warn"}">'
-            f'<div class="lbl">{"✓" if ok else "!"} {_esc(label)}</div>'
+            f'<div class="lbl">{"✓" if ok else ("?" if unknown else "!")} '
+            f'{_esc(label)}</div>'
             f'<div class="big">{_esc(str(detail) or ("ready" if ok else "not ready"))}</div>'
             f'<p class="when">{_esc(fix or hint)}</p>{extra}</div>')
 

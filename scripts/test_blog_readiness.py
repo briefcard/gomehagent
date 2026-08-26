@@ -20,6 +20,7 @@ so it is reported independently rather than folded into one green light.
     python3 scripts/test_blog_readiness.py
 """
 import os
+import pathlib
 import sys
 import tempfile
 
@@ -161,6 +162,65 @@ def main() -> int:
     ck("one red is not ready", keywords.readiness("good")["ok"] is False,
        "publishing and measuring fail independently; a single green light "
        "would hide whichever one is broken")
+
+    print("\n— 'not checked' is not 'working' —")
+    # The owner's live Plan tab for Miami Ironside showed a GREEN TICK beside
+    # Measure — `client:google` — for an account whose Search Console returns
+    # 403 insufficientPermissions. `readiness(probe=False)` read
+    # `ok = "analytics" in caps`, which is the CAPABILITY, and the capability
+    # is precisely what cannot answer this: Google being connected is not
+    # Search Console answering. §2.29's defect, on the page built to detect
+    # it, introduced by the person who spent the day removing it.
+    org("hasgoogle", "hasgoogle.example")
+    connect("hasgoogle", provider="google",
+            scopes="https://www.googleapis.com/auth/gmail.modify")
+    caps = credentials.wired_capabilities("hasgoogle")
+    ck("the capability reports analytics as wired", "analytics" in caps, str(caps))
+    m = keywords.readiness("hasgoogle", probe=False)["measure"]
+    ck("but unprobed Measure is UNKNOWN, not ok", m["ok"] is None, str(m["ok"]))
+    ck("and it says it did not check", "not checked" in m["detail"], m["detail"])
+    ck("an account is never READY on an unchecked Measure",
+       keywords.readiness("hasgoogle", probe=False)["ok"] is False)
+    from app import admin_ui as _aui
+    page = _aui.render_plan("s3cret", "hasgoogle")
+    ck("the strip shows '?' rather than a tick",
+       '<div class="lbl">? Measure</div>' in page)
+    ck("and offers the one control that answers it",
+       "Check Search Console now" in page,
+       "the thing that says it has no answer is where you ask for one")
+
+    print("\n— a website alone is enough to scrape and check a brand —")
+    # Owner, 2026-08-26: *"if I dont have a shopify, wordpress etc — can I just
+    # have a source website in the connections tab to default to?"* The field
+    # already existed and `tenant_set` already accepted it; nothing ever
+    # RENDERED the box, so it was settable only at account creation and a
+    # client whose site moved could not be corrected from the console at all.
+    from app import admin_ui as _ui, compliance as _comp, harvest as _hv
+    org("scrapeonly", "scrapeonly.example")          # no cms, no credential
+    prof = keywords.sites.get("scrapeonly") if hasattr(keywords, "sites") else None
+    from app import sites as _sites
+    ck("an account with only a domain still has a site profile",
+       _sites.get("scrapeonly")["domain"] == "scrapeonly.example")
+    ck("and no platform, honestly", _sites.get("scrapeonly")["platform"] == "",
+       "nothing is connected, so nothing is claimed")
+    ck("publishing is correctly blocked",
+       keywords.readiness("scrapeonly", probe=False)["publish"]["ok"] is False)
+    ck("but the crawler takes a DOMAIN, not a backend",
+       "base" in _comp.discover_pages.__code__.co_varnames,
+       "the site is public — content_compliance declares requires=() for "
+       "exactly this reason")
+    ck("and both scrapers refuse only on a missing domain",
+       "if not t.domain" in pathlib.Path("app/harvest.py").read_text()
+       and "if not t.domain" in pathlib.Path("app/compliance.py").read_text())
+
+    print("\n— and the box to set it is on the Connections tab —")
+    ck("domain is an editable field", "domain" in _ui.FIELD_HELP)
+    ck("its help says no connection is needed",
+       "NO CONNECTION NEEDED" in _ui.FIELD_HELP["domain"][1])
+    ck("it asks for a bare host",
+       "no scheme" in _ui.FIELD_HELP["domain"][1],
+       "https://acme.com/ in this field breaks the GSC property match and "
+       "the crawler's URL joins alike")
 
     print("\n— which MARKET the research came from —")
     r = keywords.readiness("good", probe=False)["knows_what_to_write"]
