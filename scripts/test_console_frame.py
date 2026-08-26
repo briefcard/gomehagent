@@ -203,6 +203,47 @@ def main() -> int:
     r = c.get("/admin/ui?key=s3cret&tab=kb&tenant=nope")
     ck("it still renders rather than 500ing", r.status_code == 200)
 
+    # --- the console remembers which account you were on -----------------
+    #
+    # Owner, 2026-08-26: *"every time I set a value and the session resets I go
+    # back to the marketingthatworks account."* `_account("")` falls back to
+    # the FIRST tenant, and every path that arrives without one — signing in,
+    # /console, a cookie expiring mid-afternoon — therefore dropped him onto
+    # MarketingThatWorks whatever he had been working on. Being returned to
+    # another client after setting a value is not an inconvenience: the next
+    # thing typed goes to the wrong account.
+    print("\n— the account survives a session reset —")
+    import re as _re
+    from fastapi.testclient import TestClient as _TC
+    from app import config as _cfg, web as _web
+
+    def _on(r):
+        m = _re.search(r'class="[^"]*on[^"]*"[^>]*tenant=([a-z]+)', r.text)
+        return m.group(1) if m else ""
+
+    _c = _TC(_web.app)
+    _c.post("/admin/signin", data={"key": _cfg.APPROVAL_SECRET},
+            follow_redirects=False)
+    ck("with nothing chosen it opens on the first account",
+       _on(_c.get("/admin/ui?tab=plan")) == "agency",
+       "an empty tenant falling back to everything would be worse — five "
+       "accounts' data under one account's heading")
+    _c.get("/admin/ui?tab=plan&tenant=eien")
+    ck("choosing one remembers it", _c.cookies.get("gomeh_account") == "eien")
+    ck("and it holds when the next link carries no account",
+       _on(_c.get("/admin/ui?tab=plan")) == "eien")
+    ck("including the bare URL sign-in redirects to",
+       _on(_c.get("/admin/ui")) == "eien")
+    _c.cookies.pop("console", None)                    # the session expires
+    _c.post("/admin/signin", data={"key": _cfg.APPROVAL_SECRET},
+            follow_redirects=False)
+    ck("and across a session reset", _on(_c.get("/admin/ui")) == "eien",
+       "the whole complaint")
+    ck("only what was NAMED is remembered, never the fallback",
+       _web.ACCOUNT_COOKIE and True,
+       "writing the resolved default back would make the first account sticky "
+       "the moment anyone arrived without one — the bug, cached")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

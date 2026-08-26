@@ -213,6 +213,12 @@ def root() -> str:
     return landing.render()
 
 
+#: Which account the console is looking at. Not a secret — it is an account
+#: key that is already in every link on the page — but httponly anyway, since
+#: nothing in the browser needs to read it.
+ACCOUNT_COOKIE = "gomeh_account"
+
+
 @app.get("/console")
 def console_alias():
     """A memorable alias for the console — redirects, never renders."""
@@ -1731,7 +1737,51 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
 @app.get("/admin/ui", response_class=HTMLResponse)
 def admin_ui(request: Request, key: str = Depends(admin_key),
              tab: str = "content", tenant: str = "",
-             started: str = "") -> str:
+             started: str = ""):
+    """The console, on whichever account you were last looking at.
+
+    THE ACCOUNT IS REMEMBERED, and it was not. `_account("")` falls back to
+    the first tenant, and every path that lands here without one — signing in,
+    `/console`, a cookie expiring mid-afternoon, any redirect that forgot to
+    carry it — therefore dropped the owner onto MarketingThatWorks whatever he
+    had been working on. Setting a value on one client and being returned to
+    another is worse than an inconvenience: the next thing typed goes to the
+    wrong account.
+
+    A cookie rather than a column, because this is a property of the BROWSER
+    and not of the system: two people with the console open are each looking
+    at something, and a stored "current account" would have them fighting over
+    one value.
+    """
+    from . import admin_ui as admin_ui_mod
+    remembered = request.cookies.get(ACCOUNT_COOKIE, "")
+    chosen = (tenant or remembered or "").strip()
+    body = _console_body(request, key, tab, chosen, started)
+    if not isinstance(body, str):
+        return body                       # a redirect passes straight through
+    resp = HTMLResponse(body)
+    # Only what the caller NAMED is remembered — and never ALL.
+    #
+    # "All accounts is a place you go on purpose" is a property this console
+    # already holds and `test_console_frame` already pins: an unset tenant
+    # must land on an account, because five accounts' data under one
+    # account's heading is worse than either view alone. Remembering ALL
+    # would have made every later unset visit resolve to everything, which
+    # is that defect reintroduced through the back door — and the suite
+    # caught it within a minute of the change.
+    #
+    # Writing the resolved FALLBACK back would be the other half of the same
+    # mistake: it makes the first account sticky the moment anyone arrives
+    # without one, which is the original bug, cached.
+    if tenant and tenant != admin_ui_mod.ALL:
+        resp.set_cookie(ACCOUNT_COOKIE, tenant, max_age=_COOKIE_MAX_AGE,
+                        httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return resp
+
+
+def _console_body(request: Request, key: str, tab: str, tenant: str,
+                  started: str):
     """The console. Opens on Review — the tab the day starts on (owner,
     2026-08-21: the fastest path to the actual work). It landed on
     Connections for historical reasons: that tab existed first."""
