@@ -3,7 +3,15 @@
 This file orients any new Claude Code / Cowork session on this repo so it can
 continue the build without re-deriving context. Read it first.
 
-## Next initiative (2026-08-25)
+## Next initiative (2026-08-26)
+**`INITIATIVE-solidify.md`** — hardening after a day of found-by-owner
+defects. §1 is the error accounting, §2 the audited facts (five-agent audit,
+file:line), §3 the phases. Phases 0 (ship.sh) and 1 (article review loop +
+publish write-back) are DONE as of `be79f35`. RULES NOW STANDING: every push
+goes through scripts/ship.sh; every fix ships with its sabotage guard; every
+console fact ships with its control.
+
+## Previous initiative (2026-08-25)
 **`INITIATIVE-seo-blog.md`** — the organic-growth build: a programmatic keyword
 plan (head + long-tail, clustered), the measurement loop that verifies it
 against GSC and Semrush, the `blog` skill + planner, and `MANUAL_PUBLISH` for
