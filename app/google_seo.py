@@ -65,7 +65,17 @@ def _admin(alias: str):
 
 
 def _alias(profile: dict) -> str:
-    return profile.get("google_alias") or config.SEO_GOOGLE_ALIAS
+    """Whose Google reads this site. NEVER a fallback to another account.
+
+    This returned `config.SEO_GOOGLE_ALIAS` when a profile carried none, so a
+    client with no Google of its own silently read Search Console through the
+    agency's — fine under shared identity, and wrong the moment each account
+    connects its own (owner, 2026-08-26). A profile always carries an alias
+    now (`sites._from_tenants` falls back to the tenant key, which resolves
+    that account's own credential), so an empty one means the profile itself
+    is malformed and borrowing somebody else's identity is not the repair.
+    """
+    return profile.get("google_alias") or ""
 
 
 def _host(profile: dict) -> str:

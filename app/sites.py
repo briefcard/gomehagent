@@ -125,7 +125,27 @@ def _from_tenants() -> dict:
             # needs no `creds_key` at all.
             "creds_key": (cms.get("creds_key")
                           or getattr(t, "shopify_store", "") or t.key),
-            "google_alias": getattr(t, "gmail_alias", "") or config.SEO_GOOGLE_ALIAS,
+            # THIS ACCOUNT'S OWN GOOGLE, never the agency's.
+            #
+            # This fell back to `config.SEO_GOOGLE_ALIAS` ("personal"), which
+            # was correct only under the shared-identity model — one Google
+            # account granted viewer access on every client's property. The
+            # owner corrected that on 2026-08-26: *"every account has their
+            # own google connect."*
+            #
+            # Under per-account connections the fallback is the `sites.get()`
+            # defect one field along, and it was already costing: Ironside's
+            # own Google is connected, the console files it under the TENANT
+            # and sets no alias, so `gmail_alias` is empty and every Search
+            # Console read for Ironside went through `personal` — an account
+            # whose token is revoked. Its own working connection was never
+            # asked.
+            #
+            # `t.key` is the right second choice and not a fallback to
+            # somebody else: `credentials.google_config` treats an unmatched
+            # key AS the tenant, so this resolves that account's own
+            # credential — the same fix the inbox probe needed an hour ago.
+            "google_alias": getattr(t, "gmail_alias", "") or t.key,
             "gsc_site": "", "ga4_property": "",
             **_brand_rules(brands.get(t.key))}
     return out

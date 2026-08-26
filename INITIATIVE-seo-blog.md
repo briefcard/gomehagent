@@ -411,6 +411,36 @@ what moves blog output onto the rails `campaign_email` already runs on —
 grounding, citation, `validator`, ledger, autonomy rung (§2.6).
 
 ### 2.12 Whose Google account reads a client's Search Console
+**REVERSED 2026-08-26 by the owner: *"every account has their own google
+connect."* PER-ACCOUNT, not shared identity.** The section below recorded the
+opposite as a locked decision earlier the same day and was wrong; it is kept
+because the REASONING about `_match_gsc_site` still stands and because a plan
+file that quietly rewrites its own history is one nobody can check.
+
+**What changed in the code.** `sites._from_tenants` fell back to
+`config.SEO_GOOGLE_ALIAS` and `google_seo._alias` did the same. Correct under
+shared identity; the `sites.get()` defect one field along under per-account
+connections — and it was already costing. Ironside's own Google IS connected;
+the console files a credential under the TENANT and sets no `gmail_alias`; so
+`gmail_alias` was empty and every Search Console read for Ironside went
+through `personal`, an account whose token is revoked. Its own working
+connection was never asked. The fallback is now `t.key`, which is not another
+account's identity — `credentials.google_config` treats an unmatched key AS
+the tenant, so the key resolves that account's own credential. `_alias`
+returns "" rather than substituting anybody.
+
+**What this makes cheaper, and what it costs.** Cheaper: `_match_gsc_site`
+stops being the boundary between clients, because one token no longer sees
+several clients' properties — the label-boundary fix below stands anyway and
+is still right. More expensive: every client now runs a Google consent, which
+is the scope conversation in §2.11 multiplied by five, and the client-facing
+flow can no longer be kept clear of Google entirely.
+
+---
+
+*Superseded, kept for the reasoning:*
+
+### 2.12a Whose Google account reads a client's Search Console
 **DECIDED 2026-08-25 by the owner: the SHARED-IDENTITY model stands.** One
 Google account (`SEO_GOOGLE_ALIAS`, default `personal`) is granted viewer
 access on each client's Search Console property, rather than each client

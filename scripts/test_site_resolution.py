@@ -103,6 +103,31 @@ def main() -> int:
        sites.get("coverings")["platform"] == "shopify",
        "from the tenant row's cms.platform")
 
+    print("\n— every account reads Search Console through ITS OWN Google —")
+    # Owner, 2026-08-26: *"every account has their own google connect."* This
+    # reverses §2.12's shared-identity assumption, and the old fallback was
+    # already costing: Ironside's own Google is connected, the console files
+    # it under the TENANT and sets no alias, so `gmail_alias` was empty and
+    # every Search Console read for Ironside went through `personal` — an
+    # account whose token is revoked. Its own working connection was never
+    # asked.
+    for t, expect in (("baci", "baci"), ("eien", "eien"),
+                      ("agency", "personal"), ("coverings", "coverings"),
+                      ("ironside", "ironside")):
+        ck(f"{t} reads through {expect!r}",
+           sites.get(t)["google_alias"] == expect,
+           str(sites.get(t)["google_alias"]))
+    ck("an account with no alias falls back to its own KEY, not the agency's",
+       sites.get("ironside")["google_alias"] != "personal",
+       "`credentials.google_config` treats an unmatched key AS the tenant, so "
+       "the key resolves that account's own credential — borrowing another "
+       "account's identity is never the repair")
+    from app import google_seo as _gs
+    ck("and the reader refuses to substitute one",
+       _gs._alias({"google_alias": ""}) == "",
+       "returning SEO_GOOGLE_ALIAS here meant a client with no Google of its "
+       "own silently read through the agency's")
+
     print("\n— an unimplemented platform refuses BY NAME —")
     try:
         sites.backend(sites.get("ironside"))
