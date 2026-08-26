@@ -56,6 +56,26 @@ def record(tenant: str, system_key: str, *, situation: str = "",
         conversation_id=conversation_id, touch_id=touch_id)
     with db.SessionLocal() as s:
         s.add(row)
+        # FLUSH, not a second commit. `row.id` is needed to key the artifact
+        # and a flush assigns it without ending the transaction — committing
+        # twice expired this row's attributes, and since `record` returns it
+        # detached, every caller then hit DetachedInstanceError on `.id`. One
+        # transaction, one commit, both rows or neither.
+        s.flush()
+        # THE ARTIFACT ITSELF, whole, when there is one.
+        #
+        # `body[:2000]` above is deliberate and stays — this table is a ledger
+        # of decisions and its queries depend on staying narrow. But an email
+        # or article that is drafted, checked and approved with no CMS or ESP
+        # connected then existed nowhere in full: the run said "1 item(s)" and
+        # the item was a summary of itself. Kept beside the row rather than in
+        # it, and only for things that ARE artifacts — a rendered body with a
+        # format behind it, not every reply.
+        if body and format and "<" in body and len(body) > 2000:
+            s.add(db.ArtifactBody(
+                tenant=tenant, output_id=row.id, run_id=run_id,
+                system_key=system_key, format=format,
+                destination=destination, body=body, bytes=len(body)))
         s.commit()
         s.refresh(row)
         s.expunge_all()

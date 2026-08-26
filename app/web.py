@@ -2330,6 +2330,42 @@ def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
                       msg=f"articles for {tenant} will publish into blog {blog_id}")
 
 
+@app.get("/admin/artifact/{output_id}", response_class=HTMLResponse)
+def admin_artifact(output_id: str, key: str = Depends(admin_key), raw: int = 0):
+    """The rendered artifact for one ledger row, whole.
+
+    This is what an approved run actually produced, kept for the case the
+    owner met directly: no CMS connected, so nothing was pushed anywhere and
+    the only record was a 2000-character summary. `raw=1` returns the source
+    to copy into a platform by hand — which is the entire workflow when a
+    client is on a platform with no write API.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>bad key</h3>", status_code=401)
+    with db.SessionLocal() as s:
+        row = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        if row is None:
+            out = s.get(db.Output, output_id)
+            return HTMLResponse(
+                "<h3>No full artifact kept for this row.</h3><p>" + (
+                    "Outputs recorded before 2026-08-26, and anything under "
+                    "2000 characters, keep only the ledger's short rendering."
+                    if out is not None else "Unknown output.") + "</p>",
+                status_code=404)
+        body, fmt, dest = row.body, row.format, row.destination
+    if raw:
+        return PlainTextResponse(body)
+    return HTMLResponse(
+        f'<div style="font:13px -apple-system,sans-serif;padding:8px 12px;'
+        f'background:#f2f3f5;border-bottom:1px solid #e6e8ec">'
+        f'<strong>{html.escape(fmt)}</strong> · '
+        + (f'sent to {html.escape(dest)}' if dest else
+           '<em>no destination — nothing was pushed anywhere</em>')
+        + f' · <a href="?key={html.escape(key)}&amp;raw=1">source</a></div>'
+        + body)
+
+
 @app.get("/admin/keywords_propose")
 def admin_keywords_propose(key: str = Depends(admin_key), tenant: str = "",
                            ui: int = 0):

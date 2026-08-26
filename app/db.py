@@ -995,6 +995,39 @@ class KeywordReading(Base):
     url = Column(String, default="")  # the page that ranked, when reported
 
 
+class ArtifactBody(Base):
+    """The rendered thing itself, kept whole, beside the ledger row about it.
+
+    `Output.body` is deliberately `body[:2000]` and its column comment says
+    "short rendering, not the artifact" — that table is a ledger of DECISIONS
+    and making it a content store would have been the wrong fix. But an email
+    or an article that is drafted, checked and approved and has nowhere to be
+    pushed then existed nowhere in full, which the owner met directly
+    (2026-08-26): with no CMS connected there was no record of what had been
+    approved, only a summary of it.
+
+    So: a sibling table, one row per artifact, written when there IS an
+    artifact — HTML with a format behind it, not every reply. `Output` keeps
+    its shape and its queries stay fast; this holds the bytes and is read only
+    when somebody asks to see one.
+    """
+
+    __tablename__ = "artifact_bodies"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    output_id = Column(String, default="", index=True)   # -> Output.id
+    run_id = Column(String, default="", index=True)
+    system_key = Column(String, default="", index=True)
+    format = Column(String, default="")                  # cms_article | esp_campaign | ...
+    #: Where it ended up, if anywhere. An artifact with no destination is
+    #: exactly the case this table exists for.
+    destination = Column(String, default="")
+    body = Column(Text)
+    bytes = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class Setting(Base):
     """Tiny key/value store for run-once markers."""
 

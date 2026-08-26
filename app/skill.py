@@ -335,19 +335,39 @@ class Context:
             found = coherence.review(commitment, got, brand_name=_brand)
             return [{**f, "rule": "coherence:" + f["rule"]} for f in found]
 
+        def _structure(text):
+            """Does the RENDERED thing hold together, mechanically.
+
+            A third axis beside the rules and the subject. `validator` asks
+            whether the artifact says anything it may not; `coherence` asks
+            whether it is about the thing it committed to; this asks whether
+            it is intact — a word cut and re-joined, a product recommended
+            and never linked, a variable nobody filled. All three are
+            deterministic, and none of them is a model reading its own work.
+            """
+            from . import artifact_check
+            if "<" not in text:            # not a rendered artifact
+                return []
+            found = artifact_check.check(text)
+            block = set(artifact_check.BLOCKING)
+            return [{**f, "rule": "structure:" + f["rule"],
+                     "severity": "block" if f["rule"] in block else "advice"}
+                    for f in found]
+
         def _check(text):
             verdict = validator.check(
                 self.tenant, text, claim_ids=claim_ids or [],
                 entity_key=entity_key, conversation_id=conversation_id,
                 require_citation=cite)
-            found = _coherence(text)
+            found = _coherence(text) + _structure(text)
             if not found:
                 return verdict
             hard = [f for f in found if f.get("severity") == "block"]
             return {**verdict,
                     "ok": verdict["ok"] and not hard,
                     "failures": list(verdict["failures"]) + hard,
-                    "checked": list(verdict.get("checked") or []) + ["coherence"],
+                    "checked": list(verdict.get("checked") or [])
+                               + ["coherence", "structure"],
                     # Advice survives the loop so it can be reported once the
                     # body has settled; only blocks stop the artifact.
                     "coherence_advice": [f for f in found

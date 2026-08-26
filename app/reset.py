@@ -62,7 +62,8 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "seo_snapshots", "voice_profiles", "follow_ups",
               "seo_site_config", "system_docs", "assurance_events",
               "tool_calls", "reported_figures", "compliance_events",
-              "moments", "keyword_targets", "keyword_readings"}
+              "moments", "keyword_targets", "keyword_readings",
+              "artifact_bodies"}
 # Both classified in the change that adds them, per the lesson below.
 # `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
 # it looks like research about the brand, but what it stores is what somebody
