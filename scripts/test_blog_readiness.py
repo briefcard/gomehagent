@@ -193,6 +193,38 @@ def main() -> int:
                        "acme.com") is None,
        "staging vs prod, or two clients — pinning is a person's job")
 
+    print("\n— the blog id is a picker, not a URL-encoded JSON blob —")
+    # This is a defect I introduced: the fix text told the owner to hand-build
+    # a percent-encoded `cms` blob for /admin/tenant_set. That is not
+    # configuration, it is a developer typing a database value into a URL bar.
+    from app import admin_ui, web
+    page = admin_ui.render_plan("s3cret", "noblog")
+    ck("the gap offers a control, not an instruction",
+       "Find the blogs on this store" in page,
+       "act where you report — naming a missing value and sending somebody "
+       "elsewhere to set it is two pages for one decision")
+    ck("the account that HAS one is not nagged",
+       "Find the blogs on this store" not in admin_ui.render_plan("s3cret", "good"))
+
+    # The setter MERGES. /admin/tenant_set takes the whole JSON column, so
+    # setting one key by hand meant rewriting platform and creds_key too —
+    # and getting one wrong silently unwires the account.
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "noblog").cms = {"platform": "shopify",
+                                          "creds_key": "noblog"}
+        s.commit()
+    web.admin_blog_set(key="s3cret", tenant="noblog", blog_id="77")
+    with db.SessionLocal() as s:
+        cms = s.get(db.Tenant, "noblog").cms
+    ck("the blog id is set", cms.get("blog_id") == "77", str(cms))
+    ck("and platform survived", cms.get("platform") == "shopify", str(cms))
+    ck("and creds_key survived", cms.get("creds_key") == "noblog", str(cms))
+    bad = web.admin_blog_set(key="s3cret", tenant="noblog", blog_id="News")
+    with db.SessionLocal() as s:
+        ck("a non-numeric id is refused",
+           s.get(db.Tenant, "noblog").cms.get("blog_id") == "77",
+           "Shopify addresses blogs by id; a title would 404 mid-publish")
+
     print("\n— and it is a SURFACE, not a JSON endpoint —")
     # The design flaw this closes (owner, 2026-08-25): *"where do I see the
     # high level SEO plan from which the blogs are built out?"* Nowhere. The

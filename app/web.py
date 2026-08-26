@@ -1756,7 +1756,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     if tab == "plan":
         return ui.render_plan(link_key, tenant,
                               msg=request.query_params.get("ok", ""),
-                              err=request.query_params.get("err", ""))
+                              err=request.query_params.get("err", ""),
+                              pick=bool(request.query_params.get("pick")))
     if tab == "content":
         try:
             cp = int(request.query_params.get("cpage", "1"))
@@ -2201,6 +2202,35 @@ def _plan_back(tenant: str, key: str, msg: str = "", err: str = ""):
     return RedirectResponse("/admin/ui?" + urlencode(
         {k: v for k, v in {"key": key, "tab": "plan", "tenant": tenant,
                            "ok": msg, "err": err}.items() if v}), 303)
+
+
+@app.get("/admin/blog_set")
+def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
+                   blog_id: str = ""):
+    """Set which blog on the store articles publish into.
+
+    MERGES into `cms` rather than replacing it. `/admin/tenant_set` takes a
+    whole JSON blob for that column, so setting one key by hand meant
+    rewriting `platform` and `creds_key` too — and getting one of them wrong
+    silently unwires the account.
+    """
+    from . import tenants
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    blog_id = (blog_id or "").strip()
+    if not blog_id.isdigit():
+        return _plan_back(tenant, key, err="a blog id is a number")
+    t = tenants.get(tenant)
+    if not t:
+        return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
+    with db.SessionLocal() as s:
+        row = s.get(db.Tenant, tenant)
+        cms = dict(row.cms or {})
+        cms["blog_id"] = blog_id
+        row.cms = cms
+        s.commit()
+    return _plan_back(tenant, key,
+                      msg=f"articles for {tenant} will publish into blog {blog_id}")
 
 
 @app.get("/admin/keywords_propose")

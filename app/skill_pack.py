@@ -2806,8 +2806,7 @@ def _run_blog_article(ctx: Context) -> dict:
         publish["detail"] = (
             f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
             f"can hold several blogs and guessing one writes to the wrong "
-            f"place. Find it with list_blogs, set it with /admin/tenant_set"
-            f"?tenant={ctx.tenant}&field=cms&value=..., then re-run.")
+            f"place. Pick one on the console's Plan tab, then re-run.")
     else:
         said = seo_tools._propose("propose_article", {
             "blog_id": blog_id, "title": title, "body_html": body,

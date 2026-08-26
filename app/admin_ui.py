@@ -20,10 +20,13 @@ from . import config, db, kb, systems, tenants
 FIELD_HELP = {
     "gmail_alias": (
         "Inbox monitoring + sending drafts",
-        "A key from GMAIL_ACCOUNTS_JSON — not an email address. "
-        "To add a new one: run scripts/google_oauth.py locally, sign in as that "
-        "mailbox, and add the resulting entry to GMAIL_ACCOUNTS_JSON in Render. "
-        "For a client, they must grant access to their own Google account."),
+        "The account's Google connection. To add one, use Connect beside "
+        "Google on this tab and sign in as that mailbox — nothing to run "
+        "locally and no env var to paste. Connecting here also records which "
+        "scopes Google actually granted, which the env-var route cannot, so "
+        "Search Console and Analytics report as wired only when they truly "
+        "are. A key from GMAIL_ACCOUNTS_JSON still works for accounts "
+        "connected before this existed."),
     "shopify_store": (
         "Products, inventory, orders",
         "A key from SHOPIFY_STORES_JSON. To create one: in their Shopify admin go to "
@@ -5334,7 +5337,51 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                   head=refresh, suffix=f"&amp;days={days}")
 
 
-def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
+def _blog_picker(key: str, tenant: str, pick: bool) -> str:
+    """Choose which blog on the store articles publish into.
+
+    The alternative, until now, was hand-building a percent-encoded JSON blob
+    for `/admin/tenant_set?field=cms` — which is not configuration, it is a
+    developer typing a database value into a URL bar. The id is the only thing
+    standing between a drafted article and a published one, so it belongs on
+    the page that reports it missing.
+
+    The store is only called when asked (`pick`), because this page renders on
+    every visit and a Shopify round trip per load would make the console feel
+    broken on a slow morning.
+    """
+    from . import sites
+    ask = (f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant='
+           f'{_esc(tenant)}&amp;pick=1"><button class="sec" type="button">'
+           f'Find the blogs on this store</button></a>')
+    if not pick:
+        return f'<p>{ask}</p>'
+    try:
+        raw = sites.backend(sites.get(tenant)).list_blogs(sites.get(tenant))
+    except Exception as exc:                                     # noqa: BLE001
+        return (f'<p class="bad">Could not read the store: '
+                f'{_esc(exc.__class__.__name__)}: {_esc(str(exc)[:160])}</p>{ask}')
+    rows = []
+    for line in (raw or "").splitlines():
+        parts = line.split("  ")
+        if len(parts) >= 2 and parts[0].strip().isdigit():
+            bid, title = parts[0].strip(), parts[1].strip()
+            rows.append(
+                f'<li>{_esc(title)} <code>{_esc(bid)}</code> '
+                f'<a href="/admin/blog_set?key={_esc(key)}&amp;tenant='
+                f'{_esc(tenant)}&amp;blog_id={_esc(bid)}">'
+                f'<button type="button">Use this one</button></a></li>')
+    if not rows:
+        # `list_blogs` returns a SENTENCE on failure and on an empty store —
+        # showing it beats rendering an empty list that looks like a bug.
+        return f'<p class="mut">{_esc((raw or "")[:300])}</p>{ask}'
+    return ("<ul>" + "".join(rows) + "</ul>"
+            '<p class="when">Articles publish into the blog you pick. A store '
+            'can hold several, and guessing writes into the wrong one.</p>')
+
+
+def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
+                pick: bool = False) -> str:
     """The keyword plan the blog is built from.
 
     STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
@@ -5380,11 +5427,16 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
         fix = got.get("fix") or ""
         fix = "; ".join(fix) if isinstance(fix, list) else fix
         detail = got.get("detail") or ("ready" if ok else "")
+        extra = ""
+        if part == "publish" and not ok and "blog_id" in str(got.get("detail", "")):
+            # ACT WHERE YOU REPORT. Naming a missing value and then sending
+            # somebody to a URL bar to set it is two pages for one decision.
+            extra = _blog_picker(key, tenant, pick)
         chips += (
             f'<div class="card {"" if ok else "warn"}">'
             f'<div class="lbl">{"✓" if ok else "!"} {_esc(label)}</div>'
             f'<div class="big">{_esc(str(detail) or ("ready" if ok else "not ready"))}</div>'
-            f'<p class="when">{_esc(fix or hint)}</p></div>')
+            f'<p class="when">{_esc(fix or hint)}</p>{extra}</div>')
 
     m = kw.map_for(tenant)
     by_tier = m["by_tier"]

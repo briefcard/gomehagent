@@ -1,3 +1,26 @@
+"""SUPERSEDED — use the console's Connections tab instead.
+
+Connect a Google account at /admin/ui?tab=accounts, with the Connect button
+beside Google. That flow does everything this script does and three things it
+cannot:
+
+  * it stores the token per ACCOUNT, encrypted at rest, instead of in a
+    GMAIL_ACCOUNTS_JSON env var that has to be pasted into Render by hand;
+  * it records the scopes Google ACTUALLY granted, which is what
+    `credentials.CAPABILITY_SCOPES` reads — a token pasted from here carries
+    no scope record at all, which is why `ENV_GRANTS["google"]` grants `inbox`
+    alone and Search Console reads as unwired even when it works;
+  * changing it is a button, not a redeploy.
+
+This file is kept because accounts connected before the OAuth flow existed
+still resolve through GMAIL_ACCOUNTS_JSON, and because it is the only path
+that works with no running service. Note its CLIENT_CONFIG uses the
+`"installed"` (Desktop) shape while `oauth.FLOWS["google"]` is a hosted web
+flow — one client id cannot be both, and that mismatch is a
+`redirect_uri_mismatch` waiting to happen if the same credentials serve both.
+
+Original docstring follows.
+"""
 """Authorize all three inboxes and build GMAIL_ACCOUNTS_JSON automatically.
 
 Run once:  python scripts/google_oauth.py

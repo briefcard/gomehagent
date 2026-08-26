@@ -77,9 +77,14 @@ def _err(exc: Exception) -> str:
     msg = str(exc)
     low = msg.lower()
     if "403" in msg or "scope" in low or "insufficient" in low or "permission" in low:
-        return ("Google permission error — re-run scripts/google_oauth.py to grant "
-                "webmasters.readonly + analytics.readonly, and confirm the Google "
-                f"account is a user on this property. ({msg[:160]})")
+        # Points at the BUTTON, not a terminal. This said "re-run
+        # scripts/google_oauth.py", which is the legacy path — and an error
+        # message naming the wrong remedy sends somebody to do the wrong work,
+        # the same defect `oauth.configured` has a comment about.
+        return ("Google permission error — reconnect this account on the "
+                "console's Connections tab, granting webmasters.readonly + "
+                "analytics.readonly, and confirm that Google account is a user "
+                f"on this property in Search Console. ({msg[:160]})")
     if "404" in msg or "not found" in low:
         return f"Property not found. ({msg[:160]})"
     return f"Google API error: {msg[:200]}"
