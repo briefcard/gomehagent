@@ -441,7 +441,14 @@ def _propose(name: str, args: dict, profile: dict) -> str:
             "seo_new_article",
             f"[SEO/{site}] New article: {fields['title']}"
             + (" (+FAQ schema)" if args.get("faqs") else ""),
-            {"site": site, "blog_id": blog_id, "fields": fields, "bucket": "seo"})
+            # `output_id` rides in the payload so the executor can write the
+            # publish back onto the keyword row; `run_id` on the approval row
+            # itself so the decision and the edit delta reach the SystemRun —
+            # the parameter existed since the column did and this path never
+            # passed it.
+            {"site": site, "blog_id": blog_id, "fields": fields, "bucket": "seo",
+             "output_id": str(args.get("output_id") or "")},
+            run_id=str(args.get("run_id") or ""))
         return (f"Queued for your approval ({ap_id[:8]}): create article "
                 f"'{fields['title']}' on {site}"
                 + (", PUBLISHED on approval" if fields.get("published")

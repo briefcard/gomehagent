@@ -194,6 +194,12 @@ def send_approval(approval_id: str, summary: str, detail: dict | None = None) ->
         parts.append(f"Cc: {detail['cc']}")
     if detail.get("inbound_snippet"):
         parts.append(f"\n— They wrote —\n{detail['inbound_snippet'][:500]}")
+    if not detail.get("body"):
+        # Same blind spot /admin/pending had: an article's text nests at
+        # fields.body_html, so the phone card showed a title and two buttons
+        # for the longest artifact the platform makes.
+        detail = {**detail,
+                  "body": (detail.get("fields") or {}).get("body_html", "")}
     if detail.get("body"):
         parts.append(f"\n— Proposed reply —\n{detail['body'][:2800]}")
     if detail.get("suggestion"):

@@ -323,7 +323,20 @@ def create_article(profile: dict, blog_id, fields: dict) -> str:
     res = _send(store, "POST", f"blogs/{blog_id}/articles.json",
                 {"article": art}).get("article", {})
     state = "published" if res.get("published_at") else "saved as a draft"
-    return (f"{_store_url(store)}/blogs/{res.get('handle')} — {state}"
+    # A Shopify article lives at /blogs/<BLOG-handle>/<article-handle>, and
+    # this returned /blogs/<article-handle> — a URL one path segment short of
+    # existing. Harmless while the string was only read by a person; the
+    # publish write-back now stores it as `KeywordTarget.target_url`, and a
+    # wrong URL correctly filed is the defect this repo keeps paying for. One
+    # extra GET per article creation buys the real address.
+    try:
+        blog_handle = _get(store, f"blogs/{blog_id}.json").get(
+            "blog", {}).get("handle", "")
+    except Exception:                                            # noqa: BLE001
+        blog_handle = ""
+    path = (f"blogs/{blog_handle}/{res.get('handle')}" if blog_handle
+            else f"blogs/{res.get('handle')}")
+    return (f"{_store_url(store)}/{path} — {state}"
             + ("" if res.get("published_at") else
                " (publish it from admin, or pass published=true)"))
 

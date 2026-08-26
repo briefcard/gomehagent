@@ -87,7 +87,8 @@ def record(tenant: str, system_key: str, *, situation: str = "",
             s.add(db.ArtifactBody(
                 tenant=tenant, output_id=row.id, run_id=run_id,
                 system_key=system_key, format=format,
-                destination=destination, body=body, bytes=len(body)))
+                destination=destination, body=body, draft_body=body,
+                bytes=len(body)))
         s.commit()
         s.refresh(row)
         s.expunge_all()

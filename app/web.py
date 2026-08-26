@@ -1110,7 +1110,19 @@ def pending_page(key: str = Depends(admin_key), tenant: str = "") -> str:
         for ap in aps:
             approve = "/decide/" + ap_mod._signer.dumps([ap.id, "approved"])
             deny = "/decide/" + ap_mod._signer.dumps([ap.id, "denied"])
-            body = (ap.payload or {}).get("body") or (ap.payload or {}).get("content", "")
+            body = ((ap.payload or {}).get("body")
+                    or (ap.payload or {}).get("content", "")
+                    # An article nests its text at fields.body_html, so this
+                    # page showed a one-line summary and two links for the
+                    # longest artifact the platform produces. The real review
+                    # surface is /admin/article/<id>; the fallback here keeps
+                    # THIS page honest for anyone deciding from it.
+                    or ((ap.payload or {}).get("fields") or {}).get("body_html", ""))
+            review = ""
+            if ap.kind == "seo_new_article" and (ap.payload or {}).get("output_id"):
+                review = (f" · <a href='/admin/article/"
+                          f"{html.escape((ap.payload or {})['output_id'])}"
+                          f"?key={html.escape(key)}'>📝 review &amp; edit</a>")
             # Which client this belongs to, on every row. An approval whose
             # account was never resolved says so rather than reading as this
             # one's -- an unattributed row folded into whoever is looking is
@@ -1130,7 +1142,7 @@ def pending_page(key: str = Depends(admin_key), tenant: str = "") -> str:
                    f"{html.escape(body[:1500])}</pre>"
                    f"</details>" if body else "")
                 + f" &nbsp;<a href='{approve}'>✅ Approve</a> · "
-                  f"<a href='{deny}'>❌ Deny</a></li>")
+                  f"<a href='{deny}'>❌ Deny</a>" + review + "</li>")
     head = (f"Pending approvals — {html.escape(who)} ({len(rows)})" if scoped
             else f"Pending approvals — all accounts ({len(rows)})")
     other = ("" if scoped else
@@ -2329,6 +2341,224 @@ def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
         s.commit()
     return _plan_back(tenant, key,
                       msg=f"articles for {tenant} will publish into blog {blog_id}")
+
+
+# ---------------------------------------------------------------------------
+# The article review loop.
+#
+# The owner, 2026-08-26: *"you have not added a way for me to review and edit
+# your drafted articles. I cannot evaluate them."* He was deciding from a
+# one-line summary: /admin/pending reads payload["body"], which a
+# seo_new_article payload does not have — the article nests at
+# fields.body_html — so every channel showed the title and two links.
+#
+# One page per article, keyed by output_id because that id exists on BOTH
+# paths (an approval-backed publish and a no-CMS draft). Edit saves are gated
+# by the account's own ban list — an owner's edit can reintroduce a banned
+# phrase as easily as a model can — and the approval payload is updated in the
+# same save, so WHAT WAS REVIEWED IS WHAT PUBLISHES. The pristine draft stays
+# in ArtifactBody.draft_body; the delta against it at publish time is the
+# measure the blog system declared on day one and nothing ever computed.
+# ---------------------------------------------------------------------------
+
+def _article_bundle(output_id: str):
+    """Everything the review page needs, one query each."""
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        kw = (s.query(db.KeywordTarget)
+              .filter(db.KeywordTarget.output_id == output_id).first())
+        ap = None
+        for row in (s.query(db.Approval)
+                    .filter(db.Approval.kind == "seo_new_article",
+                            db.Approval.status == "pending").all()):
+            if (row.payload or {}).get("output_id") == output_id:
+                ap = row
+                break
+        s.expunge_all()
+    return art, kw, ap
+
+
+@app.get("/admin/article/{output_id}", response_class=HTMLResponse)
+def admin_article_review(output_id: str, key: str = Depends(admin_key),
+                         ok: str = "", err: str = ""):
+    """Read the whole article, edit it, and decide — on one page."""
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>bad key</h3>", status_code=401)
+    art, kw, ap = _article_bundle(output_id)
+    if art is None:
+        return HTMLResponse("<h3>No article kept for this id.</h3>",
+                            status_code=404)
+
+    from . import artifact_check
+    flags = artifact_check.check(art.body or "")
+    flag_html = "".join(
+        f"<li><code>{html.escape(f['rule'])}</code> {html.escape(f['detail'])}"
+        f" — <em>{html.escape(f['fix'])}</em></li>" for f in flags)
+
+    fields = (ap.payload or {}).get("fields", {}) if ap else {}
+    published = bool(kw and (kw.status or "") in ("published", "won"))
+
+    if ap:
+        approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
+        deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
+        decide = (f'<a href="{approve}" style="font-weight:600">✅ Approve &amp; '
+                  f'publish</a> &nbsp;·&nbsp; <a href="{deny}">❌ Deny</a>'
+                  '<p style="font-size:.85em;color:#6e7686">Approving publishes '
+                  'THIS text — the save button below updates what ships.</p>')
+    elif published:
+        live = (f' — <a href="{html.escape(kw.target_url)}">live page</a>'
+                if kw and kw.target_url else "")
+        decide = f"<p>Published{live}.</p>"
+    else:
+        decide = (
+            '<form method="get" action="/admin/article_published" '
+            'style="border:1px solid #d8b45a;background:#fdf6e3;padding:12px">'
+            f'<input type="hidden" name="key" value="{html.escape(key)}">'
+            f'<input type="hidden" name="output_id" value="{html.escape(output_id)}">'
+            '<b>No CMS to push to.</b> Copy the source, paste it into the '
+            'platform by hand, then record where it went live so the '
+            'measurement loop can see it:<br>'
+            '<input name="url" size="52" placeholder="https://…/blogs/…"> '
+            '<button type="submit">It’s live here</button></form>')
+
+    def _inp(name, label, value, size=60):
+        return (f'<label style="display:block;margin:6px 0">{label}<br>'
+                f'<input name="{name}" size="{size}" '
+                f'value="{html.escape(value or "")}"></label>')
+
+    who = html.escape(art.tenant or "")
+    kw_line = (f'for <b>{html.escape(kw.phrase)}</b> '
+               f'({html.escape(kw.role or "")}, {html.escape(kw.status or "")})'
+               if kw else "(no keyword joined)")
+    note = (f"<p style='color:#0a7a33'>{html.escape(ok)}</p>" if ok else "") +            (f"<p style='color:#b00020'>{html.escape(err)}</p>" if err else "")
+    return HTMLResponse(f"""<html><body style="font-family:sans-serif;
+max-width:860px;margin:2em auto;padding:0 16px">
+<p style="font-size:.85em;color:#6e7686">article review · {who}</p>
+<h2 style="margin:0 0 4px">{html.escape(fields.get("title")
+    or (kw.phrase if kw else "Article"))}</h2>
+<p style="margin:0 0 14px;color:#6e7686">{kw_line} ·
+  <a href="/admin/artifact/{html.escape(output_id)}?key={html.escape(key)}&amp;raw=1">source</a> ·
+  <a href="/admin/ui?key={html.escape(key)}&amp;tab=plan&amp;tenant={who}">back to the plan</a></p>
+{note}
+{decide}
+{"<h3>Structural flags</h3><ul>" + flag_html + "</ul>" if flag_html else ""}
+<h3>Preview</h3>
+<div style="border:1px solid #ddd;padding:18px 22px;border-radius:6px">
+{art.body or ""}</div>
+<h3>Edit</h3>
+<form method="post" action="/admin/article_save">
+  <input type="hidden" name="key" value="{html.escape(key)}">
+  <input type="hidden" name="output_id" value="{html.escape(output_id)}">
+  {_inp("title", "Title", fields.get("title", ""))}
+  {_inp("seo_title", "SEO title (60)", fields.get("seo_title", ""))}
+  {_inp("seo_description", "Meta description (155)",
+        fields.get("seo_description", ""), 90)}
+  <label style="display:block;margin:6px 0">Body (HTML)<br>
+  <textarea name="body" rows="24" style="width:100%;font-family:monospace"
+  >{html.escape(art.body or "")}</textarea></label>
+  <button type="submit">Save changes</button>
+  <span style="font-size:.85em;color:#6e7686">Saves are checked against
+  {who}’s ban list — a banned phrase refuses, whoever typed it.</span>
+</form>
+</body></html>""")
+
+
+@app.post("/admin/article_save")
+async def admin_article_save(request: Request, key: str = Depends(admin_key)):
+    """One save updates every copy that publishes, or refuses them all."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    body = str(form.get("body") or "")
+    from urllib.parse import quote
+
+    def back(ok: str = "", err: str = ""):
+        from fastapi.responses import RedirectResponse
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/article/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    art, kw, ap = _article_bundle(output_id)
+    if art is None:
+        return back(err="no article with that id")
+    if not body.strip():
+        return back(err="an empty body would publish an empty page — refused")
+
+    edited = {"title": str(form.get("title") or ""),
+              "seo_title": str(form.get("seo_title") or ""),
+              "seo_description": str(form.get("seo_description") or ""),
+              "body_html": body}
+    # THE BAN LIST BINDS THE OWNER'S HANDS TOO. An edit can reintroduce
+    # "handmade" as easily as a model can, and the publish-time guard firing
+    # later — on an article the owner already approved — reads as the system
+    # overriding them. Refusing at the save names the phrase while the person
+    # who typed it is still looking at it.
+    from . import artifact_check, seo_guard, sites
+    profile = sites.get(art.tenant)
+    if (refusal := seo_guard.check(profile, edited, what="article edit")):
+        return back(err=refusal)
+
+    with db.SessionLocal() as s:
+        row = s.get(db.ArtifactBody, art.id)
+        row.body = body
+        row.bytes = len(body)
+        if ap is not None:
+            ap_row = s.get(db.Approval, ap.id)
+            payload = dict(ap_row.payload or {})
+            fields = dict(payload.get("fields") or {})
+            fields["body_html"] = body
+            for k in ("title", "seo_title", "seo_description"):
+                if edited[k]:
+                    fields[k] = edited[k]
+            payload["fields"] = fields
+            ap_row.payload = payload
+        s.commit()
+
+    warn = artifact_check.check(body)
+    said = "saved" + (" — what publishes is what you just reviewed" if ap else "")
+    if warn:
+        said += f". {len(warn)} structural flag(s) below — advisory, not a block"
+    return back(ok=said)
+
+
+@app.get("/admin/article_published")
+def admin_article_published(key: str = Depends(admin_key), output_id: str = "",
+                            url: str = ""):
+    """The manual half of the publish write-back, for platforms with no API."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/article/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return back(err="a live URL starts with http(s) — paste the address "
+                        "the article is actually at")
+    art, kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return back(err="no article with that id")
+    from . import keywords, tenants
+    t = tenants.get(art.tenant)
+    host = (getattr(t, "domain", "") or "").lower()
+    warn = ""
+    if host and host not in url.lower():
+        # A caution, not a refusal: staging hosts and CDN domains are real.
+        warn = f" (note: that URL is not on {host})"
+    got = keywords.mark_published(art.tenant, output_id, url=url)
+    said = "recorded — the measurement loop will pick it up from here"
+    if got.get("edit"):
+        e = got["edit"]
+        said += (f". Draft-vs-published: "
+                 f"{'unchanged' if e.get('as_is') else 'edited'}")
+    return back(ok=said + warn)
 
 
 @app.get("/admin/artifact/{output_id}", response_class=HTMLResponse)

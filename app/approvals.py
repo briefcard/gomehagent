@@ -385,11 +385,24 @@ def _execute(ap: db.Approval) -> None:
             f"📄 Page created ({p.get('site')}): {res}" if _published(res)
             else f"⛔ Page NOT created ({p.get('site')}): {res}")
     elif ap.kind == "seo_new_article":
-        from . import sites, whatsapp
+        from . import keywords, seo_guard, sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
         res = sites.backend(profile).create_article(
             profile, p.get("blog_id") or None, p["fields"])
+        if _published(res):
+            # CLOSE THE LOOP, which this arm never did: the 2026-08-26 audit
+            # found create_article's return — which BEGINS with the live URL —
+            # was interpolated into a WhatsApp message and discarded, so no
+            # production code had ever written target_url/published_at and
+            # `progress` had a structurally starved cohort. The URL is the
+            # first token by both backends' convention (`_published` already
+            # depends on it); the write-back joins on the output_id the
+            # payload now carries.
+            if p.get("output_id"):
+                keywords.mark_published(
+                    seo_guard.tenant_for(profile) or (ap.tenant or ""),
+                    p["output_id"], url=res.split()[0].rstrip(".,"))
         whatsapp.send_text(
             f"📝 Article created ({p.get('site')}): {res}"
             if _published(res)

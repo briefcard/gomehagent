@@ -1591,3 +1591,72 @@ def mute_lessons(tenant: str) -> dict:
                 "proposal": f"most of the {c!r} cluster is muted — the pillar "
                             f"{pillar!r} is likely the mistake, not its supports"})
     return out
+
+
+# ---------------------------------------------------------------------------
+# The publish write-back — the loop's missing wire
+# ---------------------------------------------------------------------------
+def mark_published(tenant: str, output_id: str, url: str = "") -> dict:
+    """An article went live: tell every table that has been waiting to hear.
+
+    THE LOOP WAS OPEN HERE AND NOTHING SAID SO. The audit of 2026-08-26 found
+    that no production code had ever written `KeywordTarget.target_url`,
+    `published_at`, or `status="published"` — the approval executor sent the
+    live URL into a WhatsApp message and discarded it. Consequences, each
+    silent: the Plan board's "live page" link could never render; `progress`
+    attributes only rows with status published/won, so its tracked cohort was
+    structurally starved and every report would have read "no tracked
+    readings" forever; and the cluster bonus for a published pillar could
+    never fire off a real publish.
+
+    One function, called from BOTH publish paths — the approval executor and
+    the manual mark-as-published — so the write-back cannot drift between
+    them. It touches this module's own tables directly and goes through
+    `ledger.publish` for the Output row, keeping one writer per table.
+    """
+    from . import edits, ledger
+    out: dict = {"tenant": tenant, "output_id": output_id, "url": url}
+    with db.SessionLocal() as s:
+        row = (s.query(db.KeywordTarget)
+               .filter(db.KeywordTarget.tenant == tenant,
+                       db.KeywordTarget.output_id == output_id).first())
+        if row is not None:
+            row.status = "published"
+            row.published_at = db.utcnow()
+            if url:
+                row.target_url = url
+            out["phrase"] = row.phrase
+            run_id = row.run_id
+        else:
+            out["phrase"] = ""
+            run_id = ""
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        draft, final = ((art.draft_body or "", art.body or "")
+                        if art is not None else ("", ""))
+        if art is not None and url:
+            art.destination = url
+        s.commit()
+
+    ledger.publish(tenant, output_id, destination=url)
+
+    # The declared measure, finally computed: draft vs what actually shipped.
+    # Onto the RUN, because "is this system getting better" is the question
+    # `SystemRun.edit_diff` was added for — same landing as the mail path's.
+    if draft and final:
+        d = edits.delta(draft, final)
+        out["edit"] = {k: d.get(k) for k in ("as_is", "similarity",
+                                             "lines_changed") if k in d}
+        if run_id and d.get("measured"):
+            try:
+                with db.SessionLocal() as s:
+                    run = s.get(db.SystemRun, run_id)
+                    if run and not run.edit_diff:
+                        run.edit_diff = d.get("sample") or (
+                            "published unchanged" if d.get("as_is") else "")
+                        run.decision = run.decision or (
+                            "approved" if d.get("as_is") else "edited")
+                        s.commit()
+            except Exception:                                    # noqa: BLE001
+                pass      # measuring must never block a publish
+    return out

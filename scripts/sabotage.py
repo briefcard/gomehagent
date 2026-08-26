@@ -37,6 +37,28 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: once; `why` is the consequence in the world, not the mechanism — a person
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
+    {
+        "name": "approving_writes_back",
+        "file": "app/approvals.py",
+        "find": "            if p.get(\"output_id\"):\n                keywords.mark_published(",
+        "replace": "            if False:  # SABOTAGE\n                keywords.mark_published(",
+        "suites": ["test_article_review.py"],
+        "why": "the publish loop reopens: the live URL is discarded again, "
+               "target_url/published_at never written, progress's tracked "
+               "cohort starves, and the Plan board's live-page link can "
+               "never render — the exact state the 2026-08-26 audit found",
+    },
+    {
+        "name": "owner_edits_meet_the_ban_list",
+        "file": "app/web.py",
+        "find": "    if (refusal := seo_guard.check(profile, edited, what=\"article edit\")):",
+        "replace": "    if False and (refusal := seo_guard.check(profile, edited, what=\"article edit\")):  # SABOTAGE",
+        "suites": ["test_article_review.py"],
+        "why": "an owner's edit can reintroduce a banned phrase and the save "
+               "stops refusing it — the publish-time guard then fires on a "
+               "text the owner already approved, which reads as the system "
+               "overriding them",
+    },
     # ---- 2026-08-26: ONE DEFECT, SEVEN PLACES ---------------------------
     #
     # Every entry below is the same shape, and it recurred all day: A VALUE

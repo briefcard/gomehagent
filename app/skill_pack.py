@@ -2980,8 +2980,9 @@ def _run_blog_article(ctx: Context) -> dict:
     if not can_push:
         publish["detail"] = (
             f"NOT queued — {why_no_cms} The article is written, checked and "
-            f"kept whole: read it on the Review tab, or add ?raw=1 to the "
-            f"artifact URL for the source to paste in by hand.")
+            f"kept whole: review and edit it from the Plan tab's board "
+            f"('review the draft'), copy the source from its ?raw=1 view, and "
+            f"record the live URL there once you have pasted it in.")
     elif profile.get("platform") != "wordpress" and not blog_id:
         publish["detail"] = (
             f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
@@ -2993,6 +2994,14 @@ def _run_blog_article(ctx: Context) -> dict:
             "handle": kw_mod.slug(keyword),
             "seo_title": title[:60], "seo_description": _meta_description(keyword, body),
             "faqs": [f for f in faqs if f["answer"]],
+            # The JOIN, carried from birth. The 2026-08-26 audit found the
+            # article approval payload held no output_id and no run_id, so the
+            # executor had nothing to join a write-back on — the live URL was
+            # discarded into a WhatsApp message and the keyword map never
+            # learned its article went live.
+            "output_id": ((ctx.items[-1] or {}).get("output_id", "")
+                          if ctx.items else ""),
+            "run_id": ctx.run_id,
             "published": False}, profile)
         # `_propose` returns a SENTENCE either way — "Queued for your approval
         # (id): ..." on success, and a refusal ("BLOCKED — these internal links

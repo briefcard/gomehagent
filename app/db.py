@@ -1037,7 +1037,13 @@ class ArtifactBody(Base):
     #: Where it ended up, if anywhere. An artifact with no destination is
     #: exactly the case this table exists for.
     destination = Column(String, default="")
+    #: `body` is the CURRENT text — the owner's edits land here, and it is what
+    #: publishes. `draft_body` is the text as the skill emitted it, written
+    #: once and never updated: the blog system's declared measure is the
+    #: draft-vs-published delta, and a delta needs the draft to still exist
+    #: after the edit that makes it interesting.
     body = Column(Text)
+    draft_body = Column(Text)
     bytes = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 

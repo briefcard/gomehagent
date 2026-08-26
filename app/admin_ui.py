@@ -5501,8 +5501,8 @@ def _board_section(key: str, tenant: str, days: int) -> str:
         f'<td class="num">{r["position"] if r["position"] is not None else "—"}</td>'
         f'<td>' + (f'<a href="{_esc(r["target_url"])}">live page</a>'
                    if r["target_url"] else
-                   (f'<a href="/admin/artifact/{_esc(r["output_id"])}'
-                    f'?key={_esc(key)}">the draft</a>' if r["output_id"]
+                   (f'<a href="/admin/article/{_esc(r["output_id"])}'
+                    f'?key={_esc(key)}">review the draft</a>' if r["output_id"]
                     else '<span class="mut">not written yet</span>'))
         + '</td></tr>'
         for r in b["in_flight"]) or (
