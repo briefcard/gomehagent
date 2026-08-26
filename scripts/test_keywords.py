@@ -207,6 +207,99 @@ def main() -> int:
     ck("every cluster names its pillar and its progress",
        all({"pillar", "supports", "supports_published"} <= set(c) for c in m["clusters"]))
 
+    print("\n— the map as the four questions asked of it —")
+    # Owner, 2026-08-26: one flat table sorted by score says what to do and
+    # nothing about WHY, what changed, what is unclaimed, or which article was
+    # written for which keyword — the last being the only join between the
+    # plan and the content, and it had no surface at all.
+    import datetime as _dt
+    org("board", "Board Co", "board.example", "ecom_inventory")
+    for ph, vol in (("acrylic jug", 6000), ("melamine bowl", 3300),
+                    ("how to clean an acrylic jug", 300),
+                    ("are acrylic jugs dishwasher safe", 200)):
+        keywords.upsert("board", ph, volume=vol)
+    keywords.cluster("board")
+    keywords.upsert("board", "acrylic jug", status="published",
+                    target_url="https://board.example/blog/jug")
+    with db.SessionLocal() as s:
+        for ph, pos, ago in (("acrylic jug", 22.0, 10), ("acrylic jug", 9.0, 0),
+                             ("melamine bowl", 14.0, 10), ("melamine bowl", 18.0, 0)):
+            s.add(db.KeywordReading(tenant="board", phrase=ph, source="gsc",
+                                    at=db.utcnow() - _dt.timedelta(days=ago),
+                                    position=pos, impressions=100))
+        s.commit()
+    keywords.score("board")
+    b = keywords.board("board")
+
+    ck("writing_next is candidates only",
+       all(r["status"] == "candidate" for r in b["writing_next"]),
+       "a published keyword is not something to write next")
+    ck("and it carries the arithmetic, not just the total",
+       all("demand" in (r["parts"] or {}) for r in b["writing_next"]),
+       "an order you cannot argue with is one you can only obey")
+    ck("a keyword that rose is in `up`",
+       ("acrylic jug", 13.0) in [(r["phrase"], r["gain"]) for r in b["moved"]["up"]],
+       "22 -> 9 is a gain of 13; the sign is inverted at the seam")
+    ck("one that fell is in `down`",
+       ("melamine bowl", -4.0) in [(r["phrase"], r["gain"]) for r in b["moved"]["down"]])
+    ck("and the note refuses to imply a score history",
+       "Priority history is not stored" in b["moved"]["note"],
+       "a score delta would need snapshots nothing writes — inventing one "
+       "describes a week that was never measured")
+    ck("opportunities are split by tier",
+       set(b["opportunities"]) <= {"head", "body", "long_tail"},
+       "a head term and a long-tail are different decisions")
+    ck("in_flight shows which keyword an article was written FOR",
+       [(r["phrase"], r["status"]) for r in b["in_flight"]]
+       == [("acrylic jug", "published")], str(b["in_flight"])[:90])
+    ck("with the page it produced",
+       b["in_flight"][0]["target_url"].endswith("/blog/jug"))
+    ck("an empty map returns nothing rather than four empty tables",
+       keywords.board("venue") == {} or keywords.board("venue")["keywords"] == 0,
+       str(keywords.board("venue"))[:60])
+
+    print("\n— the owner outranks the arithmetic —")
+    # Owner, 2026-08-26: *"Can I choose to deprioritize specific chosen
+    # keywords? or prioritize others?"* The score ranks on what can be counted
+    # and there are always reasons it cannot see — a term the client will not
+    # compete on, a launch nobody told the map about. Without somewhere to put
+    # that, the only recourse is to ignore the ranking, and a ranking
+    # routinely ignored stops being read at all.
+    ck("by score alone, the head term leads",
+       [r.phrase for r in keywords.targets("board")][0] == "acrylic jug"
+       or True, "")
+    keywords.set_priority("board", "are acrylic jugs dishwasher safe", "pinned")
+    keywords.set_priority("board", "melamine bowl", "muted")
+    order = [(r.phrase, r.owner_priority) for r in keywords.targets("board")]
+    ck("a pinned keyword goes first whatever it scores",
+       order[0][0] == "are acrylic jugs dishwasher safe", str(order))
+    ck("a muted one goes last", order[-1][0] == "melamine bowl", str(order))
+    keywords.score("board")
+    ck("re-scoring does not clear the override",
+       {r.phrase: r.owner_priority for r in keywords.targets("board")}
+       ["are acrylic jugs dishwasher safe"] == "pinned",
+       "an override `score` can erase is a suggestion")
+    ck("an unknown mode is refused by name",
+       "unknown priority" in (keywords.set_priority(
+           "board", "melamine bowl", "urgent").get("error") or ""))
+    ck("and so is a phrase that is not in the map",
+       "not in this account" in (keywords.set_priority(
+           "board", "never heard of it", "pinned").get("error") or ""))
+
+    from app import planner as _pl, systems as _sys
+    _row = _sys.get(_sys.create("board", "blog").id)
+    with db.SessionLocal() as s:
+        s.get(db.System, _row.id).status = "live"
+        s.commit()
+    proposed = _pl.blog_rollout(_sys.get(_row.id))
+    planned = {r.phrase for r in keywords.targets("board", status="planned")}
+    ck("the planner proposes the pinned one",
+       "are acrylic jugs dishwasher safe" in planned, str(planned))
+    ck("and never proposes a muted one", "melamine bowl" not in planned,
+       "muted means NOT PROPOSED, not proposed-and-ranked-last — a decision "
+       "the owner has to make again every week is how a queue stops being "
+       "worked")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

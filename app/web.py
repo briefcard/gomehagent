@@ -2367,6 +2367,28 @@ def admin_artifact(output_id: str, key: str = Depends(admin_key), raw: int = 0):
         + body)
 
 
+@app.get("/admin/keyword_priority")
+def admin_keyword_priority(key: str = Depends(admin_key), tenant: str = "",
+                           phrase: str = "", mode: str = "", ui: int = 0):
+    """The owner's say over the arithmetic: pin, mute, or clear.
+
+    The score ranks on what can be counted and there are always reasons it
+    cannot see — a term the client will not compete on, a launch nobody told
+    the map about. Without somewhere to put that, the only recourse is to
+    ignore the ranking, and a ranking routinely ignored stops being read.
+    """
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    got = keywords.set_priority(tenant, phrase, mode)
+    if not ui:
+        return got
+    if got.get("error"):
+        return _plan_back(tenant, key, err=got["error"])
+    return _plan_back(tenant, key,
+                      msg=f"{phrase!r} — {got['owner_priority']}")
+
+
 @app.get("/admin/keywords_propose")
 def admin_keywords_propose(key: str = Depends(admin_key), tenant: str = "",
                            ui: int = 0):

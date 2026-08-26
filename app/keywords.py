@@ -242,6 +242,40 @@ def upsert(tenant: str, phrase: str, *, volume: int = 0, difficulty=None,
     return row
 
 
+#: What an owner may say about a keyword that the score cannot work out.
+OWNER_PRIORITIES = ("", "pinned", "muted")
+
+
+def set_priority(tenant: str, phrase: str, mode: str) -> dict:
+    """Pin a keyword above the arithmetic, mute it out of the queue, or clear."""
+    mode = (mode or "").strip().lower()
+    if mode not in OWNER_PRIORITIES:
+        return {"error": f"unknown priority {mode!r}. Use pinned, muted, or "
+                         f"blank to clear."}
+    with db.SessionLocal() as s:
+        row = (s.query(db.KeywordTarget)
+               .filter(db.KeywordTarget.tenant == tenant,
+                       db.KeywordTarget.phrase == phrase).first())
+        if row is None:
+            return {"error": f"{phrase!r} is not in this account's map"}
+        row.owner_priority = mode
+        s.commit()
+    return {"ok": True, "phrase": phrase, "owner_priority": mode or "cleared"}
+
+
+def _owner_sort(rows: list) -> list:
+    """Pinned first, muted last, the arithmetic in between.
+
+    A separate sort key rather than a bonus added to the score, deliberately:
+    a bonus large enough to always win is indistinguishable from a bug, and a
+    small one gets outvoted by striking distance the week a page moves. An
+    override that can be outvoted is not an override.
+    """
+    order = {"pinned": 0, "": 1, "muted": 2}
+    return sorted(rows, key=lambda r: (order.get(r.owner_priority or "", 1),
+                                       -(r.priority or 0)))
+
+
 def targets(tenant: str, *, tier: str = "", status: str = "",
             cluster_key: str = "") -> list[db.KeywordTarget]:
     with db.SessionLocal() as s:
@@ -255,7 +289,7 @@ def targets(tenant: str, *, tier: str = "", status: str = "",
         rows = q.order_by(db.KeywordTarget.priority.desc()).all()
         for r in rows:
             s.expunge(r)
-        return rows
+        return _owner_sort(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -1283,4 +1317,110 @@ def aeo(tenant: str, *, days: int = 28) -> dict:
             "memory would measure its training data, not its citations. "
             "`KeywordReading` already takes source='ai' rows the day a real "
             "check exists."),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The board — the map as the four questions somebody actually asks of it
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-08-26: *"the plan should show a dynamic table of the brands
+# current priorities, changes week to week and separate tables for keyword
+# opportunities, next priorities etc. I need to visualize which keywords we are
+# optimizing for as well in the blogs and content."*
+#
+# One flat table sorted by score answers none of those. Four do:
+#
+#   writing_next  what the ranking says to do now, WITH its arithmetic, so the
+#                 order can be argued with instead of only obeyed;
+#   moved         what changed since last week, from the readings — the only
+#                 week-on-week fact this system actually holds;
+#   opportunities the backlog nobody has claimed yet, by tier, because a head
+#                 term and a long-tail are different decisions;
+#   in_flight     which keyword each article was written FOR, which is the
+#                 join between the plan and the content and was visible
+#                 nowhere.
+#
+# **Priority history is not kept, and this does not pretend otherwise.**
+# `moved` is position movement from `KeywordReading`, which is recorded; a
+# score delta would need snapshots nothing writes, and inventing one from the
+# current parts would be a number describing a week that was never measured.
+
+def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
+    """The map, split into the four questions worth asking of it."""
+    rows = targets(tenant)
+    by_phrase = {r.phrase: r for r in rows}
+    now, then = _period_readings(tenant, days)
+
+    def _row(r, extra: dict | None = None) -> dict:
+        pos = (now.get(r.phrase).position if now.get(r.phrase) else None)
+        return {"phrase": r.phrase, "tier": r.tier, "intent": r.intent,
+                "role": r.role, "cluster": r.cluster_key, "status": r.status,
+                "volume": r.volume, "difficulty": r.difficulty,
+                "priority": r.priority, "parts": r.priority_parts or {},
+                "position": pos, "target_url": r.target_url,
+                "owner_priority": r.owner_priority or "",
+                "output_id": r.output_id, **(extra or {})}
+
+    # --- what to write next, and the arithmetic behind the order ----------
+    writing_next = [_row(r) for r in rows if r.status == "candidate"][:top]
+
+    # --- what changed since last week -------------------------------------
+    moved_up, moved_down, entered = [], [], []
+    for phrase, a in now.items():
+        r = by_phrase.get(phrase)
+        b = then.get(phrase)
+        if r is None or a.position is None:
+            continue
+        if b is None or b.position is None:
+            # Ranking at all, for the first time we have a reading for.
+            entered.append(_row(r, {"to": a.position}))
+            continue
+        gain = round(b.position - a.position, 1)
+        if gain >= 1:
+            moved_up.append(_row(r, {"from": b.position, "to": a.position, "gain": gain}))
+        elif gain <= -1:
+            moved_down.append(_row(r, {"from": b.position, "to": a.position, "gain": gain}))
+    moved_up.sort(key=lambda x: -x["gain"])
+    moved_down.sort(key=lambda x: x["gain"])
+
+    # --- new to the map this week -----------------------------------------
+    import datetime as dt
+    cutoff = db.utcnow() - dt.timedelta(days=days)
+    fresh = [_row(r) for r in rows
+             if r.first_seen and db.as_utc(r.first_seen) >= cutoff]
+    fresh.sort(key=lambda x: -(x["priority"] or 0))
+
+    # --- the unclaimed backlog, by tier -----------------------------------
+    opportunities: dict[str, list] = {}
+    for r in rows:
+        if r.status != "candidate":
+            continue
+        opportunities.setdefault(r.tier or "?", []).append(_row(r))
+    for v in opportunities.values():
+        v.sort(key=lambda x: -(x["priority"] or 0))
+
+    # --- which keyword each article was written for ------------------------
+    in_flight = [_row(r) for r in rows
+                 if r.status in ("planned", "published", "won")]
+    in_flight.sort(key=lambda x: ({"won": 0, "published": 1, "planned": 2}
+                                  .get(x["status"], 3), -(x["priority"] or 0)))
+
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r.status] = counts.get(r.status, 0) + 1
+
+    return {
+        "tenant": tenant, "window_days": days, "keywords": len(rows),
+        "counts": counts,
+        "writing_next": writing_next,
+        "moved": {"up": moved_up[:top], "down": moved_down[:top],
+                  "entered": entered[:top],
+                  "note": ("position movement from Search Console readings. "
+                           "Priority history is not stored, so this is what "
+                           "changed in the RANKINGS, not what changed in the "
+                           "plan's opinion of them.")},
+        "new_this_week": fresh[:top],
+        "opportunities": opportunities,
+        "in_flight": in_flight,
     }

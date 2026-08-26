@@ -460,7 +460,12 @@ def blog_rollout(sysrow) -> dict:
     today = dt.date.today()
     horizon_end = today + dt.timedelta(days=cad["horizon_days"])
 
-    rows = keywords.targets(sysrow.tenant, status="candidate")
+    rows = [r for r in keywords.targets(sysrow.tenant, status="candidate")
+            if (r.owner_priority or "") != "muted"]
+    # MUTED MEANS NOT PROPOSED, not proposed-and-ranked-last. A keyword the
+    # owner has ruled out reappearing at the bottom of every week's queue is
+    # a decision he has to make again every week, which is how a queue stops
+    # being worked.
     if not rows:
         return {"ok": True, "proposed": 0, "refreshed": 0,
                 "refusals": ["no candidate keywords — run keywords.harvest "

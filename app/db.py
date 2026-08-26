@@ -958,6 +958,20 @@ class KeywordTarget(Base):
     priority = Column(Float, default=0.0, index=True)
     priority_parts = Column(JSON, default=dict)
 
+    #: THE OWNER'S OVERRIDE, above the arithmetic. "" | "pinned" | "muted".
+    #:
+    #: The score ranks on what can be counted — striking distance, cluster
+    #: completion, demand, difficulty — and there are always reasons it cannot
+    #: see: a term the client refuses to compete on, a launch nobody has told
+    #: the map about, a phrase that reads badly beside the brand. Without a way
+    #: to say so, the only recourse is to ignore the ranking — and a ranking
+    #: routinely ignored stops being read at all.
+    #:
+    #: Never written by `score`, which is what makes it an override rather than
+    #: a suggestion: the computed priority stays on the row beside it, so a
+    #: pinned keyword with a low score reads as "the owner disagreed", which is
+    #: worth keeping, rather than as a high score nobody can account for.
+    owner_priority = Column(String, default="", index=True)
     first_seen = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     notes = Column(Text, default="")

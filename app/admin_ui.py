@@ -5400,6 +5400,168 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
             'can hold several, and guessing writes into the wrong one.</p>')
 
 
+def _board_section(key: str, tenant: str, days: int) -> str:
+    """The map as the four questions somebody asks of it, not one sorted list.
+
+    A single table ordered by score says what to do and nothing about why,
+    what changed, what is unclaimed, or which article was written for which
+    keyword — which was the one join between the plan and the content and had
+    no surface at all.
+    """
+    from . import keywords as kw
+    b = kw.board(tenant, days=days)
+    if not b["keywords"]:
+        return ""
+
+    def _why(parts: dict) -> str:
+        """The arithmetic, in the order it is weighted."""
+        bits = []
+        s = parts.get("striking")
+        if s:
+            bits.append(f'striking +{s:g}')
+        c = parts.get("cluster")
+        if c:
+            bits.append(f'cluster +{c:g}')
+        d = parts.get("demand")
+        if d:
+            bits.append(f'demand +{d:g}')
+        diff = parts.get("difficulty")
+        if isinstance(diff, (int, float)) and diff:
+            bits.append(f'difficulty {diff:g}')
+        elif isinstance(diff, str):
+            bits.append("difficulty unknown")
+        return " · ".join(bits)
+
+    def _tier(t):
+        return _esc((t or "").replace("_", "-"))
+
+    def _say(phrase: str, current: str) -> str:
+        """Pin, mute, or clear — on the row, where the judgement is formed.
+
+        Both controls are always offered and the current state is a word, not
+        a highlighted button: an override you cannot see is one you forget you
+        set, and a keyword mysteriously first for weeks is worse than one
+        openly pinned.
+        """
+        from urllib.parse import quote
+        base = (f'/admin/keyword_priority?key={_esc(key)}&amp;tenant='
+                f'{_esc(tenant)}&amp;ui=1&amp;phrase={quote(phrase)}&amp;mode=')
+        if current:
+            return (f'<span class="chip">{_esc(current)}</span> '
+                    f'<a href="{base}" title="clear">clear</a>')
+        return (f'<a href="{base}pinned" title="always write this next">pin</a> '
+                f'<a href="{base}muted" title="never propose this">mute</a>')
+
+    next_rows = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td><td>{_tier(r["tier"])}</td>'
+        f'<td>{_esc(r["intent"])}</td><td>{_esc(r["role"])}</td>'
+        f'<td class="num">{r["volume"] or "—"}</td>'
+        f'<td class="num">{r["position"] if r["position"] is not None else "—"}</td>'
+        f'<td class="num">{(r["priority"] or 0):.0f}</td>'
+        f'<td class="when">{_esc(_why(r["parts"]))}</td>'
+        f'<td>{_say(r["phrase"], r.get("owner_priority") or "")}</td></tr>'
+        for r in b["writing_next"]) or (
+        '<tr><td colspan="9" class="mut">every keyword in the map is already '
+        'planned or published</td></tr>')
+
+    def _move_rows(items, label):
+        return "".join(
+            f'<tr><td>{_esc(r["phrase"])}</td><td>{_tier(r["tier"])}</td>'
+            f'<td class="num">{r.get("from", "—")}</td>'
+            f'<td class="num">{r.get("to", "—")}</td>'
+            f'<td class="num">{r.get("gain", "")}</td>'
+            f'<td>{_esc(label)}</td></tr>' for r in items)
+
+    moved = (_move_rows(b["moved"]["up"], "up")
+             + _move_rows(b["moved"]["down"], "down")
+             + _move_rows(b["moved"]["entered"], "first reading")) or (
+        f'<tr><td colspan="6" class="mut">no position changed in '
+        f'{b["window_days"]} days — the nightly sync needs two readings to '
+        f'compare</td></tr>')
+
+    opp = ""
+    for tier in ("head", "body", "long_tail"):
+        items = b["opportunities"].get(tier) or []
+        if not items:
+            continue
+        opp += (f'<tr class="grp"><td colspan="6"><strong>{_tier(tier)}</strong> '
+                f'<span class="when">{len(items)} unclaimed</span></td></tr>')
+        opp += "".join(
+            f'<tr><td>{_esc(r["phrase"])}</td><td>{_esc(r["intent"])}</td>'
+            f'<td class="num">{r["volume"] or "—"}</td>'
+            f'<td class="num">{r["difficulty"] if r["difficulty"] is not None else "?"}</td>'
+            f'<td class="num">{(r["priority"] or 0):.0f}</td>'
+            f'<td>{_say(r["phrase"], r.get("owner_priority") or "")}</td></tr>'
+            for r in items[:8])
+    opp = opp or ('<tr><td colspan="6" class="mut">nothing unclaimed</td></tr>')
+
+    flight = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td><td>{_esc(r["status"])}</td>'
+        f'<td>{_esc(r["role"])}</td><td>{_esc(r["cluster"])}</td>'
+        f'<td class="num">{r["position"] if r["position"] is not None else "—"}</td>'
+        f'<td>' + (f'<a href="{_esc(r["target_url"])}">live page</a>'
+                   if r["target_url"] else
+                   (f'<a href="/admin/artifact/{_esc(r["output_id"])}'
+                    f'?key={_esc(key)}">the draft</a>' if r["output_id"]
+                    else '<span class="mut">not written yet</span>'))
+        + '</td></tr>'
+        for r in b["in_flight"]) or (
+        '<tr><td colspan="6" class="mut">no keyword has been planned yet — '
+        'press "Propose the next articles"</td></tr>')
+
+    fresh = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td><td>{_tier(r["tier"])}</td>'
+        f'<td class="num">{r["volume"] or "—"}</td>'
+        f'<td class="num">{(r["priority"] or 0):.0f}</td></tr>'
+        for r in b["new_this_week"])
+    fresh_html = (f'<h3>New to the map this week</h3><table class="tbl">'
+                  f'<tr><th>keyword</th><th>tier</th><th>volume</th>'
+                  f'<th>priority</th></tr>{fresh}</table>' if fresh else "")
+
+    counts = " · ".join(f"{n} {s}" for s, n in sorted(b["counts"].items()))
+    return f"""
+    <h3>Writing next <span class="when">{_esc(counts)}</span></h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>tier</th><th>intent</th><th>role</th>
+          <th>volume</th><th>position</th><th>priority</th><th>why</th>
+          <th>your call</th></tr>
+      {next_rows}
+    </table>
+    <p class="when">The <em>why</em> column is the score's own arithmetic.
+    Striking distance leads because a page already ranking 11&ndash;20 is the
+    biggest single lever; finishing a cluster beats starting one; demand is
+    weighted by intent; difficulty subtracts only where it is known.</p>
+
+    <h3>Moved in the last {b["window_days"]} days</h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>tier</th><th>was</th><th>now</th><th>gain</th>
+          <th></th></tr>
+      {moved}
+    </table>
+    <p class="when">{_esc(b["moved"]["note"])}</p>
+
+    {fresh_html}
+
+    <h3>Opportunities</h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>intent</th><th>volume</th><th>difficulty</th>
+          <th>priority</th><th>your call</th></tr>
+      {opp}
+    </table>
+    <p class="when">A head term and a long-tail are different decisions, so
+    they are ranked apart. A head term is won with a pillar page plus the
+    supports that link into it &mdash; never with one article.</p>
+
+    <h3>What each article is targeting</h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>status</th><th>role</th><th>cluster</th>
+          <th>position</th><th>the content</th></tr>
+      {flight}
+    </table>
+    <p class="when">The join between the plan and what was actually written.
+    A draft with no live page is one waiting on approval or on a CMS.</p>"""
+
+
 def _progress_section(key: str, tenant: str, days: int) -> str:
     """Did the work move anything, and may we say it was the work.
 
@@ -5714,7 +5876,8 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     return _shell(key, "plan", "Plan", tenant=tenant, body=f"""
       {note}
       <div class="cards">{chips}</div>
-      <h3>The plan — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
+      {_board_section(key, tenant, 7)}
+      <h3>The architecture — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
       {body_map}
       <p>{actions}</p>
       {downstream_html}
