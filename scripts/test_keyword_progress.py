@@ -165,6 +165,72 @@ def main() -> int:
        p["wins"]["by_tier"].get("head", {}).get("top10") == 1,
        str(p["wins"]["by_tier"]))
 
+    print("\n— the loop closes: readings move priorities the same night —")
+    keywords.upsert("acme", "page two term", volume=800, status="published")
+    keywords.record_reading("acme", "page two term", position=45.0, clicks=0)
+    keywords.score("acme")
+    before = {r.phrase: r.priority for r in keywords.targets("acme")}["page two term"]
+    keywords._fetch_gsc = lambda p, days, limit: [
+        {"query": "page two term", "position": 14.0, "clicks": 3, "impressions": 500}]
+    out = keywords.sync("acme")
+    after = {r.phrase: r.priority for r in keywords.targets("acme")}["page two term"]
+    ck("sync re-scored", out.get("rescored", 0) > 0, str(out)[:110])
+    ck("a keyword that moved to page two is now worth more",
+       after > before, f"{before} -> {after}")
+    ck("and the sync says what is now top", bool(out.get("top")), str(out.get("top"))[:80])
+
+    print("\n— and the map tops itself up, on its own clock —")
+    ck("a fresh map is not due", keywords.harvest_due("acme") is False,
+       "positions move nightly; the competitive landscape does not, and each "
+       "top-up spends Semrush calls")
+    with db.SessionLocal() as s:
+        for r in s.query(db.KeywordTarget).filter_by(tenant="acme").all():
+            r.first_seen = db.utcnow() - dt.timedelta(days=keywords.HARVEST_EVERY_DAYS + 1)
+        s.commit()
+    ck("an old one is", keywords.harvest_due("acme") is True)
+    with db.SessionLocal() as s:
+        s.add(db.Tenant(key="empty", name="Empty", kind="client",
+                        domain="empty.example", business_model="b2b_spec",
+                        systems=[]))
+        s.commit()
+    ck("an account with NO map is never auto-harvested",
+       keywords.harvest_due("empty") is False,
+       "a first harvest is the moment somebody decides this account is being "
+       "worked on — starting one automatically spends a client's quota on a "
+       "map nobody asked for")
+
+    print("\n— the answer-engine half, and the line it will not cross —")
+    for ph, pos, ctr, imp in (("are jugs dishwasher safe", 5.0, 0.4, 900),
+                              ("how to clean a jug", 6.0, 4.0, 300),
+                              ("jug care guide", 7.0, 3.6, 250),
+                              ("best jug", 8.0, 4.4, 220),
+                              ("jug sizes", 9.0, 3.9, 210)):
+        keywords.upsert("acme", ph, volume=200, status="published")
+        keywords.record_reading("acme", ph, position=pos, ctr=ctr,
+                                impressions=imp, clicks=int(imp * ctr / 100))
+    a = keywords.aeo("acme")
+    ck("it counts questions answered vs still open",
+       a["coverage"]["questions_in_map"] >= 2 and "unanswered" in a["coverage"],
+       str(a["coverage"]))
+    flagged = {f["phrase"] for f in a["answer_taken"]["flagged"]}
+    ck("a page ranking 5th with a tenth the band's CTR is flagged",
+       "are jugs dishwasher safe" in flagged, str(flagged))
+    ck("its well-clicked neighbours are not",
+       "best jug" not in flagged and "jug sizes" not in flagged)
+    ck("the baseline is OUR OWN keywords, and it says so",
+       "median CTR" in " ".join(a["answer_taken"]["bands"].values()),
+       "a published CTR curve is somebody else's sample standing in for a "
+       "measurement")
+    ck("a band too small to have a median says so, not zero",
+       "too few" in a["answer_taken"]["bands"].get("1-3", ""),
+       a["answer_taken"]["bands"].get("1-3", ""))
+    ck("it is called a FLAG, not a measurement",
+       "not a measurement" in a["answer_taken"]["means"])
+    ck("and AI citation is named as NOT measured",
+       "cites this brand" in a["not_measured"] and "source='ai'" in a["not_measured"],
+       "asking a model from memory would measure its training data, not its "
+       "citations")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

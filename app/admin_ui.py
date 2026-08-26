@@ -5475,6 +5475,39 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
 
     notes = "".join(f'<p class="mut">{_esc(n)}</p>' for n in p["notes"])
 
+    a = kw.aeo(tenant, days=days)
+    cov, surf = a["coverage"], a["question_surface"]
+    flags = "".join(
+        f'<tr><td>{_esc(f["phrase"])}</td>'
+        f'<td class="num">{f["position"]}</td>'
+        f'<td class="num">{f["ctr"]}%</td>'
+        f'<td class="num">{f["band_median_ctr"]}%</td>'
+        f'<td class="num">{f["impressions"]}</td></tr>'
+        for f in a["answer_taken"]["flagged"]) or (
+        '<tr><td colspan="5" class="mut">nothing flagged — '
+        + _esc(" · ".join(a["answer_taken"]["bands"].values()) or "no readings yet")
+        + '</td></tr>')
+
+    aeo_html = f"""
+    <h3>Answer engines</h3>
+    <p><strong>{cov["answered"]}</strong> of <strong>{cov["questions_in_map"]}</strong>
+       question(s) in the map are answered · {cov["planned"]} planned ·
+       {cov["unanswered"]} not yet written</p>
+    <p>Question-shaped queries: <strong>{surf["now"]["clicks"]}</strong> click(s)
+       from {surf["now"]["impressions"]} impression(s)
+       {("(" + str(surf["change"]["clicks_pct"]) + "% vs before)")
+        if surf["change"]["clicks_pct"] is not None else ""}</p>
+    <table class="tbl">
+      <tr><th>ranking well, not being clicked</th><th>position</th><th>CTR</th>
+          <th>median at this rank</th><th>impressions</th></tr>
+      {flags}
+    </table>
+    <p class="when">{_esc(a["answer_taken"]["means"])} The comparison is against
+    <em>this account's own</em> keywords at similar positions — not a published
+    CTR curve, which would be somebody else's sample standing in for a
+    measurement.</p>
+    <p class="mut">{_esc(a["not_measured"])}</p>"""
+
     return f"""
     <h3>Progress <span class="when">{windows}</span></h3>
     {notes}
@@ -5488,6 +5521,7 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
           <th>clicks</th><th>published</th></tr>
       {moves}
     </table>
+    {aeo_html}
     <h3>The goal</h3>
     {goal_html}
     {form}"""

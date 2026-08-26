@@ -677,9 +677,18 @@ def sync(tenant: str, *, days: int = 28, limit: int = 1000) -> dict:
                        clicks=r.get("clicks", 0), ctr=r.get("ctr", 0.0))
         seen += 1
     settled = settle(tenant)
+    # RE-SCORE, because the readings that just landed ARE the biggest input to
+    # priority. Striking distance is worth up to 60 points and is read from the
+    # latest position; without this the nightly sync updated every position and
+    # left yesterday's ranking in place, so a keyword that moved 25 -> 14
+    # overnight — the single best thing to write next — kept its old score
+    # until somebody happened to press Re-score. The loop was broken at exactly
+    # the point it was supposed to be tightest.
+    ranked = score(tenant)
     return {"tenant": tenant, "readings": seen,
             "tracked_with_data": len(tracked & {r.get("query") for r in rows}),
             "tracked_without_data": len(tracked - {r.get("query") for r in rows}),
+            "rescored": ranked["scored"], "top": ranked["top"][:5],
             **settled}
 
 
@@ -853,6 +862,54 @@ def progress(tenant: str, *, days: int = 28) -> dict:
         "attributable": len(moves) - too_early,
         "too_early_to_attribute": too_early,
         "notes": notes}
+
+
+#: How often the map itself is refreshed. Distinct from the nightly reading
+#: sync, and much rarer: positions move daily, the competitive landscape does
+#: not, and each top-up spends Semrush calls across every account.
+HARVEST_EVERY_DAYS = 7
+
+
+def harvest_due(tenant: str) -> bool:
+    """Has it been long enough since this account's map was last topped up?
+
+    Read off the newest `first_seen` rather than stored as a marker: a row's
+    own timestamp cannot drift from the thing it describes, and a "last
+    harvested" setting is one more value to keep true.
+    """
+    import datetime as dt
+    rows = targets(tenant)
+    if not rows:
+        return False           # nothing to top up; a FIRST harvest is a choice
+    newest = max((db.as_utc(r.first_seen) for r in rows if r.first_seen),
+                 default=None)
+    if newest is None:
+        return True
+    return (db.utcnow() - newest).days >= HARVEST_EVERY_DAYS
+
+
+def harvest_all(*, limit: int = 40) -> dict:
+    """Top up every account's map that is due, on the weekly schedule.
+
+    Only accounts that ALREADY have a map. A first harvest stays a deliberate
+    act — it is the moment somebody decides this account is being worked on,
+    and starting one automatically would spend a client's Semrush quota on a
+    map nobody asked for.
+    """
+    from . import systems, tenants
+    out: dict[str, dict] = {}
+    for t in tenants.all_tenants():
+        if not systems.find(t.key, "blog"):
+            continue
+        if not harvest_due(t.key):
+            out[t.key] = {"skipped": "topped up within the last "
+                                     f"{HARVEST_EVERY_DAYS} days"}
+            continue
+        try:
+            out[t.key] = harvest(t.key, limit=limit)
+        except Exception as exc:  # noqa: BLE001 — one account must not stop the rest
+            out[t.key] = {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+    return out
 
 
 def sync_all(*, days: int = 28) -> dict:
@@ -1033,3 +1090,132 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
 def readiness_all(*, probe: bool = True) -> dict:
     from . import tenants
     return {t.key: readiness(t.key, probe=probe) for t in tenants.all_tenants()}
+
+
+# ---------------------------------------------------------------------------
+# The answer-engine half — and the line between measured and inferred
+# ---------------------------------------------------------------------------
+#
+# This initiative PRODUCES for answer engines: answer-first opening paragraphs,
+# H3 questions taken from what people actually searched, FAQPage JSON-LD. Until
+# now it MEASURED only classic search — positions and clicks from Search
+# Console — which meant the AEO half of the work had no evidence either way.
+#
+# What can honestly be measured from the data we hold:
+#
+#   * whether the questions people ask have been ANSWERED at all, which is the
+#     coverage half and is entirely ours to know;
+#   * whether question-shaped queries are gaining surface, which is Search
+#     Console reporting its own numbers;
+#   * where a page ranks well and is NOT being clicked, which is the signature
+#     of an answer being taken above the result.
+#
+# What CANNOT, and is therefore not claimed: whether a given AI assistant cites
+# this brand. That needs a retrieval-capable call per tracked question, and
+# `llm.call` has no web-search tool wired — asking a model from memory would
+# measure its training data, not its citations, and would be a fabricated
+# number wearing a metric's clothes. `KeywordReading.source` is a free string,
+# so `source="ai"` rows drop straight in the day a real check exists.
+
+#: A page ranking here should be getting clicks. Below this position the
+#: click-through question is about relevance, not about an answer being taken.
+ANSWER_TAKEN_MAX_POSITION = 10.0
+
+#: How far under its band's median CTR a keyword must sit before it is worth
+#: naming. Half is deliberately blunt: this is a flag for a human to look at,
+#: not a measurement, and a tighter threshold would imply a precision the
+#: signal does not have.
+ANSWER_TAKEN_CTR_RATIO = 0.5
+
+#: A median of two numbers is not a baseline. Below this a band says so rather
+#: than comparing against noise.
+ANSWER_TAKEN_MIN_BAND = 5
+
+
+def _median(values: list) -> float:
+    if not values:
+        return 0.0
+    v = sorted(values)
+    mid = len(v) // 2
+    return v[mid] if len(v) % 2 else (v[mid - 1] + v[mid]) / 2
+
+
+def aeo(tenant: str, *, days: int = 28) -> dict:
+    """How the answer-engine work is doing, and what this cannot see.
+
+    THE BASELINE IS THIS ACCOUNT'S OWN KEYWORDS, not a published CTR curve.
+    Every such curve is somebody else's sample of somebody else's SERPs, and
+    importing one would put an invented number at the centre of the finding.
+    Comparing a keyword to the median of our own keywords at similar positions
+    needs no outside assumption and answers the actual question: is this page
+    being clicked less than our pages that rank where it ranks.
+    """
+    now, then = _period_readings(tenant, days)
+    rows = targets(tenant)
+    tracked = {r.phrase: r for r in rows if r.status in ("published", "won")}
+
+    # --- coverage: have we answered the questions people ask ---------------
+    questions = [r for r in rows if is_question(r.phrase)]
+    answered = [r for r in questions if r.status in ("published", "won")]
+    coverage = {
+        "questions_in_map": len(questions),
+        "answered": len(answered),
+        "unanswered": len(questions) - len(answered),
+        "planned": len([r for r in questions if r.status == "planned"])}
+
+    # --- surface: are question-shaped queries gaining -----------------------
+    def _tot(d: dict, only_questions: bool) -> dict:
+        picked = [v for k, v in d.items()
+                  if k in tracked and is_question(k) == only_questions]
+        return _totals(picked)
+    q_now, q_then = _tot(now, True), _tot(then, True)
+    surface = {"now": q_now, "then": q_then, "change": _delta(q_now, q_then)}
+
+    # --- the answer-taken flag ---------------------------------------------
+    bands: dict[str, list] = {"1-3": [], "4-10": []}
+    for phrase, r in now.items():
+        if phrase not in tracked or r.position is None or not r.impressions:
+            continue
+        if r.position <= 3:
+            bands["1-3"].append(r)
+        elif r.position <= ANSWER_TAKEN_MAX_POSITION:
+            bands["4-10"].append(r)
+
+    flagged, band_notes = [], {}
+    for band, members in bands.items():
+        if len(members) < ANSWER_TAKEN_MIN_BAND:
+            band_notes[band] = (f"only {len(members)} keyword(s) here — too few "
+                                f"to have a median worth comparing against")
+            continue
+        med = _median([m.ctr or 0.0 for m in members])
+        band_notes[band] = f"{len(members)} keyword(s), median CTR {med:.1f}%"
+        if med <= 0:
+            continue
+        for m in members:
+            if (m.ctr or 0.0) < med * ANSWER_TAKEN_CTR_RATIO:
+                flagged.append({
+                    "phrase": m.phrase, "position": m.position,
+                    "ctr": m.ctr, "band_median_ctr": round(med, 1),
+                    "impressions": m.impressions, "clicks": m.clicks,
+                    "is_question": is_question(m.phrase)})
+    flagged.sort(key=lambda f: -(f["impressions"] or 0))
+
+    return {
+        "tenant": tenant, "window_days": days,
+        "coverage": coverage,
+        "question_surface": surface,
+        "answer_taken": {
+            "flagged": flagged[:25],
+            "bands": band_notes,
+            "means": ("ranking well and not being clicked — consistent with an "
+                      "answer engine or a featured snippet taking the answer "
+                      "above the result. It is a FLAG to look at, not a "
+                      "measurement: a dull title or a mismatched intent look "
+                      "the same from here.")},
+        "not_measured": (
+            "Whether any AI assistant cites this brand. That needs a "
+            "retrieval-capable call per tracked question; asking a model from "
+            "memory would measure its training data, not its citations. "
+            "`KeywordReading` already takes source='ai' rows the day a real "
+            "check exists."),
+    }

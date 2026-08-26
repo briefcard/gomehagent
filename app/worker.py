@@ -1097,6 +1097,12 @@ def main() -> None:
     from . import keywords
     sched.add_job(_safe(keywords.sync_all, "keyword sync"), "cron",
                   hour=config.SWEEP_HOUR, minute=5)
+    # The map itself, weekly. Positions move nightly and the competitive
+    # landscape does not — and a harvest spends Semrush calls per account, so
+    # running it on the reading schedule would be a bill for no new answer.
+    # Monday, before the week's writing is planned.
+    sched.add_job(_safe(keywords.harvest_all, "keyword map top-up"), "cron",
+                  day_of_week="mon", hour=config.SWEEP_HOUR, minute=25)
     # Weekly and overnight: a full site crawl is the expensive kind of job, a
     # site's copy does not change hourly, and a violations queue that grows
     # every morning stops being read. After the first pass it only walks what
