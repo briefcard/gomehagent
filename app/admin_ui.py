@@ -5518,6 +5518,40 @@ def _board_section(key: str, tenant: str, days: int) -> str:
                   f'<tr><th>keyword</th><th>tier</th><th>volume</th>'
                   f'<th>priority</th></tr>{fresh}</table>' if fresh else "")
 
+    # --- the ruled-out, folded away, with what they add up to -------------
+    les = b.get("lessons") or {}
+    proposals = ""
+    for group, icon in (("terms", "→"), ("sources", "→"), ("clusters", "→")):
+        for item in les.get(group) or []:
+            proposals += f'<li>{icon} {_esc(item["proposal"])}</li>'
+    muted_rows = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td><td>{_tier(r["tier"])}</td>'
+        f'<td class="num">{r["volume"] or "—"}</td>'
+        f'<td>{_esc(r["cluster"])}</td>'
+        f'<td>{_say(r["phrase"], "muted")}</td></tr>'
+        for r in b.get("muted") or [])
+    muted_html = ""
+    if muted_rows:
+        muted_html = f"""
+        <details><summary>Muted — {len(b["muted"])} keyword(s) you ruled out
+        </summary>
+          <table class="tbl">
+            <tr><th>keyword</th><th>tier</th><th>volume</th><th>cluster</th>
+                <th></th></tr>
+            {muted_rows}
+          </table>
+          <p class="when">Out of Writing next and Opportunities entirely —
+          a decision already made should not be re-presented every week — and
+          the planner never proposes one. Clear it here to bring it back.</p>
+          """ + (f"""<h4>What these have in common</h4>
+          <ul>{proposals}</ul>
+          <p class="when">Proposals, not actions. An exclude term added
+          silently would shrink every future harvest with no way to find out
+          why a keyword stopped appearing.</p>"""
+                 if proposals else
+                 f'<p class="when">{_esc(les.get("note") or "nothing they share yet")}</p>') + """
+        </details>"""
+
     counts = " · ".join(f"{n} {s}" for s, n in sorted(b["counts"].items()))
     return f"""
     <h3>Writing next <span class="when">{_esc(counts)}</span></h3>
@@ -5559,7 +5593,9 @@ def _board_section(key: str, tenant: str, days: int) -> str:
       {flight}
     </table>
     <p class="when">The join between the plan and what was actually written.
-    A draft with no live page is one waiting on approval or on a CMS.</p>"""
+    A draft with no live page is one waiting on approval or on a CMS.</p>
+
+    {muted_html}"""
 
 
 def _progress_section(key: str, tenant: str, days: int) -> str:

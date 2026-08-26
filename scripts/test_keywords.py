@@ -300,6 +300,58 @@ def main() -> int:
        "the owner has to make again every week is how a queue stops being "
        "worked")
 
+    print("\n— a mute is filed away, and read once there are enough —")
+    # Owner, 2026-08-26: *"how can we learn from muted/removed keywords? or
+    # just make sure they are filed away somewhere else not distracting"*.
+    # Both. Sorting a ruled-out keyword last still put it on the page, so a
+    # decision already made was re-presented every week — the thing a mute was
+    # supposed to stop.
+    org("venue2", "Miami Ironside", "miamiironside.com", "local_venue")
+    for ph in ("wedding venue miami", "wedding photographer miami",
+               "wedding catering miami", "corporate event venue",
+               "industrial event space"):
+        keywords.upsert("venue2", ph, volume=500, source="semrush_related")
+    keywords.cluster("venue2")
+    keywords.score("venue2")
+    for ph in ("wedding venue miami", "wedding photographer miami",
+               "wedding catering miami"):
+        keywords.set_priority("venue2", ph, "muted")
+    bd = keywords.board("venue2")
+
+    ck("muted keywords are OUT of writing next, not last in it",
+       not any("wedding" in r["phrase"] for r in bd["writing_next"]),
+       str([r["phrase"] for r in bd["writing_next"]]))
+    ck("and out of opportunities",
+       not any("wedding" in r["phrase"]
+               for v in bd["opportunities"].values() for r in v))
+    ck("but kept, with a way back", len(bd["muted"]) == 3)
+
+    les = bd["lessons"]
+    ck("three sharing a word is read as a pattern", les["enough_to_read"])
+    ck("and the word is proposed as an exclude term",
+       [t["term"] for t in les["terms"]] == ["wedding"],
+       str([t["term"] for t in les["terms"]]))
+    ck("the brand's OWN words are never proposed as negatives",
+       "miami" not in [t["term"] for t in les["terms"]],
+       "three muted 'wedding … miami' phrases proposed excluding 'miami' for "
+       "MIAMI Ironside — its own city, in its name and its domain. A brand "
+       "cannot be negative about itself")
+    ck("a noisy harvester is named",
+       any("semrush_related" in s["source"] for s in les["sources"]),
+       str(les["sources"])[:80])
+    ck("nothing was actually changed",
+       "proposal" in (les["terms"][0] if les["terms"] else {}),
+       "an exclude term added silently would shrink every future harvest with "
+       "no way to find out why a keyword stopped appearing")
+
+    org("venue3", "Quiet Co", "quiet.example", "local_venue")
+    keywords.upsert("venue3", "one thing", volume=100)
+    keywords.set_priority("venue3", "one thing", "muted")
+    ck("under the threshold it refuses to infer",
+       keywords.mute_lessons("venue3")["enough_to_read"] is False
+       and "coincidence" in keywords.mute_lessons("venue3")["note"],
+       "two keywords sharing a word says the alphabet is small")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

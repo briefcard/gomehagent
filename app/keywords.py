@@ -1409,7 +1409,13 @@ def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
                 "output_id": r.output_id, **(extra or {})}
 
     # --- what to write next, and the arithmetic behind the order ----------
-    writing_next = [_row(r) for r in rows if r.status == "candidate"][:top]
+    #
+    # MUTED IS EXCLUDED, not sorted last. Ranking a ruled-out keyword bottom
+    # still puts it on the page, so a decision already made is re-presented
+    # every week — which is the thing a mute was supposed to stop. It has its
+    # own section, with the count and a way back.
+    live = [r for r in rows if (r.owner_priority or "") != "muted"]
+    writing_next = [_row(r) for r in live if r.status == "candidate"][:top]
 
     # --- what changed since last week -------------------------------------
     moved_up, moved_down, entered = [], [], []
@@ -1439,7 +1445,7 @@ def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
 
     # --- the unclaimed backlog, by tier -----------------------------------
     opportunities: dict[str, list] = {}
-    for r in rows:
+    for r in live:
         if r.status != "candidate":
             continue
         opportunities.setdefault(r.tier or "?", []).append(_row(r))
@@ -1469,4 +1475,119 @@ def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
         "new_this_week": fresh[:top],
         "opportunities": opportunities,
         "in_flight": in_flight,
+        "muted": [_row(r) for r in rows
+                  if (r.owner_priority or "") == "muted"],
+        "lessons": mute_lessons(tenant),
     }
+
+
+# ---------------------------------------------------------------------------
+# What a mute is worth — filed away, and read once there are enough of them
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-08-26: *"how can we learn from muted/removed keywords? or just
+# make sure they are filed away somewhere else not distracting"*. Both, and
+# the second one first: a muted keyword sorted LAST but still appeared in
+# Writing next and Opportunities, so a decision already made was re-presented
+# every week. That is the thing a mute was supposed to stop.
+#
+# The learning half is a proposal, never an action. One mute is a preference;
+# a dozen sharing a word is a pattern, and the word is a candidate for
+# `exclude_terms` — which `semrush_opportunity_finder` already accepts, so the
+# harvest can stop surfacing it at the source rather than the owner muting the
+# same family of phrase every Monday.
+
+#: Below this, a shared word is a coincidence. Three keywords sharing "wedding"
+#: on a venue account says something; two says the alphabet is small.
+MUTE_PATTERN_MIN = 3
+
+
+def muted(tenant: str) -> list:
+    """Everything the owner has ruled out, newest decision first."""
+    return [r for r in targets(tenant) if (r.owner_priority or "") == "muted"]
+
+
+def mute_lessons(tenant: str) -> dict:
+    """What the mutes have in common — as proposals for a person to accept.
+
+    Three questions, and each has a different remedy:
+
+      a shared WORD      -> an exclude term, so the harvest stops finding that
+                            family at all;
+      a shared SOURCE    -> that harvester is producing noise for this account;
+      a shared CLUSTER   -> the cluster itself is off-topic, and the pillar is
+                            probably the mistake rather than its supports.
+
+    Nothing here changes anything. An `exclude_terms` entry silently added
+    from a pattern would quietly shrink every future harvest, and the owner
+    would have no way to know why a keyword stopped appearing.
+    """
+    rows = muted(tenant)
+    out: dict = {"muted": len(rows), "enough_to_read": len(rows) >= MUTE_PATTERN_MIN,
+                 "terms": [], "sources": [], "clusters": []}
+    if not out["enough_to_read"]:
+        out["note"] = (f"{len(rows)} muted — under {MUTE_PATTERN_MIN} a shared "
+                       f"word is a coincidence, not a pattern.")
+        return out
+
+    already = set()
+    try:
+        from . import sites
+        already = {t.lower() for t in (sites.get(tenant).get("exclude_terms") or [])}
+    except Exception:                                            # noqa: BLE001
+        pass
+
+    # NEVER THE BRAND'S OWN WORDS. Three muted "wedding … miami" phrases for
+    # Miami Ironside proposed excluding "miami" — the account's own city, in
+    # its name and its domain. An exclude term is a negative keyword, and a
+    # brand cannot be negative about itself.
+    brand = brand_tokens_for(tenant)
+
+    word_hits: dict[str, list] = {}
+    for r in rows:
+        for w in set(tokens(r.phrase)):
+            word_hits.setdefault(w, []).append(r.phrase)
+    for w, hits in sorted(word_hits.items(), key=lambda kv: -len(kv[1])):
+        if len(hits) < MUTE_PATTERN_MIN or w in already or w in brand:
+            continue
+        # A word that ALSO appears in what we are actively writing is not a
+        # negative keyword, it is a common noun. "jug" would otherwise be
+        # excluded off the back of three muted jug phrases.
+        live = [r.phrase for r in targets(tenant)
+                if (r.owner_priority or "") != "muted" and w in tokens(r.phrase)]
+        if live:
+            continue
+        out["terms"].append({"term": w, "muted_with_it": hits[:6],
+                             "proposal": f"add {w!r} to this account's "
+                                         f"exclude_terms so the harvest stops "
+                                         f"surfacing it"})
+
+    src: dict[str, int] = {}
+    for r in rows:
+        if r.source:
+            src[r.source] = src.get(r.source, 0) + 1
+    total_by_src: dict[str, int] = {}
+    for r in targets(tenant):
+        if r.source:
+            total_by_src[r.source] = total_by_src.get(r.source, 0) + 1
+    for s, n in sorted(src.items(), key=lambda kv: -kv[1]):
+        whole = total_by_src.get(s, n)
+        if n >= MUTE_PATTERN_MIN and whole and n / whole >= 0.5:
+            out["sources"].append({
+                "source": s, "muted": n, "found": whole,
+                "proposal": f"{n} of {whole} keywords from {s} were muted — "
+                            f"that harvester is mostly noise for this account"})
+
+    clus: dict[str, int] = {}
+    for r in rows:
+        if r.cluster_key:
+            clus[r.cluster_key] = clus.get(r.cluster_key, 0) + 1
+    for c, n in sorted(clus.items(), key=lambda kv: -kv[1]):
+        members = [r for r in targets(tenant) if r.cluster_key == c]
+        if n >= MUTE_PATTERN_MIN and members and n / len(members) >= 0.5:
+            pillar = next((r.phrase for r in members if r.role == "pillar"), c)
+            out["clusters"].append({
+                "cluster": c, "muted": n, "of": len(members),
+                "proposal": f"most of the {c!r} cluster is muted — the pillar "
+                            f"{pillar!r} is likely the mistake, not its supports"})
+    return out
