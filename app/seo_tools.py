@@ -35,19 +35,57 @@ _GOOGLE_TOOLS = {"gsc_top_queries", "gsc_top_pages", "gsc_page_queries", "gsc_tr
 # ---------------------------------------------------------------------------
 # Semrush client (platform-agnostic research)
 # ---------------------------------------------------------------------------
-def _semrush(report: str, **params) -> list[dict] | str:
+#: Which account a Semrush call is being made FOR. Passed explicitly, never
+#: ambient: one API key serves every client, so a call that cannot say whose
+#: work it was is a unit of a shared quota nobody can budget.
+def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
+    """One Semrush read, recorded against the account that asked for it.
+
+    SEMRUSH IS READ-ONLY AND CANNOT POLLUTE THE SEMRUSH ACCOUNT. This is a GET
+    against their index; Projects, Position Tracking and Site Audit are a
+    separate surface with separate limits that nothing here touches.
+
+    What IS shared is the QUOTA, and until this was instrumented nothing could
+    say which client spent it. Every other platform reaches its API through
+    `toolcalls.http_seam` and lands in the ledger with an account attached —
+    `seo_tools` imported `toolcalls` nowhere, so Semrush was the one provider
+    absent from Diagnostics entirely: no call count, no failure rate, and a
+    dying key would have shown up as thin harvests rather than as an error.
+
+    `http_seam` does not fit here — its `tenant_of` maps the seam's first
+    argument to an account, and this one's is a report type — so the plain
+    recorder is used instead.
+    """
+    import time as _clock
+    from . import toolcalls as _tc
+
     if not config.SEMRUSH_API_KEY:
         return "Semrush is not configured (set SEMRUSH_API_KEY in the environment)."
     query = {"type": report, "key": config.SEMRUSH_API_KEY, **params}
+    _t0 = _clock.monotonic()
+
+    def _log(ok: bool, err: str = "", body: str = "") -> None:
+        _tc.record(_tenant, f"semrush_{report}", source="seo",
+                   provider="semrush", ok=ok, error=err,
+                   ms=int((_clock.monotonic() - _t0) * 1000),
+                   bytes_back=len(body or ""))
+
     try:
         r = httpx.get(SEMRUSH_BASE, params=query, timeout=30)
     except Exception as exc:  # noqa: BLE001
+        _log(False, f"{exc.__class__.__name__}")
         return f"Semrush request failed ({exc.__class__.__name__})."
     body = r.text.strip()
     if body.startswith("ERROR") or r.status_code != 200:
         if "NOTHING FOUND" in body.upper():
+            # A real answer, not a failure: the index holds nothing for this
+            # phrase. Recorded as OK so a quiet niche does not read as a
+            # broken key on the Diagnostics failure rate.
+            _log(True, body=body)
             return "No Semrush data for that query."
+        _log(False, body[:160], body)
         return f"Semrush error: {body[:160]}"
+    _log(True, body=body)
     lines = body.splitlines()
     if len(lines) < 2:
         return "No Semrush data for that query."
@@ -67,8 +105,8 @@ def _f(v: str) -> float:
         return 0.0
 
 
-def semrush_domain_overview(domain: str = "", database: str = "") -> str:
-    rows = _semrush("domain_rank", domain=domain or config.SEO_DOMAIN,
+def semrush_domain_overview(domain: str = "", database: str = "", _tenant: str = "") -> str:
+    rows = _semrush("domain_rank", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
                     database=database or config.SEO_DATABASE)
     if isinstance(rows, str):
         return rows
@@ -76,8 +114,9 @@ def semrush_domain_overview(domain: str = "", database: str = "") -> str:
 
 
 def semrush_top_keywords(domain: str = "", database: str = "",
-                         limit: int = 30, sort: str = "tr_desc") -> str:
-    rows = _semrush("domain_organic", domain=domain or config.SEO_DOMAIN,
+                         limit: int = 30, sort: str = "tr_desc",
+                         _tenant: str = "") -> str:
+    rows = _semrush("domain_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
                     database=database or config.SEO_DATABASE,
                     display_limit=min(int(limit or 30), 100), display_sort=sort)
     if isinstance(rows, str):
@@ -88,8 +127,8 @@ def semrush_top_keywords(domain: str = "", database: str = "",
     return json.dumps(slim)
 
 
-def semrush_competitors(domain: str = "", database: str = "", limit: int = 15) -> str:
-    rows = _semrush("domain_organic_organic", domain=domain or config.SEO_DOMAIN,
+def semrush_competitors(domain: str = "", database: str = "", limit: int = 15, _tenant: str = "") -> str:
+    rows = _semrush("domain_organic_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
                     database=database or config.SEO_DATABASE,
                     display_limit=min(int(limit or 15), 50))
     if isinstance(rows, str):
@@ -101,8 +140,8 @@ def semrush_competitors(domain: str = "", database: str = "", limit: int = 15) -
     return json.dumps(slim)
 
 
-def semrush_keyword_metrics(phrases: str, database: str = "") -> str:
-    rows = _semrush("phrase_these", phrase=phrases,
+def semrush_keyword_metrics(phrases: str, database: str = "", _tenant: str = "") -> str:
+    rows = _semrush("phrase_these", _tenant=_tenant, phrase=phrases,
                     database=database or config.SEO_DATABASE)
     if isinstance(rows, str):
         return rows
@@ -112,8 +151,8 @@ def semrush_keyword_metrics(phrases: str, database: str = "") -> str:
     return json.dumps(slim)
 
 
-def semrush_related_keywords(phrase: str, database: str = "", limit: int = 30) -> str:
-    rows = _semrush("phrase_related", phrase=phrase,
+def semrush_related_keywords(phrase: str, database: str = "", limit: int = 30, _tenant: str = "") -> str:
+    rows = _semrush("phrase_related", _tenant=_tenant, phrase=phrase,
                     database=database or config.SEO_DATABASE,
                     display_limit=min(int(limit or 30), 60), display_sort="nq_desc")
     if isinstance(rows, str):
@@ -123,8 +162,8 @@ def semrush_related_keywords(phrase: str, database: str = "", limit: int = 30) -
     return json.dumps(slim)
 
 
-def semrush_questions(phrase: str, database: str = "", limit: int = 30) -> str:
-    rows = _semrush("phrase_questions", phrase=phrase,
+def semrush_questions(phrase: str, database: str = "", limit: int = 30, _tenant: str = "") -> str:
+    rows = _semrush("phrase_questions", _tenant=_tenant, phrase=phrase,
                     database=database or config.SEO_DATABASE,
                     display_limit=min(int(limit or 30), 60), display_sort="nq_desc")
     if isinstance(rows, str):
@@ -137,10 +176,11 @@ def semrush_questions(phrase: str, database: str = "", limit: int = 30) -> str:
 def semrush_opportunity_finder(domain: str = "", database: str = "",
                                min_volume: int = 50, min_pos: int = 11,
                                max_pos: int = 30, limit: int = 20,
-                               exclude_terms: list | None = None) -> str:
+                               exclude_terms: list | None = None,
+                               _tenant: str = "") -> str:
     """Keywords where the domain ALREADY ranks page 2-3 with real volume — quick
     wins. exclude_terms (per-site brand guardrail) are never recommended."""
-    rows = _semrush("domain_organic", domain=domain or config.SEO_DOMAIN,
+    rows = _semrush("domain_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
                     database=database or config.SEO_DATABASE,
                     display_limit=200, display_sort="nq_desc")
     if isinstance(rows, str):
@@ -170,14 +210,15 @@ def semrush_opportunity_finder(domain: str = "", database: str = "",
     return json.dumps(result)
 
 
-def capture_snapshot(domain: str = "", database: str = "") -> str:
+def capture_snapshot(domain: str = "", database: str = "",
+                     _tenant: str = "") -> str:
     domain = domain or config.SEO_DOMAIN
     database = database or config.SEO_DATABASE
-    ov = _semrush("domain_rank", domain=domain, database=database)
+    ov = _semrush("domain_rank", _tenant=_tenant, domain=domain, database=database)
     if isinstance(ov, str):
         return ov
     o = ov[0] if ov else {}
-    kw = _semrush("domain_organic", domain=domain, database=database,
+    kw = _semrush("domain_organic", _tenant=_tenant, domain=domain, database=database,
                   display_limit=50, display_sort="tr_desc")
     top = []
     if isinstance(kw, list):
@@ -779,6 +820,14 @@ def dispatch(name: str, args: dict, session_files: dict) -> str:
             args["database"] = profile["database"]
         if name == "semrush_opportunity_finder":
             args["exclude_terms"] = profile["exclude_terms"]
+        # WHOSE work this call is. Injected here, where the profile is already
+        # resolved, and never taken from the model: `_tenant` is deliberately
+        # absent from every schema in `TOOLS`, so the agent cannot name an
+        # account to bill — the same rule `tool_scope.SCOPED` enforces for the
+        # account parameter itself.
+        if name.startswith("semrush_") or name in ("seo_snapshot",):
+            from . import seo_guard
+            args["_tenant"] = seo_guard.tenant_for(profile)
         return _HANDLERS[name](**args)[:8000]
     except sites.UnknownSite as exc:
         # A refusal, not a crash. The generic arm below would render this as

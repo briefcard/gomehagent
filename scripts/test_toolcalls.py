@@ -220,6 +220,58 @@ def main() -> int:
         wordpress_seo._cfg = real_cfg
         httpx.get = real_get
 
+    # --- Semrush: one key, five accounts, and until now no way to tell --
+    #
+    # Every other platform reaches its API through `http_seam` and lands here
+    # with an account attached. `seo_tools` imported `toolcalls` NOWHERE, so
+    # Semrush — the one provider whose quota is genuinely shared across every
+    # client — was absent from Diagnostics entirely. "Which account spent the
+    # units" was unanswerable, and a dying key would have looked like thin
+    # harvests rather than an error.
+    print("\n— every Semrush round trip names the account it was for —")
+    from app import config as _cfg, seo_tools as _st
+    _cfg.SEMRUSH_API_KEY = "fake-key"
+    _real = _st.httpx.get
+
+    class _R:
+        def __init__(self, t):
+            self.text, self.status_code = t, 200
+    try:
+        _st.httpx.get = lambda *a, **k: _R("Keyword;Search Volume\njug;5000")
+        _st._semrush("phrase_related", _tenant="baci", phrase="jug")
+        _st.httpx.get = lambda *a, **k: _R("ERROR 50 :: NOTHING FOUND")
+        _st._semrush("phrase_questions", _tenant="eien", phrase="zzz")
+
+        def _boom(*a, **k):
+            raise TimeoutError("slow")
+        _st.httpx.get = _boom
+        _st._semrush("domain_organic", _tenant="baci", domain="x")
+    finally:
+        _st.httpx.get = _real
+
+    # NOT `rows` — this suite already has a `rows()` helper, and binding the
+    # name here makes Python treat every earlier call to it as a local read.
+    with db.SessionLocal() as s:
+        sem = [r for r in s.query(db.ToolCall).all() if r.provider == "semrush"]
+    by = {(r.tenant, r.tool): r.ok for r in sem}
+    ck("a successful read is filed against the account that asked",
+       by.get(("baci", "semrush_phrase_related")) == "yes", str(by))
+    ck("another account's call is filed against THAT account",
+       by.get(("eien", "semrush_phrase_questions")) == "yes",
+       "one key, five clients — an unattributed unit is a shared quota "
+       "nobody can budget")
+    ck("'nothing found' is an ANSWER, not a failure",
+       by.get(("eien", "semrush_phrase_questions")) == "yes",
+       "a quiet niche must not read as a broken key on the failure rate")
+    ck("a timeout IS a failure", by.get(("baci", "semrush_domain_organic")) == "no")
+    ck("and it carries the provider, so Diagnostics can group it",
+       all(r.provider == "semrush" for r in sem) and len(sem) == 3, str(len(sem)))
+    ck("the account is never something the model can name",
+       not any("_tenant" in str(t.get("input_schema", {}))
+               for t in _st.TOOLS),
+       "`_tenant` is absent from every schema — the agent cannot pick whose "
+       "quota to spend, the same rule tool_scope enforces for accounts")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + "; ".join(_fail))

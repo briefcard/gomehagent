@@ -162,6 +162,23 @@ def main() -> int:
        "publishing and measuring fail independently; a single green light "
        "would hide whichever one is broken")
 
+    print("\n— which MARKET the research came from —")
+    r = keywords.readiness("good", probe=False)["knows_what_to_write"]
+    ck("the market is reported, not assumed silently", r.get("market") == "us",
+       str(r.get("market")))
+    ck("and an account that never chose one is told",
+       any("market not set" in f for f in r["fix"]),
+       "the default stays — it is right for most of these accounts — but a "
+       "US default on a UK client pulls US volumes, competitors and questions "
+       "into their map: wrong data, correctly filed, invisible")
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "good").analytics = {"semrush_db": "uk"}
+        s.commit()
+    r2 = keywords.readiness("good", probe=False)["knows_what_to_write"]
+    ck("declaring one silences the warning",
+       not any("market not set" in f for f in r2["fix"]), str(r2["fix"]))
+    ck("and the declared market is what gets used", r2["market"] == "uk", r2["market"])
+
     print("\n— which client's Search Console property, exactly —")
     # LOAD-BEARING under the shared-identity model the owner chose (2026-08-25):
     # one Google account granted viewer access on several clients' properties,

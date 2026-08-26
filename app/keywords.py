@@ -503,25 +503,28 @@ def _fetch_gsc(profile: dict, days: int, limit: int) -> list[dict]:
 
 
 def _fetch_related(profile: dict, phrase: str, limit: int) -> list[dict]:
-    from . import seo_tools
+    from . import seo_guard, seo_tools
     return _json_rows(seo_tools.semrush_related_keywords(
-        phrase, database=profile.get("database", ""), limit=limit))
+        phrase, database=profile.get("database", ""), limit=limit,
+        _tenant=seo_guard.tenant_for(profile)))
 
 
 def _fetch_questions(profile: dict, phrase: str, limit: int) -> list[dict]:
-    from . import seo_tools
+    from . import seo_guard, seo_tools
     return _json_rows(seo_tools.semrush_questions(
-        phrase, database=profile.get("database", ""), limit=limit))
+        phrase, database=profile.get("database", ""), limit=limit,
+        _tenant=seo_guard.tenant_for(profile)))
 
 
 def _fetch_gap(profile: dict, limit: int) -> list[dict]:
     """Where the site already ranks but not well — Semrush's own
     striking-distance report, which is the market's view of the same question
     `_fetch_gsc` answers from your own data."""
-    from . import seo_tools
+    from . import seo_guard, seo_tools
     return _json_rows(seo_tools.semrush_opportunity_finder(
         domain=profile.get("domain", ""), database=profile.get("database", ""),
-        limit=limit, exclude_terms=profile.get("exclude_terms") or []))
+        limit=limit, exclude_terms=profile.get("exclude_terms") or [],
+        _tenant=seo_guard.tenant_for(profile)))
 
 
 #: GSC positions worth harvesting as targets. Below 3 is won; past 40 the
@@ -1064,6 +1067,25 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
     if not banned:
         problems.append("no banned_claims — a ban list is constitutive for an "
                         "article, so the skill is gated on it")
+    # WHICH MARKET the research came from, said out loud. `database` falls
+    # back to `config.SEO_DATABASE` ("us"), so an account outside the US with
+    # nothing set gets US volumes, US competitors and US questions pulled into
+    # its map — wrong data, correctly filed, invisible. The default stays,
+    # because it is right for most of these accounts; what changes is that it
+    # is now a STATED assumption rather than a hidden one.
+    declared = ((t.analytics or {}).get("semrush_db") or "").strip()
+    try:
+        market = sites.get(tenant).get("database", "")
+    except Exception:                                            # noqa: BLE001
+        market = declared
+    know["market"] = market
+    if not declared:
+        problems.append(
+            f"market not set for this account — Semrush research is being "
+            f"pulled from '{market}'. Right for a US audience; wrong volumes, "
+            f"competitors and questions for anyone else. Set analytics."
+            f"semrush_db to change it.")
+
     know["ok"] = not problems
     know["fix"] = problems
     out["knows_what_to_write"] = know
