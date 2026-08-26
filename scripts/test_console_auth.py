@@ -233,6 +233,31 @@ def main() -> int:
        r.json().get("status") != "forbidden", str(r.json()))
     config.TELEGRAM_WEBHOOK_SECRET = ""
 
+    # --- the two pages that MUST be public ------------------------------
+    #
+    # Google fetches these anonymously while saving the OAuth consent screen,
+    # so a key on either one is not a hardening — it is a consent screen that
+    # will not save. They sit in the auth suite because "which routes are open"
+    # is exactly what this file is for.
+    import re as _re
+    print("\n— the policy pages Google has to be able to read —")
+    with TestClient(web.app) as c:
+        for path, must in (("/privacy", ("Limited Use requirements",
+                                         "api-services-user-data-policy",
+                                         "gmail.modify", "webmasters.readonly")),
+                           ("/terms", ("Your responsibilities",))):
+            r = c.get(path)
+            ck(f"{path} is reachable with NO key", r.status_code == 200,
+               f"got {r.status_code}")
+            flat = _re.sub(r"\s+", " ", r.text)
+            for phrase in must:
+                ck(f"  {path} states {phrase!r}", phrase in flat)
+        priv, terms = c.get("/privacy").text, c.get("/terms").text
+        ck("the privacy policy names a contact",
+           "mailto:" in priv and "@" in priv)
+        ck("each links to the other",
+           '"/terms"' in priv and '"/privacy"' in terms)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

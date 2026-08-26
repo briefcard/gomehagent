@@ -752,6 +752,165 @@ def health_blog(key: str = Depends(admin_key), tenant: str = "",
             "accounts": got}
 
 
+# ---------------------------------------------------------------------------
+# Public policy pages.
+#
+# Google will not save an OAuth consent screen carrying sensitive scopes
+# without a privacy policy and terms URL it can fetch, and both have to sit on
+# a domain the developer controls. Serving them from the app itself means the
+# URL cannot rot separately from the thing it describes — a policy on a
+# marketing site drifts from the software the first time a scope changes.
+#
+# THE CONTENT IS DESCRIPTIVE, NOT ASPIRATIONAL. Every claim below was checked
+# against the code: the scopes are `oauth.FLOWS["google"]["scopes"]`, the
+# encryption is `credentials._fernet`, the isolation is what
+# `test_tenant_isolation` walks the schema to enforce. A policy that promises
+# more than the software does is worse than none, because it is the version a
+# regulator reads.
+# ---------------------------------------------------------------------------
+
+_POLICY_CSS = """
+ body{font:16px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+ max-width:44rem;margin:0 auto;padding:3rem 1.25rem 6rem;color:#1a1a1a;
+ background:#fff}
+ h1{font-size:1.7rem;margin:0 0 .25rem} h2{font-size:1.1rem;margin:2.2rem 0 .5rem}
+ .sub{color:#666;margin:0 0 2rem} li{margin:.3rem 0} code{background:#f4f4f5;
+ padding:.1rem .3rem;border-radius:3px;font-size:.9em}
+ a{color:#0b57d0} .box{background:#f8f8f9;border-left:3px solid #ccc;
+ padding:.8rem 1rem;margin:1.5rem 0;font-size:.94rem}
+ @media(prefers-color-scheme:dark){body{background:#151517;color:#e8e8ea}
+ code{background:#26262a}.box{background:#1e1e21;border-color:#444}a{color:#8ab4f8}}
+"""
+
+
+def _policy_page(title: str, body: str) -> str:
+    return (f"<!doctype html><html lang=en><head><meta charset=utf-8>"
+            f"<meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<title>{title}</title><style>{_POLICY_CSS}</style></head>"
+            f"<body>{body}</body></html>")
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_policy() -> str:
+    """Privacy policy — the URL Google's consent screen points at."""
+    contact = config.APPROVER_EMAIL
+    return _policy_page("Privacy Policy", f"""
+<h1>Privacy Policy</h1>
+<p class=sub>Last updated 26 August 2026</p>
+
+<p>This application is an internal marketing-operations tool operated by
+MarketingThatWorks.co ("we", "us"). It is used by us and by businesses that
+have engaged us, to draft content, answer enquiries and report on marketing
+performance. It is not offered to the general public.</p>
+
+<h2>Google user data we access</h2>
+<p>When an account is connected through Google sign-in, we request only the
+following, and use each only as stated:</p>
+<ul>
+  <li><code>gmail.modify</code> — read messages in the connected mailbox, apply
+      labels, and create draft replies.</li>
+  <li><code>gmail.send</code> — send a reply that a human operator has
+      reviewed and approved. Nothing is sent without that approval.</li>
+  <li><code>drive</code> — read documents, and create, update or copy files in
+      order to file and organise them.</li>
+  <li><code>calendar</code> — read events, and create or update events for
+      scheduling.</li>
+  <li><code>webmasters.readonly</code> — read Search Console performance data
+      (queries, clicks, impressions, positions). Read-only.</li>
+  <li><code>analytics.readonly</code> — read Google Analytics traffic reports
+      and list the properties available. Read-only.</li>
+</ul>
+
+<h2>How we use it</h2>
+<p>Solely to provide the features above: drafting replies and content, filing
+documents, scheduling, and producing performance reports for the account the
+data belongs to. We do not use Google user data for advertising, and we do not
+sell it.</p>
+
+<h2>Limited Use</h2>
+<div class=box>Our use and transfer of information received from Google APIs
+adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy"
+   rel=noopener>Google API Services User Data Policy</a>, including the Limited
+Use requirements.</div>
+
+<h2>Storage, separation and security</h2>
+<ul>
+  <li>Data is stored in a private PostgreSQL database. Access credentials are
+      encrypted at rest.</li>
+  <li>Each connected account's data is stored separately and scoped to that
+      account. The system is built so that one account's content, credentials
+      and reporting cannot be read while operating on another.</li>
+  <li>Access is limited to the operator running the service. We do not read
+      message content except as needed to operate or support the service.</li>
+</ul>
+
+<h2>Sharing with service providers</h2>
+<p>To generate drafts and summaries, message and document content may be sent
+to third-party AI providers (Anthropic, and where enabled OpenAI) through their
+APIs. These providers process the content to return a result and do not use it
+to train their models. We also exchange data with platforms an account has
+connected — for example Shopify, Omnisend or Semrush — only for that account.
+We share Google user data with no one else, and never for advertising.</p>
+
+<h2>Retention and deletion</h2>
+<p>Data is retained while an account is active. You can disconnect at any time
+from your <a href="https://myaccount.google.com/permissions" rel=noopener>Google
+account permissions</a> page, which immediately revokes our access. To have
+stored data deleted, email <a href="mailto:{contact}">{contact}</a> and we will
+delete it within 30 days.</p>
+
+<h2>Contact</h2>
+<p><a href="mailto:{contact}">{contact}</a></p>
+<p class=sub><a href="/terms">Terms of Service</a></p>
+""")
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms_of_service() -> str:
+    """Terms of service — the other URL the consent screen requires."""
+    contact = config.APPROVER_EMAIL
+    return _policy_page("Terms of Service", f"""
+<h1>Terms of Service</h1>
+<p class=sub>Last updated 26 August 2026</p>
+
+<p>This application is operated by MarketingThatWorks.co. By connecting an
+account you agree to these terms.</p>
+
+<h2>What the service does</h2>
+<p>It drafts marketing content and replies, files documents, and reports on
+marketing performance, using data from the accounts you connect. Actions that
+send, publish or otherwise change something outside the service require a human
+approval before they take effect.</p>
+
+<h2>Your responsibilities</h2>
+<ul>
+  <li>Connect only accounts you are authorised to connect.</li>
+  <li>Review what the service drafts before approving it. Generated content can
+      be wrong, and approval is yours.</li>
+  <li>Keep access links and credentials confidential.</li>
+</ul>
+
+<h2>Availability and changes</h2>
+<p>The service is provided as-is, without warranty of availability or fitness
+for a particular purpose. We may change or discontinue features, and will give
+reasonable notice of changes that materially affect a connected account.</p>
+
+<h2>Liability</h2>
+<p>To the extent permitted by law, we are not liable for indirect or
+consequential loss arising from use of the service. Nothing here limits
+liability that cannot be limited by law.</p>
+
+<h2>Ending it</h2>
+<p>You may disconnect any account at any time; revoking access from your
+provider takes effect immediately. See the
+<a href="/privacy">Privacy Policy</a> for deletion of stored data.</p>
+
+<h2>Contact</h2>
+<p><a href="mailto:{contact}">{contact}</a></p>
+""")
+
+
 @app.get("/decide/{token}", response_class=HTMLResponse)
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
