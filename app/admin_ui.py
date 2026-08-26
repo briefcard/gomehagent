@@ -5774,6 +5774,13 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         fix = "; ".join(_lines(got.get("fix")) + _lines(got.get("notes")))
         detail = got.get("detail") or ("ready" if ok else "")
         extra = ""   # publish/measure controls now live with their lines
+        if part == "switch" and not ok and got.get("system_id"):
+            # ACT WHERE YOU REPORT, again. "turn it on to run" with no way to
+            # turn it on is an instruction, not a control.
+            extra = (f'<p><a href="/admin/system_set?key={_esc(key)}'
+                     f'&amp;id={_esc(got["system_id"])}&amp;status=live'
+                     f'&amp;tenant={_esc(tenant)}">'
+                     f'<button type="button">Turn it on</button></a></p>')
         chips += (
             f'<div class="card {"" if ok else "warn"}">'
             f'<div class="lbl">{"✓" if ok else ("?" if unknown else "!")} '

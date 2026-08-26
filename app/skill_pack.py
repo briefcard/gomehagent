@@ -2594,6 +2594,130 @@ register(Skill(
 # ---------------------------------------------------------------------------
 # blog_article — one article against one keyword
 # ---------------------------------------------------------------------------
+#: The MOVES an article can make. A vocabulary, deliberately — not a lookup
+#: from intent to format.
+#:
+#: The owner's objection to a lookup, 2026-08-26: *"the format should be
+#: dynamic right? Otherwise we will be generating a lot of the same articles
+#: for the same keywords. It will take many different angles and
+#: reader-driven content to rank sometimes."* He is right, and a table mapping
+#: "best X" to "comparison" would guarantee the failure: eight supports under
+#: one pillar would arrive as eight versions of the same page, competing with
+#: each other for the query they were all written to win.
+#:
+#: So intent NARROWS the set and history picks from what is left. `campaign_
+#: email` has done this since it was written — `_craft_brief` shows the model
+#: the shapes and openings of the last three sends and tells it to move away
+#: from them, which is the claims anti-repeat applied to form. Articles had
+#: none of it.
+ARTICLE_ANGLES: dict[str, dict] = {
+    "definitive": dict(
+        label="The definitive answer",
+        brief="Answer the query completely and plainly, better than anything "
+              "ranking for it. No hedging, no throat-clearing, no history of "
+              "the category before the answer.",
+        fits=("informational", "navigational")),
+    "comparison": dict(
+        label="A comparison that commits",
+        brief="Set the real options side by side on the criteria a buyer "
+              "actually weighs, and SAY which suits whom. A comparison that "
+              "refuses to conclude is a table, not an article.",
+        fits=("commercial", "transactional")),
+    "walkthrough": dict(
+        label="Do it with me",
+        brief="Numbered steps somebody can follow while holding the thing. "
+              "Each step is an action, not a consideration.",
+        fits=("informational",)),
+    "correction": dict(
+        label="What everyone gets wrong",
+        brief="Name the common belief, show why it fails, replace it. Only "
+              "where an approved claim genuinely contradicts received "
+              "wisdom — inventing a myth to knock down is the cheapest and "
+              "most obvious form of this and it reads as filler.",
+        fits=("informational", "commercial")),
+    "checklist": dict(
+        label="Before you buy",
+        brief="The short list of things worth checking, each with the reason "
+              "it matters. Scannable; a reader should be able to use it in a "
+              "shop without reading the prose.",
+        fits=("commercial", "transactional")),
+    "situational": dict(
+        label="For one specific occasion",
+        brief="One concrete situation — a table for six outdoors, a first "
+              "flat, a gift with an hour to spare — answered end to end. "
+              "Narrower than the query, which is what makes it worth reading.",
+        fits=("commercial", "transactional", "informational")),
+    "explainer": dict(
+        label="Why it is like that",
+        brief="The mechanism behind the thing: what makes it work, what the "
+              "trade-off is, why the obvious alternative is not used. Earns "
+              "the trust that a recommendation later spends.",
+        fits=("informational",)),
+}
+
+
+def _pick_angle(intent: str, recent: list, cluster: str = "") -> tuple[str, str]:
+    """Which move this article makes, given what has already been written.
+
+    Two filters and then rotation. Intent narrows the set — a "how to" query
+    is not answered with a comparison — and everything already used IN THIS
+    CLUSTER is removed, because a cluster is the one place where sameness is
+    guaranteed to be noticed: eight supports around one pillar, all written
+    to the same recipe, compete with each other.
+
+    Falls back through: unused-and-fitting, then unused-anywhere, then the
+    least recently used. Never refuses — an article with a repeated angle is
+    a worse article, not a false one, and this is not a gate.
+    """
+    fitting = [k for k, v in ARTICLE_ANGLES.items()
+               if not intent or intent in v["fits"]] or list(ARTICLE_ANGLES)
+    used_here = [r[0] for r in recent if r[1] == cluster and r[0]]
+    used_any = [r[0] for r in recent if r[0]]
+    for pool, why in ((
+            [k for k in fitting if k not in used_here],
+            f"fits {intent or 'the query'}, unused in this cluster"), (
+            [k for k in fitting if k not in used_any],
+            f"fits {intent or 'the query'}, unused anywhere yet"), (
+            fitting, "every fitting angle has been used — least recent")):
+        if pool:
+            if why.endswith("least recent"):
+                # LAST use, not first. `used_any` is newest-first, so a larger
+                # index is longer ago — and sorting ascending on the reversed
+                # list keyed off FIRST use, which meant the angle that opened
+                # the cluster won every round after the set was exhausted:
+                # five different articles, then "definitive" forever.
+                pool.sort(key=lambda k: used_any.index(k) if k in used_any
+                          else len(used_any), reverse=True)
+            return pool[0], why
+    return "definitive", "no angle fitted"
+
+
+def _recent_articles(tenant: str, limit: int = 12) -> list:
+    """(angle, cluster, opening) for the last few articles, newest first.
+
+    The cluster is JOINED from `KeywordTarget.output_id` rather than stored a
+    second time on `Output` — the keyword row already records which article
+    was written for it, and a second copy is a second thing to drift.
+    """
+    from . import db as _db, ledger as _lg
+    rows = _lg.recent(tenant, system_key="blog", limit=limit)
+    ids = [o.id for o in rows if o.id]
+    by_output: dict[str, str] = {}
+    if ids:
+        with _db.SessionLocal() as s:
+            for k in (s.query(_db.KeywordTarget)
+                      .filter(_db.KeywordTarget.tenant == tenant,
+                              _db.KeywordTarget.output_id.in_(ids)).all()):
+                by_output[k.output_id] = k.cluster_key or ""
+    out = []
+    for o in rows:
+        opening = re.sub(r"<[^>]+>", " ", o.body or "")
+        opening = re.sub(r"\s+", " ", opening).strip()[:90]
+        out.append(((o.angle or "").split(" ")[0],
+                    by_output.get(o.id, ""), opening))
+    return out
+
+
 _ARTICLE_SYSTEM = """You write articles that answer a search query better than
 anything already ranking for it, for a brand whose rules you are given.
 
@@ -2618,7 +2742,8 @@ No <script>, no <style>, no inline styles, no image tags."""
 
 
 def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
-                    questions: list, links: list, entity: dict | None) -> str:
+                    questions: list, links: list, entity: dict | None,
+                    avoid: list | None = None) -> str:
     parts = [bundle["rules"]["block"].strip(),
              f"\n## The query this must answer\n{keyword}"]
     parts.append(
@@ -2650,13 +2775,40 @@ def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
         for L in links[:6]:
             parts.append(f'- <a href="{L["url"]}">{L["anchor"]}</a>')
     if angle:
-        parts.append(f"\n## Angle\n{angle}")
+        spec = ARTICLE_ANGLES.get(angle)
+        if spec:
+            parts.append(f"\n## THE MOVE THIS ARTICLE MAKES: {spec['label']}")
+            parts.append(spec["brief"])
+        else:
+            parts.append(f"\n## Angle\n{angle}")
+    if avoid:
+        # Told once, a model will happily write the same article twice. Shown
+        # what it already published for this brand, it has something concrete
+        # to move away from — `campaign_email` has worked this way since it
+        # was written and articles had none of it.
+        parts.append("\n## DO NOT REPEAT THESE — they are already published")
+        for a, c, opening in avoid[:4]:
+            bits = []
+            if a:
+                bits.append(f"a '{a}' article")
+            if c:
+                bits.append(f"in the {c} cluster")
+            if opening:
+                bits.append(f"opening {opening!r}")
+            if bits:
+                parts.append("- " + " ".join(bits))
+        parts.append("Take a different approach and a different opening move "
+                     "from every one of those. Not a reworded version of the "
+                     "same page — a different page. Two articles in one "
+                     "cluster written to the same recipe compete with each "
+                     "other for the query they were both written to win.")
     return "\n".join(parts)
 
 
 def _draft_article_live(bundle: dict, keyword: str, role: str, angle: str,
                         questions: list, links: list,
-                        entity: dict | None) -> tuple[str, str]:
+                        entity: dict | None,
+                        avoid: list | None = None) -> tuple[str, str]:
     """One model call for one article. Returns `(html, why_not)`."""
     from . import config
     if not config.ANTHROPIC_API_KEY:
@@ -2668,7 +2820,8 @@ def _draft_article_live(bundle: dict, keyword: str, role: str, angle: str,
             model=config.CLAUDE_MODEL, max_tokens=3000,
             system=_ARTICLE_SYSTEM,
             messages=[{"role": "user", "content": _article_prompt(
-                bundle, keyword, role, angle, questions, links, entity)}])
+                bundle, keyword, role, angle, questions, links, entity,
+                avoid)}])
         try:
             from . import usage
             usage.log_usage("blog_article_draft", config.CLAUDE_MODEL, msg,
@@ -2760,8 +2913,17 @@ def _run_blog_article(ctx: Context) -> dict:
         entity = next((e for e in (ctx.bundle.get("entities") or [])
                        if e.get("key") == entity_key), None)
 
+    # WHICH MOVE, chosen against what has already been written. An explicit
+    # angle from the plan wins — the owner naming one is a decision, not a
+    # preference — and otherwise it rotates, avoiding what this cluster has
+    # already used. `why` is recorded so the choice can be read back.
+    avoid = _recent_articles(ctx.tenant)
+    angle_why = "set on the plan"
+    if not angle:
+        angle, angle_why = _pick_angle(
+            (row.intent if row is not None else "") or "", avoid, cluster_key)
     body, why_not = _draft_article_live(
-        ctx.bundle, keyword, role, angle, questions, links, entity)
+        ctx.bundle, keyword, role, angle, questions, links, entity, avoid)
     if not body:
         # NO COMPOSED FALLBACK, unlike `ad_copy`. A three-line ad assembled
         # from a claim is a usable placeholder; a template article is a thin
@@ -2777,7 +2939,8 @@ def _run_blog_article(ctx: Context) -> dict:
              entity_key=entity_key, angle=angle or f"{role} article",
              fmt="cms_article",
              meta={"keyword": keyword, "role": role, "cluster": cluster_key,
-                   "questions": questions, "internal_links": len(links)})
+                   "questions": questions, "internal_links": len(links),
+                   "angle_why": angle_why})
 
     # --- queue the publish, through the ONE path that queues articles ------
     #
@@ -2835,6 +2998,7 @@ def _run_blog_article(ctx: Context) -> dict:
                        + (f", {len(links)} internal link(s)" if links else "")
                        + (f". {publish['detail']}" if not publish["queued"] else ""),
             "keyword": keyword, "role": role, "cluster": cluster_key,
+            "angle": angle, "angle_why": angle_why,
             "questions": questions, "publish": publish,
             # Said on EVERY run, including the successful one. "Where is my
             # article" is the question this skill will be asked most often,

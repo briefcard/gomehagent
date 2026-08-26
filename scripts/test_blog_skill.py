@@ -155,7 +155,8 @@ def main() -> int:
     print("\n— with a model, the cluster's questions become the article's —")
     seen: dict = {}
 
-    def _fake(bundle, keyword, role, angle, questions, links, entity):
+    def _fake(bundle, keyword, role, angle, questions, links, entity,
+              avoid=None):
         seen.update(keyword=keyword, role=role, questions=list(questions),
                     links=list(links))
         return ("<h1>Acrylic jugs</h1><p>An acrylic jug is a jug made of "
@@ -186,6 +187,78 @@ def main() -> int:
        (out_row.format or "") == "cms_article", str(out_row and out_row.format))
     ck("carrying the claim it was built on", bool(out_row.claim_ids),
        "attribution is what makes anti-repeat and hygiene answerable")
+
+    print("\n— eight supports in one cluster are not eight of the same article —")
+    # Owner, 2026-08-26, on a proposed intent->format lookup: *"the format
+    # should be dynamic right? Otherwise we will be generating a lot of the
+    # same articles for the same keywords. It will take many different angles
+    # and reader-driven content to rank sometimes."* He is right: a table
+    # mapping "best X" to "comparison" guarantees the failure it looks like it
+    # prevents — every support under one pillar arrives as a version of the
+    # same page, competing for the query they were all written to win.
+    #
+    # `campaign_email` has solved this since it was written: `_craft_brief`
+    # shows the model the shapes and openings of the last three sends and
+    # tells it to move away from them. Articles had none of it.
+    # NOT `seen` — this suite already binds that name to a dict at the "with a
+    # model" section, and `_fake` writes to it with `.update()`. Rebinding it
+    # to a list here made that call an AttributeError two hundred lines later,
+    # in a check about something else entirely.
+    drafted: list = []
+
+    def _watch(bundle, kw_, role_, angle_, questions_, links_, entity_,
+               avoid_=None):
+        drafted.append((kw_, angle_, len(avoid_ or [])))
+        return f"<h1>{kw_}</h1><p>Acme jugs are made from BPA-free acrylic.</p>", ""
+    skill_pack._draft_article_live = _watch
+    for ph in ("how to clean a jug", "are jugs dishwasher safe",
+               "can you freeze a jug", "how to store jugs"):
+        keywords.upsert("acme", ph, volume=200)
+    keywords.cluster("acme")
+    for ph in ("how to clean a jug", "are jugs dishwasher safe",
+               "can you freeze a jug", "how to store jugs"):
+        skill.run("blog_article", "acme", keyword=ph, role="support")
+
+    ck("the drafter is handed what came before it",
+       all(isinstance(n, int) for _k, _a, n in drafted) and len(drafted) == 4,
+       "the `avoid` argument exists on the seam and is passed every call")
+    ck("every angle is one the vocabulary declares",
+       all(a in skill_pack.ARTICLE_ANGLES for _k, a, _n in drafted),
+       str([a for _k, a, _n in drafted]))
+
+    # The rotation itself, driven directly — four full skill runs prove the
+    # wiring, this proves the property, and mixing the two hides which broke.
+    hist: list = []
+    picked = []
+    for _ in range(4):
+        a, _why = skill_pack._pick_angle("informational", hist, "jugs")
+        picked.append(a)
+        hist.insert(0, (a, "jugs", ""))
+    ck("four articles in one cluster take four different angles",
+       len(set(picked)) == 4, str(picked))
+    ck("and a fifth cluster starts over, because sameness is only noticed "
+       "inside a cluster",
+       skill_pack._pick_angle("informational", hist, "bowls")[0] == picked[0],
+       "history is filtered to THIS cluster first — eight supports around one "
+       "pillar are where identical recipes compete with each other")
+
+    ck("intent narrows the set rather than fixing the format",
+       skill_pack._pick_angle("commercial", [], "")[0]
+       != skill_pack._pick_angle("informational", [], "")[0],
+       "a how-to query is not answered with a comparison — but neither "
+       "intent gets ONE answer")
+    ck("and when the set is exhausted it cycles least-recent-first",
+       [skill_pack._pick_angle("informational",
+                               [(a, "c", "") for a in reversed(prev)], "c")[0]
+        for prev in ([], ["definitive"], ["definitive", "walkthrough"])]
+       == ["definitive", "walkthrough", "correction"],
+       "keying off FIRST use meant the angle that opened a cluster won every "
+       "round forever after")
+    ck("an angle named on the plan is not overridden",
+       skill.run("blog_article", "acme", keyword="how to clean a jug",
+                 role="support", angle="comparison")["detail"]["angle_why"]
+       == "set on the plan",
+       "the owner naming one is a decision, not a preference")
 
     print("\n— drafted is not published, and the summary knows the difference —")
     ck("a queued publish says so", r["summary"].startswith("drafted and queued"),
@@ -221,6 +294,7 @@ def main() -> int:
     _real = _st._propose
     _st._propose = lambda *a, **k: ("BLOCKED — these internal links don't "
                                     "resolve on acme.example: /nope")
+    skill_pack._draft_article_live = _fake
     r_blocked = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
     ck("a BLOCKED propose reads as not queued",
        r_blocked["detail"]["publish"]["queued"] is False

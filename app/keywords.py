@@ -550,6 +550,27 @@ def _fetch_questions(profile: dict, phrase: str, limit: int) -> list[dict]:
         _tenant=seo_guard.tenant_for(profile)))
 
 
+def _fetch_own(profile: dict, limit: int) -> list[dict]:
+    """What this domain ALREADY ranks for, at any position.
+
+    The bootstrap source, and its absence was a dead end the owner walked
+    straight into: a brand-new account has no GSC history to read and
+    `_fetch_gap` only looks at positions 11-30, so a first harvest could
+    return nothing at all — and then `related` and `questions` had no seeds,
+    because seeds come from head terms the empty map does not have. The run
+    said "no seeds and no head terms yet — run with sources=('gsc','gap')
+    first", which is exactly what had just been run. A refusal that instructs
+    you to do the thing you did is worse than one that says nothing.
+
+    Miami Ironside has 1,098 organic keywords in Semrush. Every one of them
+    was invisible to this module.
+    """
+    from . import seo_guard, seo_tools
+    return _json_rows(seo_tools.semrush_top_keywords(
+        domain=profile.get("domain", ""), database=profile.get("database", ""),
+        limit=limit, _tenant=seo_guard.tenant_for(profile)))
+
+
 def _fetch_gap(profile: dict, limit: int) -> list[dict]:
     """Where the site already ranks but not well — Semrush's own
     striking-distance report, which is the market's view of the same question
@@ -567,7 +588,7 @@ STRIKING_BAND = (3.0, 40.0)
 
 
 def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
-        "gsc", "gap", "related", "questions"), days: int = 28,
+        "gsc", "own", "gap", "related", "questions"), days: int = 28,
         limit: int = 40) -> dict:
     """Build or top up the map. Returns what each source contributed.
 
@@ -596,6 +617,17 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
                        database=profile.get("database", ""))
                 added["gsc"] += 1
 
+    if "own" in sources:
+        for r in _fetch_own(profile, limit):
+            phrase = r.get("keyword") or r.get("Keyword")
+            if not phrase:
+                continue
+            upsert(tenant, phrase, source="semrush_own",
+                   volume=int(float(r.get("volume") or 0)),
+                   cpc=float(r.get("cpc") or 0.0),
+                   database=profile.get("database", ""))
+            added["own"] += 1
+
     if "gap" in sources:
         for r in _fetch_gap(profile, limit):
             phrase = r.get("keyword") or r.get("Keyword")
@@ -613,8 +645,17 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
         pool = list(seeds) or [r.phrase for r in targets(tenant)
                                if r.tier in ("head", "body")][:8]
         if not pool:
-            notes.append("no seeds and no head terms yet — run with "
-                         "sources=('gsc','gap') first, or pass seeds=")
+            # Names what is actually missing rather than the command that was
+            # just run. If `own` and `gap` both came back empty there is
+            # nothing wrong with the sources — the domain has no Semrush
+            # presence yet, and expansion has nothing to expand.
+            notes.append(
+                "nothing to expand from: Search Console returned no queries "
+                "and Semrush found no keywords for this domain, so there are "
+                "no head terms to seed related-and-questions with. Either the "
+                "site is too new to have either, or the domain on this "
+                "account is wrong. You can also pass seeds= to start from "
+                "phrases you already know.")
         for seed in pool:
             if "related" in sources:
                 for r in _fetch_related(profile, seed, limit):
@@ -1158,6 +1199,11 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
         out["switch"] = {
             "ok": False,
             "detail": out["status"],
+            # The id travels so the page can offer the switch itself. Telling
+            # somebody to turn a system on and giving them nowhere to do it is
+            # the same defect as naming a missing blog_id and sending them to
+            # a URL bar — the owner met both in the same afternoon.
+            "system_id": getattr(sysrow, "id", ""),
             "fix": ("install it — /admin/system_add, or the Systems tab"
                     if not sysrow else
                     f"the system is {out['status']}; turn it on to run")}

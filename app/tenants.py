@@ -182,10 +182,19 @@ def verify(key: str) -> dict:
         try:
             from . import gmail_client
             with gmail_client._google_lock:
-                p = (gmail_client.service_for(t.gmail_alias)
+                # `t.key` when no alias is set. The capability comes from a
+                # CREDENTIAL and the probe addressed the mailbox by the ALIAS
+                # on the tenant row — so an account that connected Google
+                # through the console, which files under the tenant and sets
+                # no alias, reported `inbox FAIL: KeyError: None` while being
+                # perfectly connected. `credentials.google_config` already
+                # treats an unmatched key AS the tenant, so this is the
+                # resolution that path has always used.
+                p = (gmail_client.service_for(t.gmail_alias or t.key)
                      .users().getProfile(userId="me").execute())
             out["inbox"] = {"status": "ok",
-                            "detail": p.get("emailAddress", t.gmail_alias)}
+                            "detail": p.get("emailAddress",
+                                            t.gmail_alias or t.key)}
         except Exception as exc:  # noqa: BLE001
             out["inbox"] = {"status": "FAIL",
                             "detail": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
