@@ -391,6 +391,19 @@ def health_connections() -> dict:
                f" — reconnect on the Connections tab"
                + (f" under {owner}" if owner else "")))
 
+    # SEMRUSH is not a per-client connection and never was: one global key in
+    # the env, shared by every account, with no row in `credentials.PROVIDERS`
+    # and no connect flow. That is a fine design for a research API nobody
+    # holds an account-specific licence to — but it meant "are we connected to
+    # Semrush?" had NO answer on any surface a person could reach without the
+    # console secret, while Search Console, which IS per-account, sat right
+    # here. Reported as what it is: global, and set or not.
+    report["semrush"] = (
+        {"all accounts (one shared key)": "key set"} if config.SEMRUSH_API_KEY
+        else {"all accounts (one shared key)":
+              "NOT SET — the keyword map falls back to Search Console alone; "
+              "competitor gap, related terms and question mining need this"})
+
     # CANVA and the ESP were invisible here, so "is it connected?" had no
     # answer short of the authenticated console — which is exactly the
     # question that stalls a setup. Both report state only, never a secret.

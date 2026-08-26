@@ -485,7 +485,7 @@ def status(tenant: str) -> list[dict]:
                   .filter(db.Credential.tenant == tenant)
                   .order_by(db.Credential.granted_at).all()):
             by_provider.setdefault(r.provider, []).append(r)
-    from . import oauth
+    from . import oauth, tenants
     out = []
     for key, spec in PROVIDERS.items():
         held = by_provider.get(key) or []
@@ -508,7 +508,20 @@ def status(tenant: str) -> list[dict]:
                 detail += f" · not granted: {scope.rsplit('/', 1)[-1]}"
         elif row and row.status == "failed":
             state, detail = "failed", (row.last_error or "")[:120]
-        elif env.get("secret"):
+        elif _env_registry_hit(tenants.get(tenant), key):
+            # MEMBERSHIP, not the shape of the secret inside it. This asked
+            # `env.get("secret")`, and `_from_env` reports a Shopify store's
+            # secret as `cfg["token"]` — so a store configured the supported
+            # way, with `client_id` + `client_secret` and no inline token,
+            # read as MISSING here while `data_tools._shopify_token` was
+            # quietly completing a client_credentials grant and the store
+            # worked perfectly.
+            #
+            # `_env_registry_hit`'s own docstring already records this trap,
+            # and `wired_capabilities` was fixed to use it. The display layer
+            # was not — so the capability said wired, the console said connect
+            # an API key, and the owner was told to paste a credential he had
+            # already supplied in another form.
             state, detail = "connected", "from the env group (not yet moved over)"
         elif (key in SHARED_PROVIDERS and tenant != AGENCY_TENANT
               and resolve(AGENCY_TENANT, key).get("secret")):

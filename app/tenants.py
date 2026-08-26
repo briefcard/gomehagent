@@ -206,8 +206,19 @@ def verify(key: str) -> dict:
             out["analytics"] = {"status": "FAIL",
                                 "detail": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
     elif caps["analytics"]:
+        # NAMES BOTH, because they are two different things wearing one
+        # capability. `analytics` is granted by GOOGLE (GA4 + Search Console,
+        # per account); Semrush is a single global research key that no
+        # provider grants and no client connects. Reporting "analytics
+        # unverified: no SEMRUSH_API_KEY" made a missing shared key look like
+        # a missing client connection.
         out["analytics"] = {"status": "unverified",
-                            "detail": "no SEMRUSH_API_KEY or no domain"}
+                            "detail": "not probed — needs a domain, and the "
+                                      "Semrush probe needs SEMRUSH_API_KEY "
+                                      "(global, not per-account). Google "
+                                      "Analytics/Search Console access is "
+                                      "separate and comes from this account's "
+                                      "own Google connection."}
     else:
         out["analytics"] = {"status": "not configured", "detail": ""}
 

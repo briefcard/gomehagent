@@ -536,6 +536,41 @@ def main() -> int:
            cred.resolve("coverings", "shopify").get("secret", "") == "",
            "coverings must never read Shopify through the agency's token")
 
+    # --- the env group is a REGISTRY, not a secret ------------------------
+    #
+    # A Shopify store configured the SUPPORTED way — `client_id` +
+    # `client_secret`, no inline token, `data_tools._shopify_token` completing
+    # a client_credentials grant — has no `cfg["token"]`. `status()` asked
+    # `_from_env(...)["secret"]` and therefore reported a live, working store
+    # as MISSING, so the console showed a paste-an-API-key form for a
+    # credential the owner had already supplied in another form.
+    #
+    # `_env_registry_hit`'s docstring records this exact trap and
+    # `wired_capabilities` was fixed to use it. The DISPLAY layer was not.
+    print("\n— a store with client credentials and no inline token —")
+    import json as _json
+    from app import config as _cfg
+    _keep = _cfg.SHOPIFY_STORES
+    _cfg.SHOPIFY_STORES = _json.loads(_json.dumps({
+        "baci": {"domain": "baci.myshopify.com",
+                 "client_id": "abc", "client_secret": "shh"}}))
+    try:
+        rows = {r["provider"]: r for r in cred.status("baci")}
+        ck("the console says CONNECTED", rows["shopify"]["state"] == "connected",
+           f'got {rows["shopify"]["state"]!r} — the store works; '
+           f'_shopify_token exchanges the client credentials on demand')
+        ck("and says where it comes from",
+           "env group" in rows["shopify"]["detail"], rows["shopify"]["detail"])
+        caps = cred.wired_capabilities("baci")
+        ck("the capability layer agreed all along",
+           caps.get("commerce") == "env:shopify", str(caps))
+        ck("so display and capability now say the same thing",
+           (rows["shopify"]["state"] == "connected") == ("commerce" in caps),
+           "one of them reading connected while the other reads missing is "
+           "how an owner gets told to supply a credential twice")
+    finally:
+        _cfg.SHOPIFY_STORES = _keep
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
