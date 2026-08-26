@@ -179,8 +179,25 @@ CATALOG = {
                     "unserved")),
     "blog": dict(
         name="Blog / content",
-        does="Publishes grounded articles against the keyword map.",
-        requires=("cms",), requires_any=(), needs_kb=True,
+        does="Writes grounded articles against the keyword map, and publishes "
+             "them where there is somewhere to publish to.",
+        # NO `requires`, and that is the whole point (owner, 2026-08-26:
+        # *"Remember we said if theres no CMS to publish to, just give me the
+        # article copy"*).
+        #
+        # `requires=("cms",)` blocked GO-LIVE, so an account on Squarespace —
+        # a platform with no content write API and no backend built — could
+        # not run the system at all. But an article is real work before it is
+        # a published page: it is drafted, checked against the ban list, run
+        # through the validator and the structure checks, and kept whole in
+        # `ArtifactBody`. Refusing to write it because there is nowhere to
+        # push it withholds the nine-tenths that were possible.
+        #
+        # The publish half degrades instead of gating: `blog_article` reports
+        # "DRAFTED ONLY, nothing queued" with the reason, and the copy is at
+        # /admin/artifact/<output_id>?raw=1 to paste in by hand — which IS the
+        # workflow on a platform with no write API, not a lesser version of it.
+        requires=(), requires_any=(), needs_kb=True,
         kb_needs=("tone", "banned_claims", "audience", "claim"),
         # The planner and the skill landed together, 2026-08-25, which is what
         # the note here used to be waiting for.

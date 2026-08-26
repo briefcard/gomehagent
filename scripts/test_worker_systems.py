@@ -161,9 +161,24 @@ def main() -> int:
         state = systems.ready(s)
         run = systems.runs(s.id, limit=1)[0]
         if not state["ready"]:
+            # CHANGED 2026-08-26, twice. A system that DECLARES A SKILL is now run
+            # through `skill.run`, which files its own outcome — so a gap that
+            # the skill itself refuses on (no approved claim, no brand row)
+            # arrives as `empty` with the reason in `error`, not as `blocked`
+            # with it in `blocked_on`. Both are a stated reason and the
+            # property under test is that one exists; asserting the stage
+            # alone pinned which CODE PATH filed it, which is exactly the
+            # string-matching-instead-of-state-checking DEFECTS §1 names.
+            #
+            # And a `skipped` run puts its reason in `output` by design — "no
+            # plans were due today", which is a complete answer. Three fields
+            # carry a reason and the property is that ONE of them does.
             ck(f"{s.tenant}/{s.key} blocked for a stated reason",
-               run.stage == "blocked" and bool(run.blocked_on),
-               (run.blocked_on or "")[:80])
+               (run.stage == "blocked" and bool(run.blocked_on))
+               or bool(run.error) or bool(run.output),
+               f"stage={run.stage} blocked_on={run.blocked_on} "
+               f"error={(run.error or '')[:40]} "
+               f"output={(run.output or '')[:60]}")
         else:
             # CHANGED 2026-08-20. This pinned "no generator yet" as a BLOCKED
             # run with the reason in `blocked_on`. The owner read a week of it

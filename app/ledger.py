@@ -24,6 +24,12 @@ from sqlalchemy import or_
 from . import db
 
 
+#: Formats whose body IS the deliverable, kept whole however short. A reply
+#: or a report is summarised by its ledger row; an article and a campaign are
+#: the thing itself, and there may be nowhere else they exist.
+ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page")
+
+
 def record(tenant: str, system_key: str, *, situation: str = "",
            entity_key: str = "", audience_key: str = "",
            objection_id: str = "", claim_ids: list[str] | None = None,
@@ -71,7 +77,13 @@ def record(tenant: str, system_key: str, *, situation: str = "",
         # the item was a summary of itself. Kept beside the row rather than in
         # it, and only for things that ARE artifacts — a rendered body with a
         # format behind it, not every reply.
-        if body and format and "<" in body and len(body) > 2000:
+        # An ARTICLE is kept whatever its length. The `> 2000` guard was
+        # there to stop every short reply being copied, and it also threw away
+        # the short article — which is the case this table exists for, since
+        # an account with no CMS has nowhere else for it to live. Format
+        # first, length only as the catch-all for everything else.
+        if body and format and "<" in body and (
+                format in ARTIFACT_FORMATS or len(body) > 2000):
             s.add(db.ArtifactBody(
                 tenant=tenant, output_id=row.id, run_id=run_id,
                 system_key=system_key, format=format,

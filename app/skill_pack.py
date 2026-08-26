@@ -2965,7 +2965,24 @@ def _run_blog_article(ctx: Context) -> dict:
     blog_id = ((t.cms or {}) if t else {}).get("blog_id") or ""
     profile = sites.get(ctx.tenant)
     publish: dict = {"queued": False}
-    if profile.get("platform") != "wordpress" and not blog_id:
+    # CAN WE ACTUALLY PUBLISH — asked of `backend()`, not of the platform
+    # string. Ironside declares `squarespace`, so testing for an EMPTY
+    # platform missed it entirely and the run reported a missing blog_id for
+    # a store that does not exist. `backend()` already refuses by name for
+    # both cases — nothing connected, and a platform with no backend built —
+    # and its refusal is the sentence worth showing.
+    try:
+        sites.backend(profile)
+        can_push = True
+    except sites.UnknownSite as exc:
+        can_push, why_no_cms = False, str(exc)
+
+    if not can_push:
+        publish["detail"] = (
+            f"NOT queued — {why_no_cms} The article is written, checked and "
+            f"kept whole: read it on the Review tab, or add ?raw=1 to the "
+            f"artifact URL for the source to paste in by hand.")
+    elif profile.get("platform") != "wordpress" and not blog_id:
         publish["detail"] = (
             f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
             f"can hold several blogs and guessing one writes to the wrong "
@@ -2992,7 +3009,7 @@ def _run_blog_article(ctx: Context) -> dict:
                       if ctx.items else "")
 
     head = ("drafted and queued for approval" if publish["queued"]
-            else "DRAFTED ONLY, nothing queued")
+            else "DRAFTED — the copy is kept, nothing queued")
     return {"summary": f"{head} — {role} article for {keyword!r}"
                        + (f", {len(questions)} question(s) answered" if questions else "")
                        + (f", {len(links)} internal link(s)" if links else "")
@@ -3005,7 +3022,9 @@ def _run_blog_article(ctx: Context) -> dict:
             # and approving is the step between here and the answer.
             "next": ("approve it in the queue — nothing reaches the store "
                      "until you do" if publish["queued"]
-                     else "fix the reason above, then run this keyword again")}
+                     else "the article is written and kept — read it on the "
+                          "Review tab, or fix the reason above and re-run to "
+                          "queue it as well")}
 
 
 register(Skill(

@@ -188,6 +188,61 @@ def main() -> int:
     ck("carrying the claim it was built on", bool(out_row.claim_ids),
        "attribution is what makes anti-repeat and hygiene answerable")
 
+    print("\n— no CMS is not a reason to withhold the article —")
+    # Owner, 2026-08-26, hitting `{"error":"not ready to go live","blockers":
+    # ["not connected: cms"]}`: *"Remember we said if theres no CMS to publish
+    # to, just give me the article copy."* The retention was built and the
+    # GATE was left in place, so an account on Squarespace could not run the
+    # system at all — and an article is real work before it is a published
+    # page: drafted, checked against the ban list, through the validator and
+    # the structure checks, and kept whole.
+    ck("the blog system requires no connection to RUN",
+       systems.CATALOG["blog"]["requires"] == (),
+       "publishing needs a CMS; writing does not")
+
+    # A SEPARATE account with nothing connected. Changing acme's declaration
+    # proved nothing: acme holds a live Shopify credential and a WIRED cms
+    # correctly beats a declared one, so `backend()` resolved and the run fell
+    # through to the blog_id branch. The test was asserting its own setup.
+    with db.SessionLocal() as s:
+        s.add(db.Tenant(key="sqonly", name="Squarespace Only", kind="client",
+                        domain="sqonly.example", business_model="local_venue",
+                        cms={"platform": "squarespace"}, systems=[]))
+        s.commit()
+    kb.ensure_brand("sqonly", "Squarespace Only")
+    with db.SessionLocal() as s:
+        _b = s.get(db.KbBrand, "sqonly")
+        _b.banned_claims, _b.voice = ["guaranteed"], {"tone": ["direct"]}
+        s.commit()
+    kb.add_claim("sqonly", "Eight venues across the campus.", "site plan", [])
+    _sq = systems.create("sqonly", "blog")
+    with db.SessionLocal() as s:
+        s.get(db.System, _sq.id).status = "live"
+        s.commit()
+    keywords.upsert("sqonly", "miami event venue", volume=800)
+    keywords.cluster("sqonly")
+    skill_pack._draft_article_live = lambda *a, **k: (
+        "<h1>x</h1><p>Eight venues across the campus.</p>", "")
+    r_nocms = skill.run("blog_article", "sqonly", keyword="miami event venue",
+                        role="pillar")
+    ck("it still produces the article", len(r_nocms.get("items") or []) == 1,
+       str(r_nocms)[:110])
+    ck("and names the REAL reason nothing was queued",
+       "squarespace" in r_nocms["summary"],
+       "testing for an empty platform missed this entirely — Ironside "
+       "DECLARES squarespace, so the run reported a missing blog_id for a "
+       "store that does not exist. `backend()` already refuses by name")
+    oid = r_nocms["items"][0]["output_id"]
+    with db.SessionLocal() as s:
+        kept = s.query(db.ArtifactBody).filter_by(output_id=oid).first()
+    ck("the copy is kept whole, however short",
+       kept is not None and kept.body,
+       "the `> 2000` guard threw away exactly the case this table exists "
+       "for — a short article on an account with nowhere else to keep it")
+    ck("and the run says where to read it",
+       "raw=1" in r_nocms["summary"] or "Review tab" in r_nocms["summary"],
+       r_nocms["summary"][-90:])
+
     print("\n— eight supports in one cluster are not eight of the same article —")
     # Owner, 2026-08-26, on a proposed intent->format lookup: *"the format
     # should be dynamic right? Otherwise we will be generating a lot of the
@@ -278,7 +333,7 @@ def main() -> int:
         s.commit()
     r_noid = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
     ck("no blog_id is NOT reported as a success",
-       r_noid["summary"].startswith("DRAFTED ONLY"), r_noid["summary"][:90])
+       r_noid["summary"].startswith("DRAFTED"), r_noid["summary"][:90])
     ck("the reason is in the summary, not only in a note",
        "blog_id" in r_noid["summary"], r_noid["summary"][:120])
     ck("and it is still filed in the ledger, so nothing is lost",
@@ -298,7 +353,7 @@ def main() -> int:
     r_blocked = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
     ck("a BLOCKED propose reads as not queued",
        r_blocked["detail"]["publish"]["queued"] is False
-       and r_blocked["summary"].startswith("DRAFTED ONLY"),
+       and r_blocked["summary"].startswith("DRAFTED"),
        r_blocked["summary"][:100])
     _st._propose = _real
 
