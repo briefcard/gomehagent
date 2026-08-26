@@ -5571,8 +5571,16 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
             ("Knows what to write", "knows_what_to_write", "map, claims, ban list")):
         got = ready.get(part) or {}
         ok = bool(got.get("ok"))
-        fix = got.get("fix") or ""
-        fix = "; ".join(fix) if isinstance(fix, list) else fix
+        # `fix` is a SENTENCE for the connection verdicts and a LIST for the
+        # knowledge one, and `notes` is always a list. Normalise both rather
+        # than assuming either shape — concatenating them blind was a
+        # TypeError that took down every page in the console, not just this
+        # section.
+        def _lines(v) -> list:
+            if not v:
+                return []
+            return list(v) if isinstance(v, (list, tuple)) else [str(v)]
+        fix = "; ".join(_lines(got.get("fix")) + _lines(got.get("notes")))
         detail = got.get("detail") or ("ready" if ok else "")
         extra = ""
         if part == "publish" and not ok and "blog_id" in str(got.get("detail", "")):

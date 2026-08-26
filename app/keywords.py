@@ -1079,15 +1079,23 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
     except Exception:                                            # noqa: BLE001
         market = declared
     know["market"] = market
+    # AN ADVISORY, NOT A BLOCKER — and the suite is what settled that. Putting
+    # this in `problems` made an account with a map, approved claims and a ban
+    # list read NOT READY purely for never having named a market whose default
+    # is correct for most of these accounts. A warning that turns a working
+    # account red is one somebody learns to scroll past, which costs more than
+    # it saves. `notes` is seen and does not gate.
+    notes: list[str] = []
     if not declared:
-        problems.append(
-            f"market not set for this account — Semrush research is being "
-            f"pulled from '{market}'. Right for a US audience; wrong volumes, "
-            f"competitors and questions for anyone else. Set analytics."
-            f"semrush_db to change it.")
+        notes.append(
+            f"market not set — Semrush research is being pulled from "
+            f"'{market}'. Right for a US audience; wrong volumes, competitors "
+            f"and questions for anyone else. Set analytics.semrush_db to "
+            f"change it.")
 
     know["ok"] = not problems
     know["fix"] = problems
+    know["notes"] = notes
     out["knows_what_to_write"] = know
 
     # INSTALLED AND ON is part of the answer, not context beside it. The first

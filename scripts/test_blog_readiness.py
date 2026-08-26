@@ -167,7 +167,7 @@ def main() -> int:
     ck("the market is reported, not assumed silently", r.get("market") == "us",
        str(r.get("market")))
     ck("and an account that never chose one is told",
-       any("market not set" in f for f in r["fix"]),
+       any("market not set" in f for f in r["notes"]),
        "the default stays — it is right for most of these accounts — but a "
        "US default on a UK client pulls US volumes, competitors and questions "
        "into their map: wrong data, correctly filed, invisible")
@@ -176,7 +176,11 @@ def main() -> int:
         s.commit()
     r2 = keywords.readiness("good", probe=False)["knows_what_to_write"]
     ck("declaring one silences the warning",
-       not any("market not set" in f for f in r2["fix"]), str(r2["fix"]))
+       not any("market not set" in f for f in r2["notes"]), str(r2["notes"]))
+    ck("and it never made a working account read NOT READY",
+       keywords.readiness("good", probe=False)["knows_what_to_write"]["ok"] is True,
+       "a warning that turns a working account red is one somebody learns to "
+       "scroll past")
     ck("and the declared market is what gets used", r2["market"] == "uk", r2["market"])
 
     print("\n— which client's Search Console property, exactly —")
