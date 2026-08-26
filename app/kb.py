@@ -1151,9 +1151,11 @@ def add_situation(tenant: str, tag: str, patterns: list[list[str]] | None = None
     because a machine would have been silently editing the one vocabulary that
     decides whether any claim can be accepted at all.
     """
-    tag = (tag or "").strip().lower().replace(" ", "_")
-    if not tag:
-        return "A situation needs a tag."
+    import re as _re
+    tag = _re.sub(r"[^a-z0-9_]+", "",
+                  (tag or "").strip().lower().replace(" ", "_"))
+    if not tag or len(tag) < 3:
+        return "A situation needs a tag of at least three characters."
     # A machine may not widen the vocabulary with a synonym of something that
     # is already in it. A human still can — they may have a reason, and they
     # can see both.

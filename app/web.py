@@ -2636,6 +2636,97 @@ def admin_keyword_priority(key: str = Depends(admin_key), tenant: str = "",
                       msg=f"{phrase!r} — {got['owner_priority']}")
 
 
+@app.get("/admin/exclude_term")
+def admin_exclude_term(key: str = Depends(admin_key), tenant: str = "",
+                       term: str = "", ui: int = 0):
+    """Accept a mute-lesson proposal: the term joins this account's negative
+    keywords and the harvest stops surfacing that family at the source.
+
+    Merge-append into `Tenant.analytics["exclude_terms"]` — the same
+    merge-not-replace rule as /admin/blog_set, because rewriting a JSON column
+    to set one key is how an account gets silently unwired. The brand's own
+    words are refused here too, not only at proposal time: the proposal layer
+    already filters them, but a hand-typed ?term=miami must meet the same
+    wall — a brand cannot be negative about itself.
+    """
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    term = (term or "").strip().lower()
+    if not term or len(term) < 2:
+        return _plan_back(tenant, key, err="an exclude term needs at least "
+                                          "two characters")
+    if term in keywords.brand_tokens_for(tenant):
+        return _plan_back(tenant, key,
+                          err=f"{term!r} is one of {tenant}'s own brand words "
+                              f"— excluding it would hide the brand from its "
+                              f"own research")
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, tenant)
+        if not t:
+            return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
+        analytics = dict(t.analytics or {})
+        terms = [x for x in (analytics.get("exclude_terms") or [])]
+        if term in terms:
+            return _plan_back(tenant, key, msg=f"{term!r} was already excluded")
+        analytics["exclude_terms"] = terms + [term]
+        t.analytics = analytics
+        s.commit()
+    return _plan_back(tenant, key,
+                      msg=f"{term!r} excluded — the next harvest stops "
+                          f"surfacing that family")
+
+
+@app.get("/admin/market_set")
+def admin_market_set(key: str = Depends(admin_key), tenant: str = "",
+                     market: str = "", ui: int = 0):
+    """Set the Semrush market the research is pulled from."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    import re as _re
+    market = (market or "").strip().lower()
+    if not _re.fullmatch(r"[a-z]{2}(?:-[a-z]{2,12})?", market):
+        return _plan_back(tenant, key,
+                          err=f"{market!r} is not a Semrush market code — "
+                              f"they look like us, uk, de, mobile-us")
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, tenant)
+        if not t:
+            return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
+        analytics = dict(t.analytics or {})
+        analytics["semrush_db"] = market
+        t.analytics = analytics
+        s.commit()
+    return _plan_back(tenant, key,
+                      msg=f"research for {tenant} now pulls from {market!r}")
+
+
+@app.get("/admin/situation_add")
+def admin_situation_add(key: str = Depends(admin_key), tenant: str = "",
+                        tag: str = "", description: str = ""):
+    """Author one situation tag, from the page that warns tags are missing."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    # The canonical writer (there is exactly one — a console-only duplicate
+    # was written and deleted the same hour it shadowed this) returns a
+    # SENTENCE, like the rest of the KB pack: "Added situation x for t." /
+    # "Updated ..." on success, a refusal otherwise. origin="human" is what
+    # entitles the console to override the synonym guard — a person can see
+    # both tags and may have a reason; a machine may not.
+    got = kbm.add_situation(tenant, tag, patterns=[], description=description,
+                            origin="human")
+    ok = got.startswith(("Added", "Updated"))
+    arg = (f"ok={quote(got[:200] + ' — claims may carry it now')}" if ok
+           else f"err={quote(got[:300])}")
+    return RedirectResponse(
+        f"/admin/ui?key={quote(key)}&tab=kb&tenant={quote(tenant)}&{arg}", 303)
+
+
 @app.get("/admin/keywords_propose")
 def admin_keywords_propose(key: str = Depends(admin_key), tenant: str = "",
                            ui: int = 0):
@@ -3208,7 +3299,7 @@ def intake(token: str, answer: str = "", skip: str = "") -> str:
 @app.get("/admin/claim_review")
 def claim_review(key: str = Depends(admin_key), claim_id: str = "",
                  approve: str = "yes", tenant: str = "", ui: str = "",
-                 next: str = "", cpage: int = 1):
+                 next: str = "", cpage: int = 1, back: str = ""):
     """Approve or reject a client-submitted claim. From the console (`ui=1`)
     it lands back at the next card on the same queue page rather than at the
     top — a decision must never cost the reader their place."""
@@ -3217,6 +3308,16 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
     from . import kb as kbm
     res = kbm.review_claim(claim_id, approve == "yes")
     if ui:
+        if back == "kb":
+            # Decided from the Knowledge tab — return there, not to Review.
+            # "A decision must never cost the reader their place" is this
+            # route's own rule; landing them on a different tab broke it the
+            # moment a second surface could decide.
+            from urllib.parse import quote
+
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                f"/admin/ui?key={quote(key)}&tab=kb&tenant={quote(tenant)}", 303)
         return _back_to_content(tenant,
                                 anchor=(f"c-{next}" if next else "proposals"),
                                 cpage=cpage)

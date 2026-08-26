@@ -450,6 +450,22 @@ def _account(tenant: str = "") -> tuple[str, object, list]:
     return key, next((r for r in rows if r.key == key), None), rows
 
 
+def _blocker_li(key: str, tenant: str, b: str) -> str:
+    """One gate blocker as a list item — with the way to it, when there is one.
+
+    "not connected: cms" told the reader exactly what was missing and nothing
+    about where to fix it; the Connections tab is one link away and the audit
+    found no page made the trip. A blocker that is not a connection renders
+    plain — inventing a destination for "knowledge base: kb_brand row" would
+    point somewhere that cannot clear it.
+    """
+    li = f"<li>{_esc(b)}</li>"
+    if b.startswith("not connected:"):
+        li = (f'<li>{_esc(b)} — <a href="/admin/ui?key={_esc(key)}'
+              f'&amp;tab=accounts&amp;tenant={_esc(tenant)}">connect it</a></li>')
+    return li
+
+
 def _account_name(tenant: str, row=None) -> str:
     """What to call the selected account in a heading."""
     if tenant == ALL:
@@ -1422,7 +1438,7 @@ def _system_card(key: str, row) -> str:
         gate = ('<div class="ok">Ready. Everything it needs is connected and '
                 'the contract is complete.</div>')
     elif not r["can_produce"]:
-        items = "".join(f"<li>{_esc(b)}</li>" for b in r["impossible"])
+        items = "".join(_blocker_li(key, row.tenant, b) for b in r["impossible"])
         gate = ('<div class="note"><strong>Blocked &mdash; it cannot run at '
                 'all.</strong><ul class="bl">' + items + '</ul>'
                 '<div class="mut">A connection is missing. Nothing else stops '
@@ -1598,7 +1614,12 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
                         f'(unknown key)</option>')
         note = ("" if rows else
                 '<div class="what">the catalogue is empty — run the '
-                'catalogue sync on the Review tab first</div>')
+                # No key= on purpose: this renders inside a helper the key
+                # never reaches, and the console session cookie authenticates
+                # the click — the same reason _sub_href drops it when empty.
+                f'<a href="/admin/ui?tab=content&amp;sub=catalogue'
+                f'&amp;tenant={_esc(tenant)}">catalogue '
+                'sync on the Review tab</a> first</div>')
         return (f'<div class="f"><label>{label}</label>{req}{note}'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
                 f'</div>')
@@ -2041,7 +2062,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
     gate = systems.ready(row)
     gate_note = ""
     if not gate["can_produce"]:
-        items = "".join(f"<li>{_esc(b)}</li>" for b in gate["impossible"])
+        items = "".join(_blocker_li(key, row.tenant, b) for b in gate["impossible"])
         gate_note = ('<div class="note"><strong>Cannot produce.</strong>'
                      f'<ul class="bl">{items}</ul>'
                      '<div class="mut">Plans keep and stay editable; they '
@@ -2946,13 +2967,28 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
                    if editable else "")
                 + "</div>")
 
+    def _decide(r) -> str:
+        """Approve/reject a pending claim from HERE, landing back here.
+
+        The audit's gap 3b: this tab listed pending claims with a banner
+        pointing at Review — the fact on one page, the control on another.
+        Same route the Review tab uses, so a decision lands identically
+        whichever surface makes it; `back=kb` returns the reader to this
+        tab rather than costing them their place.
+        """
+        base = (f'/admin/claim_review?key={_esc(key)}&amp;tenant={_esc(tenant)}'
+                f'&amp;ui=1&amp;back=kb&amp;claim_id={_esc(r.id)}&amp;approve=')
+        return (f'<div class="when"><a href="{base}yes">✅ approve</a> · '
+                f'<a href="{base}no">❌ reject</a></div>')
+
     def _claim_block(title: str, rows_, empty: str, note: str = "",
                      cls: str = "", open_: bool = False,
-                     editable: bool = False) -> str:
+                     editable: bool = False, decidable: bool = False) -> str:
         if not rows_:
             return (f'<details class="sec"><summary>{_esc(title)} (0)</summary>'
                     f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
-        body = "".join(_claim_msg(r, note, cls, editable=editable) for r in rows_)
+        body = "".join(_claim_msg(r, note, cls, editable=editable)
+                       + (_decide(r) if decidable else "") for r in rows_)
         return (f'<details class="sec"{" open" if open_ else ""}>'
                 f'<summary>{_esc(title)} ({len(rows_)})</summary>'
                 f'<div class="thread">{body}</div></details>')
@@ -2963,7 +2999,8 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
                      editable=True)
         + _claim_block("Claims — awaiting review", inv["pending"],
                        "Nothing submitted for review.",
-                       "not selectable until approved", "gone")
+                       "not selectable until approved", "gone",
+                       decidable=True)
         + _claim_block("Claims — expired", inv["expired"],
                        "Nothing has gone stale.",
                        "past its expiry date, so selection skips it", "gone")
@@ -3017,7 +3054,8 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
           <p class="mut">A pair that means the same thing in different words
           will not appear here &mdash; measured on the real case, the two tags
           shared no trigger words and scored 0.25 on their descriptions. Run
-          <code>/admin/vocabulary?tenant={_esc(tenant)}&amp;model=1</code> for the
+          <a href="/admin/vocabulary?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;model=1">
+          <code>/admin/vocabulary?tenant={_esc(tenant)}&amp;model=1</code></a> for the
           pass that can see those.</p>
         </div>"""
 
@@ -3168,7 +3206,20 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
         sit_note = ('<div class="note">No vocabulary authored, so this account '
                     'silently inherits the agency\'s B2B language — which no venue '
                     'or product enquiry will ever match. Claims tagged in this '
-                    'account\'s own words will be refused until tags exist here.</div>')
+                    'account\'s own words will be refused until tags exist '
+                    'here — add the first one below.</div>')
+
+    # The warning above dead-ended for as long as it has existed: no console
+    # control could author a tag (seed_kb.py and the model pass were the only
+    # writers). The form is on the card that states the fact.
+    sit_note += f"""
+    <form method="get" action="/admin/situation_add" class="row">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input name="tag" size="22" placeholder="planning_a_wedding">
+      <input name="description" size="34" placeholder="what a buyer in it is trying to do">
+      <button type="submit" class="sec">Add situation</button>
+    </form>"""
 
     # --- gaps the selection loop actually hit --------------------------------
     unk = kb.unknowns(tenant)
@@ -5593,9 +5644,20 @@ def _board_section(key: str, tenant: str, days: int) -> str:
     # --- the ruled-out, folded away, with what they add up to -------------
     les = b.get("lessons") or {}
     proposals = ""
-    for group, icon in (("terms", "→"), ("sources", "→"), ("clusters", "→")):
+    # TERM proposals carry the one action that has a backing store — accept
+    # into `Tenant.analytics["exclude_terms"]`, which the site profile merges
+    # and the harvest already honours. Source and cluster findings stay prose:
+    # "this harvester is mostly noise" is a judgement for a person, and a
+    # button that half-implements it would act on less than it claims.
+    for item in les.get("terms") or []:
+        proposals += (
+            f'<li>→ {_esc(item["proposal"])} '
+            f'<a href="/admin/exclude_term?key={_esc(key)}&amp;tenant='
+            f'{_esc(tenant)}&amp;ui=1&amp;term={_esc(item["term"])}">'
+            f'<button class="sec" type="button">Exclude it</button></a></li>')
+    for group in ("sources", "clusters"):
         for item in les.get(group) or []:
-            proposals += f'<li>{icon} {_esc(item["proposal"])}</li>'
+            proposals += f'<li>→ {_esc(item["proposal"])}</li>'
     muted_rows = "".join(
         f'<tr><td>{_esc(r["phrase"])}</td><td>{_tier(r["tier"])}</td>'
         f'<td class="num">{r["volume"] or "—"}</td>'
@@ -5882,6 +5944,19 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         fix = "; ".join(_lines(got.get("fix")) + _lines(got.get("notes")))
         detail = got.get("detail") or ("ready" if ok else "")
         extra = ""   # publish/measure controls now live with their lines
+        if part == "knows_what_to_write" and any(
+                "market not set" in n for n in (got.get("notes") or [])):
+            # The advisory said "Set analytics.semrush_db to change it" — an
+            # instruction whose only write path was the raw-JSON field on
+            # Connections. The control now lives where the fact is stated.
+            extra += (
+                f'<form method="get" action="/admin/market_set" '
+                f'style="margin-top:6px">'
+                f'<input type="hidden" name="key" value="{_esc(key)}">'
+                f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                f'<input type="hidden" name="ui" value="1">'
+                f'<input name="market" size="6" placeholder="us">'
+                f'<button type="submit" class="sec">Set market</button></form>')
         if part == "switch" and not ok and got.get("system_id"):
             # ACT WHERE YOU REPORT, again. "turn it on to run" with no way to
             # turn it on is an instruction, not a control.

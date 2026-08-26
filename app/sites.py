@@ -148,6 +148,20 @@ def _from_tenants() -> dict:
             "google_alias": getattr(t, "gmail_alias", "") or t.key,
             "gsc_site": "", "ga4_property": "",
             **_brand_rules(brands.get(t.key))}
+        # ACCEPTED NEGATIVE KEYWORDS live on the tenant row, beside the other
+        # research config (`semrush_db`). They are NOT banned claims — a
+        # banned claim is a compliance rule about what may be SAID; an
+        # exclude term is a research filter about what to LOOK FOR — so they
+        # merge alongside the brand rules rather than into them. This is the
+        # home the accept button writes to; before it existed the mute-lesson
+        # proposals were prose with no backing store anywhere.
+        extra = [(x or "").strip().lower()
+                 for x in ((getattr(t, "analytics", None) or {})
+                           .get("exclude_terms") or [])]
+        if extra:
+            seen = set(out[t.key]["exclude_terms"])
+            out[t.key]["exclude_terms"] = out[t.key]["exclude_terms"] + [
+                x for x in extra if x and x not in seen]
     return out
 
 
