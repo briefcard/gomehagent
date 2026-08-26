@@ -132,10 +132,19 @@ def main() -> int:
         m = _re.search(r">(\d+) waiting<", t)
         ck(f"  {who} shows its own count", bool(m) and m.group(1) == "1",
            m.group(0) if m else "no counter rendered")
+        # RETARGETED 2026-08-26: the pill leads to the Review tab's own ship
+        # section now — /admin/pending survives as the approve-by-email
+        # fallback. The property under test was never the destination; it is
+        # that the link CARRIES THE ACCOUNT, so clicking it cannot silently
+        # widen what you are looking at. That property is asserted on the new
+        # target, and the fallback keeps its own scoping check because it is
+        # still a live page.
         ck(f"    and the link carries the account",
-           f"/admin/pending?key=s3cret&amp;tenant={who}" in t)
+           f"sub=ship&amp;tenant={who}" in t)
         q = c.get(f"/admin/pending?key=s3cret&tenant={who}").text
         ck(f"    and that queue holds only theirs", other not in q)
+        s2 = c.get(f"/admin/ui?key=s3cret&tab=content&sub=ship&tenant={who}").text
+        ck(f"    and the ship section holds only theirs too", other not in s2)
 
     print("\n— all accounts is a place you go on purpose —")
     for tab in TABS:

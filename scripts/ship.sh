@@ -20,6 +20,17 @@ if [ -z "$1" ]; then
   exit 2
 fi
 
+# Self-install the pre-push hook, so the gate cannot be forgotten on a new
+# checkout. The build dir is a linked worktree — hooks live in the shared
+# .git, which `--git-common-dir` resolves wherever this runs from.
+HOOKS_DIR="$(git rev-parse --git-common-dir)/hooks"
+if [ ! -f "$HOOKS_DIR/pre-push" ] && [ -f scripts/pre-push.hook ]; then
+  cp scripts/pre-push.hook "$HOOKS_DIR/pre-push"
+  chmod +x "$HOOKS_DIR/pre-push"
+  echo "── installed pre-push hook (ungated pushes to main now refuse)"
+fi
+export SHIP_GATED=1
+
 echo "── gate 1/3: byte-compile app/"
 python3 -m compileall -q app scripts
 

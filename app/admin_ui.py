@@ -579,8 +579,10 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
         _n = _ap.pending_count("" if tenant == ALL else tenant)
     except Exception:                                            # noqa: BLE001
         _n = 0                 # never let a counter break the console
-    waiting = (f'<a class="pend" href="/admin/pending?key={_esc(key)}'
-               f'&amp;tenant={_esc(tenant)}">'
+    # To the Review tab's own section — /admin/pending survives only as the
+    # unauthenticated-email fallback it always was.
+    waiting = (f'<a class="pend" href="/admin/ui?key={_esc(key)}'
+               f'&amp;tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}">'
                f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
 
     who = _account_name(tenant, here)
@@ -1854,10 +1856,23 @@ def _waiting_section(key: str, row) -> str:
     if not pend:
         body = '<p class="mut">Nothing is waiting on you.</p>'
     else:
+        from . import approvals as _apm
+
+        def _acts(a) -> str:
+            ok = "/decide/" + _apm._signer.dumps([a.id, "approved"])
+            no = "/decide/" + _apm._signer.dumps([a.id, "denied"])
+            review = ""
+            if a.kind == "seo_new_article" and (a.payload or {}).get("output_id"):
+                review = (f' · <a href="/admin/article/'
+                          f'{_esc((a.payload or {})["output_id"])}'
+                          f'?key={_esc(key)}">review</a>')
+            return (f'<a href="{ok}">✅</a> · <a href="{no}">❌</a>{review} · '
+                    f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content'
+                    f'&amp;sub=ship&amp;tenant={_esc(row.tenant)}">queue &rarr;</a>')
+
         body = "".join(f"""
         <div class="msg"><div>{_esc(a.summary or a.kind)}</div>
-          <div class="when">{a.created_at:%b %d, %H:%M} ·
-            <a href="/admin/pending?key={_esc(key)}&amp;tenant={_esc(row.tenant)}">decide &rarr;</a>
+          <div class="when">{a.created_at:%b %d, %H:%M} · {_acts(a)}
           </div></div>""" for a in pend[:15])
     return f"""
     <div class="card"><div class="anchor" id="waiting"></div>
@@ -3486,7 +3501,13 @@ def _compliance_body(tenant: str) -> str:
 #: Every entry carries its own count, so the tab strip says where the work is
 #: without opening anything — the point of splitting is lost if you have to
 #: visit six tabs to find the one with something in it.
-REVIEW_SUBS = (("claims", "Claims"), ("pictures", "Pictures"),
+# "ship" FIRST: the strip's order is the day's order, and "may this go out"
+# outranks "is this true" — a wrong claim waits safely in the KB, a wrong
+# send does not. Until 2026-08-26 approvals had NO section here at all: the
+# tab named Review reviewed everything except the thing most people mean by
+# the word, and the real queue lived on the unstyled /admin/pending fallback.
+REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
+               ("pictures", "Pictures"),
                ("other", "Everything else"), ("plans", "Plans"),
                ("conflicts", "Conflicts"), ("catalogue", "Catalogue"))
 
@@ -4032,12 +4053,62 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   fails while it waits; it just waits.</p>
   <div class="thread">{prows}</div>
 </div>"""
+    # --- approvals: may this ship? -----------------------------------------
+    #
+    # Scoped to THIS account, like everything on the frame — an approval from
+    # another client rendered here is the pooled-page leak all over again.
+    from . import approvals as _apm
+    with db.SessionLocal() as _s:
+        _q = (_s.query(db.Approval)
+              .filter(db.Approval.status == "pending"))
+        if tenant != ALL:
+            _q = _q.filter(db.Approval.tenant == tenant)
+        ship_rows = _q.order_by(db.Approval.created_at.desc()).all()
+        _s.expunge_all()
+
+    def _ship_row(a) -> str:
+        pl = a.payload or {}
+        body = (pl.get("body") or pl.get("content")
+                or (pl.get("fields") or {}).get("body_html", ""))
+        approve = "/decide/" + _apm._signer.dumps([a.id, "approved"])
+        deny = "/decide/" + _apm._signer.dumps([a.id, "denied"])
+        review = ""
+        if a.kind == "seo_new_article" and pl.get("output_id"):
+            review = (f' · <a href="/admin/article/{_esc(pl["output_id"])}'
+                      f'?key={_esc(key)}">review &amp; edit &rarr;</a>')
+        fold = (f'<details><summary>read it ({len(body)} chars)</summary>'
+                f'<pre style="white-space:pre-wrap">{_esc(body[:1500])}'
+                + ("…" if len(body) > 1500 else "") + "</pre></details>"
+                if body else
+                '<div class="mut">this kind carries no text body — the '
+                'summary above is the whole decision</div>')
+        return f"""
+        <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
+          {fold}
+          <div class="when">{a.created_at:%b %d, %H:%M} ·
+            <a href="{approve}">✅ approve</a> ·
+            <a href="{deny}">❌ deny</a>{review}</div>
+        </div>"""
+
+    ship_card = f"""
+<div class="anchor" id="ship"></div>
+<div class="card">
+  <div class="head"><h2>May it ship?</h2>
+    <span class="chip {'off' if ship_rows else 'on'}">{len(ship_rows)} pending</span></div>
+  <p class="mut">Everything queued to go OUT — an article to the store, a reply
+  to a customer, a change to live pages. Approving executes it; nothing leaves
+  without you. Articles have a full review-and-edit page behind the link.</p>
+  <div class="thread">{"".join(_ship_row(a) for a in ship_rows[:25])
+                       or '<p class="mut">Nothing is waiting to ship.</p>'}</div>
+</div>"""
+
     # --- the sub-tab strip -------------------------------------------------
     #
     # Counts come from the lists already built above, so the strip costs
     # nothing extra and can be trusted: a tab reading 0 is a tab with nothing
     # in it, not a tab whose count was estimated.
-    counts = {"claims": len(pending), "pictures": len(waiting),
+    counts = {"ship": len(ship_rows),
+              "claims": len(pending), "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged)}
     sub = (sub or "").strip().lower()
@@ -4070,6 +4141,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # (owner, 2026-08-21: "why does it take so long to load tabs"). Six
     # sections behind one strip means one section's work per render.
     sections = {
+        "ship": ship_card,
         "claims": f"""
 <div class="anchor" id="proposals"></div>
 <div class="card">

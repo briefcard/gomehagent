@@ -1350,9 +1350,26 @@ def _handle_button(action: str, ap_id: str) -> None:
                           "make it a permanent rule for that inbox — or reply "
                           "'skip'.")
     elif action == "edit":
-        _pending_feedback.update(mode="edit", approval_id=ap_id)
-        channel.send_text("Send me your edited version (or the change you "
-                          "want) and I'll queue the revised draft.")
+        # An ARTICLE's edit happens on the review page, not in a chat: the
+        # capture flow seeds the revision from payload["body"], which an
+        # article payload does not carry — the 2026-08-26 audit found the
+        # agent would be handed an EMPTY draft and asked to revise it. And a
+        # 1,500-word page is not a thing to retype into WhatsApp anyway.
+        with db.SessionLocal() as _s:
+            _ap_row = _s.get(db.Approval, ap_id)
+            _kind = _ap_row.kind if _ap_row else ""
+            _oid = ((_ap_row.payload or {}).get("output_id", "")
+                    if _ap_row else "")
+        if _kind == "seo_new_article" and _oid:
+            channel.send_text(
+                "Articles are edited on the review page — the whole text, "
+                "with the ban list checking your changes:\n"
+                f"{config.PUBLIC_BASE_URL}/admin/article/{_oid}\n"
+                "Save there, then approve from the same page.")
+        else:
+            _pending_feedback.update(mode="edit", approval_id=ap_id)
+            channel.send_text("Send me your edited version (or the change you "
+                              "want) and I'll queue the revised draft.")
 
 
 def _handle_voice(media_id: str) -> None:

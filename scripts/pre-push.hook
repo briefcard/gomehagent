@@ -1,0 +1,19 @@
+#!/bin/sh
+# Refuse a push to main that did not come through scripts/ship.sh.
+#
+# Installed automatically by ship.sh into the repo's shared hooks dir (this
+# build dir is a linked worktree; hooks live in the parent's .git). ship.sh
+# exports SHIP_GATED=1 after its three gates pass — compile, import, full
+# suite, each judged by exit code. A push to main IS a production deploy
+# (render.yaml sets no branch, so Render's default applies), which is why
+# main specifically is guarded and other branches pass freely.
+#
+# Emergency override, deliberate and loud:  SHIP_GATED=1 git push ...
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] && [ "$SHIP_GATED" != "1" ]; then
+    echo "pre-push: refusing an ungated push to main — use scripts/ship.sh" >&2
+    echo "pre-push: (override, if you must: SHIP_GATED=1 git push)" >&2
+    exit 1
+  fi
+done
+exit 0

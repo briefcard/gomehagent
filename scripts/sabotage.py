@@ -38,6 +38,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "ship_queue_is_scoped",
+        "file": "app/admin_ui.py",
+        "find": "            _q = _q.filter(db.Approval.tenant == tenant)",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_ship_section.py"],
+        "why": "the Review tab's ship queue pools every client's approvals "
+               "under whichever account is being looked at — the leak the "
+               "whole console frame was rebuilt to prevent, on the page "
+               "where a wrong decision executes",
+    },
+    {
         "name": "approving_writes_back",
         "file": "app/approvals.py",
         "find": "            if p.get(\"output_id\"):\n                keywords.mark_published(",
