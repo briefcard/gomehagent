@@ -135,10 +135,45 @@ def gsc_list_sites(profile: dict) -> str:
     return json.dumps(rows) if rows else "This Google account has no GSC properties."
 
 
+def _property_host(site_url: str) -> str:
+    """The bare host a Search Console property covers.
+
+    `sc-domain:acme.com` -> `acme.com`; `https://www.acme.com/` -> `acme.com`.
+    """
+    u = (site_url or "").strip().lower()
+    if u.startswith("sc-domain:"):
+        return u[len("sc-domain:"):].strip("/")
+    for pre in ("https://", "http://"):
+        if u.startswith(pre):
+            u = u[len(pre):]
+    return u.split("/")[0].removeprefix("www.")
+
+
 def _gsc_candidates(entries: list, host: str) -> list:
-    urls = [e["siteUrl"] for e in entries
-            if e.get("permissionLevel") != "siteUnverifiedUser"]
-    return [u for u in urls if host in u]
+    """Properties that plausibly cover `host`, matched on LABEL BOUNDARIES.
+
+    This was `host in u` — a raw substring test — and it is the last tier of
+    `_match_gsc_site`, which means it is the boundary holding one client's
+    numbers apart from another's under the shared-identity model (one Google
+    account granted viewer access on several clients' properties).
+
+    `"acme.com" in "https://shopacme.com/"` is True. With that the only
+    candidate, the tier returns confidently, `_save_link` PINS it, and a
+    client's report carries another client's rankings from then on. Narrow
+    window — it needs no exact domain property and no exact prefix match — but
+    the failure is silent, permanent, and lands in front of a client.
+
+    A property covers a host if it IS that host, or if the host sits beneath
+    it: `sc-domain:acme.com` covers `blog.acme.com`. Nothing else does.
+    """
+    out = []
+    for e in entries:
+        if e.get("permissionLevel") == "siteUnverifiedUser":
+            continue
+        ph = _property_host(e["siteUrl"])
+        if ph and (ph == host or host.endswith("." + ph)):
+            out.append(e["siteUrl"])
+    return out
 
 
 def _match_gsc_site(entries: list, host: str):

@@ -410,6 +410,45 @@ reading the map; a `blog_article` skill in `skill_pack` with
 what moves blog output onto the rails `campaign_email` already runs on —
 grounding, citation, `validator`, ledger, autonomy rung (§2.6).
 
+### 2.12 Whose Google account reads a client's Search Console
+**DECIDED 2026-08-25 by the owner: the SHARED-IDENTITY model stands.** One
+Google account (`SEO_GOOGLE_ALIAS`, default `personal`) is granted viewer
+access on each client's Search Console property, rather than each client
+running an OAuth consent of their own. `config.py:257` has always said so; the
+decision is that it stays.
+
+**What it buys.** Client onboarding never asks for a Google scope, so the
+client-facing flow stays clear of `gmail.modify` and `drive` — Google's
+RESTRICTED tier, the one that can pull a production External app into a CASA
+security assessment. A client adds an email address as a viewer in Search
+Console and is done. The six-scope grant is the owner's own account, of which
+he is the only user.
+
+**What it costs, and where the cost lands.** One token can now see several
+clients' properties, so `google_seo._match_gsc_site` stops being a convenience
+and becomes THE boundary between one client's rankings and another's. It was
+already built for this — "CONFIDENT match only — never guess", three tiers
+strongest-first, ambiguity returning None so a person must pin it, and a
+docstring that names "another client's property" as the risk.
+
+**Its last tier was a raw substring test, and that is fixed.**
+`_gsc_candidates` matched `host in siteUrl`, so `"acme.com" in
+"https://shopacme.com/"` was True. With that as the only candidate the tier
+returned confidently and `_save_link` PINNED another client's property —
+silently, permanently, in front of a client. It matches on LABEL BOUNDARIES
+now (`_property_host`): a property covers a host if it is that host, or if the
+host sits beneath it. Narrow window, since it needs no exact domain property
+and no exact prefix match to reach tier three at all — but the failure was
+invisible and durable, which is the combination this repo keeps paying for.
+
+**The fallbacks stay, and are now intended rather than tolerated.**
+`sites.py:128` and `google_seo.py:68` both fall back to `SEO_GOOGLE_ALIAS`.
+Under per-client OAuth those would be the `sites.get()` defect one field along
+— an unconnected account silently borrowing the owner's identity. Under shared
+identity they ARE the design. What keeps them honest is that `/health/blog`'s
+Measure verdict asks the API for a property matching THIS site's domain, so
+"connected" cannot mean "we hold a Google token" the way it briefly did.
+
 ### 2.11 Nothing had ever verified Search Console
 **FOUND 2026-08-25**, answering the owner's *"make sure that our connectors for
 these are set up correctly."* Asking it properly found the hole rather than

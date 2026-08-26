@@ -162,6 +162,37 @@ def main() -> int:
        "publishing and measuring fail independently; a single green light "
        "would hide whichever one is broken")
 
+    print("\n— which client's Search Console property, exactly —")
+    # LOAD-BEARING under the shared-identity model the owner chose (2026-08-25):
+    # one Google account granted viewer access on several clients' properties,
+    # rather than each client running OAuth. With one token seeing many
+    # properties, this match is the only thing keeping one client's rankings
+    # out of another's report.
+    from app.google_seo import _match_gsc_site
+
+    def E(*urls):
+        return [{"siteUrl": u, "permissionLevel": "siteOwner"} for u in urls]
+
+    ck("a lookalike domain does NOT match",
+       _match_gsc_site(E("https://shopacme.com/"), "acme.com") is None,
+       "'acme.com' in 'https://shopacme.com/' is True as a substring — with "
+       "that the only candidate it matched confidently and _save_link PINNED "
+       "another client's property")
+    ck("the apex domain property matches",
+       _match_gsc_site(E("sc-domain:acme.com"), "acme.com") == "sc-domain:acme.com")
+    ck("a www prefix property matches",
+       _match_gsc_site(E("https://www.acme.com/"), "acme.com") == "https://www.acme.com/")
+    ck("a host beneath a domain property matches",
+       _match_gsc_site(E("sc-domain:acme.com"), "blog.acme.com") == "sc-domain:acme.com",
+       "sc-domain:acme.com genuinely covers blog.acme.com")
+    ck("an unverified permission is never a candidate",
+       _match_gsc_site([{"siteUrl": "sc-domain:acme.com",
+                         "permissionLevel": "siteUnverifiedUser"}], "acme.com") is None)
+    ck("two plausible properties refuse to guess",
+       _match_gsc_site(E("https://acme.com/uk/", "https://acme.com/us/"),
+                       "acme.com") is None,
+       "staging vs prod, or two clients — pinning is a person's job")
+
     print("\n— and it is a SURFACE, not a JSON endpoint —")
     # The design flaw this closes (owner, 2026-08-25): *"where do I see the
     # high level SEO plan from which the blogs are built out?"* Nowhere. The
