@@ -37,6 +37,85 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: once; `why` is the consequence in the world, not the mechanism — a person
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
+    # ---- 2026-08-26: ONE DEFECT, SEVEN PLACES ---------------------------
+    #
+    # Every entry below is the same shape, and it recurred all day: A VALUE
+    # THAT WAS ASSUMED, DEFAULTED OR DECLARED, PRESENTED AS IF IT HAD BEEN
+    # OBSERVED. DEFECTS §1 already names it — "unknown collapsed into a
+    # value" — which is the point: naming a pattern does not stop it, and
+    # every one of these was written by somebody who knew the rule.
+    #
+    # Each fix now has a test. None of them had been proven to FAIL when the
+    # fix is removed, which by this file's own standard makes them decoration.
+    {
+        "name": "site_named_unknown_refuses",
+        "file": "app/sites.py",
+        "find": "        raise UnknownSite(\n            f\"No site profile for {site_key!r}",
+        "replace": "        return sites.get(config.SEO_PRIMARY_SITE) or {}  # SABOTAGE\n        raise UnknownSite(\n            f\"No site profile for {site_key!r}",
+        "suites": ["test_site_resolution.py"],
+        "why": "site=coverings silently resolves to Baci again — an article "
+               "queues against the wrong client's store, under a summary "
+               "naming the right one, checked against the wrong ban list",
+    },
+    {
+        "name": "backend_is_a_name_per_arm",
+        "file": "app/sites.py",
+        "find": "    mod = BACKENDS.get(platform)\n    if not mod:",
+        "replace": "    mod = BACKENDS.get(platform) or \"shopify_seo\"  # SABOTAGE\n    if False:",
+        "suites": ["test_site_resolution.py"],
+        "why": "Squarespace borrows the Shopify client again and Ironside "
+               "writes articles to a store that does not exist",
+    },
+    {
+        "name": "env_group_is_a_registry",
+        "file": "app/credentials.py",
+        "find": "        elif _env_registry_hit(tenants.get(tenant), key):",
+        "replace": "        elif env.get(\"secret\"):  # SABOTAGE",
+        "suites": ["test_credentials.py"],
+        "why": "a Shopify store configured with client_id/client_secret and no "
+               "inline token reads MISSING in the console while working "
+               "perfectly — the owner is asked to supply a credential twice",
+    },
+    {
+        "name": "gsc_property_matches_on_boundaries",
+        "file": "app/google_seo.py",
+        "find": "        if ph and (ph == host or host.endswith(\".\" + ph)):",
+        "replace": "        if ph and host in e[\"siteUrl\"]:  # SABOTAGE",
+        "suites": ["test_blog_readiness.py"],
+        "why": "under the shared-identity model one token sees several "
+               "clients' properties, and 'acme.com' matches 'shopacme.com' "
+               "again — pinned permanently, in a client's report",
+    },
+    {
+        "name": "unprobed_measure_is_not_ok",
+        "file": "app/keywords.py",
+        "find": "        meas = {\"ok\": None,",
+        "replace": "        meas = {\"ok\": \"analytics\" in caps,  # SABOTAGE",
+        "suites": ["test_blog_readiness.py"],
+        "why": "the Plan tab shows a green tick beside Measure for an account "
+               "whose Search Console returns 403 — the capability answering a "
+               "question only the API can",
+    },
+    {
+        "name": "drafted_is_not_published",
+        "file": "app/skill_pack.py",
+        "find": "    head = (\"drafted and queued for approval\" if publish[\"queued\"]\n            else \"DRAFTED ONLY, nothing queued\")",
+        "replace": "    head = \"drafted and queued for approval\"  # SABOTAGE",
+        "suites": ["test_blog_skill.py"],
+        "why": "a run that queued nothing reports the same sentence as one "
+               "that queued an article — the owner goes looking in Shopify "
+               "for something that was never sent",
+    },
+    {
+        "name": "sync_rescores_what_it_read",
+        "file": "app/keywords.py",
+        "find": "    ranked = score(tenant)\n    return {\"tenant\": tenant, \"readings\": seen,",
+        "replace": "    ranked = {\"scored\": 0, \"top\": []}  # SABOTAGE\n    return {\"tenant\": tenant, \"readings\": seen,",
+        "suites": ["test_keyword_progress.py"],
+        "why": "the nightly sync updates every position and leaves yesterday's "
+               "ranking in place, so the best thing to write next keeps its "
+               "old score until somebody presses Re-score",
+    },
     {
         "name": "data_layer_lists_every_table",
         "file": "app/admin_ui.py",

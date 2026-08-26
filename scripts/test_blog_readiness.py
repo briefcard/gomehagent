@@ -183,8 +183,9 @@ def main() -> int:
        keywords.readiness("hasgoogle", probe=False)["ok"] is False)
     from app import admin_ui as _aui
     page = _aui.render_plan("s3cret", "hasgoogle")
-    ck("the strip shows '?' rather than a tick",
-       '<div class="lbl">? Measure</div>' in page)
+    ck("Measuring reads '?' rather than a tick",
+       "? <strong>Measuring</strong>" in page,
+       "measuring is DOWNSTREAM of planning — stated, never a gate")
     ck("and offers the one control that answers it",
        "Check Search Console now" in page,
        "the thing that says it has no answer is where you ask for one")
@@ -315,9 +316,10 @@ def main() -> int:
     from app import admin_ui
     page = admin_ui.render_plan("s3cret", "good")
     for probe, why in (
-            ("Switch", "readiness leads: every other section is meaningless "
-                       "if publishing or measuring is broken"),
-            ("Publish", ""), ("Measure", ""), ("Knows what to write", ""),
+            ("Switch", "the two that GATE planning lead the page"),
+            ("Knows what to write", ""),
+            ("Once it is written", "publishing and measuring are stated "
+                                   "downstream, not rendered as blockers"),
             ("acrylic jug", "the map itself, not a link to it"),
             ("Propose the next articles", "the action is on the page that "
                                           "shows the state")):

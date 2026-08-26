@@ -1132,6 +1132,23 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
     # `meas["ok"] is True`, not truthiness: None must not read as ready.
     out["ok"] = bool(live and pub.get("ok") and meas.get("ok") is True
                      and know["ok"])
+
+    # THE PLAN IS NOT THE PIPELINE, and conflating them made a whole page read
+    # as broken (owner, 2026-08-26: *"the Publish path belongs to the blog
+    # system anyways right? The plan is just the brain / architecture of our
+    # content strategy"*).
+    #
+    # Three different questions with three different answers:
+    #   can it PLAN     — the switch, and whether it knows what to write;
+    #   can it PROVE it — Search Console;
+    #   can it SHIP     — a CMS.
+    #
+    # Ironside can do the first today and cannot do the third until
+    # Squarespace exists. Rendering that as a red verdict beside the others
+    # says "this account is blocked" about the half that works — and a parked
+    # decision shown as a blocker is one the owner learns to read past.
+    out["can_plan"] = bool(live and know["ok"])
+    out["downstream"] = {"publish": pub, "measure": meas}
     return out
 
 

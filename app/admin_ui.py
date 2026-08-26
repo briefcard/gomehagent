@@ -5587,10 +5587,11 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     # away, and honest about not having asked.
     ready = kw.readiness(tenant, probe=probe)
     chips = ""
+    # THE TWO THAT GATE PLANNING, first and alone. Publishing and measuring
+    # are downstream of this page, not preconditions for it — see
+    # `keywords.readiness`'s `can_plan`.
     for label, part, hint in (
             ("Switch", "switch", "installed and on"),
-            ("Publish", "publish", "a CMS that can take an article"),
-            ("Measure", "measure", "Search Console, for positions"),
             ("Knows what to write", "knows_what_to_write", "map, claims, ban list")):
         got = ready.get(part) or {}
         # THREE STATES, not two. `ok is None` means nobody has asked — and a
@@ -5610,24 +5611,55 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
             return list(v) if isinstance(v, (list, tuple)) else [str(v)]
         fix = "; ".join(_lines(got.get("fix")) + _lines(got.get("notes")))
         detail = got.get("detail") or ("ready" if ok else "")
-        extra = ""
-        if part == "publish" and not ok and "blog_id" in str(got.get("detail", "")):
-            # ACT WHERE YOU REPORT. Naming a missing value and then sending
-            # somebody to a URL bar to set it is two pages for one decision.
-            extra = _blog_picker(key, tenant, pick)
-        if unknown:
-            # The one control that turns it into an answer, beside the thing
-            # that says it has no answer.
-            extra += (f'<p><a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
-                      f'&amp;tenant={_esc(tenant)}&amp;probe=1">'
-                      f'<button class="sec" type="button">Check Search Console '
-                      f'now</button></a></p>')
+        extra = ""   # publish/measure controls now live with their lines
         chips += (
             f'<div class="card {"" if ok else "warn"}">'
             f'<div class="lbl">{"✓" if ok else ("?" if unknown else "!")} '
             f'{_esc(label)}</div>'
             f'<div class="big">{_esc(str(detail) or ("ready" if ok else "not ready"))}</div>'
             f'<p class="when">{_esc(fix or hint)}</p>{extra}</div>')
+
+    # Stated, not gated. What happens to an article after it is written, on
+    # one line, where it informs rather than blocks.
+    down = ready.get("downstream") or {}
+    _pub, _meas = down.get("publish") or {}, down.get("measure") or {}
+
+    def _line(name, got, control=""):
+        """One downstream verdict, WITH the control that resolves it.
+
+        The control travels with the verdict rather than staying behind on a
+        chip. Moving publish and measure out of the strip took the blog-id
+        picker and the Search Console check down with them — the two buttons
+        that answer the two lines — which the suite caught immediately. A fact
+        and the thing that fixes it belong in the same place, which is the
+        rule this page was built on.
+        """
+        mark = {True: "✓", None: "?"}.get(got.get("ok"), "!")
+        why = got.get("fix") or ""
+        why = "; ".join(why) if isinstance(why, list) else why
+        return (f'<li>{mark} <strong>{name}</strong> — '
+                f'{_esc(str(got.get("detail") or ""))}'
+                + (f' <span class="when">{_esc(why)}</span>'
+                   if got.get("ok") is not True else "")
+                + control + '</li>')
+
+    _check_gsc = ""
+    if _meas.get("ok") is None:
+        _check_gsc = (f' <a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
+                      f'&amp;tenant={_esc(tenant)}&amp;probe=1">'
+                      f'<button class="sec" type="button">Check Search Console '
+                      f'now</button></a>')
+    _fix_blog = ""
+    if _pub.get("ok") is not True and "blog_id" in str(_pub.get("detail", "")):
+        _fix_blog = " " + _blog_picker(key, tenant, pick)
+
+    downstream_html = (
+        '<h3>Once it is written</h3><ul style="margin:0;padding-left:18px">'
+        + _line("Publishing", _pub, _fix_blog)
+        + _line("Measuring", _meas, _check_gsc)
+        + '</ul><p class="when">Neither stops you planning. An account with no '
+        'CMS can still build a map, rank it and decide what to write — the '
+        'articles just need somewhere to go before they go there.</p>')
 
     m = kw.map_for(tenant)
     by_tier = m["by_tier"]
@@ -5685,6 +5717,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
       <h3>The plan — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
       {body_map}
       <p>{actions}</p>
+      {downstream_html}
       {_progress_section(key, tenant, days)}
       <details><summary>How this decides what to write next</summary>
         <p class="when">A head term is never targeted with an article. It is
