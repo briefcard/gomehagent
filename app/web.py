@@ -349,6 +349,21 @@ def health_connections() -> dict:
             report["shopify"][store] = f"ok — {shop['name']}"
         except Exception as exc:  # noqa: BLE001
             report["shopify"][store] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:200]}"
+    def _alias_owner(alias: str) -> str:
+        """Which ACCOUNT this mailbox alias belongs to, for the remedy line.
+
+        `google_config` already resolves alias -> tenant; the health probe
+        reported the alias alone, so "personal is broken" named a key in an
+        env blob rather than the account somebody has to select to fix it.
+        """
+        try:
+            with db.SessionLocal() as s:
+                t = (s.query(db.Tenant)
+                     .filter(db.Tenant.gmail_alias == alias).first())
+            return t.name if t else ""
+        except Exception:                                        # noqa: BLE001
+            return ""
+
     if not config.SHOPIFY_STORES:
         report["shopify"] = "SHOPIFY_STORES_JSON not set"
     for alias in config.GMAIL_ACCOUNTS:
@@ -362,8 +377,19 @@ def health_connections() -> dict:
             gmail_ok = f"gmail ERROR: {exc.__class__.__name__}"
         drive_res = data_tools.drive_search(alias, "test")
         drive_ok = ("drive ok" if not drive_res.startswith("Drive not accessible")
-                    else "drive NOT AUTHORIZED (re-run google_oauth.py with new scopes)")
-        report["google"][alias] = f"{gmail_ok} · {drive_ok}"
+                    else "drive NOT AUTHORIZED")
+        # WHICH ACCOUNT, and where to fix it. The remedy here used to read
+        # "re-run google_oauth.py with new scopes" — the legacy path, and the
+        # third message today found pointing at a terminal from a surface that
+        # has a button. An alias is also not something the owner can act on:
+        # `personal` is a key in an env blob, and the thing he has to click is
+        # named after a TENANT.
+        owner = _alias_owner(alias)
+        report["google"][alias] = (
+            f"{gmail_ok} · {drive_ok}"
+            + ("" if gmail_ok == "gmail ok" and drive_ok == "drive ok" else
+               f" — reconnect on the Connections tab"
+               + (f" under {owner}" if owner else "")))
 
     # CANVA and the ESP were invisible here, so "is it connected?" had no
     # answer short of the authenticated console — which is exactly the
@@ -1757,7 +1783,8 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
         return ui.render_plan(link_key, tenant,
                               msg=request.query_params.get("ok", ""),
                               err=request.query_params.get("err", ""),
-                              pick=bool(request.query_params.get("pick")))
+                              pick=bool(request.query_params.get("pick")),
+                              days=_plan_days(request.query_params.get("days")))
     if tab == "content":
         try:
             cp = int(request.query_params.get("cpage", "1"))
@@ -2194,6 +2221,13 @@ def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
                       + ("  " + " ".join(got.get("notes") or [])))
 
 
+def _plan_days(raw) -> int:
+    try:
+        return max(1, min(int(raw or 28), 365))
+    except (TypeError, ValueError):
+        return 28
+
+
 def _plan_back(tenant: str, key: str, msg: str = "", err: str = ""):
     from fastapi.responses import RedirectResponse
     from urllib.parse import urlencode
@@ -2305,7 +2339,7 @@ def admin_keywords_sync(key: str = Depends(admin_key), tenant: str = "",
 @app.get("/admin/keywords_goal")
 def admin_keywords_goal(key: str = Depends(admin_key), tenant: str = "",
                         organic_clicks: str = "", top3: str = "",
-                        top10: str = "", horizon_days: str = "") -> dict:
+                        top10: str = "", horizon_days: str = "", ui: int = 0):
     """Declare the growth goal the progress report measures against.
 
     There is deliberately no default: a target nobody chose is a bar nobody
@@ -2316,9 +2350,16 @@ def admin_keywords_goal(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     row = systems.find(tenant, "blog") if tenant else None
     if not row:
-        return {"error": f"the blog system is not installed for {tenant!r}"}
-    return systems.set_goal(row.id, organic_clicks=organic_clicks, top3=top3,
-                            top10=top10, horizon_days=horizon_days)
+        out = {"error": f"the blog system is not installed for {tenant!r}"}
+        return _plan_back(tenant, key, err=out["error"]) if ui else out
+    got = systems.set_goal(row.id, organic_clicks=organic_clicks, top3=top3,
+                           top10=top10, horizon_days=horizon_days)
+    if not ui:
+        return got
+    if got.get("error"):
+        return _plan_back(tenant, key, err=got["error"])
+    return _plan_back(tenant, key, msg="goal set: " + ", ".join(
+        f"{k.replace('_', ' ')} {v}" for k, v in got.items() if k != "ok"))
 
 
 @app.get("/admin/sweep")

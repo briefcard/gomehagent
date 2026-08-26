@@ -5380,8 +5380,121 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
             'can hold several, and guessing writes into the wrong one.</p>')
 
 
+def _progress_section(key: str, tenant: str, days: int) -> str:
+    """Did the work move anything, and may we say it was the work.
+
+    On the same page as the plan, deliberately. A plan and its result are one
+    subject; putting the numbers on a separate tab is how a plan stops being
+    checked against them. `keywords.progress` reads only our own tables, so
+    this costs no API call and can render on every visit.
+
+    THE GOAL FORM IS HERE because this is the section that reports its
+    absence. `set_goal` was reachable only as a URL with four query
+    parameters, which is the same defect as the blog id: naming a missing
+    value and then sending somebody elsewhere to supply it.
+    """
+    from . import keywords as kw
+    p = kw.progress(tenant, days=days)
+    t, c = p["tracked"], p["control"]
+
+    def _num(v, suffix=""):
+        return "—" if v in (None, "") else f"{v}{suffix}"
+
+    windows = "".join(
+        f'<a class="{"on" if days == d else ""}" href="/admin/ui?key={_esc(key)}'
+        f'&amp;tab=plan&amp;tenant={_esc(tenant)}&amp;days={d}">{lbl}</a>'
+        for d, lbl in ((7, "7d"), (28, "28d"), (90, "90d")))
+
+    # TRACKED BESIDE CONTROL, always. A rise on its own is a claim; a rise
+    # against the rest of the site over the same window is a finding. The
+    # control column is why this table has four columns instead of two.
+    compare = f"""
+    <table class="tbl">
+      <tr><th></th><th>clicks</th><th>vs before</th><th>avg position</th>
+          <th>position gain</th></tr>
+      <tr><td><strong>Articles we wrote</strong></td>
+          <td class="num">{t["now"]["clicks"]}</td>
+          <td class="num">{_num(t["change"]["clicks_pct"], "%")}</td>
+          <td class="num">{_num(t["now"]["avg_position"])}</td>
+          <td class="num">{_num(t["change"]["position_gain"])}</td></tr>
+      <tr><td>The rest of the site <span class="mut">(control)</span></td>
+          <td class="num">{c["now"]["clicks"]}</td>
+          <td class="num">{_num(c["change"]["clicks_pct"], "%")}</td>
+          <td class="num">{_num(c["now"]["avg_position"])}</td>
+          <td class="num">{_num(c["change"]["position_gain"])}</td></tr>
+    </table>
+    <p class="when">A smaller position is better, so a POSITIVE gain is an
+    improvement. The control row is what separates our work from a good
+    quarter for the whole category.</p>"""
+
+    moves = "".join(
+        f'<tr><td>{_esc(m["phrase"])}</td>'
+        f'<td>{_esc((m["tier"] or "").replace("_", "-"))}</td>'
+        f'<td class="num">{_num(m["from"])}</td>'
+        f'<td class="num">{m["to"]}</td>'
+        f'<td class="num">{_num(m["gain"])}</td>'
+        f'<td class="num">{m["clicks"]}</td>'
+        f'<td>{_esc(str(m["days_since_publish"]))}'
+        + ('<span class="mut"> · too early to attribute</span>'
+           if m["too_early"] else "") + '</td></tr>'
+        for m in p["movements"]) or (
+        '<tr><td colspan="7" class="mut">nothing tracked has a reading yet — '
+        'the nightly sync files them once articles are published</td></tr>')
+
+    goal = p["goal"]
+    if goal["declared"]:
+        rows = "".join(
+            f'<tr><td>{_esc(f.replace("_", " "))}</td>'
+            f'<td class="num">{a["actual"]}</td><td class="num">{a["target"]}</td>'
+            f'<td class="num">{a["pct"]}%</td></tr>'
+            for f, a in goal["attainment"].items()) or (
+            '<tr><td colspan="4" class="mut">a goal is set but nothing it '
+            'names is measurable yet</td></tr>')
+        goal_html = (f'<table class="tbl"><tr><th>goal</th><th>now</th>'
+                     f'<th>target</th><th></th></tr>{rows}</table>'
+                     f'<p class="when">Set {_esc(goal["declared"].get("set_at", ""))}'
+                     f'. Change it below.</p>')
+    else:
+        goal_html = ('<p class="mut">No goal set, so nothing above has a bar to '
+                     'clear. There is deliberately no default — a target nobody '
+                     'chose is a target nobody can fail.</p>')
+
+    form = (f'<form method="get" action="/admin/keywords_goal">'
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="ui" value="1">'
+            + "".join(
+                f'<label>{lbl} <input name="{n}" size="7" value="'
+                + _esc(str((goal["declared"] or {}).get(n, "")))
+                + '"></label> '
+                for n, lbl in (("organic_clicks", "monthly clicks"),
+                               ("top3", "keywords in top 3"),
+                               ("top10", "keywords in top 10"),
+                               ("horizon_days", "over (days)")))
+            + '<button type="submit">Set the goal</button></form>')
+
+    notes = "".join(f'<p class="mut">{_esc(n)}</p>' for n in p["notes"])
+
+    return f"""
+    <h3>Progress <span class="when">{windows}</span></h3>
+    {notes}
+    {compare}
+    <p><strong>{p["wins"]["top3"]}</strong> keyword(s) ranking 1–3 ·
+       <strong>{p["wins"]["top10"]}</strong> in the top 10 ·
+       {p["attributable"]} attributable, {p["too_early_to_attribute"]} too
+       recent to claim</p>
+    <table class="tbl">
+      <tr><th>keyword</th><th>tier</th><th>was</th><th>now</th><th>gain</th>
+          <th>clicks</th><th>published</th></tr>
+      {moves}
+    </table>
+    <h3>The goal</h3>
+    {goal_html}
+    {form}"""
+
+
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
-                pick: bool = False) -> str:
+                pick: bool = False, days: int = 28) -> str:
     """The keyword plan the blog is built from.
 
     STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
@@ -5494,6 +5607,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
       <h3>The plan — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
       {body_map}
       <p>{actions}</p>
+      {_progress_section(key, tenant, days)}
       <details><summary>How this decides what to write next</summary>
         <p class="when">A head term is never targeted with an article. It is
         targeted with a <strong>pillar</strong> page plus the long-tail

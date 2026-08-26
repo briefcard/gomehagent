@@ -248,6 +248,42 @@ def main() -> int:
        "one site" in admin_ui.render_plan("s3cret", admin_ui.ALL),
        "head terms, clusters and positions are all per-domain")
 
+    print("\n— progress is a section, not a JSON endpoint —")
+    import re as _re
+    from app import systems as _sys, web as _web
+    _r = _sys.create("good", "blog") if not _sys.find("good", "blog") else _sys.find("good", "blog")
+    with db.SessionLocal() as s:
+        s.get(db.System, _r.id).status = "live"
+        s.commit()
+    keywords.upsert("good", "acrylic jug", status="published")
+    keywords.record_reading("good", "acrylic jug", position=14.0, clicks=9)
+    keywords.record_reading("good", "a page we did not write", position=6.0, clicks=30)
+    flat = _re.sub(r"\s+", " ", admin_ui.render_plan("s3cret", "good"))
+
+    ck("the tracked row is there", "Articles we wrote" in flat)
+    ck("and the CONTROL row beside it", "The rest of the site" in flat,
+       "a rise on its own is a claim; a rise against the rest of the site "
+       "over the same window is a finding")
+    ck("a smaller position is explained as a positive gain",
+       "a POSITIVE gain is an improvement" in flat,
+       "the sign convention is the thing somebody misreports first")
+    ck("it separates attributable from too-recent",
+       "too recent to claim" in flat)
+    ck("with no goal it says so and does not invent one",
+       "No goal set" in flat and "nobody chose is a target nobody can fail" in flat)
+    ck("and the form to set it is RIGHT THERE",
+       "Set the goal" in flat and 'action="/admin/keywords_goal"' in flat,
+       "act where you report — set_goal was reachable only as a URL with four "
+       "query parameters")
+
+    _web.admin_keywords_goal(key="s3cret", tenant="good", organic_clicks="2000",
+                             top3="8", top10="25", horizon_days="90")
+    flat2 = _re.sub(r"\s+", " ", admin_ui.render_plan("s3cret", "good"))
+    ck("once set, attainment is shown against it",
+       "2000" in flat2 and "No goal set" not in flat2)
+    ck("and the form is pre-filled with what IS, not blank",
+       'value="2000"' in flat2, "state before instructions")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
