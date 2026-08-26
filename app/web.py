@@ -4284,6 +4284,21 @@ def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
                                err=f"Ran and FAILED — {why}; the run is on "
                                    f"the log below", anchor="planned")
     items = out.get("items") or []
+    # AN ARTICLE RUN LANDS ON THE ARTICLE. The owner ran one, got a
+    # paragraph-long flash whose directions pointed at another tab, and
+    # asked, reasonably: "I published an article and I dont see it. Where
+    # is it?" A run that produces one reviewable thing should put that
+    # thing in front of the person who asked for it — the review page
+    # already says everything the paragraph tried to.
+    art = next((i for i in items if i.get("output_id")
+                and (out.get("skill") == "blog_article")), None)
+    if art and len(items) == 1:
+        from fastapi.responses import RedirectResponse
+        from urllib.parse import quote
+        return RedirectResponse(
+            f"/admin/article/{quote(art['output_id'])}?key={quote(key)}"
+            f"&ok={quote('drafted — this is it; review, edit, and ship it from here')}",
+            303)
     waiting = any(i.get("disposition") == "needs_approval" for i in items)
     said = (f"Ran now — {out.get('summary') or status}"
             + (f" · {len(items)} item(s)" if items else "")

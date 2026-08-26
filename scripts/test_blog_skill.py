@@ -239,9 +239,12 @@ def main() -> int:
        kept is not None and kept.body,
        "the `> 2000` guard threw away exactly the case this table exists "
        "for — a short article on an account with nowhere else to keep it")
+    # REWORDED 2026-08-26: the paragraph became a sentence when runs started
+    # LANDING on the review page — the summary stopped carrying what the page
+    # carries. The property was never the words; it is that the summary says
+    # where the article lives.
     ck("and the run says where to read it",
-       "raw=1" in r_nocms["summary"] or "Review tab" in r_nocms["summary"],
-       r_nocms["summary"][-90:])
+       "review page" in r_nocms["summary"], r_nocms["summary"][-90:])
 
     print("\n— eight supports in one cluster are not eight of the same article —")
     # Owner, 2026-08-26, on a proposed intent->format lookup: *"the format

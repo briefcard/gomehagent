@@ -220,6 +220,56 @@ def main() -> int:
        in r7.headers["location"].replace("%20", "+"),
        "staging hosts and CDNs are real; a caution, not a block")
 
+    print("\n— the run LANDS on the article it made —")
+    # Owner, live: *"I published an article and I dont see it. Where is it?"*
+    # The flash was a paragraph directing them to the Plan tab's board — from
+    # a redirect that landed them on the SYSTEMS tab — and a directly-run
+    # keyword stayed "candidate", so the board's targeting table did not list
+    # it: the notification pointed at a row that was not there.
+    keywords.upsert("sqonly", "event spaces miami", volume=900)
+    keywords.cluster("sqonly")
+    plan = systems.open_plan("sqonly", "blog",
+                             ref="article:sqonly:event-spaces-miami",
+                             plan={"keyword": "event spaces miami",
+                                   "role": "pillar"},
+                             trigger="planner")
+    rid = plan.get("run_id") or plan.get("id") or ""
+    if not rid:
+        with db.SessionLocal() as s:
+            rid = (s.query(db.SystemRun)
+                   .filter(db.SystemRun.tenant == "sqonly")
+                   .order_by(db.SystemRun.started_at.desc()).first().id)
+    r9 = c.get(f"/admin/plan_run?key=s3cret&id={rid}&tenant=sqonly"
+               f"&system=blog&approve=1", follow_redirects=False)
+    loc = r9.headers.get("location", "")
+    ck("Run now redirects to the review page itself",
+       r9.status_code == 303 and "/admin/article/" in loc, loc[:110])
+    ck("saying plainly that this is it", "this+is+it" in loc.replace("%20", "+"),
+       "a run that produces one reviewable thing puts it in front of the "
+       "person who asked")
+    oid3 = loc.split("/admin/article/")[1].split("?")[0]
+    with db.SessionLocal() as s:
+        kw3 = (s.query(db.KeywordTarget)
+               .filter_by(tenant="sqonly", phrase="event spaces miami").first())
+    bd = keywords.board("sqonly")
+    ck("and the board's targeting table lists it",
+       any(x["phrase"] == "event spaces miami" and x["output_id"] == oid3
+           for x in bd["in_flight"]),
+       f"status={kw3.status!r} — a row with an article behind it is past "
+       f"candidate whatever filed it")
+
+    print("\n— a DIRECT run is findable too —")
+    keywords.upsert("sqonly", "loft venue miami", volume=400)
+    keywords.cluster("sqonly")
+    r10 = skill.run("blog_article", "sqonly", keyword="loft venue miami",
+                    role="support")
+    with db.SessionLocal() as s:
+        kw4 = (s.query(db.KeywordTarget)
+               .filter_by(tenant="sqonly", phrase="loft venue miami").first())
+    ck("no plan, same visibility", kw4.status == "planned",
+       "the direct path left it candidate — invisible to the exact table "
+       "the summary named")
+
     print("\n— the corrected Shopify URL —")
     sent = {}
     _send_real, _get_real = shopify_seo._send, shopify_seo._get

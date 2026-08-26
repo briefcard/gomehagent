@@ -2979,10 +2979,9 @@ def _run_blog_article(ctx: Context) -> dict:
 
     if not can_push:
         publish["detail"] = (
-            f"NOT queued — {why_no_cms} The article is written, checked and "
-            f"kept whole: review and edit it from the Plan tab's board "
-            f"('review the draft'), copy the source from its ?raw=1 view, and "
-            f"record the live URL there once you have pasted it in.")
+            f"NOT queued — {why_no_cms} The article is written and kept; "
+            f"paste it in from its review page, then record the live URL "
+            f"there.")
     elif profile.get("platform") != "wordpress" and not blog_id:
         publish["detail"] = (
             f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
@@ -3014,6 +3013,14 @@ def _run_blog_article(ctx: Context) -> dict:
 
     if row is not None:
         kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,
+                      # A row with an article behind it is past "candidate"
+                      # whatever filed it. A DIRECT run (no plan) left the
+                      # status untouched, so the board's targeting table —
+                      # the exact place the run summary told the owner to
+                      # look — did not list it: the notification pointed at
+                      # a row that was not there.
+                      status=("planned" if row is not None
+                              and row.status == "candidate" else None),
                       output_id=(ctx.items[-1] or {}).get("output_id", "")
                       if ctx.items else "")
 
