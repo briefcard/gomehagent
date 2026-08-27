@@ -71,11 +71,11 @@ padding:18px 20px;margin-bottom:16px}
 .ask li{margin-bottom:11px}
 .empty{color:var(--mut);padding:6px 0}
 .wide{grid-column:1/-1}
-form.in{max-width:380px;margin:14vh auto;background:var(--panel);
+.in{max-width:380px;margin:14vh auto;background:var(--panel);
 border:1px solid var(--line);border-radius:12px;padding:30px}
-form.in input{width:100%;padding:11px 13px;border:1px solid var(--line);
+.in input{width:100%;padding:11px 13px;border:1px solid var(--line);
 border-radius:8px;font-size:.95rem;margin:10px 0 14px}
-form.in button{width:100%;padding:11px;border:0;border-radius:8px;
+.in button{width:100%;padding:11px;border:0;border-radius:8px;
 background:var(--acc);color:#fff;font-weight:600;font-size:.95rem;cursor:pointer}
 .note{background:var(--accs);border-radius:8px;padding:12px 14px;
 font-size:.88rem;color:var(--ink2);margin-top:14px}
@@ -112,11 +112,17 @@ def render_signin(error: str = "", sent: bool = False) -> str:
             "<h1>Sign in</h1>"
             "<p class='lab'>Ask for a link — there is no password to remember.</p>"
             + (f"<div class='note'>{_e(error)}</div>" if error else "")
-            + "<form class='in' method='post' action='/portal/signin' "
+            + "<form method='post' action='/portal/signin' "
               "style='margin:18px 0 0;padding:0;border:0'>"
               "<input name='email' type='email' placeholder='you@company.com' required>"
               "<button>Request a sign-in link</button></form>")
-    return _page("Sign in", f"<form class='in' onsubmit='return false'>{inner}</form>")
+    # A <div>, never a wrapping <form>: the card wrapper used to be
+    # `<form onsubmit='return false'>`, and the HTML parser DROPS a nested
+    # <form> start tag — so the real form's method and action vanished, the
+    # button submitted the wrapper, and the wrapper cancelled it. The front
+    # door of the client product was dead HTML and no client could request a
+    # link through it.
+    return _page("Sign in", f"<div class='in'>{inner}</div>")
 
 
 def render(tenant: str, tab: str = "overview", days: int = 30,
@@ -128,8 +134,14 @@ def render(tenant: str, tab: str = "overview", days: int = 30,
         return _page("Not found", "<div class='main'><h1>No such account</h1></div>")
     rep = client_report.assemble(tenant, days)
 
+    # An owner reviewing a client's portal arrives with ?tenant=. The nav used
+    # to drop it, so their SECOND click resolved to no account and bounced a
+    # signed-in owner onto a sign-in form telling them to hand-edit a URL. A
+    # client's links never carry it — their account rides the session, and a
+    # tenant in the URL is refused rather than obeyed (resolve_tenant).
+    carry = f"&tenant={_e(tenant)}" if (who or {}).get("role") == "owner" else ""
     nav = "".join(
-        f"<a class='{'on' if k == tab else ''}' href='/portal?tab={k}&days={days}'>"
+        f"<a class='{'on' if k == tab else ''}' href='/portal?tab={k}&days={days}{carry}'>"
         f"<span class='ico'>{i}</span>{_e(label)}</a>"
         for k, label, i in _NAV)
     side = (f"<div class='side'><div class='brand'>{_e(t.name)}</div>{nav}"

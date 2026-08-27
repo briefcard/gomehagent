@@ -273,7 +273,7 @@ def _active_tenant(chat_id: str) -> str:
 
 
 @app.get("/health")
-def health() -> dict:
+def health(key: str = Depends(admin_key)) -> dict:
     """Liveness, and WHICH BUILD is answering.
 
     The commit was added after half an hour was spent guessing whether a
@@ -283,29 +283,42 @@ def health() -> dict:
 
     `RENDER_GIT_COMMIT` is set by Render itself, so this is what is actually
     executing rather than what a dashboard believes.
+
+    UNAUTHENTICATED, this answers liveness and build identity ONLY. The full
+    report used to be public and named every Gmail alias, the channel state
+    and each provider's redirect URI — a roster, not a heartbeat, on a landing
+    page that promises each client sees only their own workspace. The deploy
+    checks this exists for (`ok` / `commit` / `skills`) stay keyless so a
+    deploy can be verified from anywhere; everything that names accounts or
+    infrastructure needs the console key. `admin_key` here RESOLVES the
+    credential and returns "" rather than rejecting — the check below is the
+    gate, per the standing rule.
     """
-    from . import channel
     import os as _os
-    return {"ok": True, "whatsapp": config.WHATSAPP_ENABLED,
-            "telegram": config.TELEGRAM_ENABLED,
-            "ops_channel": channel.active(),
-            "inboxes": list(config.GMAIL_ACCOUNTS),
+    base = {"ok": True,
             "commit": (_os.environ.get("RENDER_GIT_COMMIT") or "unknown")[:12],
-            "routes": len({r.path for r in app.routes}),
             # How many skills THIS process can actually run. Zero here was
             # the owner's "no skill keyed 'campaign_email'": registration
             # was an import side effect nothing on the web path performed.
             # The registry self-loads now, and this is the curl that proves
             # it per process rather than per incident.
-            "skills": _skill_count(),
-            # The exact strings a provider console has to hold. Added after a
-            # `redirect_uri_mismatch` that took a Google error page and three
-            # files to explain: the value is computed from `PUBLIC_BASE_URL`,
-            # which is `sync: false` in render.yaml and therefore invisible
-            # everywhere. It is not a secret — it travels in the address bar
-            # during every consent round trip — and "which URI do I register"
-            # recurs for every provider and every client.
-            "oauth": _oauth_setup()}
+            "skills": _skill_count()}
+    if key != config.APPROVAL_SECRET:
+        return base                     # liveness + build identity, no roster
+    from . import channel
+    base.update({"whatsapp": config.WHATSAPP_ENABLED,
+                 "telegram": config.TELEGRAM_ENABLED,
+                 "ops_channel": channel.active(),
+                 "inboxes": list(config.GMAIL_ACCOUNTS),
+                 "routes": len({r.path for r in app.routes}),
+                 # The exact strings a provider console has to hold. Added
+                 # after a `redirect_uri_mismatch` that took a Google error
+                 # page and three files to explain: the value is computed from
+                 # `PUBLIC_BASE_URL`, which is `sync: false` in render.yaml
+                 # and therefore invisible everywhere. "Which URI do I
+                 # register" recurs for every provider and every client.
+                 "oauth": _oauth_setup()})
+    return base
 
 
 def _oauth_setup() -> dict:
@@ -344,8 +357,23 @@ def _skill_count() -> int:
 
 
 @app.get("/health/connections")
-def health_connections() -> dict:
-    """Live-test every data connection. Open in a browser to verify setup."""
+def health_connections(key: str = Depends(admin_key)):
+    """Live-test every data connection. Open in a browser (with the console
+    key, or a console session) to verify setup.
+
+    KEYED. This probe prints Shopify shop display names, every Gmail alias
+    with the tenant it belongs to, and which accounts are broken — the client
+    roster with a health verdict per row. It sat unauthenticated for months;
+    one curl contradicted both the landing page's isolation promise and
+    /privacy's. Liveness needs nothing; a roster needs the key.
+    """
+    if key != config.APPROVAL_SECRET:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"error": "admin key required — this probe names client accounts "
+                      "and live-tests their connections. /health answers "
+                      "liveness without one."},
+            status_code=401)
     from . import data_tools, gmail_client  # lazy: avoid slowing basic health
 
     report: dict = {"shopify": {}, "google": {}}
@@ -1891,7 +1919,7 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  cpage=cp)
     q = request.query_params
     return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
-                     link=q.get("link", ""))
+                     link=q.get("link", ""), ilink=q.get("ilink", ""))
 
 
 @app.get("/admin/kb_add")
@@ -1928,14 +1956,29 @@ def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "", va
 
 
 @app.get("/admin/intake_new")
-def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "", days: int = 30):
-    """Mint a private intake link for one client."""
+def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
+               days: int = 30, ui: int = 0):
+    """Mint a private intake link for one client.
+
+    `ui=1` is the console button (the Intake links card on Connections) — it
+    comes back to that page with the minted URL flashed as a copyable field,
+    the way connect links already do. The bare JSON form stays for hand calls.
+    These three routes existed for months with NO console surface: minting
+    meant hand-typing this URL and copying out of raw JSON.
+    """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     import datetime as _dt
     import secrets
     from . import tenants as tn
     if not tn.get(tenant):
+        if ui:
+            from fastapi.responses import RedirectResponse
+            from urllib.parse import quote as _q
+            return RedirectResponse(
+                f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+                f"&err={_q(f'unknown account {tenant!r}', safe='')}",
+                status_code=303)
         return {"error": f"unknown tenant {tenant!r}"}
     token = secrets.token_urlsafe(24)
     with db.SessionLocal() as s:
@@ -1943,8 +1986,15 @@ def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
             token=token, tenant=tenant, label=label,
             expires_at=db.utcnow() + _dt.timedelta(days=max(1, days))))
         s.commit()
+    url = f"{config.PUBLIC_BASE_URL}/intake/{token}"
+    if ui:
+        from fastapi.responses import RedirectResponse
+        from urllib.parse import quote as _q
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+            f"&ilink={_q(url, safe='')}", status_code=303)
     return {"ok": True, "tenant": tenant,
-            "url": f"{config.PUBLIC_BASE_URL}/intake/{token}",
+            "url": url,
             "expires_in_days": days,
             "note": "Send this to the client. It reaches one account and nothing else."}
 
@@ -1965,15 +2015,31 @@ def intake_links(key: str = Depends(admin_key), tenant: str = "") -> dict:
 
 
 @app.get("/admin/intake_revoke")
-def intake_revoke(key: str = Depends(admin_key), token: str = "") -> dict:
+def intake_revoke(key: str = Depends(admin_key), token: str = "",
+                  tenant: str = "", ui: int = 0):
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     with db.SessionLocal() as s:
         row = s.get(db.IntakeLink, token)
         if not row:
+            if ui:
+                from fastapi.responses import RedirectResponse
+                from urllib.parse import quote as _q
+                return RedirectResponse(
+                    f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+                    f"&err={_q('no such intake link', safe='')}", status_code=303)
             return {"error": "no such link"}
         row.status = "revoked"
+        if not tenant:
+            tenant = row.tenant or ""
         s.commit()
+    if ui:
+        from fastapi.responses import RedirectResponse
+        from urllib.parse import quote as _q
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+            f"&ok={_q('Intake link revoked — any copy of it now shows no longer active.', safe='')}",
+            status_code=303)
     return {"ok": True, "revoked": token}
 
 
@@ -5040,14 +5106,20 @@ async def portal_signin_post(request: Request):
 
 
 @app.get("/portal/in/{token}")
-def portal_in(token: str):
+def portal_in(token: str, tab: str = ""):
     from fastapi.responses import RedirectResponse
 
     from . import portal, portal_ui
     got = portal.redeem(token)
     if not got.get("ok"):
         return HTMLResponse(portal_ui.render_signin(got.get("error", "")))
-    resp = RedirectResponse("/portal", status_code=303)
+    # A link may name the tab it was sent about (`/portal/in/<t>?tab=results`)
+    # so redeeming lands on the thing discussed, not always on Overview.
+    # Unknown values fall through — a typo must not 404 a working sign-in.
+    dest = (f"/portal?tab={tab}"
+            if tab in ("overview", "results", "connections", "requests")
+            else "/portal")
+    resp = RedirectResponse(dest, status_code=303)
     resp.set_cookie(portal.PORTAL_COOKIE, got["cookie"], max_age=60 * 60 * 24 * 14,
                     httponly=True, secure=True, samesite="lax")
     return resp

@@ -38,15 +38,31 @@ _SESSION_DAYS = 14
 _LINK_MINUTES = 30
 
 
-def _sig(body: str) -> str:
-    return hmac.new((config.APPROVAL_SECRET or "").encode(), body.encode(),
+def _sig(body: str) -> str | None:
+    """None when no secret is configured — never a signature.
+
+    An HMAC keyed on "" still computes and still verifies, so an unset
+    APPROVAL_SECRET would accept any forged cookie — including one claiming
+    role=owner, which resolve_tenant grants every account and can_write
+    grants True. web._matches fails closed on an empty expected value; the
+    portal's own credential path does the same.
+    """
+    if not (config.APPROVAL_SECRET or "").strip():
+        return None
+    return hmac.new(config.APPROVAL_SECRET.encode(), body.encode(),
                     hashlib.sha256).hexdigest()[:32]
 
 
 def _sign(user_id: str, tenant: str, role: str) -> str:
     exp = int((db.utcnow() + dt.timedelta(days=_SESSION_DAYS)).timestamp())
     body = f"{user_id}|{tenant}|{role}|{exp}"
-    return f"{body}.{_sig(body)}"
+    sig = _sig(body)
+    if sig is None:
+        # Loud, not silent: a session minted without a secret is a session
+        # anyone can forge, so refusing to mint is the only honest answer.
+        raise RuntimeError("APPROVAL_SECRET is not set — portal sessions "
+                           "cannot be minted")
+    return f"{body}.{sig}"
 
 
 def read_session(raw: str) -> dict:
@@ -56,7 +72,8 @@ def read_session(raw: str) -> dict:
         user_id, tenant, role, exp = body.split("|")
     except ValueError:
         return {}
-    if not hmac.compare_digest(sig, _sig(body)):
+    good = _sig(body)
+    if good is None or not hmac.compare_digest(sig, good):
         return {}
     if int(exp) < int(db.utcnow().timestamp()):
         return {}

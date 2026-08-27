@@ -102,7 +102,12 @@ def main() -> int:
     canva.call = _watch
     from fastapi.testclient import TestClient
     import app.web as _web
-    _body = TestClient(_web.app).get("/health/connections").json()
+    # Keyed since the UI-overhaul step 0: /health/connections names client
+    # accounts, so it refuses without the console key (test_render_smoke pins
+    # the refusal). This suite's own concern — the probe REPORTS and never
+    # creates — needs the report, so it authenticates.
+    _body = (TestClient(_web.app)
+             .get("/health/connections?key=test-secret").json())
     canva.call = _real
     ck("no folder is created by looking at the health page",
        not [c for c in _touched if "/folders" in c], str(_touched))

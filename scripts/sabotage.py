@@ -1083,6 +1083,93 @@ SABOTAGES = [
                "all, which is the most misleading possible answer to 'what "
                "have we been telling these people'",
     },
+    # ------------------------------------------------------------------
+    # UI overhaul step 0 (INITIATIVE-ui-overhaul.md) — the safety rails.
+    # ------------------------------------------------------------------
+    {
+        "name": "portal_signin_submits",
+        "file": "app/portal_ui.py",
+        "find": "    return _page(\"Sign in\", f\"<div class='in'>{inner}</div>\")",
+        "replace": "    return _page(\"Sign in\", f\"<form class='in' "
+                   "onsubmit='return false'>{inner}</form>\")  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "the client product's front door goes dead again: a nested "
+               "<form> start tag is dropped by the HTML parser, so the "
+               "request-a-link button submits a wrapper that cancels itself "
+               "and no client can ever ask to sign in",
+    },
+    {
+        "name": "health_is_liveness_only",
+        "file": "app/web.py",
+        "find": "    if key != config.APPROVAL_SECRET:\n"
+                "        return base                     # liveness + build identity, no roster",
+        "replace": "    if False:\n"
+                   "        return base                     # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "/health goes back to printing every Gmail alias, channel "
+               "state and OAuth redirect URI to anyone on the internet — a "
+               "roster where a heartbeat belongs, contradicting the landing "
+               "page's isolation promise with one curl",
+    },
+    {
+        "name": "connections_probe_needs_key",
+        "file": "app/web.py",
+        "find": "    if key != config.APPROVAL_SECRET:\n"
+                "        from fastapi.responses import JSONResponse",
+        "replace": "    if False:\n"
+                   "        from fastapi.responses import JSONResponse",
+        "suites": ["test_render_smoke.py"],
+        "why": "/health/connections live-probes and prints Shopify shop "
+               "names and every tenant's Google state, unauthenticated — "
+               "the client roster with a health verdict per row, again",
+    },
+    {
+        "name": "client_view_carries_no_key",
+        "file": "app/admin_ui.py",
+        "find": "    client_view = (\"\" if tenant == ALL else\n"
+                "                   f'<a href=\"/portal?tenant={_esc(tenant)}\">'",
+        "replace": "    client_view = (\"\" if tenant == ALL else\n"
+                   "                   f'<a href=\"/portal?tenant={_esc(tenant)}&amp;key={_esc(key)}\">'",
+        "suites": ["test_render_smoke.py"],
+        "why": "the console secret rides back into the portal's access logs "
+               "and browser history on every Client-view click — the exact "
+               "propagation the session cookie was built to end",
+    },
+    {
+        "name": "portal_sessions_fail_closed",
+        "file": "app/portal.py",
+        "find": "    if not (config.APPROVAL_SECRET or \"\").strip():\n"
+                "        return None",
+        "replace": "    if False:\n"
+                   "        return None",
+        "suites": ["test_render_smoke.py"],
+        "why": "with APPROVAL_SECRET unset, the portal HMAC keys on \"\" and "
+               "verifies anything — a forged role=owner cookie reads every "
+               "account and passes can_write; sessions must fail closed the "
+               "way web._matches does",
+    },
+    {
+        "name": "intake_links_have_a_surface",
+        "file": "app/admin_ui.py",
+        "find": "              {_intake_links(t.key, key)}",
+        "replace": "              ",
+        "suites": ["test_render_smoke.py"],
+        "why": "minting an intake link goes back to hand-typing "
+               "/admin/intake_new and copying a URL out of raw JSON — the "
+               "highest-leverage client surface loses its only console "
+               "control",
+    },
+    {
+        "name": "plan_classes_defined",
+        "file": "app/admin_ui.py",
+        "find": ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));",
+        "replace": ".cards-SABOTAGED{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));",
+        "suites": ["test_render_smoke.py"],
+        "why": "the Plan tab's readiness strip renders as unstyled stacked "
+               "divs again — markup using classes the stylesheet does not "
+               "define, which shipped unnoticed for weeks because nothing "
+               "compared the page to its own CSS",
+    },
 ]
 
 

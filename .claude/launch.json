@@ -6,6 +6,15 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "uvicorn", "app.web:app", "--port", "8099"],
       "port": 8099
+    },
+    {
+      "name": "gomehagent-demo",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "export DATABASE_URL=sqlite:////tmp/gomeh-demo.db APPROVAL_SECRET=demo PUBLIC_BASE_URL=http://localhost:8098 WORKER_DISABLED=1; python3 scripts/seed_demo.py && python3 -m uvicorn app.web:app --port 8098"
+      ],
+      "port": 8098
     }
   ]
 }

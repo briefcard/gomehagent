@@ -377,6 +377,19 @@ font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 .planhead{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .planhead .grow{flex:1}
 .planfields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+/* Plan tab. These six shipped used-but-undefined, so the readiness strip
+   rendered as unstyled stacked divs and an ERROR on that tab rendered as
+   plain body text. scripts/test_render_smoke.py now fails on any class the
+   markup uses that this sheet does not define. */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:10px;margin:10px 0 16px}
+.cards .card{margin:0;padding:12px 14px}
+.card.warn{border-left:3px solid var(--gap);background:var(--gaps)}
+.lbl{font-weight:600;font-size:.85rem;color:var(--ink2)}
+.big{font-size:1.02rem;font-weight:600;margin:2px 0 4px}
+.tbl tr.grp td{background:var(--rule2);font-size:.85rem;padding-top:8px}
+.bad{color:#b4443a;background:var(--gaps);border-left:3px solid #b4443a;
+  padding:8px 12px;border-radius:4px}
 """
 
 #: (key, label, icon). Ordered the way a day runs rather than the way the code
@@ -616,8 +629,13 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
 
     who = _account_name(tenant, here)
     # The client view is one account's page; there is no portal for "all".
+    # NO key in this URL: the console session cookie already authenticates the
+    # owner on /portal (portal.principal checks it), and the cookie system
+    # exists precisely because the credential used to ride in browser history,
+    # Referer headers and access logs. This link reintroduced it — into the
+    # PORTAL's logs, the client-facing surface.
     client_view = ("" if tenant == ALL else
-                   f'<a href="/portal?tenant={_esc(tenant)}&amp;key={_esc(key)}">'
+                   f'<a href="/portal?tenant={_esc(tenant)}">'
                    f'Client view &rarr;</a>')
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
@@ -1068,8 +1086,71 @@ def _field(t, key: str, name: str) -> str:
     </form>"""
 
 
+def _intake_links(tenant: str, key: str) -> str:
+    """Intake links — mint, list, revoke, on the page that owns client access.
+
+    /admin/intake_new, _links and _revoke existed for months with no console
+    surface: minting a link meant hand-typing a URL and copying it out of raw
+    JSON. Connect links got a form; intake links — the higher-leverage
+    surface, because answers fill the KB every generator grounds on — got
+    nothing. Folded closed: minting is rare, and the summary line carries the
+    standing state.
+    """
+    with db.SessionLocal() as s:
+        rows = (s.query(db.IntakeLink)
+                .filter(db.IntakeLink.tenant == tenant)
+                .order_by(db.IntakeLink.created_at.desc()).all())
+        for r in rows:
+            s.expunge(r)
+    now = db.utcnow()
+
+    def _live(r) -> bool:
+        exp = db.as_utc(r.expires_at) if r.expires_at else None
+        return (r.status or "") == "active" and (exp is None or exp > now)
+
+    live = [r for r in rows if _live(r)]
+    dead = len(rows) - len(live)
+    items = ""
+    for r in live:
+        url = f"{config.PUBLIC_BASE_URL}/intake/{r.token}"
+        items += f"""
+        <div class="conn">
+          <div>
+            <strong>{_esc(r.label or 'unlabelled')}</strong>
+            <span class="chip on">active</span>
+            <div class="mut">{_esc(str(r.answered or 0))} answered ·
+              expires {_esc(str(r.expires_at)[:10])}</div>
+            <input class="copy" value="{_esc(url)}" readonly onclick="this.select()">
+          </div>
+          <div class="row">
+            <a href="/admin/intake_revoke?key={_esc(key)}&amp;token={_esc(r.token)}&amp;tenant={_esc(tenant)}&amp;ui=1"><button class="sec" type="button">Revoke</button></a>
+          </div>
+        </div>"""
+    if not items:
+        items = ('<div class="mut">No live links. A link asks the client this '
+                 'account\'s open questions one at a time — answers land as '
+                 'proposals, and claims stay pending until reviewed.</div>')
+    summary = (f"Intake links — {len(live)} live"
+               + (f" · {dead} expired or revoked" if dead else ""))
+    return f"""
+    <details class="conns">
+      <summary>{summary}</summary>
+      {items}
+      <form class="row mklink" method="get" action="/admin/intake_new">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="ui" value="1">
+        <input name="label" placeholder="who it is for, e.g. Jane" required>
+        <input name="days" value="30" size="4" title="days until it expires">
+        <button class="sec">Create an intake link</button>
+        <span class="mut">the client answers this account's open KB questions;
+        anything they skip is asked again later rather than guessed</span>
+      </form>
+    </details>"""
+
+
 def render(key: str, tenant: str = "", msg: str = "", err: str = "",
-           link: str = "") -> str:
+           link: str = "", ilink: str = "") -> str:
     """Connections for ONE account.
 
     This used to render every account stacked on one page, which is how it
@@ -1137,6 +1218,7 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                 numbers their report speaks{' — <b>unset: segments and reports refuse until this is chosen</b>' if not (t.business_model or '') else ''}</span>
               </form>
               {_connections(t.key, key)}
+              {_intake_links(t.key, key)}
               <details class="sec">
                 <summary>Raw wiring — this account's connection keys (advanced)</summary>
                 <div class="mut">These fields are <strong>keys into</strong>
@@ -1159,6 +1241,13 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
           <div>Connect link — send this to the client. It reaches one account
           and connects nothing else.</div>
           <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
+        </div>"""
+    if ilink:
+        note += f"""
+        <div class="ok">
+          <div>Intake link — send this to the client. It asks this account's
+          open questions and reaches nothing else.</div>
+          <input class="copy" value="{_esc(ilink)}" readonly onclick="this.select()">
         </div>"""
     if note:
         note = f'<div class="flash">{note}</div>'
