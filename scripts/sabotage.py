@@ -1451,6 +1451,43 @@ SABOTAGES = [
                "were built to end",
     },
     {
+        "name": "domains_live_on_knowledge",
+        "file": "app/admin_ui.py",
+        "find": "    sub = (sub or \"\").strip().lower() or \"queue\"\n"
+                "    if sub in DOMAIN_SUBS:",
+        "replace": "    sub = (sub or \"\").strip().lower() or \"queue\"\n"
+                   "    if False and sub in DOMAIN_SUBS:  # SABOTAGE",
+        "suites": ["test_schema_tab.py"],
+        "why": "the Data layer's old domain addresses stop forwarding to "
+               "Knowledge and silently land on the queue — every bookmark "
+               "and every ship-queue pointer from the hosted week shows the "
+               "wrong page at a 200, the exact typo'd-bookmark trap the "
+               "unknown-tab redirect was built to end",
+    },
+    {
+        "name": "map_counts_from_the_kb",
+        "file": "app/admin_ui.py",
+        "find": "        n = counts.get(sub_, 0)\n"
+                "        readers = reads_by_kind.get(label, 0)",
+        "replace": "        n = counts.get(sub_, 0) + 1  # SABOTAGE\n"
+                   "        readers = reads_by_kind.get(label, 0)",
+        "suites": ["test_schema_tab.py"],
+        "why": "the map's kind nodes drift from Knowledge's own counts — the "
+               "one page whose whole job is to explain the data starts "
+               "describing data that does not exist, and rule 8 (a number "
+               "matches the list it opens) breaks on the explaining surface",
+    },
+    {
+        "name": "leverage_counts_are_real",
+        "file": "app/admin_ui.py",
+        "find": "    <span class=\"chip off\">{caught_total} caught (90d)</span>",
+        "replace": "    <span class=\"chip off\">{caught_total + 1} caught (90d)</span>",
+        "suites": ["test_schema_tab.py"],
+        "why": "the layer's headline value claim inflates past the assurance "
+               "ledger it cites — the page built to prove the layer's worth "
+               "honestly becomes the one place the console exaggerates",
+    },
+    {
         "name": "variant_reaches_its_board",
         "file": "app/web.py",
         "find": "        if hit is not None and hit.output_id != output_id:\n"

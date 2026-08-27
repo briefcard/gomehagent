@@ -117,9 +117,12 @@ walk = ([("content", "")] + [("content", f"&sub={s}") for s in SUBS]
            ("assurance", ""), ("diagnostics", ""),
            ("diagnostics", "&view=systems"),
            ("accounts", ""), ("schema", "")]
-        # Step 4: the Data layer's own sub-views — queue, six domains,
-        # advanced — each held to the stylesheet like every other page.
-        + [("schema", f"&sub={s}") for s, _l in admin_ui.SCHEMA_SUBS])
+        # Step 4: the Data layer's understanding views (queue, map,
+        # leverage, advanced) and Knowledge's management views (the domains
+        # moved there under the four-tab contract) — each held to the
+        # stylesheet like every other page.
+        + [("schema", f"&sub={s}") for s, _l in admin_ui.SCHEMA_SUBS]
+        + [("kb", f"&sub={s}") for s in admin_ui.DOMAIN_SUBS])
 accounts_html = ""
 for tab, extra in walk:
     html = page(f"{tab}{extra or ''} · {T1}",

@@ -14,12 +14,19 @@ pins the load-bearing behaviors:
      from the DRAFTER'S BRIEF too (both doors read the same rows; a dismiss
      that only hid the card would be a control lying about its consequence).
   3. THE BADGE IS THE QUEUE — one computation feeds both (rule 8).
-  4. DOMAIN VIEWS PAGE, SEARCH AND EDIT IN PLACE; claims gain the Removed
-     filter with Restore (closing "restore is still an API call"), and every
-     decision lands back on the view, filter and page it was made from.
+  4. DOMAIN VIEWS PAGE, SEARCH AND EDIT IN PLACE — hosted on KNOWLEDGE
+     under the four-tab contract (owner, 2026-08-27: Knowledge manages, the
+     Data layer explains, Review decides, Plan is the strategy); the Data
+     layer's old domain addresses 303 there. Claims gain the Removed filter
+     with Restore, and every decision lands back on the view, filter and
+     page it was made from.
   5. GROUNDED OUTPUT shows a claim working inside a kept artifact.
   6. ADVANCED keeps the schema reference — computed with aggregate queries,
-     not full-table loads (asserted against the SQL actually executed).
+     not full-table loads (asserted against the SQL actually executed) —
+     and THE MAP and LEVERAGE views are read live: kind counts are
+     Knowledge's own, each system's reads are its declared kb_needs, and
+     the leverage numbers are the assurance ledger's — the honest
+     counterfactual, never an invented control arm.
 
 Run: python3 scripts/test_schema_tab.py
 """
@@ -52,6 +59,13 @@ c = TestClient(web.app, base_url="https://testserver")
 
 def page(sub="", extra=""):
     return c.get(f"/admin/ui?tab=schema&tenant=baci&key={KEY}"
+                 + (f"&sub={sub}" if sub else "") + extra).text
+
+
+def kpage(sub="", extra=""):
+    # The domain management views moved to KNOWLEDGE (the four-tab
+    # contract, owner 2026-08-27) — the domain pins live there now.
+    return c.get(f"/admin/ui?tab=kb&tenant=baci&key={KEY}"
                  + (f"&sub={sub}" if sub else "") + extra).text
 
 
@@ -196,40 +210,48 @@ def main():
                      + len(need["lessons"]) + len(need["mutes"])))
 
     print("\n--- 4 · domain views: page, search, edit, restore ---")
-    h = page("claims")
-    ck("claims page 15 of 17, pager says so",
+    r = c.get(f"/admin/ui?tab=schema&sub=claims&tenant=baci&key={KEY}",
+              follow_redirects=False)
+    ck("the Data layer's old domain address 303s to Knowledge",
+       r.status_code == 303
+       and "tab=kb" in r.headers.get("location", "")
+       and "sub=claims" in r.headers.get("location", ""),
+       r.headers.get("location", ""))
+    h = kpage("claims")
+    ck("claims page 15 of 17 on Knowledge, pager says so",
        h.count('class="anchor" id="cl-') == 15 and "of 17" in h)
-    h2 = page("claims", "&page=2")
+    h2 = kpage("claims", "&page=2")
     ck("page 2 holds the rest", h2.count('class="anchor" id="cl-') == 2)
-    h3 = page("claims", "&q=number+13")
+    h3 = kpage("claims", "&q=number+13")
     ck("search narrows the list", h3.count('class="anchor" id="cl-') == 1)
 
     kb.add_claim("baci", "Proposed by the crawler.", "site", [],
                  origin="crawl", status="pending")
-    h4 = page("claims", "&state=awaiting")
+    h4 = kpage("claims", "&state=awaiting")
     ck("the awaiting filter shows the proposal with Approve/Reject",
        "Proposed by the crawler." in h4 and "claim_review" in h4
-       and "back=schema" in h4)
+       and "back=kb" in h4)
     prop = [r for r in kb.claim_inventory("baci")["pending"]][0]
-    r = c.get(f"/admin/claim_review?key={KEY}&tenant=baci&ui=1&back=schema"
+    r = c.get(f"/admin/claim_review?key={KEY}&tenant=baci&ui=1&back=kb"
               f"&bsub=claims&bstate=awaiting&claim_id={prop.id}&approve=yes",
               follow_redirects=False)
     ck("deciding from the view lands back on the view",
        r.status_code == 303
-       and "tab=schema" in r.headers.get("location", "")
+       and "tab=kb" in r.headers.get("location", "")
        and "state=awaiting" in r.headers.get("location", ""),
        r.headers.get("location", ""))
 
     victim = kb.claim_inventory("baci")["selectable"][0]
     kb.remove("baci", "claim", victim.id)
-    h5 = page("claims", "&state=removed")
+    h5 = kpage("claims", "&state=removed")
     ck("the Removed filter lists it with RESTORE — no more API-call-only "
        "undo", "kb_restore" in h5 and "Restore" in h5)
     r = c.post("/admin/kb_restore",
                data={"key": KEY, "tenant": "baci", "kind": "claim",
-                     "id": victim.id, "back": "schema", "bsub": "claims",
+                     "id": victim.id, "back": "kb", "bsub": "claims",
                      "bstate": "removed"}, follow_redirects=False)
     ck("restore lands back on the removed view", r.status_code == 303
+       and "tab=kb" in r.headers.get("location", "")
        and "state=removed" in r.headers.get("location", ""))
     ck("…and the claim is selectable again",
        any(r_.id == victim.id
@@ -239,7 +261,7 @@ def main():
                data={"key": KEY, "tenant": "baci", "kind": "audience",
                      "akey": "hosts", "name": "Hosts who entertain",
                      "pains": "dull tables", "vocabulary": "colour\nset",
-                     "back": "schema", "bsub": "audiences"},
+                     "back": "kb", "bsub": "audiences"},
                follow_redirects=False)
     ck("the structured add form files an audience", r.status_code == 303
        and any(a.key == "hosts" for a in kb.audiences("baci")))
@@ -250,7 +272,7 @@ def main():
                      "pains": "dull tables\nmismatched sets",
                      "vocabulary": "colour\nset",
                      "buying_trigger": "a dinner on the calendar",
-                     "back": "schema", "bsub": "audiences"},
+                     "back": "kb", "bsub": "audiences"},
                follow_redirects=False)
     aud2 = [a for a in kb.audiences("baci") if a.key == "hosts"][0]
     ck("the audience editor saves — the last display-only kind has one",
@@ -258,24 +280,24 @@ def main():
        and "mismatched sets" in (aud2.pains or []),
        f"{aud2.name} / {aud2.pains}")
 
-    h6 = page("catalogue")
+    h6 = kpage("catalogue")
     ck("the catalogue offers per-row group assignment",
        "Add to group" in h6 and "aqua-range" in h6)
     r = c.post("/admin/entity_group",
                data={"key": KEY, "tenant": "baci", "entity_keys": "aqua-plate",
-                     "group": "aqua-range", "back": "schema",
+                     "group": "aqua-range", "back": "kb",
                      "bsub": "catalogue"}, follow_redirects=False)
     ck("assigning lands back on the catalogue view", r.status_code == 303
-       and "tab=schema" in r.headers.get("location", ""),
+       and "tab=kb" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     ck("…and the membership is real",
        "aqua-range" in kb.ancestors("baci", "aqua-plate"))
 
     r = c.get(f"/admin/situation_add?key={KEY}&tenant=baci&tag=wedding_prep"
-              f"&description=Planning a wedding table&back=schema"
+              f"&description=Planning a wedding table&back=kb"
               f"&bsub=situations", follow_redirects=False)
     ck("adding a situation lands back on the view", r.status_code == 303
-       and "tab=schema" in r.headers.get("location", ""))
+       and "tab=kb" in r.headers.get("location", ""))
     ck("…and the tag exists", "wedding_prep" in kb.situations("baci"))
 
     print("\n--- 5 · grounded output: the fact, working ---")
@@ -325,14 +347,38 @@ def main():
     ck("fill bars come from aggregate queries, not full-table loads",
        not bare, (bare[0][:120] if bare else ""))
 
-    print("\n--- 7 · photos say where the decision lives ---")
+    print("\n--- 7 · the map and the leverage views ---")
+    from app import assurance
+    assurance.record("baci", source="skill", system_key="campaign_email",
+                     checked=["banned_claims"],
+                     caught=["banned:hand-decorated"], verdict="blocked",
+                     grounded=False)
+    h = page("map")
+    ck("the map draws the four columns from live data",
+       "Where a fact enters" in h and "The knowledge, by kind" in h
+       and "The gates every draft passes" in h and "Who reads it" in h)
+    n_claims = admin_ui._kind_counts("baci")["claims"]
+    ck("…kind nodes carry Knowledge's own counts",
+       f"Claims · {n_claims}" in h, f"expected Claims · {n_claims}")
+    ck("…and each installed system names what it reads",
+       "reads:" in h and "Campaign email" in h)
+    rep = assurance.report("baci", 90)
+    h = page("leverage")
+    ck("leverage states the honest comparison",
+       "ungrounded control arm" in h
+       and "What would have shipped without the layer" in h)
+    ck("…and its catch count is the assurance ledger's own number",
+       (f"{rep.get('caught_total', 0)} caught" in h)
+       or (rep.get("caught_total", 0) == 0 and "No catches" in h))
+
+    print("\n--- 8 · photos say where the decision lives ---")
     from app import provenance as prov
     with db.SessionLocal() as s:
         s.add(db.KbAsset(tenant="baci", kind="image", title="candidate",
                          url="https://example.com/x.jpg",
                          review=prov.PROPOSED))
         s.commit()
-    h = page("photos")
+    h = kpage("photos")
     ck("a waiting candidate names its queue",
        "waiting" in h and "decide on Review" in h)
 

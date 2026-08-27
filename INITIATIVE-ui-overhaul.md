@@ -392,6 +392,40 @@ re-render) stays in §6; the at-a-glance card still counts via
 the per-table fill loop, which is fixed). Knowledge stays whole until
 step 6's gate (a week of real decisions on the new domain views); the
 temporary duplication is that gate's design.
+**4·Data layer AMENDED same day — THE FOUR-TAB CONTRACT (owner,
+2026-08-27, reviewing the tab): "the relationship between Knowledge, Data
+Layer & Review are not clear enough."** The contract, verbatim intent:
+**KNOWLEDGE manages** the approved knowledge by type (add, edit, delete,
+scrape new); **the DATA LAYER explains** — how everything connects, how
+complete it is, its structure, how systems leverage it, and how effective
+it has been "compared to just using a skill without this context /
+coherence / compliance layer"; **REVIEW decides** (action items across the
+organization — knowledge is approved/denied there); **PLAN is the
+strategy** (see the step-4 Plan slot below). Shipped as the amendment:
+the six domain management views RE-HOMED to Knowledge (`KB_SUBS` strip:
+Overview = the by-type page it has always been, byte-stable — test_kb_ui's
+356 checks pass unedited — plus one paged/searchable/editable view per
+kind; `_schema_domain` is tab-bound and serves either host; every
+back-field and pager URL binds to the hosting tab; the Data layer's
+week-old domain addresses 303 to Knowledge with filter/search/page
+intact). The Data layer's strip becomes the understanding set — **Queue &
+Insights · The map · Leverage · Advanced**. NEW **The map**: a four-column
+flow derived live (where a fact enters → the knowledge by kind, with
+Knowledge's own counts and "read by N system(s)" → the four gates → the
+installed systems, each naming its declared `kb_needs` via `_NEED_KIND` —
+a system's reads and the visual cannot disagree by construction); every
+node links to the tab that owns it. NEW **Leverage**: the honest
+effectiveness answer — there is no ungrounded control arm and the page
+says so; what is counted is the counterfactual the assurance ledger keeps
+("every one of these is a phrase the model wrote and the layer stopped"):
+outputs/grounded/caught/repaired/refused meters, "What would have shipped
+without the layer" ranked by rule, per-system reads (green = on file,
+amber = missing) with checks/catches. Guards (caught):
+`domains_live_on_knowledge`, `map_counts_from_the_kb`,
+`leverage_counts_are_real`. Smoke walks Knowledge's six domain sub-views
+too. Queue & Insights STAYS on the Data layer: completion-with-inline-fix
+is the "completion of the data" surface and rule 1 (act where you report)
+keeps the answer box beside the gap it names.
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first
@@ -401,7 +435,13 @@ preview on ship, all queues paginated, Sources block, legend-fold, In
 progress strip) → **Systems + workflow** (§8 — compact board rows, single
 toggle, workflow rail incl. Drafts, Measured dedup, Create-in-ESP confirm) →
 **Plan** (§7 — one window control, `.tblwrap`, goal folds, board columns
-trimmed) → **Brand** (§6 — voice derive via `_run_bg`, hard-rule remove,
+trimmed; EXPANDED INTENT, owner 2026-08-27: Plan is where the MARKETING
+STRATEGY is managed — "keywords are a big part of it but as we run
+different systems in parallel and add new systems into it, the plan page
+should help make sense of what we want to do and how each system fits
+into that plan" — so the restructure adds a cross-system strategy layer
+over the keyword plan, drawing on the per-system plans/moments machinery)
+→ **Brand** (§6 — voice derive via `_run_bg`, hard-rule remove,
 error containment) → **Assurance** (§9 — folds fold, drill filter leads,
 catches paginate, per-account scan links on `*`) → **Diagnostics** (§10 —
 rail, limit control, orphan adopt/archive, cost off the default view).
@@ -430,12 +470,19 @@ rail, limit control, orphan adopt/archive, cost off the default view).
   → submit a figure and see the confirmation.
 - **Checkpoint:** send one real client the portal only after this gate.
 
-### Step 6 — The IA merge (spec §2.3), one week after step 4's Data layer
-- **Ships:** Knowledge's domains fully absorbed; `tab=kb` 303s with the flash
-  naming the move; nav drops to 8 items; `test_kb_ui` pins retargeted.
-- **Gate:** a week of real decisions on the new domain views first; smoke +
-  pointers.
-- **Checkpoint:** owner confirms nothing they reach weekly got farther away.
+### Step 6 — ~~The IA merge (spec §2.3)~~ SUPERSEDED by the four-tab
+contract (owner, 2026-08-27): Knowledge and the Data layer stay SEPARATE
+on purpose — Knowledge manages, the Data layer explains, Review decides,
+Plan is the strategy. The spec's §2.3 merge (retire `tab=kb` into the
+Data layer) is dead; nav stays at 9 items. What remains of step 6 is the
+small opposite move: once the domain views have carried a week of real
+decisions, decide whether Knowledge's Overview one-pager folds into the
+per-kind views or stays as the landing. Spec artifact update rides step
+7's audit.
+- **Gate:** a week of real decisions on the domain views (now on
+  Knowledge); smoke + pointers.
+- **Checkpoint:** owner confirms nothing they reach weekly got farther
+  away.
 
 ### Step 7 — Completeness audit (the spec's own medicine)
 - Walk every ranked list in the spec (§1–§16) and §17's table: each item

@@ -1901,9 +1901,17 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  system=request.query_params.get("system", ""),
                                  ppage=pp)
     if tab == "kb":
+        try:
+            kpg = int(request.query_params.get("page", "1"))
+        except ValueError:
+            kpg = 1
         return ui.render_kb(link_key, tenant,
                             err=request.query_params.get("err", ""),
-                            msg=request.query_params.get("ok", ""))
+                            msg=request.query_params.get("ok", ""),
+                            sub=request.query_params.get("sub", ""),
+                            q=request.query_params.get("q", ""),
+                            state=request.query_params.get("state", ""),
+                            page=max(1, kpg))
     if tab == "brand":
         return ui.render_brand(link_key, tenant,
                                msg=request.query_params.get("ok", ""),
@@ -4039,13 +4047,12 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
     from . import kb as kbm
     res = kbm.review_claim(claim_id, approve == "yes")
     if ui:
-        if back == "schema":
-            # Decided from the Data layer's domain view — land back on the
-            # same filter and page (step 4; same rule as back=kb below).
-            return _back_to_kb(tenant, ok=str(res)[:200],
-                               back=_back_parts({"back": back, "bsub": bsub,
-                                                 "bstate": bstate,
-                                                 "bpage": bpage, "bq": bq}))
+        bp = _back_parts({"back": back, "bsub": bsub, "bstate": bstate,
+                          "bpage": bpage, "bq": bq})
+        if bp:
+            # Decided from a domain view (Knowledge hosts them under the
+            # four-tab contract) — land back on the same filter and page.
+            return _back_to_kb(tenant, ok=str(res)[:200], back=bp)
         if back == "kb":
             # Decided from the Knowledge tab — return there, not to Review.
             # "A decision must never cost the reader their place" is this
@@ -6022,9 +6029,14 @@ def _back_parts(src) -> dict:
     echoed URL, so nothing user-shaped becomes a redirect target. Empty for
     every form that predates the Data layer views, which keeps their
     Knowledge-tab landing exactly as it was."""
-    if str(src.get("back") or "") != "schema":
+    back = str(src.get("back") or "")
+    if back not in ("schema", "kb") or not str(src.get("bsub") or ""):
+        # `back=kb` WITHOUT parts is the legacy Knowledge-tab convention
+        # (claim_review has carried it since step 2); parts-less backs keep
+        # their old handling at each route.
         return {}
-    return {"sub": str(src.get("bsub") or ""),
+    return {"tab": back,
+            "sub": str(src.get("bsub") or ""),
             "state": str(src.get("bstate") or ""),
             "page": str(src.get("bpage") or ""),
             "q": str(src.get("bq") or "")}
@@ -6040,7 +6052,8 @@ def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = "",
 
     from fastapi.responses import RedirectResponse
     if back:
-        q = f"/admin/ui?tab=schema&tenant={quote(tenant)}"
+        q = (f"/admin/ui?tab={quote(back.get('tab') or 'schema')}"
+             f"&tenant={quote(tenant)}")
         if back.get("sub"):
             q += f"&sub={quote(back['sub'])}"
         if back.get("state"):

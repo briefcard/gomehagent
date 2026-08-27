@@ -415,6 +415,15 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
    scrolled its own confirmation out of view. */
 .flash{position:sticky;top:0;z-index:60}
 .pager{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:.85rem}
+.flow{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;margin-top:12px}
+.flowcol{flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px}
+.flowlab{font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding-bottom:2px;border-bottom:1px solid var(--rule)}
+.flowarr{align-self:center;color:var(--mut);font-size:1.3rem;padding:0 2px}
+.fnode{border:1px solid var(--rule);border-left:3px solid var(--acc);border-radius:4px;padding:7px 10px;font-size:.84rem;background:var(--rule2)}
+.fnode b{display:block;margin-bottom:2px}
+.fnode .when{display:block}
+.fnode.dim{border-left-color:var(--rule2);opacity:.72}
+@media(max-width:900px){.flow{flex-direction:column}.flowarr{transform:rotate(90deg);align-self:flex-start;padding-left:14px}}
 .subtabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 16px;border-bottom:1px solid var(--rule);padding-bottom:0}
 .subtab{display:flex;align-items:center;gap:7px;padding:9px 14px;text-decoration:none;color:var(--mut);font-size:.9rem;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
 .subtab:hover{color:var(--ink)}
@@ -3377,7 +3386,9 @@ def _situation_overlap_card(key: str, tenant: str, overlaps,
         </div>"""
 
 
-def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
+def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
+              sub: str = "", q: str = "", state: str = "",
+              page: int = 1) -> str:
     # One resolver for the frame and the body, so the pill cannot name an
     # account the numbers below it are not about.
     tenant, t, rows = _account(tenant)
@@ -3389,6 +3400,40 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
                                   "no pooled knowledge base. Pick an account.")
                       or '<div class="note">No accounts yet. Run '
                       '<code>/admin/register_owner</code> first.</div>')
+
+    # THE FOUR-TAB CONTRACT (owner, 2026-08-27): Knowledge is where the
+    # approved knowledge is MANAGED — add, edit, remove, restore — so the
+    # paged domain views live here, one per kind, beside the Overview this
+    # page has always been. The Data layer explains the same data; Review
+    # decides what enters it.
+    sub = (sub or "").strip().lower()
+    if sub not in DOMAIN_SUBS:
+        sub = ""
+    counts = _kind_counts(tenant)
+
+    def _sub_href(k: str) -> str:
+        return (f"/admin/ui?tab=kb"
+                + (f"&amp;sub={k}" if k else "")
+                + f"&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
+        f'{_esc(label)}'
+        + (f'<span class="cnt">{counts[k]}</span>' if k in counts else "")
+        + '</a>'
+        for k, label in KB_SUBS) + "</div>"
+
+    if sub:
+        flash = ((f'<div class="note">{_esc(err)}</div>' if err else "")
+                 + (f'<div class="ok">{_esc(msg)}</div>' if msg else ""))
+        if flash:
+            flash = f'<div class="flash">{flash}</div>'
+        return _shell(key, "kb", "Knowledge", tenant=tenant,
+                      body=flash + strip
+                      + _schema_domain(key, tenant, sub, q, state, page,
+                                       tab="kb"),
+                      suffix=f"&amp;tenant={tenant}")
 
     c = kb.completeness(tenant)
     gaps = kb.gaps(tenant)
@@ -3669,6 +3714,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
     # folded under the stat strip — state first, prose on request.
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
+{strip}
 <div>
   <p class="mut">Everything the generators are allowed to say, for this account. A
   draft may assert nothing that is not on this page.</p>
@@ -5216,13 +5262,53 @@ def _schema_advanced(key: str, tenant: str) -> str:
 """
 
 
-#: The Data layer's sub-views (step 4, spec §5). Queue & Insights is the
-#: landing — the work; the domains are the content, paged and editable in
-#: place; Advanced is the plumbing, honest about being reference.
-SCHEMA_SUBS = (("queue", "Queue & Insights"), ("claims", "Claims"),
-               ("objections", "Objections"), ("audiences", "Audiences"),
-               ("catalogue", "Catalogue"), ("situations", "Situations"),
-               ("photos", "Photos"), ("advanced", "Advanced"))
+#: The four-tab contract (owner, 2026-08-27): KNOWLEDGE manages the
+#: knowledge, the DATA LAYER explains it — how it connects, how complete it
+#: is, how systems leverage it, and what the layer has been worth — REVIEW
+#: decides, PLAN is the strategy. So this tab's sub-views are the
+#: understanding set; the domain management views live on Knowledge.
+SCHEMA_SUBS = (("queue", "Queue & Insights"), ("map", "The map"),
+               ("leverage", "Leverage"), ("advanced", "Advanced"))
+
+#: The domain views the Data layer briefly hosted (same push, same day)
+#: before the owner drew the line above — their URLs 303 to Knowledge so
+#: nothing anyone bookmarked breaks.
+DOMAIN_SUBS = ("claims", "objections", "audiences", "catalogue",
+               "situations", "photos")
+
+#: Knowledge's sub-views: the Overview (the by-type page it has always
+#: been) plus one management view per kind — paged, searchable, editable
+#: in place.
+KB_SUBS = (("", "Overview"), ("claims", "Claims"),
+           ("objections", "Objections"), ("audiences", "Audiences"),
+           ("catalogue", "Catalogue"), ("situations", "Situations"),
+           ("photos", "Photos"))
+
+
+def _kind_counts(tenant: str) -> dict:
+    """Approved rows per kind — the strip numbers, from the same filters
+    the domain views list (rule 8)."""
+    from . import provenance as prov
+    with db.SessionLocal() as s:
+        return {
+            "claims": s.query(db.KbClaim).filter(
+                db.KbClaim.tenant == tenant,
+                db.KbClaim.review == prov.APPROVED).count(),
+            "objections": s.query(db.KbObjection).filter(
+                db.KbObjection.tenant == tenant,
+                db.KbObjection.review == prov.APPROVED).count(),
+            "audiences": s.query(db.KbAudience).filter(
+                db.KbAudience.tenant == tenant,
+                db.KbAudience.review == prov.APPROVED).count(),
+            "catalogue": s.query(db.KbEntity).filter(
+                db.KbEntity.tenant == tenant,
+                db.KbEntity.review == prov.APPROVED).count(),
+            "situations": s.query(db.KbSituation).filter(
+                db.KbSituation.tenant == tenant).count(),
+            "photos": s.query(db.KbAsset).filter(
+                db.KbAsset.tenant == tenant,
+                db.KbAsset.review == prov.APPROVED).count(),
+        }
 
 
 def _schema_needs_you(tenant: str) -> dict:
@@ -5266,12 +5352,14 @@ def _schema_needs_you(tenant: str) -> dict:
 
 
 def _dl_base(key: str, tenant: str, sub: str, q: str = "",
-             state: str = "") -> str:
+             state: str = "", tab: str = "schema") -> str:
     """One URL base for a domain view — search, state and pager all append
     to the same address, so a filter never loses the search and a page turn
-    never loses either."""
+    never loses either. `tab` names the host: the domain views moved to
+    Knowledge under the four-tab contract (owner, 2026-08-27), and the
+    machinery serves whichever tab hosts it."""
     from urllib.parse import quote as _q
-    b = f"/admin/ui?tab=schema&amp;sub={_esc(sub)}&amp;tenant={_esc(tenant)}"
+    b = f"/admin/ui?tab={_esc(tab)}&amp;sub={_esc(sub)}&amp;tenant={_esc(tenant)}"
     if key:
         b += f"&amp;key={_esc(key)}"
     if state:
@@ -5282,26 +5370,27 @@ def _dl_base(key: str, tenant: str, sub: str, q: str = "",
 
 
 def _dl_search(key: str, tenant: str, sub: str, q: str, state: str = "",
-               what: str = "filter") -> str:
+               what: str = "filter", tab: str = "schema") -> str:
     hidden = "".join(
         f'<input type="hidden" name="{n}" value="{_esc(v)}">'
-        for n, v in (("tab", "schema"), ("sub", sub), ("tenant", tenant),
+        for n, v in (("tab", tab), ("sub", sub), ("tenant", tenant),
                      ("key", key), ("state", state)) if v)
     return (f'<form method="get" action="/admin/ui" class="row">{hidden}'
             f'<input name="q" value="{_esc(q)}" placeholder="{_esc(what)}" '
             f'style="flex:1;min-width:200px">'
             f'<button class="sec">Search</button>'
-            + (f'<a class="mut" href="{_dl_base(key, tenant, sub, "", state)}">'
+            + (f'<a class="mut" href="{_dl_base(key, tenant, sub, "", state, tab)}">'
                f'clear</a>' if q else "")
             + '</form>')
 
 
 def _dl_back_fields(sub: str, state: str = "", page: int = 1,
-                    q: str = "") -> str:
-    """Hidden fields every Data-layer form carries so its route lands the
+                    q: str = "", tab: str = "schema") -> str:
+    """Hidden fields every domain form carries so its route lands the
     reader back on THIS view, page and filter — rule 3, by name, never by
-    echoing a URL."""
-    return (f'<input type="hidden" name="back" value="schema">'
+    echoing a URL. `back` names the hosting tab (kb for the re-homed
+    domain views; schema for the queue's own forms)."""
+    return (f'<input type="hidden" name="back" value="{_esc(tab)}">'
             f'<input type="hidden" name="bsub" value="{_esc(sub)}">'
             + (f'<input type="hidden" name="bstate" value="{_esc(state)}">'
                if state else "")
@@ -5311,9 +5400,10 @@ def _dl_back_fields(sub: str, state: str = "", page: int = 1,
                if q else ""))
 
 
-def _dl_backq(sub: str, state: str = "", page: int = 1) -> str:
+def _dl_backq(sub: str, state: str = "", page: int = 1,
+              tab: str = "schema") -> str:
     """The same back parts as a query fragment, for GET links."""
-    s = f"back=schema&amp;bsub={_esc(sub)}"
+    s = f"back={_esc(tab)}&amp;bsub={_esc(sub)}"
     if state:
         s += f"&amp;bstate={_esc(state)}"
     if page > 1:
@@ -5683,13 +5773,26 @@ def _cited_sentence(html: str, claim: str) -> str:
 
 
 def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
-                   page: int) -> str:
+                   page: int, tab: str = "schema") -> str:
     """One domain view: a paged list of the rows with edit-in-place, a
     search filter, the pending count linking at the Review queue, and a
-    structured add form — the pipe-format textareas retire here."""
+    structured add form — the pipe-format textareas retire here.
+
+    Hosted by KNOWLEDGE under the four-tab contract (owner, 2026-08-27:
+    Knowledge manages, the Data layer explains); `tab` binds every URL and
+    back-field to the hosting tab, so the machinery serves either."""
     from . import provenance as prov
     per = 15
-    base = _dl_base(key, tenant, sub, q, state)
+    base = _dl_base(key, tenant, sub, q, state, tab)
+
+    def _bf(s_, st="", pg_=1, q_=""):
+        return _dl_back_fields(s_, st, pg_, q_, tab)
+
+    def _bq(s_, st="", pg_=1):
+        return _dl_backq(s_, st, pg_, tab)
+
+    def _srch(q_, st="", what="filter"):
+        return _dl_search(key, tenant, sub, q_, st, what, tab)
     ents = kb.entities(tenant, available_only=False)
     cat = {e.key: e.name for e in ents}
     datalist = ('<datalist id="objents">'
@@ -5722,7 +5825,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
     <input type="hidden" name="key" value="{_esc(key)}">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">
     <input type="hidden" name="kind" value="{_esc(kind)}">
-    {_dl_back_fields(sub, state, page, q)}
+    {_bf(sub, state, page, q)}
     {fields}
     <div class="row"><button>Add — it lands approved, yours to edit here</button></div>
   </form>
@@ -5753,7 +5856,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
                  if _match(q, r.claim, r.evidence,
                            " ".join(r.situations or []), r.entity_key)]
         shown, pager, pg = _page_slice(rows_)
-        bf = _dl_back_fields(sub, cur, pg, q)
+        bf = _bf(sub, cur, pg, q)
         body = ""
         for r in shown:
             if cur == "removed":
@@ -5766,7 +5869,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
         <input type="hidden" name="tenant" value="{_esc(tenant)}">
         <input type="hidden" name="kind" value="claim">
         <input type="hidden" name="id" value="{_esc(r.id)}">
-        {_dl_back_fields(sub, cur, pg, q)}
+        {_bf(sub, cur, pg, q)}
         <button class="sec">Restore</button>
         <span class="when">back to approved — every generator may cite it
         again</span>
@@ -5775,7 +5878,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
                 body += (_claim_row(key, tenant, r, vocab,
                                     "not selectable until approved", "gone")
                          + _claim_decide_row(key, tenant, r,
-                                             backq=_dl_backq(sub, cur, pg)))
+                                             backq=_bq(sub, cur, pg)))
             else:
                 body += _claim_row(key, tenant, r, vocab,
                                    editable=(cur == "selectable"),
@@ -5803,7 +5906,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
     <span class="chip {'on' if inv['selectable'] else 'off'}">{len(inv['selectable'])} usable</span>
     {_pending_chip(db.KbClaim, "claims")}</div>
   {chips}
-  {_dl_search(key, tenant, sub, q, cur, "search claims, evidence, tags")}
+  {_srch(q, cur, "search claims, evidence, tags")}
   {pager}
   <div class="thread">{body or f'<p class="mut">{_esc(empty)}{" Nothing matches the filter." if q else ""}</p>'}</div>
   {pager}
@@ -5817,7 +5920,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
                            " ".join(r.situations or []))]
         shown, pager, pg = _page_slice(rows_)
         vocab = sorted(kb.situations(tenant))
-        bf = _dl_back_fields(sub, "", pg, q)
+        bf = _bf(sub, "", pg, q)
         body = "".join(
             f'<div class="msg">{_objection_row(key, tenant, r, cat, bf)}'
             + _remove_control(key, tenant, "objection", r.id, "this answer",
@@ -5840,7 +5943,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
   <div class="head"><h2>Objections — the approved answers</h2>
     <span class="chip {'on' if rows_ else 'off'}">{len(rows_)}</span>
     {_pending_chip(db.KbObjection, "other")}</div>
-  {_dl_search(key, tenant, sub, q, "", "search objections and answers")}
+  {_srch(q, "", "search objections and answers")}
   {pager}
   <div class="thread">{body or '<p class="mut">None. This is human-authored and it is half of the intake.</p>'}</div>
   {pager}
@@ -5869,7 +5972,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
           <input type="hidden" name="key" value="{_esc(key)}">
           <input type="hidden" name="tenant" value="{_esc(tenant)}">
           <input type="hidden" name="row_id" value="{_esc(r.id)}">
-          {_dl_back_fields(sub, "", pg, q)}
+          {_bf(sub, "", pg, q)}
           <label>Name</label>
           <input name="name" value="{_esc(r.name or '')}">
           <label>Pains — one per line</label>
@@ -5885,7 +5988,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
       </details>"""
                      + _remove_control(key, tenant, "audience", r.id,
                                        r.name or r.key,
-                                       back_fields=_dl_back_fields(sub, "", pg, q))
+                                       back_fields=_bf(sub, "", pg, q))
                      + '</div>')
         add = _add_fold("Add an audience", "audience", """
     <label>Key — short, lowercase</label>
@@ -5903,7 +6006,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
     {_pending_chip(db.KbAudience, "other")}</div>
   <p class="mut">The one KB kind that had no editor (spec §5) — it does now:
   every field a segment is selected on, editable in place.</p>
-  {_dl_search(key, tenant, sub, q, "", "search audiences")}
+  {_srch(q, "", "search audiences")}
   {pager}
   <div class="thread">{body or '<p class="mut">No segments. Selection cannot narrow to a buyer.</p>'}</div>
   {pager}
@@ -5926,7 +6029,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
         <input type="hidden" name="key" value="{_esc(key)}">
         <input type="hidden" name="tenant" value="{_esc(tenant)}">
         <input type="hidden" name="entity_keys" value="{_esc(r.key)}">
-        {_dl_back_fields(sub, "", pg, q)}
+        {_bf(sub, "", pg, q)}
         <select name="group">{opts}</select>
         <button class="sec">Add to group</button>
         <span class="when">membership is additive — adding one never removes
@@ -5947,7 +6050,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
                      + _remove_control(key, tenant, "entity", r.id, r.name,
                                        "Anything scoped only to it — its claims, its "
                                        "objections, its photographs — comes out with it.",
-                                       back_fields=_dl_back_fields(sub, "", pg, q))
+                                       back_fields=_bf(sub, "", pg, q))
                      + '</div>')
         bulk = ""
         if groups and len(shown) > 1:
@@ -5960,7 +6063,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
   <form id="grp" method="post" action="/admin/entity_group"></form>
   <input type="hidden" name="key" value="{_esc(key)}" form="grp">
   <input type="hidden" name="tenant" value="{_esc(tenant)}" form="grp">
-  <input type="hidden" name="back" value="schema" form="grp">
+  <input type="hidden" name="back" value="{tab}" form="grp">
   <input type="hidden" name="bsub" value="catalogue" form="grp">
   <div class="bulkbar">
     <select name="group" form="grp">{opts}</select>
@@ -5991,7 +6094,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
   <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
     <span class="when">the store owns price and availability; editorial
     fields conflict rather than overwrite</span></div>
-  {_dl_search(key, tenant, sub, q, "", "search the catalogue")}
+  {_srch(q, "", "search the catalogue")}
   {pager}
   <div class="thread">{body or '<p class="mut">Nothing catalogued. Selection has nothing to offer.</p>'}</div>
   {pager}
@@ -6014,14 +6117,14 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
             + _remove_control(key, tenant, "situation", r.id, r.tag,
                               "Claims already tagged with it keep the tag, but "
                               "no new claim may carry it.",
-                              back_fields=_dl_back_fields(sub, "", pg, q))
+                              back_fields=_bf(sub, "", pg, q))
             + "</div>" for r in shown)
         add = f"""
 <details class="sec"><summary>Add a situation</summary>
   <form method="get" action="/admin/situation_add" class="f">
     <input type="hidden" name="key" value="{_esc(key)}">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">
-    {_dl_back_fields(sub, "", pg, q)}
+    {_bf(sub, "", pg, q)}
     <label>Tag — short, lowercase</label>
     <input name="tag" placeholder="planning_a_wedding">
     <label>What a buyer in it is trying to do</label>
@@ -6035,20 +6138,315 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
     <span class="chip {'on' if sits else 'off'}">{len(sits)} tags</span></div>
   <p class="mut">The only tags a claim for this account may carry — a claim
   tagged with anything else is refused on the way in.</p>
-  {_dl_search(key, tenant, sub, q, "", "search tags")}
+  {_srch(q, "", "search tags")}
   {pager}
   <div class="thread">{body or '<p class="mut">No vocabulary authored yet — add the first tag below.</p>'}</div>
   {pager}
   {add}
 </div>""" + _situation_overlap_card(key, tenant,
                                     kb.situation_overlaps(tenant),
-                                    back_fields=_dl_back_fields(sub))
+                                    back_fields=_bf(sub))
 
     # photos
     return _photo_library(tenant, key, page=max(1, page),
-                          base=_dl_base(key, tenant, "photos", q),
-                          back_fields=_dl_back_fields("photos", "",
-                                                      max(1, page), q))
+                          base=_dl_base(key, tenant, "photos", q, tab=tab),
+                          back_fields=_bf("photos", "", max(1, page), q))
+
+
+#: Which knowledge KIND each `kb_needs` token names — the map's edges and
+#: the leverage table's "reads" column both derive from this, so a system
+#: declaring a need and the visual disagreeing is impossible by
+#: construction.
+_NEED_KIND = {
+    "claim": ("claims", "Claims"),
+    "entity": ("catalogue", "Catalogue"),
+    "audience": ("audiences", "Audiences"),
+    "objection": ("objections", "Objections"),
+    "situation": ("situations", "Situations"),
+    "situations": ("situations", "Situations"),
+    "tone": ("", "Brand voice"),
+    "positioning": ("", "Brand voice"),
+    "banned_claims": ("", "Hard rules"),
+}
+
+
+def _installed_systems(tenant: str) -> list:
+    with db.SessionLocal() as s:
+        rows = (s.query(db.System)
+                .filter(db.System.tenant == tenant,
+                        db.System.status != "retired")
+                .order_by(db.System.key).all())
+        s.expunge_all()
+    return rows
+
+
+def _schema_map(key: str, tenant: str) -> str:
+    """The map — how the data connects (owner, 2026-08-27: "a visual of how
+    everything connects, to completion of the data, the structure of the
+    data and the way systems leverage the data").
+
+    Derived, never drawn by hand: kind counts come from the same queries
+    Knowledge's strip shows, each system's reads come from its declared
+    `kb_needs`, and every node links to the tab that owns it — Knowledge to
+    manage, Review to decide, Systems to run. Four columns, left to right:
+    where a fact enters, what it becomes, the gates every draft passes,
+    and who reads it.
+    """
+    from . import resolve as _rs
+    counts = _kind_counts(tenant)
+    b = kb.brand(tenant)
+    banned = list((b.banned_claims or []) if b else [])
+    voice = bool(b and (b.voice or {}).get("tone"))
+    r = {}
+    try:
+        r = _rs.readiness(tenant)
+    except Exception:                                            # noqa: BLE001
+        pass
+    rows_sys = _installed_systems(tenant)
+
+    def _kb_link(sub: str) -> str:
+        return (f"/admin/ui?tab=kb"
+                + (f"&amp;sub={sub}" if sub else "")
+                + f"&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    reads_by_kind: dict[str, int] = {}
+    for row in rows_sys:
+        for need in systems.spec(row.key).get("kb_needs") or ():
+            k = _NEED_KIND.get(need, ("", ""))[1]
+            if k:
+                reads_by_kind[k] = reads_by_kind.get(k, 0) + 1
+
+    def _node(label: str, meta: str, href: str = "", on: bool = True) -> str:
+        head = (f'<a href="{href}">{_esc(label)}</a>' if href
+                else _esc(label))
+        return (f'<div class="fnode{"" if on else " dim"}"><b>{head}</b>'
+                f'<span class="when">{meta}</span></div>')
+
+    kinds_col = ""
+    for sub_, label in (("claims", "Claims"), ("objections", "Objections"),
+                        ("audiences", "Audiences"),
+                        ("catalogue", "Catalogue"),
+                        ("situations", "Situations"), ("photos", "Photos")):
+        n = counts.get(sub_, 0)
+        readers = reads_by_kind.get(label, 0)
+        kinds_col += _node(
+            f"{label} · {n}",
+            (f"read by {readers} system(s)" if readers else
+             "no installed system declares it — reference until one does"),
+            _kb_link(sub_), on=n > 0)
+    kinds_col += _node(
+        f"Hard rules · {len(banned)}",
+        f"read by every gate, against every draft — including yours",
+        f"/admin/ui?tab=brand&amp;tenant={_esc(tenant)}"
+        + (f"&amp;key={_esc(key)}" if key else ""), on=bool(banned))
+    kinds_col += _node(
+        "Brand voice" + (" · set" if voice else " · not set"),
+        "tone and positioning ride every drafter brief",
+        f"/admin/ui?tab=brand&amp;tenant={_esc(tenant)}"
+        + (f"&amp;key={_esc(key)}" if key else ""), on=voice)
+
+    sys_col = ""
+    for row in rows_sys:
+        needs = [
+            _NEED_KIND.get(nd, ("", nd))[1]
+            for nd in systems.spec(row.key).get("kb_needs") or ()]
+        sys_col += _node(
+            row.name or row.key,
+            ("reads: " + ", ".join(dict.fromkeys(needs))
+             if needs else "reads no knowledge — runs on connections alone")
+            + f" · {row.status}",
+            f"/admin/ui?tab=systems&amp;tenant={_esc(tenant)}"
+            f"&amp;system={_esc(row.key)}"
+            + (f"&amp;key={_esc(key)}" if key else ""),
+            on=(row.status == "live"))
+    if not sys_col:
+        sys_col = _node("No systems installed",
+                        "install one on the Systems tab and its reads "
+                        "appear here", on=False)
+
+    score = _esc(str(r.get("score", "0/0")))
+    return f"""
+<div class="card">
+  <div class="head"><h2>How it all connects</h2>
+    <span class="chip {'on' if r.get('answerable') else 'off'}">{score}
+      situations answerable</span></div>
+  <p class="mut">Facts enter on the left, become governed knowledge in the
+  middle, pass the gates, and come out as drafts a system produced — held on
+  Review until you approve. Everything below is read live: the counts are
+  Knowledge's own, each system's reads are its declared needs, and every
+  node opens the tab that owns it — <b>Knowledge to manage, Review to
+  decide, this tab to understand</b>.</p>
+  <div class="flow">
+    <div class="flowcol">
+      <div class="flowlab">Where a fact enters</div>
+      {_node("You — console & Telegram", "adds land approved; edits are re-attestations", _kb_link(""))}
+      {_node("Client intake links", "answers land as proposals", f"/admin/ui?tab=accounts&amp;tenant={_esc(tenant)}" + (f"&amp;key={_esc(key)}" if key else ""))}
+      {_node("Site crawl & store sync", "candidate facts and catalogue rows — proposals, never silent overwrites")}
+      {_node("Sent-mail harvest", "voice and objection candidates from real correspondence")}
+    </div>
+    <div class="flowarr">&rarr;</div>
+    <div class="flowcol">
+      <div class="flowlab">The knowledge, by kind</div>
+      {kinds_col}
+      <div class="when">proposals wait on
+        <a href="/admin/ui?tab=content&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
+        — nothing here is citable until approved</div>
+    </div>
+    <div class="flowarr">&rarr;</div>
+    <div class="flowcol">
+      <div class="flowlab">The gates every draft passes</div>
+      {_node("Validator", f"{len(banned)} hard rule(s) — a banned phrase is refused, whoever wrote it", on=bool(banned))}
+      {_node("Coherence", "one artifact, one subject — parts checked against the commitment")}
+      {_node("Structure", "rendered artifacts must hold together — links, variables, cut words")}
+      {_node("Fitness", "draft and archived products are never offered, anywhere")}
+    </div>
+    <div class="flowarr">&rarr;</div>
+    <div class="flowcol">
+      <div class="flowlab">Who reads it</div>
+      {sys_col}
+      <div class="when">what they produce holds on
+        <a href="/admin/ui?tab=content&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
+        until you approve it</div>
+    </div>
+  </div>
+</div>"""
+
+
+def _schema_leverage(key: str, tenant: str) -> str:
+    """Leverage — what the layer has been worth, measured (owner,
+    2026-08-27: "how effective that data has been in outputs compared to
+    just using a skill without this context / coherence / compliance
+    layer").
+
+    There is no ungrounded control arm and this page does not invent one.
+    The honest form of the comparison is the counterfactual the assurance
+    ledger already keeps: every catch listed here is something a drafter
+    actually produced and the layer stopped or repaired — running the same
+    skill without the layer is precisely the world where each one shipped.
+    """
+    import datetime as _dt
+
+    from . import assurance
+    rep = assurance.report(tenant, 90)
+    since = db.utcnow() - _dt.timedelta(days=90)
+    with db.SessionLocal() as s:
+        outs = (s.query(db.Output)
+                .filter(db.Output.tenant == tenant,
+                        db.Output.created_at >= since).count())
+        cited = (s.query(db.Output)
+                 .filter(db.Output.tenant == tenant,
+                         db.Output.created_at >= since,
+                         db.Output.claim_ids.isnot(None)).count())
+        ev = (s.query(db.AssuranceEvent)
+              .filter(db.AssuranceEvent.tenant == tenant,
+                      db.AssuranceEvent.created_at >= since).all())
+        s.expunge_all()
+
+    by_sys: dict[str, dict] = {}
+    for e in ev:
+        d = by_sys.setdefault(e.system_key or "—",
+                              {"checks": 0, "caught": 0})
+        d["checks"] += 1
+        if e.caught:
+            d["caught"] += 1
+
+    caught = rep.get("caught") or {}
+    caught_total = rep.get("caught_total", sum(caught.values()))
+    repairs = rep.get("repairs") or {}
+    grounding = rep.get("grounding") or {}
+    edited = rep.get("edited") or {}
+
+    meters = f"""
+  <div class="stat">
+    <span><b>{outs}</b> outputs (90d)</span>
+    <span><b>{cited}</b> grounded in cited claims</span>
+    <span><b>{caught_total}</b> catches</span>
+    <span><b>{repairs.get('succeeded', 0)}</b> repaired, then shipped clean</span>
+    <span><b>{repairs.get('still_blocked', 0)}</b> refused outright</span>
+  </div>"""
+
+    if caught:
+        rules = "".join(
+            f'<div class="msg"><code>{_esc(rule)}</code> '
+            f'<span class="chip off">×{n}</span></div>'
+            for rule, n in list(caught.items())[:12])
+        counterfactual = f"""
+<div class="card">
+  <div class="head"><h2>What would have shipped without the layer</h2>
+    <span class="chip off">{caught_total} caught (90d)</span></div>
+  <p class="mut">Each of these is something a drafter actually produced and
+  a gate stopped — a banned phrase, an uncited assertion, an off-subject
+  artifact, a broken render. Running the same skill without this layer is
+  the world where every one of them reached a customer in the client's
+  name. Repaired ones were fixed and re-checked; refused ones never left.</p>
+  <div class="thread">{rules}</div>
+</div>"""
+    else:
+        counterfactual = """
+<div class="card">
+  <div class="head"><h2>What would have shipped without the layer</h2></div>
+  <p class="mut">No catches in this window. On a quiet account that means
+  nothing was checked or nothing was produced — the meters above say which;
+  a live account with output and zero catches is worth reading twice.</p>
+</div>"""
+
+    rows_html = ""
+    counts = _kind_counts(tenant)
+    b = kb.brand(tenant)
+    for row in _installed_systems(tenant):
+        spec = systems.spec(row.key)
+        needs = [nd for nd in spec.get("kb_needs") or ()]
+        chips = ""
+        for nd in needs:
+            sub_, label = _NEED_KIND.get(nd, ("", nd))
+            if nd == "banned_claims":
+                have = bool(b and b.banned_claims)
+            elif nd in ("tone", "positioning"):
+                have = bool(b and (b.voice or {}).get("tone"))
+            else:
+                have = counts.get(sub_, 0) > 0
+            chips += (f'<span class="chip {"on" if have else "off"}">'
+                      f'{_esc(label)}</span> ')
+        with db.SessionLocal() as s:
+            n_out = (s.query(db.Output)
+                     .filter(db.Output.tenant == tenant,
+                             db.Output.system_key == row.key,
+                             db.Output.created_at >= since).count())
+        st = by_sys.get(row.key, {"checks": 0, "caught": 0})
+        rows_html += (
+            f'<div class="msg"><div><b>{_esc(row.name or row.key)}</b> '
+            f'<span class="chip nb">{_esc(row.status)}</span></div>'
+            f'<div class="when">reads: {chips or "—"}</div>'
+            f'<div class="when">{n_out} output(s) · {st["checks"]} check(s) '
+            f'· {st["caught"]} with a catch</div></div>')
+
+    grounded_line = (
+        f'{grounding.get("with_a_claim_id", 0)} of '
+        f'{grounding.get("measured", 0)} measured drafts cited an approved '
+        f'claim' if grounding.get("measured") else
+        "grounding is not yet measured in this window")
+    edited_note = _esc(str(edited.get("note") or ""))
+
+    return f"""
+<div class="card">
+  <div class="head"><h2>Leverage — what the layer is worth</h2>
+    <span class="chip nb">90 days</span></div>
+  <p class="mut">The comparison is honest by construction: there is no
+  ungrounded control arm, so what is counted is the counterfactual the
+  assurance ledger keeps — everything a drafter produced that the gates
+  caught, repaired or refused before it left. {_esc(grounded_line)}.</p>
+  {meters}
+  {f'<p class="when">{edited_note}</p>' if edited_note else ""}
+</div>
+{counterfactual}
+<div class="card">
+  <div class="head"><h2>How each system leverages it</h2></div>
+  <p class="mut">What each installed system declares it reads (green = on
+  file, amber = missing — the gap is on Queue &amp; Insights), and what the
+  gates did for its output.</p>
+  <div class="thread">{rows_html or '<p class="mut">No systems installed yet.</p>'}</div>
+</div>"""
 
 
 def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
@@ -6070,32 +6468,25 @@ def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
                                        "client. Pick an account to work its "
                                        "queue."))
     sub = (sub or "").strip().lower() or "queue"
+    if sub in DOMAIN_SUBS:
+        # The management views live on Knowledge now (the four-tab
+        # contract); a bookmark from the days this tab hosted them keeps
+        # working — with its filter, search and page intact.
+        from urllib.parse import quote as _uq
+
+        from fastapi.responses import RedirectResponse
+        u = f"/admin/ui?tab=kb&sub={_uq(sub)}&tenant={_uq(tenant)}"
+        if state:
+            u += f"&state={_uq(state)}"
+        if q:
+            u += f"&q={_uq(q)}"
+        if page > 1:
+            u += f"&page={page}"
+        return RedirectResponse(u, 303)
     if sub not in dict(SCHEMA_SUBS):
         sub = "queue"
 
     need = _schema_needs_you(tenant)
-    from . import provenance as prov
-    with db.SessionLocal() as s:
-        dom_counts = {
-            "claims": s.query(db.KbClaim).filter(
-                db.KbClaim.tenant == tenant,
-                db.KbClaim.review == prov.APPROVED).count(),
-            "objections": s.query(db.KbObjection).filter(
-                db.KbObjection.tenant == tenant,
-                db.KbObjection.review == prov.APPROVED).count(),
-            "audiences": s.query(db.KbAudience).filter(
-                db.KbAudience.tenant == tenant,
-                db.KbAudience.review == prov.APPROVED).count(),
-            "catalogue": s.query(db.KbEntity).filter(
-                db.KbEntity.tenant == tenant,
-                db.KbEntity.review == prov.APPROVED).count(),
-            "situations": s.query(db.KbSituation).filter(
-                db.KbSituation.tenant == tenant).count(),
-            "photos": s.query(db.KbAsset).filter(
-                db.KbAsset.tenant == tenant,
-                db.KbAsset.review == prov.APPROVED).count(),
-        }
-    dom_counts["queue"] = need["n"]
 
     def _sub_href(k: str) -> str:
         return (f"/admin/ui?tab=schema&amp;sub={k}&amp;tenant={_esc(tenant)}"
@@ -6104,17 +6495,18 @@ def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
     strip = '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
         f'{_esc(label)}'
-        + (f'<span class="cnt">{dom_counts[k]}</span>'
-           if k in dom_counts else "")
+        + (f'<span class="cnt">{need["n"]}</span>' if k == "queue" else "")
         + '</a>'
         for k, label in SCHEMA_SUBS) + "</div>"
 
-    if sub == "queue":
-        body = _schema_queue(key, tenant, need)
+    if sub == "map":
+        body = _schema_map(key, tenant)
+    elif sub == "leverage":
+        body = _schema_leverage(key, tenant)
     elif sub == "advanced":
         body = _schema_advanced(key, tenant)
     else:
-        body = _schema_domain(key, tenant, sub, q, state, page)
+        body = _schema_queue(key, tenant, need)
 
     flash = ((f'<div class="ok">{_esc(msg)}</div>' if msg else "")
              + (f'<div class="bad">{_esc(err)}</div>' if err else ""))
