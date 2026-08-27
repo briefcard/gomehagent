@@ -426,6 +426,38 @@ amber = missing) with checks/catches. Guards (caught):
 too. Queue & Insights STAYS on the Data layer: completion-with-inline-fix
 is the "completion of the data" surface and rule 1 (act where you report)
 keeps the answer box beside the gap it names.
+**4·Connections BUILT + SHIPPED 2026-08-27 (spec §11).** Three views on
+the `ACCOUNTS_SUBS` strip. **Status** (the default): account card,
+capability chips, missing line, connection rows sorted FAILED FIRST
+(strip badge = the failed count, same query), and Test connections
+converted from a raw-JSON dead-end to a BACKGROUND verify (`_run_bg` —
+five live probes must not hang a page) whose per-provider result is
+stored (`Setting verify_result:<tenant>`) and rendered ON the card
+("Last live test … — hover a chip for the detail"); "Never live-tested"
+is the honest first state. **People & links**: portal people
+(Revoke CONFIRMS, naming that unused sign-in links die with it; the
+Sign-in link button flashes the minted URL on-page as `plink=` instead
+of dumping a credential as JSON), the connect-link mint form, and the
+intake-links card — all three link flashes now label their copy
+affordance. **Advanced**: business-model select, raw wiring with `ui=1`
+on every `_field` save (the page's own "Saving reloads to a JSON
+response — hit back" copy is GONE, both instances), Add-account and
+Grant-access converted to flashes (refusals ride `err=` too; bare JSON
+forms survive for hand calls), the bot-access fold reframed as a
+neutral **parked by choice** chip with its switch-on condition inside
+(it rendered as a working form under a permanent error-styled warning —
+a parked decision styled as a defect), and the routes panel as-is.
+Connection Disconnect and intake-link Revoke also confirm. Guards (all
+caught): `verify_lands_on_the_card`, `signin_link_flashes_back`,
+`destructive_asks_first` (which caught its own suite's first, looser
+assertion — the pin now binds `onsubmit=`, not the substring),
+`parked_reads_as_parked`; `intake_links_have_a_surface` retargeted to
+the People view. New suite `test_connections_tab.py`; smoke walks both
+new sub-views with class coverage; pins in test_connect_ui, test_oauth,
+test_metrics and test_kb retargeted at the views their content moved to,
+each with a dated comment. PARKED, named: the purge dry-run (spec
+counted it among this page's dead-ends; it actually lives on Review's
+catalogue card and converts with Review's own restructure).
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first

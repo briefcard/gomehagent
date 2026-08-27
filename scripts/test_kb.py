@@ -81,7 +81,10 @@ with TestClient(app) as cl:
     # routes" is body-specific to that tab (renders in both its branches),
     # which "Connections" alone would not prove — the sidebar nav carries that
     # word on every tab.
-    for tab,needle in (("kb","Knowledge"),("systems","Systems"),("accounts","Connection routes")):
+    # "accounts" needle changed again (2026-08-27, step 4): the routes
+    # panel moved to the tab's Advanced view; "Test connections" is the
+    # Status view's own control and the default landing.
+    for tab,needle in (("kb","Knowledge"),("systems","Systems"),("accounts","Test connections")):
         r = cl.get("/admin/ui", params={"key":"s3cret","tab":tab})
         ck(f"{tab} tab renders", r.status_code==200 and needle in r.text, f"{len(r.text)}b")
     r = cl.get("/admin/ui", params={"key":"s3cret","tab":"kb","tenant":"baci"})

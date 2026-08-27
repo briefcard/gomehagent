@@ -122,7 +122,8 @@ walk = ([("content", "")] + [("content", f"&sub={s}") for s in SUBS]
         # moved there under the four-tab contract) — each held to the
         # stylesheet like every other page.
         + [("schema", f"&sub={s}") for s, _l in admin_ui.SCHEMA_SUBS]
-        + [("kb", f"&sub={s}") for s in admin_ui.DOMAIN_SUBS])
+        + [("kb", f"&sub={s}") for s in admin_ui.DOMAIN_SUBS]
+        + [("accounts", "&sub=people"), ("accounts", "&sub=advanced")])
 accounts_html = ""
 for tab, extra in walk:
     html = page(f"{tab}{extra or ''} · {T1}",
@@ -144,7 +145,9 @@ ck("Client view link is keyless",
 # ---------------------------------------------------------------------------
 # Pin: the intake-links card exists and the mint flow lands back as a flash.
 # ---------------------------------------------------------------------------
-ck("intake links have a console surface", "Intake links —" in accounts_html)
+# Step 4: intake links live on the People & links view now.
+people_html = c.get(f"/admin/ui?key={KEY}&tab=accounts&tenant={T1}&sub=people").text
+ck("intake links have a console surface", "Intake links —" in people_html)
 r = c.get(f"/admin/intake_new?key={KEY}&tenant={T1}&label=Smoke&ui=1",
           follow_redirects=False)
 ck("intake mint (ui=1) redirects back", r.status_code == 303

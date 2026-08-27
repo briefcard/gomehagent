@@ -345,8 +345,11 @@ def main() -> int:  # noqa: C901 — one suite, read top to bottom
            "/admin/oauth/google?" in blocked)
         oauth.config.META_APP_ID = real_meta
 
+        # Step 4 (2026-08-27): the mint form lives on People & links now.
+        people = cl.get("/admin/ui?key=s3cret&tab=accounts&tenant=baci"
+                        "&sub=people").text
         ck("there is a form to mint a connect link",
-           'action="/admin/connect_link"' in page)
+           'action="/admin/connect_link"' in people)
         ck("disconnect is a POST, not a prefetchable GET",
            'method="post" action="/admin/connect_revoke"' in page)
         ck("no secret reaches the page", REFRESH not in page

@@ -1151,8 +1151,10 @@ SABOTAGES = [
     {
         "name": "intake_links_have_a_surface",
         "file": "app/admin_ui.py",
-        "find": "              {_intake_links(t.key, key)}",
-        "replace": "              ",
+        # Retargeted 2026-08-27 (step 4): the card moved to the People &
+        # links view with the rest of the client-access surface.
+        "find": "    {_intake_links(t.key, key)}",
+        "replace": "    ",
         "suites": ["test_render_smoke.py"],
         "why": "minting an intake link goes back to hand-typing "
                "/admin/intake_new and copying a URL out of raw JSON — the "
@@ -1449,6 +1451,56 @@ SABOTAGES = [
                "number that does not match its list is learned as noise "
                "within a week, which is the defect the needs-you badges "
                "were built to end",
+    },
+    {
+        "name": "verify_lands_on_the_card",
+        "file": "app/web.py",
+        "find": "    if ui and tenant:\n"
+                "        import json as _json",
+        "replace": "    if False:  # SABOTAGE\n"
+                   "        import json as _json",
+        "suites": ["test_connections_tab.py"],
+        "why": "Test connections goes back to dumping raw JSON in a new tab "
+               "— the console's own button becomes the dead-end the page's "
+               "copy used to document, and the stored per-provider summary "
+               "on the Status card stops updating",
+    },
+    {
+        "name": "signin_link_flashes_back",
+        "file": "app/web.py",
+        "find": "    got = portal.issue_link(email, issued_by=\"owner\")\n"
+                "    if ui:",
+        "replace": "    got = portal.issue_link(email, issued_by=\"owner\")\n"
+                   "    if False:  # SABOTAGE",
+        "suites": ["test_connections_tab.py"],
+        "why": "minting a sign-in link dumps the credential as raw JSON "
+               "again instead of flashing it copyable on People & links — "
+               "the exact dead-end §11 counted, on the most "
+               "credential-shaped link this page mints",
+    },
+    {
+        "name": "destructive_asks_first",
+        "file": "app/admin_ui.py",
+        "find": "                f'<form method=\"post\" action=\"/admin/person_access\" class=\"inl\" '\n"
+                "                f'onsubmit=\"return confirm(",
+        "replace": "                f'<form method=\"post\" action=\"/admin/person_access\" class=\"inl\" '\n"
+                   "                f'data-x=\"return confirm(",
+        "suites": ["test_connections_tab.py"],
+        "why": "Revoke goes back to firing on a bare click — an irreversible "
+               "action (their unused sign-in links die with it) one stray "
+               "tap from happening, inside a fold that self-opens",
+    },
+    {
+        "name": "parked_reads_as_parked",
+        "file": "app/admin_ui.py",
+        "find": "  <summary>Give someone bot access\n"
+                "    <span class=\"chip nb\">parked by choice</span></summary>",
+        "replace": "  <summary>Give someone bot access</summary>",
+        "suites": ["test_connections_tab.py"],
+        "why": "the bot-access fold loses its parked-by-choice label — a "
+               "deliberately parked decision rendering as an ordinary "
+               "feature is rule 3's defect inverted, and the next reader "
+               "switches it on without meeting the switch-on conditions",
     },
     {
         "name": "domains_live_on_knowledge",

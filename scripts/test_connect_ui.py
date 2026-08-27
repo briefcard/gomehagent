@@ -86,9 +86,15 @@ def main() -> int:
     print("\n— the console names it —")
     with TestClient(app) as cl:
         page = cl.get("/admin/ui?key=s3cret&tab=accounts&tenant=baci").text
-    page_off = page
-    ck("the Connections tab renders", "Connection routes" in page)
-    ck("Shopify's blocker is NAMED on the page", "SHOPIFY_CLIENT_ID" in page)
+        # Step 4 (2026-08-27): the tab grew a Status / People & links /
+        # Advanced strip; the routes panel and the business-model control
+        # live on Advanced now. Pins follow their content deliberately.
+        adv = cl.get(
+            "/admin/ui?key=s3cret&tab=accounts&tenant=baci&sub=advanced").text
+    page_off, adv_off = page, adv
+    ck("the Connections tab renders", "Connection routes" in adv)
+    ck("Shopify's blocker is NAMED on the page", "SHOPIFY_CLIENT_ID" in page
+       or "SHOPIFY_CLIENT_ID" in adv)
     ck("and it says the one-click route exists rather than staying silent",
        "One-click sign-in" in page)
     # Needed MOST while the route is blocked: registering it IS half of
@@ -111,7 +117,10 @@ def main() -> int:
         cred._probe = real_probe
     with TestClient(app) as cl:
         page2 = cl.get("/admin/ui?key=s3cret&tab=accounts&tenant=baci").text
-    ck("a stored secret never reaches the page", SECRET not in page2)
+        adv2 = cl.get(
+            "/admin/ui?key=s3cret&tab=accounts&tenant=baci&sub=advanced").text
+    ck("a stored secret never reaches the page",
+       SECRET not in page2 and SECRET not in adv2)
     ck("though the connection itself is shown as connected",
        "connected" in page2)
 
@@ -120,9 +129,10 @@ def main() -> int:
     # way to set it on an existing account was a hand-typed tenant_set URL —
     # which is how prod's eien reached the segment builder unclassified
     # (2026-08-21). Rule 10: every view-changing knob gets an on-page control.
-    ck("the account card carries a business-model selector",
-       'name="field" value="business_model"' in page2
-       and "<select" in page2)
+    ck("the account card carries a business-model selector (Advanced view "
+       "since step 4)",
+       'name="field" value="business_model"' in adv2
+       and "<select" in adv2)
     with TestClient(app) as cl:
         r = cl.get("/admin/tenant_set",
                    params={"key": "s3cret", "tenant": "baci",
@@ -153,16 +163,18 @@ def main() -> int:
        _way(sh, "oauth")["action"])
     with TestClient(app) as cl:
         page = cl.get("/admin/ui?key=s3cret&tab=accounts&tenant=baci").text
+        adv = cl.get(
+            "/admin/ui?key=s3cret&tab=accounts&tenant=baci&sub=advanced").text
     ck("the console now offers the sign-in", "Sign in with Shopify" in page)
     ck("with somewhere to type the shop", 'name="shop"' in page)
     # Switching the button on does not make the DATA complete, and both of the
     # ways it stays incomplete fail quietly: redacted fields read as an empty
     # account, and a 60-day order window reads as a quiet business.
     ck("and it still warns that the button is not the whole job",
-       "Protected Customer Data" in page and "read_all_orders" in page)
+       "Protected Customer Data" in adv and "read_all_orders" in adv)
     ck("the caveat is shown while the route is OFF too, since it is true either "
        "way and is the more expensive half to discover late",
-       "Protected Customer Data" in page_off)
+       "Protected Customer Data" in adv_off)
 
     # --- the prerequisites nobody was told about --------------------------
     print("\n— prerequisites —")

@@ -1745,7 +1745,7 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
 @app.get("/admin/tenant_add")
 def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
                kind: str = "client", domain: str = "",
-               business_model: str = "") -> dict:
+               business_model: str = "", ui: int = 0):
     """Create a new account. Seeding only covers the original five.
 
     /admin/tenant_add?key=SECRET&tenant=acme&name=Acme+Co&domain=acme.com
@@ -1759,26 +1759,53 @@ def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+
+    def _out(err: str = "", ok: str = "", to: str = ""):
+        # `ui=1` is the console's Add-account form (step 4, spec §11): the
+        # outcome lands back on the tab as a flash — creating an account
+        # used to dead-end on raw JSON, on the console's own form. The bare
+        # JSON stays for hand calls.
+        if not ui:
+            return None
+        from urllib.parse import quote as _q
+
+        from fastapi.responses import RedirectResponse
+        arg = f"err={_q(err, safe='')}" if err else f"ok={_q(ok, safe='')}"
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&sub=advanced"
+            f"&tenant={_q(to or tenant, safe='')}&{arg}", 303)
+
     tenant = (tenant or "").strip().lower()
     if not tenant or not tenant.replace("_", "").replace("-", "").isalnum():
-        return {"error": "tenant must be a short alphanumeric key, e.g. 'acme'"}
+        e = "tenant must be a short alphanumeric key, e.g. 'acme'"
+        return _out(err=e, to="") or {"error": e}
     if not name:
-        return {"error": "name required"}
+        return _out(err="name required") or {"error": "name required"}
     from . import metrics, tenants
     business_model = (business_model or "").strip()
     if business_model and business_model not in metrics.OUTCOMES:
         # Refused rather than stored. A typo here is silent: the account is
         # created, looks fine, and its first report says "no outcomes for
         # 'ecomm_inventory'" weeks later in front of the client.
-        return {"error": f"unknown business_model {business_model!r}",
-                "known": sorted(metrics.OUTCOMES)}
+        return _out(err=f"unknown business_model {business_model!r}") or {
+            "error": f"unknown business_model {business_model!r}",
+            "known": sorted(metrics.OUTCOMES)}
     with db.SessionLocal() as s:
         if s.get(db.Tenant, tenant):
-            return {"error": f"{tenant!r} already exists — use /admin/tenant_set"}
+            e = f"{tenant!r} already exists — use the raw wiring below"
+            return _out(err=e) or {
+                "error": f"{tenant!r} already exists — use /admin/tenant_set"}
         s.add(db.Tenant(key=tenant, name=name, kind=kind, domain=domain,
                         business_model=business_model,
                         systems=[], notes="created via /admin/tenant_add"))
         s.commit()
+    said = (f"{name} created — it is in the account switcher now"
+            + ("" if business_model else
+               "; no business model yet, so segments and reports refuse "
+               "until you pick one above"))
+    got = _out(ok=said)
+    if got is not None:
+        return got
     out = {"ok": True, "created": tenant, **tenants.resolve(tenant),
            "next": "attach connections with /admin/tenant_set, then seed its KB"}
     if not business_model:
@@ -1791,7 +1818,7 @@ def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
 
 @app.get("/admin/user_add")
 def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
-             role: str = "client", tenant: str = "") -> dict:
+             role: str = "client", tenant: str = "", ui: int = 0):
     """Give someone access to the bot, scoped to one account.
 
     /admin/user_add?key=SECRET&chat_id=123&name=Ellis&role=client&tenant=coverings
@@ -1802,15 +1829,33 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+
+    def _out(err: str = "", ok: str = ""):
+        # `ui=1` is the console's bot-access fold — Grant access used to
+        # dead-end on raw JSON (step 4, spec §11).
+        if not ui:
+            return None
+        from urllib.parse import quote as _q
+
+        from fastapi.responses import RedirectResponse
+        arg = f"err={_q(err, safe='')}" if err else f"ok={_q(ok, safe='')}"
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&sub=advanced"
+            f"&tenant={_q(tenant, safe='')}&{arg}", 303)
+
     if role not in ("owner", "client", "freelancer"):
-        return {"error": "role must be owner | client | freelancer"}
+        e = "role must be owner | client | freelancer"
+        return _out(err=e) or {"error": e}
     if role != "owner" and not tenant:
-        return {"error": "a non-owner must be pinned to a tenant"}
+        e = "a non-owner must be pinned to a tenant"
+        return _out(err=e) or {"error": e}
     if not chat_id:
-        return {"error": "chat_id required — have them message the bot first"}
+        e = "chat_id required — have them message the bot first"
+        return _out(err=e) or {"error": e}
     with db.SessionLocal() as s:
         if tenant and not s.get(db.Tenant, tenant):
-            return {"error": f"unknown tenant {tenant!r}"}
+            return _out(err=f"unknown tenant {tenant!r}") or {
+                "error": f"unknown tenant {tenant!r}"}
         u = s.query(db.User).filter(db.User.telegram_chat_id == str(chat_id)).first()
         if u:
             u.name, u.role, u.tenant_key = name or u.name, role, tenant or None
@@ -1819,8 +1864,10 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
                           tenant_key=tenant or None,
                           active_tenant=tenant or "agency"))
         s.commit()
-    return {"ok": True, "name": name, "role": role,
-            "scoped_to": tenant or "all accounts"}
+    return _out(ok=f"{name or chat_id} has bot access as {role}, scoped to "
+                   f"{tenant or 'all accounts'}") or {
+        "ok": True, "name": name, "role": role,
+        "scoped_to": tenant or "all accounts"}
 
 
 @app.get("/admin/ui", response_class=HTMLResponse)
@@ -1992,7 +2039,8 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             303)
     q = request.query_params
     return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
-                     link=q.get("link", ""), ilink=q.get("ilink", ""))
+                     link=q.get("link", ""), ilink=q.get("ilink", ""),
+                     plink=q.get("plink", ""), sub=q.get("sub", ""))
 
 
 @app.get("/admin/kb_add")
@@ -2061,7 +2109,7 @@ def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
             from fastapi.responses import RedirectResponse
             from urllib.parse import quote as _q
             return RedirectResponse(
-                f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+                f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
                 f"&err={_q(f'unknown account {tenant!r}', safe='')}",
                 status_code=303)
         return {"error": f"unknown tenant {tenant!r}"}
@@ -2076,7 +2124,7 @@ def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
         from fastapi.responses import RedirectResponse
         from urllib.parse import quote as _q
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+            f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
             f"&ilink={_q(url, safe='')}", status_code=303)
     return {"ok": True, "tenant": tenant,
             "url": url,
@@ -2111,7 +2159,7 @@ def intake_revoke(key: str = Depends(admin_key), token: str = "",
                 from fastapi.responses import RedirectResponse
                 from urllib.parse import quote as _q
                 return RedirectResponse(
-                    f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+                    f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
                     f"&err={_q('no such intake link', safe='')}", status_code=303)
             return {"error": "no such link"}
         row.status = "revoked"
@@ -2122,7 +2170,7 @@ def intake_revoke(key: str = Depends(admin_key), token: str = "",
         from fastapi.responses import RedirectResponse
         from urllib.parse import quote as _q
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+            f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
             f"&ok={_q('Intake link revoked — any copy of it now shows no longer active.', safe='')}",
             status_code=303)
     return {"ok": True, "revoked": token}
@@ -5888,16 +5936,33 @@ async def person_access(request: Request, key: str = Depends(admin_key)):
 
 
 @app.get("/admin/portal_link")
-def portal_link(key: str = Depends(admin_key), email: str = "") -> dict:
+def portal_link(key: str = Depends(admin_key), email: str = "",
+                ui: int = 0, tenant: str = ""):
     """Mint a sign-in link for a client, to send them yourself.
 
     Returned rather than sent, on purpose: a login link is a credential, and
     this system has never sent anything as a side effect of producing it.
+    `ui=1` is the People & links button (step 4, spec §11): the link flashes
+    on the page as a copyable field, the way connect and intake links
+    already do — it used to dead-end on raw JSON.
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import portal
-    return portal.issue_link(email, issued_by="owner")
+    got = portal.issue_link(email, issued_by="owner")
+    if ui:
+        from urllib.parse import quote as _q
+
+        from fastapi.responses import RedirectResponse
+        url = (got or {}).get("url") or (got or {}).get("link") or ""
+        base = (f"/admin/ui?tab=accounts&sub=people"
+                f"&tenant={_q(tenant, safe='')}")
+        if url:
+            return RedirectResponse(base + f"&plink={_q(url, safe='')}", 303)
+        return RedirectResponse(
+            base + "&err=" + _q(str((got or {}).get("error")
+                                    or "could not mint a link"), safe=""), 303)
+    return got
 
 
 @app.get("/admin/skill_catalogue")
@@ -5934,12 +5999,46 @@ async def skill_run(request: Request, key: str = Depends(admin_key)) -> dict:
 
 
 @app.get("/admin/verify")
-def verify_tenant(key: str = Depends(admin_key), tenant: str = "") -> dict:
+def verify_tenant(key: str = Depends(admin_key), tenant: str = "",
+                  ui: int = 0):
     """Live-test a tenant's integrations. 'Configured' and 'working' are
-    different questions — a revoked token still looks configured."""
+    different questions — a revoked token still looks configured.
+
+    `ui=1` is the console button (step 4, spec §11): the probes run in the
+    BACKGROUND — five live calls must not hang a page — the result is
+    stored, and the Status card renders the per-provider summary where the
+    button is. The bare JSON form stays for hand calls.
+    """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import tenants
+    if ui and tenant:
+        import json as _json
+
+        def _run_and_store(tk: str) -> None:
+            got = tenants.verify(tk)
+            results = {c: r for c, r in got.items()
+                       if isinstance(r, dict) and "status" in r}
+            with db.SessionLocal() as s:
+                k = f"verify_result:{tk}"
+                row = s.get(db.Setting, k)
+                val = _json.dumps({"when": str(db.utcnow()),
+                                   "results": results})
+                if row is None:
+                    s.add(db.Setting(key=k, value=val))
+                else:
+                    row.value = val
+                s.commit()
+
+        from urllib.parse import quote as _q
+
+        from fastapi.responses import RedirectResponse
+        _run_bg(f"verify:{tenant}", _run_and_store, tenant)
+        return RedirectResponse(
+            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
+            + "&ok=" + _q("testing every connection in the background — "
+                          "the per-provider result lands on this card; "
+                          "refresh in a moment", safe=""), 303)
     if not tenant:
         return {"tenants": [tenants.verify(t.key) for t in tenants.all_tenants()]}
     return tenants.verify(tenant)

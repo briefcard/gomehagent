@@ -924,6 +924,11 @@ def _connections(tenant: str, key: str) -> str:
     """
     from . import credentials as cred
     rows = cred.status(tenant)
+    # FAILED FIRST (spec §11): a broken connection is the row this page
+    # exists to surface, and it was sorted wherever the provider list put
+    # it. Stable within each state, so the provider order stays learnable.
+    _rank = {"failed": 0, "connected": 1}
+    rows = sorted(rows, key=lambda r: _rank.get(r.get("state"), 2))
     out = []
     for r in rows:
         state = r["state"]
@@ -1027,8 +1032,15 @@ def _connections(tenant: str, key: str) -> str:
                 out += (f'<form method="post" action="/admin/connect_test" '
                         f'class="inl">{hidden}<button class="sec">Re-check'
                         f'</button></form>')
+            # Asks first (spec §11): severing a connection is irreversible
+            # in effect — the client re-connects, we do not un-revoke.
             out += (f'<form method="post" action="/admin/connect_revoke" '
-                    f'class="inl">{hidden}<button class="sec">Disconnect'
+                    f'class="inl" onsubmit="return confirm(\'Disconnect '
+                    f'{_esc(r["name"])}'
+                    + (f' ({_esc(site)})' if site else "")
+                    + f' for {_esc(tenant)}? The client will have to '
+                    f'connect it again.\')">'
+                    f'{hidden}<button class="sec">Disconnect'
                     f'</button></form>')
             return out
 
@@ -1128,16 +1140,11 @@ def _connections(tenant: str, key: str) -> str:
     <details class="conns" open>
       <summary>Connections</summary>
       {''.join(out)}
-      <form method="post" action="/admin/connect_link" class="row mklink">
-        <input type="hidden" name="key" value="{_esc(key)}">
-        <input type="hidden" name="tenant" value="{_esc(tenant)}">
-        <input name="label" placeholder="who it is for, e.g. Jane" required>
-        <input name="days" value="30" size="3" title="days until it expires">
-        <button class="sec">Create a connect link</button>
-        <span class="mut">for the client to connect their own accounts</span>
-      </form>
+      <div class="when">Connect links, sign-in links and the people who may
+      use them live on
+      <a href="/admin/ui?tab=accounts&amp;sub=people&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">People &amp; links</a>.</div>
     </details>
-    """ + _people(tenant, key)
+    """
 
 
 def _people(tenant: str, key: str) -> str:
@@ -1166,12 +1173,17 @@ def _people(tenant: str, key: str) -> str:
                 f'<form method="post" action="/admin/person_access" class="inl">'
                 f'{hidden}<button class="sec" name="action" value="{nxt}">'
                 f'{"Make read only" if full else "Give full access"}</button></form>'
-                f'<form method="post" action="/admin/person_access" class="inl">'
+                # Irreversible-in-effect (their unused sign-in links die with
+                # it) so it asks first — the bare inline button was one of
+                # the spec's named defects on this page.
+                f'<form method="post" action="/admin/person_access" class="inl" '
+                f'onsubmit="return confirm(\'Revoke {_esc(u["name"] or u["email"])}\\u0027s portal access? Any unused sign-in link they hold dies with it.\')">'
                 f'{hidden}<button class="sec" name="action" value="revoke">'
                 f'Revoke</button></form>')
             if u["can_sign_in"]:
                 buttons += (f'<a href="/admin/portal_link?key={_esc(key)}'
-                            f'&amp;email={_esc(u["email"])}">'
+                            f'&amp;email={_esc(u["email"])}&amp;ui=1'
+                            f'&amp;tenant={_esc(tenant)}">'
                             f'<button class="sec" type="button">Sign-in link'
                             f'</button></a>')
         note = ""
@@ -1267,7 +1279,7 @@ def _intake_links(tenant: str, key: str) -> str:
             <input class="copy" value="{_esc(url)}" readonly onclick="this.select()">
           </div>
           <div class="row">
-            <a href="/admin/intake_revoke?key={_esc(key)}&amp;token={_esc(r.token)}&amp;tenant={_esc(tenant)}&amp;ui=1"><button class="sec" type="button">Revoke</button></a>
+            <a href="/admin/intake_revoke?key={_esc(key)}&amp;token={_esc(r.token)}&amp;tenant={_esc(tenant)}&amp;ui=1" onclick="return confirm('Revoke this intake link? Anyone holding it loses access; a new one can always be minted.')"><button class="sec" type="button">Revoke</button></a>
           </div>
         </div>"""
     if not items:
@@ -1293,15 +1305,63 @@ def _intake_links(tenant: str, key: str) -> str:
     </details>"""
 
 
-def render(key: str, tenant: str = "", msg: str = "", err: str = "",
-           link: str = "", ilink: str = "") -> str:
-    """Connections for ONE account.
+#: Connections' sub-views (step 4, spec §11): Status is the question the
+#: tab exists to answer — is this account wired; People & links is
+#: everything about letting its humans in; Advanced is the plumbing and
+#: the rare admin forms.
+ACCOUNTS_SUBS = (("", "Status"), ("people", "People & links"),
+                 ("advanced", "Advanced"))
 
-    This used to render every account stacked on one page, which is how it
-    stayed while the console had no client switcher — but it is the screen
-    where getting the wrong account is most expensive, because the buttons on
-    it revoke credentials and mint links. One account at a time, named in the
-    frame, is the point of the whole rearrangement.
+
+def _verify_summary(tenant: str, key: str) -> str:
+    """The last Test-connections result, on the card that owns the button.
+
+    The test runs in the background (a hotel-wifi page must not hang on five
+    live probes); the result is stored and rendered HERE — so the button's
+    consequence is visible where the button is, not in a JSON tab."""
+    import json as _json
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, f"verify_result:{tenant}")
+    if row is None:
+        return ('<div class="mut">Never live-tested. The chips above show '
+                'what is <em>configured</em>; Test connections calls each '
+                'one to see if it <em>works</em>.</div>')
+    try:
+        got = _json.loads(row.value or "{}")
+    except Exception:                                            # noqa: BLE001
+        return ""
+    bits = "".join(
+        f'<span class="chip {"on" if r.get("status") == "ok" else ("off" if r.get("status") == "FAIL" else "nb")}" '
+        f'title="{_esc(str(r.get("detail") or ""))}">'
+        f'{_esc(cap)}: {_esc(str(r.get("status") or ""))}</span>'
+        for cap, r in (got.get("results") or {}).items())
+    return (f'<div class="mut">Last live test {_esc(str(got.get("when") or "")[:16])} '
+            f'— hover a chip for the detail:</div>'
+            f'<div class="chips">{bits}</div>')
+
+
+def _copy_flash(title: str, url: str) -> str:
+    """A minted link, flashed with its copy affordance labeled."""
+    return f"""
+        <div class="ok">
+          <div>{title}</div>
+          <input class="copy" value="{_esc(url)}" readonly onclick="this.select()">
+          <div class="when">click the field to select it, then copy — the
+          link is shown once here and is not sent anywhere by itself</div>
+        </div>"""
+
+
+def render(key: str, tenant: str = "", msg: str = "", err: str = "",
+           link: str = "", ilink: str = "", plink: str = "",
+           sub: str = "") -> str:
+    """Connections for ONE account (restructured in step 4, spec §11).
+
+    One account at a time, named in the frame — this is the screen where
+    getting the wrong account is most expensive, because the buttons on it
+    revoke credentials and mint links. Three views: Status (is it wired),
+    People & links (letting its humans in), Advanced (raw wiring, admin
+    forms, the plumbing panel). Every action lands back here as a flash —
+    the six raw-JSON dead-ends the spec counted are gone.
     """
     tenant, _here, rows = _account(tenant)
     if tenant == ALL:
@@ -1309,107 +1369,127 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
                       body=_every_note(True, "These buttons revoke credentials "
                                        "and mint client links, so they are only "
                                        "ever offered for one named account."))
+    sub = (sub or "").strip().lower()
+    if sub not in dict(ACCOUNTS_SUBS):
+        sub = ""
     rows = [r for r in rows if r.key == tenant]
-    if not rows:
-        # The routes panel EXPANDED here: with no accounts yet, "can anyone
-        # connect at all" is the only question on this page that HAS an answer,
-        # and it is the one a fresh install needs.
-        panel = _routes_panel(expanded=True)
-        body = ('<div class="note">No accounts yet. Run '
-                '<code>/admin/register_owner</code> first — it seeds the five.</div>')
-    else:
-        panel = _routes_panel()
-        body = ""
-        for t in rows:
-            caps = tenants.capabilities(t.key)
-            missing = [c for c, ok in caps.items() if not ok]
-            fields = "".join(_field(t, key, f) for f in
-                             # `domain` FIRST, and it was missing entirely.
-                             # It is the most load-bearing field on the row —
-                             # `harvest` and `compliance` both refuse without
-                             # it, `sites` builds no profile without it, and
-                             # `seo_guard` joins on it — and it was settable
-                             # only at /admin/tenant_add, so a client whose
-                             # site moved could not be corrected from the
-                             # console at all. `tenant_set` has always
-                             # accepted it; nothing ever rendered the box.
-                             ("domain", "gmail_alias", "shopify_store", "esp",
-                              "cms", "ads", "analytics", "crm", "design",
-                              "systems"))
-            body += f"""
-            <div class="card">
-              <div class="head">
-                <h2>{_esc(t.name)}</h2>
-                <code>{_esc(t.key)}</code>
-                <span class="mut">{_esc(t.kind)} · {_esc(t.domain) or 'no domain'}</span>
-              </div>
-              <div class="chips">{_chips(caps)}</div>
-              <div class="mut">Missing: {', '.join(missing) or 'nothing — fully wired'}</div>
-              <div class="row">
-                <a href="/admin/verify?key={_esc(key)}&amp;tenant={_esc(t.key)}"><button class="sec" type="button">Test connections</button></a>
-                <span class="mut">chips show what is <em>configured</em>; this calls each one to see if it <em>works</em></span>
-              </div>
-              <form class="row" method="get" action="/admin/tenant_set"
-                    style="align-items:center;gap:8px">
-                <input type="hidden" name="key" value="{_esc(key)}">
-                <input type="hidden" name="tenant" value="{_esc(t.key)}">
-                <input type="hidden" name="field" value="business_model">
-                <input type="hidden" name="ui" value="1">
-                <label style="white-space:nowrap"><b>Business model</b></label>
-                <select name="value">{_model_options(t.business_model or "")}</select>
-                <button class="sec">Save</button>
-                <span class="mut">decides which segments get built and which
-                numbers their report speaks{' — <b>unset: segments and reports refuse until this is chosen</b>' if not (t.business_model or '') else ''}</span>
-              </form>
-              {_connections(t.key, key)}
-              {_intake_links(t.key, key)}
-              <details class="sec">
-                <summary>Raw wiring — this account's connection keys (advanced)</summary>
-                <div class="mut">These fields are <strong>keys into</strong>
-                credential dictionaries or env-var names — never secrets. The
-                secrets themselves are either in the Render env group or, for
-                anything a client connected themselves, encrypted in the
-                database and shown above only as a state. Saving reloads to a
-                JSON response — hit back to return here; changes take effect
-                immediately, no redeploy.</div>
-                <div class="grid">{fields}</div>
-              </details>
-            </div>"""
 
+    # The flashes render on EVERY view — the result of what you just did
+    # comes first, whichever view the action returns to.
     note = f'<div class="ok">{_esc(msg)}</div>' if msg else ""
     if err:
         note += f'<div class="note">{_esc(err)}</div>'
     if link:
-        note += f"""
-        <div class="ok">
-          <div>Connect link — send this to the client. It reaches one account
-          and connects nothing else.</div>
-          <input class="copy" value="{_esc(link)}" readonly onclick="this.select()">
-        </div>"""
+        note += _copy_flash("Connect link — send this to the client. It "
+                           "reaches one account and connects nothing else.",
+                           link)
     if ilink:
-        note += f"""
-        <div class="ok">
-          <div>Intake link — send this to the client. It asks this account's
-          open questions and reaches nothing else.</div>
-          <input class="copy" value="{_esc(ilink)}" readonly onclick="this.select()">
-        </div>"""
+        note += _copy_flash("Intake link — send this to the client. It asks "
+                           "this account's open questions and reaches "
+                           "nothing else.", ilink)
+    if plink:
+        note += _copy_flash("Sign-in link — send it to them yourself. A "
+                           "login link is a credential: nothing here sends "
+                           "it as a side effect of minting it.", plink)
     if note:
         note = f'<div class="flash">{note}</div>'
 
-    # Order (owner, 2026-08-21): the result of what you just did, then the
-    # selected account's actual state — the question the tab exists to answer —
-    # and only then the rarely-used admin forms and the plumbing, folded. The
-    # old page led with two blocks of instructions and two create-forms, and
-    # the account's connections sat below all of it.
-    return _shell(key, "accounts", "Connections", tenant=tenant, body=f"""
-{note}
+    if not rows:
+        # The routes panel EXPANDED here: with no accounts yet, "can anyone
+        # connect at all" is the only question on this page that HAS an
+        # answer, and it is the one a fresh install needs.
+        return _shell(key, "accounts", "Connections", tenant=tenant, body=(
+            note + '<div class="note">No accounts yet. Run '
+            '<code>/admin/register_owner</code> first — it seeds the five.'
+            '</div>' + _routes_panel(expanded=True)))
 
-{body}
+    t = rows[0]
+
+    from . import credentials as _cred
+    try:
+        n_failed = sum(1 for r in _cred.status(tenant)
+                       if r.get("state") == "failed")
+    except Exception:                                            # noqa: BLE001
+        n_failed = 0
+
+    def _sub_href(k: str) -> str:
+        return (f"/admin/ui?tab=accounts"
+                + (f"&amp;sub={k}" if k else "")
+                + f"&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
+        f'{_esc(label)}'
+        + (f'<span class="cnt">{n_failed}</span>'
+           if k == "" and n_failed else "")
+        + '</a>'
+        for k, label in ACCOUNTS_SUBS) + "</div>"
+
+    if sub == "people":
+        body = f"""
+<div class="card">
+  <div class="head"><h2>{_esc(t.name)} — people &amp; links</h2>
+    <code>{_esc(t.key)}</code></div>
+  {_people(tenant, key)}
+  <details class="conns" open>
+    <summary>Links to send</summary>
+    <p class="mut">A <b>connect link</b> lets the client wire their own
+    tools; an <b>intake link</b> asks them this account's open questions.
+    Each reaches one account and nothing else; minted links flash at the
+    top of this page, copyable.</p>
+    <form method="post" action="/admin/connect_link" class="row mklink">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input name="label" placeholder="who it is for, e.g. Jane" required>
+      <input name="days" value="30" size="3" title="days until it expires">
+      <button class="sec">Create a connect link</button>
+    </form>
+    {_intake_links(t.key, key)}
+  </details>
+</div>"""
+    elif sub == "advanced":
+        fields = "".join(_field(t, key, f) for f in
+                         # `domain` FIRST — the most load-bearing field on
+                         # the row: `harvest` and `compliance` refuse
+                         # without it, `sites` builds no profile, and
+                         # `seo_guard` joins on it.
+                         ("domain", "gmail_alias", "shopify_store", "esp",
+                          "cms", "ads", "analytics", "crm", "design",
+                          "systems"))
+        body = f"""
+<div class="card">
+  <div class="head"><h2>{_esc(t.name)} — advanced</h2>
+    <code>{_esc(t.key)}</code></div>
+  <form class="row" method="get" action="/admin/tenant_set"
+        style="align-items:center;gap:8px">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(t.key)}">
+    <input type="hidden" name="field" value="business_model">
+    <input type="hidden" name="ui" value="1">
+    <label style="white-space:nowrap"><b>Business model</b></label>
+    <select name="value">{_model_options(t.business_model or "")}</select>
+    <button class="sec">Save</button>
+    <span class="mut">decides which segments get built and which
+    numbers their report speaks{' — <b>unset: segments and reports refuse until this is chosen</b>' if not (t.business_model or '') else ''}</span>
+  </form>
+  <details class="sec">
+    <summary>Raw wiring — this account's connection keys</summary>
+    <div class="mut">These fields are <strong>keys into</strong>
+    credential dictionaries or env-var names — never secrets. The
+    secrets themselves are either in the Render env group or, for
+    anything a client connected themselves, encrypted in the
+    database and shown only as a state. Saving lands back here with a
+    flash; changes take effect immediately, no redeploy.</div>
+    <div class="grid">{fields}</div>
+  </details>
+</div>
 
 <details class="sec">
   <summary>Add an account</summary>
   <form method="get" action="/admin/tenant_add" class="grid">
     <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="ui" value="1">
     <div class="f"><label>tenant key</label>
       <div class="what">Short and lowercase — you'll type it often</div>
       <input name="tenant" placeholder="acme" required></div>
@@ -1429,16 +1509,22 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
       <select name="business_model">{_model_options()}</select>
       <div class="row"><button>Create</button></div></div>
   </form>
-  <div class="when">Saving reloads to a JSON response — hit back to return
-  here. Changes take effect immediately; no redeploy.</div>
+  <div class="when">Creating lands back here with a flash; changes take
+  effect immediately, no redeploy.</div>
 </details>
 
 <details class="sec">
-  <summary>Give someone bot access</summary>
+  <summary>Give someone bot access
+    <span class="chip nb">parked by choice</span></summary>
+  <p class="mut">Parked, deliberately — not broken: ops commands are scoped
+  correctly, but free-text questions fall through to an agent that is not
+  tenant-scoped. Switch-on condition: reporting and agent scoping land.
+  The form works today for OWNER-side users; hold off on clients.</p>
   <p class="mut">They message the bot first — it replies with their chat id
   because it doesn't recognise them. Paste that id here.</p>
   <form method="get" action="/admin/user_add" class="grid">
     <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="ui" value="1">
     <div class="f"><label>chat id</label>
       <div class="what">From their first message to the bot</div>
       <input name="chat_id" placeholder="123456789" required></div>
@@ -1453,13 +1539,37 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
       <input name="tenant" placeholder="coverings">
       <div class="row"><button>Grant access</button></div></div>
   </form>
-  <div class="note"><strong>Not yet.</strong> Ops commands are scoped correctly, but
-  free-text questions fall through to an agent that is not tenant-scoped. Hold off
-  on client access until reporting and agent scoping land.</div>
 </details>
 
-{panel}
-""")
+{_routes_panel()}"""
+    else:
+        caps = tenants.capabilities(t.key)
+        missing = [c for c, ok in caps.items() if not ok]
+        body = f"""
+<div class="card">
+  <div class="head">
+    <h2>{_esc(t.name)}</h2>
+    <code>{_esc(t.key)}</code>
+    <span class="mut">{_esc(t.kind)} · {_esc(t.domain) or 'no domain'}</span>
+  </div>
+  <div class="chips">{_chips(caps)}</div>
+  <div class="mut">Missing: {', '.join(missing) or 'nothing — fully wired'}</div>
+  {_verify_summary(tenant, key)}
+  <div class="row">
+    <form method="get" action="/admin/verify" style="display:inline">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(t.key)}">
+      <input type="hidden" name="ui" value="1">
+      <button class="sec">Test connections</button>
+    </form>
+    <span class="mut">runs in the background — the per-provider result
+    lands on this card</span>
+  </div>
+  {_connections(t.key, key)}
+</div>"""
+
+    return _shell(key, "accounts", "Connections", tenant=tenant,
+                  body=note + strip + body)
 
 
 # ---------------------------------------------------------------------------

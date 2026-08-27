@@ -212,7 +212,9 @@ def main() -> int:
     from app import web
     c = TestClient(web.app)
 
-    page = c.get("/admin/ui?key=s3cret&tab=accounts").text
+    # Step 4 (2026-08-27): the create form and the model selector live on
+    # the tab's Advanced view now — the pins follow the content.
+    page = c.get("/admin/ui?key=s3cret&tab=accounts&sub=advanced").text
     ck("the create form asks for it", 'name="business_model"' in page)
     ck("  and its options come from metrics.OUTCOMES, not a second list",
        all(m in page for m in metrics.OUTCOMES),
