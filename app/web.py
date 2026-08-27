@@ -188,10 +188,16 @@ async def _console_session(request: Request, call_next):
 
 
 @app.get("/admin/logout")
-def admin_logout() -> dict:
-    """Drop the console session on this browser."""
-    r = Response(content='{"ok":true,"note":"console session cleared"}',
-                 media_type="application/json")
+def admin_logout():
+    """Drop the console session on this browser and land on the sign-in door.
+
+    Returned JSON until the sidebar gained a Sign out link (step 2b) — a
+    person clicking a link must land on a page, and the page after signing
+    out is the one for signing back in. Nothing ever consumed the JSON; the
+    route had no link anywhere.
+    """
+    from fastapi.responses import RedirectResponse
+    r = RedirectResponse("/admin/signin", 303)
     r.delete_cookie(ADMIN_COOKIE)
     return r
 
@@ -1882,7 +1888,10 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
     link_key = key if request.query_params.get("key") else ""
     if tab == "systems":
         try:
-            pp = int(request.query_params.get("ppage", "1"))
+            # `page=` primary, `ppage=` accepted — same aliasing as Review's
+            # pager, one vocabulary console-wide.
+            pp = int(request.query_params.get("page")
+                     or request.query_params.get("ppage", "1"))
         except ValueError:
             pp = 1
         return ui.render_systems(link_key, tenant,
@@ -1919,7 +1928,11 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                 return default
         return ui.render_diagnostics(
             link_key, tenant,
-            view=request.query_params.get("view", ""),
+            # `sub=` is the console-wide name for a sub-view (Review and
+            # Systems already use it); `view=` stays accepted so pinned URLs
+            # and bookmarks survive. One concept, one primary name.
+            view=(request.query_params.get("sub", "")
+                  or request.query_params.get("view", "")),
             days=_int("days", 7, 1, 365),
             level=request.query_params.get("level", ""),
             system=request.query_params.get("system", ""),
@@ -1936,7 +1949,10 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                               days=_plan_days(request.query_params.get("days")))
     if tab == "content":
         try:
-            cp = int(request.query_params.get("cpage", "1"))
+            # `page=` is the console-wide pager name; `cpage=` stays accepted
+            # so every redirect helper and bookmark keeps working.
+            cp = int(request.query_params.get("page")
+                     or request.query_params.get("cpage", "1"))
         except ValueError:
             cp = 1
         return ui.render_content(link_key, tenant, started=started,
@@ -1944,6 +1960,18 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  err=request.query_params.get("err", ""),
                                  msg=request.query_params.get("ok", ""),
                                  cpage=cp)
+    if tab != "accounts":
+        # An unrecognised tab used to FALL THROUGH to Connections with a 200 —
+        # a typo'd bookmark silently showed the wrong page, cousin of the
+        # documented `?tab=review` false-pass trap. Land on the default tab
+        # and SAY so; silence is how the wrong page gets trusted.
+        from urllib.parse import quote as _uq
+
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(
+            f"/admin/ui?tab=content&tenant={_uq(tenant or '', safe='')}"
+            f"&err={_uq(f'No tab named {tab!r} — landed on Review.', safe='')}",
+            303)
     q = request.query_params
     return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""), ilink=q.get("ilink", ""))

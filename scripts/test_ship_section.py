@@ -50,8 +50,12 @@ def main() -> int:
     ck("the article's TEXT is on the page",
        "All about jugs" in page,
        "the owner was deciding from a one-line summary")
+    # Retargeted (UI overhaul step 2b): the decide controls became labeled
+    # buttons — a control says what it does, and ✅/❌ were the only console
+    # "buttons" whose meaning lived in a glyph. Same hrefs, same decisions.
     ck("with approve and deny in place",
-       "✅ approve" in page and "❌ deny" in page)
+       ">Approve</a>" in page and ">Deny</a>" in page
+       and 'class="btn danger"' in page)
     ck("and the review page one click away", "review &amp; edit" in page)
 
     print("\n— scoped to the account being looked at —")

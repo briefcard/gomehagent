@@ -213,8 +213,9 @@ button.sec{background:transparent;color:var(--acc)}
 .pre.yes{color:var(--ok)}
 .pre.no{color:var(--gap)}
 .btn{display:inline-block;font-size:.78rem;font-weight:700;padding:4px 12px;border-radius:4px;
-  background:var(--acc);color:var(--acc-ink);text-decoration:none}
-.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--rule)}
+  border:1px solid var(--acc);background:var(--acc);color:var(--acc-ink);text-decoration:none}
+.btn.sec{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.danger{background:transparent;color:var(--err);border-color:var(--err)}
 /* --- the frame: sidebar, client switcher, page ---------------------------
    Same shape as the client portal on purpose. Switching between the two
    should not mean learning a second layout, and the account is chosen once
@@ -579,34 +580,88 @@ def _hues(rows: list) -> dict[str, str]:
     return {k: str(round((i * 360 / n + 25) % 360)) for i, k in enumerate(keys)}
 
 
-def _review_waiting(tenant: str) -> int:
-    """This account's review-queue depth — every KB table's proposed rows.
+def _badges(tenant: str, full: bool = True) -> dict:
+    """Needs-you counts per tab, computed once per page render.
 
-    Rides the Review item in the sidebar on every page, because "is there
-    work" must not cost a click per tab to find out (owner, 2026-08-21: the
-    fewer clicks and the less thinking, the better the app is planned). The
-    sibling number — pending APPROVALS — already has its own pill below the
-    switcher linking /admin/pending; this one is the proposals half and links
-    where proposals are decided. Scalar COUNTs only, and any failure counts as
-    zero: a sidebar must never be the thing that breaks a page.
+    THE RULE: a badge counts things WAITING ON A PERSON — never runs, never
+    activity — which is why every badge renders amber. "Is there work" must
+    not cost a click per tab to find out (owner, 2026-08-21), and for months
+    only Review could answer it: pictures, conflicts, a failing connection,
+    a system refusing every run for a week — all invisible until you opened
+    the right tab, and for Systems check, the right sub-view too.
+
+    Review's number is everything decidable: proposed KB rows, held plans,
+    open conflicts, AND pending approvals — one question, one number. The
+    approvals pill in the foot keeps its own markup (test-pinned, and the
+    ship queue deserves its dedicated door) but it is a subset of this.
+
+    `full=False` computes Review's number only — the all-accounts switcher
+    calls this once per account for its rollups, and five accounts times the
+    readiness probe would make the deliberate view the slow one.
+
+    Every part is wrapped separately and a failure counts as zero: a sidebar
+    must never be the thing that breaks a page.
     """
+    out = {"content": 0, "systems": 0, "accounts": 0, "schema": 0}
     if not tenant or tenant == ALL:
-        return 0
-    from . import provenance as prov
+        return out
+    from . import approvals, credentials as cred, provenance as prov
     try:
         with db.SessionLocal() as s:
-            proposed = sum(
+            out["content"] += sum(
                 s.query(model)
                 .filter(model.tenant == tenant,
                         model.review == prov.PROPOSED).count()
                 for model in (db.KbClaim, db.KbAudience, db.KbObjection,
                               db.KbEntity, db.KbSituation, db.KbAsset))
-        # Plans held for a person are review work too — a plan missing a
-        # field, or complete and awaiting the explicit tap its rung requires.
-        # In the same badge, because "is there work" is one question.
-        return proposed + len(systems.plans_needing_action(tenant))
     except Exception:                                            # noqa: BLE001
-        return 0
+        pass
+    try:
+        out["content"] += len(systems.plans_needing_action(tenant))
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        out["content"] += len(prov.conflicts(tenant))
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        out["content"] += approvals.pending_count(tenant)
+    except Exception:                                            # noqa: BLE001
+        pass
+    if not full:
+        return out
+    try:
+        out["systems"] = len(systems.attention(tenant, 30))
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        out["accounts"] = sum(1 for r in cred.status(tenant)
+                              if r.get("state") == "failed")
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        from . import resolve
+        out["schema"] = len(resolve.readiness(tenant)
+                            .get("next_actions") or [])
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        from . import keywords
+        out["schema"] += len((keywords.mute_lessons(tenant) or {})
+                             .get("proposals") or [])
+    except Exception:                                            # noqa: BLE001
+        pass
+    return out
+
+
+#: What each badge counts, said on hover — the number must be explainable
+#: or it becomes noise somebody learns to scroll past.
+_BADGE_TITLES = {
+    "content": "decisions waiting on you",
+    "systems": "systems needing attention",
+    "accounts": "connections failing",
+    "schema": "answers the brain is missing",
+}
 
 
 def _every_note(every: bool, what: str) -> str:
@@ -638,24 +693,35 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     tenant, here, rows = _account(tenant)
 
     hues = _hues(rows)
+    # On the deliberate cross-account view, each switcher row carries its own
+    # needs-you rollup — the one place a per-account roll-up makes sense is
+    # the page whose whole point is looking across accounts. Elsewhere the
+    # rows stay plain: five extra badge passes per render would tax every
+    # page for a number the sidebar already shows for the account you are on.
+    rollups = ({r.key: _badges(r.key, full=False)["content"] for r in rows}
+               if tenant == ALL else {})
     switch = "".join(
         f'<a class="{"on" if r.key == tenant else ""}" '
         f'style="--tint:{hues.get(r.key, "")}" '
         f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={_esc(r.key)}">'
-        f'<span class="dot"></span>{_esc(r.name)}</a>' for r in rows)
+        f'<span class="dot"></span>{_esc(r.name)}'
+        + (f'<span class="navbadge" title="{_BADGE_TITLES["content"]}">'
+           f'{_n}</span>' if (_n := rollups.get(r.key, 0)) else "")
+        + '</a>' for r in rows)
     # Cross-account is a place you go on purpose, listed apart from the clients
     # so it can never be the account you are on without having chosen it.
     switch += (f'<a class="every {"on" if tenant == ALL else ""}" '
                f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={ALL}">'
                f'<span class="dot"></span>All accounts</a>')
 
+    badges = _badges(tenant)
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
         f'href="/admin/ui?key={_esc(key)}&amp;tab={t}&amp;tenant={_esc(tenant)}'
         f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}'
-        + (f'<span class="navbadge" title="proposals waiting for review">'
-           f'{_rw}</span>'
-           if t == "content" and (_rw := _review_waiting(tenant)) else "")
+        + (f'<span class="navbadge" title="{_BADGE_TITLES[t]}">'
+           f'{_n}</span>'
+           if (_n := badges.get(t, 0)) else "")
         + '</a>'
         for t, label, i in _TABS)
 
@@ -695,6 +761,8 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     client_view = ("" if tenant == ALL else
                    f'<a href="/portal?tenant={_esc(tenant)}">'
                    f'Client view &rarr;</a>')
+    # /admin/logout existed with no link anywhere — a door with no handle.
+    sign_out = '<a href="/admin/logout">Sign out</a>'
 
     # Dark renders with no attribute; the cookie-chosen light look rides
     # `data-theme` so the token block can address it without JS. The toggle
@@ -720,7 +788,7 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     <div class="switch">{switch}</div>
     <div class="navlabel">Manage</div>
     {nav}
-    <div class="foot">{waiting}{client_view}</div>
+    <div class="foot">{waiting}{client_view}{sign_out}</div>
   </div>
   <div class="main">
     <div class="pagehead"><h1>{_esc(title)}</h1>
@@ -1329,9 +1397,6 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
     # the account's connections sat below all of it.
     return _shell(key, "accounts", "Connections", tenant=tenant, body=f"""
 {note}
-<div>
-  <h1>Connections</h1>
-</div>
 
 {body}
 
@@ -1698,7 +1763,7 @@ def _system_card(key: str, row) -> str:
         <span><b>{st['denied']}</b> denied</span>
         <span><b>{st['blocked']}</b> blocked</span>
       </div>
-      <div class="row">{live}{promo}</div>
+      <div class="row">{promo}</div>
       {_contract_form(key, row)}
       {_thread(key, row)}
       {_runs(row, st['total'])}
@@ -2077,7 +2142,8 @@ def _waiting_section(key: str, row) -> str:
                 review = (f' · <a href="/admin/article/'
                           f'{_esc((a.payload or {})["output_id"])}'
                           f'?key={_esc(key)}">review</a>')
-            return (f'<a href="{ok}">✅</a> · <a href="{no}">❌</a>{review} · '
+            return (f'<a class="btn" href="{ok}">Approve</a> '
+                    f'<a class="btn danger" href="{no}">Deny</a>{review} · '
                     f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content'
                     f'&amp;sub=ship&amp;tenant={_esc(row.tenant)}">queue &rarr;</a>')
 
@@ -2499,7 +2565,6 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
 {_every_note(every, "Every account's pipelines, grouped by client. "
              "Installing and the contract forms are on an account's own page.")}
 <div>
-  <h1>Systems</h1>
   <p class="mut">One row per installed pipeline. A system is not on because it has a
   name — it is on when its contract is answered, its connections work, and the
   knowledge base can ground it. Everything below refuses in public rather than
@@ -2919,7 +2984,6 @@ and hand-set fields survive future re-derives.</p>
     return _shell(key, "brand", "Brand", tenant=tenant, head=_BRAND_CSS, body=f"""
 {note}
 <div>
-  <h1>Brand</h1>
   <p class="mut">Who this account is, how it sounds, and how its email looks —
   positioning and voice feed every draft; the theme is rendered into every
   campaign email once approved. What may be ASSERTED (claims, objections, the
@@ -3180,8 +3244,11 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
         """
         base = (f'/admin/claim_review?key={_esc(key)}&amp;tenant={_esc(tenant)}'
                 f'&amp;ui=1&amp;back=kb&amp;claim_id={_esc(r.id)}&amp;approve=')
-        return (f'<div class="when"><a href="{base}yes">✅ approve</a> · '
-                f'<a href="{base}no">❌ reject</a></div>')
+        # Labeled buttons, not emoji links: a control says what it does, and
+        # ✅/❌ were the only "buttons" in the console whose meaning lived in
+        # a glyph (step 2b; the ship queue's pair retired the same day).
+        return (f'<div class="row"><a class="btn" href="{base}yes">Approve</a> '
+                f'<a class="btn danger" href="{base}no">Reject</a></div>')
 
     def _claim_block(title: str, rows_, empty: str, note: str = "",
                      cls: str = "", open_: bool = False,
@@ -3507,7 +3574,6 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
 <div>
-  <h1>Knowledge</h1>
   <p class="mut">Everything the generators are allowed to say, for this account. A
   draft may assert nothing that is not on this page.</p>
   {theme_line}
@@ -4339,8 +4405,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
           {fold}
           <div class="when">{a.created_at:%b %d, %H:%M} ·
-            <a href="{approve}">✅ approve</a> ·
-            <a href="{deny}">❌ deny</a>{review}</div>
+            <a class="btn" href="{approve}">Approve</a>
+            <a class="btn danger" href="{deny}">Deny</a>{review}</div>
         </div>"""
 
     ship_card = f"""
@@ -4449,7 +4515,6 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     return _shell(key, "content", "Review", tenant=tenant, body=f"""
 <div class="flash">{banner}</div>
 <div>
-  <h1>Review</h1>
   <p class="mut">Decisions waiting on you for this account. Nothing here is
   published — it is the difference between what the brand allows and what is
   live. (Compliance moved to Assurance: a report about pages already published
@@ -4988,7 +5053,6 @@ def render_schema(key: str, tenant: str = "") -> str:
 
     return _shell(key, "schema", "Data layer", tenant=tenant, body=f"""
 <div>
-  <h1>Data layer</h1>
   <p class="mut">What the knowledge base holds for this account, table by table.
   The Knowledge tab shows the content; this shows the shape — which columns are
   actually being filled, and how the rows break down by where they came from and
@@ -5172,7 +5236,6 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     body = f"""
     {_every_note(every, "Checks recorded across every account, pooled. "
                  "Pick a client to see only theirs.")}
-    <h2>Assurance{who}</h2>
     {windows}
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
 
@@ -5394,7 +5457,7 @@ def _systems_check(key: str, tenant: str, days: int, need: list,
 
     return f"""
 <div>
-  <h1>Systems check</h1>
+  <h2>Systems check</h2>
   <p class="mut">Which system is unwell, since when, and what exactly went
   wrong — with the runs that prove it. Ranked by how often each thing bit,
   most recent first between equals.</p>
@@ -6292,8 +6355,13 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         f'<a href="{_link("keywords_rescore")}"><button class="sec">Re-score'
         '</button></a>')
 
-    note = (f'<p class="ok">{_esc(msg)}</p>' if msg else "") + (
-        f'<p class="bad">{_esc(err)}</p>' if err else "")
+    # The one flash pattern every tab uses: sticky, so a redirect that lands
+    # mid-page at an anchor cannot scroll the result out of view. Plan used
+    # bare <p> tags for weeks — the confirmation scrolled away with the page.
+    note = (f'<div class="ok">{_esc(msg)}</div>' if msg else "") + (
+        f'<div class="bad">{_esc(err)}</div>' if err else "")
+    if note:
+        note = f'<div class="flash">{note}</div>'
 
     return _shell(key, "plan", "Plan", tenant=tenant, body=f"""
       {note}

@@ -219,6 +219,36 @@ finally:
     config.APPROVAL_SECRET = _old
 
 # ---------------------------------------------------------------------------
+# The frame (step 2b): badges that mean "waiting on a person", one h1, a
+# Sign out that exists, no silent wrong-tab, one pager vocabulary.
+# ---------------------------------------------------------------------------
+with db.SessionLocal() as s:
+    s.add(db.Approval(kind="send_email", status="pending",
+                      summary="SMOKE ship row", payload={}, tenant=T1))
+    s.commit()
+
+badged = c.get(f"/admin/ui?key={KEY}&tab=content&tenant={T1}").text
+ck("the Review badge counts the pending decision",
+   'title="decisions waiting on you">1</span>' in badged)
+ck("…and the queue actually shows it — the badge is the list's number",
+   "SMOKE ship row" in badged)
+ck("exactly one h1 on the page (the pagehead)", badged.count("<h1") == 1,
+   f'found {badged.count("<h1")}')
+star = c.get(f"/admin/ui?key={KEY}&tab=systems&tenant=*").text
+ck("All accounts rolls the count up onto the switcher row",
+   star.count('title="decisions waiting on you">1</span>') == 1)
+ck("Sign out exists in the frame", 'href="/admin/logout"' in badged)
+
+r = c.get(f"/admin/ui?key={KEY}&tab=bogus&tenant={T1}", follow_redirects=False)
+ck("an unknown tab redirects and says so", r.status_code == 303
+   and "tab=content" in r.headers.get("location", "")
+   and "err=" in r.headers.get("location", ""),
+   r.headers.get("location", ""))
+aliased = c.get(f"/admin/ui?key={KEY}&tab=diagnostics&tenant={T1}&sub=systems").text
+ck("`sub=` reaches the Diagnostics sub-view (view= still accepted)",
+   "Systems check" in aliased)
+
+# ---------------------------------------------------------------------------
 # Light mode (step 2): the second token block defines every token the dark
 # root does — the parity that stops one palette silently falling behind the
 # other — the toggle persists in a cookie, and the choice reaches <body>.
@@ -264,6 +294,10 @@ c.get(f"/admin/theme?key={KEY}&to=dark", follow_redirects=False)
 darkpage = c.get(f"/admin/ui?key={KEY}&tab=content&tenant={T1}").text
 ck("dark is the default and renders with no attribute",
    "data-theme" not in _body_tag(darkpage), _body_tag(darkpage))
+
+r = c.get("/admin/logout", follow_redirects=False)
+ck("Sign out lands on the sign-in door", r.status_code == 303
+   and r.headers.get("location", "") == "/admin/signin")
 
 # ---------------------------------------------------------------------------
 print(f"\n{len(_fail)} failure(s)" if _fail else "\nall render-smoke checks pass")

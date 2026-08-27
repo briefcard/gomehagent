@@ -1160,6 +1160,17 @@ SABOTAGES = [
                "control",
     },
     {
+        "name": "badge_counts_match_lists",
+        "file": "app/admin_ui.py",
+        "find": "        out[\"content\"] += len(prov.conflicts(tenant))",
+        "replace": "        out[\"content\"] += len(prov.conflicts(tenant)) + 1  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "the sidebar badge drifts from the queue it points at — a "
+               "number that does not match the list it opens is learned as "
+               "noise within a week, and the console goes back to answering "
+               "'is there work' with a click per tab",
+    },
+    {
         "name": "light_defines_every_token",
         "file": "app/admin_ui.py",
         "find": "body[data-theme=light]{--bg:#f4f6fb;--panel:#fff;--ink:#171a26;--ink2:#3d4353;",
