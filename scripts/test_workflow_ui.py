@@ -187,8 +187,12 @@ def main() -> int:
     rv = c.get("/admin/ui?key=s3cret&tab=content&tenant=agency").text
     ck("the Review tab carries the plans card",
        "Plans awaiting you" in rv and "system=wf_probe" in rv)
+    # Retargeted 2026-08-27 (step 4): approvable plans decide IN PLACE on
+    # Review now — the button replaced the "approve it →" jump; the jump to
+    # the card survives as "open its plan →" / "complete it →".
     ck("each row says what it needs and links to the card itself",
-       "#plan-" in rv and ("approve it" in rv or "complete it" in rv))
+       "#plan-" in rv and ("Approve — runs on its date" in rv
+                           or "complete it" in rv))
     ck("the sidebar badge counts them", 'class="navbadge"' in rv)
     rb = c.get("/admin/ui?key=s3cret&tab=content&tenant=baci").text
     ck("…scoped: baci's card holds only baci's",

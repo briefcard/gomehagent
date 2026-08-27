@@ -212,10 +212,15 @@ def main() -> int:
     ck("the phrase is ranked", has(asr, "handmade"))
     ck("the scan can be run from Assurance",
        "/admin/compliance_scan" in asr)
+    # Retargeted 2026-08-27 (step 4): harvest lives in the Sources block on
+    # every view; Store sync PARKS its button when no store is connected —
+    # offering one that can only fail was the defect, so the parked state is
+    # the correct render for this credential-less suite.
+    _cat = admin_ui.render_content(KEY, "baci", sub="catalogue")
     ck("each Review action can be run from its own section",
        "/admin/harvest" in page
-       and "/admin/catalog_sync" in admin_ui.render_content(
-           KEY, "baci", sub="catalogue"))
+       and ("/admin/catalog_sync" in _cat
+            or "parked — no store connected" in _cat))
     ck("an account never scanned says so rather than looking clean",
        "Never scanned" in admin_ui.render_assurance(KEY, "coverings"))
 
@@ -274,8 +279,10 @@ def main() -> int:
     page = admin_ui.render_content(KEY, "baci")
     ck("the card names what the claim is true of",
        has(page, "Clear Cake Stand with Cover"))
+    # Retargeted 2026-08-27 (step 4): the restriction sentence reads ONCE,
+    # in the legend fold, instead of repeating on every card.
     ck("and says what that restricts it to",
-       "only ever appear in content about that" in page)
+       "appears in content about that" in page)
     ck("the scope is editable against the account's own catalogue",
        'name="entity_key"' in page and 'list="ents"' in page)
     scoped = [c for c in kb.pending_claims("baci")

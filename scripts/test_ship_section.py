@@ -50,12 +50,15 @@ def main() -> int:
     ck("the article's TEXT is on the page",
        "All about jugs" in page,
        "the owner was deciding from a one-line summary")
-    # Retargeted (UI overhaul step 2b): the decide controls became labeled
-    # buttons — a control says what it does, and ✅/❌ were the only console
-    # "buttons" whose meaning lived in a glyph. Same hrefs, same decisions.
-    ck("with approve and deny in place",
-       ">Approve</a>" in page and ">Deny</a>" in page
-       and 'class="btn danger"' in page)
+    # Retargeted twice, deliberately: 2b made ✅/❌ labeled link-buttons;
+    # step 4 (2026-08-27) made them POST forms that decide IN CONSOLE and
+    # flash the executor's own sentence back — the signed /decide links are
+    # the email mechanism only now. The approve button states its
+    # consequence per kind ("Approve & publish" for an article).
+    ck("with approve and deny in place, deciding in-console",
+       'action="/admin/ship_decide"' in page
+       and 'value="approved"' in page and 'value="denied"' in page
+       and "Approve &amp; publish" in page and ">Deny</button>" in page)
     ck("and the review page one click away", "review &amp; edit" in page)
 
     print("\n— scoped to the account being looked at —")

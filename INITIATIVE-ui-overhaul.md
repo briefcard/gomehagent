@@ -458,6 +458,44 @@ test_metrics and test_kb retargeted at the views their content moved to,
 each with a dated comment. PARKED, named: the purge dry-run (spec
 counted it among this page's dead-ends; it actually lives on Review's
 catalogue card and converts with Review's own restructure).
+**4·Review BUILT + SHIPPED 2026-08-27 (spec §4).** The primary control
+decides IN CONSOLE: ship rows POST to NEW `/admin/ship_decide` — the SAME
+executor as the signed links (`approvals.apply_decision`), whose own
+sentence becomes the flash — with the approve button STATING ITS
+CONSEQUENCE per kind ("Approve — pushes the draft to omnisend" /
+"Approve & publish" / "Approve — sends it" / "…marks it reviewed,
+ready"); the signed /decide links remain the EMAIL mechanism only. Each
+row previews THE THING (`_ship_preview`: kept ArtifactBody in a
+sandboxed iframe; ad batches list their variants via the board-membership
+resolve; text fallback unchanged). EVERY QUEUE PAGES: ship 15, pictures
+60-per-page past the old cap, everything-else 15 (+ ONE `pents` datalist
+instead of one per card), conflicts 15, plans 15 — a shared `page_req`
+threads the requested page past the claims clamp that silently pinned
+every other queue to page 1 (a live defect this rebuild exposed). NEW
+`_sources_block` at the top: the feeders (Harvest / Mine sent mail /
+Store sync / Scan) with last-ran state from `bg_status`, failures loud,
+each action beside its state — and the sync action PARKS without a store,
+both here and on the renamed **Store sync** section (was "Catalogue" —
+it is a sync-and-flags panel; the catalogue lives on Knowledge; key stays
+`catalogue` so URLs never break). Pictures: the queue card renders EMPTY
+("Nothing waiting — the crawler files what it finds here" + Run
+harvest), the add-form folds, entity gets the `ents` datalist. Claims:
+the per-card explainer prose reads ONCE in a "How to read these cards"
+legend fold (it rendered 15× per page). Plans: approvable rows get
+Approve/Skip IN PLACE (`plan_approve`/`plan_skip` grew `back=content`);
+complete-it still jumps to the plan's own form. Bulk results render AS
+THE FLASH (they were muted .when grey); the purge dry-run flashes its
+counts (`ui=1`) — closing the item parked from §11. Guards (all caught,
+one MISSED-then-fixed: `sources_lead_the_page`'s find had a
+double-escaped newline): `ship_decides_in_console`, `every_queue_pages`,
+`sources_lead_the_page`, `store_sync_parks_without_a_store`,
+`bulk_reports_are_flashes`. New suite `test_review_tab.py` (24 checks);
+retargets with dated comments in test_ship_section (decide buttons →
+POST forms), test_workflow_ui (in-place plan buttons), test_kb_ui
+(legend + parked sync). PARKED, named: j/k card navigation (spec's
+ranked move 6) — a keyboard affordance is worth adding once the owner's
+walkthrough confirms the mouse flow; smallest-value move, no structural
+cost to defer.
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first

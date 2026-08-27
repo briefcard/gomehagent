@@ -1453,6 +1453,60 @@ SABOTAGES = [
                "were built to end",
     },
     {
+        "name": "ship_decides_in_console",
+        "file": "app/web.py",
+        "find": "    said = _appr.apply_decision(str(form.get(\"approval_id\") or \"\"), verdict)",
+        "replace": "    said = \"Approved\"  # SABOTAGE",
+        "suites": ["test_review_tab.py"],
+        "why": "the console's primary control flashes success and decides "
+               "nothing — the approval stays pending, the campaign never "
+               "pushes, and the owner reads 'Approved' over a queue that "
+               "silently kept everything",
+    },
+    {
+        "name": "every_queue_pages",
+        "file": "app/admin_ui.py",
+        "find": "    _ship_shown = ship_rows[(_page - 1) * SHIP_PAGE:_page * SHIP_PAGE]",
+        "replace": "    _ship_shown = ship_rows[:25]  # SABOTAGE",
+        "suites": ["test_review_tab.py"],
+        "why": "the ship queue goes back to a 25-row cap wearing a pager's "
+               "clothes — decision #26 is unreachable again, and a queue "
+               "whose depth nobody can see stops being worked (it lived at "
+               "~200 drafts once)",
+    },
+    {
+        "name": "sources_lead_the_page",
+        "file": "app/admin_ui.py",
+        "find": "{_sources_block(key, tenant)}\n{strip}",
+        "replace": "{strip}",
+        "suites": ["test_review_tab.py"],
+        "why": "the feeders and their last-ran state disappear from the "
+               "day's tab — a failed harvest goes back to being invisible "
+               "until somebody wonders why the queues are empty",
+    },
+    {
+        "name": "store_sync_parks_without_a_store",
+        "file": "app/admin_ui.py",
+        "find": "   if has_store else\n   '<p class=\"mut\">The sync button appears once a store is connected",
+        "replace": "   if True else\n   '<p class=\"mut\">The sync button appears once a store is connected",
+        "suites": ["test_review_tab.py"],
+        "why": "the sync button renders for an account with no store and "
+               "fails on every click — a control that can only fail, on the "
+               "tab the day starts on, teaching distrust of every button "
+               "beside it",
+    },
+    {
+        "name": "bulk_reports_are_flashes",
+        "file": "app/admin_ui.py",
+        "find": "        banner = f'<div class=\"ok\">{_esc(msg)}</div>' + banner",
+        "replace": "        banner = f'<div class=\"when\">{_esc(msg)}</div>' + banner",
+        "suites": ["test_review_tab.py"],
+        "why": "a bulk decision's report — including what it REFUSED — goes "
+               "back to muted grey, the least important text on the page; a "
+               "refusal nobody notices is a claim that quietly never "
+               "became usable",
+    },
+    {
         "name": "verify_lands_on_the_card",
         "file": "app/web.py",
         "find": "    if ui and tenant:\n"

@@ -4081,7 +4081,113 @@ def _compliance_body(tenant: str) -> str:
 REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("pictures", "Pictures"),
                ("other", "Everything else"), ("plans", "Plans"),
-               ("conflicts", "Conflicts"), ("catalogue", "Catalogue"))
+               ("conflicts", "Conflicts"),
+               # Renamed from "Catalogue" (step 4, spec §4): this is a
+               # sync-and-flags panel, not the catalogue — the catalogue
+               # itself is managed on Knowledge — and the old name collided
+               # with that card. The KEY stays `catalogue`: URLs never break.
+               ("catalogue", "Store sync"))
+
+
+def _sources_block(key: str, tenant: str) -> str:
+    """The three feeders and what they last did — at the TOP (spec §4).
+
+    The queue-filling actions used to sit below the fifteen cards they
+    feed, and the BG status lines rendered as loose banner rows. One
+    compact card now: each source with its last-ran state (failed loud,
+    running plain, finished with its own summary) and its button beside
+    it — controls lead.
+    """
+    from .web import bg_status
+    has_store = bool(tenants.capabilities(tenant).get("commerce"))
+    acts = {"harvest": ("/admin/harvest", "Run harvest", {"apply": "1"},
+                        "reads the site, files proposals"),
+            "email": ("/admin/email_harvest", "Mine sent mail", {"ui": "1"},
+                      "reads what this account already SAID"),
+            # No store, no button — same rule as the Store sync section: a
+            # control that can only fail teaches distrust of every control.
+            "sync": (("/admin/catalog_sync", "Sync store", {},
+                      "names, prices, live stock") if has_store else
+                     ("", "", {}, "parked — no store connected")),
+            "scan": ("/admin/compliance_scan", "Scan site", {"ui": "1"},
+                     "checks live pages against the ban list")}
+    rows = ""
+    for label, name in BG_LABELS:
+        st = bg_status(label, tenant)
+        when = _esc((st.get("at") or "")[:16].replace("T", " "))
+        if not st:
+            state = '<span class="mut">never ran</span>'
+        elif st.get("state") == "failed":
+            state = (f'<span class="chip off" title="{_esc(st.get("detail", ""))}">'
+                     f'failed {when}</span>')
+        elif st.get("state") == "running":
+            state = f'<span class="chip nb">running · {when}</span>'
+        else:
+            state = (f'<span class="mut" title="{_esc(st.get("detail", ""))}">'
+                     f'ran {when}</span>')
+        action, btn, extra, what = acts.get(label, ("", "", {}, ""))
+        rows += (f'<div class="conn-site"><span><b>{_esc(name)}</b> '
+                 f'<span class="when">{_esc(what)}</span></span> {state} '
+                 f'<span class="row">'
+                 + (_act(key, action, btn, tenant, extra, small=True)
+                    if action else "")
+                 + '</span></div>')
+    # A failure is the one state that must not hide in a fold.
+    fails = "".join(
+        f'<div class="note"><strong>{name} failed</strong> — '
+        f'{_esc(bg_status(label, tenant).get("detail", ""))}</div>'
+        for label, name in BG_LABELS
+        if bg_status(label, tenant).get("state") == "failed")
+    return f"""
+<details class="sec"><summary>Sources — what fills these queues, and when
+each last ran</summary>{rows}</details>{fails}"""
+
+
+def _ship_preview(pl: dict) -> str:
+    """The thing being approved, rendered inside the row's fold (spec §4:
+    "read the thing you are approving without leaving").
+
+    Artifact-backed kinds render their kept body — a sandboxed iframe for
+    HTML, the variant texts for an ad batch; everything else falls back to
+    the payload's text, which is what the fold always showed.
+    """
+    oid = str(pl.get("output_id") or "")
+    body = (pl.get("body") or pl.get("content")
+            or (pl.get("fields") or {}).get("body_html", ""))
+    art = None
+    if oid:
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == oid).first())
+            if art is None:
+                art = (s.query(db.ArtifactBody)
+                       .filter(db.ArtifactBody.format == "ad_batch",
+                               db.ArtifactBody.body.like(f'%"{oid}"%'))
+                       .first())
+            s.expunge_all()
+    if art is not None and (art.format or "") == "ad_batch":
+        import json as _json
+        try:
+            vs = _json.loads(art.body or "").get("variants") or []
+            inner = "".join(
+                f'<div class="msg{" gone" if v.get("dropped") else ""}">'
+                f'{_esc(str(v.get("text") or ""))}</div>' for v in vs)
+            return (f'<details><summary>preview — {len(vs)} variant(s)'
+                    f'</summary><div class="thread">{inner}</div></details>')
+        except Exception:                                        # noqa: BLE001
+            pass
+    if art is not None and (art.body or "").strip():
+        return (f'<details><summary>preview — rendered'
+                f'</summary><iframe sandbox="" srcdoc="{_esc(art.body)}" '
+                f'style="width:100%;height:380px;border:1px solid '
+                f'var(--rule);border-radius:6px;background:#fff"></iframe>'
+                f'</details>')
+    if body:
+        return (f'<details><summary>read it ({len(body)} chars)</summary>'
+                f'<pre style="white-space:pre-wrap">{_esc(body[:1500])}'
+                + ("…" if len(body) > 1500 else "") + "</pre></details>")
+    return ('<div class="mut">this kind carries no text body — the '
+            'summary above is the whole decision</div>')
 
 
 def render_content(key: str, tenant: str = "", started: str = "",
@@ -4114,6 +4220,14 @@ def render_content(key: str, tenant: str = "", started: str = "",
     CLAIMS_PAGE = 15
     total_claims = len(pending)
     pages = max(1, -(-total_claims // CLAIMS_PAGE))
+    # The REQUESTED page, before the claims clamp narrows it — every other
+    # queue pages off this (step 4), and the clamp below rebinds `cpage` to
+    # the claims queue's own depth, which silently pinned page 2 of any
+    # other queue back to page 1.
+    try:
+        page_req = max(1, int(cpage or 1))
+    except (TypeError, ValueError):
+        page_req = 1
     try:
         cpage = max(1, min(int(cpage or 1), pages))
     except (TypeError, ValueError):
@@ -4164,8 +4278,18 @@ def render_content(key: str, tenant: str = "", started: str = "",
     waiting = kbm.proposed_assets(tenant)
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
+    # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap
+    # with no way to turn the page.
+    PICS_PAGE = 60
+    _pages_p = max(1, -(-len(waiting) // PICS_PAGE))
+    _ppage = max(1, min(page_req, _pages_p))
+    _pics_shown = waiting[(_ppage - 1) * PICS_PAGE:_ppage * PICS_PAGE]
+    _pics_pager = _pager(
+        f"/admin/ui?tab=content&amp;sub=pictures&amp;tenant={_esc(tenant)}"
+        + (f"&amp;key={_esc(key)}" if key else ""),
+        _ppage, len(waiting), PICS_PAGE, "pictures")
     pic_cards = ""
-    for a in waiting[:60]:
+    for a in _pics_shown:
         is_logo = (a.subject or "") == kbm.LOGO
         pic_cards += f"""
         <label class="pic">
@@ -4174,7 +4298,6 @@ def render_content(key: str, tenant: str = "", started: str = "",
           <span class="picmeta">{'&#9679; logo' if is_logo else ''}
             {_esc((a.title or '')[:38])}</span>
         </label>"""
-    pics_html = ""
     if waiting:
         pics_html = f"""
     <div class="anchor" id="pics"></div>
@@ -4188,9 +4311,10 @@ def render_content(key: str, tenant: str = "", started: str = "",
       the next crawl will not offer it again.</p>
       <form id="picsform" method="post" action="/admin/assets_decide"></form>
       <input type="hidden" name="tenant" value="{_esc(tenant)}" form="picsform">
+      {_pics_pager}
       <div class="bulkbar">
         <label class="pick"><input type="checkbox" id="allpics"> select all
-          {len(waiting)}</label>
+          {len(_pics_shown)} on this page</label>
         <span class="grow"></span>
         <button form="picsform" name="action" value="reject" class="sec">Reject
           selected</button>
@@ -4202,12 +4326,32 @@ def render_content(key: str, tenant: str = "", started: str = "",
                  email hero">Approve selected</button>
       </div>
       <div class="picgrid">{pic_cards}</div>
+      {_pics_pager}
       <script>
       document.getElementById('allpics').addEventListener('change', function(e) {{
         document.querySelectorAll('input[name="asset_ids"]')
                 .forEach(function(b) {{ b.checked = e.target.checked; }});
       }});
       </script>
+    </div>"""
+    else:
+        # The card renders EMPTY too (spec §4): a crawler-fed queue that
+        # vanishes when empty hides that the queue exists at all — and the
+        # empty state is where the filling action belongs.
+        from .web import bg_status as _bgs
+        _hv = _bgs("harvest", tenant)
+        _hv_when = _esc((_hv.get("at") or "never")[:16].replace("T", " "))
+        pics_html = f"""
+    <div class="anchor" id="pics"></div>
+    <div class="card">
+      <div class="head"><h2>Pictures waiting</h2>
+        <span class="chip on">none waiting</span>
+        <span class="mut">{len(approved_pics)} approved · {len(marks)} logo(s)</span></div>
+      <p class="mut">Nothing waiting — the crawler files what it finds here.
+      Last harvest: {_hv_when}.</p>
+      <div class="row">{_act(key, "/admin/harvest", "Run harvest", tenant, {"apply": "1"})}
+        <span class="mut">reads the site; candidates land here for your
+        decision</span></div>
     </div>"""
 
     assets_form = pics_html + f"""
@@ -4218,6 +4362,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
       inspiration only and can never leave the building. What it depicts is
       guessed from the file — a cutout is an object, anything else is treated
       as a scene.</p>
+      <details class="sec"><summary>Add a photograph by URL</summary>
       <form class="f" method="post" action="/admin/asset_add">
         <input type="hidden" name="key" value="{_esc(key)}">
         <input type="hidden" name="tenant" value="{_esc(tenant)}">
@@ -4231,9 +4376,11 @@ def render_content(key: str, tenant: str = "", started: str = "",
           <option value="reference">reference — inspiration only</option>
         </select>
         <label>Product or space it shows (optional)</label>
-        <input name="entity_key" placeholder="leave blank for brand-wide">
+        <input name="entity_key" list="ents" placeholder="leave blank for brand-wide">
         <div class="row"><button>Add to library</button></div>
       </form>
+      </details>
+      {catlist}
     </div>"""
 
     if pending:
@@ -4327,25 +4474,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <label>What it proves &mdash; written by the model, not the site</label>
               <textarea name="proves" rows="2"
                 placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
-              <div class="when">{
-                "The one field here the model WROTE rather than copied. Read it: "
-                "a wrong reading of a true number is invisible once approved, and "
-                "this is what a drafter reaches for when deciding how to use the "
-                "claim."
-                if getattr(p, "proves", "") else
-                "Empty because no model read this page &mdash; the deterministic "
-                "filter produces no interpretation at all. Write one, or re-run "
-                "the harvest once the extractor is working and check "
-                "<code>extractor</code> in the response."
-              }</div>
               <label>True of &mdash; blank means the whole brand</label>
               <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
                      placeholder="brand-level (used in any content)">
               <div class="when">{
                   "Scoped to " + _esc(dict(cat).get(p.entity_key, p.entity_key))
-                  + " &mdash; it will only ever appear in content about that."
-                  if p.entity_key else
-                  "Brand-level &mdash; usable in any content for this account."
+                  if p.entity_key else "Brand-level"
               }</div>
               {dup}
               {reconfirm}
@@ -4409,7 +4543,22 @@ def render_content(key: str, tenant: str = "", started: str = "",
         # rendered inside the claims card — which is how a queue with dead
         # buttons went unnoticed for weeks: nobody scrolled past 15 claim
         # cards to reach it. It is its own section now.
-        proposals = (catlist + bulk
+        # The prose that repeated on every card reads ONCE here (spec §4:
+        # "collapse into one legend fold above the queue" — it rendered
+        # fifteen times per page).
+        legend = """
+        <details class="sec"><summary>How to read these cards</summary>
+          <p class="mut"><b>What it proves</b> is the one field the model
+          WROTE rather than copied — read it: a wrong reading of a true
+          number is invisible once approved, and it is what a drafter
+          reaches for when deciding how to use the claim. Empty means no
+          model read the page. <b>True of</b> scopes the claim: blank is
+          brand-level, usable in any content; a named item means it only
+          ever appears in content about that. <b>Quoted</b> rows are a
+          customer's own words — the wording is the evidence and cannot be
+          reworded. An untagged claim can never be selected.</p>
+        </details>"""
+        proposals = (catlist + legend + bulk
                      + '<div class="grid" style="grid-template-columns:1fr">'
                      + "".join(_card(p) for p in shown) + "</div>" + pager)
     else:
@@ -4442,9 +4591,17 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 <button name="keep" value="incoming">Take theirs</button>
               </div>
             </form>"""
-        conflicts_html = ('<div class="grid" style="grid-template-columns:1fr">'
-                          + "".join(_conflict(c) for c in open_conflicts[:20])
-                          + "</div>")
+        _pages_c = max(1, -(-len(open_conflicts) // 15))
+        _kpage = max(1, min(page_req, _pages_c))
+        _conf_pager = _pager(
+            f"/admin/ui?tab=content&amp;sub=conflicts&amp;tenant={_esc(tenant)}"
+            + (f"&amp;key={_esc(key)}" if key else ""),
+            _kpage, len(open_conflicts), 15, "conflicts")
+        conflicts_html = (_conf_pager
+                          + '<div class="grid" style="grid-template-columns:1fr">'
+                          + "".join(_conflict(c) for c in
+                                    open_conflicts[(_kpage - 1) * 15:_kpage * 15])
+                          + "</div>" + _conf_pager)
     else:
         conflicts_html = ('<p class="mut">Nothing in dispute. When a crawl, an '
                           'upload or the store disagrees with something already '
@@ -4484,24 +4641,17 @@ def render_content(key: str, tenant: str = "", started: str = "",
             # wrong ones are approved.
             scope = ""
             if kind == "objection":
-                cat = {e.key: e.name for e in
-                       kbm.entities(tenant, available_only=False)}
-                opts = "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
-                               for k, v in cat.items())
+                # The datalist renders ONCE for the section (spec §4) — it
+                # was rebuilt inside every objection card.
                 scope = f"""
               <label>True of &mdash; which item is this answer about?</label>
               <input name="entity_key" list="pents"
                      value="{_esc(getattr(r, 'entity_key', '') or '')}"
                      placeholder="start typing a product name">
-              <datalist id="pents">{opts}</datalist>
               <label class="row" style="gap:6px">
                 <input type="checkbox" name="brand_wide" value="1">
                 <span>No item &mdash; this is true of everything they sell</span>
-              </label>
-              <div class="when">One of the two is required. An answer approved
-                with neither is claimed of the whole catalogue &mdash;
-                &ldquo;dishwasher safe&rdquo; read off one product page becomes
-                a promise about the porcelain too.</div>"""
+              </label>"""
             return f"""
             <form class="f" method="post" action="/admin/proposal_review">
               <input type="hidden" name="kind" value="{_esc(kind)}">
@@ -4519,9 +4669,29 @@ def render_content(key: str, tenant: str = "", started: str = "",
               </div>
             </form>"""
         n_other = sum(len(v) for v in other.values())
-        others_html = ('<div class="grid" style="grid-template-columns:1fr">'
-                       + "".join(_prop(k, i) for k, items in other.items()
-                                 for i in items) + "</div>")
+        _flat = [(k, i) for k, items in other.items() for i in items]
+        _pages_o = max(1, -(-len(_flat) // 15))
+        _opage = max(1, min(page_req, _pages_o))
+        _oth_pager = _pager(
+            f"/admin/ui?tab=content&amp;sub=other&amp;tenant={_esc(tenant)}"
+            + (f"&amp;key={_esc(key)}" if key else ""),
+            _opage, len(_flat), 15, "proposals")
+        _pents_opts = "".join(
+            f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>'
+            for e in kbm.entities(tenant, available_only=False))
+        others_html = (
+            f'<datalist id="pents">{_pents_opts}</datalist>'
+            + '<details class="sec"><summary>How scope works</summary>'
+              '<p class="mut">An objection needs one of the two: a named '
+              'item, or the brand-wide box. An answer approved with neither '
+              'is claimed of the whole catalogue &mdash; &ldquo;dishwasher '
+              'safe&rdquo; read off one product page becomes a promise '
+              'about the porcelain too.</p></details>'
+            + _oth_pager
+            + '<div class="grid" style="grid-template-columns:1fr">'
+            + "".join(_prop(k, i) for k, i in
+                      _flat[(_opage - 1) * 15:_opage * 15])
+            + "</div>" + _oth_pager)
     else:
         n_other, others_html = 0, (
             '<p class="mut">Nothing waiting. Audiences, objections, entities and '
@@ -4572,32 +4742,24 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     banner = (f'<div class="ok">{_esc(_STARTED.get(started, ""))}</div>'
               if started in _STARTED else "")
 
-    # What the last background action actually did. Without this a run that
-    # failed and a run still going look identical — the banner says "proposals
-    # will appear above" either way, and the traceback is in a service log the
-    # person reading this page cannot see.
+    # The per-source status lines live in the Sources block now (spec §4)
+    # — one place, with each source's action beside its state. A RUNNING
+    # source still announces itself here so "refresh in a moment" is
+    # visible without opening the fold.
     from .web import bg_status
     for label, name in BG_LABELS:
         st = bg_status(label, tenant)
-        if not st:
-            continue
-        when = _esc((st.get("at") or "")[:16].replace("T", " "))
-        if st.get("state") == "failed":
-            banner += (f'<div class="note"><strong>{name} failed</strong> '
-                       f'({when})<br>{_esc(st.get("detail", ""))}</div>')
-        elif st.get("state") == "running":
-            banner += (f'<div class="ok">{name} is running ({when}). '
+        if st.get("state") == "running":
+            banner += (f'<div class="ok">{name} is running. '
                        f'Refresh in a moment.</div>')
-        elif st.get("detail"):
-            banner += (f'<div class="ok"><strong>{name}</strong> finished '
-                       f'{when} — {_esc(st["detail"])}</div>')
 
     if err:
         banner = f'<div class="note">{_esc(err)}</div>' + banner
     if msg:
-        # A bulk decision reports what it did, including what it refused. A
-        # count with no reasons reads as a partial success nobody can act on.
-        banner = f'<div class="when">{_esc(msg)}</div>' + banner
+        # A bulk decision reports what it did, including what it refused —
+        # AS THE FLASH (spec §4): it rendered in muted .when grey, the least
+        # important text on the page, above the styled flash it belonged in.
+        banner = f'<div class="ok">{_esc(msg)}</div>' + banner
 
     # --- plans waiting on a person, across systems -------------------------
     # One kind of thing per card: a PLAN is queued work that cannot run until
@@ -4607,13 +4769,49 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     plans_wait = systems.plans_needing_action(tenant)
     plans_card = ""
     if plans_wait:
-        prows = "".join(f"""
-        <div class="msg"><div><b>{_esc(w["system_name"])}</b> ·
-          {_esc(w["ref"])}{" · " + _esc(w["planned_for"]) if w["planned_for"] else ""}
-          — {'needs completing: ' if w["need"] == "complete" else ''}{_esc(w["detail"])}</div>
-          <div class="when"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}&amp;ppage={systems.plan_page(tenant, w["system_key"], w["run_id"])}#plan-{_esc(w["run_id"])}">
-            {'complete it' if w["need"] == "complete" else 'approve it'} &rarr;</a></div>
-        </div>""" for w in plans_wait[:15])
+        _pages_pl = max(1, -(-len(plans_wait) // 15))
+        _plpage = max(1, min(page_req, _pages_pl))
+        _pl_pager = _pager(
+            f"/admin/ui?tab=content&amp;sub=plans&amp;tenant={_esc(tenant)}"
+            + (f"&amp;key={_esc(key)}" if key else ""),
+            _plpage, len(plans_wait), 15, "plans")
+
+        def _plan_row(w) -> str:
+            jump = (f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;'
+                    f'tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}'
+                    f'&amp;ppage={systems.plan_page(tenant, w["system_key"], w["run_id"])}'
+                    f'#plan-{_esc(w["run_id"])}">')
+            if w["need"] == "complete":
+                # A missing field is filled on the workflow card, where the
+                # plan's own form is — the jump stays.
+                ctl = f'{jump}complete it &rarr;</a>'
+            else:
+                # DECIDED IN PLACE (spec §4): the routes have carried
+                # back-to-place since the pointer sweep; the Review queue
+                # now uses them instead of sending the reader to another
+                # tab to click the same two buttons.
+                base = (f'<input type="hidden" name="key" value="{_esc(key)}">'
+                        f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                        f'<input type="hidden" name="system" value="{_esc(w["system_key"])}">'
+                        f'<input type="hidden" name="id" value="{_esc(w["run_id"])}">'
+                        f'<input type="hidden" name="back" value="content">')
+                ctl = (f'<form method="get" action="/admin/plan_approve" '
+                       f'class="inl">{base}<button class="sec">Approve — '
+                       f'runs on its date</button></form> '
+                       f'<form method="get" action="/admin/plan_skip" '
+                       f'class="inl">{base}'
+                       f'<input name="reason" placeholder="why not (kept on the record)" size="22">'
+                       f'<button class="sec">Skip</button></form> '
+                       f'{jump}open its plan &rarr;</a>')
+            return (f'<div class="msg"><div><b>{_esc(w["system_name"])}</b> ·'
+                    f' {_esc(w["ref"])}'
+                    + (" · " + _esc(w["planned_for"]) if w["planned_for"] else "")
+                    + f' — {"needs completing: " if w["need"] == "complete" else ""}'
+                    f'{_esc(w["detail"])}</div>'
+                    f'<div class="row">{ctl}</div></div>')
+
+        prows = "".join(_plan_row(w) for w in
+                        plans_wait[(_plpage - 1) * 15:_plpage * 15])
         plans_card = f"""
 <div class="anchor" id="plans"></div>
 <div class="card">
@@ -4621,8 +4819,11 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     <span class="chip off">{len(plans_wait)} held</span></div>
   <p class="mut">Queued work that cannot run yet — a plan missing a field, or
   one that is complete and needs your go-ahead on this rung. Nothing here
-  fails while it waits; it just waits.</p>
+  fails while it waits; it just waits. Approving and skipping happen here;
+  completing a field happens on the plan itself.</p>
+  {_pl_pager}
   <div class="thread">{prows}</div>
+  {_pl_pager}
 </div>"""
     # --- approvals: may this ship? -----------------------------------------
     #
@@ -4639,13 +4840,9 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 
     def _ship_row(a) -> str:
         pl = a.payload or {}
-        body = (pl.get("body") or pl.get("content")
-                or (pl.get("fields") or {}).get("body_html", ""))
-        approve = "/decide/" + _apm._signer.dumps([a.id, "approved"])
-        deny = "/decide/" + _apm._signer.dumps([a.id, "denied"])
         review = ""
         if a.kind == "seo_new_article" and pl.get("output_id"):
-            review = (f' · <a href="/admin/article/{_esc(pl["output_id"])}'
+            review = (f' <a href="/admin/article/{_esc(pl["output_id"])}'
                       f'?key={_esc(key)}">review &amp; edit &rarr;</a>')
         elif (a.kind == "skill_output" and pl.get("output_id")
               and pl.get("skill") in ("campaign_email", "ad_copy")):
@@ -4654,23 +4851,59 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
             # belongs to (the workroom route resolves a variant id to its
             # board). Replies stay bare: their artifact IS the Gmail draft.
             _what = ("review on its board" if pl.get("skill") == "ad_copy"
-                     else "review in the workroom")
-            review = (f' · <a href="/admin/work/{_esc(pl["output_id"])}'
+                     else "open workroom")
+            review = (f' <a href="/admin/work/{_esc(pl["output_id"])}'
                       f'?key={_esc(key)}">{_what} &rarr;</a>')
-        fold = (f'<details><summary>read it ({len(body)} chars)</summary>'
-                f'<pre style="white-space:pre-wrap">{_esc(body[:1500])}'
-                + ("…" if len(body) > 1500 else "") + "</pre></details>"
-                if body else
-                '<div class="mut">this kind carries no text body — the '
-                'summary above is the whole decision</div>')
+        # APPROVE STATES ITS CONSEQUENCE (spec §4) — the sweep already made
+        # each summary's wording honest; the button now says what approving
+        # DOES, per kind, instead of one word meaning five things.
+        prov = (pl.get("esp_push") or {}).get("provider", "")
+        if prov:
+            says = f"Approve — pushes the draft to {_esc(prov)}"
+        elif a.kind == "seo_new_article":
+            says = "Approve &amp; publish"
+        elif a.kind == "send_email":
+            says = "Approve — sends it"
+        elif a.kind == "skill_output":
+            says = "Approve — marks it reviewed, ready"
+        else:
+            says = "Approve"
+
+        def _btn(verdict: str, label: str, cls: str = "") -> str:
+            # POSTs back INTO the console with the executor's own sentence
+            # as the flash — the signed /decide links stay the EMAIL
+            # mechanism only; the console's primary control no longer exits
+            # to an unstyled page with no way back.
+            return (f'<form method="post" action="/admin/ship_decide" '
+                    f'class="inl"><input type="hidden" name="key" '
+                    f'value="{_esc(key)}">'
+                    f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                    f'<input type="hidden" name="approval_id" value="{_esc(a.id)}">'
+                    f'<input type="hidden" name="page" value="{_page}">'
+                    f'<input type="hidden" name="verdict" value="{verdict}">'
+                    f'<button{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}>'
+                    f'{label}</button></form>')
         return f"""
         <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
-          {fold}
-          <div class="when">{a.created_at:%b %d, %H:%M} ·
-            <a class="btn" href="{approve}">Approve</a>
-            <a class="btn danger" href="{deny}">Deny</a>{review}</div>
+          {_ship_preview(pl)}
+          <div class="row">
+            {_btn("approved", says)}
+            {_btn("denied", "Deny", "sec")}
+            <span class="when">{a.created_at:%b %d, %H:%M}{review}</span>
+          </div>
         </div>"""
 
+    # Paginated at 15 (spec §4): the primary queue rendered "25 rows max
+    # with no pager" — a queue whose depth nobody can see stops being
+    # worked; it lived at ~200 drafts once.
+    SHIP_PAGE = 15
+    _pages_s = max(1, -(-len(ship_rows) // SHIP_PAGE))
+    _page = max(1, min(page_req, _pages_s))
+    _ship_shown = ship_rows[(_page - 1) * SHIP_PAGE:_page * SHIP_PAGE]
+    _ship_pager = _pager(
+        f"/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}"
+        + (f"&amp;key={_esc(key)}" if key else ""),
+        _page, len(ship_rows), SHIP_PAGE, "decisions")
     ship_card = f"""
 <div class="anchor" id="ship"></div>
 <div class="card">
@@ -4678,9 +4911,11 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     <span class="chip {'off' if ship_rows else 'on'}">{len(ship_rows)} pending</span></div>
   <p class="mut">Everything queued to go OUT — an article to the store, a reply
   to a customer, a change to live pages. Approving executes it; nothing leaves
-  without you. Articles have a full review-and-edit page behind the link.</p>
-  <div class="thread">{"".join(_ship_row(a) for a in ship_rows[:25])
+  without you. The preview in each row is the thing itself.</p>
+  {_ship_pager}
+  <div class="thread">{"".join(_ship_row(a) for a in _ship_shown)
                        or '<p class="mut">Nothing is waiting to ship.</p>'}</div>
+  {_ship_pager}
 </div>"""
 
     # --- the sub-tab strip -------------------------------------------------
@@ -4731,12 +4966,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   <p class="mut">Found on {_esc(t.name)}'s own site. Invisible to every generator
   until approved. Anything using a banned phrase was dropped, not queued.</p>
   {proposals}
-  <div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}
-    <span class="mut">reads the site and files what it finds</span></div>
-  <div class="row">{_act(key, "/admin/email_harvest", "Mine sent mail", tenant, {"ui": "1"})}
-    <span class="mut">reads what this account has already SAID — the one place
-    objections exist, because the brand has been answering the same questions
-    for years. Only the buckets triage flagged as worth mining are opened.</span></div>
+  {'' if pending else f'<div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}{_act(key, "/admin/email_harvest", "Mine sent mail", tenant, {"ui": "1"})}<span class="mut">the feeders — their last-ran state is in Sources above</span></div>'}
   {clear_all}
 </div>""",
         "pictures": assets_form,
@@ -4767,10 +4997,12 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 </div>""",
         "catalogue": f"""
 <div class="card">
-  <div class="head"><h2>Catalogue</h2></div>
+  <div class="head"><h2>Store sync</h2>
+    {'' if has_store else '<span class="chip nb">parked — no store connected</span>'}</div>
   {cat}
-  <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
-    <span class="mut">names, prices and live stock — the store owns those</span></div>
+  {f'<div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}<span class="mut">names, prices and live stock — the store owns those</span></div>'
+   if has_store else
+   '<p class="mut">The sync button appears once a store is connected on the Connections tab — offering one that can only fail teaches the reader to distrust every button.</p>'}
 </div>""",
     }
 
@@ -4807,6 +5039,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   live. (Compliance moved to Assurance: a report about pages already published
   is not a decision.)</p>
 </div>
+{_sources_block(key, tenant)}
 {strip}
 {sections[sub]}
 
@@ -4822,6 +5055,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   <div class="row">
     <form method="get" action="/admin/purge_harvested" class="inl">
       <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="ui" value="1">
       <button class="sec">Show me what it would delete</button>
     </form>
     <form method="post" action="/admin/purge_harvested" class="inl"

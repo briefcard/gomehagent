@@ -5061,14 +5061,53 @@ def plan_save(request: Request, key: str = Depends(admin_key), id: str = "",
                            anchor=f"plan-{id}", ppage=ppage)
 
 
+@app.post("/admin/ship_decide")
+async def ship_decide(request: Request, key: str = Depends(admin_key)):
+    """Decide one ship-queue approval WITHOUT leaving the console (step 4,
+    spec §4 — the highest-stakes flow had the worst UX: bare links exiting
+    to an unstyled /decide page with no way back).
+
+    Same executor as the signed links — `approvals.apply_decision` — so a
+    decision lands identically whichever surface makes it, and its own
+    human-readable sentence ("Approved and pushed to omnisend as a draft…")
+    becomes the flash. The signed /decide links remain the EMAIL mechanism.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import approvals as _appr
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    verdict = str(form.get("verdict") or "")
+    try:
+        pg = max(1, int(str(form.get("page") or "1")))
+    except ValueError:
+        pg = 1
+    if verdict not in ("approved", "denied"):
+        return _back_to_content(tenant, err="say approve or deny — nothing "
+                                            "was decided", sub="ship")
+    said = _appr.apply_decision(str(form.get("approval_id") or ""), verdict)
+    return _back_to_content(tenant, msg=str(said)[:400], sub="ship",
+                            cpage=pg)
+
+
 @app.get("/admin/plan_approve")
 def plan_approve(key: str = Depends(admin_key), id: str = "",
-                 tenant: str = "", system: str = "", ppage: int = 1):
-    """The explicit go-ahead a plan needs on shadow / approve_all."""
+                 tenant: str = "", system: str = "", ppage: int = 1,
+                 back: str = ""):
+    """The explicit go-ahead a plan needs on shadow / approve_all.
+
+    `back=content` is Review's Plans queue deciding in place (step 4) —
+    the reader lands back on the queue they were working, rule 3.
+    """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import systems
     out = systems.approve_plan(id)
+    if back == "content":
+        if out.get("error"):
+            return _back_to_content(tenant, err=out["error"], sub="plans")
+        return _back_to_content(tenant, msg="Plan approved — it runs on its "
+                                            "date", sub="plans")
     if out.get("error"):
         return _back_to_system(tenant, system, err=out["error"],
                                anchor=f"plan-{id}", ppage=ppage)
@@ -5079,12 +5118,17 @@ def plan_approve(key: str = Depends(admin_key), id: str = "",
 
 @app.get("/admin/plan_skip")
 def plan_skip(key: str = Depends(admin_key), id: str = "", tenant: str = "",
-              system: str = "", reason: str = ""):
+              system: str = "", reason: str = "", back: str = ""):
     """Decline one plan — recorded as a decision, never a silent delete."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import systems
     out = systems.skip_plan(id, reason=reason)
+    if back == "content":
+        if out.get("error"):
+            return _back_to_content(tenant, err=out["error"], sub="plans")
+        return _back_to_content(tenant, msg="Plan skipped — kept on the "
+                                            "record", sub="plans")
     if out.get("error"):
         return _back_to_system(tenant, system, err=out["error"], anchor="planned")
     return _back_to_system(tenant, system, ok="Plan skipped — kept on the record",
@@ -6477,15 +6521,34 @@ def mail_cursor(key: str = Depends(admin_key), tenant: str = "",
 
 @app.get("/admin/purge_harvested")
 def purge_harvested_report(request: Request, key: str = Depends(admin_key),
-                           tenant: str = "") -> dict:
-    """What a purge WOULD remove. Reports only — deleting needs the POST."""
+                           tenant: str = "", ui: int = 0):
+    """What a purge WOULD remove. Reports only — deleting needs the POST.
+
+    `ui=1` is the console's dry-run button (step 4; §11 counted this among
+    the raw-JSON dead-ends): the counts land back as a flash instead of a
+    JSON tab the reader has to back out of.
+    """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import kb as kbm
-    return kbm.purge_harvested(
+    got = kbm.purge_harvested(
         tenant, include_entities=str(
             request.query_params.get("entities", "")).lower() in ("1", "true"),
         dry_run=True)
+    if ui:
+        if got.get("error"):
+            return _back_to_content(tenant, err=str(got["error"])[:300])
+        wd = got.get("would_delete") or {}
+        total = sum(v for v in wd.values() if isinstance(v, int))
+        parts = ", ".join(f"{v} {k.replace('_', ' ')}"
+                          for k, v in wd.items() if isinstance(v, int) and v)
+        return _back_to_content(
+            tenant,
+            msg=(f"dry run — clearing would delete {total} row(s)"
+                 + (f" ({parts})" if parts else "")
+                 + "; the ban list, vocabulary and catalogue are kept. "
+                   "Nothing was deleted."))
+    return got
 
 
 @app.post("/admin/purge_harvested")
