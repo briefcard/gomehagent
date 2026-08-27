@@ -12,6 +12,12 @@ goes through scripts/ship.sh; every fix ships with its sabotage guard; every
 console fact ships with its control.
 
 ## Previous initiative (2026-08-25)
+**`SYSTEMS-REFERENCE.md`** — the per-system spec: every variable, setting,
+plan field, knob (with caps and storage), surface, table, integration and
+cross-system join, derived from the code with file anchors — plus the eight
+design rules the 2026-08-26/27 defect families paid for. READ THIS FIRST for
+any UI/console work; it is written for exactly that.
+
 **`INITIATIVE-seo-blog.md`** — the organic-growth build: a programmatic keyword
 plan (head + long-tail, clustered), the measurement loop that verifies it
 against GSC and Semrush, the `blog` skill + planner, and `MANUAL_PUBLISH` for
