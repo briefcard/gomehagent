@@ -1672,6 +1672,60 @@ def feedback_block(tenant: str, key: str) -> str:
             "treat as current instruction):\n" + "\n".join(lines))
 
 
+def edit_lesson_rows(tenant: str, key: str = "", limit: int = 20) -> list[dict]:
+    """The observed edit lessons, as ROWS — the Data layer's Active Learning
+    lane (UI overhaul step 4) and `edit_lessons` below read the same query,
+    so what the owner sees on the lane is exactly what the prompt carries.
+
+    One system when `key` names one, every system for the tenant otherwise.
+    Dismissed rows are filtered HERE, at the shared source: a lesson the
+    owner dismissed as a one-off must leave the prompt too, or the lane's
+    "dismiss" quietly means "hide from me but keep teaching the model" —
+    a control that lies about its consequence.
+    """
+    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=60)
+    with db.SessionLocal() as s:
+        q = s.query(db.System).filter(db.System.tenant == tenant)
+        if key:
+            q = q.filter(db.System.key == key)
+        by_id = {r.id: r.key for r in q.all()}
+        if not by_id:
+            return []
+        rows = (s.query(db.SystemRun)
+                .filter(db.SystemRun.system_id.in_(list(by_id)),
+                        db.SystemRun.tenant == tenant,
+                        db.SystemRun.created_at >= since,
+                        db.SystemRun.edit_diff != None,      # noqa: E711
+                        db.SystemRun.edit_diff != "",
+                        db.SystemRun.decision == "edited")
+                .order_by(db.SystemRun.created_at.desc())
+                .limit(max(1, limit)).all())
+        gone = {r.key.split(":", 1)[1] for r in
+                s.query(db.Setting)
+                .filter(db.Setting.key.like("lesson_dismissed:%")).all()}
+        out = [{"run_id": r.id, "system_key": by_id.get(r.system_id, ""),
+                "when": r.created_at, "text": (r.edit_diff or "").strip()}
+               for r in rows]
+    return [r for r in out
+            if r["text"] and r["text"] != "sent unchanged"
+            and r["run_id"] not in gone]
+
+
+def dismiss_edit_lesson(run_id: str) -> str:
+    """Mark one observed lesson as a one-off — it leaves the lane AND the
+    prompt block, because both read `edit_lesson_rows`. A marker row, not a
+    delete: the run and its diff stay on the record."""
+    if not (run_id or "").strip():
+        return "Nothing named to dismiss."
+    with db.SessionLocal() as s:
+        k = f"lesson_dismissed:{run_id.strip()}"
+        if s.get(db.Setting, k) is None:
+            s.add(db.Setting(key=k, value="1"))
+            s.commit()
+    return ("Dismissed — treated as a one-off. The pattern leaves the "
+            "drafter's brief too; nothing was deleted from the record.")
+
+
 def edit_lessons(tenant: str, key: str, limit: int = 5) -> str:
     """What a human actually changed, fed back to the thing that wrote it.
 
@@ -1696,23 +1750,10 @@ def edit_lessons(tenant: str, key: str, limit: int = 5) -> str:
     **Scoped to the account and capped.** The samples are the client's own
     correspondence; they may inform that client's next draft and no other's.
     """
-    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=60)
-    with db.SessionLocal() as s:
-        ids = [r.id for r in s.query(db.System).filter(
-            db.System.tenant == tenant, db.System.key == key).all()]
-        if not ids:
-            return ""
-        rows = (s.query(db.SystemRun)
-                .filter(db.SystemRun.system_id.in_(ids),
-                        db.SystemRun.tenant == tenant,
-                        db.SystemRun.created_at >= since,
-                        db.SystemRun.edit_diff != None,      # noqa: E711
-                        db.SystemRun.edit_diff != "",
-                        db.SystemRun.decision == "edited")
-                .order_by(db.SystemRun.created_at.desc())
-                .limit(max(1, limit)).all())
-        samples = [(r.created_at, (r.edit_diff or "").strip()) for r in rows]
-    samples = [(w, t) for w, t in samples if t and t != "sent unchanged"]
+    # The same rows the Data layer's Active Learning lane shows (and the
+    # same dismissal filter): one learning ledger, two doors.
+    samples = [(r["when"], r["text"])
+               for r in edit_lesson_rows(tenant, key, limit=limit)]
     if not samples:
         return ""
     lines = []

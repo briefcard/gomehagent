@@ -641,15 +641,11 @@ def _badges(tenant: str, full: bool = True) -> dict:
     except Exception:                                            # noqa: BLE001
         pass
     try:
-        from . import resolve
-        out["schema"] = len(resolve.readiness(tenant)
-                            .get("next_actions") or [])
-    except Exception:                                            # noqa: BLE001
-        pass
-    try:
-        from . import keywords
-        out["schema"] += len((keywords.mute_lessons(tenant) or {})
-                             .get("proposals") or [])
+        # The SAME computation Queue & Insights renders (rule 8) — this used
+        # to read a "proposals" key mute_lessons never returned, so the
+        # lessons half of the badge was permanently zero while the title
+        # promised it counted.
+        out["schema"] = _schema_needs_you(tenant)["n"]
     except Exception:                                            # noqa: BLE001
         pass
     return out
@@ -661,7 +657,7 @@ _BADGE_TITLES = {
     "content": "decisions waiting on you",
     "systems": "systems needing attention",
     "accounts": "connections failing",
-    "schema": "answers the brain is missing",
+    "schema": "gaps and lessons waiting on you",
 }
 
 
@@ -3007,8 +3003,30 @@ and hand-set fields survive future re-derives.</p>
 </div>""")
 
 
+def _pager(base: str, page: int, total: int, per: int, what: str) -> str:
+    """One pager, one vocabulary — "X–Y of N", newer/older — extracted in
+    step 4 (the 2b deferral; the Data layer's domain views are its consumer)
+    from the Review claims queue's inline version, which stays the wording's
+    origin. `base` already carries every other param; this appends `page=`.
+    Rendered above AND below a long list by callers, per the 2b contract."""
+    pages = max(1, -(-total // per))
+    if pages <= 1:
+        return ""
+    page = max(1, min(page, pages))
+    lo = (page - 1) * per + 1
+    hi = min(total, page * per)
+    return ('<div class="pager"><span class="mut">'
+            f'{_esc(what)} {lo}&ndash;{hi} of {total}</span>'
+            + (f'<a href="{base}&amp;page={page - 1}">&larr; newer</a>'
+               if page > 1 else "")
+            + (f'<a href="{base}&amp;page={page + 1}">older &rarr;</a>'
+               if page < pages else "")
+            + "</div>")
+
+
 def _remove_control(key: str, tenant: str, kind: str, row_id: str,
-                    name: str = "", note: str = "") -> str:
+                    name: str = "", note: str = "",
+                    back_fields: str = "") -> str:
     """The one way to take a row out, wherever it is listed.
 
     Folded, because removing is rare next to reading, and a delete control
@@ -3029,12 +3047,14 @@ def _remove_control(key: str, tenant: str, kind: str, row_id: str,
         <input type="hidden" name="tenant" value="{_esc(tenant)}">
         <input type="hidden" name="kind" value="{_esc(kind)}">
         <input type="hidden" name="id" value="{_esc(row_id)}">
+        {back_fields}
         <button class="sec">Remove</button>
       </form>
     </details>"""
 
 
-def _photo_library(tenant: str, key_: str = "") -> str:
+def _photo_library(tenant: str, key_: str = "", page: int = 0,
+                   base: str = "", back_fields: str = "") -> str:
     """Every photograph the creative pipeline is allowed to publish.
 
     There was nowhere in the console to see this (owner, 2026-08-23). The
@@ -3047,6 +3067,12 @@ def _photo_library(tenant: str, key_: str = "") -> str:
     Review, where the decision is; this is the answer to "what do we have",
     which is a knowledge question and belongs with the rest of what the
     account knows.
+
+    `page` > 0 turns on the Data layer's paged mode (step 4): photograph #61
+    stops being unreachable, and the card says how many candidates are still
+    WAITING with the decision's address — the rail row the spec asked for.
+    Knowledge's call stays parameterless and renders exactly as before until
+    step 6 retires it.
     """
     from . import kb as kbm
     shots = [a for a in kbm.assets(tenant, publishable_only=True, kind="image")
@@ -3079,36 +3105,276 @@ def _photo_library(tenant: str, key_: str = "") -> str:
                    + (f" {_esc(when)}" if when else "") if used else "")
                 + '</span></a>'
                 + _remove_control(key_, tenant, "asset", a.id,
-                                  a.title or "this photograph")
+                                  a.title or "this photograph",
+                                  back_fields=back_fields)
                 + '</div>')
+
+    waiting_chip = ""
+    if page:
+        with db.SessionLocal() as s:
+            from . import provenance as _pv
+            n_wait = (s.query(db.KbAsset)
+                      .filter(db.KbAsset.tenant == tenant,
+                              db.KbAsset.review == _pv.PROPOSED).count())
+        if n_wait:
+            waiting_chip = (
+                f'<span class="chip off">{n_wait} waiting &middot; '
+                f'<a href="/admin/ui?tab=content&amp;sub=pictures&amp;'
+                f'tenant={_esc(tenant)}'
+                + (f'&amp;key={_esc(key_)}' if key_ else "")
+                + '">decide on Review</a></span>')
 
     if not shots and not marks:
         return ('<div class="card"><div class="head">'
-                '<h2>Photographs the creative may use</h2></div>'
+                '<h2>Photographs the creative may use</h2>'
+                + waiting_chip + '</div>'
                 '<p class="mut">Nothing approved yet. Pictures found on the '
                 'account&#39;s own site queue up on <b>Review &rarr; '
                 'Pictures</b>; approving one there grants use and it appears '
                 'here. A picture on a client&#39;s site is a candidate, not a '
                 'licence — approve what is genuinely theirs.</p></div>')
 
+    if page:
+        pg = max(1, min(page, max(1, -(-len(shots) // 60))))
+        shown = shots[(pg - 1) * 60:pg * 60]
+        tail = _pager(base, pg, len(shots), 60, "photographs")
+    else:
+        shown = shots[:60]
+        tail = (f'<p class="mut">Showing 60 of {len(shots)}.</p>'
+                if len(shots) > 60 else '')
+
     return f"""
 <div class="card">
   <div class="head"><h2>Photographs the creative may use</h2>
     <span class="chip on">{len(shots)} approved</span>
-    {f'<span class="chip">{len(marks)} logo(s)</span>' if marks else ''}</div>
+    {f'<span class="chip">{len(marks)} logo(s)</span>' if marks else ''}
+    {waiting_chip}</div>
   <p class="mut">Owned and approved, so a generator may publish them — an
   email hero comes from this shelf or the email goes without one. What each is
   OF is shown beneath it, because that is what a hero is checked against;
   brand-wide means it is not tied to one product. Decisions live on
   <b>Review &rarr; Pictures</b>.</p>
-  <div class="picgrid">{"".join(_tile(a) for a in shots[:60])}</div>
-  {f'<p class="mut">Showing 60 of {len(shots)}.</p>' if len(shots) > 60 else ''}
+  <div class="picgrid">{"".join(_tile(a) for a in shown)}</div>
+  {tail}
   {('<h3 style="font-size:.9rem;margin:14px 0 6px">Logos</h3>'
     '<div class="picgrid">' + "".join(_tile(a) for a in marks[:12]) + "</div>"
     + '<p class="mut">Held apart on purpose: the header already carries the '
       'logo, so a brand mark is never chosen as a hero — it would read as a '
       'letterhead.</p>') if marks else ''}
 </div>"""
+
+
+# --- KB row builders, shared by Knowledge and the Data layer's domain views —
+# extracted from render_kb's closures in step 4 (the deferred 2b extraction;
+# the domain views are the consumer that makes them not-dead-code). Markup is
+# byte-identical to what the closures produced: test_kb_ui pins it.
+
+def _claim_expiry_line(r) -> str:
+    """When this claim stops standing — visible on EVERY card (owner,
+    2026-08-21). Three states, same vocabulary as `kb.claim_expiry`."""
+    e = kb.claim_expiry(r)
+    if e["state"] == "timeless":
+        return ('<span class="chip nb">never expires</span>')
+    if e["state"] == "undatable":
+        return ('<span class="chip off">undatable</span> '
+                '<span class="mut">no verification date on file — '
+                'saving it dates it from today</span>')
+    due = e.get("due")
+    return (f'<span class="mut">expires {_esc(_date(due)) if due else "?"}'
+            f' — a resave re-verifies and resets it to a year out</span>')
+
+
+def _claim_editor_form(key: str, tenant: str, r, vocab,
+                       back_fields: str = "") -> str:
+    """Edit-in-place for an approved claim, folded so the list stays
+    scannable. Same guards as review: a testimonial's wording is its
+    evidence (read-only), tags come only from the account's vocabulary."""
+    verbatim = (r.proof_type or "") in kb.VERBATIM_ONLY
+    tagbox = "".join(
+        f'<label class="tag"><input type="checkbox" name="tags" '
+        f'value="{_esc(tg)}"{" checked" if tg in (r.situations or []) else ""}> '
+        f'{_esc(tg)}</label>' for tg in vocab)
+    exp_btn = ('<button class="sec" name="action" value="expire" '
+               'title="Put it back on the clock, dated from today">'
+               'Expires again</button>'
+               if (r.expiry_policy or "") == "never" else
+               '<button class="sec" name="action" value="never" '
+               'title="Brand origin, a material, a permanent placement — '
+               'facts that do not go stale">Never expires</button>')
+    return f"""
+        <details><summary class="mut">Edit</summary>
+          <form class="f" method="post" action="/admin/claim_update">
+            <input type="hidden" name="claim_id" value="{_esc(r.id)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            {back_fields}
+            <label>{"Quoted — a customer's own words (cannot be reworded)"
+                    if verbatim else "Claim"}</label>
+            <textarea name="claim" rows="2"{" readonly" if verbatim else ""
+                      }>{_esc(r.claim)}</textarea>
+            <label>Evidence</label>
+            <input name="evidence" value="{_esc(r.evidence or '')}"
+                   placeholder="what makes this checkable">
+            <label>True of — blank means the whole brand</label>
+            <input name="entity_key" list="objents"
+                   value="{_esc(r.entity_key or '')}"
+                   placeholder="brand-level (used in any content)">
+            <label>Who said it — required before a testimonial or
+review can be QUOTED</label>
+            <input name="attributed_to" value="{_esc(r.attributed_to or '')}"
+                   placeholder="the customer's name, as it may appear in print">
+            <label>Situations</label>
+            <div class="tags">{tagbox}</div>
+            <div class="row">
+              <button title="Saving re-attests it: verified today, any expiry
+date reset to a year from now (a timeless claim stays timeless)">Save</button>
+              {exp_btn}
+            </div>
+          </form>
+        </details>"""
+
+
+def _claim_row(key: str, tenant: str, r, vocab, note: str = "",
+               cls: str = "", editable: bool = False,
+               back_fields: str = "") -> str:
+    meta = " · ".join(x for x in [
+        _esc(r.strength or ""), _esc(r.proof_type or ""),
+        f"verified {_date(r.verified_at)}" if r.verified_at else "",
+    ] if x)
+    tags = " ".join(r.situations or []) or "untagged — can never be selected"
+    return (f'<div class="anchor" id="cl-{_esc(r.id)}"></div>'
+            f'<div class="msg {cls}">'
+            f"<div>{_esc(r.claim)}</div>"
+            + (f'<div class="when"><strong>{_esc(r.evidence)}</strong></div>'
+               if r.evidence else
+               '<div class="when"><span class="mut">no evidence recorded</span></div>')
+            + f'<div class="when"><code>{_esc(tags)}</code></div>'
+            + f'<div class="when">{meta}{" · " if meta else ""}'
+            f'{_esc(r.source or "source not recorded")}</div>'
+            + f'<div class="when">{_claim_expiry_line(r)}</div>'
+            + (f'<div class="when"><b>{_esc(kb.usage_rule(r.proof_type))}</b></div>'
+               if kb.usage_rule(r.proof_type or "") else "")
+            + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
+            + (_claim_editor_form(key, tenant, r, vocab, back_fields)
+               if editable else "")
+            # A claim has always been rejectable from the REVIEW queue,
+            # which an approved claim has already left. Removing one it
+            # turns out the brand should not be making meant re-finding it
+            # there, where it no longer is.
+            + (_remove_control(key, tenant, "claim", r.id, "this claim",
+                               back_fields=back_fields)
+               if editable else "")
+            + "</div>")
+
+
+def _claim_decide_row(key: str, tenant: str, r, backq: str = "back=kb") -> str:
+    """Approve/reject a pending claim from HERE, landing back here.
+
+    The audit's gap 3b: the Knowledge tab listed pending claims with a
+    banner pointing at Review — the fact on one page, the control on
+    another. Same route the Review tab uses, so a decision lands
+    identically whichever surface makes it; `backq` names where the reader
+    is, so the decision never costs them their place.
+    """
+    base = (f'/admin/claim_review?key={_esc(key)}&amp;tenant={_esc(tenant)}'
+            f'&amp;ui=1&amp;{backq}&amp;claim_id={_esc(r.id)}&amp;approve=')
+    # Labeled buttons, not emoji links: a control says what it does, and
+    # ✅/❌ were the only "buttons" in the console whose meaning lived in
+    # a glyph (step 2b; the ship queue's pair retired the same day).
+    return (f'<div class="row"><a class="btn" href="{base}yes">Approve</a> '
+            f'<a class="btn danger" href="{base}no">Reject</a></div>')
+
+
+def _objection_row(key: str, tenant: str, r, cat: dict,
+                   back_fields: str = "") -> str:
+    # The scope is the first thing that has to be readable. An answer true
+    # of one product and shown as true of the catalogue is not a display
+    # bug — it is the system asserting something false about every other
+    # thing the account sells.
+    if r.entity_key:
+        scope = (f'true of <code>{_esc(cat.get(r.entity_key, r.entity_key))}'
+                 f'</code> only')
+        flag = ""
+    else:
+        scope = "<strong>true of everything they sell</strong>"
+        # A machine-origin row that nobody scoped never had that decided.
+        flag = ('<div class="note">Nothing has said what this is true of, '
+                'so it is being claimed of the whole catalogue. If it came '
+                'off one product page, scope it — approving a product '
+                'answer brand-wide is how a customer is told the wrong '
+                'thing about a different item.</div>'
+                if kb.scope_unconfirmed(r) or (r.origin or "") == "crawl"
+                else "")
+    return (
+        f'<div class="anchor" id="o-{_esc(r.id)}"></div>'
+        f'<div><strong>{_esc(r.objection)}</strong>'
+        + (' <span class="chip off">escalate</span>'
+           if (r.escalate or "").lower() == "yes" else "")
+        + "</div>"
+        + f"<div>{_esc(r.response)}</div>"
+        + f'<div class="when">{scope}'
+        + (f" · segment <code>{_esc(r.audience_key)}</code>"
+           if r.audience_key else " · any segment")
+        + (f" · from {_esc(r.origin)}" if r.origin else "")
+        + (f" · paired proof <code>{_esc(r.claim_id)}</code>"
+           if r.claim_id else "")
+        + "</div>" + flag
+        + f"""
+            <details><summary class="mut">Edit</summary>
+            <form class="f" method="post" action="/admin/objection_edit">
+              <input type="hidden" name="row_id" value="{_esc(r.id)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              {back_fields}
+              <label>Objection — the hesitation in the buyer's words</label>
+              <textarea name="objection" rows="2">{_esc(r.objection or '')}</textarea>
+              <label>The approved answer</label>
+              <textarea name="response" rows="3">{_esc(r.response or '')}</textarea>
+              <label>True of &mdash; blank claims it of everything they sell</label>
+              <input name="entity_key" list="objents"
+                     value="{_esc(r.entity_key or '')}"
+                     placeholder="leave blank only if it really is brand-wide">
+              <div class="row"><button class="sec">Save</button></div>
+            </form>
+            </details>""")
+
+
+def _situation_overlap_card(key: str, tenant: str, overlaps,
+                            back_fields: str = "") -> str:
+    """The merge-danger card, one builder for both tabs that show it —
+    Knowledge (until step 6 retires it) and the Data layer's Situations
+    view, where the spec moves it."""
+    if not overlaps:
+        return ""
+    rowsh = "".join(f"""
+        <div class="conn">
+          <div><code>{_esc(o['keep'])}</code> and <code>{_esc(o['drop'])}</code>
+            <span class="chip off">{_esc(o['basis'].replace('_', ' '))}</span>
+            <div class="mut">{_esc(o['why'])} &middot;
+              {o['rows'].get(o['keep'], 0)} and {o['rows'].get(o['drop'], 0)} rows</div>
+          </div>
+          <form method="post" action="/admin/merge_situation" class="inl"
+                onsubmit="return confirm('Fold {_esc(o['drop'])} into {_esc(o['keep'])}? Every row tagged the first will be retagged.')">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="keep" value="{_esc(o['keep'])}">
+            <input type="hidden" name="drop" value="{_esc(o['drop'])}">
+            {back_fields}
+            <button class="sec">Fold into {_esc(o['keep'])}</button>
+          </form>
+        </div>""" for o in overlaps[:8])
+    return f"""
+        <div class="card danger">
+          <div class="head"><h2>These situations may be one situation</h2></div>
+          <p class="mut">Two tags a person would answer with the same proof are
+          one tag. Split across both, neither accumulates the approved examples
+          that make tagging work, and selection reaches half the evidence it
+          should. Nothing is merged automatically.</p>
+          {rowsh}
+          <p class="mut">A pair that means the same thing in different words
+          will not appear here &mdash; measured on the real case, the two tags
+          shared no trigger words and scored 0.25 on their descriptions. Run
+          <a href="/admin/vocabulary?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;model=1">
+          <code>/admin/vocabulary?tenant={_esc(tenant)}&amp;model=1</code></a> for the
+          pass that can see those.</p>
+        </div>"""
 
 
 def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
@@ -3158,119 +3424,16 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
 
     vocab = sorted(kb.situations(tenant))
 
-    def _expiry_line(r) -> str:
-        """When this claim stops standing — visible on EVERY card (owner,
-        2026-08-21). Three states, same vocabulary as `kb.claim_expiry`."""
-        e = kb.claim_expiry(r)
-        if e["state"] == "timeless":
-            return ('<span class="chip nb">never expires</span>')
-        if e["state"] == "undatable":
-            return ('<span class="chip off">undatable</span> '
-                    '<span class="mut">no verification date on file — '
-                    'saving it dates it from today</span>')
-        due = e.get("due")
-        return (f'<span class="mut">expires {_esc(_date(due)) if due else "?"}'
-                f' — a resave re-verifies and resets it to a year out</span>')
-
-    def _claim_editor(r) -> str:
-        """Edit-in-place for an approved claim, folded so the list stays
-        scannable. Same guards as review: a testimonial's wording is its
-        evidence (read-only), tags come only from the account's vocabulary."""
-        verbatim = (r.proof_type or "") in kb.VERBATIM_ONLY
-        tagbox = "".join(
-            f'<label class="tag"><input type="checkbox" name="tags" '
-            f'value="{_esc(tg)}"{" checked" if tg in (r.situations or []) else ""}> '
-            f'{_esc(tg)}</label>' for tg in vocab)
-        exp_btn = ('<button class="sec" name="action" value="expire" '
-                   'title="Put it back on the clock, dated from today">'
-                   'Expires again</button>'
-                   if (r.expiry_policy or "") == "never" else
-                   '<button class="sec" name="action" value="never" '
-                   'title="Brand origin, a material, a permanent placement — '
-                   'facts that do not go stale">Never expires</button>')
-        return f"""
-        <details><summary class="mut">Edit</summary>
-          <form class="f" method="post" action="/admin/claim_update">
-            <input type="hidden" name="claim_id" value="{_esc(r.id)}">
-            <input type="hidden" name="tenant" value="{_esc(tenant)}">
-            <label>{"Quoted — a customer's own words (cannot be reworded)"
-                    if verbatim else "Claim"}</label>
-            <textarea name="claim" rows="2"{" readonly" if verbatim else ""
-                      }>{_esc(r.claim)}</textarea>
-            <label>Evidence</label>
-            <input name="evidence" value="{_esc(r.evidence or '')}"
-                   placeholder="what makes this checkable">
-            <label>True of — blank means the whole brand</label>
-            <input name="entity_key" list="objents"
-                   value="{_esc(r.entity_key or '')}"
-                   placeholder="brand-level (used in any content)">
-            <label>Who said it — required before a testimonial or
-review can be QUOTED</label>
-            <input name="attributed_to" value="{_esc(r.attributed_to or '')}"
-                   placeholder="the customer's name, as it may appear in print">
-            <label>Situations</label>
-            <div class="tags">{tagbox}</div>
-            <div class="row">
-              <button title="Saving re-attests it: verified today, any expiry
-date reset to a year from now (a timeless claim stays timeless)">Save</button>
-              {exp_btn}
-            </div>
-          </form>
-        </details>"""
-
-    def _claim_msg(r, note: str = "", cls: str = "", editable: bool = False) -> str:
-        meta = " · ".join(x for x in [
-            _esc(r.strength or ""), _esc(r.proof_type or ""),
-            f"verified {_date(r.verified_at)}" if r.verified_at else "",
-        ] if x)
-        tags = " ".join(r.situations or []) or "untagged — can never be selected"
-        return (f'<div class="anchor" id="cl-{_esc(r.id)}"></div>'
-                f'<div class="msg {cls}">'
-                f"<div>{_esc(r.claim)}</div>"
-                + (f'<div class="when"><strong>{_esc(r.evidence)}</strong></div>'
-                   if r.evidence else
-                   '<div class="when"><span class="mut">no evidence recorded</span></div>')
-                + f'<div class="when"><code>{_esc(tags)}</code></div>'
-                + f'<div class="when">{meta}{" · " if meta else ""}'
-                f'{_esc(r.source or "source not recorded")}</div>'
-                + f'<div class="when">{_expiry_line(r)}</div>'
-                + (f'<div class="when"><b>{_esc(kb.usage_rule(r.proof_type))}</b></div>'
-                   if kb.usage_rule(r.proof_type or "") else "")
-                + (f'<div class="when"><b>{_esc(note)}</b></div>' if note else "")
-                + (_claim_editor(r) if editable else "")
-                # A claim has always been rejectable from the REVIEW queue,
-                # which an approved claim has already left. Removing one it
-                # turns out the brand should not be making meant re-finding it
-                # there, where it no longer is.
-                + (_remove_control(key, tenant, "claim", r.id, "this claim")
-                   if editable else "")
-                + "</div>")
-
-    def _decide(r) -> str:
-        """Approve/reject a pending claim from HERE, landing back here.
-
-        The audit's gap 3b: this tab listed pending claims with a banner
-        pointing at Review — the fact on one page, the control on another.
-        Same route the Review tab uses, so a decision lands identically
-        whichever surface makes it; `back=kb` returns the reader to this
-        tab rather than costing them their place.
-        """
-        base = (f'/admin/claim_review?key={_esc(key)}&amp;tenant={_esc(tenant)}'
-                f'&amp;ui=1&amp;back=kb&amp;claim_id={_esc(r.id)}&amp;approve=')
-        # Labeled buttons, not emoji links: a control says what it does, and
-        # ✅/❌ were the only "buttons" in the console whose meaning lived in
-        # a glyph (step 2b; the ship queue's pair retired the same day).
-        return (f'<div class="row"><a class="btn" href="{base}yes">Approve</a> '
-                f'<a class="btn danger" href="{base}no">Reject</a></div>')
-
     def _claim_block(title: str, rows_, empty: str, note: str = "",
                      cls: str = "", open_: bool = False,
                      editable: bool = False, decidable: bool = False) -> str:
         if not rows_:
             return (f'<details class="sec"><summary>{_esc(title)} (0)</summary>'
                     f'<p class="mut" style="margin-top:10px">{_esc(empty)}</p></details>')
-        body = "".join(_claim_msg(r, note, cls, editable=editable)
-                       + (_decide(r) if decidable else "") for r in rows_)
+        body = "".join(_claim_row(key, tenant, r, vocab, note, cls,
+                                  editable=editable)
+                       + (_claim_decide_row(key, tenant, r) if decidable
+                          else "") for r in rows_)
         return (f'<details class="sec"{" open" if open_ else ""}>'
                 f'<summary>{_esc(title)} ({len(rows_)})</summary>'
                 f'<div class="thread">{body}</div></details>')
@@ -3307,100 +3470,20 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
     # invisible here.
     # Situations doing one job. Reported here rather than merged anywhere,
     # because a merge rewrites what every claim under both tags can answer.
-    overlaps = kb.situation_overlaps(tenant)
-    over_html = ""
-    if overlaps:
-        rowsh = "".join(f"""
-        <div class="conn">
-          <div><code>{_esc(o['keep'])}</code> and <code>{_esc(o['drop'])}</code>
-            <span class="chip off">{_esc(o['basis'].replace('_', ' '))}</span>
-            <div class="mut">{_esc(o['why'])} &middot;
-              {o['rows'].get(o['keep'], 0)} and {o['rows'].get(o['drop'], 0)} rows</div>
-          </div>
-          <form method="post" action="/admin/merge_situation" class="inl"
-                onsubmit="return confirm('Fold {_esc(o['drop'])} into {_esc(o['keep'])}? Every row tagged the first will be retagged.')">
-            <input type="hidden" name="tenant" value="{_esc(tenant)}">
-            <input type="hidden" name="keep" value="{_esc(o['keep'])}">
-            <input type="hidden" name="drop" value="{_esc(o['drop'])}">
-            <button class="sec">Fold into {_esc(o['keep'])}</button>
-          </form>
-        </div>""" for o in overlaps[:8])
-        over_html = f"""
-        <div class="card danger">
-          <div class="head"><h2>These situations may be one situation</h2></div>
-          <p class="mut">Two tags a person would answer with the same proof are
-          one tag. Split across both, neither accumulates the approved examples
-          that make tagging work, and selection reaches half the evidence it
-          should. Nothing is merged automatically.</p>
-          {rowsh}
-          <p class="mut">A pair that means the same thing in different words
-          will not appear here &mdash; measured on the real case, the two tags
-          shared no trigger words and scored 0.25 on their descriptions. Run
-          <a href="/admin/vocabulary?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;model=1">
-          <code>/admin/vocabulary?tenant={_esc(tenant)}&amp;model=1</code></a> for the
-          pass that can see those.</p>
-        </div>"""
+    over_html = _situation_overlap_card(key, tenant,
+                                        kb.situation_overlaps(tenant))
 
     obj_rows = kb.objections(tenant, any_entity=True)
     obj_cat = {e.key: e.name for e in kb.entities(tenant, available_only=False)}
-
-    def _obj(r) -> str:
-        # The scope is the first thing that has to be readable. An answer true
-        # of one product and shown as true of the catalogue is not a display
-        # bug — it is the system asserting something false about every other
-        # thing the account sells.
-        if r.entity_key:
-            scope = (f'true of <code>{_esc(obj_cat.get(r.entity_key, r.entity_key))}'
-                     f'</code> only')
-            flag = ""
-        else:
-            scope = "<strong>true of everything they sell</strong>"
-            # A machine-origin row that nobody scoped never had that decided.
-            flag = ('<div class="note">Nothing has said what this is true of, '
-                    'so it is being claimed of the whole catalogue. If it came '
-                    'off one product page, scope it — approving a product '
-                    'answer brand-wide is how a customer is told the wrong '
-                    'thing about a different item.</div>'
-                    if kb.scope_unconfirmed(r) or (r.origin or "") == "crawl"
-                    else "")
-        return (
-            f'<div class="anchor" id="o-{_esc(r.id)}"></div>'
-            f'<div><strong>{_esc(r.objection)}</strong>'
-            + (' <span class="chip off">escalate</span>'
-               if (r.escalate or "").lower() == "yes" else "")
-            + "</div>"
-            + f"<div>{_esc(r.response)}</div>"
-            + f'<div class="when">{scope}'
-            + (f" · segment <code>{_esc(r.audience_key)}</code>"
-               if r.audience_key else " · any segment")
-            + (f" · from {_esc(r.origin)}" if r.origin else "")
-            + (f" · paired proof <code>{_esc(r.claim_id)}</code>"
-               if r.claim_id else "")
-            + "</div>" + flag
-            + f"""
-            <details><summary class="mut">Edit</summary>
-            <form class="f" method="post" action="/admin/objection_edit">
-              <input type="hidden" name="row_id" value="{_esc(r.id)}">
-              <input type="hidden" name="tenant" value="{_esc(tenant)}">
-              <label>Objection — the hesitation in the buyer's words</label>
-              <textarea name="objection" rows="2">{_esc(r.objection or '')}</textarea>
-              <label>The approved answer</label>
-              <textarea name="response" rows="3">{_esc(r.response or '')}</textarea>
-              <label>True of &mdash; blank claims it of everything they sell</label>
-              <input name="entity_key" list="objents"
-                     value="{_esc(r.entity_key or '')}"
-                     placeholder="leave blank only if it really is brand-wide">
-              <div class="row"><button class="sec">Save</button></div>
-            </form>
-            </details>""")
 
     # Objections stand alone — they used to share a block with the situation-
     # merge warnings, which is how "claims vs objections" stopped reading as
     # two different things (owner, 2026-08-21). The merge card now lives with
     # the situations it is about.
     obj_html = _kb_list("All objections",
-                        [_obj(r) + _remove_control(key, tenant, "objection",
-                                                   r.id, "this answer")
+                        [_objection_row(key, tenant, r, obj_cat)
+                         + _remove_control(key, tenant, "objection",
+                                           r.id, "this answer")
                          for r in obj_rows],
                         "None. This is human-authored and it is half of the "
                         "intake.", open=len(obj_rows) <= 12)
@@ -4979,38 +5062,58 @@ def _fix_list(key: str, tenant: str) -> str:
 </div>"""
 
 
-def render_schema(key: str, tenant: str = "") -> str:
+def _schema_advanced(key: str, tenant: str) -> str:
+    """The schema reference — today's Data layer page, as the Advanced view.
+
+    Honest about being reference: the shape of the data, not a queue. The
+    fill bars used to be computed by loading EVERY ROW of EVERY KB table per
+    page view (spec §5 named it); they are aggregate queries now — one per
+    table for the bars, two GROUP BYs for the breakdown — and the page reads
+    identically.
+    """
+    from sqlalchemy import Text as _Text, case, cast, func
+
     from . import db as _db, kb as kbm, provenance as prov
 
-    tenant, _here, rows_t = _account(tenant)
-    if tenant == ALL:
-        return _shell(key, "schema", "Data layer", tenant=tenant,
-                      body=_every_note(True, "Row counts are per client. "
-                                       "Pick an account to read its tables."))
     blocks = []
     for cls_name, table, headline, why in _kb_tables():
         model = getattr(_db, cls_name)
         cols = [c for c in model.__table__.columns]
+        names = [c.name for c in cols]
+        data_cols = [c for c in cols if c.name not in ("id", "tenant")]
+
+        # One aggregate query per table: COUNT(*) plus a filled-count per
+        # column. Emptiness matches the old in-python test (None, "", [],
+        # {}) via a text cast — CAST(col AS TEXT) is valid for JSON on both
+        # sqlite and Postgres, where VARCHAR would not be.
+        aggs = [func.count()]
+        for c in data_cols:
+            aggs.append(func.sum(case(
+                (c.is_(None), 0),
+                (cast(c, _Text).in_(("", "[]", "{}", "null")), 0),
+                else_=1)))
         with _db.SessionLocal() as s:
-            q = s.query(model)
-            if "tenant" in [c.name for c in cols]:
+            q = s.query(*aggs)
+            if "tenant" in names:
                 q = q.filter(model.tenant == tenant)
-            rows = q.all()
-            s.expunge_all()
-        n = len(rows)
+            got = q.one()
+            rev, org = {}, {}
+            if "review" in names and "tenant" in names:
+                rev = {(k or "—"): v for k, v in
+                       s.query(model.review, func.count())
+                       .filter(model.tenant == tenant)
+                       .group_by(model.review).all()}
+                org = {(k or "—"): v for k, v in
+                       s.query(model.origin, func.count())
+                       .filter(model.tenant == tenant)
+                       .group_by(model.origin).all()}
+        n = int(got[0] or 0)
 
         # Per-column fill rate. A column nobody fills is either dead weight or
         # a gap in the intake, and both are worth seeing.
         colrows = ""
-        for c in cols:
-            if c.name in ("id", "tenant"):
-                continue
-            filled = 0
-            for r in rows:
-                v = getattr(r, c.name, None)
-                if v not in (None, "", [], {}):
-                    filled += 1
-            pct = int(100 * filled / n) if n else 0
+        for c, filled in zip(data_cols, got[1:]):
+            pct = int(100 * int(filled or 0) / n) if n else 0
             axis = ""
             if c.name in ("origin", "review", "approved_by", "approved_at",
                           "fingerprint", "also_seen"):
@@ -5023,16 +5126,8 @@ def render_schema(key: str, tenant: str = "") -> str:
                         f'<td>{axis}</td></tr>')
 
         # How the rows break down on the two axes that decide usability.
-        def _tally(attr):
-            out = {}
-            for r in rows:
-                out[getattr(r, attr, None) or "—"] = out.get(
-                    getattr(r, attr, None) or "—", 0) + 1
-            return out
         breakdown = ""
-        if n and hasattr(model, "review"):
-            rev = _tally("review")
-            org = _tally("origin")
+        if n and rev:
             breakdown = ('<div class="chips">'
                          + "".join(f'<span class="chip {"on" if k == prov.APPROVED else "off"}">'
                                    f'{_esc(k)} {v}</span>' for k, v in sorted(rev.items()))
@@ -5099,15 +5194,14 @@ def render_schema(key: str, tenant: str = "") -> str:
     missing = ("".join(f'<span class="chip off">{_esc(m)}</span>'
                        for m in comp.get("missing", []))) or ""
 
-    return _shell(key, "schema", "Data layer", tenant=tenant, body=f"""
+    return f"""
 <div>
-  <p class="mut">What the knowledge base holds for this account, table by table.
-  The Knowledge tab shows the content; this shows the shape — which columns are
-  actually being filled, and how the rows break down by where they came from and
-  whether a human has approved them. Read from the models, so a new column shows
-  up here on its own.</p>
+  <p class="mut">The shape of the data, as reference — which columns are
+  actually being filled, and how the rows break down by where they came from
+  and whether a human has approved them. Read from the models, so a new column
+  shows up here on its own. The content lives on the domain views; the work
+  lives on Queue &amp; Insights.</p>
 </div>
-{_fix_list(key, tenant)}
 
 <div class="card">
   <div class="head"><h2>This account at a glance</h2></div>
@@ -5119,7 +5213,917 @@ def render_schema(key: str, tenant: str = "") -> str:
 </div>
 {"".join(blocks)}
 {relational}
-""", suffix=f"&amp;tenant={_esc(tenant)}")
+"""
+
+
+#: The Data layer's sub-views (step 4, spec §5). Queue & Insights is the
+#: landing — the work; the domains are the content, paged and editable in
+#: place; Advanced is the plumbing, honest about being reference.
+SCHEMA_SUBS = (("queue", "Queue & Insights"), ("claims", "Claims"),
+               ("objections", "Objections"), ("audiences", "Audiences"),
+               ("catalogue", "Catalogue"), ("situations", "Situations"),
+               ("photos", "Photos"), ("advanced", "Advanced"))
+
+
+def _schema_needs_you(tenant: str) -> dict:
+    """The Data layer's needs-you rows, computed ONCE and shared by the
+    badge, the strip and the queue itself — rule 8: a count and the list it
+    points at come from the same query, or the number is learned as noise.
+
+    Four parts, each wrapped so a failing feed counts zero instead of taking
+    the sidebar down: readiness blockers, entity-attribute gaps that cost an
+    answer, observed edit lessons, and mute-pattern proposals with a
+    one-click accept. (The spec's fifth feed — craft proposals — has no
+    carrier in the code yet and is not counted or rendered.)
+    """
+    out: dict = {"readiness": {}, "actions": [], "unknowns": [],
+                 "lessons": [], "mutes": [], "mute_info": []}
+    try:
+        from . import resolve as _rs
+        out["readiness"] = _rs.readiness(tenant)
+        out["actions"] = list(out["readiness"].get("next_actions") or [])
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        out["unknowns"] = list(kb.unknowns(tenant))
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        out["lessons"] = systems.edit_lesson_rows(tenant)
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        from . import keywords as _kw
+        ml = _kw.mute_lessons(tenant) or {}
+        out["mutes"] = list(ml.get("terms") or [])
+        out["mute_info"] = (list(ml.get("sources") or [])
+                            + list(ml.get("clusters") or []))
+    except Exception:                                            # noqa: BLE001
+        pass
+    out["n"] = (len(out["actions"]) + len(out["unknowns"])
+                + len(out["lessons"]) + len(out["mutes"]))
+    return out
+
+
+def _dl_base(key: str, tenant: str, sub: str, q: str = "",
+             state: str = "") -> str:
+    """One URL base for a domain view — search, state and pager all append
+    to the same address, so a filter never loses the search and a page turn
+    never loses either."""
+    from urllib.parse import quote as _q
+    b = f"/admin/ui?tab=schema&amp;sub={_esc(sub)}&amp;tenant={_esc(tenant)}"
+    if key:
+        b += f"&amp;key={_esc(key)}"
+    if state:
+        b += f"&amp;state={_esc(state)}"
+    if q:
+        b += f"&amp;q={_esc(_q(q, safe=''))}"
+    return b
+
+
+def _dl_search(key: str, tenant: str, sub: str, q: str, state: str = "",
+               what: str = "filter") -> str:
+    hidden = "".join(
+        f'<input type="hidden" name="{n}" value="{_esc(v)}">'
+        for n, v in (("tab", "schema"), ("sub", sub), ("tenant", tenant),
+                     ("key", key), ("state", state)) if v)
+    return (f'<form method="get" action="/admin/ui" class="row">{hidden}'
+            f'<input name="q" value="{_esc(q)}" placeholder="{_esc(what)}" '
+            f'style="flex:1;min-width:200px">'
+            f'<button class="sec">Search</button>'
+            + (f'<a class="mut" href="{_dl_base(key, tenant, sub, "", state)}">'
+               f'clear</a>' if q else "")
+            + '</form>')
+
+
+def _dl_back_fields(sub: str, state: str = "", page: int = 1,
+                    q: str = "") -> str:
+    """Hidden fields every Data-layer form carries so its route lands the
+    reader back on THIS view, page and filter — rule 3, by name, never by
+    echoing a URL."""
+    return (f'<input type="hidden" name="back" value="schema">'
+            f'<input type="hidden" name="bsub" value="{_esc(sub)}">'
+            + (f'<input type="hidden" name="bstate" value="{_esc(state)}">'
+               if state else "")
+            + (f'<input type="hidden" name="bpage" value="{page}">'
+               if page > 1 else "")
+            + (f'<input type="hidden" name="bq" value="{_esc(q)}">'
+               if q else ""))
+
+
+def _dl_backq(sub: str, state: str = "", page: int = 1) -> str:
+    """The same back parts as a query fragment, for GET links."""
+    s = f"back=schema&amp;bsub={_esc(sub)}"
+    if state:
+        s += f"&amp;bstate={_esc(state)}"
+    if page > 1:
+        s += f"&amp;bpage={page}"
+    return s
+
+
+def _match(q: str, *fields) -> bool:
+    ql = (q or "").strip().lower()
+    if not ql:
+        return True
+    hay = " ".join(str(f or "") for f in fields).lower()
+    return all(w in hay for w in ql.split())
+
+
+def _schema_queue(key: str, tenant: str, need: dict) -> str:
+    """Queue & Insights — the landing. Three lanes (spec §5): what the brain
+    is missing (answerable HERE), what it is learning from human edits
+    (promote or dismiss HERE), and a fact shown WORKING inside real output —
+    the honest answer to "nothing in the KB is display-only"."""
+    from urllib.parse import quote as _q
+    r = need["readiness"]
+
+    # --- lane 1 · missing knowledge, each row with its typed control ------
+    missing_sits = [p["situation"] for p in (r.get("per_situation") or [])
+                    if p.get("state") == "unanswerable"]
+
+    def _act_row(a: dict) -> str:
+        fix = str(a.get("fix") or "")
+        meta = (f'<div class="when">unblocks {_esc(str(a.get("unblocks", "")))}'
+                + (f' · {a.get("situations", 0)} situation(s)'
+                   if a.get("situations") else "") + "</div>")
+        if fix.startswith("author an objection"):
+            forms = "".join(f"""
+      <form class="f" method="post" action="/admin/objection_add">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="situations" value="{_esc(tag)}">
+        {_dl_back_fields("queue")}
+        <label>No approved answer for <code>{_esc(tag)}</code></label>
+        <input name="objection" placeholder="the hesitation, in the buyer's words">
+        <textarea name="response" rows="2" placeholder="the approved answer — saving files it as an objection, approved"></textarea>
+        <div class="row"><button>Save answer</button>
+          <span class="when">lands approved — the next draft can use it</span></div>
+      </form>""" for tag in missing_sits[:3])
+            more = (f'<div class="when">and {len(missing_sits) - 3} more '
+                    f'situation(s) after these</div>'
+                    if len(missing_sits) > 3 else "")
+            return (f'<div class="msg"><div><strong>{_esc(fix)}</strong></div>'
+                    f'{meta}{forms}{more}</div>')
+        # The two brand blockers and the approve-backlog keep their labeled
+        # link-button — their control-bearing surface is one place (one
+        # writer), and the button says which.
+        tab, label = _READINESS_WHERE.get(
+            str(a.get("where") or "").strip().lower(), ("", ""))
+        ctl = (f'<a class="btn sec" href="/admin/ui?tab={tab}'
+               f'&amp;tenant={_esc(tenant)}'
+               + (f'&amp;key={_esc(key)}' if key else "")
+               + f'">{label} &rarr;</a>' if tab
+               else f'<span class="mut">{_esc(str(a.get("where") or ""))}</span>')
+        return (f'<div class="msg"><div><strong>{_esc(fix)}</strong></div>'
+                f'{meta}<div class="row">{ctl}</div></div>')
+
+    acts_html = ("".join(_act_row(a) for a in need["actions"])
+                 or f'<p class="mut">Nothing is blocking this account. It can '
+                    f'answer {r.get("answerable", 0)} of '
+                    f'{r.get("situations", 0)} situations, '
+                    f'{r.get("proven", 0)} of them with proof attached.</p>')
+
+    unk_html = "".join(
+        f'<div class="msg"><div><strong>{_esc(u.entity_name or u.entity_key)}'
+        f'</strong> — {_esc((u.attribute or "").replace("_", " "))} unknown</div>'
+        f'<div class="when">blocked an answer {_esc(u.hits)}× · last asked: '
+        f'{_esc(u.asked_for or "—")}</div>'
+        f'<form class="f" method="get" action="/admin/kb_unknown" '
+        f'style="margin-top:6px">'
+        f'<input type="hidden" name="key" value="{_esc(key)}">'
+        f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+        f'<input type="hidden" name="id" value="{_esc(u.id)}">'
+        f'{_dl_back_fields("queue")}'
+        f'<div class="row"><input name="value" placeholder="the value, or n/a">'
+        f'<button>Save</button></div></form></div>'
+        for u in need["unknowns"]) or (
+        '<p class="mut">Nothing has been asked for that this account could '
+        'not answer.</p>')
+
+    gaps = []
+    try:
+        gaps = kb.gaps(tenant)
+    except Exception:                                            # noqa: BLE001
+        pass
+    if gaps:
+        nxt = gaps[0]
+        gap_html = f"""
+    <details class="sec"><summary>The intake question ({len(gaps)} unanswered)</summary>
+      <p style="margin-top:8px"><strong>{_esc(nxt['q'])}</strong></p>
+      <form class="f" method="get" action="/admin/kb_add">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="step" value="{nxt['id']}">
+        {_dl_back_fields("queue")}
+        <textarea name="text" rows="2" placeholder="{_esc(nxt['hint'])}"></textarea>
+        <div class="row"><button>Answer</button></div>
+      </form>
+    </details>"""
+    else:
+        gap_html = ('<p class="mut">The intake is complete — every question '
+                    'the pipeline requires has an answer.</p>')
+
+    blocked = []
+    try:
+        blocked = systems.blocked_reasons(tenant, 30)
+    except Exception:                                            # noqa: BLE001
+        pass
+    blocked_html = ""
+    if blocked:
+        blocked_html = (
+            '<details class="sec"><summary>What cost an output (30 days, '
+            f'{len(blocked)} reason(s))</summary>'
+            '<p class="mut" style="margin-top:8px">Runs that blocked or '
+            'shipped with a recorded defect, by reason, most frequent first '
+            '— the authoring backlog ranked by what it actually cost.</p>'
+            + "".join(f'<div class="msg"><code>{_esc(rule)}</code> '
+                      f'<span class="chip off">×{n}</span></div>'
+                      for rule, n in blocked[:10])
+            + '</details>')
+
+    lane1 = f"""
+<div class="card">
+  <div class="head"><h2>What to fix, in order</h2>
+    <span class="chip {'off' if need['actions'] else 'on'}">{_esc(r.get("score", "0/0"))}
+      situations answerable</span></div>
+  <p class="mut">Ranked by how many situations each one releases, not by how
+  quick it is. This account {_esc(r.get("verdict", "has no vocabulary yet"))}.
+  Each row carries its control — answering files it approved, here.</p>
+  <div class="thread">{acts_html}</div>
+  <h3 style="font-size:.9rem;margin:14px 0 6px">Gaps that cost an answer
+    <span class="chip {'off' if need['unknowns'] else 'on'}">{len(need['unknowns'])} open</span></h3>
+  <div class="thread">{unk_html}</div>
+  {gap_html}
+  {blocked_html}
+</div>"""
+
+    # --- lane 2 · active learning — observed, never instruction ------------
+    lessons_html = ""
+    for les in need["lessons"]:
+        rid = _esc(les["run_id"])
+        base_fields = (
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="run_id" value="{rid}">'
+            f'<input type="hidden" name="system_key" '
+            f'value="{_esc(les["system_key"])}">'
+            + _dl_back_fields("queue"))
+        lessons_html += f"""
+  <div class="msg">
+    <div><span class="chip nb">{_esc(les["system_key"])}</span>
+      <span class="when">{_esc(f"{les['when']:%b %d}" if les.get("when") else "")}
+      · observed from your edits · 60d window</span></div>
+    <pre class="msg" style="white-space:pre-wrap;margin:6px 0">{_esc(les["text"][:600])}</pre>
+    <div class="row">
+      <form method="post" action="/admin/lesson_act" style="display:inline">
+        {base_fields}
+        <input type="hidden" name="act" value="guidance">
+        <button class="sec" title="Standing guidance — injected into every future draft for this system">Keep as guidance</button>
+      </form>
+      <form method="post" action="/admin/lesson_act" style="display:inline">
+        {base_fields}
+        <input type="hidden" name="act" value="dismiss">
+        <button class="sec" title="A one-off, not a pattern — it leaves this lane AND the drafter's brief">Dismiss</button>
+      </form>
+    </div>
+    <details class="sec"><summary>Make it a rule</summary>
+      <form method="post" action="/admin/lesson_act" class="row">
+        {base_fields}
+        <input type="hidden" name="act" value="rule">
+        <input name="phrase" placeholder="the exact phrase to ban — the validator blocks it forever" style="flex:1;min-width:240px">
+        <button class="sec">Ban it</button>
+      </form>
+    </details>
+  </div>"""
+    if not lessons_html:
+        lessons_html = ('<p class="mut">No edited runs in the last 60 days. '
+                        'When you edit a draft before it ships, the pattern '
+                        'appears here to promote or dismiss.</p>')
+
+    mutes_html = ""
+    for m in need["mutes"]:
+        mutes_html += f"""
+  <div class="msg">
+    <div><strong>{_esc(m.get("term", ""))}</strong>
+      <span class="when">muted with it: {_esc(", ".join(m.get("muted_with_it") or [])[:120])}</span></div>
+    <div class="when">{_esc(m.get("proposal", ""))}</div>
+    <form method="get" action="/admin/exclude_term" class="row">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="term" value="{_esc(m.get("term", ""))}">
+      {_dl_back_fields("queue")}
+      <button class="sec">Exclude it — the harvest stops surfacing it</button>
+    </form>
+  </div>"""
+    for m in need["mute_info"]:
+        mutes_html += (
+            f'<div class="msg"><div class="when">{_esc(m.get("proposal", ""))}'
+            f' · <a href="/admin/ui?tab=plan&amp;tenant={_esc(tenant)}'
+            + (f'&amp;key={_esc(key)}' if key else "")
+            + '">retire it on Plan &rarr;</a></div></div>')
+    if not (need["mutes"] or need["mute_info"]):
+        mutes_html = ('<p class="mut">No mute patterns yet — under a handful '
+                      'of muted keywords, a shared word is a coincidence, not '
+                      'a pattern.</p>')
+
+    lane2 = f"""
+<div class="card">
+  <div class="head"><h2>Active learning</h2>
+    <span class="chip {'off' if (need['lessons'] or need['mutes']) else 'on'}">{len(need['lessons']) + len(need['mutes'])} waiting</span></div>
+  <p class="mut"><b>Observed, never instruction</b> — the code's own
+  distinction. These are patterns read from what you actually changed and
+  muted; promoting one makes it standing guidance or a hard rule, dismissing
+  one removes it from the drafter's brief too.</p>
+  {lessons_html}
+  <h3 style="font-size:.9rem;margin:14px 0 6px">From your muted keywords</h3>
+  {mutes_html}
+</div>"""
+
+    return lane1 + lane2 + _grounded_lane(key, tenant)
+
+
+def _grounded_lane(key: str, tenant: str) -> str:
+    """Grounded output v1 (spec §5, the one new build): a claim shown WORKING
+    inside a kept artifact — used N times in 90 days, last in a named piece,
+    with the sentence that carries it. The display shows the fact doing its
+    job, which is the honest answer to a KB that reads as display-only."""
+    import datetime as _dt
+
+    since = db.utcnow() - _dt.timedelta(days=90)
+    uses: dict[str, list] = {}
+    with db.SessionLocal() as s:
+        outs = (s.query(db.Output)
+                .filter(db.Output.tenant == tenant,
+                        db.Output.created_at >= since,
+                        db.Output.claim_ids.isnot(None))
+                .order_by(db.Output.created_at.desc())
+                .limit(400).all())
+        s.expunge_all()
+    for o in outs:
+        for cid in (o.claim_ids or []):
+            uses.setdefault(str(cid), []).append(o)
+    top = sorted(uses.items(), key=lambda kv: -len(kv[1]))[:3]
+    if not top:
+        return ("""
+<div class="card">
+  <div class="head"><h2>Grounded output</h2><span class="chip nb">preview</span></div>
+  <p class="mut">No output has cited a claim in the last 90 days. Once drafts
+  cite proof, this shows each fact working inside the real thing — the
+  sentence it became, in the artifact it shipped in.</p>
+</div>""")
+
+    with db.SessionLocal() as s:
+        by_id = {c.id: c for c in
+                 s.query(db.KbClaim)
+                 .filter(db.KbClaim.id.in_([cid for cid, _ in top])).all()}
+        s.expunge_all()
+
+    rows_html = ""
+    for cid, used in top:
+        claim = by_id.get(cid)
+        if claim is None:
+            continue
+        latest = used[0]
+        used_ids = [o.id for o in used[:12]]
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id.in_(used_ids)).first())
+            if art is None:
+                # An ad VARIANT is kept inside its batch, not under its own
+                # id — the same membership resolution the workroom route
+                # runs, or every ad claim would read as "not kept".
+                from sqlalchemy import or_
+                art = (s.query(db.ArtifactBody)
+                       .filter(db.ArtifactBody.format == "ad_batch",
+                               or_(*[db.ArtifactBody.body.like(f'%"{i}"%')
+                                     for i in used_ids])).first())
+            s.expunge_all()
+        quote_html = ""
+        where = ""
+        if art is not None:
+            if (art.format or "") == "ad_batch":
+                # Quote the VARIANT'S copy — the JSON around it is the
+                # record, not the artifact a reader would recognise.
+                import json as _json
+                sent = ""
+                try:
+                    for v in _json.loads(art.body or "").get("variants") or []:
+                        if (cid in (v.get("claim_ids") or [])
+                                or v.get("output_id") in used_ids):
+                            sent = _cited_sentence(str(v.get("text") or ""),
+                                                   claim.claim or "")
+                            break
+                except Exception:                                # noqa: BLE001
+                    pass
+            else:
+                sent = _cited_sentence(art.body or art.draft_body or "",
+                                       claim.claim or "")
+            if sent:
+                quote_html = (f'<div class="msg esc" style="margin-top:6px">'
+                              f'&hellip;{sent}&hellip;</div>')
+            where = (f' · last in <a href="/admin/work/{_esc(art.output_id)}'
+                     + (f'?key={_esc(key)}' if key else "")
+                     + f'">{_esc((art.format or "artifact").replace("_", " "))}'
+                     f' &middot; {_esc(str(latest.created_at)[:10])}</a>')
+        else:
+            where = (' · the artifacts were not kept whole (pre-workroom '
+                     'outputs), so the sentence cannot be shown')
+        uses_fold = (
+            '<details class="sec"><summary>'
+            f'See all {len(used)} use(s)</summary>'
+            + "".join(f'<div class="msg"><span class="when">'
+                      f'{_esc(str(o.created_at)[:16])} · '
+                      f'{_esc(o.system_key or "")} · '
+                      f'{_esc((o.format or ""))}</span></div>'
+                      for o in used[:15])
+            + '</details>')
+        rows_html += (
+            f'<div class="msg"><div>claim: <b>{_esc(claim.claim)}</b></div>'
+            f'<div class="when">used {len(used)}&times; / 90d{where}</div>'
+            f'{quote_html}'
+            f'<div class="row"><a class="btn sec" '
+            f'href="{_dl_base(key, tenant, "claims")}#cl-{_esc(cid)}">'
+            f'Edit claim &rarr;</a></div>'
+            f'{uses_fold}</div>')
+
+    return f"""
+<div class="card">
+  <div class="head"><h2>Grounded output</h2><span class="chip nb">preview</span></div>
+  <p class="mut">The most-used proof, shown working — the sentence a claim
+  became, inside the artifact that shipped it. Nothing here is display-only:
+  each row carries its editor.</p>
+  <div class="thread">{rows_html}</div>
+</div>"""
+
+
+def _cited_sentence(html: str, claim: str) -> str:
+    """The sentence of the artifact that most carries the claim's words —
+    a token-overlap best match, with the shared words bolded. Deterministic
+    and honest: when nothing overlaps, empty, and the caller says so."""
+    text = _re.sub(r"<[^>]+>", " ", html or "")
+    text = _re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+    toks = {w for w in _re.findall(r"[a-z0-9']+", (claim or "").lower())
+            if len(w) > 3}
+    if not toks:
+        return ""
+    best, best_n = "", 0
+    for sent in _re.split(r"(?<=[.!?])\s+", text):
+        n = sum(1 for w in _re.findall(r"[a-z0-9']+", sent.lower())
+                if w in toks)
+        if n > best_n:
+            best, best_n = sent, n
+    if best_n < 2:
+        return ""
+    out = _esc(best[:300])
+    for w in sorted(toks, key=len, reverse=True):
+        out = _re.sub(f"(?i)\\b({_re.escape(w)})\\b", r"<b>\1</b>", out)
+    return out
+
+
+def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
+                   page: int) -> str:
+    """One domain view: a paged list of the rows with edit-in-place, a
+    search filter, the pending count linking at the Review queue, and a
+    structured add form — the pipe-format textareas retire here."""
+    from . import provenance as prov
+    per = 15
+    base = _dl_base(key, tenant, sub, q, state)
+    ents = kb.entities(tenant, available_only=False)
+    cat = {e.key: e.name for e in ents}
+    datalist = ('<datalist id="objents">'
+                + "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
+                          for k, v in cat.items()) + "</datalist>")
+
+    def _page_slice(rows_):
+        total = len(rows_)
+        pg = max(1, min(page, max(1, -(-total // per))))
+        return rows_[(pg - 1) * per:pg * per], _pager(base, pg, total, per,
+                                                      sub), pg
+
+    def _pending_chip(model, review_sub: str) -> str:
+        with db.SessionLocal() as s:
+            n = (s.query(model)
+                 .filter(model.tenant == tenant,
+                         model.review == prov.PROPOSED).count())
+        if not n:
+            return ""
+        return (f'<span class="chip off">{n} awaiting review &middot; '
+                f'<a href="/admin/ui?tab=content&amp;sub={review_sub}&amp;'
+                f'tenant={_esc(tenant)}'
+                + (f'&amp;key={_esc(key)}' if key else "")
+                + '">decide on Review</a></span>')
+
+    def _add_fold(title: str, kind: str, fields: str) -> str:
+        return f"""
+<details class="sec"><summary>{_esc(title)}</summary>
+  <form class="f" method="post" action="/admin/kb_row_add">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="kind" value="{_esc(kind)}">
+    {_dl_back_fields(sub, state, page, q)}
+    {fields}
+    <div class="row"><button>Add — it lands approved, yours to edit here</button></div>
+  </form>
+</details>"""
+
+    if sub == "claims":
+        inv = kb.claim_inventory(tenant)
+        with db.SessionLocal() as s:
+            # KbClaim carries no created_at; verified_at is the row's most
+            # recent attestation and orders removed rows newest-first.
+            removed = (s.query(db.KbClaim)
+                       .filter(db.KbClaim.tenant == tenant,
+                               db.KbClaim.review == prov.REJECTED)
+                       .order_by(db.KbClaim.verified_at.desc()).all())
+            s.expunge_all()
+        states = (("selectable", inv["selectable"]),
+                  ("awaiting", inv["pending"]),
+                  ("expired", inv["expired"]),
+                  ("retired", inv["retired"]),
+                  ("removed", removed))
+        cur = state if state in dict(states) else "selectable"
+        chips = '<div class="filters">' + "".join(
+            f'<a class="{"on" if k == cur else ""}" '
+            f'href="{_dl_base(key, tenant, sub, q, k)}">{k} ({len(v)})</a>'
+            for k, v in states) + "</div>"
+        vocab = sorted(kb.situations(tenant))
+        rows_ = [r for r in dict(states)[cur]
+                 if _match(q, r.claim, r.evidence,
+                           " ".join(r.situations or []), r.entity_key)]
+        shown, pager, pg = _page_slice(rows_)
+        bf = _dl_back_fields(sub, cur, pg, q)
+        body = ""
+        for r in shown:
+            if cur == "removed":
+                body += (
+                    _claim_row(key, tenant, r, vocab, "removed — no "
+                               "generator may cite it", "gone")
+                    + f"""
+      <form method="post" action="/admin/kb_restore" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="kind" value="claim">
+        <input type="hidden" name="id" value="{_esc(r.id)}">
+        {_dl_back_fields(sub, cur, pg, q)}
+        <button class="sec">Restore</button>
+        <span class="when">back to approved — every generator may cite it
+        again</span>
+      </form>""")
+            elif cur == "awaiting":
+                body += (_claim_row(key, tenant, r, vocab,
+                                    "not selectable until approved", "gone")
+                         + _claim_decide_row(key, tenant, r,
+                                             backq=_dl_backq(sub, cur, pg)))
+            else:
+                body += _claim_row(key, tenant, r, vocab,
+                                   editable=(cur == "selectable"),
+                                   cls=("" if cur == "selectable" else "gone"),
+                                   back_fields=bf)
+        empty = {"selectable": "No usable proof. Any draft that needs a "
+                               "number is blocked.",
+                 "awaiting": "Nothing submitted for review.",
+                 "expired": "Nothing has gone stale.",
+                 "retired": "Nothing retired.",
+                 "removed": "Nothing removed by hand."}[cur]
+        add = _add_fold("Add a claim", "claim", f"""
+    <label>Claim — one checkable statement</label>
+    <textarea name="claim" rows="2"></textarea>
+    <label>Evidence — what makes it checkable</label>
+    <input name="evidence">
+    <label>Situations</label>
+    <div class="tags">{"".join(
+        f'<label class="tag"><input type="checkbox" name="situations" '
+        f'value="{_esc(t)}"> {_esc(t)}</label>' for t in vocab)
+        or '<span class="mut">no vocabulary yet — untagged is brand-wide proof</span>'}</div>""")
+        return f"""
+<div class="card">
+  <div class="head"><h2>Claims — the proof drafts may cite</h2>
+    <span class="chip {'on' if inv['selectable'] else 'off'}">{len(inv['selectable'])} usable</span>
+    {_pending_chip(db.KbClaim, "claims")}</div>
+  {chips}
+  {_dl_search(key, tenant, sub, q, cur, "search claims, evidence, tags")}
+  {pager}
+  <div class="thread">{body or f'<p class="mut">{_esc(empty)}{" Nothing matches the filter." if q else ""}</p>'}</div>
+  {pager}
+  {add}
+  {datalist}
+</div>"""
+
+    if sub == "objections":
+        rows_ = [r for r in kb.objections(tenant, any_entity=True)
+                 if _match(q, r.objection, r.response, r.entity_key,
+                           " ".join(r.situations or []))]
+        shown, pager, pg = _page_slice(rows_)
+        vocab = sorted(kb.situations(tenant))
+        bf = _dl_back_fields(sub, "", pg, q)
+        body = "".join(
+            f'<div class="msg">{_objection_row(key, tenant, r, cat, bf)}'
+            + _remove_control(key, tenant, "objection", r.id, "this answer",
+                              back_fields=bf)
+            + '</div>' for r in shown)
+        add = _add_fold("Add an objection", "objection", f"""
+    <label>Objection — the hesitation in the buyer's words</label>
+    <textarea name="objection" rows="2"></textarea>
+    <label>The approved answer</label>
+    <textarea name="response" rows="3"></textarea>
+    <label>True of — blank claims it of everything they sell</label>
+    <input name="entity_key" list="objents">
+    <label>Situations</label>
+    <div class="tags">{"".join(
+        f'<label class="tag"><input type="checkbox" name="situations" '
+        f'value="{_esc(t)}"> {_esc(t)}</label>' for t in vocab)
+        or '<span class="mut">no vocabulary yet</span>'}</div>""")
+        return f"""
+<div class="card">
+  <div class="head"><h2>Objections — the approved answers</h2>
+    <span class="chip {'on' if rows_ else 'off'}">{len(rows_)}</span>
+    {_pending_chip(db.KbObjection, "other")}</div>
+  {_dl_search(key, tenant, sub, q, "", "search objections and answers")}
+  {pager}
+  <div class="thread">{body or '<p class="mut">None. This is human-authored and it is half of the intake.</p>'}</div>
+  {pager}
+  {add}
+  {datalist}
+</div>"""
+
+    if sub == "audiences":
+        rows_ = [r for r in kb.audiences(tenant)
+                 if _match(q, r.name, r.key, " ".join(r.pains or []),
+                           " ".join(r.vocabulary or []))]
+        shown, pager, pg = _page_slice(rows_)
+        body = ""
+        for r in shown:
+            body += (f'<div class="msg">'
+                     f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.key)}</code></div>"
+                     + _kv([("pains", _words(r.pains, "none recorded")),
+                            ("their words", _words(r.vocabulary,
+                                                   "none — selection cannot recognise this buyer")),
+                            ("buying trigger", _esc(r.buying_trigger) or _mut("not set")),
+                            ("decides in", _esc(r.decision_timeline) or _mut("not set"))]
+                           + ([("notes", _esc(r.notes))] if r.notes else []))
+                     + f"""
+      <details><summary class="mut">Edit</summary>
+        <form class="f" method="post" action="/admin/audience_update">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="row_id" value="{_esc(r.id)}">
+          {_dl_back_fields(sub, "", pg, q)}
+          <label>Name</label>
+          <input name="name" value="{_esc(r.name or '')}">
+          <label>Pains — one per line</label>
+          <textarea name="pains" rows="3">{_esc(chr(10).join(r.pains or []))}</textarea>
+          <label>Their words — one per line; selection matches on these</label>
+          <textarea name="vocabulary" rows="3">{_esc(chr(10).join(r.vocabulary or []))}</textarea>
+          <label>Buying trigger</label>
+          <input name="buying_trigger" value="{_esc(r.buying_trigger or '')}">
+          <label>Decides in</label>
+          <input name="decision_timeline" value="{_esc(r.decision_timeline or '')}">
+          <div class="row"><button class="sec">Save</button></div>
+        </form>
+      </details>"""
+                     + _remove_control(key, tenant, "audience", r.id,
+                                       r.name or r.key,
+                                       back_fields=_dl_back_fields(sub, "", pg, q))
+                     + '</div>')
+        add = _add_fold("Add an audience", "audience", """
+    <label>Key — short, lowercase</label>
+    <input name="akey" placeholder="hosts">
+    <label>Name</label>
+    <input name="name" placeholder="Hosts who entertain">
+    <label>Pains — one per line</label>
+    <textarea name="pains" rows="2"></textarea>
+    <label>Their words — one per line</label>
+    <textarea name="vocabulary" rows="2"></textarea>""")
+        return f"""
+<div class="card">
+  <div class="head"><h2>Audiences — who they sell to</h2>
+    <span class="chip {'on' if rows_ else 'off'}">{len(rows_)}</span>
+    {_pending_chip(db.KbAudience, "other")}</div>
+  <p class="mut">The one KB kind that had no editor (spec §5) — it does now:
+  every field a segment is selected on, editable in place.</p>
+  {_dl_search(key, tenant, sub, q, "", "search audiences")}
+  {pager}
+  <div class="thread">{body or '<p class="mut">No segments. Selection cannot narrow to a buyer.</p>'}</div>
+  {pager}
+  {add}
+</div>"""
+
+    if sub == "catalogue":
+        rows_ = [r for r in ents
+                 if _match(q, r.name, r.key, r.type, r.description)]
+        shown, pager, pg = _page_slice(rows_)
+        groups = [r for r in ents if (r.type or "") == "collection"]
+        opts = "".join(f'<option value="{_esc(g.key)}">{_esc(g.name)}</option>'
+                       for g in groups)
+        body = ""
+        for r in shown:
+            grp = ""
+            if groups and (r.type or "") != "collection":
+                grp = f"""
+      <form method="post" action="/admin/entity_group" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="entity_keys" value="{_esc(r.key)}">
+        {_dl_back_fields(sub, "", pg, q)}
+        <select name="group">{opts}</select>
+        <button class="sec">Add to group</button>
+        <span class="when">membership is additive — adding one never removes
+        another</span>
+      </form>"""
+            body += (f'<div class="msg">'
+                     f'<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.type)}</code> '
+                     f"{_esc(r.price) or _mut('no price')}"
+                     + ("" if (r.availability or "available") == "available"
+                        else f' <span class="chip off">{_esc(r.availability)}</span>')
+                     + "</div>"
+                     + f'<div class="when">{_esc(r.description) or _mut("no description")}</div>'
+                     + _attr_chips(r.attributes or {})
+                     + f'<div class="when"><code>{_esc(r.key)}</code> · '
+                     + _esc(r.source or "source not recorded")
+                     + (f" · verified {_date(r.verified_at)}" if r.verified_at else "")
+                     + "</div>" + grp
+                     + _remove_control(key, tenant, "entity", r.id, r.name,
+                                       "Anything scoped only to it — its claims, its "
+                                       "objections, its photographs — comes out with it.",
+                                       back_fields=_dl_back_fields(sub, "", pg, q))
+                     + '</div>')
+        bulk = ""
+        if groups and len(shown) > 1:
+            picks = "".join(
+                f'<label class="pick"><input type="checkbox" name="entity_keys" '
+                f'value="{_esc(r.key)}" form="grp"> {_esc(r.name)}</label>'
+                for r in shown if (r.type or "") != "collection")
+            bulk = f"""
+<details class="sec"><summary>Group several at once (this page's items)</summary>
+  <form id="grp" method="post" action="/admin/entity_group"></form>
+  <input type="hidden" name="key" value="{_esc(key)}" form="grp">
+  <input type="hidden" name="tenant" value="{_esc(tenant)}" form="grp">
+  <input type="hidden" name="back" value="schema" form="grp">
+  <input type="hidden" name="bsub" value="catalogue" form="grp">
+  <div class="bulkbar">
+    <select name="group" form="grp">{opts}</select>
+    <span class="grow"></span>
+    <button form="grp">Add selected to this group</button>
+  </div>
+  <div class="tags">{picks}</div>
+  <p class="mut">Search first to narrow the page — the old 200-checkbox wall
+  is what this replaces.</p>
+</details>"""
+        add = _add_fold("Add something they sell", "entity", """
+    <label>Type</label>
+    <select name="etype"><option>product</option><option>collection</option>
+      <option>service</option></select>
+    <label>Key — short, lowercase</label>
+    <input name="ekey" placeholder="aqua-plate">
+    <label>Name</label>
+    <input name="name">
+    <label>Price</label>
+    <input name="price" placeholder="$95">
+    <label>Description</label>
+    <textarea name="description" rows="2"></textarea>""")
+        return f"""
+<div class="card">
+  <div class="head"><h2>Catalogue — what they sell</h2>
+    <span class="chip {'on' if rows_ else 'off'}">{len(rows_)}</span>
+    {_pending_chip(db.KbEntity, "other")}</div>
+  <div class="row">{_act(key, "/admin/catalog_sync", "Sync from store", tenant)}
+    <span class="when">the store owns price and availability; editorial
+    fields conflict rather than overwrite</span></div>
+  {_dl_search(key, tenant, sub, q, "", "search the catalogue")}
+  {pager}
+  <div class="thread">{body or '<p class="mut">Nothing catalogued. Selection has nothing to offer.</p>'}</div>
+  {pager}
+  {bulk}
+  {add}
+</div>"""
+
+    if sub == "situations":
+        sits = [r for r in kb.situation_rows(tenant)
+                if _match(q, r.tag, r.description)]
+        shown, pager, pg = _page_slice(sits)
+        body = "".join(
+            f'<div class="msg"><div><code>{_esc(r.tag)}</code> '
+            f'<span class="chip nb">{_esc(r.kind or "problem")}</span></div>'
+            f'<div class="when">{_esc(r.description) or _mut("no description")}</div>'
+            f'<div class="when">triggers on: '
+            + (_esc(", ".join(" ".join(p) for p in (r.patterns or []) if p))
+               or _mut("no patterns — diagnosis can never assign this tag"))
+            + "</div>"
+            + _remove_control(key, tenant, "situation", r.id, r.tag,
+                              "Claims already tagged with it keep the tag, but "
+                              "no new claim may carry it.",
+                              back_fields=_dl_back_fields(sub, "", pg, q))
+            + "</div>" for r in shown)
+        add = f"""
+<details class="sec"><summary>Add a situation</summary>
+  <form method="get" action="/admin/situation_add" class="f">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    {_dl_back_fields(sub, "", pg, q)}
+    <label>Tag — short, lowercase</label>
+    <input name="tag" placeholder="planning_a_wedding">
+    <label>What a buyer in it is trying to do</label>
+    <input name="description">
+    <div class="row"><button class="sec">Add situation</button></div>
+  </form>
+</details>"""
+        return f"""
+<div class="card">
+  <div class="head"><h2>Situations — this account's vocabulary</h2>
+    <span class="chip {'on' if sits else 'off'}">{len(sits)} tags</span></div>
+  <p class="mut">The only tags a claim for this account may carry — a claim
+  tagged with anything else is refused on the way in.</p>
+  {_dl_search(key, tenant, sub, q, "", "search tags")}
+  {pager}
+  <div class="thread">{body or '<p class="mut">No vocabulary authored yet — add the first tag below.</p>'}</div>
+  {pager}
+  {add}
+</div>""" + _situation_overlap_card(key, tenant,
+                                    kb.situation_overlaps(tenant),
+                                    back_fields=_dl_back_fields(sub))
+
+    # photos
+    return _photo_library(tenant, key, page=max(1, page),
+                          base=_dl_base(key, tenant, "photos", q),
+                          back_fields=_dl_back_fields("photos", "",
+                                                      max(1, page), q))
+
+
+def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
+                  state: str = "", page: int = 1, msg: str = "",
+                  err: str = "") -> str:
+    """The Data layer — the actionable brain (step 4, spec §5).
+
+    Queue & Insights lands first: the brain asks, you answer inline; what it
+    learned from your edits waits to be promoted or dismissed; and the most-
+    used proof is shown working inside a kept artifact. The domain views are
+    the content, paged with edit-in-place; Advanced keeps the schema
+    reference this tab used to be, computed with COUNT queries instead of
+    full-table loads.
+    """
+    tenant, _here, _rows = _account(tenant)
+    if tenant == ALL:
+        return _shell(key, "schema", "Data layer", tenant=tenant,
+                      body=_every_note(True, "The knowledge base is per "
+                                       "client. Pick an account to work its "
+                                       "queue."))
+    sub = (sub or "").strip().lower() or "queue"
+    if sub not in dict(SCHEMA_SUBS):
+        sub = "queue"
+
+    need = _schema_needs_you(tenant)
+    from . import provenance as prov
+    with db.SessionLocal() as s:
+        dom_counts = {
+            "claims": s.query(db.KbClaim).filter(
+                db.KbClaim.tenant == tenant,
+                db.KbClaim.review == prov.APPROVED).count(),
+            "objections": s.query(db.KbObjection).filter(
+                db.KbObjection.tenant == tenant,
+                db.KbObjection.review == prov.APPROVED).count(),
+            "audiences": s.query(db.KbAudience).filter(
+                db.KbAudience.tenant == tenant,
+                db.KbAudience.review == prov.APPROVED).count(),
+            "catalogue": s.query(db.KbEntity).filter(
+                db.KbEntity.tenant == tenant,
+                db.KbEntity.review == prov.APPROVED).count(),
+            "situations": s.query(db.KbSituation).filter(
+                db.KbSituation.tenant == tenant).count(),
+            "photos": s.query(db.KbAsset).filter(
+                db.KbAsset.tenant == tenant,
+                db.KbAsset.review == prov.APPROVED).count(),
+        }
+    dom_counts["queue"] = need["n"]
+
+    def _sub_href(k: str) -> str:
+        return (f"/admin/ui?tab=schema&amp;sub={k}&amp;tenant={_esc(tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
+        f'{_esc(label)}'
+        + (f'<span class="cnt">{dom_counts[k]}</span>'
+           if k in dom_counts else "")
+        + '</a>'
+        for k, label in SCHEMA_SUBS) + "</div>"
+
+    if sub == "queue":
+        body = _schema_queue(key, tenant, need)
+    elif sub == "advanced":
+        body = _schema_advanced(key, tenant)
+    else:
+        body = _schema_domain(key, tenant, sub, q, state, page)
+
+    flash = ((f'<div class="ok">{_esc(msg)}</div>' if msg else "")
+             + (f'<div class="bad">{_esc(err)}</div>' if err else ""))
+    if flash:
+        flash = f'<div class="flash">{flash}</div>'
+
+    return _shell(key, "schema", "Data layer", tenant=tenant,
+                  body=flash + strip + body,
+                  suffix=f"&amp;tenant={_esc(tenant)}")
 
 
 def render_assurance(key: str, tenant: str = "", days: int = 30,

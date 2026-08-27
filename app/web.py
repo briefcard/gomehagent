@@ -1939,7 +1939,17 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             limit=_int("limit", 200, 10, 1000),
             live=_int("live", 0, 0, 300))
     if tab == "schema":
-        return ui.render_schema(link_key, tenant)
+        try:
+            pg = int(request.query_params.get("page", "1"))
+        except ValueError:
+            pg = 1
+        return ui.render_schema(link_key, tenant,
+                                sub=request.query_params.get("sub", ""),
+                                q=request.query_params.get("q", ""),
+                                state=request.query_params.get("state", ""),
+                                page=max(1, pg),
+                                msg=request.query_params.get("ok", ""),
+                                err=request.query_params.get("err", ""))
     if tab == "plan":
         return ui.render_plan(link_key, tenant,
                               msg=request.query_params.get("ok", ""),
@@ -1978,7 +1988,9 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
 
 
 @app.get("/admin/kb_add")
-def kb_add(key: str = Depends(admin_key), tenant: str = "", step: str = "", text: str = ""):
+def kb_add(key: str = Depends(admin_key), tenant: str = "", step: str = "",
+           text: str = "", back: str = "", bsub: str = "", bstate: str = "",
+           bpage: str = "", bq: str = ""):
     """Capture one KB answer. Same parser the Telegram intake uses, so a fact
     entered on a phone and one entered in the console land identically."""
     if key != config.APPROVAL_SECRET:
@@ -1988,13 +2000,19 @@ def kb_add(key: str = Depends(admin_key), tenant: str = "", step: str = "", text
     # Same test as the Telegram path: the data decides whether it took.
     if any(g["id"] == step for g in kbm.gaps(tenant)):
         return {"error": result, "step": step}
+    bp = _back_parts({"back": back, "bsub": bsub, "bstate": bstate,
+                      "bpage": bpage, "bq": bq})
+    if bp:
+        return _back_to_kb(tenant, ok=str(result)[:200], back=bp)
     from fastapi.responses import RedirectResponse
     return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
                             status_code=303)
 
 
 @app.get("/admin/kb_unknown")
-def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "", value: str = ""):
+def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "",
+               value: str = "", back: str = "", bsub: str = "",
+               bstate: str = "", bpage: str = "", bq: str = ""):
     """Close one gap from the console. Same writer as the Telegram `/unknowns`
     reply, so the value lands on the entity identically either way."""
     if key != config.APPROVAL_SECRET:
@@ -2005,6 +2023,10 @@ def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "", va
     still_open = any(u.id == id for u in kbm.unknowns(tenant))
     if still_open:
         return {"error": result, "id": id}
+    bp = _back_parts({"back": back, "bsub": bsub, "bstate": bstate,
+                      "bpage": bpage, "bq": bq})
+    if bp:
+        return _back_to_kb(tenant, ok=str(result)[:200], back=bp)
     from fastapi.responses import RedirectResponse
     return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
                             status_code=303)
@@ -3175,7 +3197,9 @@ def admin_keyword_priority(key: str = Depends(admin_key), tenant: str = "",
 
 @app.get("/admin/exclude_term")
 def admin_exclude_term(key: str = Depends(admin_key), tenant: str = "",
-                       term: str = "", ui: int = 0):
+                       term: str = "", ui: int = 0, back: str = "",
+                       bsub: str = "", bstate: str = "", bpage: str = "",
+                       bq: str = ""):
     """Accept a mute-lesson proposal: the term joins this account's negative
     keywords and the harvest stops surfacing that family at the source.
 
@@ -3189,29 +3213,36 @@ def admin_exclude_term(key: str = Depends(admin_key), tenant: str = "",
     from . import keywords
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+    bp = _back_parts({"back": back, "bsub": bsub, "bstate": bstate,
+                      "bpage": bpage, "bq": bq})
+
+    def _out(msg: str = "", err: str = ""):
+        # Accepted from the Data layer's Active Learning lane (step 4), the
+        # decision lands back there; from Plan, on Plan — rule 3 either way.
+        if bp:
+            return _back_to_kb(tenant, ok=msg, err=err, back=bp)
+        return _plan_back(tenant, key, msg=msg, err=err)
+
     term = (term or "").strip().lower()
     if not term or len(term) < 2:
-        return _plan_back(tenant, key, err="an exclude term needs at least "
-                                          "two characters")
+        return _out(err="an exclude term needs at least two characters")
     if term in keywords.brand_tokens_for(tenant):
-        return _plan_back(tenant, key,
-                          err=f"{term!r} is one of {tenant}'s own brand words "
-                              f"— excluding it would hide the brand from its "
-                              f"own research")
+        return _out(err=f"{term!r} is one of {tenant}'s own brand words "
+                        f"— excluding it would hide the brand from its "
+                        f"own research")
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, tenant)
         if not t:
-            return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
+            return _out(err=f"unknown account {tenant!r}")
         analytics = dict(t.analytics or {})
         terms = [x for x in (analytics.get("exclude_terms") or [])]
         if term in terms:
-            return _plan_back(tenant, key, msg=f"{term!r} was already excluded")
+            return _out(msg=f"{term!r} was already excluded")
         analytics["exclude_terms"] = terms + [term]
         t.analytics = analytics
         s.commit()
-    return _plan_back(tenant, key,
-                      msg=f"{term!r} excluded — the next harvest stops "
-                          f"surfacing that family")
+    return _out(msg=f"{term!r} excluded — the next harvest stops "
+                    f"surfacing that family")
 
 
 @app.get("/admin/market_set")
@@ -3238,9 +3269,161 @@ def admin_market_set(key: str = Depends(admin_key), tenant: str = "",
                       msg=f"research for {tenant} now pulls from {market!r}")
 
 
+@app.post("/admin/objection_add")
+async def objection_add(request: Request, key: str = Depends(admin_key)):
+    """File one approved answer — the Queue's inline control and the
+    Objections view's add form (step 4, spec §5: "an objection gap gets an
+    answer box … saving files it as an objection, approved").
+
+    Same writer the intake and the bot use (`kb.add_objection`,
+    origin="human" — the console is the owner speaking, so it lands
+    approved and the next draft can use it). The queue's form carries the
+    missing situation as a hidden field, so the answer lands tagged with
+    exactly the gap it closes.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    sits = [str(t).strip() for t in form.getlist("situations")
+            if str(t).strip()]
+    got = kbm.add_objection(
+        tenant, str(form.get("objection") or "").strip(),
+        str(form.get("response") or "").strip(),
+        entity_key=str(form.get("entity_key") or "").strip(),
+        situations=sits, origin="human")
+    ok = str(got).startswith(("Added", "Updated", "Recorded"))
+    return _back_to_kb(tenant,
+                       ok=(str(got)[:200] + " — the next draft can use it")
+                       if ok else "",
+                       err="" if ok else str(got)[:300],
+                       back=_back_parts(form) or {"sub": "queue", "state": "",
+                                                  "page": "", "q": ""})
+
+
+@app.post("/admin/kb_row_add")
+async def kb_row_add(request: Request, key: str = Depends(admin_key)):
+    """Structured add for the Data layer's domain views (step 4): labeled
+    fields instead of the pipe-format textareas, same canonical writers —
+    `kb.add_claim` / `kb.add_audience` / `kb.add_entity`, origin="human".
+    A route per field-shape would be four routes saying `kind=`; the writers
+    stay the single writers either way."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    kind = str(form.get("kind") or "")
+
+    def val(n: str) -> str:
+        return str(form.get(n) or "").strip()
+
+    def lines(n: str) -> list:
+        return [x.strip() for x in val(n).splitlines() if x.strip()]
+
+    if kind == "claim":
+        got = kbm.add_claim(tenant, val("claim"), val("evidence"),
+                            [str(t) for t in form.getlist("situations")],
+                            origin="human")
+    elif kind == "audience":
+        got = kbm.add_audience(tenant, val("akey"), val("name"),
+                               lines("pains"), lines("vocabulary"),
+                               origin="human")
+    elif kind == "entity":
+        got = kbm.add_entity(tenant, val("etype") or "product", val("ekey"),
+                             val("name"), description=val("description"),
+                             price=val("price"), origin="human")
+    else:
+        return _back_to_kb(tenant, err=f"nothing addable is called {kind!r}",
+                           back=_back_parts(form))
+    said = str(got)
+    ok = not said.lower().startswith(("an ", "a ", "unknown", "refus"))
+    return _back_to_kb(tenant, ok=said[:250] if ok else "",
+                       err="" if ok else said[:300],
+                       back=_back_parts(form))
+
+
+@app.post("/admin/audience_update")
+async def audience_update(request: Request, key: str = Depends(admin_key)):
+    """Edit an audience in place — the one KB kind that had no editor
+    (spec §5). Same rule as the claim and objection editors: a human may
+    always correct a row, and the edit is authoritative."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+
+    def lines(n: str) -> list:
+        return [x.strip() for x in str(form.get(n) or "").splitlines()
+                if x.strip()]
+
+    got = kbm.update_audience(
+        str(form.get("row_id") or ""),
+        name=str(form.get("name") or ""),
+        pains=lines("pains"), vocabulary=lines("vocabulary"),
+        buying_trigger=str(form.get("buying_trigger") or ""),
+        decision_timeline=str(form.get("decision_timeline") or ""))
+    good = got == "Saved."
+    return _back_to_kb(tenant, ok="audience saved" if good else "",
+                       err="" if good else got,
+                       back=_back_parts(form))
+
+
+@app.post("/admin/lesson_act")
+async def lesson_act(request: Request, key: str = Depends(admin_key)):
+    """Act on one observed lesson from the Active Learning lane (step 4).
+
+    Three verbs, each landing in a real channel at click time — the lane is
+    never a box nobody reads: `guidance` writes the system's standing notes
+    (injected into every future draft), `rule` writes the ban list the
+    validator enforces, `dismiss` marks it a one-off — which removes it
+    from the drafter's brief too, because both read the same rows.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    act = str(form.get("act") or "")
+    run_id = str(form.get("run_id") or "")
+    syskey = str(form.get("system_key") or "")
+    bp = _back_parts(form) or {"sub": "queue", "state": "", "page": "", "q": ""}
+    from . import systems as _sys
+    if act == "guidance":
+        rows = [r for r in _sys.edit_lesson_rows(tenant, syskey)
+                if r["run_id"] == run_id]
+        if not rows:
+            return _back_to_kb(tenant, err="that lesson is no longer on the "
+                                           "lane", back=bp)
+        said = _sys.note(tenant, syskey,
+                         "[observed, kept as guidance] " + rows[0]["text"][:400])
+        # Kept means promoted — the observation leaves the lane (it lives in
+        # the guidance now; showing it in both places would state one fact
+        # twice and invite promoting it twice).
+        _sys.dismiss_edit_lesson(run_id)
+        return _back_to_kb(tenant, ok=str(said)[:200]
+                           + " — injected into every future draft", back=bp)
+    if act == "rule":
+        phrase = str(form.get("phrase") or "").strip()
+        if not phrase:
+            return _back_to_kb(tenant, err="a rule needs the exact phrase to "
+                                           "ban — type it next to the button",
+                               back=bp)
+        said = _sys.promote_rule(tenant, phrase)
+        return _back_to_kb(tenant, ok=str(said)[:250], back=bp)
+    if act == "dismiss":
+        said = _sys.dismiss_edit_lesson(run_id)
+        return _back_to_kb(tenant, ok=str(said)[:200], back=bp)
+    return _back_to_kb(tenant, err="say guidance, rule or dismiss — nothing "
+                                   "was done", back=bp)
+
+
 @app.get("/admin/situation_add")
 def admin_situation_add(key: str = Depends(admin_key), tenant: str = "",
-                        tag: str = "", description: str = ""):
+                        tag: str = "", description: str = "", back: str = "",
+                        bsub: str = "", bstate: str = "", bpage: str = "",
+                        bq: str = ""):
     """Author one situation tag, from the page that warns tags are missing."""
     from urllib.parse import quote
 
@@ -3258,6 +3441,13 @@ def admin_situation_add(key: str = Depends(admin_key), tenant: str = "",
     got = kbm.add_situation(tenant, tag, patterns=[], description=description,
                             origin="human")
     ok = got.startswith(("Added", "Updated"))
+    bp = _back_parts({"back": back, "bsub": bsub, "bstate": bstate,
+                      "bpage": bpage, "bq": bq})
+    if bp:
+        return _back_to_kb(tenant,
+                           ok=(got[:200] + " — claims may carry it now")
+                           if ok else "",
+                           err="" if ok else got[:300], back=bp)
     arg = (f"ok={quote(got[:200] + ' — claims may carry it now')}" if ok
            else f"err={quote(got[:300])}")
     return RedirectResponse(
@@ -3838,7 +4028,9 @@ def intake(token: str, answer: str = "", skip: str = "") -> str:
 @app.get("/admin/claim_review")
 def claim_review(key: str = Depends(admin_key), claim_id: str = "",
                  approve: str = "yes", tenant: str = "", ui: str = "",
-                 next: str = "", cpage: int = 1, back: str = ""):
+                 next: str = "", cpage: int = 1, back: str = "",
+                 bsub: str = "", bstate: str = "", bpage: str = "",
+                 bq: str = ""):
     """Approve or reject a client-submitted claim. From the console (`ui=1`)
     it lands back at the next card on the same queue page rather than at the
     top — a decision must never cost the reader their place."""
@@ -3847,6 +4039,13 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
     from . import kb as kbm
     res = kbm.review_claim(claim_id, approve == "yes")
     if ui:
+        if back == "schema":
+            # Decided from the Data layer's domain view — land back on the
+            # same filter and page (step 4; same rule as back=kb below).
+            return _back_to_kb(tenant, ok=str(res)[:200],
+                               back=_back_parts({"back": back, "bsub": bsub,
+                                                 "bstate": bstate,
+                                                 "bpage": bpage, "bq": bq}))
         if back == "kb":
             # Decided from the Knowledge tab — return there, not to Review.
             # "A decision must never cost the reader their place" is this
@@ -5056,7 +5255,11 @@ async def entity_group_post(request: Request, key: str = Depends(admin_key)):
     group = str(form.get("group", "")).strip()
     keys = [str(k) for k in form.getlist("entity_keys") if str(k).strip()]
 
+    bp = _back_parts(form)
+
     def back(msg: str = "", err: str = "") -> RedirectResponse:
+        if bp:
+            return _back_to_kb(tenant, ok=msg, err=err, back=bp)
         q = f"&ok={quote(msg)}" if msg else (f"&err={quote(err)}" if err else "")
         return RedirectResponse(
             f"/admin/ui?tab=kb&tenant={quote(tenant)}{q}#groups", 303)
@@ -5813,14 +6016,41 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
     return RedirectResponse(q, status_code=303)
 
 
-def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = ""):
-    """Return to the Knowledge tab, carrying the outcome and the reader's
-    place — the same contract `_back_to_content` keeps: a decision must never
-    cost a scroll back to where you were."""
+def _back_parts(src) -> dict:
+    """Where the edit was made, read by NAME from hidden fields the Data
+    layer's forms carry (back=schema, bsub, bstate, bpage, bq) — never an
+    echoed URL, so nothing user-shaped becomes a redirect target. Empty for
+    every form that predates the Data layer views, which keeps their
+    Knowledge-tab landing exactly as it was."""
+    if str(src.get("back") or "") != "schema":
+        return {}
+    return {"sub": str(src.get("bsub") or ""),
+            "state": str(src.get("bstate") or ""),
+            "page": str(src.get("bpage") or ""),
+            "q": str(src.get("bq") or "")}
+
+
+def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = "",
+                back: dict | None = None):
+    """Return to the tab the edit was made on, carrying the outcome and the
+    reader's place — the same contract `_back_to_content` keeps: a decision
+    must never cost a scroll back to where you were. Knowledge by default;
+    the Data layer's domain views when the form named itself (step 4)."""
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
-    q = f"/admin/ui?tab=kb&tenant={tenant}"
+    if back:
+        q = f"/admin/ui?tab=schema&tenant={quote(tenant)}"
+        if back.get("sub"):
+            q += f"&sub={quote(back['sub'])}"
+        if back.get("state"):
+            q += f"&state={quote(back['state'])}"
+        if back.get("page"):
+            q += f"&page={quote(back['page'])}"
+        if back.get("q"):
+            q += f"&q={quote(back['q'])}"
+    else:
+        q = f"/admin/ui?tab=kb&tenant={tenant}"
     if err:
         q += f"&err={quote(err)}"
     if ok:
@@ -5965,8 +6195,9 @@ async def kb_remove(request: Request, key: str = Depends(admin_key)):
     tenant = str(f.get("tenant") or "")
     out = kbm.remove(tenant, str(f.get("kind") or ""), str(f.get("id") or ""))
     if not out.get("ok"):
-        return _back_to_kb(tenant, err=out.get("error", "could not remove it"))
-    return _back_to_kb(tenant, ok=out["said"])
+        return _back_to_kb(tenant, err=out.get("error", "could not remove it"),
+                           back=_back_parts(f))
+    return _back_to_kb(tenant, ok=out["said"], back=_back_parts(f))
 
 
 @app.post("/admin/kb_restore")
@@ -5979,8 +6210,9 @@ async def kb_restore(request: Request, key: str = Depends(admin_key)):
     tenant = str(f.get("tenant") or "")
     out = kbm.restore(tenant, str(f.get("kind") or ""), str(f.get("id") or ""))
     if not out.get("ok"):
-        return _back_to_kb(tenant, err=out.get("error", "could not restore it"))
-    return _back_to_kb(tenant, ok=out["said"])
+        return _back_to_kb(tenant, err=out.get("error", "could not restore it"),
+                           back=_back_parts(f))
+    return _back_to_kb(tenant, ok=out["said"], back=_back_parts(f))
 
 
 @app.get("/admin/purge_proposals")
@@ -6097,7 +6329,8 @@ async def merge_situation(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     r = kbm.merge_situations(tenant, str(form.get("keep", "")),
                              str(form.get("drop", "")), dry_run=False)
-    return _back_to_kb(tenant, err=r.get("error", "") or r.get("note", ""))
+    return _back_to_kb(tenant, err=r.get("error", "") or r.get("note", ""),
+                       back=_back_parts(form))
 
 
 @app.get("/admin/harvest_pages")
@@ -6196,7 +6429,7 @@ async def objection_edit(request: Request, key: str = Depends(admin_key)):
     good = result == "Saved."
     return _back_to_kb(tenant, err="" if good else result,
                        ok="objection saved" if good else "",
-                       anchor=f"o-{row_id}")
+                       anchor=f"o-{row_id}", back=_back_parts(form))
 
 
 @app.post("/admin/claim_update", response_class=HTMLResponse)
@@ -6224,10 +6457,10 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
 
     if action == "never":
         return _back_to_kb(tenant, ok=kbm.set_claim_expiry(claim_id, never=True),
-                           anchor=anchor)
+                           anchor=anchor, back=_back_parts(form))
     if action == "expire":
         return _back_to_kb(tenant, ok=kbm.set_claim_expiry(claim_id),
-                           anchor=anchor)
+                           anchor=anchor, back=_back_parts(form))
 
     msg = kbm.update_claim(
         claim_id,
@@ -6238,7 +6471,8 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
     if msg != "Saved.":
         # The refusal is the feature: verbatim testimonials cannot be
         # reworded, unknown tags cannot be invented — same rules as review.
-        return _back_to_kb(tenant, err=msg, anchor=anchor)
+        return _back_to_kb(tenant, err=msg, anchor=anchor,
+                           back=_back_parts(form))
     with db.SessionLocal() as s:
         row = s.get(db.KbClaim, claim_id)
         timeless = bool(row) and (row.expiry_policy or "") == "never"
@@ -6251,7 +6485,8 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
     return _back_to_kb(tenant, anchor=anchor,
                        ok=("saved — verified today"
                            + ("" if timeless else
-                              "; expiry reset to a year from now")))
+                              "; expiry reset to a year from now")),
+                       back=_back_parts(form))
 
 
 @app.post("/admin/conflict_resolve", response_class=HTMLResponse)

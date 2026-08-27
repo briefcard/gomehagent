@@ -327,6 +327,71 @@ Sub-steps land separately, each shippable:
   feedback; both visibly land (prompt block / ban list).
 
 ### Step 4 — Tab-by-tab restructure (spec §§4–11; one tab per push)
+**4·Data layer BUILT + SHIPPED 2026-08-27.** `tab=schema` restructured
+whole (fluidity rule 2): a `SCHEMA_SUBS` strip — Queue & Insights (the
+landing) · six domain views · Advanced — with counts from the same queries
+that render each list. **Queue & Insights**, three lanes: (1) "What to fix,
+in order" — readiness blockers with TYPED controls (a missing situation
+gets an inline answer box → new POST `/admin/objection_add`, canonical
+writer, origin=human so it lands approved and readiness moves the moment
+it files; brand/approve blockers keep their labeled link-buttons — one
+writer per control), the unknowns inline-save moved here, the intake
+question folded, blocked_reasons folded ("what cost an output, 30d");
+(2) **Active Learning** — `systems.edit_lesson_rows()` (NEW: the
+structured reader `edit_lessons` now formats from, one query for the lane
+AND the prompt) with Keep-as-guidance (→ `systems.note`, then leaves the
+lane — it lives in the guidance), Make-it-a-rule (typed phrase →
+`promote_rule` → ban list), Dismiss (NEW `dismiss_edit_lesson`, a Setting
+marker read by the SHARED rows query — a dismiss that only hid the card
+would keep teaching the model); mute-lesson TERM proposals with one-click
+accept (`exclude_term` grew back-threading), source/cluster patterns
+informational with a Plan link (no one-click accept exists for them —
+named, not faked); (3) **Grounded output v1** — top-3 claims by 90d
+Output.claim_ids usage, the carrying sentence extracted + bolded from the
+kept ArtifactBody (ad variants resolve to their BATCH and quote the
+variant's own copy, never the JSON), workroom link, per-claim editor link,
+uses fold; honest empty/not-kept states. **Domain views** (claims/
+objections/audiences/catalogue/situations/photos): paged 15 (`_pager` —
+the 2b-deferred shared helper extraction landed here, with `_claim_row`/
+`_claim_editor_form`/`_objection_row`/`_situation_overlap_card` pulled
+from render_kb's closures byte-identically — test_kb_ui's 356 checks pin
+it), search-as-filter, pending-count chips linking at Review, structured
+add forms (NEW POST `/admin/kb_row_add` — named fields, same canonical
+writers; the pipe textareas survive only on Knowledge until step 6).
+Claims: state chips incl. **Removed with per-row Restore** (closes
+"restore is still an API call"); audiences: **the editor the kind never
+had** (NEW `kb.update_audience` + POST `/admin/audience_update`);
+catalogue: per-row add-to-group + this-page bulk fold (the 200-checkbox
+wall dies) + Sync from store; situations: folded add + the overlap merge
+card moved here; photos: pager past 60 + "N waiting · decide on Review"
+chip. **Advanced** = the old page (every pin kept: identifiers,
+relationships, no-foreign-keys, APPROVED-only counts) with fill bars from
+ONE aggregate query per table (CAST AS TEXT for JSON emptiness — valid on
+sqlite AND Postgres where VARCHAR is not) + GROUP BY breakdowns; the
+suite asserts against the SQL actually executed that the fill-bar tables
+are never full-loaded. **Badge** = `_schema_needs_you()["n"]`, the SAME
+computation the queue renders (fixing a live defect: the old badge read a
+mute_lessons "proposals" key that never existed, so half the promised
+count was permanently zero). Rule-3 back-threading throughout: every
+form/link carries back=schema parts by NAME (`_back_parts`/`_back_to_kb`
+extended; kb_add, kb_unknown, kb_remove, kb_restore, situation_add,
+claim_review, claim_update, objection_edit, merge_situation,
+entity_group, exclude_term all honor them; Knowledge's forms unchanged).
+Guards (all caught): `queue_answers_land_approved`,
+`lesson_guidance_reaches_prompt`, `lesson_dismiss_is_real`,
+`claim_restore_has_a_surface`, `schema_badge_matches_queue`. New suite
+`test_schema_tab.py` (35 checks); smoke walks all 8 sub-views with CSS
+class coverage; test_data_layer + test_kb_ui shape pins retargeted at
+`sub=advanced` with dated comments; seed_demo seeds 17 claims (1
+removed), an unanswered situation, a gap, and two observed lessons.
+Verified on the demo: queue/claims/removed/advanced, desktop + phone,
+dark + light. PARKED, named: craft-proposals lane (spec names it; no
+carrier exists in code — joins when one does); Grounded-output v2 (live
+re-render) stays in §6; the at-a-glance card still counts via
+`kb.completeness` (loads 4 kinds once — small; the spec's offender was
+the per-table fill loop, which is fixed). Knowledge stays whole until
+step 6's gate (a week of real decisions on the new domain views); the
+temporary duplication is that gate's design.
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first
@@ -387,6 +452,33 @@ Steps 0–2 are days, not weeks; step 3 is the largest genuinely new build;
 step 4 is steady cadence work gated by owner walkthroughs.
 
 ## §6 Parked / out of scope (named, not forgotten)
+
+- **Creative generation goes behind ONE provider-agnostic seam when the
+  media layer lands** (owner decision 2026-08-27, while reviewing 3.4).
+  Today three disconnected pieces exist: `creative.py` (email hero,
+  library→Canva-draft, the only skill-wired path), `compose.py`/
+  `imagegen.py` (product compositing + OpenAI scenes, reachable only via
+  the manual `/admin/creative` curl route), and nothing for ads or blogs.
+  The §3c "renderings beside copy" build must NOT add a fourth per-channel
+  generator: one purpose-aware front door (ad | email_hero | …, purpose
+  sets the format contract — Meta 1:1/4:5/9:16 vs 1200×600 hero) over
+  duck-typed provider adapters, the `esp.py` shape exactly ("adding a
+  provider is a profile row plus an adapter module — never a branch inside
+  the generator"), because the owner expects to plug in an ad-specific
+  image API later. Invariants stay OUTSIDE the providers so no future API
+  bypasses them: rights gate (approved+owned only), product fidelity (the
+  product is drawn/composited, never model-painted — the Canva
+  invented-pitchers and repainted-handle lessons), `basis` on every
+  candidate, human approval before anything customer-facing. The board UX
+  binds to the seam, so swapping providers never changes how review works.
+  REFINED 2026-08-27 (owner): centralized PER BRAND/CLIENT (one library,
+  one brand identity per tenant) with a PURPOSE REGISTRY shaping the
+  output — ad_creative / blog_header / email_hero / thumbnail / … each
+  declare their own format contract (sizes, aspect ratios), composition
+  contract (text overlay or none, logo placement, safe areas), selection
+  rules, and destination handling. A purpose is data the front door reads,
+  never an if-chain inside a generator — adding "thumbnail" must be a
+  registry entry, the way adding an ESP is a profile row.
 
 - CSRF + POST-ification of the ~37 mutating GETs — after the restructure so
   URLs move once (spec §17 P2).

@@ -1391,6 +1391,66 @@ SABOTAGES = [
                "decidable in the ship queue, one stray click from 'ready'",
     },
     {
+        "name": "queue_answers_land_approved",
+        "file": "app/web.py",
+        "find": "        situations=sits, origin=\"human\")",
+        "replace": "        situations=sits, origin=\"crawl\")  # SABOTAGE",
+        "suites": ["test_schema_tab.py"],
+        "why": "the Queue's answer box files the owner's own answer as a "
+               "machine PROPOSAL — invisible to every generator until "
+               "somebody re-approves their own words on Review, and the "
+               "lane's promise ('saving files it as an objection, approved') "
+               "becomes a lie",
+    },
+    {
+        "name": "lesson_guidance_reaches_prompt",
+        "file": "app/web.py",
+        "find": "        said = _sys.note(tenant, syskey,\n"
+                "                         \"[observed, kept as guidance] \" + rows[0][\"text\"][:400])",
+        "replace": "        said = \"kept\"  # SABOTAGE",
+        "suites": ["test_schema_tab.py"],
+        "why": "Keep-as-guidance flashes success and teaches nothing — the "
+               "promoted observation never reaches the system's standing "
+               "notes, so the Active Learning lane becomes a complaint box "
+               "with three buttons",
+    },
+    {
+        "name": "lesson_dismiss_is_real",
+        "file": "app/systems.py",
+        "find": "    return [r for r in out\n"
+                "            if r[\"text\"] and r[\"text\"] != \"sent unchanged\"\n"
+                "            and r[\"run_id\"] not in gone]",
+        "replace": "    return [r for r in out\n"
+                   "            if r[\"text\"] and r[\"text\"] != \"sent unchanged\"]  # SABOTAGE",
+        "suites": ["test_schema_tab.py"],
+        "why": "dismissing a lesson hides nothing — the one-off the owner "
+               "rejected keeps riding the drafter's brief and keeps "
+               "re-appearing on the lane, a control that lies about its "
+               "consequence in both channels at once",
+    },
+    {
+        "name": "claim_restore_has_a_surface",
+        "file": "app/admin_ui.py",
+        "find": "<button class=\"sec\">Restore</button>",
+        "replace": "<!-- SABOTAGE -->",
+        "suites": ["test_schema_tab.py"],
+        "why": "putting back a removed claim goes back to being an API call "
+               "with a row id — the exact hole the Removed filter was built "
+               "to close, reopened while the filter still lists what cannot "
+               "be acted on",
+    },
+    {
+        "name": "schema_badge_matches_queue",
+        "file": "app/admin_ui.py",
+        "find": "        out[\"schema\"] = _schema_needs_you(tenant)[\"n\"]",
+        "replace": "        out[\"schema\"] = _schema_needs_you(tenant)[\"n\"] + 1  # SABOTAGE",
+        "suites": ["test_schema_tab.py"],
+        "why": "the Data layer badge drifts from the queue it opens — a "
+               "number that does not match its list is learned as noise "
+               "within a week, which is the defect the needs-you badges "
+               "were built to end",
+    },
+    {
         "name": "variant_reaches_its_board",
         "file": "app/web.py",
         "find": "        if hit is not None and hit.output_id != output_id:\n"

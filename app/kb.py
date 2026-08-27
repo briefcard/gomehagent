@@ -3063,6 +3063,38 @@ def scope_unconfirmed(row) -> bool:
     return (getattr(row, "review", "") or "") != prov.APPROVED
 
 
+def update_audience(row_id: str, name: str = None, pains: list | None = None,
+                    vocabulary: list | None = None, buying_trigger: str = None,
+                    decision_timeline: str = None, notes: str = None) -> str:
+    """Edit an audience in place — the last display-only KB kind gets its
+    editor (UI overhaul step 4; spec §5 named it directly).
+
+    Claims and objections have had this for as long as the review queue has
+    existed; audiences could only be re-proposed through `add_audience`,
+    whose provenance gate records a CONFLICT when a proposal disagrees with
+    an approved row — correct for a machine, absurd for the owner correcting
+    their own segment. Same rule as the other editors: a human may always
+    correct a row, and the edit is authoritative.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAudience, row_id)
+        if not row:
+            return "No such audience."
+        for field, value in (("name", name), ("buying_trigger", buying_trigger),
+                             ("decision_timeline", decision_timeline),
+                             ("notes", notes)):
+            if value is not None:
+                setattr(row, field, value.strip())
+        for field, value in (("pains", pains), ("vocabulary", vocabulary)):
+            if value is not None:
+                setattr(row, field, [str(v).strip() for v in value
+                                     if str(v).strip()])
+        if not (row.name or "").strip():
+            return "An audience needs a name."
+        s.commit()
+    return "Saved."
+
+
 def update_objection(row_id: str, objection: str = None, response: str = None,
                      entity_key: str | None = None, audience_key: str = None,
                      escalate: str = None,

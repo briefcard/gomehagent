@@ -98,6 +98,58 @@ def seed_ad_batch() -> str:
             f"(anchor {r['items'][0]['output_id'][:8]}…)")
 
 
+def seed_data_layer() -> str:
+    """Representative rows for the step-4 Data layer walkthrough — every
+    queue lane and domain state has something to click.
+
+    Public writers throughout, with one named exception: the two SystemRun
+    rows that stand in for edited sends. Their production writer is
+    `edits.delta` at launch time, which needs a live send to diff — the
+    demo fakes the ROW, not the reader, and the comment is the label.
+    """
+    import datetime as dt
+
+    from app import systems
+
+    if len([r for r in kb.claim_inventory("baci")["selectable"]]) > 10:
+        return "data layer: already seeded"
+    kb.add_situation("baci", "hosting_dinners", patterns=[["dinner"]],
+                     description="Setting a table for guests", origin="human")
+    kb.add_situation("baci", "gift_hunting", patterns=[["gift"]],
+                     description="Buying a present with a deadline",
+                     origin="human")
+    kb.add_objection("baci", "Is it dishwasher safe?",
+                     "Yes — tested at 65 degrees.",
+                     situations=["hosting_dinners"], origin="human")
+    for i in range(16):
+        kb.add_claim("baci", f"Piece {i} survives {1200 + i} dishwasher "
+                             f"cycles in lab testing.",
+                     f"lab report {i}", ["hosting_dinners"], origin="human")
+    kb.add_claim("baci", "A claim the owner walked back.", "old flyer", [],
+                 origin="human")
+    walked = [r for r in kb.claim_inventory("baci")["selectable"]
+              if "walked back" in r.claim]
+    if walked:
+        kb.remove("baci", "claim", walked[0].id)
+    kb.record_unknowns("baci", [{"basis": "unknown", "key": "aqua-plate",
+                                 "name": "Aqua Plate",
+                                 "attribute": "capacity"}],
+                       asked_for="does the pitcher hold a litre?")
+    row = (systems.find("baci", "campaign_email")
+           or systems.create("baci", "campaign_email"))
+    with db.SessionLocal() as s:
+        for i, txt in enumerate((
+                "- shortened the opening in 4 of 6 edited sends",
+                "- swapped the hero for a lifestyle shot, twice")):
+            s.add(db.SystemRun(system_id=row.id, tenant="baci", stage="sent",
+                               decision="edited", edit_diff=txt,
+                               created_at=db.utcnow()
+                               - dt.timedelta(days=3 + i)))
+        s.commit()
+    return "data layer: claims×17 (1 removed), objection, gap, 2 lessons"
+
+
 said = seed_ad_batch()
+said2 = seed_data_layer()
 print(f"demo seeded: {made} · accounts: "
-      f"{', '.join(t.key for t in tenants.all_tenants())} · {said}")
+      f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}")

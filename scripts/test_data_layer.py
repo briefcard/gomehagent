@@ -52,6 +52,14 @@ def page(tenant="baci"):
     return client.get(f"/admin/ui?tab=schema&tenant={tenant}&key={KEY}").text
 
 
+def adv(tenant="baci"):
+    # Step 4 (2026-08-27): the tab landed on the schema reference; it lands
+    # on Queue & Insights now, and the reference is the Advanced sub-view.
+    # The shape pins below follow it there deliberately.
+    return client.get(
+        f"/admin/ui?tab=schema&sub=advanced&tenant={tenant}&key={KEY}").text
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -72,7 +80,8 @@ def main() -> int:
        str([n for n, _t, h, _w in admin_ui._kb_tables() if h == n]))
 
     h = page()
-    ck("the tables render on the page", "kb_assets" in h and "kb_claims" in h)
+    ck("the tables render on the Advanced view",
+       "kb_assets" in adv() and "kb_claims" in adv())
 
     print("\n— a new knowledge table would appear on its own —")
     # The point of deriving it: nobody has to remember. Asserted by asking the
@@ -108,9 +117,12 @@ def main() -> int:
     ck("…and a real link to where it is fixed", 'href="/admin/ui?tab=kb' in h)
 
     print("\n— it was a dead end before, and the counts still work —")
-    ck("the row counts survived", "This account at a glance" in h)
+    # Retargeted at sub=advanced 2026-08-27 (step 4): the reference content
+    # kept every string; only its address changed.
+    h_adv = adv()
+    ck("the row counts survived", "This account at a glance" in h_adv)
     ck("the identifiers and relationships survived",
-       "Identifiers" in h and "How the tables relate" in h)
+       "Identifiers" in h_adv and "How the tables relate" in h_adv)
 
     print("\n— an account with nothing blocking it says so —")
     kb.set_brand("baci", tone="Warm, precise.", positioning="Italian-designed.")

@@ -290,7 +290,9 @@ def main() -> int:
     # a column. This page is built by reading the models, so the assertion is
     # that every KB table and every provenance column reaches it on its own.
     print("\n— the Data layer tab —")
-    page = admin_ui.render_schema(KEY, "baci")
+    # Retargeted 2026-08-27 (step 4): the schema reference is
+    # the Advanced sub-view; every pinned string survives there.
+    page = admin_ui.render_schema(KEY, "baci", sub="advanced")
     for table in ("kb_brand", "kb_claims", "kb_entities", "kb_objections",
                   "kb_audiences", "kb_situations", "kb_unknowns", "kb_conflicts"):
         ck(f"{table} is on the page", table in page)
@@ -303,14 +305,16 @@ def main() -> int:
     ck("counts are the approved ones the generator would see",
        "APPROVED rows only" in page)
     ck("an account with nothing still renders",
-       "Data layer" in admin_ui.render_schema(KEY, "blank"))
+       "Data layer" in admin_ui.render_schema(KEY, "blank", sub="advanced"))
 
     # ---- 7. the Data layer tab describes the schema from the models -------
     # Hand-written schema documentation goes stale the first time somebody adds
     # a column. This page is built by reading the models, so what is asserted is
     # that every table and every provenance column reaches it on its own.
     print("\n— the Data layer tab —")
-    page = admin_ui.render_schema(KEY, "baci")
+    # Retargeted 2026-08-27 (step 4): the schema reference is
+    # the Advanced sub-view; every pinned string survives there.
+    page = admin_ui.render_schema(KEY, "baci", sub="advanced")
     for table in ("kb_brand", "kb_claims", "kb_entities", "kb_objections",
                   "kb_audiences", "kb_situations", "kb_unknowns", "kb_conflicts"):
         ck(f"{table} is on the page", table in page)
@@ -334,7 +338,7 @@ def main() -> int:
        "no foreign keys anywhere" in page)
     ck("nullable joins are marked as such", page.count(">nullable<") >= 3)
     ck("an account with nothing still renders",
-       "Data layer" in admin_ui.render_schema(KEY, "blank"))
+       "Data layer" in admin_ui.render_schema(KEY, "blank", sub="advanced"))
 
     # ---- approved knowledge is editable in place; a resave re-attests ------
     # Owner's rule (2026-08-21): saving an approved claim resets its expiry —
