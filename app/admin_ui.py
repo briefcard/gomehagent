@@ -83,41 +83,69 @@ FIELD_HELP = {
 }
 
 _CSS = """
-:root{--bg:#f6f7fa;--panel:#fff;--ink:#15171d;--ink2:#3d434f;--mut:#6e7686;
---rule:#dfe3ea;--rule2:#eef0f4;--acc:#2f4b7c;--accs:#e8edf6;--ok:#2a6357;--oks:#e3efeb;
---gap:#95602a;--gaps:#f6ebdc}
-@media(prefers-color-scheme:dark){:root{--bg:#101218;--panel:#171a22;--ink:#e9ebf0;
---ink2:#b9bfcc;--mut:#858d9e;--rule:#2a2f3b;--rule2:#212632;--acc:#87a6d8;--accs:#1c2434;
---ok:#66ad99;--oks:#152621;--gap:#d2a063;--gaps:#2a2115}}
+/* The Saias Ops token sheet — UI overhaul step 1 (INITIATIVE-ui-overhaul.md,
+   design source: the "Saias Ops Overhaul" spec §1). The console COMMITS to
+   dark: one look, no media query — the old light default with a dark override
+   meant every hard-coded hex was wrong in one of the two themes, and three
+   were. Color semantics are fixed across every page: lavender (--acc) =
+   navigation/selection/primary action; mint (--ok) = healthy/live/confirmed;
+   amber (--gap) = WAITING ON A PERSON (every badge and count); red (--err) =
+   failure and destruction only; the per-account --tint hue = whose data this
+   is. Same class names as before on purpose — the suite string-matches
+   markup, so the reskin swaps values, never contracts. */
+:root{--bg:#0b1326;--panel:#131b2e;--ink:#dae2fd;--ink2:#b9c2de;--mut:#8f97b3;
+--rule:#2c3450;--rule2:#1b2338;--field:#1d2740;
+--acc:#d2bbff;--accs:#241f45;--ok:#4edea3;--oks:#0f2c22;
+--gap:#ffb95f;--gaps:#2b2113;--err:#ffb4ab;--errs:#3a1512;
+--sans:"Hanken Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+--mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,
-BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);
+-webkit-font-smoothing:antialiased}
+/* Every bare link, on-palette. Links were styled per component (.side a,
+   .filters a, …) and nothing defined the element itself, so any plain <a> in
+   prose fell back to the browser's default blue — unreadable on this ground
+   (owner, 2026-08-27, step-1 review). Underlined so an inline control is
+   visibly a control; the nav/chrome contexts all declare their own
+   text-decoration:none and keep it. */
+a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:#3a4160}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+textarea:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 .w{max-width:960px;margin:0 auto;padding:32px 20px 80px;display:flex;flex-direction:column;gap:30px}
-h1{font:600 1.7rem/1.2 Georgia,serif;margin:0}
-h2{font:600 1.15rem/1.2 Georgia,serif;margin:0}
-h3{font:600 .98rem/1.3 Georgia,serif;margin:0}
+h1{font:700 1.7rem/1.2 var(--sans);letter-spacing:-.02em;margin:0}
+h2{font:700 1.15rem/1.25 var(--sans);letter-spacing:-.015em;margin:0}
+h3{font:700 .98rem/1.3 var(--sans);margin:0}
+.tblwrap{overflow-x:auto}
 .mut{color:var(--mut);font-size:.86rem}
-.card{background:var(--panel);border:1px solid var(--rule);border-radius:7px;padding:16px 18px;
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px 18px;
 display:flex;flex-direction:column;gap:12px}
 .head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;
 border-bottom:1px solid var(--rule);padding-bottom:10px}
 .head h2{flex:1 1 auto}
 .chips{display:flex;flex-wrap:wrap;gap:5px}
-.chip{font-size:.68rem;padding:.2em .5em;border-radius:3px;font-weight:700;letter-spacing:.03em}
+.chip{font-family:var(--mono);font-size:.66rem;padding:.25em .55em;border-radius:3px;
+font-weight:700;letter-spacing:.04em;background:var(--rule2);color:var(--ink2);
+border:1px solid var(--rule)}
 .chip.on{background:var(--oks);color:var(--ok);border:1px solid var(--ok)}
 .chip.off{background:var(--gaps);color:var(--gap);border:1px solid var(--gap)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
-.f{display:flex;flex-direction:column;gap:5px;border:1px solid var(--rule);border-radius:5px;
+.f{display:flex;flex-direction:column;gap:5px;border:1px solid var(--rule);border-radius:4px;
 padding:11px 13px;background:var(--rule2)}
-.f label{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700;color:var(--acc)}
+.f label{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;
+letter-spacing:.08em;font-weight:700;color:var(--acc)}
 .f .what{font-size:.8rem;color:var(--ink2)}
 .f details{font-size:.79rem;color:var(--mut)}
 .f summary{cursor:pointer;color:var(--acc);font-weight:600;font-size:.75rem}
 .f details p{margin:6px 0 0}
 input,select{font:inherit;font-size:.85rem;padding:6px 8px;border:1px solid var(--rule);
-border-radius:4px;background:var(--panel);color:var(--ink);width:100%}
-button{font:inherit;font-size:.82rem;font-weight:600;padding:6px 13px;border-radius:5px;
-border:1px solid var(--acc);background:var(--acc);color:var(--panel);cursor:pointer}
+border-radius:3px;background:var(--field);color:var(--ink);width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--acc)}
+button{font:inherit;font-size:.82rem;font-weight:700;padding:6px 13px;border-radius:4px;
+border:1px solid var(--acc);background:var(--acc);color:#2a1155;cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 /* `.conn` is a flex ROW (name | state | actions) and this form is a third
@@ -155,8 +183,8 @@ button.sec{background:transparent;color:var(--acc)}
   white-space:nowrap}
 .pre.yes{color:var(--ok)}
 .pre.no{color:var(--gap)}
-.btn{display:inline-block;font-size:.78rem;padding:4px 12px;border-radius:4px;
-  background:var(--acc);color:var(--panel);text-decoration:none}
+.btn{display:inline-block;font-size:.78rem;font-weight:700;padding:4px 12px;border-radius:4px;
+  background:var(--acc);color:#2a1155;text-decoration:none}
 .btn.sec{background:transparent;color:var(--ink);border:1px solid var(--rule)}
 /* --- the frame: sidebar, client switcher, page ---------------------------
    Same shape as the client portal on purpose. Switching between the two
@@ -167,8 +195,9 @@ button.sec{background:transparent;color:var(--acc)}
 border-right:1px solid var(--rule);padding:18px 12px;display:flex;
 flex-direction:column;gap:1px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .side .brand{font-weight:700;font-size:.98rem;padding:0 10px 14px}
-.side .swlabel,.side .navlabel{font-size:.68rem;text-transform:uppercase;
-letter-spacing:.08em;color:var(--mut);padding:12px 10px 6px;font-weight:600}
+.side .swlabel,.side .navlabel{font-family:var(--mono);font-size:.64rem;
+text-transform:uppercase;letter-spacing:.1em;color:var(--mut);
+padding:12px 10px 6px;font-weight:700}
 .side .switch{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
 .side a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;
 color:var(--ink2);font-size:.88rem;text-decoration:none}
@@ -185,14 +214,12 @@ flex:0 0 7px}
    row, the page pill and a rule under the heading. Hue only: saturation and
    lightness are fixed here so no account can render illegibly or alarmingly,
    and an account added tomorrow gets its colour without an edit. */
-body{--tone:hsl(var(--tint,214) 42% 38%);--tones:hsl(var(--tint,214) 46% 94%)}
-@media(prefers-color-scheme:dark){body{--tone:hsl(var(--tint,214) 52% 72%);
---tones:hsl(var(--tint,214) 34% 17%)}}
+body{--tone:hsl(var(--tint,214) 58% 74%);--tones:hsl(var(--tint,214) 42% 17%)}
 body.every{--tone:var(--acc);--tones:var(--accs)}
 /* Every account's dot in ITS OWN colour, not just the selected one -- each
    row carries a `--tint` of its own, so the mapping is learnable from the
    list rather than only visible once you have already switched. */
-.side .switch a .dot{background:hsl(var(--tint,214) 44% 52%);opacity:.5}
+.side .switch a .dot{background:hsl(var(--tint,214) 58% 64%);opacity:.55}
 .side .switch a.on{background:var(--tones);color:var(--tone)}
 .side .switch a.on .dot{opacity:1}
 .side .switch a.every .dot{background:var(--rule);opacity:1}
@@ -222,12 +249,12 @@ font-weight:600}
 font-size:.83rem;align-items:baseline}
 .log .ev:first-child{border-top:0}
 .log .ev .lv{flex:0 0 6px;align-self:stretch;border-radius:99px;margin-top:2px}
-.log .ev.fail .lv{background:#b4443a}
+.log .ev.fail .lv{background:var(--err)}
 .log .ev.warn .lv{background:var(--gap)}
 .log .ev.ok .lv{background:var(--ok)}
 .log .ev.info .lv{background:var(--rule)}
 .log .ev .when{flex:0 0 118px;color:var(--mut);font-size:.76rem;
-font-family:ui-monospace,Menlo,monospace}
+font-family:var(--mono)}
 .log .ev .kind{flex:0 0 74px;color:var(--mut);font-size:.74rem;
 text-transform:uppercase;letter-spacing:.05em}
 .log .ev .what{flex:1;min-width:0}
@@ -242,14 +269,14 @@ padding:9px 0;border-top:1px solid var(--rule2)}
 .sysrow:first-child{border-top:0}
 .sysrow .nm{flex:0 0 190px;font-weight:600}
 .sysrow .vd{flex:1;min-width:200px;color:var(--ink2);font-size:.85rem}
-.sysrow .n{font-family:ui-monospace,Menlo,monospace;font-size:.8rem;
+.sysrow .n{font-family:var(--mono);font-size:.8rem;
 color:var(--mut)}
-.sysrow.bad .vd{color:#b4443a}
+.sysrow.bad .vd{color:var(--err)}
 .sysrow.warn .vd{color:var(--gap)}
 .side .foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--rule);
 display:flex;flex-direction:column;gap:1px}
 .side .foot a{font-size:.82rem;color:var(--mut)}
-.side a.pend{color:var(--acc);font-weight:600}
+.side a.pend{color:var(--gap);font-weight:700}
 .main{flex:1;min-width:0;padding:22px 28px 60px;max-width:1180px}
 .pagehead{display:flex;align-items:baseline;gap:12px;margin-bottom:18px;
 flex-wrap:wrap}
@@ -269,28 +296,26 @@ flex-wrap:wrap;padding:10px;gap:4px}
   flex-wrap:wrap;background:var(--panel);border:1px solid var(--rule);
   border-radius:5px;padding:9px 12px;margin-bottom:10px}
 .bulkbar .grow{flex:1}
-/* The waiting-decisions counter in the tab bar. Defined WITH the markup. */
-.tabs a.pend{margin-left:auto;color:var(--acc);border-color:var(--acc);
-font-weight:600}
+/* The waiting-decisions pill (styled with the sidebar foot above) is AMBER on
+   purpose: amber is the waiting-on-a-person color everywhere in this console,
+   and a count that can read as mere activity stops being checked. The old
+   `.tabs a.pend` rule retired with the tab bar it belonged to. */
 .pick{display:inline-flex;gap:6px;align-items:center;font-size:.75rem;
   color:var(--mut);cursor:pointer;user-select:none}
 /* Sticky bar is ~44px tall and would otherwise cover the card just jumped to. */
 .anchor{position:relative;top:-56px;display:block;height:0;visibility:hidden}
-code{font-family:ui-monospace,Menlo,monospace;font-size:.82em;background:var(--rule2);
-padding:.1em .35em;border-radius:3px}
+code{font-family:var(--mono);font-size:.8em;background:var(--rule2);
+border:1px solid var(--rule);padding:.08em .35em;border-radius:3px}
 .cur{background:var(--accs);border-left:3px solid var(--acc)}
 .note{background:var(--gaps);border-left:3px solid var(--gap);padding:10px 14px;
 border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
 .ok{background:var(--oks);border-left:3px solid var(--ok);padding:10px 14px;
 border-radius:0 4px 4px 0;font-size:.85rem;color:var(--ink2)}
-.cols{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}.cols th{text-align:left;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#8a8f98;padding:5px 8px;border-bottom:1px solid #e2e5ea}.cols td{padding:5px 8px;border-bottom:1px solid #f0f2f5;vertical-align:middle}.cols .cn{font-family:ui-monospace,Menlo,monospace}.cols .ct{font-family:ui-monospace,Menlo,monospace;color:#8a8f98;font-size:11px}.cols .cf{width:150px;white-space:nowrap}.fillbar{display:inline-block;width:88px;height:6px;border-radius:3px;background:#e6e9ee;vertical-align:middle;overflow:hidden}.fillbar i{display:block;height:100%;background:#2f7d5c}.fillbar i.sec{background:#c9a227}.fillbar i.off{background:#cfd4da}.fillpct{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#8a8f98;margin-left:7px}.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
-.tabs a{text-decoration:none;font-size:.85rem;font-weight:600;color:var(--mut);
-padding:8px 15px;border:1px solid transparent;border-bottom:none;border-radius:5px 5px 0 0;
-position:relative;bottom:-1px}
-.tabs a.on{color:var(--acc);background:var(--panel);border-color:var(--rule);
-border-bottom:1px solid var(--panel)}
+.cols{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}.cols th{text-align:left;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding:5px 8px;border-bottom:1px solid var(--rule)}.cols td{padding:5px 8px;border-bottom:1px solid var(--rule2);vertical-align:middle}.cols .cn{font-family:var(--mono)}.cols .ct{font-family:var(--mono);color:var(--mut);font-size:11px}.cols .cf{width:150px;white-space:nowrap}.fillbar{display:inline-block;width:88px;height:6px;border-radius:3px;background:var(--rule2);vertical-align:middle;overflow:hidden}.fillbar i{display:block;height:100%;background:var(--ok)}.fillbar i.sec{background:var(--gap)}.fillbar i.off{background:var(--rule)}.fillpct{font-family:var(--mono);font-size:10.5px;color:var(--mut);margin-left:7px}
+/* The old horizontal `.tabs` bar rendered by nothing since the frame rebuild —
+   its rules (and the light-theme hexes they carried) retire with the reskin. */
 textarea{font:inherit;font-size:.85rem;padding:6px 8px;border:1px solid var(--rule);
-border-radius:4px;background:var(--panel);color:var(--ink);width:100%;resize:vertical}
+border-radius:3px;background:var(--field);color:var(--ink);width:100%;resize:vertical}
 .sysgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
 .stat{display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem;color:var(--mut)}
 .stat b{color:var(--ink);font-weight:600}
@@ -312,8 +337,8 @@ ul.bl li{margin:2px 0}
 .tog.on .kn{left:17px;background:var(--ok)}
 .tog.dis{opacity:.45;cursor:not-allowed}
 .kv{display:grid;grid-template-columns:130px 1fr;gap:5px 14px;margin:0;font-size:.85rem}
-.kv dt{color:var(--mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
-font-weight:700;padding-top:2px}
+.kv dt{color:var(--mut);font-family:var(--mono);font-size:.68rem;text-transform:uppercase;
+letter-spacing:.07em;font-weight:700;padding-top:2px}
 .kv dd{margin:0;color:var(--ink2);min-width:0;overflow-wrap:anywhere}
 @media(max-width:560px){.kv{grid-template-columns:1fr;gap:1px 0}.kv dd{margin-bottom:7px}}
 details.conns{border:1px solid var(--rule);border-radius:6px;padding:10px 13px;
@@ -343,7 +368,7 @@ form.inl{display:inline}
 .mklink input[name=days]{flex:0 0 56px}
 .card.danger{border-color:var(--gap);background:var(--gaps)}
 .card.danger .head h2{color:var(--gap)}
-input.copy{width:100%;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;
+input.copy{width:100%;font-family:var(--mono);font-size:.8rem;
 margin-top:6px}
 details.sec{border:1px solid var(--rule);border-radius:5px;padding:9px 12px;background:var(--rule2)}
 details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;color:var(--acc)}
@@ -359,10 +384,10 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 .subtab{display:flex;align-items:center;gap:7px;padding:9px 14px;text-decoration:none;color:var(--mut);font-size:.9rem;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px}
 .subtab:hover{color:var(--ink)}
 .subtab.on{color:var(--ink);border-bottom-color:var(--acc)}
-.subtab .cnt{font-size:.75rem;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--rule);color:var(--mut)}
-.subtab.on .cnt{background:var(--acc);color:#0b0e13}
-.navbadge{margin-left:auto;background:var(--gap);color:#fff;border-radius:9px;
-font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
+.subtab .cnt{font-family:var(--mono);font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--rule2);border:1px solid var(--rule);color:var(--mut)}
+.subtab.on .cnt{background:var(--gap);border-color:var(--gap);color:#2a1700}
+.navbadge{margin-left:auto;background:var(--gap);color:#2a1700;border-radius:9px;
+font-family:var(--mono);font-size:.7rem;font-weight:700;padding:1px 7px;line-height:1.5}
 /* The workflow surface: the strip is STATE (counts that link into the
    system's own view), a plan card is one item of queued work. */
 .workstrip{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:.8rem;align-items:center;color:var(--mut)}
@@ -388,7 +413,7 @@ font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 .lbl{font-weight:600;font-size:.85rem;color:var(--ink2)}
 .big{font-size:1.02rem;font-weight:600;margin:2px 0 4px}
 .tbl tr.grp td{background:var(--rule2);font-size:.85rem;padding-top:8px}
-.bad{color:#b4443a;background:var(--gaps);border-left:3px solid #b4443a;
+.bad{color:var(--err);background:var(--errs);border-left:3px solid var(--err);
   padding:8px 12px;border-radius:4px}
 """
 
