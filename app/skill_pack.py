@@ -2417,22 +2417,24 @@ def _run_campaign_email(ctx: Context) -> dict:
         ctx.note("this draft is not fit to launch as it stands: "
                  + "; ".join(f["detail"] for f in hard))
 
-    # THE DRAFT IS HOW THE OWNER SEES IT, so it is always made.
+    # HELD FOR YOUR REVIEW — the ESP draft is made at APPROVAL, never here.
     #
-    # This used to require the copy to pass, the theme to be complete,
-    # personalization to have run and nothing to be blocking — and produced
-    # NOTHING when any of them failed. That collapsed two different states into
-    # one outcome: "this must not be sent" and "you may not look at this". A
-    # draft cannot send — launching is `send_campaign(confirm=True)`, which the
-    # substrate never calls — so withholding it bought no safety at all and
-    # cost the owner the only view they had of the work (owner, 2026-08-22:
-    # "how else will I see it and send it?").
+    # The previous policy drafted into the ESP the moment there was HTML,
+    # because the console had no preview surface and withholding the draft
+    # took away the only view the owner had of the work (2026-08-22: "how
+    # else will I see it and send it?" — the [NEEDS FIX] campaign-name
+    # convention was that policy's warning label). The WORKROOM is that view
+    # now, and the owner inverted the flow with it (2026-08-27): "we want to
+    # have a preview before it gets sent over so that the feedback on
+    # changes / entire plan adjustment that may be needed can happen in the
+    # data layer that we have access to as opposed to in the ESP."
     #
-    # So the draft is made whenever there is HTML to make it from, and anything
-    # wrong with it rides in the campaign NAME, which is internal to the ESP.
-    # The owner sees "[NEEDS FIX — …]" in their campaign list while the SUBJECT
-    # stays exactly what a customer would receive. What a defect still costs is
-    # the approval: nothing defective becomes launchable through this system.
+    # So: the artifact is kept whole in OUR store (ledger writes
+    # ArtifactBody), the review — preview, feedback, subject/preheader
+    # adjustment, redraft — happens in the workroom against our own data
+    # layer, and `push_campaign_to_esp` below is the ONLY code that writes a
+    # campaign into a client's platform, called by the approval executor.
+    # Nothing sits in a client's ESP that the owner has not approved.
     defects = [f["detail"] for f in hard]
     if not item.get("ok"):
         defects += [f["detail"] for f in (item.get("failures") or [])]
@@ -2444,98 +2446,91 @@ def _run_campaign_email(ctx: Context) -> dict:
     _forbidden = [f for f in (hard + list(item.get("failures") or []))
                   if str(f.get("rule", "")) in WITHHOLD_FROM_ESP]
     if _forbidden:
-        ctx.note("NOT drafted into the ESP — this email would state something "
-                 "false or forbidden in the client's name, and a draft sitting "
-                 "in the sending platform is one click from a list: "
+        ctx.note("will NEVER be pushed to the ESP — this email would state "
+                 "something false or forbidden in the client's name: "
                  + "; ".join(f["detail"] for f in _forbidden))
 
-    esp_draft, esp_target = {}, {}
-    if final_html and not _forbidden:
-        mod, refusal = esp.backend(ctx.tenant)
-        if refusal:
-            ctx.note("could not draft into the ESP: " + refusal)
-        else:
-            # Bind the draft to the PLANNED segment inside the ESP — the
-            # remembered id first, a live name-match second, and a named
-            # absence third: an untargeted draft is a real state the owner
-            # must see, because at launch it would go to whoever the ESP
-            # defaults to rather than to the cohort the plan named.
-            from . import segments as segmod
-            target = esp_target = segmod.esp_id_for(ctx.tenant, seg["key"])
-            include = [target["id"]] if target.get("id") else None
-            if not target.get("id"):
-                ctx.note("the ESP draft is untargeted — " + target.get("why", ""))
-            elif target.get("why"):
-                ctx.note(target["why"])
-            try:
-                # INTERNAL name, customer-facing subject. Omnisend shows the
-                # name in the campaign list and never to a reader, which makes
-                # it the one place a warning can live without altering the
-                # email the customer would get.
-                _mark = ("[NEEDS FIX — " + "; ".join(defects)[:70] + "] "
-                         if defects else "")
-                esp_draft = mod.draft_from_html(
-                    ctx.tenant, name=(_mark + copy.get("subject", ""))[:120],
-                    subject=copy.get("subject", ""),
-                    sender_name=theme["name"], html=final_html,
-                    preheader=copy.get("preheader", ""),
-                    include_segments=include)
-                if not esp_draft.get("ok"):
-                    ctx.note("the ESP rejected the draft: "
-                             + esp_draft.get("error", "")[:200])
-                elif esp_draft.get("images_not_rehosted"):
-                    # Rehosted images cannot be broken by the ESP; these
-                    # stayed hotlinked and might be.
-                    ctx.note("image(s) the ESP would not rehost — kept "
-                             "hotlinked, may render broken there: "
-                             + ", ".join(esp_draft["images_not_rehosted"][:3]))
-                if esp_draft.get("ok") and hero_got.get("asset_id"):
-                    # Feedback signal one: the photograph actually went into
-                    # a drafted campaign. Publishing is the explicit act the
-                    # creative library's `uses` counter exists for.
-                    from . import kb as _kb
-                    _kb.mark_asset_used(hero_got["asset_id"],
-                                        destination="campaign_email draft")
-            except Exception as exc:                            # noqa: BLE001
-                ctx.note(f"drafting into the ESP raised {exc.__class__.__name__}")
+    esp_draft = {}
+    # Segment binding is COMPUTED here — so the workroom can warn about an
+    # untargeted send while there is still time to fix it — and USED at push
+    # time. Remembered id first, live name-match second, named absence third.
+    from . import segments as segmod
+    esp_target = segmod.esp_id_for(ctx.tenant, seg["key"])
+    if not esp_target.get("id"):
+        ctx.note("the campaign is untargeted so far — " + esp_target.get("why", ""))
+    elif esp_target.get("why"):
+        ctx.note(esp_target["why"])
 
-    # WHERE IT ACTUALLY LANDED. `emit` wrote `esp:omnisend` a hundred lines
-    # above, before any of this ran — so the column said the same thing whether
-    # the draft reached the platform, was refused by it, raised, or was
-    # deliberately withheld. It recorded the intention and was read as the
-    # outcome. Now it names a campaign somebody can open, or says plainly that
-    # nothing was created. Status is untouched: a draft is not a send.
+    # Everything the approval-time push needs, in one recipe. It rides in
+    # two places: on the ARTIFACT (the machine's stash, below) and on the
+    # pending APPROVAL (the owner-editable mirror the workroom's adjust form
+    # writes — the push prefers it, so what the owner changed is what the
+    # client's platform receives).
     _prov = esp.provider_for(ctx.tenant) or "none"
-    if esp_draft.get("ok") and esp_draft.get("campaign_id"):
-        _landed = f"esp:{_prov}:campaign/{esp_draft['campaign_id']}"
-    elif _forbidden:
+    _push_recipe = ({
+        "provider": _prov,
+        "subject": copy.get("subject", ""),
+        "preheader": copy.get("preheader", ""),
+        "sender_name": theme["name"],
+        "segment_key": seg["key"],
+        "segment_id": esp_target.get("id") or "",
+        "hero_asset_id": hero_got.get("asset_id") or ""}
+        if final_html and not _forbidden else {})
+
+    # THE ARTIFACT THE WORKROOM REVIEWS — the rendered email, kept whole in
+    # our store. `emit` records the validated COPY on the ledger; the HTML is
+    # only final HERE, after render, personalization and rehosting — so this
+    # is its one writer. `draft_body` freezes on first write (v1, the
+    # workroom's virtual first version); `body` is what the push sends.
+    if final_html:
+        from . import db as _db
+        with _db.SessionLocal() as s:
+            _row = (s.query(_db.ArtifactBody)
+                    .filter(_db.ArtifactBody.output_id == item["output_id"])
+                    .first())
+            if _row is None:
+                s.add(_db.ArtifactBody(
+                    tenant=ctx.tenant, output_id=item["output_id"],
+                    run_id=ctx.run_id or "", system_key="campaign_email",
+                    format="campaign_email", destination="",
+                    body=final_html, draft_body=final_html,
+                    bytes=len(final_html), push=_push_recipe))
+            else:
+                _row.body = final_html
+                if not (_row.draft_body or ""):
+                    _row.draft_body = final_html
+                _row.bytes = len(final_html)
+                _row.push = _push_recipe
+            s.commit()
+
+    if _push_recipe:
+        from . import approvals as _appr
+        _appr.attach_esp_push(ctx.run_id, _push_recipe)
+
+    # WHERE IT STANDS. The destination column names a state somebody can act
+    # on: held for the workroom's review, withheld outright, or nothing to
+    # hold. A campaign id lands here only when the push actually creates one.
+    if _forbidden:
         _landed = f"esp:{_prov}:withheld"
+    elif final_html:
+        _landed = f"esp:{_prov}:held-for-review"
     else:
         _landed = f"esp:{_prov}:not-drafted"
     ledger.delivered(ctx.tenant, item["output_id"], _landed)
 
-    # NO DRAFT, NO APPROVAL TO GIVE. `emit` queued one the moment the copy
-    # cleared the validator, but the artifact is created here, afterwards — so
-    # anything that stopped it (a craft block, an ESP refusal, a raised
-    # exception) leaves a queue item describing an email that exists nowhere.
-    # Approving it produced nothing and removed it from the queue, which is how
-    # an approved campaign became impossible to find (owner, 2026-08-22).
-    # AN APPROVAL IS A QUESTION ABOUT SOMETHING LAUNCHABLE. The draft now
-    # exists either way, so the approval is withdrawn for a narrower reason
-    # than before: not "there is nothing to look at" but "this one is not fit
-    # to launch yet". The note says which, and says where to go and look.
-    if defects or not esp_draft.get("ok"):
-        why = ("; ".join(defects) if defects
-               else esp_draft.get("error") or "the ESP draft was not created")
+    # AN APPROVAL IS A QUESTION ABOUT SOMETHING PUSHABLE. Defective or
+    # forbidden copy withdraws it — the workroom still shows the artifact and
+    # its defects, feedback still files, but nothing offers to put it in a
+    # client's platform until a redraft comes back clean.
+    if defects or _forbidden or not final_html:
         why = ("; ".join(f["detail"] for f in _forbidden) if _forbidden
-               else why)
+               else "; ".join(defects) if defects
+               else "no HTML was produced")
         from . import approvals as _appr
         if _appr.withdraw(ctx.run_id, why):
-            ctx.note(("the draft IS in the ESP, marked [NEEDS FIX] — but the "
-                      "approval was withdrawn, because it is not fit to launch "
-                      "as it stands: " if esp_draft.get("ok") else
-                      "the approval for this email was withdrawn — there is no "
-                      "draft in the ESP to approve: ") + why)
+            ctx.note("the approval was withdrawn — not fit to push as it "
+                     "stands: " + why + ". Review it in the workroom; a "
+                     "clean redraft re-queues it.")
 
     # RECORDED SO IT CAN STOP HAPPENING. Every defect goes on the run, where
     # `systems.blocked_reasons` ranks it by how often it actually cost a send —
@@ -2556,16 +2551,16 @@ def _run_campaign_email(ctx: Context) -> dict:
     return {"summary": (f"campaign email for '{seg['name']}' — {basis}, "
                         + ("sendable" if not missing else "not yet sendable")
                         + (", hero image" if hero else ", no hero image")
-                        + (", drafted in ESP" if esp_draft.get("ok") and not defects
-                           else ", DRAFTED IN ESP but NEEDS FIX: "
-                                + "; ".join(defects)[:120]
-                           if esp_draft.get("ok")
-                           else ", NOT DRAFTED IN ESP (false or forbidden): "
-                                + "; ".join(f["detail"] for f in _forbidden)[:120]
+                        + (", NOT PUSHABLE (false or forbidden): "
+                           + "; ".join(f["detail"] for f in _forbidden)[:120]
                            if _forbidden
-                           else ", NOT DRAFTED IN ESP: "
-                                + (esp_draft.get("error")
-                                   or "no HTML was produced")[:120])),
+                           else ", held for your review — approving pushes "
+                                "it to the ESP"
+                           if final_html and not defects
+                           else ", held with defects — fix before it can "
+                                "be approved: " + "; ".join(defects)[:120]
+                           if final_html
+                           else ", no HTML was produced")),
             "defects": defects,
             "segment": seg, "basis": basis, "cited_claims": cited,
             "hero": {"basis": hero_got.get("basis", ""),
@@ -2573,6 +2568,118 @@ def _run_campaign_email(ctx: Context) -> dict:
                      "drafted": hero_got.get("drafted", {})},
             "esp_target": esp_target,
             "esp_draft": esp_draft, "html_bytes": len(final_html)}
+
+
+def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
+    """Create the ESP draft for an APPROVED campaign — the ONLY ESP write.
+
+    Called by the approval executor (and the workroom's retry button). Reads
+    what the emit stashed on the approval — subject, preheader, sender,
+    segment binding — which is also where the workroom's pre-push edits land,
+    so what the owner adjusted in our data layer is exactly what reaches the
+    platform. Idempotent by destination: a campaign already pushed returns
+    its id instead of drafting a twin.
+    """
+    from . import db, esp, ledger
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        out = s.get(db.Output, output_id)
+        push = {}
+        latest_status = ""
+        held_defects: list = []
+        run_decision = ""
+        run_id = art.run_id if art is not None else ""
+        if run_id:
+            aprs = (s.query(db.Approval)
+                    .filter(db.Approval.run_id == run_id)
+                    .order_by(db.Approval.created_at.desc()).all())
+            latest_status = aprs[0].status if aprs else ""
+            for apr in aprs:
+                got = (apr.payload or {}).get("esp_push")
+                if got:
+                    push = dict(got)
+                    break
+            run = s.get(db.SystemRun, run_id)
+            if run is not None:
+                held_defects = list(run.blocked_on or [])
+                run_decision = run.decision or ""
+        s.expunge_all()
+    # THE REVIEW'S VERDICT BINDS THE PUSH — this function must never be a
+    # side door around it. A withdrawn approval, or defects recorded on the
+    # run with no approval in sight, both mean "not fit to push as it
+    # stands"; a clean redraft re-queues a fresh approval and lifts this.
+    if latest_status == "withdrawn" or (
+            held_defects and run_decision != "approved"):
+        return {"ok": False,
+                "error": "the review withdrew this campaign — not fit to "
+                         "push as it stands"
+                         + (f" ({'; '.join(held_defects[:3])})"
+                            if held_defects else "")
+                         + "; a clean redraft re-queues it"}
+    if art is None or not (art.body or "").strip():
+        return {"ok": False,
+                "error": "no artifact HTML is kept for this campaign — "
+                         "nothing to push"}
+    # The approval's copy first — that is where the workroom's edits land —
+    # falling back to the machine's stash on the artifact.
+    push = push or dict(getattr(art, "push", None) or {})
+    if not push:
+        return {"ok": False,
+                "error": "no push recipe — this campaign was withheld "
+                         "(false or forbidden) or predates review-"
+                         "before-push; a clean redraft supplies one"}
+    already = (getattr(out, "destination", "") or "")
+    if ":campaign/" in already:
+        return {"ok": True, "provider": already.split(":")[1],
+                "campaign_id": already.split(":campaign/")[-1],
+                "note": "already in the ESP — not drafted twice"}
+    mod, refusal = esp.backend(tenant)
+    if refusal:
+        return {"ok": False, "error": refusal}
+    prov = esp.provider_for(tenant) or "esp"
+    include = [push["segment_id"]] if push.get("segment_id") else None
+    try:
+        esp_draft = mod.draft_from_html(
+            tenant, name=(push.get("subject") or "campaign")[:120],
+            subject=push.get("subject", ""),
+            sender_name=push.get("sender_name", ""),
+            html=art.body, preheader=push.get("preheader", ""),
+            include_segments=include)
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False,
+                "error": f"the ESP raised {exc.__class__.__name__}: "
+                         f"{str(exc)[:160]}"}
+    if not esp_draft.get("ok"):
+        return {"ok": False,
+                "error": esp_draft.get("error", "the ESP rejected the draft")}
+    landed_note = ""
+    try:
+        ledger.delivered(tenant, output_id,
+                         f"esp:{prov}:campaign/{esp_draft.get('campaign_id')}")
+    except Exception as exc:                                     # noqa: BLE001
+        # The draft EXISTS in the platform; hiding a failed ledger write
+        # would make our record disagree with reality silently — the exact
+        # intention-vs-outcome confusion `delivered` was built to end.
+        landed_note = (f"draft created, but recording it failed "
+                       f"({exc.__class__.__name__}) — the ledger still says "
+                       f"held-for-review")
+    if push.get("hero_asset_id"):
+        # The photograph actually reached a drafted campaign — the explicit
+        # act the creative library's `uses` counter exists for.
+        try:
+            from . import kb as _kb
+            _kb.mark_asset_used(push["hero_asset_id"],
+                                destination="campaign_email draft")
+        except Exception:                                        # noqa: BLE001
+            pass
+    got = {"ok": True, "provider": prov,
+           "campaign_id": esp_draft.get("campaign_id", "")}
+    if landed_note:
+        got["note"] = landed_note
+    if esp_draft.get("images_not_rehosted"):
+        got["images_not_rehosted"] = esp_draft["images_not_rehosted"]
+    return got
 
 
 register(Skill(

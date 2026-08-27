@@ -317,6 +317,32 @@ ck("rule-level feedback REACHES the validator's ban list",
    any("smokebannedphrase" in str(b) for b in banned), str(banned)[:120])
 
 # ---------------------------------------------------------------------------
+# Draft products are not even OFFERED (owner, 2026-08-27): the plan's entity
+# picker must list an available product, label an out-of-stock one, and show
+# a draft/archived one never — fitness screens the drafter's pool, this pins
+# the owner-facing select.
+# ---------------------------------------------------------------------------
+from app import provenance as _prov  # noqa: E402
+
+with db.SessionLocal() as s:
+    s.add(db.KbEntity(tenant=T1, key="smk-live", name="Smoke Live Product",
+                      type="product", availability="available",
+                      status="active", review=_prov.APPROVED))
+    s.add(db.KbEntity(tenant=T1, key="smk-oos", name="Smoke OOS Product",
+                      type="product", availability="oos",
+                      status="active", review=_prov.APPROVED))
+    s.add(db.KbEntity(tenant=T1, key="smk-drafty", name="Smoke Draft Product",
+                      type="product", availability="draft",
+                      status="active", review=_prov.APPROVED))
+    s.commit()
+_sel = admin_ui._plan_field_input({"key": "entity_key", "kind": "entity",
+                                   "label": "Featured"}, "", tenant=T1)
+ck("the entity picker offers the live product", "smk-live" in _sel)
+ck("…labels the out-of-stock one", "smk-oos" in _sel
+   and "out of stock" in _sel)
+ck("…and a DRAFT product is not offered at all", "smk-drafty" not in _sel)
+
+# ---------------------------------------------------------------------------
 # Light mode (step 2): the second token block defines every token the dark
 # root does — the parity that stops one palette silently falling behind the
 # other — the toggle persists in a cookie, and the choice reaches <body>.

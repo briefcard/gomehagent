@@ -392,8 +392,11 @@ def main():
     before = len(_drafted)
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="sell",
                   intent="offer", deadline="the sale really ends Sunday 23:59 ET")
-    ck("the SAME copy ships once a real deadline is on the plan",
-       len(_drafted) == before + 1)
+    # RETARGETED (UI overhaul 3.3): nothing drafts at emit any more — a clean
+    # run is HELD for the workroom; "ships" means it clears the urgency gate.
+    ck("the SAME copy is held cleanly once a real deadline is on the plan",
+       "held for your review" in (r.get("summary") or ""),
+       (r.get("summary") or "")[:90])
 
     print("\n— a repair re-renders: the ESP gets the REPAIRED email —")
     calls = {"n": 0}
@@ -421,7 +424,10 @@ def main():
     ck("the HTML filed on the item is the REPAIRED one",
        "made in Italy" not in (it.get("meta", {}).get("html") or "")
        and "Designed in Milan" in (it.get("meta", {}).get("html") or ""))
-    ck("the ESP received the REPAIRED html, not the rejected render",
+    # RETARGETED (UI overhaul 3.3): the ESP sees it at the approval-time
+    # push — which must carry the REPAIRED render, never the rejected one.
+    skill_pack.push_campaign_to_esp("baci", it.get("output_id", ""))
+    ck("the push carries the REPAIRED html, not the rejected render",
        len(_drafted) == before + 1
        and "made in Italy" not in _drafted[-1]["html"]
        and "Designed in Milan" in _drafted[-1]["html"])
@@ -524,8 +530,7 @@ def main():
     skill_pack.draft_campaign = _urlless
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
     ck("a placeholder '#' does not outrank the real storefront",
-       len(_drafted) == before + 1
-       and "example-store.com" in (_meta(r, "html") or ""))
+       "example-store.com" in (_meta(r, "html") or ""))
 
     # Nothing to point at anywhere: no domain, and no entity with a URL.
     with db.SessionLocal() as s:
@@ -535,20 +540,24 @@ def main():
     before = len(_drafted)
     skill_pack.draft_campaign = _urlless
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
-    # CHANGED 2026-08-22. A dead button is BROKEN, not false — and withholding
-    # the draft over it left the owner with nothing to look at, which is how a
-    # send "that was working before" became invisible. The draft now goes to
-    # the ESP carrying the problem in its INTERNAL name; what it does not get
-    # is an approval. Withholding is reserved for `WITHHOLD_FROM_ESP` — the
-    # things that would be false or forbidden if a human did click send.
-    ck("the draft still reaches the ESP, because a draft cannot send itself",
-       len(_drafted) == before + 1, str(len(_drafted) - before))
-    ck("…marked [NEEDS FIX] in the name the ESP shows the OWNER",
-       "[NEEDS FIX" in (_drafted[-1].get("name") or "") if _drafted else False,
-       (_drafted[-1].get("name") or "")[:70] if _drafted else "")
-    ck("…while the SUBJECT stays what a customer would receive",
-       not (_drafted[-1].get("subject") or "").startswith("[") if _drafted else False,
-       (_drafted[-1].get("subject") or "")[:50] if _drafted else "")
+    # CHANGED 2026-08-22, CHANGED AGAIN 2026-08-27 (UI overhaul 3.3). A dead
+    # button is BROKEN, not false. The 08-22 policy shipped it to the ESP
+    # marked [NEEDS FIX] because the console had no other way to look at it;
+    # the WORKROOM is that way now, so a defective email is HELD in our
+    # store — visible, reviewable, its approval withdrawn — and NOTHING
+    # reaches the client's platform. The push refuses the withdrawn verdict
+    # rather than offering a side door around it.
+    ck("a defective draft reaches the ESP never — it is held for the workroom",
+       len(_drafted) == before, str(len(_drafted) - before))
+    ck("…the summary says held-with-defects",
+       "held with defects" in (r.get("summary") or ""),
+       (r.get("summary") or "")[:90])
+    _oid_dead = (r.get("items") or [{}])[0].get("output_id", "")
+    _got_dead = skill_pack.push_campaign_to_esp("baci", _oid_dead)
+    ck("…and the push refuses the withdrawn verdict, naming it",
+       _got_dead.get("ok") is not True
+       and "withdrew" in (_got_dead.get("error") or ""),
+       str(_got_dead)[:90])
     ck("…and the run says which control is dead",
        any("points nowhere" in n for n in r.get("notes", [])))
     ck("…and it is recorded, so a repeat is visible as an account gap",
@@ -748,8 +757,9 @@ def main():
         "claim_ids": [], "cta_label": "See it", "cta_url": ""}, "model", "")
     r = skill.run("campaign_email", "baci", segment="repeat_buyers", goal="x")
     html = _meta(r, "html") or ""
-    ck("an email whose links the drafter left empty STILL SHIPS",
-       len(_drafted) == before + 1)
+    ck("an email whose links the drafter left empty is STILL HELD cleanly",
+       "held for your review" in (r.get("summary") or ""),
+       (r.get("summary") or "")[:90])
     ck("…because the empty links were pointed at the store, not blocked",
        'href=""' not in html and 'href="#"' not in html
        and "example-store.com" in html)
@@ -770,8 +780,8 @@ def main():
     r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x")
     ck("the copy passed the validator", (r.get("items") or [{}])[0].get("ok") is True)
     ck("…but no draft reached the ESP", len(_drafted) == before)
-    ck("the summary SAYS it was not drafted",
-       "NOT DRAFTED IN ESP" in (r.get("summary") or ""), r.get("summary", "")[:70])
+    ck("the summary SAYS it can never be pushed",
+       "NOT PUSHABLE" in (r.get("summary") or ""), r.get("summary", "")[:70])
     with db.SessionLocal() as s:
         ap = (s.query(db.Approval)
               .filter(db.Approval.run_id == (r.get("run_id") or ""))
@@ -793,11 +803,14 @@ def main():
     with db.SessionLocal() as s:
         ap = (s.query(db.Approval)
               .filter(db.Approval.run_id == (r.get("run_id") or "")).first())
-    ck("a real draft still queues a real approval",
-       len(_drafted) == before + 1 and ap is not None and ap.status == "pending")
+    # RETARGETED (UI overhaul 3.3): the approval queues while NOTHING is in
+    # the ESP — and approving is now the act that pushes the draft there.
+    ck("a clean campaign queues its approval with nothing yet in the ESP",
+       len(_drafted) == before and ap is not None and ap.status == "pending")
     said = approvals.apply_decision(ap.id, "approved") if ap else ""
-    ck("…and approving says what it actually did — reviewed, not sent",
-       "Nothing was sent" in said and "Launch it" in said, said[:70])
+    ck("…and approving PUSHES the draft and says so — launch stays human",
+       "pushed to" in said and "Launch" in said
+       and len(_drafted) == before + 1, said[:80])
 
     with db.SessionLocal() as s:
         rr = s.get(db.System, row.id)

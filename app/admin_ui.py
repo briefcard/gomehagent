@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextvars
 import html
 import json
+import re as _re
 
 from . import config, db, kb, systems, tenants
 
@@ -1849,8 +1850,19 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         # Same rule as segments: a reference into the catalogue, never free
         # text. Options are this account's real entities, in-stock first;
         # the data layer refuses any key outside them.
+        #
+        # DRAFT PRODUCTS ARE NOT OFFERED — at all (owner, 2026-08-27: "draft
+        # products shouldn't even be accessible to the system"). fitness.py
+        # already screens the DRAFTER's pool and catches one named anyway;
+        # this closes the last door, the one facing the owner: a select that
+        # lists a draft/archived product invites a plan the run must then
+        # refuse. Out-of-stock stays listed WITH its label — stock is a
+        # temporary state a plan may legitimately wait out; draft is a
+        # decision the store owner has not made yet.
         cur = str(value or "").strip()
-        rows = sorted(kb.entities(tenant, available_only=False),
+        rows = sorted((r for r in kb.entities(tenant, available_only=False)
+                       if (r.availability or "available")
+                       not in ("draft", "archived", "unpublished")),
                       key=lambda r: ((r.availability or "available") != "available",
                                      (r.name or "").lower()))
         opts = [f'<option value=""{"" if cur else " selected"}>— none — the '
@@ -6270,7 +6282,19 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
               .filter(db.FeedbackItem.output_id == output_id)
               .order_by(db.FeedbackItem.created_at.desc()).all())
         run = s.get(db.SystemRun, art.run_id) if art.run_id else None
+        out = s.get(db.Output, output_id)
         s.expunge_all()
+
+    # A campaign email reviews differently from an article: iframe previews
+    # instead of inline HTML, subject/preheader adjustable pre-push instead
+    # of a body editor (email HTML is fragile; blocks get redrafted, not
+    # hand-edited), and the decide bar's consequence is the ESP push itself
+    # — under review-before-push, NOTHING sits in a client's platform until
+    # the approval here says so.
+    is_email = (art.format or "") == "campaign_email"
+    esp_push = ((ap.payload or {}).get("esp_push") or {}) if ap else {}
+    dest = getattr(out, "destination", "") or ""
+    pushed = ":campaign/" in dest
 
     # --- the lifecycle, as chips: where this artifact IS ------------------
     def _chip(label: str, on: bool) -> str:
@@ -6288,7 +6312,44 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             True)
 
     # --- decide bar (moved from web.py, restyled; same consequences) ------
-    if ap:
+    if is_email:
+        prov = esp_push.get("provider") or "the ESP"
+        if ap:
+            from . import approvals
+            approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
+            deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
+            decide = (f'<div class="row"><a class="btn" href="{approve}">'
+                      f'Approve — pushes the draft to {_esc(prov)}, '
+                      f'launch-ready</a> <a class="btn danger" href="{deny}">'
+                      f'Deny</a> <span class="when">Nothing reaches '
+                      f'{_esc(prov)} until you approve. Review and adjust '
+                      f'here; launch there.</span></div>')
+        elif pushed:
+            decide = (f'<div class="ok">In {_esc(dest.split(":")[1])} as a '
+                      f'draft — campaign '
+                      f'{_esc(dest.split(":campaign/")[-1])}. Launching stays '
+                      f'yours, in the platform; the launch-time edit delta is '
+                      f'measured.</div>')
+        else:
+            why = ""
+            if run is not None and (run.decision or "") == "denied":
+                why = "denied — it will not be pushed"
+            decide = (f'<div class="note">Held in our store — no pending '
+                      f'approval{" (" + why + ")" if why else ""}. A clean '
+                      f'redraft re-queues one.</div>'
+                      + (f'<form class="row" method="get" '
+                         f'action="/admin/esp_push">'
+                         f'<input type="hidden" name="key" value="{_esc(key)}">'
+                         f'<input type="hidden" name="output_id" '
+                         f'value="{_esc(output_id)}">'
+                         f'<button class="sec">Push to {_esc(prov)} now'
+                         f'</button><span class="when">the retry for an '
+                         f'approved push that failed — never the first '
+                         f'path</span></form>'
+                         if (art.body or "").strip()
+                         and run is not None
+                         and (run.decision or "") == "approved" else ""))
+    elif ap:
         from . import approvals
         approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
         deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
@@ -6346,6 +6407,114 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                    f'pre-wrap">{_esc(str(d.get("sample") or "")[:1200])}</pre>'
                    if d.get("sample") else "</p>"))
 
+    # --- preview + edit, by kind ------------------------------------------
+    src_link = (f'<p class="when"><a href="/admin/artifact/{_esc(output_id)}'
+                f'?key={_esc(key)}&amp;raw=1">source</a></p>')
+    if is_email:
+        srcdoc = _esc(art.body or "")
+        plain = _re.sub(r"<[^>]+>", " ", art.body or "")
+        plain = _re.sub(r"\s+", " ", plain).strip()
+        seg_note = (f'{_esc(esp_push.get("segment_key") or "—")}'
+                    + (" · bound in the ESP" if esp_push.get("segment_id")
+                       else " · NOT bound in the ESP yet — it would go to "
+                            "the platform default"))
+        preview_card = f"""
+<div class="card">
+  <h3>Preview — as the ESP will receive it</h3>
+  <div class="row">
+    <span class="chip nb">subject</span> {_esc(esp_push.get("subject") or "—")}
+    <span class="chip nb">preheader</span> {_esc(esp_push.get("preheader") or "—")}
+    <span class="chip nb">segment</span> {seg_note}
+  </div>
+  <iframe sandbox="" srcdoc="{srcdoc}" style="width:100%;height:520px;
+    border:1px solid var(--rule);border-radius:6px;background:#fff"></iframe>
+  <details class="sec"><summary>Phone width (360px)</summary>
+    <iframe sandbox="" srcdoc="{srcdoc}" style="width:360px;max-width:100%;
+      height:560px;border:1px solid var(--rule);border-radius:6px;
+      background:#fff"></iframe></details>
+  <details class="sec"><summary>Plain text</summary>
+    <pre class="msg" style="white-space:pre-wrap">{_esc(plain[:4000])}</pre>
+  </details>
+  {src_link}
+</div>"""
+        # No body editor for email: the HTML is a rendered artifact of the
+        # blocks contract, hand-editing it is how emails break in clients —
+        # blocks get redrafted, not retyped. Subject and preheader ARE
+        # editable, because the push reads them from the approval this form
+        # writes: adjustment happens in our data layer, not in the ESP.
+        edit_card = (f"""
+<div class="card">
+  <h3>Adjust before the push</h3>
+  <form method="post" action="/admin/campaign_meta_save">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    {_inp("subject", "Subject", esp_push.get("subject", ""), 70)}
+    {_inp("preheader", "Preheader", esp_push.get("preheader", ""), 90)}
+    <div class="row">
+      <button type="submit" class="sec">Save — the push uses exactly this</button>
+      <span class="when">checked against {_esc(tenant)}&rsquo;s ban list —
+      a banned phrase refuses, whoever typed it</span>
+    </div>
+  </form>
+</div>""" if ap else "")
+    else:
+        preview_card = f"""
+<div class="card">
+  <h3>Preview</h3>
+  <div style="border:1px solid var(--rule);padding:18px 22px;border-radius:6px;background:#fff;color:#15171d">
+  {art.body or ""}</div>
+  {src_link}
+</div>"""
+        edit_card = f"""
+<div class="card">
+  <h3>Edit</h3>
+  <form method="post" action="/admin/article_save">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    {_inp("title", "Title", fields.get("title", ""))}
+    {_inp("seo_title", "SEO title (60)", fields.get("seo_title", ""))}
+    {_inp("seo_description", "Meta description (155)",
+          fields.get("seo_description", ""), 90)}
+    <label style="display:block;margin:6px 0">Body (HTML)<br>
+    <textarea name="body" rows="22" style="font-family:var(--mono)"
+    >{_esc(art.body or "")}</textarea></label>
+    <div class="row">
+      <button type="submit" name="action" value="save">Save changes</button>
+      <button type="submit" name="action" value="later" class="sec"
+        title="Keeps your edits and holds this In review — it appears on the Review tab's In-progress strip until you finish">Save for later</button>
+      <span class="when">Saves are checked against {_esc(tenant)}&rsquo;s ban
+      list — a banned phrase refuses, whoever typed it.</span>
+    </div>
+  </form>
+</div>"""
+
+    # Feedback parts follow the artifact's anatomy: an email's judgement
+    # lands on a block, not a paragraph number.
+    if is_email:
+        shape = list(getattr(out, "shape", None) or [])[:10]
+        parts = (["overall", "subject", "preheader", "hero"]
+                 + [f"block {i + 1} · {str(k)[:16]}"
+                    for i, k in enumerate(shape)]
+                 + ["footer"])
+    else:
+        parts = ["overall", "title", "seo", "meta", "body"]
+    part_opts = "".join(f"<option>{_esc(p)}</option>" for p in parts)
+
+    plan_fold = ""
+    if is_email and run is not None and isinstance(
+            getattr(run, "brief", None), dict):
+        rows_ = "".join(
+            f"<dt>{_esc(k)}</dt><dd>{_esc(str(v))}</dd>"
+            for k, v in list(run.brief.items())[:12] if k != "edited")
+        plan_fold = (
+            '<details class="sec"><summary>The plan behind this send'
+            f'</summary><dl class="kv">{rows_}</dl>'
+            '<p class="when">Subject and preheader adjust above and flow '
+            'into the push. A different segment, entity or angle is a '
+            'redraft against an adjusted plan — that control lands with '
+            '3.3b; until then, skip this one and file a fresh plan in the '
+            'workflow queue.</p></details>')
+
     # --- the feedback rail ------------------------------------------------
     open_fb = "".join(
         f'<div class="msg"><b>{_esc(f.part)}</b> · {_esc(f.category or "—")} '
@@ -6372,33 +6541,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
   {decide}
 </div>
 {f'<div class="card"><h3>Structural flags</h3><ul class="bl">{flag_html}</ul></div>' if flag_html else ""}
-<div class="card">
-  <h3>Preview</h3>
-  <div style="border:1px solid var(--rule);padding:18px 22px;border-radius:6px;background:#fff;color:#15171d">
-  {art.body or ""}</div>
-  <p class="when"><a href="/admin/artifact/{_esc(output_id)}?key={_esc(key)}&amp;raw=1">source</a></p>
-</div>
-<div class="card">
-  <h3>Edit</h3>
-  <form method="post" action="/admin/article_save">
-    <input type="hidden" name="key" value="{_esc(key)}">
-    <input type="hidden" name="output_id" value="{_esc(output_id)}">
-    {_inp("title", "Title", fields.get("title", ""))}
-    {_inp("seo_title", "SEO title (60)", fields.get("seo_title", ""))}
-    {_inp("seo_description", "Meta description (155)",
-          fields.get("seo_description", ""), 90)}
-    <label style="display:block;margin:6px 0">Body (HTML)<br>
-    <textarea name="body" rows="22" style="font-family:var(--mono)"
-    >{_esc(art.body or "")}</textarea></label>
-    <div class="row">
-      <button type="submit" name="action" value="save">Save changes</button>
-      <button type="submit" name="action" value="later" class="sec"
-        title="Keeps your edits and holds this In review — it appears on the Review tab's In-progress strip until you finish">Save for later</button>
-      <span class="when">Saves are checked against {_esc(tenant)}&rsquo;s ban
-      list — a banned phrase refuses, whoever typed it.</span>
-    </div>
-  </form>
-</div>
+{preview_card}
+{edit_card}
 <div class="anchor" id="feedback"></div>
 <div class="card">
   <h3>Feedback — where should this lesson land?</h3>
@@ -6407,9 +6551,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     <input type="hidden" name="output_id" value="{_esc(output_id)}">
     <input type="hidden" name="system_key" value="{_esc(syskey)}">
     <div class="row">
-      <select name="part" style="width:auto"><option>overall</option>
-        <option>title</option><option>seo</option><option>meta</option>
-        <option>body</option></select>
+      <select name="part" style="width:auto">{part_opts}</select>
       <select name="category" style="width:auto"><option value="">category…</option>
         <option>tone</option><option>length</option><option>format</option>
         <option>factual</option><option>brand</option><option>layout</option></select>
@@ -6427,6 +6569,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
   </form>
   <div class="thread">{open_fb}</div>
 </div>
+{plan_fold}
 {f'<details class="sec"><summary>What this system has learned from you</summary><pre class="msg" style="white-space:pre-wrap">{_esc(learned)}</pre></details>' if learned else ""}
 <details class="sec"><summary>Versions — v1 is the frozen draft ({1 + len(versions)})</summary>
   <div class="thread">{vs_rows}</div>{dsum}

@@ -1054,6 +1054,13 @@ class ArtifactBody(Base):
     #: publish write-back, and by the manual mark-as-published — held work is
     #: work someone intends to come back to, not work that already shipped.
     state = Column(String, default="")
+    #: What an approval-time ESP push needs — subject, preheader, sender,
+    #: segment binding — stashed by the run that rendered the HTML. The
+    #: approval payload carries the OWNER-EDITED mirror (the workroom's
+    #: adjust form writes there, and the push prefers it); this is the
+    #: machine's stash, so a campaign reviewed outside the approval flow can
+    #: still be pushed, and a withdrawn-then-redrafted one keeps its recipe.
+    push = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 
 

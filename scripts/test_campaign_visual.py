@@ -169,10 +169,16 @@ def main() -> int:  # noqa: PLR0915
        "Aqua pitcher" in html)
     ck("the run names the hero's basis",
        r["detail"]["hero"]["basis"] == "approved_asset", str(r["detail"]["hero"]))
-    ck("the email still drafted into the ESP", r["detail"]["esp_draft"].get("ok") is True)
+    # RETARGETED (UI overhaul 3.3): review-before-push — the email is HELD
+    # for the workroom, and the ESP draft (with the hero's use credited)
+    # happens at the approval-time push.
+    _oid = (r.get("items") or [{}])[0].get("output_id", "")
+    _got = skill_pack.push_campaign_to_esp("baci", _oid)
+    ck("the email reaches the ESP at the approval-time push",
+       _got.get("ok") is True, str(_got)[:90])
     used = [a for a in kb.assets("baci", publishable_only=False)
             if a.url.endswith("aqua-hero.jpg")][0]
-    ck("the use was filed on the asset (feedback signal one)",
+    ck("the use was filed on the asset at the push (feedback signal one)",
        used.uses == "1" and used.last_used_at is not None, used.uses)
 
     print("\n— and with only unusable imagery, the email ships imageless —")
@@ -192,8 +198,11 @@ def main() -> int:  # noqa: PLR0915
     ck("no <img falls back into the hero slot", "cdn.example" not in html3)
     ck("the imageless state is named on the run",
        r3["detail"]["hero"]["basis"] == "none", str(r3["detail"]["hero"]))
-    ck("and the email still went out to the ESP as a draft",
-       r3["detail"]["esp_draft"].get("ok") is True)
+    # RETARGETED (UI overhaul 3.3): imageless is thinner, never withheld —
+    # it is held for review like every campaign, and pushes clean.
+    _got3 = skill_pack.push_campaign_to_esp("baci", item3.get("output_id", ""))
+    ck("and the imageless email still reaches the ESP at the push",
+       _got3.get("ok") is True, str(_got3)[:90])
 
     print()
     if _fail:

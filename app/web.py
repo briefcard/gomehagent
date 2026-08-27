@@ -2508,8 +2508,12 @@ def _article_bundle(output_id: str):
         kw = (s.query(db.KeywordTarget)
               .filter(db.KeywordTarget.output_id == output_id).first())
         ap = None
+        # Articles AND campaigns: the workroom is every artifact's home, and
+        # a campaign's approval (kind=skill_output) carries the esp_push the
+        # review edits write into.
         for row in (s.query(db.Approval)
-                    .filter(db.Approval.kind == "seo_new_article",
+                    .filter(db.Approval.kind.in_(("seo_new_article",
+                                                  "skill_output")),
                             db.Approval.status == "pending").all()):
             if (row.payload or {}).get("output_id") == output_id:
                 ap = row
@@ -2629,6 +2633,96 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
     if warn:
         said += f". {len(warn)} structural flag(s) below — advisory, not a block"
     return back(ok=said)
+
+
+@app.post("/admin/campaign_meta_save")
+async def campaign_meta_save(request: Request, key: str = Depends(admin_key)):
+    """Adjust a held campaign's subject/preheader BEFORE it reaches the ESP.
+
+    The whole point of review-before-push: the edit happens in our data
+    layer, lands on the approval's esp_push payload, and the approval-time
+    push reads exactly that — so what the owner adjusted is what the client's
+    platform receives. Ban-gated like every owner edit: the list binds the
+    owner's hands too.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    subject = str(form.get("subject") or "").strip()
+    preheader = str(form.get("preheader") or "").strip()
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    if not subject:
+        return back(err="an empty subject would push an unnamed campaign — "
+                        "refused")
+    art, _kw, ap = _article_bundle(output_id)
+    if art is None:
+        return back(err="no artifact with that id")
+    if ap is None or not (ap.payload or {}).get("esp_push"):
+        return back(err="no pending approval carries this campaign's push — "
+                        "a withdrawn one needs a clean redraft first")
+    # Deterministic mirror of the validator's ban gate, on the two fields a
+    # customer reads first. (The full validator wants a claims context; the
+    # phrase scan is the half that binds an owner edit.)
+    low = f"{subject} {preheader}".lower()
+    with db.SessionLocal() as s:
+        brand = (s.query(db.KbBrand)
+                 .filter(db.KbBrand.tenant == (art.tenant or "")).first())
+        banned = list((brand.banned_claims or []) if brand else [])
+    hit = next((b for b in banned if str(b).strip()
+                and str(b).lower() in low), "")
+    if hit:
+        return back(err=f"refused — {art.tenant}'s ban list forbids "
+                        f"{hit!r}, whoever typed it")
+    with db.SessionLocal() as s:
+        row = s.get(db.Approval, ap.id)
+        payload = dict(row.payload or {})
+        push = dict(payload.get("esp_push") or {})
+        push["subject"], push["preheader"] = subject, preheader
+        payload["esp_push"] = push
+        row.payload = payload
+        s.commit()
+    return back(ok="saved — the push will use exactly this subject and "
+                   "preheader")
+
+
+@app.get("/admin/esp_push")
+def esp_push_retry(key: str = Depends(admin_key), output_id: str = ""):
+    """Push an approved campaign into the ESP — the workroom's retry button.
+
+    Normally the approval executor does this; the button exists for the
+    honest failure path ("approved — but the push failed") so fixing the
+    connection does not require re-approving anything.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&err={quote('no artifact with that id')}", 303)
+    from . import skill_pack as _sp
+    got = _sp.push_campaign_to_esp(art.tenant or "", output_id)
+    if got.get("ok"):
+        msg = (f"in {got.get('provider')} as a draft — campaign "
+               f"{got.get('campaign_id')}. Launching stays yours, there.")
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&ok={quote(msg)}", 303)
+    return RedirectResponse(
+        f"/admin/work/{quote(output_id)}?key={quote(key)}"
+        f"&err={quote('push failed: ' + str(got.get('error', ''))[:220])}", 303)
 
 
 @app.post("/admin/feedback_add")

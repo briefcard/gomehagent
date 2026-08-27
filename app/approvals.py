@@ -151,6 +151,30 @@ def notify_pending(title: str | None = None) -> int:
     return len(items)
 
 
+def attach_esp_push(run_id: str, push: dict) -> int:
+    """Stash what the approval-time ESP push needs on the approval itself.
+
+    Under review-before-push (UI overhaul 3.3) the approval IS the
+    authorization to write into a client's platform, so it carries everything
+    the write needs — subject, preheader, sender, segment binding. This is
+    also the seam that makes the workroom's pre-push edits real: the edit
+    form updates this payload, and `push_campaign_to_esp` reads it.
+    """
+    if not run_id:
+        return 0
+    n = 0
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.run_id == run_id,
+                        db.Approval.status == "pending").all())
+        for ap in rows:
+            ap.payload = {**(ap.payload or {}), "esp_push": dict(push)}
+            n += 1
+        if n:
+            s.commit()
+    return n
+
+
 def withdraw(run_id: str, why: str) -> int:
     """Close the pending approvals for a run whose artifact never appeared.
 
@@ -230,6 +254,27 @@ def apply_decision(ap_id: str, decision: str) -> str:
             # that actually sent something, which is how approving a campaign
             # read as sending it and left the owner looking for an email that
             # nothing had promised to move.
+            if ap.kind == "skill_output" and (ap.payload or {}).get("esp_push"):
+                # Review-before-push (UI overhaul 3.3): the campaign was HELD
+                # in our store for the workroom's review, and approving is
+                # what writes the draft into the client's platform. Launching
+                # still stays human, in the ESP.
+                from . import skill_pack as _sp
+                p = ap.payload or {}
+                got = _sp.push_campaign_to_esp(
+                    ap.tenant or p.get("tenant", ""), p.get("output_id", ""))
+                if got.get("ok"):
+                    extra = (" (some images stayed hotlinked: "
+                             + ", ".join(got["images_not_rehosted"][:3]) + ")"
+                             if got.get("images_not_rehosted") else "")
+                    return (f"Approved and pushed to {got.get('provider')} as "
+                            f"a draft (campaign {got.get('campaign_id')})"
+                            f"{extra} — launch-ready. Launching stays yours, "
+                            f"in the platform.")
+                return (f"Approved — but the push to the ESP failed: "
+                        f"{got.get('error', 'unknown')[:200]}. Nothing is in "
+                        f"the platform; retry from the workroom once it is "
+                        f"fixed.")
             if ap.kind == "skill_output":
                 return (f"Approved: {ap.summary}. Nothing was sent — this "
                         f"marks the draft reviewed. Launch it in the platform "

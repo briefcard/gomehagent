@@ -292,9 +292,22 @@ def live():
     ck("an email that spends one proof twice is BLOCKED at the gate",
        i3.get("ok") is False and "coherence:proof_repeated" in _rules3,
        str(sorted(_rules3)))
-    ck("…and the draft still reaches the ESP, marked, so it can be looked at",
-       len(_drafted) == 1 and "[NEEDS FIX" in (_drafted[-1].get("name") or ""),
-       (_drafted[-1].get("name") or "")[:70] if _drafted else "no draft")
+    # RETARGETED (UI overhaul 3.3, owner 2026-08-27): review-before-push.
+    # The look-at-it surface is the WORKROOM over our own store now, so a
+    # defective email reaches the ESP never — not even marked. The old
+    # [NEEDS FIX]-in-the-campaign-name convention existed only because the
+    # console had no preview; the artifact is kept whole here instead.
+    from app import db as _db
+    with _db.SessionLocal() as _s:
+        _kept = (_s.query(_db.ArtifactBody)
+                 .filter(_db.ArtifactBody.output_id ==
+                         i3.get("output_id", "")).first())
+        _s.expunge_all()
+    ck("…and NOTHING reaches the ESP — the artifact is kept in OUR store, "
+       "where the workroom reviews it",
+       not _drafted and _kept is not None
+       and bool((_kept.body or "").strip()),
+       "drafted!" if _drafted else "no artifact kept")
     # NOT approvable, and by the stronger route: `emit` only ever queues an
     # approval for an item that PASSED, so an incoherent email never gets one
     # to withdraw. The draft exists to be looked at; it cannot be launched

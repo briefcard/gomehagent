@@ -28,6 +28,11 @@ from . import db
 #: or a report is summarised by its ledger row; an article and a campaign are
 #: the thing itself, and there may be nowhere else they exist.
 ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page")
+# Campaign emails are NOT in that tuple on purpose: `emit` carries the
+# validated COPY, and the reviewable artifact — the rendered HTML — is only
+# final after render/personalize/rehost. The campaign path writes its own
+# ArtifactBody at the end of the run (skill_pack, review-before-push), and
+# two writers for one artifact would race over `draft_body`.
 
 
 def record(tenant: str, system_key: str, *, situation: str = "",

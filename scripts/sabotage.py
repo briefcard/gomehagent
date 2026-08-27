@@ -1217,6 +1217,45 @@ SABOTAGES = [
                "silently becomes the weakest, a note nobody enforces",
     },
     {
+        "name": "draft_products_never_offered",
+        "file": "app/admin_ui.py",
+        "find": "        rows = sorted((r for r in kb.entities(tenant, available_only=False)\n"
+                "                       if (r.availability or \"available\")\n"
+                "                       not in (\"draft\", \"archived\", \"unpublished\")),",
+        "replace": "        rows = sorted(kb.entities(tenant, available_only=False),  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "the plan's entity picker offers draft and archived products "
+               "again — inviting the owner to plan a campaign around a "
+               "product no customer can buy, which is the CitroBurn failure "
+               "wearing a select element",
+    },
+    {
+        "name": "approving_pushes_the_draft",
+        "file": "app/approvals.py",
+        "find": "                got = _sp.push_campaign_to_esp(\n"
+                "                    ap.tenant or p.get(\"tenant\", \"\"), p.get(\"output_id\", \"\"))",
+        "replace": "                got = {\"ok\": True, \"provider\": \"omnisend\",\n"
+                   "                       \"campaign_id\": \"x\"}  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "approving a campaign claims a push that never happened — the "
+               "owner approves, the message says launch-ready, and the ESP "
+               "holds nothing; review-before-push becomes review-before-"
+               "nothing",
+    },
+    {
+        "name": "push_refuses_withdrawn",
+        "file": "app/skill_pack.py",
+        "find": "    if latest_status == \"withdrawn\" or (\n"
+                "            held_defects and run_decision != \"approved\"):",
+        "replace": "    if False and (\n"
+                   "            held_defects and run_decision != \"approved\"):  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the push becomes a side door around the review's verdict — a "
+               "campaign the gates withdrew (dead links, defects) can be "
+               "written into a client's live ESP anyway, one click from a "
+               "list",
+    },
+    {
         "name": "badge_counts_match_lists",
         "file": "app/admin_ui.py",
         "find": "        out[\"content\"] += len(prov.conflicts(tenant))",

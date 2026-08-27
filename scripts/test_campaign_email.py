@@ -111,13 +111,26 @@ def main():
     ck("the {{FIRST_NAME}} token was rendered native",
        "‹NAME›" in item["meta"]["html"] and "{{FIRST_NAME}}" not in item["meta"]["html"])
 
-    print("\n— a valid, sendable email is DRAFTED into the ESP (never sent) —")
-    ck("draft_from_html was called on the client's ESP",
-       any(d["subject"] == "You're about to run out" for d in _drafted))
-    ck("the run reports the ESP draft", r["detail"]["esp_draft"].get("ok") is True)
+    # RETARGETED (UI overhaul 3.3, owner 2026-08-27): review-before-push.
+    # Emit HOLDS the campaign in our store for the workroom's review; the ESP
+    # draft is created by `push_campaign_to_esp`, which the approval executor
+    # calls. So the invariant flipped: draft_from_html must NOT fire at emit,
+    # and MUST fire — with the same subject and binding — at push.
+    print("\n— a valid, sendable email is HELD for review, never pre-drafted —")
+    ck("draft_from_html was NOT called at emit — nothing reaches the ESP "
+       "before approval", not _drafted, str(_drafted)[:80])
+    ck("the run says it is held for the workroom",
+       "held for your review" in (r.get("summary") or ""),
+       (r.get("summary") or "")[:100])
+    oid = item.get("output_id", "")
+    got_push = skill_pack.push_campaign_to_esp("baci", oid)
+    ck("…and the approval-time push creates the draft, same subject",
+       got_push.get("ok") is True
+       and any(d["subject"] == "You're about to run out" for d in _drafted),
+       str(got_push)[:100])
 
-    print("\n— the draft is BOUND to the planned segment in the ESP —")
-    ck("with nothing linked, the draft is untargeted and the run SAYS so",
+    print("\n— the push is BOUND to the planned segment in the ESP —")
+    ck("with nothing linked, the push is untargeted and the run SAID so",
        _drafted and _drafted[-1]["include"] is None
        and any("untargeted" in n for n in r.get("notes", [])),
        str((r.get("notes") or [])[-1:])[:90])
@@ -125,7 +138,9 @@ def main():
     segmod._store_links("baci", {"reorder_due": {"id": "seg-lnk-1",
                                                  "name": "Reorder due"}})
     r_bind = skill.run("campaign_email", "baci", segment="reorder_due")
-    ck("a remembered segment id rides the draft as its audience",
+    oid_b = (r_bind.get("items") or [{}])[0].get("output_id", "")
+    skill_pack.push_campaign_to_esp("baci", oid_b)
+    ck("a remembered segment id rides the pushed draft as its audience",
        _drafted[-1]["include"] == ["seg-lnk-1"],
        str(_drafted[-1].get("include")))
     ck("…and the run reports the target",
@@ -185,6 +200,10 @@ def main():
     r_subj = skill.run("campaign_email", "baci", segment="reorder_due",
                        subject="The owner's own line")
     item_s = (r_subj.get("items") or [{}])[0]
+    # RETARGETED (UI overhaul 3.3): the ESP sees nothing at emit — the
+    # plan's subject must ride the held artifact's push recipe and reach the
+    # platform when the approval-time push fires.
+    skill_pack.push_campaign_to_esp("baci", item_s.get("output_id", ""))
     ck("the plan's subject is what ships",
        item_s.get("meta", {}).get("subject") == "The owner's own line"
        and any(d["subject"] == "The owner's own line" for d in _drafted),

@@ -193,19 +193,38 @@ def main():
                  origin="human")
 
     # ---------------------------------------------------------------- 3 ----
+    # RETARGETED (UI overhaul 3.3, owner 2026-08-27): review-before-push.
+    # Emit records HELD-FOR-REVIEW — nothing reaches the ESP before the
+    # approval-time push — and the campaign id lands on the row only when
+    # the push actually creates one. A push the ESP refuses leaves the row
+    # honestly held, never faking a landing.
     print("\n— destination is an outcome, not an intention —")
-    ck("a drafted campaign names the campaign somebody can open",
-       row.destination == "esp:omnisend:campaign/camp_77", repr(row.destination))
+    ck("an emitted campaign is HELD, not pre-drafted into the ESP",
+       row.destination == "esp:omnisend:held-for-review",
+       repr(row.destination))
+    got_p = skill_pack.push_campaign_to_esp("baci", row.id)
+    row_p = [o for o in _rows_for(row.run_id)
+             if o.status not in ledger.NOT_A_SEND][0]
+    ck("…and the push names the campaign somebody can open",
+       got_p.get("ok") is True
+       and row_p.destination.startswith("esp:omnisend:campaign/"),
+       f"{got_p!r} · {row_p.destination!r}")
     ck("and it is NOT recorded as sent — a draft is not a send",
-       row.status != "published" and row.published_at is None, str(row.status))
+       row_p.status != "published" and row_p.published_at is None,
+       str(row_p.status))
 
     _esp_ok["v"] = False
     skill_pack.draft_campaign = _designed(cited=True)
     r3 = skill.run("campaign_email", "baci", segment="reorder_due",
                    entity_key="aqua-pitcher")
     row3 = [o for o in _rows_for(r3["run_id"]) if o.status not in ledger.NOT_A_SEND][0]
+    got_r = skill_pack.push_campaign_to_esp("baci", row3.id)
+    row3b = [o for o in _rows_for(r3["run_id"])
+             if o.status not in ledger.NOT_A_SEND][0]
     ck("an ESP refusal is recorded as one, not as a landing",
-       row3.destination == "esp:omnisend:not-drafted", repr(row3.destination))
+       got_r.get("ok") is not True
+       and row3b.destination == "esp:omnisend:held-for-review",
+       f"{got_r.get('error', '')[:60]!r} · {row3b.destination!r}")
     _esp_ok["v"] = True
 
     # ---------------------------------------------------------------- 4 ----
