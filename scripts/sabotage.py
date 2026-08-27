@@ -1277,6 +1277,21 @@ SABOTAGES = [
                "nothing",
     },
     {
+        "name": "seo_head_carries_the_keyword",
+        "file": "app/skill_pack.py",
+        "find": "    keyword = (keyword or \"\").strip().lower()\n"
+                "    if keyword:\n"
+                "        sentences = _re.split(r\"(?<=[.!?])\\s+\", text)",
+        "replace": "    keyword = (keyword or \"\").strip().lower()\n"
+                   "    if False:\n"
+                   "        sentences = _re.split(r\"(?<=[.!?])\\s+\", text)",
+        "suites": ["test_blog_skill.py"],
+        "why": "the meta description goes back to being whatever the article "
+               "opened with — the target keyword the page exists to win "
+               "vanishes from the one line a searcher reads before deciding "
+               "to click",
+    },
+    {
         "name": "badge_counts_match_lists",
         "file": "app/admin_ui.py",
         "find": "        out[\"content\"] += len(prov.conflicts(tenant))",

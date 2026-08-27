@@ -237,9 +237,19 @@ filters draft/archived/unpublished (oos stays, labeled); fitness still
 screens the drafter's pool. Six suites retargeted with dated comments;
 campaign_variety now proves the executor push end-to-end. Guards (caught):
 `draft_products_never_offered`, `approving_pushes_the_draft`,
-`push_refuses_withdrawn`. STILL OPEN in 3.3: the Request-changes REDRAFT
-consuming open draft-level FeedbackItems (+ field overrides) — the "entire
-plan adjustment" half; subject/preheader adjustment ships now.
+`push_refuses_withdrawn`. **3.3b BUILT + committed `7dfcadc` (SHIPPED — steps 0–3.3 all deployed
+2026-08-27; production /health confirms per push):** `skill_pack.
+redraft_artifact` — Request-changes on every held artifact: open
+draft-level FeedbackItems + typed note + plan-field overrides
+(segment/entity/intent/deadline/angle; entity select draft-filtered) →
+fresh run through every gate with the notes FIRST in the drafter brief
+(rides `craft` for email / the resolve bundle for articles, so stub
+signatures survive and can observe); old row SUPERSEDED (status +
+destination `superseded:<new>`, approval withdrawn, workroom page keeps a
+forward link, keyword row re-pointed, feedback marked applied). Refusals:
+pushed→edit in platform; published→revision path; no direction→reroll
+refused. Proven end-to-end in campaign_variety + article_review. Guards:
+`redraft_supersedes`, `redraft_carries_the_notes` (caught).
 Sub-steps land separately, each shippable:
 - **3.1 Backend:** `ArtifactVersion` (v1 backfilled from `draft_body`) +
   `FeedbackItem` tables (auto-migrate + backfill in the same change, per the

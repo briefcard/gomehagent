@@ -3098,17 +3098,64 @@ def _draft_article_live(bundle: dict, keyword: str, role: str, angle: str,
         return "", model_error.explain(exc)
 
 
+def _trim_words(text: str, limit: int) -> str:
+    """Trim at a word boundary, never mid-word — an ellipsis over a chop."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:-— ") + "…"
+
+
+def _seo_title(keyword: str, title: str) -> str:
+    """The <title> tag, ≤60 chars, CARRYING the target keyword.
+
+    Deterministic on purpose (same reasoning as the description below).
+    The model's title wins when it already contains the phrase; otherwise
+    the keyword LEADS and the title follows — the query this page exists to
+    win is the one thing its title tag must not omit (owner, 2026-08-27:
+    "pre-fill Title, SEO, and Meta descriptions optimized to the target
+    keywords").
+    """
+    keyword = (keyword or "").strip()
+    title = (title or "").strip()
+    if not keyword:
+        return _trim_words(title, 60)
+    if keyword.lower() in title.lower():
+        return _trim_words(title, 60)
+    lead = keyword[:1].upper() + keyword[1:]
+    return _trim_words(f"{lead} — {title}" if title else lead, 60)
+
+
 def _meta_description(keyword: str, body_html: str) -> str:
-    """155 characters, from the article's own opening. Formulaic on purpose —
-    the same reasoning that keeps `catalog_seo_rewrite` deterministic: there is
-    nothing here for a model to decide, and a generated one is a second place
-    for a banned claim to enter."""
+    """≤155 characters, from the article's own words, ANCHORED on the keyword.
+
+    Formulaic on purpose — the same reasoning that keeps
+    `catalog_seo_rewrite` deterministic: there is nothing here for a model to
+    decide, and a generated one is a second place for a banned claim to
+    enter. The 2026-08-27 fix: this took `keyword` and never used it, so the
+    description was whatever the article happened to open with. Now the
+    excerpt STARTS at the first sentence that contains the phrase — the
+    article's own sentence, never a composed one — and only falls back to
+    the opening when no sentence carries it (which the SERP then shows
+    honestly: this page does not lead with the query).
+    """
     import re as _re
     text = _re.sub(r"<[^>]+>", " ", body_html or "")
     text = _re.sub(r"\s+", " ", text).strip()
     if not text:
         return ""
-    return (text[:152].rsplit(" ", 1)[0] + "…") if len(text) > 155 else text
+    keyword = (keyword or "").strip().lower()
+    if keyword:
+        sentences = _re.split(r"(?<=[.!?])\s+", text)
+        for i, sen in enumerate(sentences):
+            if keyword in sen.lower():
+                packed = sen
+                for nxt in sentences[i + 1:]:
+                    if len(packed) + 1 + len(nxt) > 155:
+                        break
+                    packed = f"{packed} {nxt}"
+                return _trim_words(packed, 155)
+    return _trim_words(text, 155)
 
 
 def _run_blog_article(ctx: Context) -> dict:
@@ -3265,7 +3312,8 @@ def _run_blog_article(ctx: Context) -> dict:
         said = seo_tools._propose("propose_article", {
             "blog_id": blog_id, "title": title, "body_html": body,
             "handle": kw_mod.slug(keyword),
-            "seo_title": title[:60], "seo_description": _meta_description(keyword, body),
+            "seo_title": _seo_title(keyword, title),
+            "seo_description": _meta_description(keyword, body),
             "faqs": [f for f in faqs if f["answer"]],
             # The JOIN, carried from birth. The 2026-08-26 audit found the
             # article approval payload held no output_id and no run_id, so the

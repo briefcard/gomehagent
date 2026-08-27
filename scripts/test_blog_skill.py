@@ -393,6 +393,33 @@ def main() -> int:
        any("backlog" in n for n in (r_none.get("notes") or [])),
        str(r_none.get("notes"))[:120])
 
+    # ------------------------------------------------------------------
+    print("\n— the SEO head is pre-filled AND optimized to the keyword —")
+    # Owner, 2026-08-27: "pre-fill Title, SEO, and Meta descriptions
+    # optimized to the target keywords." _meta_description took the keyword
+    # and never used it; seo_title was a mid-word [:60] chop.
+    st = skill_pack._seo_title("acrylic wine glasses",
+                               "Toast Without Fear: Our Sturdiest Stemware")
+    ck("a title missing the keyword gets the keyword LEADING, ≤60",
+       st.lower().startswith("acrylic wine glasses") and len(st) <= 60, st)
+    st2 = skill_pack._seo_title("acrylic wine glasses",
+                                "Acrylic Wine Glasses That Survive the Pool")
+    ck("a title already carrying it is kept, word-trimmed",
+       st2 == "Acrylic Wine Glasses That Survive the Pool"
+       and " — " not in st2, st2)
+    ck("no mid-word chop at the 60 boundary",
+       not skill_pack._seo_title("k", "word " * 30).rstrip("…").endswith("wor"))
+    body = ("<p>Summer tables get rowdy. Our acrylic wine glasses shrug off "
+            "drops and dishwashers alike. Guests notice the shine first.</p>"
+            "<p>More prose follows here.</p>")
+    md = skill_pack._meta_description("acrylic wine glasses", body)
+    ck("the meta description STARTS at the article's own keyword sentence",
+       md.startswith("Our acrylic wine glasses") and len(md) <= 155, md)
+    md2 = skill_pack._meta_description("acrylic wine glasses",
+                                       "<p>Nothing relevant here at all.</p>")
+    ck("…and falls back to the opening when no sentence carries it",
+       md2.startswith("Nothing relevant"), md2)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
