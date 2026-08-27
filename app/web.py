@@ -2518,92 +2518,39 @@ def _article_bundle(output_id: str):
     return art, kw, ap
 
 
-@app.get("/admin/article/{output_id}", response_class=HTMLResponse)
-def admin_article_review(output_id: str, key: str = Depends(admin_key),
-                         ok: str = "", err: str = ""):
-    """Read the whole article, edit it, and decide — on one page."""
+@app.get("/admin/article/{output_id}")
+def admin_article_review(request: Request, output_id: str):
+    """The old address — every chat link, digest and bookmark keeps working.
+
+    The page itself became the WORKROOM (/admin/work/…) in UI-overhaul step 3:
+    same three earned properties, plus the loop the owner asked for. A
+    redirect, not a 404: an address that worked yesterday works today.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    q = str(request.query_params)
+    return RedirectResponse(
+        f"/admin/work/{quote(output_id)}" + (f"?{q}" if q else ""), 303)
+
+
+@app.get("/admin/work/{output_id}", response_class=HTMLResponse)
+def admin_workroom(request: Request, output_id: str,
+                   key: str = Depends(admin_key), ok: str = "", err: str = ""):
+    """One artifact's home: preview, edit, feedback, history — the work loop."""
     if key != config.APPROVAL_SECRET:
         # A human from a chat link, not an API — hand them the sign-in door
         # the way /admin/ui does, instead of a bare 401 dead end.
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/admin/signin", 303)
+    from . import admin_ui as admin_ui_mod
+    admin_ui_mod.set_theme(request.cookies.get(THEME_COOKIE, ""))
     art, kw, ap = _article_bundle(output_id)
     if art is None:
-        return HTMLResponse("<h3>No article kept for this id.</h3>",
+        return HTMLResponse("<h3>No artifact kept for this id.</h3>",
                             status_code=404)
-
-    from . import artifact_check
-    flags = artifact_check.check(art.body or "")
-    flag_html = "".join(
-        f"<li><code>{html.escape(f['rule'])}</code> {html.escape(f['detail'])}"
-        f" — <em>{html.escape(f['fix'])}</em></li>" for f in flags)
-
-    fields = (ap.payload or {}).get("fields", {}) if ap else {}
-    published = bool(kw and (kw.status or "") in ("published", "won"))
-
-    if ap:
-        approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
-        deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
-        decide = (f'<a href="{approve}" style="font-weight:600">✅ Approve &amp; '
-                  f'publish</a> &nbsp;·&nbsp; <a href="{deny}">❌ Deny</a>'
-                  '<p style="font-size:.85em;color:#6e7686">Approving publishes '
-                  'THIS text — the save button below updates what ships.</p>')
-    elif published:
-        live = (f' — <a href="{html.escape(kw.target_url)}">live page</a>'
-                if kw and kw.target_url else "")
-        decide = f"<p>Published{live}.</p>"
-    else:
-        decide = (
-            '<form method="get" action="/admin/article_published" '
-            'style="border:1px solid #d8b45a;background:#fdf6e3;padding:12px">'
-            f'<input type="hidden" name="key" value="{html.escape(key)}">'
-            f'<input type="hidden" name="output_id" value="{html.escape(output_id)}">'
-            '<b>No CMS to push to.</b> Copy the source, paste it into the '
-            'platform by hand, then record where it went live so the '
-            'measurement loop can see it:<br>'
-            '<input name="url" size="52" placeholder="https://…/blogs/…"> '
-            '<button type="submit">It’s live here</button></form>')
-
-    def _inp(name, label, value, size=60):
-        return (f'<label style="display:block;margin:6px 0">{label}<br>'
-                f'<input name="{name}" size="{size}" '
-                f'value="{html.escape(value or "")}"></label>')
-
-    who = html.escape(art.tenant or "")
-    kw_line = (f'for <b>{html.escape(kw.phrase)}</b> '
-               f'({html.escape(kw.role or "")}, {html.escape(kw.status or "")})'
-               if kw else "(no keyword joined)")
-    note = (f"<p style='color:#0a7a33'>{html.escape(ok)}</p>" if ok else "") +            (f"<p style='color:#b00020'>{html.escape(err)}</p>" if err else "")
-    return HTMLResponse(f"""<html><body style="font-family:sans-serif;
-max-width:860px;margin:2em auto;padding:0 16px">
-<p style="font-size:.85em;color:#6e7686">article review · {who}</p>
-<h2 style="margin:0 0 4px">{html.escape(fields.get("title")
-    or (kw.phrase if kw else "Article"))}</h2>
-<p style="margin:0 0 14px;color:#6e7686">{kw_line} ·
-  <a href="/admin/artifact/{html.escape(output_id)}?key={html.escape(key)}&amp;raw=1">source</a> ·
-  <a href="/admin/ui?key={html.escape(key)}&amp;tab=plan&amp;tenant={who}">back to the plan</a></p>
-{note}
-{decide}
-{"<h3>Structural flags</h3><ul>" + flag_html + "</ul>" if flag_html else ""}
-<h3>Preview</h3>
-<div style="border:1px solid #ddd;padding:18px 22px;border-radius:6px">
-{art.body or ""}</div>
-<h3>Edit</h3>
-<form method="post" action="/admin/article_save">
-  <input type="hidden" name="key" value="{html.escape(key)}">
-  <input type="hidden" name="output_id" value="{html.escape(output_id)}">
-  {_inp("title", "Title", fields.get("title", ""))}
-  {_inp("seo_title", "SEO title (60)", fields.get("seo_title", ""))}
-  {_inp("seo_description", "Meta description (155)",
-        fields.get("seo_description", ""), 90)}
-  <label style="display:block;margin:6px 0">Body (HTML)<br>
-  <textarea name="body" rows="24" style="width:100%;font-family:monospace"
-  >{html.escape(art.body or "")}</textarea></label>
-  <button type="submit">Save changes</button>
-  <span style="font-size:.85em;color:#6e7686">Saves are checked against
-  {who}’s ban list — a banned phrase refuses, whoever typed it.</span>
-</form>
-</body></html>""")
+    return HTMLResponse(admin_ui_mod.render_workroom(
+        key, output_id, art, kw, ap, ok=ok, err=err))
 
 
 @app.post("/admin/article_save")
@@ -2614,13 +2561,14 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     output_id = str(form.get("output_id") or "")
     body = str(form.get("body") or "")
+    later = str(form.get("action") or "") == "later"
     from urllib.parse import quote
 
     def back(ok: str = "", err: str = ""):
         from fastapi.responses import RedirectResponse
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/article/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
 
     art, kw, ap = _article_bundle(output_id)
     if art is None:
@@ -2646,6 +2594,19 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
         row = s.get(db.ArtifactBody, art.id)
         row.body = body
         row.bytes = len(body)
+        # Save-for-later HOLDS; a plain save RELEASES. The state is what the
+        # Review tab's In-progress strip indexes — held work is work someone
+        # intends to come back to, and a finished save is the coming-back.
+        row.state = "in_review" if later else ""
+        # Every save appends a version. v1 stays virtual (draft_body, frozen
+        # at emit); rows only ever grow — a history that can lose a step
+        # cannot tell the delta story the blog system measures by.
+        n = 2 + s.query(db.ArtifactVersion).filter(
+            db.ArtifactVersion.output_id == output_id).count()
+        s.add(db.ArtifactVersion(tenant=art.tenant or "", output_id=output_id,
+                                 n=n, author="owner",
+                                 note="save for later" if later else "",
+                                 body=body))
         if ap is not None:
             ap_row = s.get(db.Approval, ap.id)
             payload = dict(ap_row.payload or {})
@@ -2659,10 +2620,96 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
         s.commit()
 
     warn = artifact_check.check(body)
-    said = "saved" + (" — what publishes is what you just reviewed" if ap else "")
+    if later:
+        said = ("kept in review — your edits are saved, and this artifact is "
+                "on the Review tab's In-progress strip until you finish")
+    else:
+        said = "saved" + (" — what publishes is what you just reviewed"
+                          if ap else "")
     if warn:
         said += f". {len(warn)} structural flag(s) below — advisory, not a block"
     return back(ok=said)
+
+
+@app.post("/admin/feedback_add")
+async def feedback_add(request: Request, key: str = Depends(admin_key)):
+    """File one piece of judgement at an artifact — the workroom's rail.
+
+    Each level lands in its REAL channel at filing time, because a feedback
+    store nothing reads is a complaint box: system-level writes the system's
+    standing guidance (injected into every future draft), rule-level writes
+    the ban list the validator enforces, draft-level stays open on the
+    artifact and rides the next redraft.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    note = str(form.get("note") or "").strip()
+    level = str(form.get("level") or "draft")
+    part = str(form.get("part") or "overall")
+    category = str(form.get("category") or "")
+    syskey = str(form.get("system_key") or "")
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}#feedback",
+            303)
+
+    if not note:
+        return back(err="feedback with no note is a click, not a judgement")
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return back(err="no artifact with that id")
+    tenant = art.tenant or ""
+    syskey = syskey or (art.system_key or "")
+    from . import systems as _sys
+    status, applied_at = "open", None
+    if level == "system":
+        if not syskey:
+            return back(err="this artifact names no system to teach — file "
+                            "it against the draft, or make it a rule")
+        _sys.note(tenant, syskey, f"[workroom · {part}] {note}")
+        status, applied_at = "applied", db.utcnow()
+        said = ("filed as standing guidance — injected into every future "
+                "draft this system writes")
+    elif level == "rule":
+        got = _sys.promote_rule(tenant, note)
+        status, applied_at = "applied", db.utcnow()
+        said = got or "filed as a rule — the validator enforces it from now on"
+    else:
+        level = "draft"
+        said = "filed against this draft — open until a redraft consumes it"
+    with db.SessionLocal() as s:
+        s.add(db.FeedbackItem(
+            tenant=tenant, output_id=output_id, run_id=art.run_id or "",
+            system_key=syskey, part=part, category=category, note=note,
+            level=level, status=status, applied_at=applied_at))
+        s.commit()
+    return back(ok=said)
+
+
+@app.get("/admin/feedback_drop")
+def feedback_drop(key: str = Depends(admin_key), id: str = "",
+                  output_id: str = ""):
+    """Dismiss one open feedback item — judged, then judged unnecessary."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    with db.SessionLocal() as s:
+        row = s.get(db.FeedbackItem, id)
+        if row is not None and row.status == "open":
+            row.status = "dismissed"
+            s.commit()
+    return RedirectResponse(
+        f"/admin/work/{quote(output_id)}?key={quote(key)}"
+        f"&ok={quote('dismissed')}#feedback", 303)
 
 
 @app.get("/admin/article_published")
@@ -2678,7 +2725,7 @@ def admin_article_published(key: str = Depends(admin_key), output_id: str = "",
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/article/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
 
     url = (url or "").strip()
     if not url.startswith(("http://", "https://")):
@@ -2695,6 +2742,13 @@ def admin_article_published(key: str = Depends(admin_key), output_id: str = "",
         # A caution, not a refusal: staging hosts and CDN domains are real.
         warn = f" (note: that URL is not on {host})"
     got = keywords.mark_published(art.tenant, output_id, url=url)
+    # Published work is not held work — release the In-review hold so the
+    # In-progress strip only ever lists things still owed a decision.
+    with db.SessionLocal() as s:
+        row = s.get(db.ArtifactBody, art.id)
+        if row is not None and (row.state or "") == "in_review":
+            row.state = ""
+            s.commit()
     said = "recorded — the measurement loop will pick it up from here"
     if got.get("edit"):
         e = got["edit"]

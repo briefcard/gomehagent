@@ -249,6 +249,74 @@ ck("`sub=` reaches the Diagnostics sub-view (view= still accepted)",
    "Systems check" in aliased)
 
 # ---------------------------------------------------------------------------
+# The workroom (step 3): the old address redirects, the draft survives every
+# edit, versions append, Save-for-later is INDEXED, and feedback lands in a
+# real channel at filing time — the loop, not a complaint box.
+# ---------------------------------------------------------------------------
+from app import kb as _kb  # noqa: E402
+
+_kb.ensure_brand(T1, T1)      # the save path's ban-list gate needs the row —
+_kb.add_banned(T1, "smokedummyrule")   # and the gate is CONSTITUTIVE: an
+                                       # empty ban list refuses the edit
+                                       # rather than passing it unchecked
+with db.SessionLocal() as s:
+    s.add(db.ArtifactBody(tenant=T1, output_id="smk-art-1", run_id="",
+                          system_key="blog", format="cms_article",
+                          body="<p>Workroom smoke body</p>",
+                          draft_body="<p>the frozen draft</p>", bytes=28))
+    s.commit()
+
+r = c.get(f"/admin/article/smk-art-1?key={KEY}", follow_redirects=False)
+ck("the old article address redirects to the workroom", r.status_code == 303
+   and r.headers.get("location", "").startswith("/admin/work/smk-art-1"),
+   r.headers.get("location", ""))
+wr = c.get(f"/admin/work/smk-art-1?key={KEY}").text
+ck("the workroom renders, framed", 'class="side"' in wr
+   and "Workroom smoke body" in wr and "article_save" in wr)
+coverage("workroom", wr)
+
+r = c.post("/admin/article_save",
+           data={"key": KEY, "output_id": "smk-art-1", "action": "later",
+                 "title": "Held", "body": "<p>edited, held for later</p>"},
+           follow_redirects=False)
+ck("Save for later lands back on the workroom", r.status_code == 303
+   and "/admin/work/smk-art-1" in r.headers.get("location", "")
+   and "ok=" in r.headers.get("location", ""), r.headers.get("location", ""))
+with db.SessionLocal() as s:
+    _art = s.query(db.ArtifactBody).filter_by(output_id="smk-art-1").first()
+    _vs = s.query(db.ArtifactVersion).filter_by(output_id="smk-art-1").all()
+    s.expunge_all()
+ck("the edit persisted and the hold is real",
+   "held for later" in (_art.body or "") and _art.state == "in_review")
+ck("the draft SURVIVES the edit — v1 stays frozen",
+   _art.draft_body == "<p>the frozen draft</p>")
+ck("the save appended a version", len(_vs) == 1 and _vs[0].n == 2
+   and _vs[0].author == "owner")
+strip = c.get(f"/admin/ui?key={KEY}&tab=content&tenant={T1}").text
+ck("Save-for-later is INDEXED — the In-progress strip finds it",
+   "In progress" in strip and "/admin/work/smk-art-1" in strip)
+
+r = c.post("/admin/feedback_add",
+           data={"key": KEY, "output_id": "smk-art-1", "system_key": "blog",
+                 "part": "body", "category": "tone", "level": "system",
+                 "note": "lead with the number, not the greeting"},
+           follow_redirects=False)
+ck("system-level feedback files", r.status_code == 303
+   and "ok=" in r.headers.get("location", ""), r.headers.get("location", ""))
+from app import systems as _sys  # noqa: E402
+ck("…and REACHES the prompt channel",
+   "lead with the number" in _sys.feedback_block(T1, "blog"))
+c.post("/admin/feedback_add",
+       data={"key": KEY, "output_id": "smk-art-1", "system_key": "blog",
+             "part": "body", "category": "brand", "level": "rule",
+             "note": "smokebannedphrase"}, follow_redirects=False)
+with db.SessionLocal() as s:
+    _brand = s.query(db.KbBrand).filter_by(tenant=T1).first()
+    banned = list(_brand.banned_claims or []) if _brand else []
+ck("rule-level feedback REACHES the validator's ban list",
+   any("smokebannedphrase" in str(b) for b in banned), str(banned)[:120])
+
+# ---------------------------------------------------------------------------
 # Light mode (step 2): the second token block defines every token the dark
 # root does — the parity that stops one palette silently falling behind the
 # other — the toggle persists in a cookie, and the choice reaches <body>.

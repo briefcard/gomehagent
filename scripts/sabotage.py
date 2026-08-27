@@ -1160,6 +1160,63 @@ SABOTAGES = [
                "control",
     },
     {
+        "name": "draft_survives_edit",
+        "file": "app/web.py",
+        "find": "        row.body = body\n        row.bytes = len(body)",
+        "replace": "        row.body = body\n        row.draft_body = body  # SABOTAGE\n        row.bytes = len(body)",
+        "suites": ["test_render_smoke.py", "test_article_review.py"],
+        "why": "the frozen draft gets overwritten by every save — v1 stops "
+               "existing, the draft-vs-published delta (the blog system's "
+               "declared measure) can never compute again, and the version "
+               "history's first step is a lie",
+    },
+    {
+        "name": "version_appends_never_overwrites",
+        "file": "app/web.py",
+        "find": "        s.add(db.ArtifactVersion(tenant=art.tenant or \"\", output_id=output_id,\n"
+                "                                 n=n, author=\"owner\",\n"
+                "                                 note=\"save for later\" if later else \"\",\n"
+                "                                 body=body))",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "saves stop leaving history — the workroom's versions fold "
+               "shows only the frozen draft forever, and 'doesn't get stored "
+               "anywhere, to edit later' comes back as a fact instead of a "
+               "complaint",
+    },
+    {
+        "name": "workroom_indexed",
+        "file": "app/admin_ui.py",
+        "find": "                    .filter(db.ArtifactBody.tenant == tenant,\n"
+                "                            db.ArtifactBody.state == \"in_review\")",
+        "replace": "                    .filter(db.ArtifactBody.tenant == tenant,\n"
+                   "                            db.ArtifactBody.state == \"never\")  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "Save-for-later holds work that no surface can find again — "
+               "persistence with no index, which is the exact experience "
+               "('stored nowhere') the workroom was built to end",
+    },
+    {
+        "name": "feedback_reaches_prompt",
+        "file": "app/web.py",
+        "find": "        _sys.note(tenant, syskey, f\"[workroom · {part}] {note}\")",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "teach-this-system feedback files a row and teaches nothing — "
+               "the rail becomes a complaint box, and the owner's judgement "
+               "stops reaching the prompt that drafts tomorrow's work",
+    },
+    {
+        "name": "rule_reaches_validator",
+        "file": "app/web.py",
+        "find": "        got = _sys.promote_rule(tenant, note)",
+        "replace": "        got = \"\"  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "make-it-a-rule stops writing the ban list — the strongest "
+               "promise on the rail ('the validator blocks it forever') "
+               "silently becomes the weakest, a note nobody enforces",
+    },
+    {
         "name": "badge_counts_match_lists",
         "file": "app/admin_ui.py",
         "find": "        out[\"content\"] += len(prov.conflicts(tenant))",

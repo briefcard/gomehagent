@@ -414,6 +414,19 @@ def _execute(ap: db.Approval) -> None:
                 keywords.mark_published(
                     seo_guard.tenant_for(profile) or (ap.tenant or ""),
                     p["output_id"], url=res.split()[0].rstrip(".,"))
+                # Published work is not held work: release the workroom's
+                # Save-for-later hold so the In-progress strip only ever
+                # lists things still owed a decision.
+                try:
+                    with db.SessionLocal() as s:
+                        row = (s.query(db.ArtifactBody)
+                               .filter(db.ArtifactBody.output_id ==
+                                       p["output_id"]).first())
+                        if row is not None and (row.state or "") == "in_review":
+                            row.state = ""
+                            s.commit()
+                except Exception:                                # noqa: BLE001
+                    pass
         whatsapp.send_text(
             f"📝 Article created ({p.get('site')}): {res}"
             if _published(res)

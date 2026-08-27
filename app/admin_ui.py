@@ -2329,7 +2329,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
 <div>
   <div class="crumb"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(row.tenant)}">&larr; Systems</a></div>
   <div class="head" style="border-bottom:0;padding-bottom:0">
-    <h1>{_esc(row.name)}</h1>
+    <h2>{_esc(row.name)}</h2>
     <code>{_esc(row.key)}</code>
     <span class="chips">
       <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
@@ -2342,6 +2342,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
   {gate_note}
 </div>
 {_planned_section(key, row, ppage)}
+{_drafts_section(key, row)}
 {_segments_card(key, row) if systems.workflow(row.key)["artifact"] == "esp_campaign" else ""}
 {_waiting_section(key, row)}
 {_shipped_section(row)}
@@ -4512,8 +4513,33 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 </div>""",
     }
 
+    # The In-progress strip — the index that makes Save-for-later a real
+    # state. Held artifacts were the owner's exact complaint about the old
+    # article screen: edits persisted, but persistence with no index is
+    # experienced as loss. Guarded like every sidebar fact: a broken strip
+    # must never be the thing that breaks the day's tab.
+    inprog = ""
+    try:
+        with db.SessionLocal() as s:
+            held = (s.query(db.ArtifactBody)
+                    .filter(db.ArtifactBody.tenant == tenant,
+                            db.ArtifactBody.state == "in_review")
+                    .order_by(db.ArtifactBody.created_at.desc())
+                    .limit(8).all())
+            s.expunge_all()
+        if held:
+            links = " · ".join(
+                f'<a href="/admin/work/{_esc(a.output_id)}?key={_esc(key)}">'
+                f'{_esc(a.system_key or "artifact")} · '
+                f'{_esc(str(a.created_at)[:10])}</a>' for a in held)
+            inprog = (f'<div class="everynote"><b>In progress</b> — '
+                      f'{len(held)} kept to finish: {links}</div>')
+    except Exception:                                            # noqa: BLE001
+        inprog = ""
+
     return _shell(key, "content", "Review", tenant=tenant, body=f"""
 <div class="flash">{banner}</div>
+{inprog}
 <div>
   <p class="mut">Decisions waiting on you for this account. Nothing here is
   published — it is the difference between what the brand allows and what is
@@ -6169,6 +6195,243 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
     <h3>The goal</h3>
     {goal_html}
     {form}"""
+
+
+def _drafts_section(key: str, row) -> str:
+    """This system's workroom index — every kept artifact, newest first.
+
+    The third index that ends redirect-only artifacts (with Review's
+    In-progress strip and the Plan board's links): the system that produced a
+    thing is where you go looking for it a week later.
+    """
+    try:
+        with db.SessionLocal() as s:
+            arts = (s.query(db.ArtifactBody)
+                    .filter(db.ArtifactBody.tenant == row.tenant,
+                            db.ArtifactBody.system_key == row.key)
+                    .order_by(db.ArtifactBody.created_at.desc())
+                    .limit(8).all())
+            total = (s.query(db.ArtifactBody)
+                     .filter(db.ArtifactBody.tenant == row.tenant,
+                             db.ArtifactBody.system_key == row.key).count())
+            s.expunge_all()
+    except Exception:                                            # noqa: BLE001
+        arts, total = [], 0
+    rows_html = ""
+    for a in arts:
+        held = (a.state or "") == "in_review"
+        rows_html += (
+            f'<div class="msg{"" if held else " gone"}">'
+            f'<a href="/admin/work/{_esc(a.output_id)}?key={_esc(key)}">'
+            f'{_esc((a.format or "artifact").replace("_", " "))} · '
+            f'{_esc(str(a.created_at)[:16])}</a>'
+            + (' <span class="chip off">in review</span>' if held else "")
+            + f' <span class="when">{a.bytes or 0} bytes</span></div>')
+    if not rows_html:
+        rows_html = ('<p class="mut">Nothing produced yet. When a run makes '
+                     'an artifact, it lands here with its workroom one click '
+                     'away — never reachable only through a redirect.</p>')
+    return f"""
+<div class="anchor" id="drafts"></div>
+<div class="card">
+  <div class="head"><h2>Drafts — the workroom index</h2>
+    <span class="chip nb">{total} kept</span></div>
+  <div class="thread">{rows_html}</div>
+</div>"""
+
+
+def render_workroom(key: str, output_id: str, art, kw, ap,
+                    ok: str = "", err: str = "") -> str:
+    """One artifact's home: preview, edit, feedback, history — the work loop.
+
+    Absorbs /admin/article's page (owner, on that page: "some weird edit
+    screen that can only be accessed as a redirect but doesn't get stored
+    anywhere, to edit later and doesn't give an option for feedback loops")
+    and keeps its three earned properties verbatim: what was reviewed is what
+    publishes; the ban list binds the owner too; the draft survives the edit.
+    What it adds is the loop those properties deserved: Save-for-later with
+    an index that can find it again, a version history whose v1 is the frozen
+    draft, and a feedback rail whose three levels each land in a real channel
+    — this draft, this system's prompt, or the validator — at filing time.
+    """
+    from . import artifact_check, edits
+
+    tenant = art.tenant or ""
+    syskey = art.system_key or ""
+    fields = (ap.payload or {}).get("fields", {}) if ap else {}
+    published = bool(kw and (kw.status or "") in ("published", "won"))
+    title = fields.get("title") or (kw.phrase if kw else "") or "Artifact"
+
+    with db.SessionLocal() as s:
+        versions = (s.query(db.ArtifactVersion)
+                    .filter(db.ArtifactVersion.output_id == output_id)
+                    .order_by(db.ArtifactVersion.n).all())
+        fb = (s.query(db.FeedbackItem)
+              .filter(db.FeedbackItem.output_id == output_id)
+              .order_by(db.FeedbackItem.created_at.desc()).all())
+        run = s.get(db.SystemRun, art.run_id) if art.run_id else None
+        s.expunge_all()
+
+    # --- the lifecycle, as chips: where this artifact IS ------------------
+    def _chip(label: str, on: bool) -> str:
+        return f'<span class="chip {"on" if on else "nb"}">{label}</span>'
+    steps = (_chip("drafted", True)
+             + _chip("in review", (art.state or "") == "in_review"
+                     or bool(versions))
+             + _chip("awaiting approval", bool(ap))
+             + _chip("published", published))
+    measured = ""
+    if run is not None and getattr(run, "edit_diff", None):
+        d = run.edit_diff or {}
+        measured = _chip(
+            "measured — " + ("sent as-is" if d.get("as_is") else "edited"),
+            True)
+
+    # --- decide bar (moved from web.py, restyled; same consequences) ------
+    if ap:
+        from . import approvals
+        approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
+        deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
+        decide = (f'<div class="row"><a class="btn" href="{approve}">Approve '
+                  f'&amp; publish</a> <a class="btn danger" href="{deny}">'
+                  f'Deny</a> <span class="when">Approving publishes THIS text '
+                  f'— saving below updates what ships.</span></div>')
+    elif published:
+        live = (f' — <a href="{_esc(kw.target_url)}">live page</a>'
+                if kw and kw.target_url else "")
+        decide = f'<div class="ok">Published{live}.</div>'
+    else:
+        decide = f"""
+        <form class="row" method="get" action="/admin/article_published">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="output_id" value="{_esc(output_id)}">
+          <b>No CMS to push to.</b>
+          <span class="when">Copy the source, paste it into the platform by
+          hand, then record where it went live so the measurement loop can
+          see it:</span>
+          <input name="url" size="42" placeholder="https://…/blogs/…">
+          <button type="submit" class="sec">It&rsquo;s live here</button>
+        </form>"""
+
+    flags = artifact_check.check(art.body or "")
+    flag_html = "".join(
+        f'<li><code>{_esc(f["rule"])}</code> {_esc(f["detail"])} — '
+        f'<em>{_esc(f["fix"])}</em></li>' for f in flags)
+    kw_line = (f'for <b>{_esc(kw.phrase)}</b> ({_esc(kw.role or "")}, '
+               f'{_esc(kw.status or "")}) · '
+               f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;'
+               f'tenant={_esc(tenant)}">its Plan row</a>'
+               if kw else "no keyword joined")
+
+    def _inp(name, label, value, size=60):
+        return (f'<label style="display:block;margin:6px 0">{label}<br>'
+                f'<input name="{name}" size="{size}" '
+                f'value="{_esc(value or "")}"></label>')
+
+    # --- versions: v1 is the frozen draft, rows are what changed it -------
+    vs_rows = (f'<div class="msg"><b>v1</b> — the draft, as the machine wrote '
+               f'it <span class="when">{len(art.draft_body or "")} chars · '
+               f'frozen at emit</span></div>')
+    for v in versions:
+        vs_rows += (f'<div class="msg"><b>v{v.n}</b> — {_esc(v.author)}'
+                    + (f' · {_esc(v.note)}' if v.note else "")
+                    + f' <span class="when">{_esc(str(v.created_at)[:16])} · '
+                      f'{len(v.body or "")} chars</span></div>')
+    dsum = ""
+    if (art.draft_body or "") and (art.body or "") != (art.draft_body or ""):
+        d = edits.delta(art.draft_body or "", art.body or "")
+        dsum = (f'<p class="when">Draft vs current: '
+                f'{"unchanged" if d.get("as_is") else "edited"}'
+                + (f' — sample:</p><pre class="msg esc" style="white-space:'
+                   f'pre-wrap">{_esc(str(d.get("sample") or "")[:1200])}</pre>'
+                   if d.get("sample") else "</p>"))
+
+    # --- the feedback rail ------------------------------------------------
+    open_fb = "".join(
+        f'<div class="msg"><b>{_esc(f.part)}</b> · {_esc(f.category or "—")} '
+        f'· {_esc(f.note)} <span class="when">{_esc(f.level)} · '
+        f'{_esc(f.status)}</span>'
+        + (f' · <a href="/admin/feedback_drop?key={_esc(key)}&amp;id='
+           f'{_esc(f.id)}&amp;output_id={_esc(output_id)}">dismiss</a>'
+           if f.status == "open" else "")
+        + '</div>' for f in fb) or (
+        '<p class="mut">Nothing filed yet. Feedback filed here lands in a '
+        'real channel the moment you save it — nothing goes into a box '
+        'nobody reads.</p>')
+    learned = systems.guidance_block(tenant, syskey) if syskey else ""
+
+    body_html = f"""
+{f'<div class="flash"><div class="ok">{_esc(ok)}</div></div>' if ok else ""}
+{f'<div class="flash"><div class="bad">{_esc(err)}</div></div>' if err else ""}
+<div class="crumb"><a href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;tenant={_esc(tenant)}&amp;sub=ship">&larr; Review</a> ·
+  <a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant={_esc(tenant)}">&larr; Plan</a></div>
+<div class="card">
+  <div class="head"><h2>{_esc(title)}</h2><code>{_esc(syskey or "artifact")}</code>
+    <span class="mut">{kw_line}</span></div>
+  <div class="row">{steps}{measured}</div>
+  {decide}
+</div>
+{f'<div class="card"><h3>Structural flags</h3><ul class="bl">{flag_html}</ul></div>' if flag_html else ""}
+<div class="card">
+  <h3>Preview</h3>
+  <div style="border:1px solid var(--rule);padding:18px 22px;border-radius:6px;background:#fff;color:#15171d">
+  {art.body or ""}</div>
+  <p class="when"><a href="/admin/artifact/{_esc(output_id)}?key={_esc(key)}&amp;raw=1">source</a></p>
+</div>
+<div class="card">
+  <h3>Edit</h3>
+  <form method="post" action="/admin/article_save">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    {_inp("title", "Title", fields.get("title", ""))}
+    {_inp("seo_title", "SEO title (60)", fields.get("seo_title", ""))}
+    {_inp("seo_description", "Meta description (155)",
+          fields.get("seo_description", ""), 90)}
+    <label style="display:block;margin:6px 0">Body (HTML)<br>
+    <textarea name="body" rows="22" style="font-family:var(--mono)"
+    >{_esc(art.body or "")}</textarea></label>
+    <div class="row">
+      <button type="submit" name="action" value="save">Save changes</button>
+      <button type="submit" name="action" value="later" class="sec"
+        title="Keeps your edits and holds this In review — it appears on the Review tab's In-progress strip until you finish">Save for later</button>
+      <span class="when">Saves are checked against {_esc(tenant)}&rsquo;s ban
+      list — a banned phrase refuses, whoever typed it.</span>
+    </div>
+  </form>
+</div>
+<div class="anchor" id="feedback"></div>
+<div class="card">
+  <h3>Feedback — where should this lesson land?</h3>
+  <form method="post" action="/admin/feedback_add">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    <input type="hidden" name="system_key" value="{_esc(syskey)}">
+    <div class="row">
+      <select name="part" style="width:auto"><option>overall</option>
+        <option>title</option><option>seo</option><option>meta</option>
+        <option>body</option></select>
+      <select name="category" style="width:auto"><option value="">category…</option>
+        <option>tone</option><option>length</option><option>format</option>
+        <option>factual</option><option>brand</option><option>layout</option></select>
+      <input name="note" placeholder="the judgement, in one line — for rule level, the exact phrase to ban" style="flex:1;min-width:260px">
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label class="pick"><input type="radio" name="level" value="draft" checked>
+        fix this draft <span class="when">— stays open, rides the next redraft</span></label>
+      <label class="pick"><input type="radio" name="level" value="system">
+        teach this system <span class="when">— standing guidance, injected into every future draft</span></label>
+      <label class="pick"><input type="radio" name="level" value="rule">
+        make it a rule <span class="when">— the validator blocks it forever</span></label>
+      <button type="submit" class="sec">File it</button>
+    </div>
+  </form>
+  <div class="thread">{open_fb}</div>
+</div>
+{f'<details class="sec"><summary>What this system has learned from you</summary><pre class="msg" style="white-space:pre-wrap">{_esc(learned)}</pre></details>' if learned else ""}
+<details class="sec"><summary>Versions — v1 is the frozen draft ({1 + len(versions)})</summary>
+  <div class="thread">{vs_rows}</div>{dsum}
+</details>"""
+    return _shell(key, "content", title, body=body_html, tenant=tenant)
 
 
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",

@@ -1045,7 +1045,70 @@ class ArtifactBody(Base):
     body = Column(Text)
     draft_body = Column(Text)
     bytes = Column(Integer, default=0)
+    #: "" (nothing held) or "in_review" — the workroom's Save-for-later. The
+    #: owner's complaint that created the workroom was that an edit screen
+    #: reachable only by redirect "doesn't get stored anywhere, to edit
+    #: later": the edits DID persist, but persistence with no state and no
+    #: index is experienced as loss. This is the state; the Review tab's
+    #: In-progress strip is the index. Cleared by a plain save, by the
+    #: publish write-back, and by the manual mark-as-published — held work is
+    #: work someone intends to come back to, not work that already shipped.
+    state = Column(String, default="")
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class ArtifactVersion(Base):
+    """One saved state of one artifact — the workroom's history.
+
+    v1 is deliberately VIRTUAL: `ArtifactBody.draft_body`, frozen at emit, is
+    always the first version, so nothing needs backfilling and the draft can
+    never be edited into something else by a versioning bug. Rows here are
+    what changed it — an owner save, later a machine redraft — appended,
+    never overwritten, never deleted. The draft-vs-published delta is the
+    blog system's declared measure; a history that can lose a step cannot
+    measure anything.
+    """
+
+    __tablename__ = "artifact_versions"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    output_id = Column(String, default="", index=True)
+    n = Column(Integer, default=2)               # v1 = the frozen draft
+    author = Column(String, default="owner")     # owner | machine
+    note = Column(Text, default="")              # what this save was about
+    body = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint("tenant", "output_id", "n"),)
+
+
+class FeedbackItem(Base):
+    """One piece of judgement filed at an artifact — the workroom's rail.
+
+    Three levels, each landing in a real channel AT FILING TIME, because a
+    feedback store nothing reads is a complaint box: `draft` (fix this one —
+    stays open and rides the next redraft), `system` (standing guidance —
+    written into the system's thread via `systems.note`, injected into every
+    future draft), `rule` (the exact phrase goes to `banned_claims` via
+    `systems.promote_rule` — the deterministic validator enforces it
+    forever). The row is the record that it happened, what part of the
+    artifact it referred to, and whether it has been acted on.
+    """
+
+    __tablename__ = "feedback_items"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    output_id = Column(String, default="", index=True)
+    run_id = Column(String, default="")
+    system_key = Column(String, default="")
+    part = Column(String, default="overall")   # overall|title|seo|meta|body|block
+    category = Column(String, default="")      # tone|length|format|factual|brand|layout
+    note = Column(Text, default="")
+    level = Column(String, default="draft")    # draft | system | rule
+    status = Column(String, default="open")    # open | applied | dismissed
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    applied_at = Column(DateTime(timezone=True))
 
 
 class Setting(Base):

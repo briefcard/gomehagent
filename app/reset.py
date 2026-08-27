@@ -63,7 +63,7 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "seo_site_config", "system_docs", "assurance_events",
               "tool_calls", "reported_figures", "compliance_events",
               "moments", "keyword_targets", "keyword_readings",
-              "artifact_bodies"}
+              "artifact_bodies", "artifact_versions", "feedback_items"}
 # Both classified in the change that adds them, per the lesson below.
 # `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
 # it looks like research about the brand, but what it stores is what somebody
@@ -89,6 +89,10 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
 # `users` is NOT here: it has `tenant_key`, not `tenant`, so it is not
 # discovered — and deleting a client's login is a separate decision from
 # clearing their data anyway.
+# `artifact_versions` and `feedback_items` are OPERATIONS, classified in the
+# change that adds them (UI overhaul step 3): a version history and filed
+# judgement are records of work done ON content, not the knowledge itself —
+# resetting knowledge must not erase the trail of what was edited and why.
 ACCESS = {"credentials", "connect_links", "intake_links", "portal_links"}
 # `compliance_events` is OPERATIONS and classified in the same change that adds
 # it, which is the whole lesson of the two comments above: `kb_assets` and
