@@ -146,21 +146,47 @@ checkpoint.** What landed:
   phone; and click through the demo server (`gomehagent-demo`).
 
 ### Step 1 — The token sheet (the one-commit reskin)
-- **Ships:** `_CSS` values replaced by the compiled token system (spec §1) —
-  dark committed, same class names, dead `.tabs` rules removed, every class
-  the smoke suite found now defined, visible focus states, `.tblwrap` +
-  component classes available. Inline SVG icon helpers added (not yet used).
-  Fonts: system-stack first; self-hosted WOFF2 subsets only if the demo
-  click-through misses them.
-- **New guards:** none beyond smoke; retarget style-adjacent pins with
-  comments.
-- **Gate:** smoke class-coverage green; all nine tabs + portal + intake +
-  connect clicked through on demo at desktop + 375px.
-- **Checkpoint:** owner approves the look on Review + Systems on the demo
-  server **before** the push (this is the aesthetic go/no-go for everything
-  after).
+**BUILT + OWNER-APPROVED 2026-08-27, committed `279f8d9` (unpushed).**
+`_CSS` values → the token system, dark-first, same class names; dead `.tabs`
+rules and every un-themed hex retired; visible focus states; `.tblwrap`
+staged; fonts system-stack-first (Hanken Grotesk / JetBrains Mono when
+present). Owner's one review find, fixed in the same commit: bare `<a>`
+elements had no base rule and rendered browser-default blue on the dark
+ground — `a{color:var(--acc);underline}` now, which also makes the Plan
+board's pin/mute links read as controls. Gate met: smoke class-coverage +
+all 102 suites green. Deviation from the original step text: the SVG icon
+helpers move to step 2, where the components that consume them land —
+"added, not yet used" would have been dead code in this commit.
 
 ### Step 2 — Shared components + frame
+- **2a BUILT + committed `adb4b6e` (unpushed): the LIGHT palette + toggle**
+  (owner addition 2026-08-27). `body[data-theme=light]` second token block,
+  pagehead toggle, `gomeh_theme` cookie (180d), dark default, on-accent inks
+  tokenized. Smoke holds token PARITY (light must define every dark token,
+  type stacks exempt), toggle persistence, and body-tag attribution — that
+  check was wrong twice (grepped the page, matched the stylesheet's own
+  comments) before reading the real body tag; the lesson is in the suite.
+  Guards: `light_defines_every_token`, `theme_survives_the_session`.
+  Verified live on the demo in both themes.
+- **2b BUILT + committed `9820629` (unpushed).** Badges: `_badges()` one
+  pass per render (Review = proposals + held plans + conflicts + approvals;
+  Systems = attention; Connections = failed creds; Data layer = readiness
+  next_actions + mute-lesson proposals), amber everywhere, per-part
+  fail-to-zero, per-account rollups on the `*` switcher (full=False cheap
+  path), titles say what each counts. Single h1 (six body h1s + Assurance's
+  triple account-naming removed; "Systems check" → h2, pin intact). ✅/❌ →
+  Approve/Deny `.btn`/`.btn.danger` on ship queue + workflow waiting +
+  Knowledge decide (test_ship_section retargeted with comment). System-card
+  duplicate toggle removed. Plan joins the sticky flash. Sign out link +
+  /admin/logout → 303 signin. Unknown tab= → 303 Review with err flash
+  (was: silent Connections at 200). Aliases: `sub=` primary everywhere
+  (view= accepted), `page=` primary (cpage=/ppage= accepted). Guard:
+  `badge_counts_match_lists` (caught). Smoke pins: badge==list, one-h1,
+  Sign out, unknown-tab redirect, alias reach, logout door.
+  DEFERRED, named: shared render-helper extraction + SVG icon set land with
+  step 4's first restructured tab — helpers without a consumer are dead
+  code, and the rebuilds are their consumer.
+- **Original 2b scope (for reference):**
 - **Ships:** one helper each for flash (sticky, three semantics, used by
   Plan/Assurance/Diagnostics too), pager (15/page, above+below, one
   vocabulary), buttons (labeled actions — ✅/❌ retire everywhere the console
@@ -179,6 +205,41 @@ checkpoint.** What landed:
   sidebar alone, per account and on All accounts.
 
 ### Step 3 — The work loop (spec §3; the owner-named core)
+**3.1 + 3.2 BUILT + committed `d6970f7` (unpushed).** `/admin/work/{id}`
+absorbs `/admin/article` (303, every pin intact — test_article_review rides
+the redirect); three earned properties kept verbatim. `ArtifactVersion`
+(v1 = the frozen draft, VIRTUAL — no backfill, no way to version-bug the
+draft) + `FeedbackItem` tables, tenant-scoped, classified OPERATIONS in the
+same change; `ArtifactBody.state` = the Save-for-later hold, released by a
+plain save / publish write-back / mark-as-published. Three indexes: Review
+In-progress strip, per-system **Drafts** section on the workflow view, the
+Plan board's existing links. Feedback rail live: draft-level stays open
+(rides the next redraft), system-level → `systems.note` → the prompt,
+rule-level → `promote_rule` → the ban list — each at FILING time, with the
+Learned-from-you fold on the page. Guards (all caught):
+`draft_survives_edit`, `version_appends_never_overwrites`,
+`workroom_indexed`, `feedback_reaches_prompt`, `rule_reaches_validator`.
+DEVIATION, named: the redraft route moved from 3.1 into 3.3 — its consumer
+is the email workroom, and machinery without a consumer is dead code.
+**3.3 BUILT + committed `2d5b101` (unpushed): REVIEW-BEFORE-PUSH + the email
+workroom.** Owner inverted the flow (2026-08-27): the ESP draft stays, but
+preview/feedback/adjustment happen in OUR data layer first. Emit now HOLDS
+the campaign (campaign path writes its own ArtifactBody — rendered HTML,
+draft_body frozen; `emit` only carries the validated copy); the workroom
+renders it (desktop/phone/plain frames, subject/preheader/segment header,
+block-drawn feedback parts, plan fold) with an Adjust-before-push form
+writing the approval's `esp_push` payload — which `push_campaign_to_esp`
+(the ONLY ESP campaign write; idempotent; refuses withdrawn verdicts and
+recorded defects; credits the hero at the real draft) reads when the
+APPROVAL executes. [NEEDS FIX] retires with its reason. Same day, same
+commit: **draft products are not even OFFERED** — the plan's entity picker
+filters draft/archived/unpublished (oos stays, labeled); fitness still
+screens the drafter's pool. Six suites retargeted with dated comments;
+campaign_variety now proves the executor push end-to-end. Guards (caught):
+`draft_products_never_offered`, `approving_pushes_the_draft`,
+`push_refuses_withdrawn`. STILL OPEN in 3.3: the Request-changes REDRAFT
+consuming open draft-level FeedbackItems (+ field overrides) — the "entire
+plan adjustment" half; subject/preheader adjustment ships now.
 Sub-steps land separately, each shippable:
 - **3.1 Backend:** `ArtifactVersion` (v1 backfilled from `draft_body`) +
   `FeedbackItem` tables (auto-migrate + backfill in the same change, per the
@@ -280,5 +341,6 @@ step 4 is steady cadence work gated by owner walkthroughs.
 - Grounded-output preview v2 (live re-render); v1 (citation search) rides
   step 4's Data layer if cheap, else parks here.
 - Client approve/comment lane in the portal Work tab — a later autonomy rung.
-- Light-theme console — the console committed to dark; revisit only if a
-  second operator asks.
+- ~~Light-theme console~~ — UNPARKED 2026-08-27 (owner: "Can we also have a
+  light mode equivalent and have a toggle in the top header?"). Now ships in
+  step 2; dark remains the default.
