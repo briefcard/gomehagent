@@ -2551,6 +2551,24 @@ def admin_workroom(request: Request, output_id: str,
     admin_ui_mod.set_theme(request.cookies.get(THEME_COOKIE, ""))
     art, kw, ap = _article_bundle(output_id)
     if art is None:
+        # An ad VARIANT's id lands here from the ship queue and the ledger —
+        # its reviewable home is the batch board it belongs to (3.4). The
+        # batch is one ArtifactBody anchored on its first variant; membership
+        # is in the batch JSON, so a contains-match finds the board for any
+        # variant id. A redirect, not a 404: rule 3, the reader keeps their
+        # place.
+        from urllib.parse import quote
+
+        from fastapi.responses import RedirectResponse
+        with db.SessionLocal() as s:
+            hit = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.format == "ad_batch",
+                           db.ArtifactBody.body.like(f'%"{output_id}"%'))
+                   .first())
+            s.expunge_all()
+        if hit is not None and hit.output_id != output_id:
+            return RedirectResponse(
+                f"/admin/work/{quote(hit.output_id)}?key={quote(key)}", 303)
         return HTMLResponse("<h3>No artifact kept for this id.</h3>",
                             status_code=404)
     return HTMLResponse(admin_ui_mod.render_workroom(
@@ -2694,6 +2712,201 @@ async def campaign_meta_save(request: Request, key: str = Depends(admin_key)):
                    "preheader")
 
 
+def _ad_batch_bundle(output_id: str, n: str = ""):
+    """The board's edit routes share one load: artifact, parsed batch, and —
+    when a variant number is asked for — that variant's row. Returns
+    `(art, batch, variant, err)`; a non-empty `err` is the flash to refuse
+    with, so every route names the same failures the same way."""
+    import json as _json
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None or (art.format or "") != "ad_batch":
+        return None, None, None, "no ad batch with that id"
+    try:
+        batch = _json.loads(art.body or "")
+        variants = list(batch.get("variants") or [])
+        if not variants:
+            raise ValueError("no variants")
+    except Exception:                                            # noqa: BLE001
+        return art, None, None, "the batch record is unreadable"
+    if not n:
+        return art, batch, None, ""
+    v = next((x for x in variants if str(x.get("n")) == str(n)), None)
+    if v is None:
+        return art, batch, None, f"no variant {n} on this board"
+    return art, batch, v, ""
+
+
+def _ad_batch_write(art, batch, note: str) -> None:
+    """One board write: the JSON becomes the current body and a version
+    appends — every change to the batch leaves a step, the same contract the
+    article save holds (a history that can lose a step tells no story)."""
+    import json as _json
+    doc = _json.dumps(batch, ensure_ascii=False, indent=1)
+    with db.SessionLocal() as s:
+        row = s.get(db.ArtifactBody, art.id)
+        row.body = doc
+        row.bytes = len(doc)
+        nv = 2 + (s.query(db.ArtifactVersion)
+                  .filter(db.ArtifactVersion.output_id == art.output_id)
+                  .count())
+        s.add(db.ArtifactVersion(tenant=art.tenant or "",
+                                 output_id=art.output_id, n=nv,
+                                 author="owner", note=note, body=doc))
+        s.commit()
+
+
+@app.post("/admin/ad_variant_save")
+async def ad_variant_save(request: Request, key: str = Depends(admin_key)):
+    """Edit one variant's copy in place on the board (3.4).
+
+    Ban-gated like every owner edit — the list binds the owner's hands too,
+    and refusing at the save names the phrase while the person who typed it
+    is still looking at it. The edit lands in the batch JSON (what the board
+    shows and the batch ships); the variant's ledger row keeps the text as
+    emitted, the way article edits never rewrite their Output row.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    n = str(form.get("n") or "")
+    text = str(form.get("text") or "").strip()
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    art, batch, v, bad = _ad_batch_bundle(output_id, n)
+    if bad or v is None:
+        return back(err=bad or f"no variant {n} on this board")
+    if not text:
+        return back(err="an empty variant would ship blank — drop it instead")
+    # The deterministic mirror of the validator's ban gate, exactly as the
+    # campaign subject edit runs it: the full validator wants a claims
+    # context; the phrase scan is the half that binds an owner edit.
+    with db.SessionLocal() as s:
+        brand = (s.query(db.KbBrand)
+                 .filter(db.KbBrand.tenant == (art.tenant or "")).first())
+        banned = list((brand.banned_claims or []) if brand else [])
+    low = text.lower()
+    hit = next((b for b in banned if str(b).strip()
+                and str(b).lower() in low), "")
+    if hit:
+        return back(err=f"refused — {art.tenant}'s ban list forbids "
+                        f"{hit!r}, whoever typed it")
+    v["text"] = text
+    _ad_batch_write(art, batch, f"variant {n} copy edited")
+    return back(ok=f"variant {n} saved — the board is what the batch ships")
+
+
+@app.post("/admin/ad_variant_drop")
+async def ad_variant_drop(request: Request, key: str = Depends(admin_key)):
+    """Drop a variant from the batch — or put it back (3.4).
+
+    A drop is a judgement, not a delete: the card stays on the board, greyed
+    and labeled, so Regenerate knows what to replace and batch-approve knows
+    what to deny. Nothing is removed from the ledger.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    n = str(form.get("n") or "")
+    restore = str(form.get("act") or "") == "restore"
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    art, batch, v, bad = _ad_batch_bundle(output_id, n)
+    if bad or v is None:
+        return back(err=bad or f"no variant {n} on this board")
+    v["dropped"] = not restore
+    _ad_batch_write(art, batch,
+                    f"variant {n} {'restored' if restore else 'dropped'}")
+    if restore:
+        return back(ok=f"variant {n} restored — it rides with the batch again")
+    return back(ok=f"variant {n} dropped — Regenerate replaces it, and "
+                   f"approving the batch denies it")
+
+
+@app.post("/admin/ad_batch_decide")
+async def ad_batch_decide(request: Request, key: str = Depends(admin_key)):
+    """Decide the whole board in one gesture (3.4).
+
+    Approve resolves every pending variant approval the way the board reads:
+    kept variants approved (first, so the runs' decisions read approved),
+    dropped ones DENIED — a dropped variant riding an approve would mark
+    ready the exact thing the owner threw off the board. Honest by contract:
+    approving marks the batch ready and nothing else — no ad-platform write
+    exists, and the page says so.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    verdict = str(form.get("verdict") or "")
+
+    def back(ok: str = "", err: str = ""):
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+
+    art, batch, _v, bad = _ad_batch_bundle(output_id)
+    if bad:
+        return back(err=bad)
+    live_ids = {str(v.get("output_id") or "")
+                for v in batch["variants"] if not v.get("dropped")}
+    drop_ids = {str(v.get("output_id") or "")
+                for v in batch["variants"] if v.get("dropped")}
+    from . import approvals as _appr
+    with db.SessionLocal() as s:
+        pend = [(a.id, str((a.payload or {}).get("output_id") or ""))
+                for a in (s.query(db.Approval)
+                          .filter(db.Approval.tenant == (art.tenant or ""),
+                                  db.Approval.status == "pending").all())]
+        s.expunge_all()
+    n_ok = n_no = 0
+    if verdict == "approve":
+        for ap_id, oid in pend:
+            if oid in live_ids:
+                _appr.apply_decision(ap_id, "approved")
+                n_ok += 1
+        for ap_id, oid in pend:
+            if oid in drop_ids:
+                _appr.apply_decision(ap_id, "denied")
+                n_no += 1
+        if not (n_ok or n_no):
+            return back(err="nothing is pending on this batch — its rung "
+                            "asked for no approval, or it was decided "
+                            "already")
+        return back(ok=f"batch marked ready — {n_ok} variant(s) approved"
+                       + (f", {n_no} dropped one(s) denied" if n_no else "")
+                       + ". No ad-platform write exists; the copy ships by "
+                         "hand from here.")
+    if verdict == "deny":
+        for ap_id, oid in pend:
+            if oid in live_ids | drop_ids:
+                _appr.apply_decision(ap_id, "denied")
+                n_no += 1
+        if not n_no:
+            return back(err="nothing is pending on this batch")
+        return back(ok=f"batch denied — {n_no} approval(s) closed; nothing "
+                       f"on this board rides")
+    return back(err="say approve or deny — nothing was decided")
+
+
 @app.post("/admin/work_redraft")
 async def work_redraft(request: Request, key: str = Depends(admin_key)):
     """Request changes: redraft a held artifact from its filed feedback.
@@ -2713,7 +2926,8 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
     note = str(form.get("note") or "")
     overrides = {k: str(form.get(k) or "").strip()
                  for k in ("segment", "entity_key", "intent", "deadline",
-                           "goal", "subject", "angle", "role")
+                           "goal", "subject", "angle", "role",
+                           "audience_key")
                  if str(form.get(k) or "").strip()}
     art, _kw, _ap = _article_bundle(output_id)
     if art is None:
@@ -2724,9 +2938,17 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
     got = _sp.redraft_artifact(art.tenant or "", output_id, note=note,
                                overrides=overrides)
     if got.get("ok"):
-        msg = (f"redrafted — {got.get('consumed', 0)} feedback item(s) "
-               f"consumed; this supersedes the previous draft, which stays "
-               f"readable and names this one")
+        if str(got.get("output_id")) == output_id:
+            # The ad board regenerates IN PLACE — same page, kept variants
+            # untouched — so the flash must not claim a supersession that
+            # did not happen.
+            msg = (f"regenerated — {got.get('consumed', 0)} feedback item(s) "
+                   f"consumed; kept variants survive, replaced ones closed "
+                   f"with a pointer to their replacement")
+        else:
+            msg = (f"redrafted — {got.get('consumed', 0)} feedback item(s) "
+                   f"consumed; this supersedes the previous draft, which "
+                   f"stays readable and names this one")
         return RedirectResponse(
             f"/admin/work/{quote(str(got.get('output_id')))}?key={quote(key)}"
             f"&ok={quote(msg)}", 303)

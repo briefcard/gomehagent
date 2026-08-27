@@ -4408,6 +4408,16 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         if a.kind == "seo_new_article" and pl.get("output_id"):
             review = (f' · <a href="/admin/article/{_esc(pl["output_id"])}'
                       f'?key={_esc(key)}">review &amp; edit &rarr;</a>')
+        elif (a.kind == "skill_output" and pl.get("output_id")
+              and pl.get("skill") in ("campaign_email", "ad_copy")):
+            # The artifact-backed kinds get their workroom behind the row —
+            # a campaign to its preview, an ad variant to the batch board it
+            # belongs to (the workroom route resolves a variant id to its
+            # board). Replies stay bare: their artifact IS the Gmail draft.
+            _what = ("review on its board" if pl.get("skill") == "ad_copy"
+                     else "review in the workroom")
+            review = (f' · <a href="/admin/work/{_esc(pl["output_id"])}'
+                      f'?key={_esc(key)}">{_what} &rarr;</a>')
         fold = (f'<details><summary>read it ({len(body)} chars)</summary>'
                 f'<pre style="white-space:pre-wrap">{_esc(body[:1500])}'
                 + ("…" if len(body) > 1500 else "") + "</pre></details>"
@@ -6298,14 +6308,68 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     superseded_by = (dest.split("superseded:", 1)[1]
                      if dest.startswith("superseded:") else "")
 
+    # An ad BATCH reviews differently again (3.4): the artifact is a set —
+    # JSON of 1–5 variants — so the preview is a board of cards, each with
+    # its own edit / feedback / drop, the decide bar resolves every
+    # variant's approval in one gesture, and Request-changes regenerates in
+    # place (kept variants survive; the board never supersedes as a page,
+    # which is why variant-level supersession uses its own destination
+    # vocabulary that the `superseded:` parse above deliberately misses).
+    is_ads = (art.format or "") == "ad_batch"
+    batch = None
+    ad_apr = {"pending": 0, "ready": 0, "denied": 0}
+    if is_ads:
+        import json as _json
+        title, kw_line = "Ad batch", "the batch record is unreadable"
+        try:
+            batch = _json.loads(art.body or "")
+            if not isinstance(batch.get("variants"), list) \
+                    or not batch["variants"]:
+                batch = None
+        except Exception:                                        # noqa: BLE001
+            batch = None
+        if batch is not None:
+            _ids = {str(v.get("output_id") or "") for v in batch["variants"]}
+            with db.SessionLocal() as s:
+                for a in (s.query(db.Approval)
+                          .filter(db.Approval.tenant == tenant).all()):
+                    if str((a.payload or {}).get("output_id") or "") in _ids:
+                        if a.status == "pending":
+                            ad_apr["pending"] += 1
+                        elif a.status in ("approved", "executed"):
+                            ad_apr["ready"] += 1
+                        elif a.status == "denied":
+                            ad_apr["denied"] += 1
+            title = ("Ad batch — "
+                     + (batch.get("entity_label")
+                        or batch.get("entity_key") or "the brand")
+                     + " × " + (batch.get("audience_key") or "everyone"))
+            _n_live = sum(1 for v in batch["variants"]
+                          if not v.get("dropped"))
+            kw_line = (f'{_n_live} of {len(batch["variants"])} variant(s) '
+                       f'riding · '
+                       f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;'
+                       f'tenant={_esc(tenant)}&amp;system=ad_creative">its '
+                       f'system</a>')
+
     # --- the lifecycle, as chips: where this artifact IS ------------------
     def _chip(label: str, on: bool) -> str:
         return f'<span class="chip {"on" if on else "nb"}">{label}</span>'
-    steps = (_chip("drafted", True)
-             + _chip("in review", (art.state or "") == "in_review"
-                     or bool(versions))
-             + _chip("awaiting approval", bool(ap))
-             + _chip("published", published))
+    if is_ads:
+        # A batch's last chip is READY, not published — its declared ship
+        # marks it ready and a person carries it to the platform; claiming
+        # "published" would claim a write that does not exist.
+        steps = (_chip("drafted", True)
+                 + _chip("in review", bool(versions))
+                 + _chip("awaiting approval", ad_apr["pending"] > 0)
+                 + _chip("ready", ad_apr["pending"] == 0
+                         and ad_apr["ready"] > 0))
+    else:
+        steps = (_chip("drafted", True)
+                 + _chip("in review", (art.state or "") == "in_review"
+                         or bool(versions))
+                 + _chip("awaiting approval", bool(ap))
+                 + _chip("published", published))
     measured = ""
     if run is not None and getattr(run, "edit_diff", None):
         d = run.edit_diff or {}
@@ -6314,7 +6378,49 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             True)
 
     # --- decide bar (moved from web.py, restyled; same consequences) ------
-    if is_email:
+    if is_ads:
+        # HONEST BY CONTRACT (spec §3c): approve marks the batch ready — its
+        # declared ship — and nothing else. No ad-platform write is wired,
+        # and this bar says so in every state rather than implying a launch.
+        ship_note = ('<span class="when">Approving marks the batch ready — '
+                     'that is its whole ship: <b>no ad-platform write is '
+                     'wired</b>, the copy leaves by hand, and launching '
+                     'stays yours in the platform.</span>')
+        if batch is None:
+            decide = ('<div class="bad">The batch record is unreadable — '
+                      'nothing here can be decided. The raw source link '
+                      'below still shows what is stored.</div>')
+        elif ad_apr["pending"]:
+            _n_drop = sum(1 for v in batch["variants"] if v.get("dropped"))
+            decide = (f'<form class="row" method="post" '
+                      f'action="/admin/ad_batch_decide">'
+                      f'<input type="hidden" name="key" value="{_esc(key)}">'
+                      f'<input type="hidden" name="output_id" '
+                      f'value="{_esc(output_id)}">'
+                      f'<button type="submit" name="verdict" value="approve">'
+                      f'Approve batch — {_n_live} kept variant(s) ready'
+                      f'</button> '
+                      f'<button type="submit" name="verdict" value="deny" '
+                      f'class="sec">Deny batch</button> '
+                      + (f'<span class="chip nb">{_n_drop} dropped — denied '
+                         f'on approve</span> ' if _n_drop else "")
+                      + ship_note + "</form>")
+        elif ad_apr["ready"]:
+            decide = (f'<div class="ok">Batch ready — {ad_apr["ready"]} '
+                      f'variant(s) approved. No ad-platform write is wired: '
+                      f'the copy ships by hand, and launching stays yours '
+                      f'in the platform.</div>')
+        elif ad_apr["denied"]:
+            decide = ('<div class="note">Denied — nothing on this board '
+                      'rides. A regenerate with feedback starts it over.'
+                      '</div>')
+        else:
+            decide = ('<div class="note">No approval was asked — this run '
+                      'filed as <code>'
+                      + _esc(getattr(out, "status", "") or "recorded")
+                      + '</code> at its autonomy rung. ' + ship_note
+                      + '</div>')
+    elif is_email:
         prov = esp_push.get("provider") or "the ESP"
         if ap:
             from . import approvals
@@ -6385,15 +6491,20 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                   f'<a href="/admin/work/{_esc(superseded_by)}?key={_esc(key)}">'
                   f'the current draft &rarr;</a></div>')
 
-    flags = artifact_check.check(art.body or "")
+    # The structural check reads rendered artifacts; a batch is a JSON
+    # record, and flags computed over it would be findings about brackets.
+    flags = [] if is_ads else artifact_check.check(art.body or "")
     flag_html = "".join(
         f'<li><code>{_esc(f["rule"])}</code> {_esc(f["detail"])} — '
         f'<em>{_esc(f["fix"])}</em></li>' for f in flags)
-    kw_line = (f'for <b>{_esc(kw.phrase)}</b> ({_esc(kw.role or "")}, '
-               f'{_esc(kw.status or "")}) · '
-               f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;'
-               f'tenant={_esc(tenant)}">its Plan row</a>'
-               if kw else "no keyword joined")
+    if not is_ads:
+        # The board sets its own byline above — a batch has no keyword and
+        # "no keyword joined" would read as a gap instead of a fact.
+        kw_line = (f'for <b>{_esc(kw.phrase)}</b> ({_esc(kw.role or "")}, '
+                   f'{_esc(kw.status or "")}) · '
+                   f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;'
+                   f'tenant={_esc(tenant)}">its Plan row</a>'
+                   if kw else "no keyword joined")
 
     def _inp(name, label, value, size=60):
         return (f'<label style="display:block;margin:6px 0">{label}<br>'
@@ -6410,7 +6521,11 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                     + f' <span class="when">{_esc(str(v.created_at)[:16])} · '
                       f'{len(v.body or "")} chars</span></div>')
     dsum = ""
-    if (art.draft_body or "") and (art.body or "") != (art.draft_body or ""):
+    # Not for batches: a text diff of two JSON documents is noise — the
+    # version notes ("variant 2 copy edited", "regenerated 1 of 1 …") tell
+    # the same story in the board's own vocabulary.
+    if not is_ads and (art.draft_body or "") \
+            and (art.body or "") != (art.draft_body or ""):
         d = edits.delta(art.draft_body or "", art.body or "")
         dsum = (f'<p class="when">Draft vs current: '
                 f'{"unchanged" if d.get("as_is") else "edited"}'
@@ -6421,7 +6536,96 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     # --- preview + edit, by kind ------------------------------------------
     src_link = (f'<p class="when"><a href="/admin/artifact/{_esc(output_id)}'
                 f'?key={_esc(key)}&amp;raw=1">source</a></p>')
-    if is_email:
+    if is_ads:
+        if batch is None:
+            preview_card = (f'<div class="card"><h3>The variant board</h3>'
+                            f'<div class="bad">The batch record is '
+                            f'unreadable — the raw source below is all '
+                            f'there is.</div>{src_link}</div>')
+        else:
+            regen = batch.get("last_regenerate") or {}
+            head_bits = (
+                f'<span class="chip nb">entity</span> '
+                f'{_esc(batch.get("entity_label") or batch.get("entity_key") or "the brand")} '
+                f'<span class="chip nb">audience</span> '
+                f'{_esc(batch.get("audience_key") or "everyone")}'
+                + (f' <span class="chip off">{batch["blocked_at_emit"]} '
+                   f'blocked at the gates</span>'
+                   if batch.get("blocked_at_emit") else "")
+                + (f' <span class="chip nb">last regenerate: '
+                   f'{regen.get("cleared", 0)} of {regen.get("asked", 0)} '
+                   f'cleared</span>' if regen else ""))
+            vcards = ""
+            for v in batch["variants"]:
+                n = v.get("n")
+                dropped = bool(v.get("dropped"))
+                basis = str(v.get("basis") or "")
+                chips = f'<span class="chip nb">{_esc(str(v.get("angle") or ""))}</span> '
+                if v.get("needs_art_direction"):
+                    # The flag nobody could see (spec §3c) — an amber chip
+                    # per variant instead of JSON in a run detail.
+                    chips += '<span class="chip off">needs art direction</span> '
+                if basis and basis != "model":
+                    chips += (f'<span class="chip off" title="{_esc(basis)}">'
+                              f'composed fallback — not ad copy</span> ')
+                if dropped:
+                    chips += '<span class="chip nb">dropped</span> '
+                claim_line = (f'<div class="when">built on: '
+                              f'&ldquo;{_esc(str(v.get("claim") or "")[:180])}'
+                              f'&rdquo;</div>'
+                              if v.get("claim") else "")
+                if dropped:
+                    act_forms = f"""
+      <form method="post" action="/admin/ad_variant_drop" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <input type="hidden" name="n" value="{n}">
+        <input type="hidden" name="act" value="restore">
+        <button type="submit" class="sec">Restore</button>
+        <span class="when">dropped — Regenerate replaces it; approving the
+        batch denies it</span>
+      </form>"""
+                else:
+                    act_forms = f"""
+      <form method="post" action="/admin/ad_variant_save">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <input type="hidden" name="n" value="{n}">
+        <textarea name="text" rows="3" style="width:100%;font-family:var(--mono)">{_esc(str(v.get("text") or ""))}</textarea>
+        <div class="row">
+          <button type="submit" class="sec">Save copy</button>
+          <span class="when">ban-gated — a banned phrase refuses, whoever
+          typed it</span>
+        </div>
+      </form>
+      <form method="post" action="/admin/feedback_add" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <input type="hidden" name="system_key" value="{_esc(syskey)}">
+        <input type="hidden" name="part" value="variant {n}">
+        <input type="hidden" name="level" value="draft">
+        <input name="note" placeholder="what&rsquo;s wrong with this one — rides the next regenerate" style="flex:1;min-width:220px">
+        <button type="submit" class="sec">File feedback</button>
+      </form>
+      <form method="post" action="/admin/ad_variant_drop" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <input type="hidden" name="n" value="{n}">
+        <button type="submit" class="sec">Drop</button>
+        <span class="when">a judgement, not a delete — it stays here, greyed,
+        until a regenerate replaces it</span>
+      </form>"""
+                vcards += (f'<div class="msg{" gone" if dropped else ""}">'
+                           f'<div class="row"><b>Variant {n}</b> {chips}'
+                           f'</div>{claim_line}{act_forms}</div>')
+            preview_card = (f'<div class="card"><h3>The variant board</h3>'
+                            f'<div class="row">{head_bits}</div>'
+                            f'<div class="thread">{vcards}</div>'
+                            f'{src_link}</div>')
+        # Per-variant editors live on the cards; a whole-body editor over
+        # the batch JSON would invite hand-breaking the record.
+        edit_card = ""
+    elif is_email:
         srcdoc = _esc(art.body or "")
         plain = _re.sub(r"<[^>]+>", " ", art.body or "")
         plain = _re.sub(r"\s+", " ", plain).strip()
@@ -6500,8 +6704,12 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
 </div>"""
 
     # Feedback parts follow the artifact's anatomy: an email's judgement
-    # lands on a block, not a paragraph number.
-    if is_email:
+    # lands on a block, not a paragraph number — and a batch's on a variant.
+    if is_ads:
+        parts = (["overall"]
+                 + [f"variant {v.get('n')}"
+                    for v in (batch or {}).get("variants") or []])
+    elif is_email:
         shape = list(getattr(out, "shape", None) or [])[:10]
         parts = (["overall", "subject", "preheader", "hero"]
                  + [f"block {i + 1} · {str(k)[:16]}"
@@ -6531,7 +6739,17 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     redraft_card = ""
     if ((art.body or "").strip() and not pushed and not published
             and not superseded_by):
-        if is_email:
+        if is_ads:
+            ov_fields = (
+                _plan_field_input({"key": "entity_key", "kind": "entity",
+                                   "label": "Entity"},
+                                  (batch or {}).get("entity_key") or "",
+                                  tenant=tenant)
+                + _plan_field_input({"key": "audience_key",
+                                     "label": "Audience key"},
+                                    (batch or {}).get("audience_key") or "",
+                                    tenant=tenant))
+        elif is_email:
             ov_fields = (
                 _plan_field_input({"key": "segment", "kind": "segment",
                                    "label": "Segment"},
@@ -6567,22 +6785,39 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                    f"consumed" if open_draft_fb else
                    "no open feedback filed — the note below is the whole "
                    "instruction")
+        if is_ads:
+            _n_dropped = sum(1 for v in (batch or {}).get("variants") or []
+                             if v.get("dropped"))
+            _rc_title = "Request changes — regenerate on this board"
+            _rc_btn = "Regenerate with feedback"
+            _rc_how = ((f"replaces the {_n_dropped} dropped variant(s), "
+                        f"kept ones survive verbatim" if _n_dropped else
+                        "nothing is dropped, so the WHOLE batch is "
+                        "redrafted — drop a variant first to keep the rest")
+                       + " · runs fresh through every gate")
+            _rc_ph = ("e.g. shorter lines, and stop opening every variant "
+                      "with the brand name")
+        else:
+            _rc_title = "Request changes — redraft in our data layer"
+            _rc_btn = "Redraft with this feedback"
+            _rc_how = ("runs fresh through every gate · supersedes this "
+                       "draft and re-queues the approval")
+            _rc_ph = ("e.g. two products max, and lead with the "
+                      "free-shipping line")
         redraft_card = f"""
 <div class="card">
-  <h3>Request changes — redraft in our data layer</h3>
+  <h3>{_rc_title}</h3>
   <form method="post" action="/admin/work_redraft">
     <input type="hidden" name="key" value="{_esc(key)}">
     <input type="hidden" name="output_id" value="{_esc(output_id)}">
     <label style="display:block;margin:6px 0">What must change<br>
-    <textarea name="note" rows="3" placeholder="e.g. two products max, and
-lead with the free-shipping line"></textarea></label>
+    <textarea name="note" rows="3" placeholder="{_esc(_rc_ph)}"></textarea></label>
     <details class="sec"><summary>Adjust the plan for this redraft</summary>
       <div class="planfields">{ov_fields}</div>
     </details>
     <div class="row" style="margin-top:8px">
-      <button type="submit">Redraft with this feedback</button>
-      <span class="when">{fb_line} · runs fresh through every gate ·
-      supersedes this draft and re-queues the approval</span>
+      <button type="submit">{_rc_btn}</button>
+      <span class="when">{fb_line} · {_rc_how}</span>
     </div>
   </form>
 </div>"""

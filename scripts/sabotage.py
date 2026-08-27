@@ -1337,6 +1337,74 @@ SABOTAGES = [
                "define, which shipped unnoticed for weeks because nothing "
                "compared the page to its own CSS",
     },
+    {
+        "name": "ad_batch_is_kept",
+        "file": "app/skill_pack.py",
+        "find": "    if board_rows and not str(ctx.params.get(\"into_batch\") or \"\").strip():",
+        "replace": "    if False and board_rows:  # SABOTAGE",
+        "suites": ["test_ad_board.py"],
+        "why": "ad variants go back to living only in run-detail JSON — the "
+               "spec's exact defect ('no surface shows them, so nothing can "
+               "be judged, edited, or regenerated') returns, while every "
+               "variant still queues an approval about copy nobody can see",
+    },
+    {
+        "name": "ad_regenerate_keeps_kept",
+        "file": "app/skill_pack.py",
+        "find": "        merged = kept + rows",
+        "replace": "        merged = list(rows)  # SABOTAGE",
+        "suites": ["test_ad_board.py"],
+        "why": "Regenerate silently throws away every KEPT variant — the "
+               "owner's edits and approvals with them — and replaces the "
+               "whole board with fresh drafts; 'kept variants survive' is "
+               "the promise printed next to the button",
+    },
+    {
+        "name": "ad_variant_edit_is_ban_gated",
+        "file": "app/web.py",
+        "find": "    low = text.lower()\n"
+                "    hit = next((b for b in banned if str(b).strip()\n"
+                "                and str(b).lower() in low), \"\")\n"
+                "    if hit:",
+        "replace": "    low = text.lower()\n"
+                   "    hit = \"\"  # SABOTAGE\n"
+                   "    if hit:",
+        "suites": ["test_ad_board.py"],
+        "why": "the owner can type a banned claim straight into a variant "
+               "and mark the batch ready — the ban list stops binding the "
+               "owner's hands exactly where copy leaves for a paid channel",
+    },
+    {
+        "name": "batch_approve_denies_dropped",
+        "file": "app/web.py",
+        "find": "        for ap_id, oid in pend:\n"
+                "            if oid in drop_ids:\n"
+                "                _appr.apply_decision(ap_id, \"denied\")\n"
+                "                n_no += 1",
+        "replace": "        for ap_id, oid in pend:\n"
+                   "            if False:  # SABOTAGE\n"
+                   "                _appr.apply_decision(ap_id, \"denied\")\n"
+                   "                n_no += 1",
+        "suites": ["test_ad_board.py"],
+        "why": "approving the batch leaves the dropped variants' approvals "
+               "pending — the thing the owner threw off the board stays "
+               "decidable in the ship queue, one stray click from 'ready'",
+    },
+    {
+        "name": "variant_reaches_its_board",
+        "file": "app/web.py",
+        "find": "        if hit is not None and hit.output_id != output_id:\n"
+                "            return RedirectResponse(\n"
+                "                f\"/admin/work/{quote(hit.output_id)}?key={quote(key)}\", 303)",
+        "replace": "        if False and hit is not None:  # SABOTAGE\n"
+                   "            return RedirectResponse(\n"
+                   "                f\"/admin/work/{quote(hit.output_id)}?key={quote(key)}\", 303)",
+        "suites": ["test_ad_board.py", "test_render_smoke.py"],
+        "why": "every ship-queue link for a non-anchor variant dead-ends on "
+               "a 404 — the review control points at a place that does not "
+               "hold the thing, the defect family the pointers suite exists "
+               "to end",
+    },
 ]
 
 

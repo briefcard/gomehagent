@@ -564,11 +564,20 @@ def _draft_ad_live(bundle: dict, claim: dict, angle: str,
     try:
         import anthropic
 
-        parts = [bundle["rules"]["block"].strip(),
-                 f"\n## The one claim you may build on\n"
-                 f"{claim['claim']}"
-                 + (f"\n(evidence: {claim['evidence']})" if claim.get("evidence") else "")
-                 + f"\n(this is true of: {claim.get('scope') or 'the brand'})"]
+        parts = [bundle["rules"]["block"].strip()]
+        if bundle.get("revision_notes"):
+            # The board's regenerate rides through here (UI overhaul 3.4).
+            # Notes FIRST — the convention campaign_email and blog_article
+            # already hold: the owner's direction outranks everything but
+            # the rules themselves.
+            parts.append("\n## The owner reviewed the previous batch — "
+                         "address this before anything else\n"
+                         + str(bundle["revision_notes"]).strip())
+        parts.append(
+            f"\n## The one claim you may build on\n"
+            f"{claim['claim']}"
+            + (f"\n(evidence: {claim['evidence']})" if claim.get("evidence") else "")
+            + f"\n(this is true of: {claim.get('scope') or 'the brand'})")
 
         ents = bundle.get("entities") or []
         if ents:
@@ -619,6 +628,13 @@ def _run_ad_copy(ctx: Context) -> dict:
     entity_key = str(ctx.params.get("entity_key") or "")
     audience_key = str(ctx.params.get("audience_key") or "")
     want = max(1, min(5, int(ctx.params.get("variants") or 3)))
+    if str(ctx.params.get("revision_notes") or "").strip():
+        # The variant board's regenerate (UI overhaul 3.4): the owner's
+        # digest rides the bundle so `draft_ad` puts it FIRST in the brief.
+        # The composed fallback ignores it — a deterministic composer has
+        # nothing to address a note with — and `basis` already names which
+        # path wrote each variant, so that degradation stays on the record.
+        ctx.bundle["revision_notes"] = str(ctx.params["revision_notes"]).strip()
 
     if not ctx.claims:
         ctx.note("no approved claim is in scope, so there is nothing to "
@@ -637,6 +653,11 @@ def _run_ad_copy(ctx: Context) -> dict:
     objections = ctx.bundle.get("objections") or []
     by_basis: dict[str, int] = {}
     degraded_note = ""
+    #: The variant board's rows (3.4): what each KEPT variant is, in the
+    #: board's own vocabulary — angle, basis, the claim it stands on, the
+    #: post-repair text. Collected at emit because `angle` and the claim's
+    #: wording live here and nowhere on the item.
+    board_rows: list[dict] = []
 
     # ONE AD, ONE SUBJECT — the same contract the campaign runs under, with a
     # different referent shape. An ad has no imagery yet (see the note above),
@@ -698,25 +719,70 @@ def _run_ad_copy(ctx: Context) -> dict:
                    if entity_key else
                    coherence.commit("audience", audience_key or "everyone",
                                     action=angle))
-        ctx.emit(text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
-                 audience_key=audience_key, angle=angle, fmt="ad_copy",
-                 commitment=_commit,
-                 parts=lambda _t, _c=claim: coherence.parts(
-                     text=_t,
-                     claims=[{"claim_id": _c.get("claim_id", ""),
-                              "text": _c.get("claim", ""),
-                              "scope": _c.get("scope", "brand-wide")}]),
-                 redraft=_repair if basis == "model" else None,
-                 meta={"needs_art_direction": True, "basis": basis})
+        item = ctx.emit(
+            text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
+            audience_key=audience_key, angle=angle, fmt="ad_copy",
+            commitment=_commit,
+            parts=lambda _t, _c=claim: coherence.parts(
+                text=_t,
+                claims=[{"claim_id": _c.get("claim_id", ""),
+                         "text": _c.get("claim", ""),
+                         "scope": _c.get("scope", "brand-wide")}]),
+            redraft=_repair if basis == "model" else None,
+            meta={"needs_art_direction": True, "basis": basis})
+        if item["ok"]:
+            # `item["body"]` and not `text`: a repair replaces the body, and
+            # a board row built from the pre-repair draft would show the
+            # variant that was thrown away — the exact drift `meta` being a
+            # callable exists to prevent.
+            board_rows.append({
+                "n": len(board_rows) + 1, "output_id": item["output_id"],
+                "angle": angle, "basis": basis,
+                "needs_art_direction": True,
+                "claim_ids": list(item["claim_ids"]),
+                "claim": str(claim.get("claim") or ""),
+                "text": item["body"], "dropped": False})
 
     if degraded_note:
         ctx.note(f"the model did not write these — {degraded_note}. What is "
                  f"filed is a grounded placeholder, not ad copy: every variant "
                  f"carries basis='composed'.")
 
+    # THE BATCH IS AN ARTIFACT (UI overhaul 3.4, spec §3c). These variants
+    # used to live only in run-detail JSON — "no surface shows them, so
+    # nothing can be judged, edited, or regenerated". One ArtifactBody per
+    # batch, anchored on the first kept variant's ledger row, holds the
+    # reviewable set as JSON: /admin/work/<anchor> renders it as the variant
+    # board, owner edits append versions, and the regenerate loop rewrites
+    # the SAME row in place — so the version history and the draft-vs-current
+    # story stay meaningful across regenerations. `draft_body` freezes the
+    # machine's original batch (the workroom's virtual v1).
+    #
+    # `into_batch` marks a run the regenerate spawned to REFILL an existing
+    # board: the caller merges these rows into that batch, and a second
+    # board for the refill would state every variant twice.
+    if board_rows and not str(ctx.params.get("into_batch") or "").strip():
+        import json as _json
+        _doc = _json.dumps(
+            {"kind": "ad_batch", "entity_key": entity_key,
+             "entity_label": _label, "audience_key": audience_key,
+             "blocked_at_emit": len(ctx.items) - len(board_rows),
+             "variants": board_rows}, ensure_ascii=False, indent=1)
+        from . import db as _db
+        with _db.SessionLocal() as s:
+            s.add(_db.ArtifactBody(
+                tenant=ctx.tenant, output_id=board_rows[0]["output_id"],
+                run_id=ctx.run_id or "", system_key="ad_creative",
+                format="ad_batch", destination="",
+                body=_doc, draft_body=_doc, bytes=len(_doc)))
+            s.commit()
+        ctx.note("the batch is on its variant board — judge, edit, drop and "
+                 "regenerate it there")
+
     return {"summary": f"{len(ctx.items)} variant(s) ({', '.join(
                 f'{n} {b}' for b, n in sorted(by_basis.items()))}), no imagery",
-            "by_basis": by_basis, "angles": list(_ANGLES[:len(ctx.items)])}
+            "by_basis": by_basis, "angles": list(_ANGLES[:len(ctx.items)]),
+            "board_rows": board_rows}
 
 
 register(Skill(
@@ -728,7 +794,11 @@ register(Skill(
     system_key="ad_creative",
     tier=3,
     needs=("rules.banned_claims",),
-    params=("entity_key", "audience_key", "variants", "utterance"),
+    # `revision_notes` + `into_batch` are the board's regenerate loop (3.4):
+    # the digest rides the brief, and `into_batch` names the board the rows
+    # will be merged into (so the refill run writes no second board).
+    params=("entity_key", "audience_key", "variants", "utterance",
+            "revision_notes", "into_batch"),
     writes=False,
     produces="draft",
     run=_run_ad_copy))
@@ -2779,6 +2849,12 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
                                  or getattr(out, "entity_key", "") or ""),
                   "revision_notes": digest}
         skill_key = "blog_article"
+    elif fmt == "ad_batch":
+        # The board regenerates IN PLACE — its own tail, not the supersede
+        # flow below: a batch is a SET with per-variant judgement, and the
+        # kept variants must survive exactly as reviewed.
+        return _regenerate_ad_batch(tenant, output_id, art, fb, digest,
+                                    overrides)
     else:
         return {"ok": False,
                 "error": f"no redraft path for format {fmt!r} yet"}
@@ -2826,6 +2902,120 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
                        f"superseded by redraft (workroom) -> {new_oid}")
     return {"ok": True, "output_id": new_oid, "consumed": len(fb),
             "summary": (r.get("summary") or "")[:200]}
+
+
+def _regenerate_ad_batch(tenant: str, output_id: str, art, fb: list,
+                         digest: str, overrides: dict) -> dict:
+    """Regenerate an ad batch from its feedback — kept variants survive.
+
+    A batch is a SET with per-variant judgement, so it does not supersede
+    wholesale the way an email or an article does. The board (its
+    ArtifactBody) keeps its identity and its version history — that is what
+    makes versions and the draft-vs-current story meaningful — and
+    supersession happens at the VARIANT level: every replaced variant's
+    ledger row closes with a pointer to its replacement and its pending
+    approval is withdrawn, while kept variants' rows, owner edits and
+    approvals are untouched.
+
+    Dropped variants name what gets replaced. With nothing dropped, the
+    whole batch is redrafted — Request-changes with no drops is a judgement
+    about all of it. The `superseded:`-prefixed destination is deliberately
+    NOT used here: the board's anchor row can itself be a replaced variant,
+    and the board must never render as a superseded PAGE.
+    """
+    import json as _json
+
+    from . import approvals as _appr
+    from . import db, skill as _skill
+    try:
+        batch = _json.loads(art.body or "")
+        variants = list(batch.get("variants") or [])
+        if not variants:
+            raise ValueError("no variants")
+    except Exception:                                            # noqa: BLE001
+        return {"ok": False, "error": "the batch record is unreadable — "
+                                      "nothing names its variants"}
+
+    dropped = [v for v in variants if v.get("dropped")]
+    kept = [v for v in variants if not v.get("dropped")] if dropped else []
+    replaced = dropped if dropped else variants
+
+    notes = digest
+    if kept:
+        notes += ("\n\nThese variants were KEPT and will run beside yours — "
+                  "do not repeat their lines:\n"
+                  + "\n".join("- " + str(v.get("text") or "")[:200]
+                              for v in kept))
+
+    r = _skill.run("ad_copy", tenant,
+                   entity_key=(overrides.get("entity_key")
+                               or batch.get("entity_key") or ""),
+                   audience_key=(overrides.get("audience_key")
+                                 or batch.get("audience_key") or ""),
+                   variants=max(1, min(5, len(replaced))),
+                   revision_notes=notes, into_batch=output_id)
+    rows = list((r.get("detail") or {}).get("board_rows") or [])
+    if not rows:
+        # Rule 7: a refusal names its reason where the button was. A blocked
+        # run's reasons live in blocked_on; "blocked" alone sends the owner
+        # hunting through Diagnostics for what this line could have said.
+        why = ("; ".join(r.get("blocked_on") or [])
+               or str(r.get("summary") or r.get("status") or "unknown"))
+        return {"ok": False,
+                "error": "the regenerate produced nothing that cleared the "
+                         "gates — " + why[:220]}
+
+    with db.SessionLocal() as s:
+        # Emit order pairs each replaced slot with its replacement; a slot
+        # the refill could not clear closes without a successor and the
+        # return says so.
+        for i, v in enumerate(replaced):
+            _o = s.get(db.Output, str(v.get("output_id") or ""))
+            if _o is not None:
+                _o.status = "superseded"
+                _o.destination = ("replaced-in-batch:"
+                                  + (rows[i]["output_id"]
+                                     if i < len(rows) else ""))
+        gone = {str(v.get("output_id") or "") for v in replaced}
+        for apr in (s.query(db.Approval)
+                    .filter(db.Approval.tenant == tenant,
+                            db.Approval.status == "pending").all()):
+            if (apr.payload or {}).get("output_id") in gone:
+                apr.status = "withdrawn"
+                apr.decided_at = db.utcnow()
+                apr.payload = {**(apr.payload or {}),
+                               "withdrawn_because":
+                                   "replaced on the board by a regenerate"}
+        merged = kept + rows
+        for n, v in enumerate(merged, 1):
+            v["n"] = n
+        batch["variants"] = merged
+        batch["last_regenerate"] = {"asked": len(replaced),
+                                    "cleared": len(rows)}
+        _doc = _json.dumps(batch, ensure_ascii=False, indent=1)
+        row = s.get(db.ArtifactBody, art.id)
+        row.body = _doc
+        row.bytes = len(_doc)
+        nv = 2 + (s.query(db.ArtifactVersion)
+                  .filter(db.ArtifactVersion.output_id == output_id).count())
+        s.add(db.ArtifactVersion(
+            tenant=tenant, output_id=output_id, n=nv, author="machine",
+            note=f"regenerated {len(rows)} of {len(replaced)} variant(s) "
+                 f"with feedback", body=_doc))
+        for f_row in (s.query(db.FeedbackItem)
+                      .filter(db.FeedbackItem.output_id == output_id,
+                              db.FeedbackItem.level == "draft",
+                              db.FeedbackItem.status == "open").all()):
+            f_row.status = "applied"
+            f_row.applied_at = db.utcnow()
+        s.commit()
+
+    short = ""
+    if len(rows) < len(replaced):
+        short = (f" — asked for {len(replaced)}, {len(rows)} cleared the "
+                 f"gates; the shortfall is on the run's record")
+    return {"ok": True, "output_id": output_id, "consumed": len(fb),
+            "summary": (r.get("summary") or "")[:160] + short}
 
 
 register(Skill(

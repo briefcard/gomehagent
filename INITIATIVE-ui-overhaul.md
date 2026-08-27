@@ -250,6 +250,48 @@ forward link, keyword row re-pointed, feedback marked applied). Refusals:
 pushed→edit in platform; published→revision path; no direction→reroll
 refused. Proven end-to-end in campaign_variety + article_review. Guards:
 `redraft_supersedes`, `redraft_carries_the_notes` (caught).
+**3.4 BUILT + SHIPPED 2026-08-27: the ad variant board.** The batch is an
+`ArtifactBody` (`format="ad_batch"`, JSON of 1–5 variants, anchored on the
+first variant's ledger row; `draft_body` = the frozen original, virtual v1)
+written by `_run_ad_copy` and rendered at `/admin/work/<anchor>`: one card
+per variant with angle chip, amber `needs_art_direction` chip, honest
+`composed fallback — not ad copy` chip, the claim it stands on, inline copy
+edit (ban-gated like every owner edit, every change appends a version),
+inline draft-feedback (`part="variant N"`, the existing rail), and
+drop/restore (a judgement, not a delete — greyed card, named consequences).
+Any VARIANT's id 303s to its board (ship-queue rows now link "review on its
+board"; campaigns gained the same "review in the workroom" link — same
+family, same fix). Regenerate rides `redraft_artifact` (same digest — the
+`redraft_carries_the_notes` guard binds it) with `ad_copy` gaining
+`revision_notes` (notes FIRST in the brief) + `into_batch` (the refill run
+writes no second board), but IN PLACE, its own tail: kept variants survive
+verbatim (owner edits included), dropped ones are replaced 1:1 through
+every gate, replaced rows close as `superseded` with destination
+`replaced-in-batch:<successor>` — deliberately NOT `superseded:`, so the
+board never renders as a superseded PAGE — and their approvals withdraw
+per-variant. Nothing dropped = the whole batch redrafts (the button says
+so). Batch decide is one gesture: kept approved first, dropped DENIED;
+every state of the bar says **no ad-platform write is wired** (the system's
+declared ship). Guards (all caught): `ad_batch_is_kept`,
+`ad_regenerate_keeps_kept`, `ad_variant_edit_is_ban_gated`,
+`batch_approve_denies_dropped`, `variant_reaches_its_board`. New suite
+`test_ad_board.py` proves the loop offline end to end; smoke walks the
+board (CSS class coverage + the variant redirect); `seed_demo.py` seeds a
+real batch through `skill.run` (ANTHROPIC key stripped first — the demo
+must never spend; composed basis is the honest offline face). Verified on
+the demo desktop + phone width, dark + light. DEVIATIONS, named: (1) cards
+render the copy whole — `_AD_SYSTEM`'s contract is "two or three short
+lines, no headline label", so a headline/body/CTA split would misrepresent
+the artifact; it waits on a drafter contract that produces structure.
+(2) spec §3c's "renderings beside copy" (compose/imagegen previews) parks
+with the media layer (build map 05/06) — ad_copy is copy-only by its own
+note. (3) per-variant approvals stay (the batch bar resolves them all);
+grouping their ship-queue rows belongs to step 4's Review restructure.
+(4) no variants-count override on regenerate — replacements are 1:1 with
+drops; growing a batch is a new run. On the credential-less demo,
+regenerate refuses with its reason (rule 7 — the refusal was made to name
+`blocked_on` instead of a bare "blocked"). STANDING WATCH: the first real
+batch through board → regenerate → approve, per the first-live-run rule.
 Sub-steps land separately, each shippable:
 - **3.1 Backend:** `ArtifactVersion` (v1 backfilled from `draft_body`) +
   `FeedbackItem` tables (auto-migrate + backfill in the same change, per the

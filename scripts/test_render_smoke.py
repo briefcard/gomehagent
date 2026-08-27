@@ -345,6 +345,46 @@ ck("…labels the out-of-stock one", "smk-oos" in _sel
 ck("…and a DRAFT product is not offered at all", "smk-drafty" not in _sel)
 
 # ---------------------------------------------------------------------------
+# The ad variant board (step 3.4): a batch renders as cards with the amber
+# needs-art-direction chip, says honestly that no ad-platform write exists,
+# and any VARIANT's id reaches the board it belongs to — the ship queue's
+# links must land somewhere real. test_ad_board.py proves the loop; this
+# holds the surface to the stylesheet like every other page.
+# ---------------------------------------------------------------------------
+import json as _json  # noqa: E402
+
+_batch = {"kind": "ad_batch", "entity_key": "smk-live",
+          "entity_label": "Smoke Live Product", "audience_key": "hosts",
+          "blocked_at_emit": 1,
+          "variants": [
+              {"n": 1, "output_id": "smk-ad-1", "angle": "proof",
+               "basis": "model", "needs_art_direction": True,
+               "claim_ids": ["c1"], "claim": "Dishwasher safe.",
+               "text": "Ad line one.", "dropped": False},
+              {"n": 2, "output_id": "smk-ad-2", "angle": "objection",
+               "basis": "composed (no key)", "needs_art_direction": True,
+               "claim_ids": ["c2"], "claim": "Acrylic.",
+               "text": "Ad line two.", "dropped": True}]}
+with db.SessionLocal() as s:
+    s.add(db.ArtifactBody(tenant=T1, output_id="smk-ad-1", run_id="",
+                          system_key="ad_creative", format="ad_batch",
+                          body=_json.dumps(_batch),
+                          draft_body=_json.dumps(_batch), bytes=1))
+    s.commit()
+adb = c.get(f"/admin/work/smk-ad-1?key={KEY}").text
+ck("the ad board renders, framed", 'class="side"' in adb
+   and "The variant board" in adb and "needs art direction" in adb)
+ck("…honest about its ship: no ad-platform write is wired",
+   "no ad-platform write is wired" in adb.lower())
+ck("…a dropped variant is greyed with its restore, kept ones editable",
+   "Restore" in adb and "ad_variant_save" in adb)
+coverage("ad board", adb)
+r = c.get(f"/admin/work/smk-ad-2?key={KEY}", follow_redirects=False)
+ck("a variant id 303s to its board", r.status_code == 303
+   and "/admin/work/smk-ad-1" in r.headers.get("location", ""),
+   f"{r.status_code} {r.headers.get('location', '')}")
+
+# ---------------------------------------------------------------------------
 # Light mode (step 2): the second token block defines every token the dark
 # root does — the parity that stops one palette silently falling behind the
 # other — the toggle persists in a cookie, and the choice reaches <body>.
