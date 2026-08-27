@@ -10,10 +10,25 @@ phone on a hotel wifi.
 """
 from __future__ import annotations
 
+import contextvars
 import html
 import json
 
 from . import config, db, kb, systems, tenants
+
+#: The viewer's theme for THIS request. Set by `web.admin_ui` from the
+#: `gomeh_theme` cookie before any rendering; dark is the default and renders
+#: with NO attribute, so every other caller of `_shell` (and every test that
+#: never set a cookie) gets the default look without knowing themes exist.
+#: A contextvar rather than a parameter because threading a display
+#: preference through nine render functions would put presentation in every
+#: signature; and rather than a module global because two concurrent requests
+#: must not see each other's choice.
+_THEME = contextvars.ContextVar("console_theme", default="dark")
+
+
+def set_theme(value: str) -> None:
+    _THEME.set("light" if value == "light" else "dark")
 
 # The instructions that used to live in a separate manual. Kept beside the
 # fields so a value is never entered from memory.
@@ -95,10 +110,24 @@ _CSS = """
    markup, so the reskin swaps values, never contracts. */
 :root{--bg:#0b1326;--panel:#131b2e;--ink:#dae2fd;--ink2:#b9c2de;--mut:#8f97b3;
 --rule:#2c3450;--rule2:#1b2338;--field:#1d2740;
---acc:#d2bbff;--accs:#241f45;--ok:#4edea3;--oks:#0f2c22;
---gap:#ffb95f;--gaps:#2b2113;--err:#ffb4ab;--errs:#3a1512;
+--acc:#d2bbff;--accs:#241f45;--acc-ink:#2a1155;--ok:#4edea3;--oks:#0f2c22;
+--gap:#ffb95f;--gaps:#2b2113;--gap-ink:#2a1700;--err:#ffb4ab;--errs:#3a1512;
+--scrollh:#3a4160;
 --sans:"Hanken Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
 --mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
+/* The LIGHT equivalent (owner, 2026-08-27) — same custom properties, second
+   values, chosen per pair for the same contrast the dark set holds. Dark is
+   the DEFAULT and renders with no attribute; data-theme=light on the body
+   tag comes from the gomeh_theme cookie via the pagehead toggle. The smoke
+   asserts the two blocks define the SAME token set, so neither palette can
+   silently fall behind the other. */
+body[data-theme=light]{--bg:#f4f6fb;--panel:#fff;--ink:#171a26;--ink2:#3d4353;
+--mut:#6b7386;--rule:#dfe3ec;--rule2:#eef1f6;--field:#fff;
+--acc:#6d28d9;--accs:#efe9fd;--acc-ink:#f6efff;--ok:#0e7a55;--oks:#e4f4ec;
+--gap:#9a5b00;--gaps:#faf0de;--gap-ink:#fff7ea;--err:#b3251e;--errs:#fbe9e7;
+--scrollh:#c3c9d6;
+--tone:hsl(var(--tint,214) 42% 38%);--tones:hsl(var(--tint,214) 46% 94%)}
+body[data-theme=light] .side .switch a .dot{background:hsl(var(--tint,214) 44% 48%)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);
 -webkit-font-smoothing:antialiased}
@@ -112,7 +141,7 @@ a{color:var(--acc);text-decoration:underline;text-underline-offset:2px}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--rule);border-radius:5px}
-::-webkit-scrollbar-thumb:hover{background:#3a4160}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollh)}
 a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
 textarea:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 .w{max-width:960px;margin:0 auto;padding:32px 20px 80px;display:flex;flex-direction:column;gap:30px}
@@ -145,7 +174,7 @@ input,select{font:inherit;font-size:.85rem;padding:6px 8px;border:1px solid var(
 border-radius:3px;background:var(--field);color:var(--ink);width:100%}
 input:focus,select:focus,textarea:focus{border-color:var(--acc)}
 button{font:inherit;font-size:.82rem;font-weight:700;padding:6px 13px;border-radius:4px;
-border:1px solid var(--acc);background:var(--acc);color:#2a1155;cursor:pointer}
+border:1px solid var(--acc);background:var(--acc);color:var(--acc-ink);cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
 .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 /* `.conn` is a flex ROW (name | state | actions) and this form is a third
@@ -184,7 +213,7 @@ button.sec{background:transparent;color:var(--acc)}
 .pre.yes{color:var(--ok)}
 .pre.no{color:var(--gap)}
 .btn{display:inline-block;font-size:.78rem;font-weight:700;padding:4px 12px;border-radius:4px;
-  background:var(--acc);color:#2a1155;text-decoration:none}
+  background:var(--acc);color:var(--acc-ink);text-decoration:none}
 .btn.sec{background:transparent;color:var(--ink);border:1px solid var(--rule)}
 /* --- the frame: sidebar, client switcher, page ---------------------------
    Same shape as the client portal on purpose. Switching between the two
@@ -281,6 +310,10 @@ display:flex;flex-direction:column;gap:1px}
 .pagehead{display:flex;align-items:baseline;gap:12px;margin-bottom:18px;
 flex-wrap:wrap}
 .pagehead h1{font-size:1.3rem;margin:0;letter-spacing:-.02em}
+.pagehead .theme{margin-left:auto;text-decoration:none;color:var(--mut);
+font-size:.95rem;line-height:1;padding:4px 9px;border:1px solid var(--rule);
+border-radius:4px;background:var(--panel)}
+.pagehead .theme:hover{color:var(--acc);border-color:var(--acc)}
 /* Whose data this is, on every page. Below the fold it was possible to read a
    whole screen without ever seeing the account name. */
 .pagehead .who{font-size:.82rem;color:var(--acc);background:var(--accs);
@@ -385,8 +418,8 @@ details.sec[open]>summary{margin-bottom:9px;border-bottom:1px solid var(--rule);
 .subtab:hover{color:var(--ink)}
 .subtab.on{color:var(--ink);border-bottom-color:var(--acc)}
 .subtab .cnt{font-family:var(--mono);font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--rule2);border:1px solid var(--rule);color:var(--mut)}
-.subtab.on .cnt{background:var(--gap);border-color:var(--gap);color:#2a1700}
-.navbadge{margin-left:auto;background:var(--gap);color:#2a1700;border-radius:9px;
+.subtab.on .cnt{background:var(--gap);border-color:var(--gap);color:var(--gap-ink)}
+.navbadge{margin-left:auto;background:var(--gap);color:var(--gap-ink);border-radius:9px;
 font-family:var(--mono);font-size:.7rem;font-weight:700;padding:1px 7px;line-height:1.5}
 /* The workflow surface: the strip is STATE (counts that link into the
    system's own view), a plan card is one item of queued work. */
@@ -663,10 +696,22 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
                    f'<a href="/portal?tenant={_esc(tenant)}">'
                    f'Client view &rarr;</a>')
 
+    # Dark renders with no attribute; the cookie-chosen light look rides
+    # `data-theme` so the token block can address it without JS. The toggle
+    # carries tab + tenant + the current tab's suffix, so switching themes
+    # keeps the reader exactly where they were — a display preference must
+    # never cost the place (the redirect rule, applied to chrome).
+    theme = _THEME.get()
+    other = "dark" if theme == "light" else "light"
+    theme_ctl = (f'<a class="theme" href="/admin/theme?key={_esc(key)}'
+                 f'&amp;to={other}&amp;tab={tab}&amp;tenant={_esc(tenant)}{suffix}"'
+                 f' title="Switch to {other} mode">'
+                 f'{"☾" if other == "dark" else "☀"}</a>')
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(title)} — {_esc(who)}</title>
-<style>{_CSS}</style>{head}</head><body class="{"every" if tenant == ALL else ""}"
+<style>{_CSS}</style>{head}</head><body class="{"every" if tenant == ALL else ""}"{
+    ' data-theme="light"' if theme == "light" else ""}
  style="--tint:{hues.get(tenant, "")}">
 <div class="shell">
   <div class="side">
@@ -679,7 +724,7 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
   </div>
   <div class="main">
     <div class="pagehead"><h1>{_esc(title)}</h1>
-      <span class="who">{_esc(who)}</span></div>
+      <span class="who">{_esc(who)}</span>{theme_ctl}</div>
     {body}
   </div>
 </div></body></html>"""

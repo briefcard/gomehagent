@@ -1160,6 +1160,30 @@ SABOTAGES = [
                "control",
     },
     {
+        "name": "light_defines_every_token",
+        "file": "app/admin_ui.py",
+        "find": "body[data-theme=light]{--bg:#f4f6fb;--panel:#fff;--ink:#171a26;--ink2:#3d4353;",
+        "replace": "body[data-theme=light]{--bg:#f4f6fb;--panel:#fff;--ink:#171a26;--inkX:#3d4353;",
+        "suites": ["test_render_smoke.py"],
+        "why": "the light palette drops a token the dark set defines — every "
+               "rule reading it falls back to the dark value on a light "
+               "ground, which is exactly the mistuned-hex era the token "
+               "sheet retired, reintroduced one theme at a time",
+    },
+    {
+        "name": "theme_survives_the_session",
+        "file": "app/web.py",
+        "find": "    resp.set_cookie(THEME_COOKIE, \"light\" if to == \"light\" else \"dark\",\n"
+                "                    max_age=60 * 60 * 24 * 180, httponly=True, samesite=\"lax\",\n"
+                "                    secure=request.url.scheme == \"https\")",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_render_smoke.py"],
+        "why": "the toggle redirects but remembers nothing — every click "
+               "flashes the other theme for one page load and reverts, the "
+               "kind of half-working control that teaches a person the "
+               "console cannot be trusted with preferences",
+    },
+    {
         "name": "plan_classes_defined",
         "file": "app/admin_ui.py",
         "find": ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));",

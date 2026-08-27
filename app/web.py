@@ -217,6 +217,32 @@ def root() -> str:
 #: key that is already in every link on the page — but httponly anyway, since
 #: nothing in the browser needs to read it.
 ACCOUNT_COOKIE = "gomeh_account"
+THEME_COOKIE = "gomeh_theme"
+
+
+@app.get("/admin/theme")
+def admin_theme(request: Request, key: str = Depends(admin_key), to: str = ""):
+    """Flip the console between dark (the default) and light.
+
+    A browser preference, so a cookie beside `gomeh_account` — two people
+    with the console open each keep their own look. The toggle link carries
+    tab, tenant and the current tab's suffix; everything except `key` and
+    `to` is passed straight back to /admin/ui, so switching themes never
+    costs the reader their place. 180 days, not 14: a display preference
+    that silently reverts mid-quarter reads as a bug.
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import urlencode
+    if key != config.APPROVAL_SECRET:
+        return RedirectResponse("/admin/signin", 303)
+    keep = [(k, v) for k, v in request.query_params.multi_items()
+            if k not in ("key", "to")]
+    resp = RedirectResponse(
+        "/admin/ui" + (f"?{urlencode(keep)}" if keep else ""), 303)
+    resp.set_cookie(THEME_COOKIE, "light" if to == "light" else "dark",
+                    max_age=60 * 60 * 24 * 180, httponly=True, samesite="lax",
+                    secure=request.url.scheme == "https")
+    return resp
 
 
 @app.get("/console")
@@ -1811,6 +1837,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
     one value.
     """
     from . import admin_ui as admin_ui_mod
+    admin_ui_mod.set_theme(request.cookies.get(THEME_COOKIE, ""))
     remembered = request.cookies.get(ACCOUNT_COOKIE, "")
     chosen = (tenant or remembered or "").strip()
     body = _console_body(request, key, tab, chosen, started)

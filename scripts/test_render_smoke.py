@@ -219,5 +219,52 @@ finally:
     config.APPROVAL_SECRET = _old
 
 # ---------------------------------------------------------------------------
+# Light mode (step 2): the second token block defines every token the dark
+# root does — the parity that stops one palette silently falling behind the
+# other — the toggle persists in a cookie, and the choice reaches <body>.
+# ---------------------------------------------------------------------------
+_css = admin_ui._CSS
+
+
+def _tokens(block_start: str) -> set:
+    seg = _css.split(block_start, 1)[1].split("}", 1)[0]
+    return set(re.findall(r"--([\w-]+)\s*:", seg))
+
+
+dark_tokens = _tokens(":root{") - {"sans", "mono"}   # type stacks are
+light_tokens = _tokens("body[data-theme=light]{")    # theme-invariant
+ck("light defines every dark token", dark_tokens <= light_tokens,
+   "missing: " + ", ".join(sorted(dark_tokens - light_tokens)))
+# Light restates the per-account tint formulas (dark's live on body{}); it
+# must not otherwise invent tokens the dark set lacks.
+ck("light adds only the tint formulas",
+   light_tokens - dark_tokens <= {"tone", "tones"},
+   str(sorted(light_tokens - dark_tokens - {"tone", "tones"})))
+
+r = c.get(f"/admin/theme?key={KEY}&to=light&tab=content&tenant={T1}&sub=ship",
+          follow_redirects=False)
+ck("theme toggle redirects back to the exact page", r.status_code == 303
+   and r.headers.get("location", "").endswith(
+       f"tab=content&tenant={T1}&sub=ship"),
+   r.headers.get("location", ""))
+def _body_tag(html: str) -> str:
+    # Assert on the real body TAG: search AFTER </head>, because the served
+    # stylesheet's own comments have now false-positived this check twice —
+    # once mentioning data-theme="light", once mentioning <body> itself. A
+    # check that greps a page greps the page's prose too.
+    m = re.search(r"<body[^>]*>", html.split("</head>", 1)[-1])
+    return m.group(0) if m else ""
+
+
+lightpage = c.get(f"/admin/ui?key={KEY}&tab=content&tenant={T1}").text
+ck("light choice reaches the body tag",
+   'data-theme="light"' in _body_tag(lightpage), _body_tag(lightpage))
+coverage(f"content · {T1} · light", lightpage)
+c.get(f"/admin/theme?key={KEY}&to=dark", follow_redirects=False)
+darkpage = c.get(f"/admin/ui?key={KEY}&tab=content&tenant={T1}").text
+ck("dark is the default and renders with no attribute",
+   "data-theme" not in _body_tag(darkpage), _body_tag(darkpage))
+
+# ---------------------------------------------------------------------------
 print(f"\n{len(_fail)} failure(s)" if _fail else "\nall render-smoke checks pass")
 sys.exit(1 if _fail else 0)
