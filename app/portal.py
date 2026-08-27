@@ -88,7 +88,9 @@ def issue_link(email: str, issued_by: str = "") -> dict:
         if not user:
             return {"ok": False,
                     "error": f"no active user with the address {email!r}. "
-                             f"Add them with /admin/user_add first — this does "
+                             f"Add them on the Connections tab's People card first "
+                             f"(it is the form that records an email; "
+                             f"/admin/user_add takes only a chat id) — this does "
                              f"not create accounts."}
         if user.role != "owner" and not (user.tenant_key or "").strip():
             # An owner sees everything by design; a client with no account

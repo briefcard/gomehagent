@@ -812,14 +812,21 @@ def record_defects(run_id: str, rules: list) -> int:
 ATTENTION_KINDS = (
     ("connection", "Connection", "accounts",
      ("is not connected", "no credentials", "connect ", "not connected",
-      "no ESP", "token")),
+      # ready()'s OTHER connection sentence — "needs at least one of: …" —
+      # matched no needle and fell to Diagnostics, where nothing connects.
+      "needs at least one of", "no ESP", "token")),
     ("install", "Not installed or switched off", "systems",
      ("is not installed", "is designed", "is paused", "is retired",
       "the contract is optional", "turn it on")),
     ("knowledge", "Missing knowledge", "kb",
-     ("nothing on file at", "cannot say anything true without", "no_ban_list",
-      "no approved", "author one", "banned_claims")),
-    ("compliance", "Compliance", "content",
+     ("nothing on file at", "cannot say anything true without",
+      "no approved", "author one")),
+    # SPLIT from "knowledge" 2026-08-26: the ban list is authored on the
+    # BRAND tab ("Add hard rule"), and routing no_ban_list to Knowledge sent
+    # the reader to a tab that cannot clear it.
+    ("banlist", "Missing ban list", "brand",
+     ("no_ban_list", "banned_claims")),
+    ("compliance", "Compliance", "assurance",
      ("banned_claim", "unfit_entity_named", "unbacked_urgency")),
     ("quality", "Quality", "diagnostics",
      ("coherence:", "dead_link", "proof_repeated", "personalize_failed",
@@ -1466,6 +1473,22 @@ def plans(tenant: str, key: str = "", due_by: str = "") -> list[db.SystemRun]:
         rows = [r for r in rows
                 if ((r.brief or {}).get("planned_for") or "") and _when(r) <= due_by]
     return rows
+
+
+def plan_page(tenant: str, system_key: str, plan_id: str,
+              per: int = 15) -> int:
+    """Which page of the workflow board a plan renders on.
+
+    The board paginates and every deep link (#plan-<id>) carried no page, so
+    a plan past the first fifteen had an anchor pointing at nothing — the
+    flash said "filed" over a board that did not show it. Computed from the
+    SAME `plans()` ordering the board slices, so the two cannot drift.
+    """
+    rows = plans(tenant, system_key)
+    for i, r in enumerate(rows):
+        if r.id == plan_id:
+            return i // per + 1
+    return 1
 
 
 def plans_needing_action(tenant: str) -> list[dict]:

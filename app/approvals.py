@@ -102,7 +102,8 @@ def notify_pending(title: str | None = None) -> int:
             .order_by(db.Approval.created_at)
             .all()
         )
-        items = [(ap.id, ap.summary, dict(ap.payload), ap.created_at)
+        items = [(ap.id, ap.summary,
+                  {**dict(ap.payload), "_kind": ap.kind}, ap.created_at)
                  for ap in aps if not ap.payload.get("_notified")]
     if not items:
         return 0
@@ -233,7 +234,17 @@ def apply_decision(ap_id: str, decision: str) -> str:
                 return (f"Approved: {ap.summary}. Nothing was sent — this "
                         f"marks the draft reviewed. Launch it in the platform "
                         f"where it lives.")
-            return f"Approved and executed: {ap.summary}"
+            _HANDLED = {"send_email", "refile_moves", "seo_update",
+                        "seo_new_collection", "seo_new_page",
+                        "seo_new_article", "seo_article_revision",
+                        "shopify_theme_asset", "systems_update"}
+            if ap.kind in _HANDLED:
+                return f"Approved and executed: {ap.summary}"
+            # The nightly sweep files kind="sweep"; nothing executes it, and
+            # "executed" over a no-op teaches the reader the word means
+            # nothing.
+            return (f"Approved: {ap.summary}. This kind has nothing to "
+                    f"execute — approving records the decision.")
         return f"Denied: {ap.summary}"
 
 

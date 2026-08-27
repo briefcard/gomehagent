@@ -468,7 +468,7 @@ def blog_rollout(sysrow) -> dict:
     # being worked.
     if not rows:
         return {"ok": True, "proposed": 0, "refreshed": 0,
-                "refusals": ["no candidate keywords — run keywords.harvest "
+                "refusals": ["no candidate keywords — press Build the map "
                              "first, or every candidate is already planned"]}
 
     # Who is a pillar, and has it been dealt with. Read once: asking per

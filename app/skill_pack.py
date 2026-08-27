@@ -1827,7 +1827,7 @@ def _run_campaign_email(ctx: Context) -> dict:
     if not _cta_home:
         ctx.note("no storefront URL is on file for this account, so no link in "
                  "this email can point anywhere — set the domain on the "
-                 "Accounts tab and every future send fixes itself")
+                 "Connections tab and every future send fixes itself")
     # NO PHOTOGRAPHS ANYWHERE? FETCH THEM. The catalogue sync is what puts a
     # product's photo on the entity and in the creative library, and an account
     # whose sync predates that code has products with no imagery — which is a
@@ -2264,10 +2264,11 @@ def _run_campaign_email(ctx: Context) -> dict:
             ctx.note(
                 f"this email carries NO image at all, only the logo — "
                 f"{_with} of {len(_all)} product(s) have a photograph on file"
-                + (" — run the catalogue sync on the Review tab; until it "
-                   "does, there is no product imagery to place"
-                   if not _with else
-                   " — photos exist, so this is the layout, not the data")
+                + (" — photos exist, so this is the layout, not the data"
+                   if _with else
+                   " — no product photos are on file; the store sync runs "
+                   "before every send and found none, so they need adding "
+                   "to the store itself (or the photo library)")
                 + (" (and no approved library photograph either)"
                    if not hero_got.get("image") else ""))
     if not state["native_ok"]:
@@ -2877,6 +2878,15 @@ def _run_blog_article(ctx: Context) -> dict:
         return {"summary": "no proof in scope", "keyword": keyword}
 
     row = next((r for r in kw_mod.targets(ctx.tenant) if r.phrase == keyword), None)
+    if row is None:
+        # A keyword typed straight into a run joins the map before drafting.
+        # Without this the board — the only surface that links the review
+        # page — never listed the article, and the page was reachable only by
+        # hand-typing its output id into the address bar.
+        kw_mod.upsert(ctx.tenant, keyword, source="direct_run")
+        kw_mod.cluster(ctx.tenant)
+        row = next((r for r in kw_mod.targets(ctx.tenant)
+                    if r.phrase == keyword), None)
     cluster_key = str(ctx.params.get("cluster") or "") or (row.cluster_key if row else "")
     if row is not None:
         role = ctx.params.get("role") or row.role or role
@@ -3038,9 +3048,11 @@ def _run_blog_article(ctx: Context) -> dict:
             # and approving is the step between here and the answer.
             "next": ("approve it in the queue — nothing reaches the store "
                      "until you do" if publish["queued"]
-                     else "the article is written and kept — read it on the "
-                          "Review tab, or fix the reason above and re-run to "
-                          "queue it as well")}
+                     else "the article is written and kept — its review "
+                          "page opens when you run it from the Plan tab, and "
+                          "the board's 'review the draft' link reaches it any "
+                          "time; fix the reason above and re-run to queue it "
+                          "as well")}
 
 
 register(Skill(

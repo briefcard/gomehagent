@@ -382,6 +382,14 @@ font-size:.72rem;font-weight:700;padding:1px 7px;line-height:1.5}
 #: (key, label, icon). Ordered the way a day runs rather than the way the code
 #: is arranged: what needs deciding, then what it knows, then what it is
 #: connected to, then the plumbing.
+#: The background actions whose status the Review banner reports. ONE
+#: vocabulary: `_run_bg` writers must use exactly these labels — three of the
+#: four once wrote under names nothing read ("email_harvest", "catalog sync",
+#: "compliance scan"), so a crashed run looked identical to one still
+#: running. `test_pointers` holds writer labels to this tuple.
+BG_LABELS = (("harvest", "Harvest"), ("scan", "Compliance scan"),
+             ("sync", "Catalogue sync"), ("email", "Sent mail"))
+
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("brand", "Brand", "❖"),
          # The SEO plan the blog is built from. It sits beside Systems rather
@@ -597,8 +605,13 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
         _n = 0                 # never let a counter break the console
     # To the Review tab's own section — /admin/pending survives only as the
     # unauthenticated-email fallback it always was.
-    waiting = (f'<a class="pend" href="/admin/ui?key={_esc(key)}'
-               f'&amp;tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}">'
+    # On All accounts the count spans every client but Review refuses the
+    # pooled view — so the pill goes to /admin/pending, the one queue that
+    # renders all-accounts rows, each labelled with its owner.
+    _pend_href = ("/admin/pending?key=" + _esc(key) if tenant == ALL else
+                  f"/admin/ui?key={_esc(key)}&amp;tab=content&amp;sub=ship"
+                  f"&amp;tenant={_esc(tenant)}")
+    waiting = (f'<a class="pend" href="{_pend_href}">'
                f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
 
     who = _account_name(tenant, here)
@@ -1460,6 +1473,22 @@ def _system_card(key: str, row) -> str:
     else:
         promo = '<span class="mut">Top of the ladder.</span>'
 
+    # THE LADDER GOES DOWN TOO. The nightly sweep has always advised "work
+    # them or turn the system down a rung" for a swollen queue — and only
+    # Promote existed, so the advice named a control the console did not
+    # have. One tap, one rung, through the same system_set that already
+    # accepts `autonomy`; the promote gate does not apply because LESS
+    # autonomy needs no earning.
+    _l = list(systems.AUTONOMY)
+    _cur = (row.autonomy or "shadow")
+    if _cur in _l and _l.index(_cur) > 0:
+        _down = _l[_l.index(_cur) - 1]
+        promo += (f' <a href="/admin/system_set?key={_esc(key)}'
+                  f'&amp;id={_esc(row.id)}&amp;autonomy={_esc(_down)}'
+                  f'&amp;tenant={_esc(row.tenant)}">'
+                  f'<button class="sec" type="button">Down a rung '
+                  f'({_esc(_down.replace("_", " "))})</button></a>')
+
     # ONE CONTROL THAT SHOWS THE STATE AND CHANGES IT (owner, 2026-08-23).
     # This was two different buttons that swapped places — "Switch on" when
     # off, "Pause" when on — so the same pixel meant opposite things and the
@@ -1791,8 +1820,10 @@ def _planned_section(key: str, row, ppage: int) -> str:
           </form>
         </details>"""
     else:
-        create = ('<p class="mut">Filing plans needs the system on — the '
-                  'switch is above. Existing plans stay editable meanwhile.</p>')
+        create = ('<p class="mut">Filing plans needs the system on — '
+                  'switch on above once the gate is clear (when it is '
+                  'blocked, the gate note names what to connect first). '
+                  'Existing plans stay editable meanwhile.</p>')
 
     from . import planner as _pl
     has_planner = row.key in _pl.PLANNERS
@@ -2467,6 +2498,12 @@ _THEME_EDIT_FIELDS = (
     ("footer.tagline", "Tagline", "one line above the legal footer"),
     ("footer.disclaimer", "Disclaimer", "rendered small in the footer"),
     ("name", "Brand name", "defaults to the brand KB display name"),
+    # The letter-format sign-off reads theme["sender"]["name"] and dropped
+    # the signature with "set it on the Brand tab" when empty — a direction
+    # at a control that did not exist. The dotted path writes the nested
+    # shape the reader expects, exactly as footer.address already does.
+    ("sender.name", "Sender name", "signs letter-format emails — with no "
+                                   "name the sign-off is dropped"),
 )
 
 _BRAND_CSS = """<style>
@@ -2747,7 +2784,9 @@ def _remove_control(key: str, tenant: str, kind: str, row_id: str,
     <details class="sec" style="margin-top:6px">
       <summary class="mut">Remove{(" " + _esc(name)) if name else ""}</summary>
       <p class="mut" style="margin-top:6px">It stops being offered to every
-      generator immediately. Nothing is deleted — it can be put back.
+      generator immediately. Nothing is deleted, though putting one back is
+      still an API call (/admin/kb_restore with the row id) — no console
+      surface lists removed rows yet.
       {_esc(note)}</p>
       <form method="post" action="/admin/kb_remove" class="row">
         <input type="hidden" name="key" value="{_esc(key)}">
@@ -2929,6 +2968,10 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "") -> str:
             <input name="entity_key" list="objents"
                    value="{_esc(r.entity_key or '')}"
                    placeholder="brand-level (used in any content)">
+            <label>Who said it — required before a testimonial or
+review can be QUOTED</label>
+            <input name="attributed_to" value="{_esc(r.attributed_to or '')}"
+                   placeholder="the customer's name, as it may appear in print">
             <label>Situations</label>
             <div class="tags">{tagbox}</div>
             <div class="row">
@@ -3294,7 +3337,8 @@ date reset to a year from now (a timeless claim stays timeless)">Save</button>
             f'<p class="mut">Proposed claims are invisible to every generator '
             f'until approved. '
             f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;'
-            f'tenant={_esc(tenant)}#proposals">Open the review queue →</a></p>'
+            f'sub=claims&amp;tenant={_esc(tenant)}#proposals">'
+            f'Open the review queue →</a></p>'
             f'</div>')
 
     # The substance, one clearly-named card per kind (owner, 2026-08-21: one
@@ -3850,8 +3894,8 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 f'content about every product, so these narrower copies add '
                 f'nothing">Retire {n} already covered brand-level</button>')
         def _pg(p: int) -> str:
-            return (f"/admin/ui?tab=content&amp;tenant={_esc(tenant)}"
-                    f"&amp;cpage={p}#proposals")
+            return (f"/admin/ui?tab=content&amp;sub=claims"
+                    f"&amp;tenant={_esc(tenant)}&amp;cpage={p}#proposals")
         pager = ""
         if pages > 1:
             pager = ('<div class="pager"><span class="mut">claims '
@@ -4056,8 +4100,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # will appear above" either way, and the traceback is in a service log the
     # person reading this page cannot see.
     from .web import bg_status
-    for label, name in (("harvest", "Harvest"), ("scan", "Compliance scan"),
-                        ("sync", "Catalogue sync"), ("email", "Sent mail")):
+    for label, name in BG_LABELS:
         st = bg_status(label, tenant)
         if not st:
             continue
@@ -4091,7 +4134,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         <div class="msg"><div><b>{_esc(w["system_name"])}</b> ·
           {_esc(w["ref"])}{" · " + _esc(w["planned_for"]) if w["planned_for"] else ""}
           — {'needs completing: ' if w["need"] == "complete" else ''}{_esc(w["detail"])}</div>
-          <div class="when"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}#plan-{_esc(w["run_id"])}">
+          <div class="when"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}&amp;ppage={systems.plan_page(tenant, w["system_key"], w["run_id"])}#plan-{_esc(w["run_id"])}">
             {'complete it' if w["need"] == "complete" else 'approve it'} &rarr;</a></div>
         </div>""" for w in plans_wait[:15])
         plans_card = f"""
@@ -4276,7 +4319,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
       <input type="hidden" name="ui" value="1">
       <button>Clear and re-harvest</button>
     </form>
-    <span class="mut">then run Find proposals / Mine sent mail, above</span>
+    <span class="mut">then run Find proposals / Mine sent mail on the
+    Claims section</span>
   </div>
   </div>
 </details>
@@ -4330,7 +4374,9 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
                 blocks.append(f"""
                 <div class="prov">
                   <h3>{_esc(r['name'])} <span class="chip nb">on a call</span></h3>
-                  <div class="how">{_esc(spec['howto'])}</div>
+                  <div class="how">One-click sign-in is not configured on this
+                  install, so there is no Connect button here — this one gets
+                  wired together on a call.</div>
                   <div class="mut">{_esc(r.get('blocked_by', ''))}</div>
                 </div>""")
                 continue
@@ -4352,7 +4398,8 @@ def render_connect(link, tenant, rows: list[dict], msg: str = "",
             blocks.append(f"""
             <div class="prov">
               <h3>{_esc(r['name'])} <span class="chip nb">on a call</span></h3>
-              <div class="how">{_esc(spec['howto'])}</div>
+              <div class="how">This one gets wired together on a call — the
+              form for it is not offered here.</div>
             </div>""")
             continue
         extra = "".join(
@@ -4593,7 +4640,10 @@ def _fill_bar(pct: int) -> str:
 #: draws, one page over.
 _READINESS_WHERE = {
     "knowledge tab": ("kb", "Knowledge"),
-    "content tab": ("content", "Review"),
+    # `sub=claims`: the fix these buttons carry is "claims waiting review",
+    # and Review's default section is May-it-ship whenever approvals are
+    # pending — the click landed beside the queue it named.
+    "content tab": ("content&amp;sub=claims", "Review"),
     "brand tab": ("brand", "Brand"),
     "connections": ("accounts", "Connections"),
 }
@@ -4802,7 +4852,7 @@ def render_schema(key: str, tenant: str = "") -> str:
 
 
 def render_assurance(key: str, tenant: str = "", days: int = 30,
-                     system: str = "", rule: str = "") -> str:
+                     system: str = "", rule: str = "", started: str = "") -> str:
     """What the layer checked, what it caught, and what cannot be measured yet.
 
     Ordered by how much each number can be trusted: catches first because they
@@ -5024,6 +5074,26 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # `suffix` rides the CURRENT tab's own nav link, so the window survives a
     # trip to another tab and back. Diagnostics has always done this; Assurance
     # did not, so every visit silently reset to 30 days.
+    # The scan's own feedback, on the page whose button starts it. The banner
+    # machinery lived on Review; the scan moved here (2026-08-23) and its
+    # feedback did not move with it — the started flash was dropped by the
+    # dispatcher and the bg status was keyed under a label and tenant nothing
+    # read, so a crashed scan looked identical to one still running.
+    scan_note = ""
+    if started == "scan":
+        scan_note = ('<div class="ok">Scan started — it reads the live site, '
+                     'so give it a minute and refresh.</div>')
+    try:
+        from .web import bg_status as _bgs
+        _st = _bgs("scan", tenant) or {}
+    except Exception:                                            # noqa: BLE001
+        _st = {}
+    if _st.get("state") == "failed":
+        scan_note += (f'<div class="note"><strong>The last scan failed</strong>'
+                      f' — {_esc(_st.get("detail", ""))}</div>')
+    elif _st.get("state") == "done" and _st.get("detail"):
+        scan_note += f'<div class="ok">{_esc(_st.get("detail", ""))}</div>'
+    body = scan_note + body
     return _shell(key, "assurance", "Assurance", body=body, tenant=tenant,
                   suffix=f"&amp;days={days}")
 
@@ -5960,9 +6030,12 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         if part == "switch" and not ok and got.get("system_id"):
             # ACT WHERE YOU REPORT, again. "turn it on to run" with no way to
             # turn it on is an instruction, not a control.
+            # `back=plan`: the redirect returns to THIS page — system_set
+            # used to land on the all-accounts Systems list with the tenant
+            # dropped, and refuse with raw JSON.
             extra = (f'<p><a href="/admin/system_set?key={_esc(key)}'
                      f'&amp;id={_esc(got["system_id"])}&amp;status=live'
-                     f'&amp;tenant={_esc(tenant)}">'
+                     f'&amp;back=plan&amp;tenant={_esc(tenant)}">'
                      f'<button type="button">Turn it on</button></a></p>')
         chips += (
             f'<div class="card {"" if ok else "warn"}">'

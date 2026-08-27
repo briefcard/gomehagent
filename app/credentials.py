@@ -1074,9 +1074,15 @@ def _probe(provider: str, secret: str, meta: dict) -> dict:
                 # This is the one scope failure a probe CAN see; the rest still
                 # surface later, which is why the runbook says grant the full set.
                 return {"ok": False,
+                        # "reveal the token again" contradicted this file's own
+                        # howto three screens up: the Admin API token shows
+                        # exactly once. A merchant following the old sentence
+                        # hit a screen where re-revealing is impossible.
                         "error": "That token is valid but the app has no read "
                                  "access. Re-check the Admin API scopes on the "
-                                 "custom app, then reveal the token again."}
+                                 "custom app — then uninstall and reinstall it "
+                                 "to mint a fresh token (each token is shown "
+                                 "only once), and paste the new one here."}
             if r.status_code == 404:
                 return {"ok": False,
                         "error": f"No store found at {domain}. Check it against "
@@ -1313,6 +1319,15 @@ def needed_for(tenant: str) -> list[str]:
         spec = systems.CATALOG.get(sysrow.key) or {}
         caps.update(spec.get("requires", ()))
         caps.update(spec.get("requires_any", ()))
+        if sysrow.key == "blog":
+            # `blog` requires NOTHING to run — writing needs no store, which
+            # is deliberate (systems.py) — but its publish half wants a CMS,
+            # and this filter read only `requires`, so the moment any system
+            # was installed the connect page stopped offering Shopify or
+            # WordPress to the exact account being onboarded for articles.
+            # The refusal in sites.backend() says "connect a site or store at
+            # /connect/<token>"; the page that link opens has to offer one.
+            caps.add("cms")
     if not caps:
         # No system installed yet is the common case during onboarding, and the
         # old fallback was CONNECTABLE — api-key providers only — so Google

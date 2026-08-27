@@ -601,6 +601,20 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     added: dict[str, int] = {s: 0 for s in sources}
     notes: list[str] = []
 
+    excl = [t for t in (profile.get("exclude_terms") or []) if t]
+
+    def _excluded(phrase: str) -> bool:
+        """The exclude list binds EVERY source, not just the gap fetch.
+
+        `semrush_opportunity_finder` filtered server-side and the other four
+        sources did not, so accepting a mute-lesson term stopped one entrance
+        of five — the excluded family kept arriving via the domain's own
+        rankings, GSC, related and questions, and the owner's accepted
+        decision looked ignored.
+        """
+        low = f" {phrase.lower()} "
+        return any(f" {t} " in low or t in phrase.lower() for t in excl)
+
     if "gsc" in sources:
         for r in _fetch_gsc(profile, days, limit * 3):
             phrase, pos = r.get("query"), r.get("position")
@@ -612,7 +626,8 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
             record_reading(tenant, phrase, source="gsc", position=pos,
                            impressions=r.get("impressions", 0),
                            clicks=r.get("clicks", 0), ctr=r.get("ctr", 0.0))
-            if pos is not None and STRIKING_BAND[0] < pos <= STRIKING_BAND[1]:
+            if (pos is not None and not _excluded(phrase)
+                    and STRIKING_BAND[0] < pos <= STRIKING_BAND[1]):
                 upsert(tenant, phrase, source="gsc_striking",
                        database=profile.get("database", ""))
                 added["gsc"] += 1
@@ -620,7 +635,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     if "own" in sources:
         for r in _fetch_own(profile, limit):
             phrase = r.get("keyword") or r.get("Keyword")
-            if not phrase:
+            if not phrase or _excluded(phrase):
                 continue
             upsert(tenant, phrase, source="semrush_own",
                    volume=int(float(r.get("volume") or 0)),
@@ -659,7 +674,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
         for seed in pool:
             if "related" in sources:
                 for r in _fetch_related(profile, seed, limit):
-                    if r.get("keyword"):
+                    if r.get("keyword") and not _excluded(r["keyword"]):
                         upsert(tenant, r["keyword"], source="semrush_related",
                                volume=int(r.get("volume") or 0),
                                cpc=float(r.get("cpc") or 0.0),
@@ -667,7 +682,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
                         added["related"] += 1
             if "questions" in sources:
                 for r in _fetch_questions(profile, seed, limit):
-                    if r.get("question"):
+                    if r.get("question") and not _excluded(r["question"]):
                         upsert(tenant, r["question"], source="semrush_questions",
                                volume=int(r.get("volume") or 0),
                                database=profile.get("database", ""))
@@ -1100,9 +1115,9 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
             blog_id = (t.cms or {}).get("blog_id") or ""
             if profile.get("platform") != "wordpress" and not blog_id:
                 pub["detail"] = "connected, but no blog_id"
-                pub["fix"] = ("a store can hold several blogs and the skill "
-                              "refuses to guess — call list_blogs, then set it "
-                              "with /admin/tenant_set")
+                pub["fix"] = ("a store can hold several blogs and the "
+                              "skill refuses to guess — press 'Find the blogs "
+                              "on this store' beside this line and pick one")
             else:
                 pub.update(ok=True, detail=f"{profile['platform']} via {caps['cms']}")
         except sites.UnknownSite as exc:
@@ -1151,7 +1166,7 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
                   "claims": len(claims), "banned_claims": len(banned)}
     problems = []
     if not rows:
-        problems.append("no keyword map — run /admin/keywords_harvest")
+        problems.append("no keyword map — press Build the map, below")
     if not claims:
         problems.append("no approved claims — the skill refuses to draft "
                         "without one, and will not spend a model call")

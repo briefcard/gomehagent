@@ -125,7 +125,7 @@ def _site_violations(tenant: str, days: int) -> list[dict]:
                     + ([f"{p} ({c}×)" for p, c in worst] if worst else [])
                     + [f"{scan.get('pages_checked', 0)} pages checked"],
         "suggests": "these are published under the client's name right now — "
-                    "the Review tab lists each with its URL and the sentence "
+                    "the Assurance tab lists each with its URL and the sentence "
                     "around it"}]
 
 
@@ -151,7 +151,9 @@ def _knowledge_gap_cost(tenant: str, days: int) -> list[dict]:
             "headline": f"{n} runs refused on the same missing thing",
             "evidence": [f"blocked on: {reason}",
                          f"{n} times in {days} days"],
-            "suggests": "answer this one on the Knowledge tab and those runs "
+            "suggests": "answer it on the Knowledge tab if it appears under "
+                    "'Gaps that cost an answer'; the rest of the story is on "
+                    "Diagnostics. Those runs "
                         "start producing — it is the highest-value thing to "
                         "write this week"})
     return out
@@ -249,8 +251,9 @@ def _grounding_not_landing(tenant: str, days: int) -> list[dict]:
         "evidence": [f"{len(kb.claims(tenant))} approved claims are on file",
                      f"{measured} drafts measured, {cited} carried a claim_id"],
         "suggests": "the knowledge is reaching the prompt and not being used. "
-                    "That is a prompt problem, not a knowledge one — check "
-                    "what the bundle rendered before writing more claims"}]
+                    "That is a prompt problem, not a knowledge one — read what "
+                    "the bundle rendered at /admin/agent_context?tenant=… "
+                    "before writing more claims"}]
 
 
 # ---------------------------------------------------------------------------

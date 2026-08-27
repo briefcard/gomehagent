@@ -1854,7 +1854,8 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
         return ui.render_assurance(
             link_key, tenant, days=max(1, min(days, 365)),
             system=request.query_params.get("system", ""),
-            rule=request.query_params.get("rule", ""))
+            rule=request.query_params.get("rule", ""),
+            started=request.query_params.get("started", ""))
     if tab == "diagnostics":
         def _int(name: str, default: int, lo: int, hi: int) -> int:
             try:
@@ -2401,7 +2402,10 @@ def admin_article_review(output_id: str, key: str = Depends(admin_key),
                          ok: str = "", err: str = ""):
     """Read the whole article, edit it, and decide — on one page."""
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>bad key</h3>", status_code=401)
+        # A human from a chat link, not an API — hand them the sign-in door
+        # the way /admin/ui does, instead of a bare 401 dead end.
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/signin", 303)
     art, kw, ap = _article_bundle(output_id)
     if art is None:
         return HTMLResponse("<h3>No article kept for this id.</h3>",
@@ -2744,7 +2748,9 @@ def admin_keywords_propose(key: str = Depends(admin_key), tenant: str = "",
     if got.get("refusals") and not got.get("proposed"):
         return _plan_back(tenant, key, err="; ".join(got["refusals"])[:300])
     said = (f"proposed {got.get('proposed', 0)}, refreshed "
-            f"{got.get('refreshed', 0)} — they are waiting in Review")
+            f"{got.get('refreshed', 0)} — see the board below; they run "
+                      f"on the daily tick, or Review holds any needing your "
+                      f"go-ahead")
     if got.get("pillar_first"):
         said += ". " + got["pillar_first"][0]
     return _plan_back(tenant, key, msg=said)
@@ -3358,12 +3364,36 @@ def kb_json(key: str = Depends(admin_key), tenant: str = "") -> dict:
 # older tenant routes keep their JSON responses.
 # ---------------------------------------------------------------------------
 
-def _back_to_systems(key: str, msg: str = ""):
+def _back_to_systems(key: str, msg: str = "", tenant: str = "",
+                     system: str = "", err: str = "", ppage: int = 0):
+    """Return to the Systems tab WITHOUT amnesia.
+
+    This dropped tenant and system, so pressing "Turn it on" on one
+    account's Plan chip — or "Switch on" inside a workflow view — landed on
+    the all-accounts Systems list, the view that hosted the button gone.
+    A control's redirect keeps the place the control lived in.
+    """
+    from urllib.parse import quote
+
     from fastapi.responses import RedirectResponse
     url = f"/admin/ui?key={key}&tab=systems"
+    if tenant:
+        url += f"&tenant={quote(tenant)}"
+    if system:
+        url += f"&system={quote(system)}"
+    try:
+        if int(ppage) > 1:
+            url += f"&ppage={int(ppage)}"
+    except (TypeError, ValueError):
+        pass
     if msg:
-        from urllib.parse import quote
-        url += f"&msg={quote(msg)}"
+        # `ok=`, the key the dispatcher actually reads — this helper wrote
+        # `msg=` for as long as it existed, so every flash it ever carried
+        # rendered nowhere. The same one-writer-one-reader mismatch as the
+        # bg-status labels, found by the same sweep.
+        url += f"&ok={quote(msg)}"
+    if err:
+        url += f"&err={quote(err)}"
     return RedirectResponse(url, status_code=303)
 
 
@@ -4000,7 +4030,7 @@ def system_add(key: str = Depends(admin_key), tenant: str = "", system: str = ""
     if not tenant or not system:
         return {"error": "tenant and system are both required"}
     systems.create(tenant, system)
-    return _back_to_systems(key)
+    return _back_to_systems(key, tenant=tenant, system=system)
 
 
 @app.get("/admin/system_on")
@@ -4076,12 +4106,33 @@ def system_set(request: Request, key: str = Depends(admin_key), id: str = ""):
     settable = set(systems.CONTRACT_FIELDS) | {"name", "status", "autonomy", "notes"}
     clean = {k: v for k, v in request.query_params.items()
              if k in settable and v not in ("", None)}
+    row = systems.get(id)
+    tenant = getattr(row, "tenant", "") or request.query_params.get("tenant", "")
+    sysname = getattr(row, "key", "")
+    back = request.query_params.get("back", "")
+
+    def _land(msg: str = "", err: str = ""):
+        # "Turn it on" lives on the Plan tab; its redirect goes back there.
+        # Everything else returns to the workflow view it was pressed in —
+        # WITH tenant and system, which this route used to drop, stranding
+        # the reader on the all-accounts Systems list.
+        if back == "plan" and tenant:
+            return _plan_back(tenant, key, msg=msg, err=err)
+        return _back_to_systems(key, msg=msg, err=err,
+                                tenant=tenant, system=sysname)
+
     if not clean:
-        return _back_to_systems(key)
+        return _land(err="nothing to set — every field was blank")
     out = systems.update(id, **clean)
     if out.get("error"):
-        return out  # a refused promotion should be read, not silently swallowed
-    return _back_to_systems(key)
+        # A refused switch-on used to `return out` — raw JSON in the browser,
+        # no flash, no way back. The refusal is read where the button was.
+        why = out["error"]
+        if out.get("blockers"):
+            why += " — " + "; ".join(out["blockers"])[:200]
+        return _land(err=why)
+    said = ", ".join(f"{k} → {v}" for k, v in clean.items())[:150]
+    return _land(msg=f"saved: {said}")
 
 
 @app.get("/admin/system_promote")
@@ -4091,9 +4142,13 @@ def system_promote(key: str = Depends(admin_key), id: str = ""):
         return {"error": "unauthorized"}
     from . import systems
     out = systems.promote(id)
+    row = systems.get(id)
+    t, sk = getattr(row, "tenant", ""), getattr(row, "key", "")
     if out.get("error"):
-        return out
-    return _back_to_systems(key)
+        # Read where the button was, not as raw JSON in the browser.
+        return _back_to_systems(key, err=str(out["error"])[:250],
+                                tenant=t, system=sk)
+    return _back_to_systems(key, msg="promoted one rung", tenant=t, system=sk)
 
 
 @app.get("/admin/system_note")
@@ -4109,7 +4164,7 @@ def system_note(key: str = Depends(admin_key), id: str = "", text: str = "", dro
     if not row:
         return {"error": "unknown system"}
     systems.note(row.tenant, row.key, text)
-    return _back_to_systems(key)
+    return _back_to_systems(key, tenant=row.tenant, system=row.key)
 
 
 @app.get("/admin/system_rule")
@@ -4123,8 +4178,10 @@ def system_rule(key: str = Depends(admin_key), id: str = "", phrase: str = ""):
         return {"error": "unknown system"}
     result = systems.promote_rule(row.tenant, phrase)
     if result.startswith("No KB brand row"):
-        return {"error": result}
-    return _back_to_systems(key)
+        return _back_to_systems(key, err=result[:250],
+                                tenant=row.tenant, system=row.key)
+    return _back_to_systems(key, msg=result[:150],
+                            tenant=row.tenant, system=row.key)
 
 
 # ---------------------------------------------------------------------------
@@ -4188,8 +4245,13 @@ def plan_new(request: Request, key: str = Depends(admin_key),
         return _back_to_system(tenant, system, err=out["error"], anchor="planned")
     said = ("filed — complete, runs " + planned_for if out.get("complete")
             else "filed — still missing: " + ", ".join(out.get("missing", [])))
+    # ppage: the board paginates and sorts by planned_for, so a plan dated
+    # past the first fifteen rendered on page 2+ while the flash said "filed"
+    # over a board that did not show it.
     return _back_to_system(tenant, system, ok=f"Plan {said}",
-                           anchor=f"plan-{out['run_id']}")
+                           anchor=f"plan-{out['run_id']}",
+                           ppage=systems.plan_page(tenant, system,
+                                                   out["run_id"]))
 
 
 @app.get("/admin/plan_save")
@@ -5154,7 +5216,8 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
 
 
 def _back_to_content(tenant: str, started: str = "", err: str = "",
-                     msg: str = "", anchor: str = "", cpage: int = 0):
+                     msg: str = "", anchor: str = "", cpage: int = 0,
+                     sub: str = ""):
     """Return to the Content tab. No key in the URL: by the time an action has
     run, the session cookie is already set (the middleware sets it on any
     request carrying a valid key), so putting the secret back into the address
@@ -5170,7 +5233,31 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
+
+    # THE SECTION TRAVELS WITH THE ANCHOR. Review renders exactly one section
+    # per visit and, since "May it ship?" went first, defaults to the first
+    # non-empty one — so every redirect that named an anchor without a section
+    # stranded the reader on the ship queue the moment anything was pending:
+    # decide a claim, land on approvals; the claim queue, the anchor, and the
+    # flash's own referent all gone. The 2026-08-26 sweep counted EIGHTEEN
+    # flows broken this one way. The anchor already says which section it
+    # lives in, so the mapping is derived here once rather than remembered at
+    # every call site — a caller cannot forget what it never had to know.
+    _ANCHOR_SUB = (("proposals", "claims"), ("c-", "claims"),
+                   ("pics", "pictures"), ("others", "other"),
+                   ("plan-", "plans"), ("conflict", "conflicts"))
+    sub = sub or next((s for a, s in _ANCHOR_SUB
+                       if anchor == a or anchor.startswith(a)), "")
+    # The started-banners live on specific sections too: a "harvest started"
+    # note rendered over the ship queue promises proposals that will never
+    # appear there.
+    _STARTED_SUB = {"harvest": "claims", "email": "claims",
+                    "sync": "catalogue", "purge": "claims"}
+    sub = sub or _STARTED_SUB.get(started, "")
+
     q = f"/admin/ui?tab=content&tenant={tenant}"
+    if sub:
+        q += f"&sub={sub}"
     if started:
         q += f"&started={started}"
     if err:
@@ -5314,7 +5401,10 @@ def email_harvest_route(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     from . import email_harvest as eh
     if ui:
-        _run_bg("email_harvest", eh.mine, tenant, days=days, limit=limit,
+        # "email", the key the Review banner reads — "email_harvest" wrote a
+        # status nothing displayed, so a crashed mine looked identical to
+        # one still running.
+        _run_bg("email", eh.mine, tenant, days=days, limit=limit,
                 apply=True)
         return _back_to_content(tenant, "email")
     return eh.mine(tenant, days=days, limit=limit, apply=bool(apply))
@@ -5534,8 +5624,9 @@ async def purge_harvested_apply(request: Request, key: str = Depends(admin_key))
     if form.get("ui"):
         gone = sum(v.get("total", 0) for v in (result.get("deleted") or {}).values())
         return _back_to_content(
-            tenant, err=f"Cleared {gone} crawled and mailed rows. Run Fill from "
-                        f"every source to re-harvest — the ban list, vocabulary "
+            tenant, err=f"Cleared {gone} crawled and mailed rows "
+                        f"— then run Find proposals and Mine sent mail on Review's "
+                        f"Claims section to re-harvest; the ban list, vocabulary "
                         f"and catalogue were kept.")
     return result
 
@@ -5634,7 +5725,11 @@ async def conflict_resolve(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     prov.resolve_conflict(str(form.get("conflict_id", "")),
                           str(form.get("keep", "approved")))
-    return _back_to_content(tenant)
+    # `sub="conflicts"`: this returned bare, and conflicts is SIXTH in the
+    # default-section order — settling one dispute bounced the reader to
+    # whichever earlier queue had a count, and the remaining conflicts
+    # silently disappeared from view.
+    return _back_to_content(tenant, sub="conflicts")
 
 
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
@@ -5753,6 +5848,8 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         claim=str(form.get("claim", "")),
         evidence=str(form.get("evidence", "")),
         entity_key=ent_key,
+        attributed_to=(str(form.get("attributed_to"))
+                       if form.get("attributed_to") is not None else None),
         proves=str(form.get("proves", "")),
         context=str(form.get("context", "")) if form.get("context") is not None else None,
         tags=[str(t) for t in form.getlist("tags")])
@@ -5814,11 +5911,14 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
     from . import compliance
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
-    def _scan_and_record():
+    def _scan_and_record(_t=""):
+        # `_t` exists only so _run_bg can key the status by tenant — its key
+        # is args[0], and the parameterless closure filed every scan under
+        # the EMPTY tenant, where no reader ever looked.
         compliance.record_scan(tenant, compliance.scan(
             tenant, limit=limit, since=since))
     if ui:
-        _run_bg("compliance scan", _scan_and_record)
+        _run_bg("scan", _scan_and_record, tenant)
         # BACK TO THE PAGE THE BUTTON IS ON. Compliance moved to Assurance
         # (2026-08-23) and this redirect did not move with it, so pressing the
         # one button on Assurance landed you on Review — the very tab the card
@@ -5850,7 +5950,7 @@ def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
     if ui:
-        _run_bg("catalog sync", cs.sync_shopify, tenant, limit=limit,
+        _run_bg("sync", cs.sync_shopify, tenant, limit=limit,
                 dry_run=bool(report_only))
         return _back_to_content(tenant, "sync")
     return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))

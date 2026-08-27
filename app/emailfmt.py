@@ -67,7 +67,36 @@ def approval_email(items: list[dict], intro: str | None = None) -> str:
     """items: {summary, account, inbound_from, subject, inbound_snippet,
     reason, body, approve_url, deny_url}"""
     blocks = []
+    replies = 0
     for i, p in enumerate(items, 1):
+        kind = p.get("_kind", "")
+        if kind and kind != "send_email":
+            # A NON-REPLY approval rendered on the reply template promised
+            # "Approve & send" over an article publish, a file refile, or the
+            # nightly sweep — and its empty inbound_from/snippet fields drew a
+            # card describing an email that never existed. Its own card says
+            # what approving actually does.
+            body = (p.get("body") or p.get("content")
+                    or (p.get("fields") or {}).get("body_html", ""))
+            act = {"seo_new_article": "publishes the article",
+                   "seo_article_revision": "applies the revision",
+                   "seo_update": "updates the live page",
+                   "seo_new_page": "creates the page",
+                   "seo_new_collection": "creates the collection",
+                   "refile_moves": "moves the files",
+                   "systems_update": "adopts the map",
+                   "sweep": "records the decision — nothing executes",
+                   }.get(kind, "records the decision")
+            blocks.append(f"""
+<div style="border:1px solid #dadce0;border-radius:8px;padding:18px 20px;margin:18px 0;">
+  <p style="margin:0 0 6px;font-weight:bold;">{i}. {esc(p.get('summary', kind))}</p>
+  <p style="margin:0 0 10px;{MUTED}">{esc(kind)} &middot; approving {esc(act)}</p>
+  {f'<div style="background:#f8f9fa;border-radius:6px;padding:12px 16px;margin-bottom:14px;">{nl2br(esc(body)[:2500])}</div>' if body else ''}
+  <a href="{p['approve_url']}" style="{BTN_OK}">Approve</a>
+  <a href="{p['deny_url']}" style="{BTN_NO}">Deny</a>
+</div>""")
+            continue
+        replies += 1
         needs_facts = "NEEDS-FACTS" in (p.get("reason") or "")
         flag = ('<span style="color:#d93025;font-weight:bold;"> — needs facts '
                 'from you before sending</span>' if needs_facts else "")
@@ -85,14 +114,30 @@ def approval_email(items: list[dict], intro: str | None = None) -> str:
   <a href="{p['approve_url']}" style="{BTN_OK}">Approve &amp; send</a>
   <a href="{p['deny_url']}" style="{BTN_NO}">Deny</a>
 </div>""")
-    intro_html = (f'<p style="margin:0 0 4px;">{esc(intro)}</p>' if intro else
-                  f'<p style="margin:0 0 4px;">Hi Gomeh — {len(items)} '
-                  f'repl{"y is" if len(items) == 1 else "ies are"} ready for '
-                  f'your review. Each one shows the incoming message, my read '
-                  f'on it, and the reply I propose to send.</p>')
-    tip = (f'<p style="{MUTED}">Want to edit one first? The same draft is in '
-           f"that inbox's Drafts folder — edit and send it there, then hit "
-           f'Deny here so I don\'t double-send.</p>')
+    n_other = len(items) - replies
+    if intro:
+        intro_html = f'<p style="margin:0 0 4px;">{esc(intro)}</p>'
+    elif replies and not n_other:
+        intro_html = (f'<p style="margin:0 0 4px;">Hi Gomeh — {len(items)} '
+                      f'repl{"y is" if len(items) == 1 else "ies are"} ready '
+                      f'for your review. Each one shows the incoming message, '
+                      f'my read on it, and the reply I propose to send.</p>')
+    else:
+        # The old intro described every card as a reply; a mixed digest
+        # opened by promising incoming messages that half the cards never
+        # had.
+        intro_html = (f'<p style="margin:0 0 4px;">Hi Gomeh — {len(items)} '
+                      f'approval{"" if len(items) == 1 else "s"} waiting'
+                      + (f' ({replies} repl'
+                         f'{"y" if replies == 1 else "ies"}, {n_other} other)'
+                         if replies else "") + '. Each card says what '
+                      'approving it does.</p>')
+    # The Drafts-folder edit tip is TRUE only of mail — on an article card it
+    # directed the owner to a Gmail draft that does not exist.
+    tip = ((f'<p style="{MUTED}">Want to edit a reply first? The same draft '
+            f"is in that inbox's Drafts folder — edit and send it there, "
+            f'then hit Deny here so I don\'t double-send.</p>')
+           if replies else "")
     return wrap(intro_html + tip + "".join(blocks))
 
 

@@ -127,8 +127,13 @@ def main() -> int:
 
     print("\n— every item knows where its fix lives —")
     kinds = {a["reason"]: (a["kind"], a["where"]) for a in need}
-    ck("a missing ban list sends you to Knowledge",
-       kinds["no_ban_list"] == ("knowledge", "kb"), str(kinds.get("no_ban_list")))
+    # RETARGETED 2026-08-27: the ban list is authored on the BRAND tab
+    # ("Add hard rule") — routing no_ban_list to Knowledge sent the reader
+    # to a tab that cannot clear it, which the pointer sweep caught. The
+    # property was never "goes to Knowledge"; it is "goes where the fix
+    # lives".
+    ck("a missing ban list sends you where the ban list is authored",
+       kinds["no_ban_list"] == ("banlist", "brand"), str(kinds.get("no_ban_list")))
     ck("a quality failure stays here", kinds["dead_link"][0] == "quality")
     ck("an uninstalled system sends you to Systems",
        systems.classify_reason(

@@ -2127,7 +2127,8 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                  tags: list[str] | None = None, proof_type: str = None,
                  source: str = None, strength: str = None,
                  entity_key: str | None = None, proves: str | None = None,
-                 context: str | None = None) -> str:
+                 context: str | None = None,
+                 attributed_to: str | None = None) -> str:
     """Edit a claim in place. The editing half of propose-then-approve.
 
     Tags are validated against the tenant's vocabulary exactly as `add_claim`
@@ -2150,6 +2151,12 @@ def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                 return (f"{row.tenant} has nothing in its catalogue keyed "
                         f"{ek!r}. Leave it blank for a brand-level claim.")
             row.entity_key = ek
+        if attributed_to is not None:
+            # The column existed since the schema did with NO writer a person
+            # could reach — the drafter dropped every verbatim quote with
+            # "set who said it on the claim" while nothing could. Whitespace
+            # clears it; words are never invented into a real person's mouth.
+            row.attributed_to = attributed_to.strip()
         if tags is not None:
             valid = situations(row.tenant)
             unknown = [t for t in tags if t not in valid]
@@ -2288,7 +2295,9 @@ def join_group(tenant: str, key: str, group_key: str) -> str:
         if not (s.query(db.KbEntity)
                 .filter(db.KbEntity.tenant == tenant,
                         db.KbEntity.key == group_key).first()):
-            return (f"No entity keyed {group_key!r} — create the collection "
+            return (f"No entity keyed {group_key!r} — create it by typing "
+                    f"collection|{group_key}|Display Name into the Knowledge "
+                    f"tab's add-entity box, then assign members. Or: create the collection "
                     f"first, then assign members to it.")
         if group_key in (row.parent_keys or []):
             return f"{key} is already in {group_key}."
@@ -3362,7 +3371,8 @@ def apply_answer(tenant: str, step_id: str, text: str,
     step = _STEP.get(step_id)
     text = (text or "").strip()
     if not step:
-        return "That question expired — send /next for the current one."
+        return ("That question expired. The Knowledge tab's form always "
+                "shows the current one — refresh it (or send /next in chat).")
     if not text:
         return "Nothing captured."
 
@@ -3376,7 +3386,8 @@ def apply_answer(tenant: str, step_id: str, text: str,
     if step_id in ("display_name", "positioning", "tone", "banned_claims",
                    "next_steps") and "|" in text:
         return (f"That looks like an answer to a different question — "
-                f"{_STEP[step_id]['hint']}. Send /next to see the current one.")
+                f"{_STEP[step_id]['hint']}. Refresh the Knowledge tab "
+                f"for the current question (or send /next in chat).")
 
     if step_id == "display_name":
         return set_brand(tenant, display_name=text)
