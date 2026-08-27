@@ -1256,6 +1256,27 @@ SABOTAGES = [
                "list",
     },
     {
+        "name": "redraft_supersedes",
+        "file": "app/skill_pack.py",
+        "find": "            old.status = \"superseded\"",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_campaign_variety.py", "test_article_review.py"],
+        "why": "a redraft leaves TWO live rows for one intent — both held, "
+               "both counted, both on the board — and the anti-repeat window "
+               "reads the rejected attempt as something the brand said",
+    },
+    {
+        "name": "redraft_carries_the_notes",
+        "file": "app/skill_pack.py",
+        "find": "    digest = \"\\n\".join(f\"- {ln}\" for ln in lines)",
+        "replace": "    digest = \"\"  # SABOTAGE",
+        "suites": ["test_campaign_variety.py", "test_article_review.py"],
+        "why": "Request-changes reruns the drafter with the owner's feedback "
+               "silently dropped — a reroll wearing a redraft's name, and the "
+               "workroom's rail teaching the owner that filing feedback does "
+               "nothing",
+    },
+    {
         "name": "badge_counts_match_lists",
         "file": "app/admin_ui.py",
         "find": "        out[\"content\"] += len(prov.conflicts(tenant))",

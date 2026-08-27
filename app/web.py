@@ -2694,6 +2694,48 @@ async def campaign_meta_save(request: Request, key: str = Depends(admin_key)):
                    "preheader")
 
 
+@app.post("/admin/work_redraft")
+async def work_redraft(request: Request, key: str = Depends(admin_key)):
+    """Request changes: redraft a held artifact from its filed feedback.
+
+    Thin over `skill_pack.redraft_artifact` — the workroom's button. Success
+    lands on the SUCCESSOR's workroom (the redraft supersedes; the old page
+    stays readable and names it); failure lands back where the button was,
+    with the reason.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    note = str(form.get("note") or "")
+    overrides = {k: str(form.get(k) or "").strip()
+                 for k in ("segment", "entity_key", "intent", "deadline",
+                           "goal", "subject", "angle", "role")
+                 if str(form.get(k) or "").strip()}
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&err={quote('no artifact with that id')}", 303)
+    from . import skill_pack as _sp
+    got = _sp.redraft_artifact(art.tenant or "", output_id, note=note,
+                               overrides=overrides)
+    if got.get("ok"):
+        msg = (f"redrafted — {got.get('consumed', 0)} feedback item(s) "
+               f"consumed; this supersedes the previous draft, which stays "
+               f"readable and names this one")
+        return RedirectResponse(
+            f"/admin/work/{quote(str(got.get('output_id')))}?key={quote(key)}"
+            f"&ok={quote(msg)}", 303)
+    return RedirectResponse(
+        f"/admin/work/{quote(output_id)}?key={quote(key)}"
+        f"&err={quote('redraft refused: ' + str(got.get('error', ''))[:220])}",
+        303)
+
+
 @app.get("/admin/esp_push")
 def esp_push_retry(key: str = Depends(admin_key), output_id: str = ""):
     """Push an approved campaign into the ESP — the workroom's retry button.

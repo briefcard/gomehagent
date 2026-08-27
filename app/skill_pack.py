@@ -1148,6 +1148,12 @@ def _campaign_craft(ctx, seg: dict) -> dict:
         why = (why + "; " if why else "") + "an offer shows the product"
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
             "deadline": str(ctx.params.get("deadline") or "").strip(),
+            # A redraft's marching orders — set by the workroom's
+            # Request-changes path, empty on a fresh draft. Rides `craft`
+            # rather than a new drafter argument so every suite's stub
+            # signature survives, and a stub can observe it.
+            "revision_notes": str(ctx.params.get("revision_notes")
+                                  or "").strip(),
             "avoid": [h for h in hist if h.get("shape") or h.get("subject")]}
 
 
@@ -1164,6 +1170,13 @@ def _craft_brief(craft: dict) -> str:
     intent = CAMPAIGN_INTENTS.get(str(craft.get("intent") or ""), {})
     fmt = CAMPAIGN_FORMATS.get(str(craft.get("format") or ""), {})
     out: list[str] = []
+    if craft.get("revision_notes"):
+        # FIRST, because it outranks everything else here: the owner read
+        # the previous version and sent it back with these.
+        out.append("\n## THIS IS A REDRAFT — THE OWNER SENT THE LAST ONE "
+                   "BACK\nFix every item below. These outrank the style "
+                   "brief and the anti-repeat list:\n"
+                   + str(craft["revision_notes"]))
     if intent:
         lo, hi = intent["words"]
         out += [f"\n## WHAT THIS SEND IS FOR: {intent['label']}",
@@ -2682,6 +2695,139 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
     return got
 
 
+def redraft_artifact(tenant: str, output_id: str, note: str = "",
+                     overrides: dict | None = None) -> dict:
+    """Request changes: redraft one held artifact, consuming its feedback.
+
+    The workroom's loop, closed. Open draft-level FeedbackItems (plus the
+    note typed at the button, plus any plan-field overrides — segment,
+    entity, intent, deadline, angle) become the drafter's marching orders
+    via `revision_notes`; the skill runs FRESH through every gate, and the
+    old item is SUPERSEDED, never edited in place: old Output → status
+    "superseded" with its destination naming the successor, old approval
+    withdrawn, feedback marked applied. One intent, one live row — the
+    substrate's own vocabulary for a replaced attempt, applied at the
+    artifact level.
+    """
+    from . import approvals as _appr
+    from . import db, ledger, skill as _skill
+    overrides = dict(overrides or {})
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        out = s.get(db.Output, output_id)
+        run = s.get(db.SystemRun, art.run_id) if art and art.run_id else None
+        fb = (s.query(db.FeedbackItem)
+              .filter(db.FeedbackItem.output_id == output_id,
+                      db.FeedbackItem.level == "draft",
+                      db.FeedbackItem.status == "open").all())
+        kw = (s.query(db.KeywordTarget)
+              .filter(db.KeywordTarget.output_id == output_id).first())
+        s.expunge_all()
+    if art is None:
+        return {"ok": False, "error": "no artifact with that id"}
+    if ":campaign/" in (getattr(out, "destination", "") or ""):
+        return {"ok": False,
+                "error": "already pushed to the ESP — redraft the NEXT send "
+                         "instead; a draft in the platform is edited there"}
+    if (getattr(out, "status", "") or "") == "published" or (
+            kw is not None and (kw.status or "") in ("published", "won")):
+        return {"ok": False,
+                "error": "already published — a live page gets a revision "
+                         "through the revision path, not a redraft of the "
+                         "draft it came from"}
+
+    lines = [f"[{f.part} · {f.category or 'general'}] {f.note}" for f in fb]
+    if (note or "").strip():
+        lines.append(str(note).strip())
+    if not lines:
+        return {"ok": False,
+                "error": "nothing to redraft from — file feedback or type a "
+                         "note; a redraft with no direction is a reroll"}
+    digest = "\n".join(f"- {ln}" for ln in lines)
+
+    brief = dict(run.brief) if run is not None and isinstance(
+        run.brief, dict) else {}
+    fmt = art.format or ""
+    if fmt == "campaign_email":
+        params = {
+            "segment": (overrides.get("segment")
+                        or getattr(out, "audience_key", "") or
+                        brief.get("segment", "")),
+            "entity_key": (overrides.get("entity_key")
+                           or brief.get("entity_key", "")
+                           or getattr(out, "entity_key", "") or ""),
+            "intent": (overrides.get("intent")
+                       or getattr(out, "situation", "") or ""),
+            "deadline": (overrides.get("deadline")
+                         or brief.get("deadline", "") or ""),
+            "goal": overrides.get("goal") or brief.get("goal", "") or "",
+            "subject": overrides.get("subject") or brief.get("subject", ""),
+            "revision_notes": digest}
+        skill_key = "campaign_email"
+    elif fmt == "cms_article" or kw is not None:
+        if kw is None:
+            return {"ok": False,
+                    "error": "no keyword row joins this article — nothing "
+                             "names what a redraft should target"}
+        params = {"keyword": kw.phrase,
+                  "role": overrides.get("role") or kw.role or "",
+                  "cluster": kw.cluster_key or "",
+                  "angle": (overrides.get("angle")
+                            or getattr(out, "angle", "") or ""),
+                  "entity_key": (overrides.get("entity_key")
+                                 or getattr(out, "entity_key", "") or ""),
+                  "revision_notes": digest}
+        skill_key = "blog_article"
+    else:
+        return {"ok": False,
+                "error": f"no redraft path for format {fmt!r} yet"}
+
+    params = {k: v for k, v in params.items() if str(v or "").strip()}
+    r = _skill.run(skill_key, tenant, **params)
+    new_item = next((i for i in (r.get("items") or [])
+                     if i.get("output_id")), None)
+    if new_item is None:
+        return {"ok": False,
+                "error": "the redraft produced nothing — "
+                         + str(r.get("summary")
+                               or r.get("status") or "unknown")[:200]}
+    new_oid = new_item["output_id"]
+
+    # SUPERSEDE, never duplicate: one intent keeps one live row. The old
+    # item stays readable — its workroom page names the successor — but it
+    # leaves every queue, every count and the anti-repeat window.
+    with db.SessionLocal() as s:
+        old = s.get(db.Output, output_id)
+        if old is not None:
+            old.status = "superseded"
+        old_art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id).first())
+        if old_art is not None and (old_art.state or "") == "in_review":
+            old_art.state = ""
+        for f_row in (s.query(db.FeedbackItem)
+                      .filter(db.FeedbackItem.output_id == output_id,
+                              db.FeedbackItem.level == "draft",
+                              db.FeedbackItem.status == "open").all()):
+            f_row.status = "applied"
+            f_row.applied_at = db.utcnow()
+        if kw is not None:
+            kw_row = s.get(db.KeywordTarget, kw.id)
+            if kw_row is not None:
+                # The board's draft link must point at the LIVING draft.
+                kw_row.output_id = new_oid
+        s.commit()
+    try:
+        ledger.delivered(tenant, output_id, f"superseded:{new_oid}")
+    except Exception:                                            # noqa: BLE001
+        pass
+    if art.run_id:
+        _appr.withdraw(art.run_id,
+                       f"superseded by redraft (workroom) -> {new_oid}")
+    return {"ok": True, "output_id": new_oid, "consumed": len(fb),
+            "summary": (r.get("summary") or "")[:200]}
+
+
 register(Skill(
     key="campaign_email",
     name="Campaign email",
@@ -2692,7 +2838,8 @@ register(Skill(
     system_key="campaign_email",
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
-    params=("segment", "goal", "subject", "intent", "deadline", "entity_key",
+    params=("revision_notes",
+            "segment", "goal", "subject", "intent", "deadline", "entity_key",
             "audience_key", "utterance", "draft_visual"),
     writes=True,
     produces="draft",
@@ -2910,6 +3057,11 @@ def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
                      "same page — a different page. Two articles in one "
                      "cluster written to the same recipe compete with each "
                      "other for the query they were both written to win.")
+    if bundle.get("revision_notes"):
+        parts.append("\n## THIS IS A REDRAFT — THE OWNER SENT THE LAST ONE "
+                     "BACK\nFix every item below; they outrank the angle "
+                     "brief and the anti-repeat list:\n"
+                     + str(bundle["revision_notes"]))
     return "\n".join(parts)
 
 
@@ -3035,6 +3187,11 @@ def _run_blog_article(ctx: Context) -> dict:
     # preference — and otherwise it rotates, avoiding what this cluster has
     # already used. `why` is recorded so the choice can be read back.
     avoid = _recent_articles(ctx.tenant)
+    # A redraft's marching orders ride the bundle into the prompt — set by
+    # the workroom's Request-changes path, absent on a fresh draft.
+    if str(ctx.params.get("revision_notes") or "").strip():
+        ctx.bundle["revision_notes"] = str(
+            ctx.params["revision_notes"]).strip()
     angle_why = "set on the plan"
     if not angle:
         angle, angle_why = _pick_angle(
@@ -3177,7 +3334,8 @@ register(Skill(
     # public page under the client's own domain; drafting one against an empty
     # ban list is not a thinner article, it is an unchecked one.
     constitutive=("banned_claims",),
-    params=("keyword", "role", "cluster", "angle", "entity_key", "utterance"),
+    params=("keyword", "role", "cluster", "angle", "entity_key", "utterance",
+            "revision_notes"),
     writes=True,
     produces="draft",
     run=_run_blog_article))

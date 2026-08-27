@@ -220,6 +220,49 @@ def main() -> int:
        in r7.headers["location"].replace("%20", "+"),
        "staging hosts and CDNs are real; a caution, not a block")
 
+    print("\n— Request changes: the article redraft (UI overhaul 3.3b) —")
+    ck("a PUBLISHED article refuses the redraft — a live page gets a "
+       "revision, not a redraft of its draft",
+       skill_pack.redraft_artifact("sqonly", oid2, note="x")
+       .get("ok") is not True)
+    r8 = skill.run("blog_article", "sqonly", keyword="acrylic carafe",
+                   role="support")
+    oid3 = r8["items"][0]["output_id"]
+    with db.SessionLocal() as s:
+        s.add(db.FeedbackItem(tenant="sqonly", output_id=oid3, part="body",
+                              category="tone",
+                              note="ARTICLE-REDRAFT-NOTE warmer opening",
+                              level="draft", status="open"))
+        s.commit()
+    _seen_rd: dict = {}
+    _orig_live = skill_pack._draft_article_live
+
+    def _capture_live(bundle, *a, **k):
+        _seen_rd["bundle"] = dict(bundle or {})
+        return _orig_live(bundle, *a, **k)
+    skill_pack._draft_article_live = _capture_live
+    got_rd = skill_pack.redraft_artifact("sqonly", oid3,
+                                         note="typed blog note")
+    skill_pack._draft_article_live = _orig_live
+    ck("the redraft runs fresh and supersedes",
+       got_rd.get("ok") is True
+       and got_rd.get("output_id") not in ("", oid3), str(got_rd)[:90])
+    ck("…the drafter's bundle carried the owner's notes",
+       "ARTICLE-REDRAFT-NOTE" in (_seen_rd.get("bundle", {})
+                                  .get("revision_notes") or "")
+       and "typed blog note" in (_seen_rd.get("bundle", {})
+                                 .get("revision_notes") or ""))
+    with db.SessionLocal() as s:
+        old3 = s.get(db.Output, oid3)
+        kw3 = (s.query(db.KeywordTarget)
+               .filter_by(tenant="sqonly", phrase="acrylic carafe").first())
+    ck("the old row is SUPERSEDED and names its successor",
+       old3.status == "superseded"
+       and old3.destination == f"superseded:{got_rd.get('output_id')}",
+       f"{old3.status} · {old3.destination}")
+    ck("…and the keyword row points at the LIVING draft",
+       kw3.output_id == got_rd.get("output_id"), str(kw3.output_id)[:14])
+
     print("\n— the run LANDS on the article it made —")
     # Owner, live: *"I published an article and I dont see it. Where is it?"*
     # The flash was a paragraph directing them to the Plan tab's board — from

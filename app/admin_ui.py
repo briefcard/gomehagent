@@ -6295,6 +6295,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     esp_push = ((ap.payload or {}).get("esp_push") or {}) if ap else {}
     dest = getattr(out, "destination", "") or ""
     pushed = ":campaign/" in dest
+    superseded_by = (dest.split("superseded:", 1)[1]
+                     if dest.startswith("superseded:") else "")
 
     # --- the lifecycle, as chips: where this artifact IS ------------------
     def _chip(label: str, on: bool) -> str:
@@ -6373,6 +6375,15 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           <input name="url" size="42" placeholder="https://…/blogs/…">
           <button type="submit" class="sec">It&rsquo;s live here</button>
         </form>"""
+
+    if superseded_by:
+        # A replaced draft is a record, not a workspace — every decision and
+        # adjustment belongs to its successor.
+        decide = (f'<div class="note"><b>Superseded by a redraft.</b> This '
+                  f'version was sent back and replaced; it stays readable, '
+                  f'and everything decidable lives on '
+                  f'<a href="/admin/work/{_esc(superseded_by)}?key={_esc(key)}">'
+                  f'the current draft &rarr;</a></div>')
 
     flags = artifact_check.check(art.body or "")
     flag_html = "".join(
@@ -6510,10 +6521,71 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             '<details class="sec"><summary>The plan behind this send'
             f'</summary><dl class="kv">{rows_}</dl>'
             '<p class="when">Subject and preheader adjust above and flow '
-            'into the push. A different segment, entity or angle is a '
-            'redraft against an adjusted plan — that control lands with '
-            '3.3b; until then, skip this one and file a fresh plan in the '
-            'workflow queue.</p></details>')
+            'into the push. A different segment, entity, intent or angle: '
+            'adjust it in Request changes below — the redraft runs against '
+            'the adjusted plan, through every gate.</p></details>')
+
+    # --- Request changes: the redraft, fed by the filed feedback ----------
+    open_draft_fb = [f for f in fb
+                     if f.level == "draft" and f.status == "open"]
+    redraft_card = ""
+    if ((art.body or "").strip() and not pushed and not published
+            and not superseded_by):
+        if is_email:
+            ov_fields = (
+                _plan_field_input({"key": "segment", "kind": "segment",
+                                   "label": "Segment"},
+                                  esp_push.get("segment_key")
+                                  or getattr(out, "audience_key", "") or "",
+                                  tenant=tenant)
+                + _plan_field_input({"key": "entity_key", "kind": "entity",
+                                     "label": "Featured entity"},
+                                    getattr(out, "entity_key", "") or "",
+                                    tenant=tenant)
+                + _plan_field_input({"key": "intent", "kind": "choice",
+                                     "label": "Intent",
+                                     "choices": ["story", "education",
+                                                 "proof", "offer"]},
+                                    getattr(out, "situation", "") or "",
+                                    tenant=tenant)
+                + _plan_field_input({"key": "deadline",
+                                     "label": "Deadline — the only licit "
+                                              "urgency"}, "", tenant=tenant)
+                + _plan_field_input({"key": "goal",
+                                     "label": "Angle / concept"}, "",
+                                    tenant=tenant))
+        else:
+            ov_fields = (
+                _plan_field_input({"key": "angle", "label": "Angle"},
+                                  getattr(out, "angle", "") or "",
+                                  tenant=tenant)
+                + _plan_field_input({"key": "entity_key", "kind": "entity",
+                                     "label": "Featured entity"},
+                                    getattr(out, "entity_key", "") or "",
+                                    tenant=tenant))
+        fb_line = (f"{len(open_draft_fb)} open feedback item(s) will be "
+                   f"consumed" if open_draft_fb else
+                   "no open feedback filed — the note below is the whole "
+                   "instruction")
+        redraft_card = f"""
+<div class="card">
+  <h3>Request changes — redraft in our data layer</h3>
+  <form method="post" action="/admin/work_redraft">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    <label style="display:block;margin:6px 0">What must change<br>
+    <textarea name="note" rows="3" placeholder="e.g. two products max, and
+lead with the free-shipping line"></textarea></label>
+    <details class="sec"><summary>Adjust the plan for this redraft</summary>
+      <div class="planfields">{ov_fields}</div>
+    </details>
+    <div class="row" style="margin-top:8px">
+      <button type="submit">Redraft with this feedback</button>
+      <span class="when">{fb_line} · runs fresh through every gate ·
+      supersedes this draft and re-queues the approval</span>
+    </div>
+  </form>
+</div>"""
 
     # --- the feedback rail ------------------------------------------------
     open_fb = "".join(
@@ -6569,6 +6641,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
   </form>
   <div class="thread">{open_fb}</div>
 </div>
+{redraft_card}
 {plan_fold}
 {f'<details class="sec"><summary>What this system has learned from you</summary><pre class="msg" style="white-space:pre-wrap">{_esc(learned)}</pre></details>' if learned else ""}
 <details class="sec"><summary>Versions — v1 is the frozen draft ({1 + len(versions)})</summary>

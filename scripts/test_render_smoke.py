@@ -273,6 +273,8 @@ ck("the old article address redirects to the workroom", r.status_code == 303
 wr = c.get(f"/admin/work/smk-art-1?key={KEY}").text
 ck("the workroom renders, framed", 'class="side"' in wr
    and "Workroom smoke body" in wr and "article_save" in wr)
+ck("…and offers Request changes — the redraft door",
+   "Request changes" in wr and "work_redraft" in wr)
 coverage("workroom", wr)
 
 r = c.post("/admin/article_save",

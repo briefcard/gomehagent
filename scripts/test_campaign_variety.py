@@ -812,6 +812,51 @@ def main():
        "pushed to" in said and "Launch" in said
        and len(_drafted) == before + 1, said[:80])
 
+    print("\n— Request changes: the redraft consumes the filed feedback —")
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>First attempt, fine but wordy.</p>"},
+        {"type": "cta", "label": "Shop", "url": "https://example.com/shop"}])
+    r_rd = skill.run("campaign_email", "baci", segment="new_subscribers",
+                     goal="x")
+    oid_a = (r_rd.get("items") or [{}])[0].get("output_id", "")
+    with db.SessionLocal() as s:
+        s.add(db.FeedbackItem(tenant="baci", output_id=oid_a, part="body",
+                              category="length",
+                              note="REDRAFT-NOTE two products max",
+                              level="draft", status="open"))
+        s.commit()
+    _seen: dict = {}
+    _orig_drafter = skill_pack.draft_campaign
+
+    def _capture(bundle, seg, goal, craft=None):
+        _seen["craft"] = dict(craft or {})
+        return _orig_drafter(bundle, seg, goal, craft)
+    skill_pack.draft_campaign = _capture
+    got_rd = skill_pack.redraft_artifact("baci", oid_a, note="typed note too")
+    ck("the redraft runs fresh and supersedes",
+       got_rd.get("ok") is True
+       and got_rd.get("output_id") not in ("", oid_a), str(got_rd)[:90])
+    ck("…the drafter received the owner's notes, feedback first",
+       "REDRAFT-NOTE" in (_seen.get("craft", {}).get("revision_notes") or "")
+       and "typed note too" in (_seen.get("craft", {})
+                                .get("revision_notes") or ""),
+       (_seen.get("craft", {}).get("revision_notes") or "")[:80])
+    with db.SessionLocal() as s:
+        old_o = s.get(db.Output, oid_a)
+        fb_row = (s.query(db.FeedbackItem)
+                  .filter_by(output_id=oid_a).first())
+        old_ap = (s.query(db.Approval)
+                  .filter(db.Approval.run_id == (r_rd.get("run_id") or ""))
+                  .first())
+    ck("the old row is SUPERSEDED and names its successor",
+       old_o.status == "superseded"
+       and old_o.destination == f"superseded:{got_rd.get('output_id')}",
+       f"{old_o.status} · {old_o.destination}")
+    ck("…its approval withdrawn, so nothing stale is decidable",
+       old_ap is not None and old_ap.status == "withdrawn",
+       str(getattr(old_ap, "status", None)))
+    ck("…and the feedback is marked applied", fb_row.status == "applied")
+
     with db.SessionLocal() as s:
         rr = s.get(db.System, row.id)
         rr.autonomy = "auto"
