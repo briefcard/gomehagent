@@ -355,6 +355,12 @@ def main() -> int:  # noqa: PLR0915
     ck("the voice deriver is a button, not a typed URL",
        'name="derive_voice"' in page
        and "Derive voice from the site" in page)
+    # 2026-08-28: retargeted. The button was a GET on /admin/ui that crawled
+    # the site and called the model INSIDE the page request; it is a POST to
+    # the background route now, so what this pins is the ACTION, not the verb.
+    ck("…and it is a POST that starts work off the request",
+       'action="/admin/brand_voice_derive"' in page
+       and 'method="post"' in page)
 
     c = TestClient(web.app)
     c.get("/admin/ui", params={"key": "test-secret"})   # session cookie
@@ -400,10 +406,21 @@ def main() -> int:  # noqa: PLR0915
         "positioning": "Milanese tableware for hosts who set a serious table.",
         "elevator": "The Milan table, shipped from Miami.",
         "degraded": ""}
+    # 2026-08-28: retargeted from `render_brand(derive_voice=True)`, which
+    # used to DO the derive. The proposal now outlives the request that made
+    # it (`KbBrand.voice_proposed`), because the work runs behind `_run_bg`
+    # and the page that renders it is a later one. So the suite derives, then
+    # renders — the same two things the console does, in the same order.
+    vc.derive("baci")
+    ck("the proposal survives the request that computed it",
+       bool(vc.proposed("baci").get("tone")))
     dpage = admin_ui.render_brand("test-secret", "baci", derive_voice=True)
     ck("the derive panel shows tone AND the verbatim quotes behind it",
        "assured, warm" in dpage and "Milanese way" in dpage
        and "Nothing was written" in dpage)
+    ck("…and it renders WITHOUT the parameter too — a stored proposal is a "
+       "fact about the account, not about how you arrived at the page",
+       "assured, warm" in admin_ui.render_brand("test-secret", "baci"))
     ck("…and proposes positioning and elevator from the same read",
        "hosts who set a serious table" in dpage
        and "shipped from Miami" in dpage)
@@ -430,22 +447,78 @@ def main() -> int:  # noqa: PLR0915
        not _re.search(r"<a [^>]*>\s*<button", page))
     ck("the derive control is a real form the dispatcher honours",
        'name="derive_voice"' in page)
+    # The old GET must still resolve — a bookmark or a history entry that
+    # 404s is the URL contract broken (fluidity rule 3). It opens the panel
+    # and starts nothing.
     clicked = c.get("/admin/ui", params={"key": "test-secret", "tab": "brand",
                                          "tenant": "baci",
                                          "derive_voice": "1"}).text
-    ck("clicking it through the console actually populates the proposal",
+    ck("the old derive_voice URL still resolves and shows the proposal",
        "assured, warm" in clicked and "Nothing was written" in clicked)
+    r = c.post("/admin/brand_voice_derive",
+               data={"tenant": "baci", "key": "test-secret"},
+               follow_redirects=False)
+    loc = r.headers["location"]
+    ck("the derive button returns IMMEDIATELY, to the Brand tab",
+       r.status_code == 303 and "tab=brand" in loc and "#voice" in loc)
+    # The anchor goes on LAST. Appending `key=` after `#voice` makes the
+    # credential part of the FRAGMENT, which is never sent to the server — it
+    # only appeared to work because the console session cookie carried it.
+    ck("…with every parameter in the QUERY, not stranded in the fragment",
+       "key=" in loc.split("#")[0] and "key=" not in loc.split("#", 1)[1], loc)
+    ck("…and it writes no voice, only a proposal",
+       (kb.brand("baci").voice or {}).get("tone") == ["assured", "warm"])
 
     vc.propose = lambda tenant, texts: {
         "tenant": tenant, "tone": ["measured"], "evidence": [],
         "positioning": "", "elevator": "",
         "degraded": "ANTHROPIC_API_KEY is not set — measured metrics only"}
+    vc.derive("baci")
     dpage2 = admin_ui.render_brand("test-secret", "baci", derive_voice=True)
     ck("with no model, positioning/elevator are ABSENT and say why — "
        "arithmetic cannot state what a business does",
        "No positioning or elevator proposed" in dpage2
        and "ANTHROPIC_API_KEY" in dpage2
        and "Adopt proposal (tone)" in dpage2)
+
+    # ── the theme half cannot take the tab with it (2026-08-28) ────────────
+    #
+    # `brand_theme.status()` was the first thing `render_brand` did, and a
+    # not-ok result RETURNED a shell containing one sentence — so a stale
+    # Shopify credential removed the identity editor, the hard rules and the
+    # source list, which are precisely the controls a person would come here
+    # to use. Worse, an EXCEPTION inside it 500ed the tab, and the exception
+    # is the likely case: the theme is derived from three third-party
+    # sources. Guard: `the_theme_cannot_take_the_tab`.
+    print("\n— a theme that will not read does not take the tab —")
+    import app.brand_theme as _bt
+    _real_status = _bt.status
+
+    def _boom(_t):
+        raise RuntimeError("shopify token expired")
+
+    _bt.status = _boom
+    try:
+        broken = admin_ui.render_brand("test-secret", "baci")
+    finally:
+        _bt.status = _real_status
+    ck("the page still renders rather than 500ing", len(broken) > 2000)
+    ck("the identity editor survives — it is how you fix the account",
+       "Identity — who they are" in broken
+       and 'action="/admin/brand_update"' in broken)
+    ck("so do the hard rules and the source list",
+       "Add hard rule" in broken
+       and "Where their words are read from" in broken)
+    ck("the failure is NAMED where the theme was, not swallowed",
+       "shopify token expired" in broken
+       and "could not be read" in broken)
+    ck("…and says what is unaffected, so the note is not a dead end",
+       "still editable" in broken)
+    ck("no theme control is offered that could only fail",
+       "brand_theme/approve" not in broken
+       and "brand_theme/derive" not in broken)
+    ck("a healthy tab still offers them",
+       "brand_theme/approve" in admin_ui.render_brand("test-secret", "baci"))
 
     print()
     if _fail:

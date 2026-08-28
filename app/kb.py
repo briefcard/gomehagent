@@ -1661,7 +1661,20 @@ def set_brand(tenant: str, **fields) -> str:
 
 
 def add_banned(tenant: str, phrase: str) -> str:
-    """Add a phrase the validator will reject. Creates the brand row if needed."""
+    """Add a phrase the validator will reject. Creates the brand row if needed.
+
+    THE ONLY WRITER of `banned_claims`, add or restore. `systems.promote_rule`
+    kept its own copy of this logic for months — a second appender to the one
+    list that gates every draft — which is the "writer I missed" shape from
+    SYSTEMS-REFERENCE §6b: the moment removal exists, a second appender is a
+    path that can silently contradict the lifted record. It now delegates
+    here, and `test_ban_list.one_writer` computes the claim from the source
+    rather than restating it.
+
+    Re-adding a lifted phrase CLEARS its lifted entry: a rule that is enforced
+    again is not a lifted one, and leaving both would state the same fact
+    twice in opposite directions (rule 8).
+    """
     phrase = (phrase or "").strip()
     if not phrase:
         return "A rule needs a phrase."
@@ -1669,12 +1682,61 @@ def add_banned(tenant: str, phrase: str) -> str:
     with db.SessionLocal() as s:
         row = s.get(db.KbBrand, tenant)
         current = list(row.banned_claims or [])
+        lifted = [x for x in (row.lifted_claims or [])
+                  if str(x.get("phrase", "")).lower() != phrase.lower()]
+        if lifted != list(row.lifted_claims or []):
+            row.lifted_claims = lifted
         if phrase.lower() in [c.lower() for c in current]:
+            s.commit()
             return f"Already banned for {tenant}."
         row.banned_claims = current + [phrase]
         s.commit()
         n = len(row.banned_claims)
     return f"Banned for {tenant} ({n} rules): “{phrase}”"
+
+
+def lifted_claims(tenant: str) -> list[dict]:
+    """Hard rules taken out by hand — the sibling reader to `banned_claims`."""
+    b = brand(tenant)
+    return [dict(x) for x in (b.lifted_claims or [])] if b else []
+
+
+def remove_banned(tenant: str, phrase: str, by: str = "owner") -> str:
+    """Lift one hard rule. The ONLY subtractor from `banned_claims`.
+
+    The list could be added to and never subtracted from, so a rule typed by
+    mistake, or one that stopped being true — a brand that starts genuinely
+    manufacturing in Italy — was permanent, and the only escape was editing
+    the database by hand. That is not a boundary, it is a trap.
+
+    It is not a delete. The phrase moves to `lifted_claims` with who and when,
+    because this is the edit on this tab with the largest blast radius: every
+    draft that was being BLOCKED by it stops being blocked, silently, from the
+    next generation onward. A record beside the list is what makes that
+    reviewable afterwards.
+    """
+    phrase = (phrase or "").strip()
+    if not phrase:
+        return "Name the rule to lift."
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        if row is None:
+            return f"No brand record for {tenant}."
+        current = list(row.banned_claims or [])
+        keep = [c for c in current if c.lower() != phrase.lower()]
+        if len(keep) == len(current):
+            return f"“{phrase}” is not a hard rule for {tenant}."
+        # Store the phrase AS IT WAS WRITTEN, not as it was typed into the
+        # remove control — the list is what the validator matches on.
+        was = next(c for c in current if c.lower() == phrase.lower())
+        row.banned_claims = keep
+        row.lifted_claims = list(row.lifted_claims or []) + [
+            {"phrase": was, "by": by,
+             "at": db.utcnow().isoformat(timespec="seconds")}]
+        s.commit()
+        n = len(keep)
+    return (f"Lifted for {tenant} ({n} rule{'' if n == 1 else 's'} left): "
+            f"“{was}” — drafts containing it are no longer blocked.")
 
 
 #: How long an approved claim stands before somebody has to say it is still

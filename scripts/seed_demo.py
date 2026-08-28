@@ -176,6 +176,24 @@ def seed_landing_pages() -> str:
     return f"baci reads {res['landing_pages'] + 1} sources"
 
 
+def seed_brand_states() -> str:
+    """Both hard-rule states, so the Brand tab is clickable rather than
+    theoretical: a rule that IS enforced and one that was LIFTED.
+
+    Idempotent — `remove_banned` on a phrase that is not a rule is a refusal,
+    not an error, and re-running leaves the same two states.
+    """
+    kb.add_banned("baci", "artisanal")
+    if not any(x.get("phrase") == "artisanal" for x in kb.lifted_claims("baci")):
+        kb.remove_banned("baci", "artisanal")
+    # A second account with rules and nothing lifted, so the quiet case — no
+    # "Lifted rules" fold at all — is on screen too.
+    kb.add_banned("eien", "cures")
+    kb.add_banned("eien", "treats")
+    return (f"brand: baci {len(kb.banned_claims('baci'))} enforced / "
+            f"{len(kb.lifted_claims('baci'))} lifted")
+
+
 def seed_mail_queue() -> str:
     """Both halves of the 2026-08-27 rule, so the walkthrough can see the
     difference: a drafted reply (which must NOT appear on Review) and an
@@ -300,6 +318,7 @@ said3 = seed_landing_pages()
 said4 = seed_mail_queue()
 said5 = seed_keyword_map()
 said6 = seed_schedule()
+said7 = seed_brand_states()
 print(f"demo seeded: {made} · accounts: "
       f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}"
-      f" · {said3} · {said4} · {said5} · {said6}")
+      f" · {said3} · {said4} · {said5} · {said6} · {said7}")

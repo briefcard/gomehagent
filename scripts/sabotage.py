@@ -2020,6 +2020,51 @@ SABOTAGES = [
                "reads as queued and means lost — which is the one thing the "
                "Schedule view exists to make visible",
     },
+    {
+        "name": "a_lifted_rule_stays_lifted",
+        "file": "app/kb.py",
+        "find": "        lifted = [x for x in (row.lifted_claims or [])\n"
+                "                  if str(x.get(\"phrase\", \"\")).lower() != phrase.lower()]",
+        "replace": "        lifted = list(row.lifted_claims or [])  # SABOTAGE",
+        "suites": ["test_ban_list.py"],
+        "why": "a rule the owner lifted and then restored is enforced again "
+               "AND still listed as lifted — the tab states the same fact in "
+               "two opposite directions at once, and the Restore button on a "
+               "rule that is already live is a control whose press means "
+               "nothing. Rule 8, on the one list that blocks every draft",
+    },
+    {
+        "name": "one_writer_owns_the_ban_list",
+        "file": "app/systems.py",
+        "find": "    _kb.add_banned(tenant, phrase)",
+        "replace": "    with db.SessionLocal() as s:  # SABOTAGE\n"
+                   "        brand = s.get(db.KbBrand, tenant)\n"
+                   "        brand.banned_claims = list(brand.banned_claims or []) + [phrase]\n"
+                   "        s.commit()",
+        "suites": ["test_ban_list.py"],
+        "why": "promotion becomes a SECOND writer of `banned_claims` again, "
+               "so a phrase the owner deliberately lifted can be re-added by "
+               "a path that knows nothing about the lifted record — enforced "
+               "and listed-as-lifted simultaneously. This is the exact shape "
+               "of the writer-I-missed defect (§6b): the instance nobody "
+               "audited is the one that is broken",
+    },
+    {
+        "name": "the_theme_cannot_take_the_tab",
+        "file": "app/admin_ui.py",
+        "find": "    except Exception as exc:                                     # noqa: BLE001\n"
+                "        log.exception(\"brand theme unreadable for %s\", tenant)\n"
+                "        theme_err = f\"{exc.__class__.__name__}: {exc}\"",
+        "replace": "    except Exception as exc:  # SABOTAGE\n"
+                   "        raise",
+        "suites": ["test_brand_theme.py"],
+        "why": "a stale Shopify credential or a corrupt theme blob takes the "
+               "WHOLE Brand tab down again — including the identity editor, "
+               "the hard rules and the source list, which are the controls a "
+               "person would reach for to fix the account. A failure in one "
+               "half removing the other half's controls is how a fixable "
+               "problem becomes an unfixable one",
+    },
 ]
 
 

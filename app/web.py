@@ -616,6 +616,14 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
     rule = str(form.get("add_banned", "")).strip()
     if rule:
         msgs.append(kbm.add_banned(tenant, rule)[:120])
+    # Lifting a rule. Its own field rather than a mode on `add_banned`,
+    # because add and remove are opposite consequences and a single field
+    # switched by a hidden input is how you eventually delete what you meant
+    # to add. `remove_banned` is the only subtractor and it records what it
+    # took out; `add_banned` with the same phrase is the restore.
+    drop = str(form.get("drop_banned", "")).strip()
+    if drop:
+        msgs.append(kbm.remove_banned(tenant, drop)[:160])
     return RedirectResponse(
         f"/admin/ui?tab=brand&tenant={quote(tenant)}"
         f"&ok={quote(' · '.join(msgs) or 'nothing to change')}#identity", 303)
@@ -707,6 +715,48 @@ async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
     if form.get("key"):
         back += f"&key={quote(str(form['key']))}"
     return RedirectResponse(back, 303)
+
+
+@app.post("/admin/brand_voice_derive")
+async def brand_voice_derive(request: Request, key: str = Depends(admin_key)):
+    """Start the voice derive and come straight back.
+
+    It used to run inside the Brand tab's own GET — a site crawl plus a model
+    call, capped at six pages precisely because a person was watching the tab
+    wait for it. That is the broken-button experience `_run_bg` exists to
+    remove, so this starts the work and returns; the proposal is stored on
+    `KbBrand.voice_proposed` and the tab renders it when it lands, with the
+    background status line saying whether it is running, finished or failed.
+
+    A POST because it writes a proposal. The old `derive_voice=1` GET still
+    resolves — it now just opens the proposal panel — so a bookmark or a
+    browser-history entry does not 404 (fluidity rule 3).
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import voice as vc
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    if not tenant:
+        return RedirectResponse("/admin/ui?tab=brand"
+                                "&err=pick+an+account+first", 303)
+    _run_bg("voice", vc.derive, tenant)
+    # THE ANCHOR GOES ON LAST. The sibling theme routes append `key=` to a
+    # fragmentless URL, so copying their shape here put the credential AFTER
+    # `#voice` — where it is a fragment, never sent to the server. It survived
+    # a browser click only because the console session cookie was already
+    # carrying it; an explicit ?key= URL with no session would have landed on
+    # the sign-in door instead. Caught previewing the demo, 2026-08-28.
+    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+            f"&ok={quote('reading their site — the proposal appears below when it lands')}"
+            f"&derive_voice=1")
+    if form.get("key"):
+        back += f"&key={quote(str(form['key']))}"
+    return RedirectResponse(back + "#voice", 303)
 
 
 @app.post("/admin/brand_theme/approve")

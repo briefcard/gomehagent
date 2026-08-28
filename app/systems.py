@@ -1854,19 +1854,27 @@ def promote_rule(tenant: str, phrase: str) -> str:
     check that fails closed. Anything phrased as never/always belongs here —
     a model must never be the thing standing between a rule and an output.
     """
+    from . import kb as _kb
     phrase = (phrase or "").strip()
     if not phrase:
         return "A rule needs a phrase to match on."
     with db.SessionLocal() as s:
-        brand = s.get(db.KbBrand, tenant)
-        if not brand:
+        if not s.get(db.KbBrand, tenant):
+            # Deliberately NOT `ensure_brand`: promotion arrives from feedback
+            # on a run, and an account with no brand record has nothing the
+            # validator could read the rule against. Say so instead of
+            # conjuring a row — /admin/system_rule branches on this sentence.
             return (f"No KB brand row for {tenant} — create the brand record "
                     f"before adding rules, or the validator has nothing to read.")
-        current = list(brand.banned_claims or [])
-        if phrase.lower() in [c.lower() for c in current]:
-            return f"Already a rule for {tenant}."
-        brand.banned_claims = current + [phrase]
-        s.commit()
+    if phrase.lower() in [c.lower() for c in _kb.banned_claims(tenant)]:
+        return f"Already a rule for {tenant}."
+    # THE MUTATION BELONGS TO ONE WRITER. This function kept a second copy of
+    # it until 2026-08-28, which meant a phrase the owner had deliberately
+    # LIFTED could be re-added by a path that knew nothing about the lifted
+    # record — the ban list would enforce it again while the Brand tab still
+    # listed it as lifted. `kb.add_banned` is now the only assignment to
+    # `banned_claims` in app/, and `test_ban_list` computes that with `ast`.
+    _kb.add_banned(tenant, phrase)
     return (f"Hard rule added for {tenant}: any draft containing "
             f"“{phrase}” is now rejected by the validator.")
 

@@ -31,6 +31,7 @@ phrasing the compliance layer exists to catch.
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import re
 
@@ -326,3 +327,58 @@ def gather(tenant: str, limit: int = 25) -> tuple[list[str], str]:
         except Exception as exc:  # noqa: BLE001 — one bad page is not a failure
             log.debug("voice gather skipped %s: %s", url, exc)
     return texts, f"read {read} pages via {how}"
+
+
+def derive(tenant: str, limit: int = 6) -> dict:
+    """Read the account's own site and STORE a voice proposal for review.
+
+    Split out of the Brand tab on 2026-08-28. `render_brand` used to crawl the
+    site and call the model INSIDE the page request — the docstring said so,
+    and capped the read at six pages for exactly that reason: "this runs
+    inside the page request, and a sequential crawl plus a model call has to
+    come back while the person is still watching the tab". Six pages of a cold
+    site is still tens of seconds, and a GET that blocks that long with no
+    feedback is indistinguishable from a broken button, which is the whole
+    reason `_run_bg` exists (web.py). It runs behind `_run_bg` now, so the
+    page returns immediately and the proposal appears when it lands.
+
+    Which is only possible if the proposal OUTLIVES the request that made it,
+    so it is stored on `KbBrand.voice_proposed` — the same contract as
+    `theme_proposed`, which the same tab already uses for the same reason.
+
+    IT STILL WRITES NO VOICE. `voice` changes only when a person presses
+    Adopt; this writes the proposal and nothing else, and the suite asserts
+    the live voice is untouched across a derive.
+
+    The identity source is the WEBSITE ONLY — `gather` reads `t.domain` and
+    the landing pages in `tenants.content_sources` are never fetched here.
+    That is the 2026-08-27 multi-domain constraint, and `sabotage.
+    voice_reads_the_website_only` exists to break it.
+    """
+    texts, how = gather(tenant, limit=limit)
+    if not texts:
+        got = {"error": f"could not read the site to derive a voice: {how}",
+               "source": how, "pages_read": 0,
+               "derived_at": dt.datetime.now(dt.timezone.utc)
+               .isoformat(timespec="seconds")}
+        kb.set_brand(tenant, voice_proposed=got)
+        return got
+    got = dict(propose(tenant, texts))
+    got["source"] = how
+    got["derived_at"] = (dt.datetime.now(dt.timezone.utc)
+                         .isoformat(timespec="seconds"))
+    # `_summarise` (web.py) reads `pages_read` off the return to write the
+    # background status line, so a finished derive says what it READ rather
+    # than only that it finished — "read 6 pages, proposed nothing" and "the
+    # button did nothing" are different facts and must not look alike.
+    bits = how.split()
+    got["pages_read"] = (int(bits[1]) if len(bits) > 1 and bits[1].isdigit()
+                         else 0)
+    kb.set_brand(tenant, voice_proposed=got)
+    return got
+
+
+def proposed(tenant: str) -> dict:
+    """The stored voice proposal, or {} when none has been derived."""
+    row = kb.brand(tenant)
+    return dict((row.voice_proposed if row else None) or {})

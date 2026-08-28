@@ -284,6 +284,20 @@ durable fix was the same shape: stop asserting the property, start testing it.
 
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-28 — Brand, the last tab of step 4: the voice deriver came OFF the
+  page request (`voice.derive` behind `_run_bg`, proposal stored on
+  `KbBrand.voice_proposed` so it outlives the request that made it — 8ms
+  response where a site crawl plus a model call used to block); hard rules
+  became liftable, which required computing the writers FIRST — `ast` found a
+  second appender inside `systems.promote_rule`, and a second writer to a list
+  that can now shrink is a silent contradiction, so it delegates and `kb.py`
+  holds exactly one appender and one subtractor (`test_ban_list` computes
+  that claim rather than restating it); and the theme half stopped being able
+  to take the tab down with it — a stale Shopify credential used to remove the
+  identity editor, the hard rules and the source list, which are the controls
+  you would use to fix the account. Two defects found by previewing: 124px of
+  page overflow at phone width (`.tblwrap`, reused from Plan) and a redirect
+  that stranded `key=` in the URL fragment.
 - 2026-08-28 — the owner's walkthrough, five defects and their fixes:
   the artifact became self-describing (`ArtifactBody.meta`) after the blog
   review page rendered three empty boxes above a perfect preview AND

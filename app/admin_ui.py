@@ -13,9 +13,16 @@ from __future__ import annotations
 import contextvars
 import html
 import json
+import logging
 import re as _re
 
 from . import config, db, kb, systems, tenants
+
+#: The console renders; it does not normally log. The exception is a section
+#: that CONTAINS a failure so the rest of the page survives — the operator
+#: sees the message, and the traceback still has to reach the service log or
+#: the containment has traded a dead page for a silent one.
+log = logging.getLogger("admin_ui")
 
 #: The viewer's theme for THIS request. Set by `web.admin_ui` from the
 #: `gomeh_theme` cookie before any rendering; dark is the default and renders
@@ -479,6 +486,18 @@ font-family:var(--mono);font-size:.7rem;font-weight:700;padding:1px 7px;line-hei
 #: running. `test_pointers` holds writer labels to this tuple.
 BG_LABELS = (("harvest", "Harvest"), ("scan", "Compliance scan"),
              ("sync", "Catalogue sync"), ("email", "Sent mail"))
+
+#: Background actions the BRAND tab reports. Separate from the four above
+#: because those are the feeders that fill Review's queues and each carries
+#: its button in Review's Sources fold — a voice derive fills no queue, and a
+#: state reported where its control is not is exactly what rule 1 forbids. It
+#: is the same vocabulary, viewed by the tab that owns the action.
+BG_BRAND_LABELS = (("voice", "Voice derive"),)
+
+#: Every label `_run_bg` may write under. `test_pointers` holds the writers to
+#: THIS, so a new background action must be named by the surface that reports
+#: it before it can be started at all.
+BG_ALL_LABELS = BG_LABELS + BG_BRAND_LABELS
 
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("brand", "Brand", "❖"),
@@ -3178,6 +3197,13 @@ _BRAND_CSS = """<style>
    check. They grow to share the row and wrap on a phone. */
 .src-cell{flex:1 1 15rem;min-width:0}
 .src-cell input{width:100%;box-sizing:border-box;padding:5px}
+/* A hard rule is a chip you can OPEN. Inline-block so the rules still read
+   as a row of chips rather than a stack of disclosure widgets, and the
+   marker is hidden because the chip itself is the affordance. */
+.hardrule{display:inline-block;margin:0 6px 6px 0;vertical-align:top}
+.hardrule>summary{list-style:none;cursor:pointer}
+.hardrule>summary::-webkit-details-marker{display:none}
+.hardrule[open]{display:block;border:1px solid var(--rule);border-radius:6px;padding:6px 8px}
 </style>"""
 
 
@@ -3202,11 +3228,29 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     were the intake kernel and two blank set-forms in a fold ("how does that
     make sense?" — it didn't; the fossil of the interview-first era). Brand
     now owns identity, edit-in-place and prefilled; Knowledge keeps what is
-    TRUE and sayable. `derive_voice` runs the voice proposer against the
-    client's own site — banned-claims-filtered, verbatim exemplars, and it
-    WRITES NOTHING: `set_brand` via the form remains the only way a voice
-    lands. Like Connections, the forms write to a single account, so the
-    cross-account view refuses to offer them.
+    TRUE and sayable. The voice proposer runs against the client's own site —
+    banned-claims-filtered, verbatim exemplars — and it WRITES NO VOICE:
+    `set_brand` via the form remains the only way one lands. Like
+    Connections, the forms write to a single account, so the cross-account
+    view refuses to offer them.
+
+    Three things changed 2026-08-28, each a way this page could fail a person
+    who came here to fix something:
+
+    · **The derive moved off the request** (`/admin/brand_voice_derive` →
+      `_run_bg("voice", …)`). It used to crawl the site and call the model
+      inside this GET; the proposal now outlives the request on
+      `KbBrand.voice_proposed` and this renders it. `derive_voice` survives
+      as a parameter that opens the panel and starts nothing, so the old URL
+      does not 404.
+    · **Hard rules can be LIFTED.** The list could be added to and never
+      subtracted from, so a rule typed by mistake was permanent unless you
+      edited the database. Each rule folds open to its own lift, stating the
+      consequence, and what was lifted is listed with the way back.
+    · **The theme half is contained.** A theme that would not read used to
+      REPLACE this whole tab with one sentence — taking the identity editor,
+      the rules and the source list with it, which are the controls you would
+      reach for to fix the account.
     """
     from . import brand_theme
     tenant, t, _rows = _account(tenant)
@@ -3216,12 +3260,31 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                                        "approved one account at a time — these "
                                        "forms write to a single client, so "
                                        "pick one in the sidebar."))
-    st = brand_theme.status(tenant)
-    if not st.get("ok"):
-        return _shell(key, "brand", "Brand", tenant=tenant, head=_BRAND_CSS,
-                      body=f'<div class="note">{_esc(st.get("error", ""))}</div>')
-    prop = brand_theme.proposed(tenant)
-    live = brand_theme.live_theme(tenant)
+    # THE THEME HALF IS CONTAINED. It used to be the first thing this
+    # function did, and a not-ok status REPLACED the entire tab with one
+    # sentence — so a Shopify credential going stale, or a corrupt theme
+    # blob, took the identity editor, the hard rules and the source list down
+    # with it. Those are the controls you would reach for to FIX the account,
+    # and they have nothing to do with the theme. `status` is also called
+    # here for the first time in the request, so a raise inside it (or inside
+    # the derived-theme JSON) 500ed the page rather than degrading.
+    #
+    # Now: identity, sources and rules always render; whatever the theme says
+    # about itself lands in the theme cards, as a note, in its own half.
+    theme_err = ""
+    st: dict = {}
+    prop: dict = {}
+    live: dict = {}
+    try:
+        st = brand_theme.status(tenant)
+        if not st.get("ok"):
+            theme_err = str(st.get("error", "") or "the theme could not be read")
+        else:
+            prop = brand_theme.proposed(tenant)
+            live = brand_theme.live_theme(tenant)
+    except Exception as exc:                                     # noqa: BLE001
+        log.exception("brand theme unreadable for %s", tenant)
+        theme_err = f"{exc.__class__.__name__}: {exc}"
     note = (f'<div class="ok">{_esc(msg)}</div>' if msg else "") + \
            (f'<div class="note">{_esc(err)}</div>' if err else "")
     if note:
@@ -3231,24 +3294,97 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     b = kb.brand(tenant)
     voice_d = (b.voice or {}) if b else {}
     banned = (b.banned_claims or []) if b else []
-    banned_chips = "".join(f'<span class="chip off">{_esc(p)}</span>'
-                           for p in banned) or \
+
+    # EVERY RULE CARRIES ITS OWN LIFT. The list could be added to and never
+    # subtracted from: a phrase typed by mistake, or one that stopped being
+    # true, was permanent, and the only way out was editing the database by
+    # hand — which is a fix instruction that is not on the surface, i.e. the
+    # defect rule 1 names. Folded and consequence-stated, the same shape as
+    # `_remove_control`, because lifting a rule un-blocks drafts silently
+    # from the next generation onward and a bare × beside each chip is an
+    # invitation to do that by accident.
+    def _rule_row(phrase: str) -> str:
+        return f"""
+      <details class="sec hardrule">
+        <summary><span class="chip off">{_esc(phrase)}</span></summary>
+        <p class="mut">Lifting this stops the validator blocking drafts that
+        contain &ldquo;{_esc(phrase)}&rdquo;. Nothing already published
+        changes; everything written from now on may say it. It is recorded
+        below as lifted, and adding it back restores it.</p>
+        <form method="post" action="/admin/brand_update" class="row">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="drop_banned" value="{_esc(phrase)}">
+          <button class="sec">Lift this rule</button>
+        </form>
+      </details>"""
+
+    banned_chips = "".join(_rule_row(p_) for p_ in banned) or \
         '<span class="mut">none — the validator has nothing to enforce, and ' \
         'campaign emails will not validate until at least one exists</span>'
 
+    # What was taken out, and the way back. Without this the tab would show a
+    # shorter list and nothing to say why it got shorter — the same silence
+    # that made an un-removable list feel safe in the first place.
+    lifted = kb.lifted_claims(tenant)
+    lifted_block = ""
+    if lifted:
+        rows = "".join(f"""
+      <div class="conn-site">
+        <span><span class="chip">{_esc(x.get("phrase", ""))}</span>
+          <span class="when">lifted {_esc((x.get("at") or "")[:16].replace("T", " "))}
+          by {_esc(x.get("by") or "owner")}</span></span>
+        <form method="post" action="/admin/brand_update" class="row">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="add_banned" value="{_esc(x.get("phrase", ""))}">
+          <!-- "Restore this rule", not "Restore": the claims queue already
+               has a bare Restore button and a control named only by its verb
+               says nothing about what comes back. It also keeps
+               `claim_restore_has_a_surface`'s anchor unambiguous, which is
+               how this collision was found. -->
+          <button class="sec">Restore this rule</button>
+        </form>
+      </div>""" for x in reversed(lifted))
+        lifted_block = f"""
+  <details class="sec" style="margin-top:8px">
+    <summary class="mut">Lifted rules ({len(lifted)}) &mdash; no longer
+    enforced</summary>
+    <p class="mut" style="margin-top:6px">These were hard rules and are not
+    any more. Nothing was deleted; restoring one puts it straight back in
+    front of every draft.</p>{rows}
+  </details>"""
+
+    # THE PROPOSAL IS READ, NOT COMPUTED. This block used to crawl the site
+    # and call the model inside the page request — six pages, capped there
+    # only because someone was watching the tab wait. It runs behind
+    # `_run_bg` now (`/admin/brand_voice_derive` → `voice.derive`), stores on
+    # `KbBrand.voice_proposed`, and this renders whatever is stored plus the
+    # background state, so the three outcomes look different from each other:
+    # running, finished with a proposal, failed with a reason. `derive_voice`
+    # survives as a URL parameter that opens the panel — the old GET must not
+    # 404 — but it no longer starts anything.
+    from .web import bg_status as _bg_status
+    from . import voice as vc
+    vstate = _bg_status("voice", tenant)
+    got = vc.proposed(tenant)
+    running = vstate.get("state") == "running"
+    when = _esc((vstate.get("at") or "")[:16].replace("T", " "))
+    if running:
+        vnote = ('<div class="ok">Reading their site now. This takes about a '
+                 'minute on a cold site; refresh and the proposal appears '
+                 'below.</div>')
+    elif vstate.get("state") == "failed":
+        vnote = (f'<div class="note"><strong>The derive failed</strong> '
+                 f'{when} &mdash; {_esc(vstate.get("detail", ""))}</div>')
+    else:
+        vnote = ""
+
     voice_prop = ""
-    if derive_voice:
-        from . import voice as vc
-        # Six pages, not fifteen: this runs INSIDE the page request, and a
-        # sequential crawl plus a model call has to come back while the
-        # person is still watching the tab. Six pages of a brand's own copy
-        # is plenty to hear a voice in.
-        texts, how = vc.gather(tenant, limit=6)
-        if not texts:
-            voice_prop = (f'<div class="note">Could not read the site to '
-                          f'derive a voice: {_esc(how)}</div>')
+    if got or vnote:
+        if got.get("error"):
+            body = f'<div class="note">{_esc(str(got["error"]))}</div>'
+        elif not got:
+            body = ""
         else:
-            got = vc.propose(tenant, texts)
             tone_s = ", ".join(str(x) for x in (got.get("tone") or []))
             pos = str(got.get("positioning") or "")
             elev = str(got.get("elevator") or "")
@@ -3280,10 +3416,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
             adopts = " + ".join(x for x, v in (("tone", tone_s),
                                                ("positioning", pos),
                                                ("elevator", elev)) if v)
-            voice_prop = f"""
-      <div class="card">
-        <div class="head"><h2>Read off their own site</h2>
-          <span class="mut">{_esc(str(got.get("source") or how))}</span></div>
+            body = f"""
         <p class="mut"><b>Nothing was written.</b> A proposal from what the
         brand has already published — banned phrases filtered out, quotes
         verbatim, and the positioning may assert only what the copy asserts.
@@ -3297,9 +3430,16 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
           <button class="sec">Adopt proposal ({adopts})</button>
           <span class="mut">saves only the fields shown; everything else
           stays as set</span>
-        </form>''' if adopts else ''}
+        </form>''' if adopts else ''}"""
+        derived = _esc(str(got.get("derived_at") or "")[:16].replace("T", " "))
+        voice_prop = f"""
+      <div class="anchor" id="voice"></div>
+      <div class="card">
+        <div class="head"><h2>Read off their own site</h2>
+          <span class="mut">{_esc(str(got.get("source") or ""))}
+          {("· derived " + derived) if derived else ""}</span></div>
+        {vnote}{body}
       </div>"""
-
     identity = f"""
 <div class="anchor" id="identity"></div>
 <div class="card">
@@ -3327,17 +3467,19 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
        does nothing in most browsers, which is exactly how the owner found
        it: "I pressed it and it's not populating." A control that cannot
        fire is worse than a missing one, because it reads as broken. -->
-  <form method="get" action="/admin/ui" class="row" style="margin-top:8px">
+  <form method="post" action="/admin/brand_voice_derive" class="row"
+        style="margin-top:8px">
     <input type="hidden" name="key" value="{_esc(key)}">
-    <input type="hidden" name="tab" value="brand">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">
     <input type="hidden" name="derive_voice" value="1">
-    <button class="sec">Derive voice from the site</button>
-    <span class="mut">reads a few of their published pages and proposes below —
-    takes ~20 seconds, writes nothing</span>
+    <button class="sec">{"Reading the site…" if running else "Derive voice from the site"}</button>
+    <span class="mut">reads a few of their published pages and proposes below.
+    It runs in the background and writes nothing — the page comes straight
+    back and the proposal appears when it lands.</span>
   </form>
   <div style="margin-top:10px"><span class="mut">Hard rules the validator
-  enforces — a draft containing one is BLOCKED, never softened:</span></div>
+  enforces — a draft containing one is BLOCKED, never softened. Open one to
+  lift it:</span></div>
   <div class="chips">{banned_chips}</div>
   <form class="row" method="post" action="/admin/brand_update"
         style="align-items:center;gap:8px">
@@ -3345,6 +3487,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     <input name="add_banned" placeholder="add a phrase the validator must reject">
     <button class="sec">Add hard rule</button>
   </form>
+  {lifted_block}
 </div>
 {voice_prop}"""
 
@@ -3400,8 +3543,18 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
   </form>
 </div>"""
 
-    # The live half: what customers' emails render with today.
-    if live:
+    # The live half: what customers' emails render with today. When the theme
+    # could not be read at all, BOTH theme cards say so and say what still
+    # works — the identity above it is unaffected and editable, which is the
+    # point of containing this rather than replacing the page with it.
+    if theme_err:
+        live_body = (f'<div class="note"><strong>The theme could not be read'
+                     f'</strong> &mdash; {_esc(theme_err)}<br>'
+                     f'<span class="mut">Identity, sources and hard rules '
+                     f'above are unaffected and still editable. Campaign '
+                     f'emails stay marked not-yet-sendable while this is '
+                     f'true.</span></div>')
+    elif live:
         gaps = st.get("live_gaps") or []
         meta = live.get("_meta") or {}
         state = (('<span class="mut">still not sendable: '
@@ -3420,7 +3573,10 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     # The proposed half: what the deriver found, and where every field came
     # from. Provenance is the review — the owner is signing off SOURCES, not
     # just colours.
-    if prop.get("theme"):
+    if theme_err:
+        prop_body = ('<p class="mut">Nothing can be proposed until the theme '
+                     'reads — the error is named on the card above.</p>')
+    elif prop.get("theme"):
         src_rows = "".join(
             f"<tr><td><code>{_esc(p)}</code></td><td>{_esc(s)}</td></tr>"
             for p, s in sorted((prop.get("sources") or {}).items()))
@@ -3436,8 +3592,14 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                + _esc("; ".join(prop.get("gaps") or [])) + "</span>"
                if prop.get("gaps") else "")
             + "</p>"
-            + f'<table class="bt-table"><tr><th>field</th><th>came from</th>'
-              f"</tr>{src_rows}</table>"
+            # `.tblwrap` — the Plan tab's answer to the same problem, reused
+            # rather than re-invented. Both tables here are two columns of
+            # prose and a URL; at 375px they pushed the whole PAGE 124px wide,
+            # so every card scrolled sideways to accommodate a table nobody
+            # was reading. Found previewing the Brand tab, 2026-08-28.
+            + f'<div class="tblwrap"><table class="bt-table">'
+              f"<tr><th>field</th><th>came from</th>"
+              f"</tr>{src_rows}</table></div>"
             + (f'<p><b>Sources not consulted</b> — each names its fix:</p>'
                f"<ul>{unavailable}</ul>" if unavailable else "")
             + (f"<ul>{partial}</ul>" if partial else "")
@@ -3460,7 +3622,11 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                    f"<td><input type='text' name='{path}' "
                    f"value='{_esc(node)}'></td></tr>")
     keyfield = f'<input type="hidden" name="key" value="{_esc(key)}">'
-    actions = f"""
+    # A control that can only fail teaches distrust of every control (the
+    # Sources block's own rule about a store-sync button with no store). With
+    # the theme unreadable, Derive and Approve can do nothing but error, so
+    # they are not offered — the reason is on the card instead.
+    actions = "" if theme_err else f"""
 <form method="post" action="/admin/brand_theme/derive" style="margin:10px 0">
   {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
   <button>Derive from Canva / Shopify / site</button>
@@ -3471,7 +3637,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
 and hand-set fields survive future re-derives.</p>
 <form method="post" action="/admin/brand_theme/approve" class="bt-form">
   {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
-  <table class="bt-table">{inputs}</table>
+  <div class="tblwrap"><table class="bt-table">{inputs}</table></div>
   <p><button>Approve — this look ships</button></p>
 </form>"""
 

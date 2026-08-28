@@ -24,12 +24,9 @@ was verified at `/health` before the next began. Read §4's step entries for
 the detail — this is the map.
 
 **Step 4, tab by tab (spec §§4–11).** Data layer · Connections · Review ·
-Systems + workflow · Plan are SHIPPED. Remaining: **Brand (§6)** — the
-identity editor and multi-domain source list already landed, so what is left
-is the voice deriver behind `_run_bg`, hard-rule REMOVAL (the ban list can be
-added to and never subtracted from), and theme-error containment — then
-**Assurance (§9)** and **Diagnostics (§10)**. Then step 5 (client product),
-step 6 (does Knowledge's Overview fold in), step 7 (completeness audit).
+Systems + workflow · Plan · **Brand** are SHIPPED. Remaining: **Assurance
+(§9)** and **Diagnostics (§10)**. Then step 5 (client product), step 6 (does
+Knowledge's Overview fold in), step 7 (completeness audit).
 
 | commit | what |
 |---|---|
@@ -45,7 +42,8 @@ step 6 (does Knowledge's Overview fold in), step 7 (completeness audit).
 | `a3ad78d` | A live draft is not an unanswered thread |
 | `99a8ddd` | The queues name the thing; `reconcile_mail` on demand |
 | `cec1ad1` | Documentation catches up with the session |
-| _next_ | The writer I missed — campaign artifacts carry identity too |
+| `a4daed8` | Turn the claim into a check |
+| _next_ | Brand — the derive comes off the request, and a rule can be lifted |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1113,6 +1111,83 @@ rail, limit control, orphan adopt/archive, cost off the default view).
   smoke + demo click-through of every sub-view and empty state.
 - **Checkpoint per tab:** owner walkthrough, same protocol as 2026-08-23;
   next tab does not start until this one passes.
+
+**4·Brand BUILT + SHIPPED 2026-08-28 (spec §6).** The last three things
+the tab was missing, each of them a way the page could fail the person who
+came to it to FIX something.
+
+THE DERIVE CAME OFF THE REQUEST. `render_brand` crawled the site and called
+the model inside its own GET — the code said so and capped the read at six
+pages for exactly that reason ("this runs INSIDE the page request … has to
+come back while the person is still watching the tab"). Six pages of a cold
+site is still tens of seconds, which is the broken-button experience
+`_run_bg` exists to remove, one layer up from where it was already solved.
+NEW `voice.derive` runs behind `_run_bg("voice", …)` from a POST
+(`/admin/brand_voice_derive`) and the page returns in **8ms** measured on the
+demo. That is only possible if the proposal OUTLIVES the request that made
+it, so it is stored on a new `KbBrand.voice_proposed` — the same contract as
+`theme_proposed`, which the same tab already uses for the same reason, rather
+than a second mechanism for the same job. The panel now renders three
+distinguishable states (running · finished with a proposal · failed with its
+reason) instead of one blocking wait. **`derive_voice=1` still resolves** —
+it opens the panel and starts nothing — because a bookmark that 404s is
+fluidity rule 3 broken. IDENTITY STILL COMES FROM THE WEBSITE ONLY: `derive`
+delegates to `gather`, which reads `t.domain`, and
+`voice_reads_the_website_only` still guards that seam.
+
+HARD RULES CAN BE LIFTED — and the design work here was NOT the button. The
+ban list is the hard compliance boundary (for Baci it is the difference
+between "Italian-designed" and a made-in-Italy claim that is not true), and
+it could be added to and never subtracted from: a phrase typed by mistake was
+permanent unless somebody edited the database, which is a fix instruction
+living nowhere on the surface. THE PART THAT MATTERED: before adding a
+subtractor, the writers had to be COMPUTED. `ast` over `app/` found **two**
+appenders — `kb.add_banned` and a private copy inside `systems.promote_rule`
+— which is survivable while a list only grows and is a silent contradiction
+the moment it can shrink: promotion would re-enforce a phrase while the tab
+still listed it as lifted. `promote_rule` now delegates the mutation and
+keeps its own preconditions and wording, so every caller and every pinned
+string is unchanged, and `kb.py` holds exactly one appender and one
+subtractor. Lifting is not deleting: the phrase moves to a new
+`KbBrand.lifted_claims` with who and when, each enforced rule folds open to
+its own lift stating the CONSEQUENCE ("drafts containing it are no longer
+blocked"), and what was lifted is listed with the way back. Re-adding clears
+the lifted entry, because enforced and lifted are opposites and a rule listed
+as both states one fact twice in contradiction (rule 8).
+
+THE THEME HALF IS CONTAINED. `brand_theme.status()` was the first thing the
+renderer did and a not-ok result RETURNED a shell containing one sentence —
+so a stale Shopify credential removed the identity editor, the hard rules and
+the source list, which are precisely the controls you would reach for to fix
+the account. An exception inside it 500ed the tab outright, and an exception
+is the likely case: the theme is derived from three third-party sources. Now
+identity, sources and rules always render; the failure is named where the
+theme was, says what is unaffected, and the Derive/Approve buttons are
+withheld rather than offered as controls that could only fail.
+
+FOUND WHILE PREVIEWING, both fixed here because they are defects of the tab
+being shipped: (1) the Brand tab overflowed the PAGE by 124px at 375px width
+— `.bt-table` pushing every card sideways — fixed with `.tblwrap`, the Plan
+tab's existing answer, reused rather than re-invented; (2) my own redirect
+appended `key=` AFTER `#voice`, stranding the credential in the fragment
+where it is never sent — it survived a browser click only because the console
+session cookie was already carrying it. Both are pinned.
+
+NEW SUITE `test_ban_list.py` (23 checks), whose first three checks are the
+one-writer claim COMPUTED with `ast` rather than asserted (§6b). Guards, all
+three caught: `a_lifted_rule_stays_lifted`, `one_writer_owns_the_ban_list`,
+`the_theme_cannot_take_the_tab`. `test_brand_theme.py` grew the containment
+section and had its voice section RETARGETED with dated comments — it used to
+call `render_brand(derive_voice=True)` to *do* the derive; it now derives then
+renders, the same two steps in the same order as the console. `test_pointers`
+reads `BG_ALL_LABELS` (BG_LABELS stays Review's four feeders; a voice derive
+fills no queue and must not report itself where its control is not).
+`seed_demo` gives baci both rule states so the fold and the lifted list are
+clickable, and eien rules with nothing lifted so the quiet case is on screen.
+Verified on the demo: the real derive read 6 pages of bacimilanousa.com via
+sitemap and proposed measured tone with no model key (the degraded path), the
+lift/restore round trip, the containment with `status()` raising, and zero
+horizontal overflow at 375px and desktop.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

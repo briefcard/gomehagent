@@ -146,7 +146,11 @@ def main() -> int:
     text = (ROOT / "app" / "web.py").read_text()
     for m in re.finditer(r'_run_bg\(\s*"([a-z_ ]+)"', text):
         writers.add(m.group(1))
-    readers = {label for label, _name in admin_ui.BG_LABELS}
+    # 2026-08-28: retargeted from BG_LABELS to BG_ALL_LABELS when the voice
+    # derive moved behind `_run_bg`. BG_LABELS is Review's four feeders and
+    # stays that; the vocabulary every writer must draw from is the union, so
+    # a background action still cannot write under a label no surface reads.
+    readers = {label for label, _name in admin_ui.BG_ALL_LABELS}
     print(f"— bg labels: writers {sorted(writers)} · readers {sorted(readers)} —")
     ck("every background writer's label has a reader",
        writers <= readers, str(sorted(writers - readers)))

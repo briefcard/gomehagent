@@ -1368,9 +1368,24 @@ class KbBrand(Base):
     # every pre-existing row, so the migration needs no backfill.
     theme = Column(JSON, default=dict)
     theme_proposed = Column(JSON, default=dict)
+    # The voice deriver's latest read of the client's own site, awaiting the
+    # owner's adoption. Same contract as `theme_proposed` one field up and for
+    # the same reason: NOTHING generates from it — `voice` is the only thing
+    # any prompt sees, and it changes only when a person presses Adopt.
+    # It is stored rather than held in the request because the derive is a
+    # crawl plus a model call behind `_run_bg`, and a proposal that only
+    # exists inside the response that computed it cannot survive the wait.
+    voice_proposed = Column(JSON, default=dict)
     # Hard compliance boundary. The validator rejects any draft containing one
     # of these strings — see Baci's origin/handcraft rules. Never advisory.
     banned_claims = Column(JSON, default=list)
+    # Rules TAKEN OUT by hand: [{"phrase", "at", "by"}]. Lifting a hard rule
+    # is the most consequential edit on the Brand tab — drafts that were being
+    # blocked stop being blocked — so it leaves a record beside the list it
+    # changed rather than vanishing. `_remove_control`'s promise ("nothing is
+    # deleted") applies to a JSON list too, and re-adding the phrase clears
+    # the entry, because a rule that is enforced again is not a lifted one.
+    lifted_claims = Column(JSON, default=list)
     approval_policy = Column(JSON, default=dict)  # {auto_publish[], requires_signoff[]}
 
     # How selection reaches the thing this tenant actually sells. Without it the
