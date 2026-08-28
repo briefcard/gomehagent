@@ -2292,6 +2292,32 @@ SABOTAGES = [
                "The keyword layer knew the intent all along and the drafter "
                "was never told",
     },
+    {
+        "name": "the_title_is_a_title_not_the_query",
+        "file": "app/skill_pack.py",
+        "find": "    title = _h1_of(body)",
+        "replace": "    title = keyword[:1].upper() + keyword[1:]  # SABOTAGE",
+        "suites": ["test_blog.py", "test_seo_head.py"],
+        "why": "the article's Title and <title> tag go back to being the "
+               "capitalised SEARCH QUERY — 'Buy acrylic dinnerware' — while "
+               "the H1 the drafter was asked for is written into the body and "
+               "thrown away. It reads like a deliberate optimisation, which "
+               "is why it survived: nobody looks twice at a title that "
+               "contains the keyword",
+    },
+    {
+        "name": "a_targeting_title_is_left_alone",
+        "file": "app/skill_pack.py",
+        "find": "    if _targets_keyword(keyword, title) or keyword.lower() in title.lower():",
+        "replace": "    if keyword.lower() in title.lower():  # SABOTAGE",
+        "suites": ["test_seo_head.py"],
+        "why": "matching the query by exact substring again, so a title that "
+               "plainly targets it — 'Melamine and Acrylic Dinnerware, "
+               "Compared' for 'acrylic dinnerware sets' — is judged a miss, "
+               "gets the query stapled to the front, and then loses its "
+               "readable half to the 60-character trim. The reader sees the "
+               "search phrase followed by a fragment",
+    },
 ]
 
 

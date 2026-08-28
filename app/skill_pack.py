@@ -3398,6 +3398,13 @@ STRUCTURE: an H1 that is the article's title, then H2 sections whose headings
 are the sub-questions a reader actually has. Short paragraphs. Use an H3 + one
 paragraph for anything that is literally a question.
 
+THE H1 IS THE TITLE THAT SHIPS — it becomes the page title and the <title> tag,
+so write it for a person choosing what to click, and carry the target phrase
+inside it naturally. Under about 60 characters. Not the bare search query: "Buy
+acrylic dinnerware" is what the machine typed, not what a person would click.
+"Acrylic Dinnerware That Survives a Whole Summer Outside" carries the same
+words and is worth reading.
+
 GROUND EVERY FACTUAL ASSERTION in the approved claims you are given. If a claim
 does not cover something, write around it or leave it out. Never invent a
 statistic, a date, a material, a place of manufacture, or a superlative.
@@ -3526,24 +3533,83 @@ def _trim_words(text: str, limit: int) -> str:
     return text[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:-— ") + "…"
 
 
-def _seo_title(keyword: str, title: str) -> str:
-    """The <title> tag, ≤60 chars, CARRYING the target keyword.
+def _h1_of(body_html: str) -> str:
+    """The article's own H1, as text. `""` when it wrote none."""
+    import re as _re
+    m = _re.search(r"<h1[^>]*>(.*?)</h1>", body_html or "",
+                   _re.I | _re.S)
+    if not m:
+        return ""
+    return _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", "", m.group(1))).strip()
 
-    Deterministic on purpose (same reasoning as the description below).
-    The model's title wins when it already contains the phrase; otherwise
-    the keyword LEADS and the title follows — the query this page exists to
-    win is the one thing its title tag must not omit (owner, 2026-08-27:
-    "pre-fill Title, SEO, and Meta descriptions optimized to the target
-    keywords").
+
+def _targets_keyword(keyword: str, title: str) -> bool:
+    """Does this title already go after that query?
+
+    TOKEN COVERAGE, not an exact substring. "Melamine and Acrylic Dinnerware,
+    Compared" targets "acrylic dinnerware sets" — every content word is there
+    — and the old exact-match test said no, so a good human title was stuffed
+    with the query and then TRUNCATED AWAY by the 60-character trim. The
+    reader got the search phrase plus a fragment.
+
+    `keywords.tokens` is the vocabulary, not a second stemmer here: it is the
+    same predicate `keywords.cluster` uses to decide whether one phrase
+    contains another, so "targets it" means the same thing in the plan and in
+    the title tag.
+    """
+    from . import keywords as _kw
+    want, got = set(_kw.tokens(keyword)), set(_kw.tokens(title))
+    if not want:
+        return False
+    hit = want & got
+    if hit == want:
+        return True
+    # MOST, not all. A strict subset called "Melamine and Acrylic Dinnerware,
+    # Compared" a miss for "acrylic dinnerware sets" over the single word
+    # "sets", and then stapled the query onto a title that was plainly about
+    # it. Two thirds with at least two real words matched is generous enough
+    # to stop that and tight enough that one incidental shared word — "best",
+    # "miami" — does not count as targeting.
+    return len(hit) >= 2 and len(hit) * 3 >= len(want) * 2
+
+
+def _seo_title(keyword: str, title: str) -> str:
+    """The <title> tag, ≤60 chars, carrying the target query.
+
+    Deterministic on purpose (same reasoning as the description below), and
+    rewritten 2026-08-29 because the previous version produced exactly what
+    the owner described: it stapled the raw keyword to the front with an em
+    dash, so a page about melamine got
+
+        "Best melamine dinnerware vs acrylic — Which Dinnerware…"
+
+    — the query, then a truncated fragment of the human title. A title tag is
+    read by a person deciding whether to click; a stuffed one is skipped, and
+    Google rewrites it anyway.
+
+    The order now: keep the human title when it already targets the query
+    (token coverage, not substring); otherwise fit the query in ALONGSIDE it
+    rather than in place of it, trimming the title to make room instead of
+    letting the trim eat it; and when there is no room for both, keep the
+    HUMAN title — a page that ranks slightly worse and gets clicked beats one
+    that ranks and does not.
     """
     keyword = (keyword or "").strip()
     title = (title or "").strip()
     if not keyword:
         return _trim_words(title, 60)
-    if keyword.lower() in title.lower():
+    if not title:
+        return _trim_words(keyword[:1].upper() + keyword[1:], 60)
+    if _targets_keyword(keyword, title) or keyword.lower() in title.lower():
         return _trim_words(title, 60)
+    # Room for both? Trim the TITLE to fit beside the query, never the other
+    # way round — the old code trimmed the joined string, which is why the
+    # human half was the half that disappeared.
     lead = keyword[:1].upper() + keyword[1:]
-    return _trim_words(f"{lead} — {title}" if title else lead, 60)
+    room = 60 - len(lead) - 3           # " — "
+    if room >= 24:
+        return f"{lead} — {_trim_words(title, room)}"
+    return _trim_words(title, 60)
 
 
 def _meta_description(keyword: str, body_html: str) -> str:
@@ -3560,7 +3626,14 @@ def _meta_description(keyword: str, body_html: str) -> str:
     honestly: this page does not lead with the query).
     """
     import re as _re
-    text = _re.sub(r"<[^>]+>", " ", body_html or "")
+    # DROP THE H1 FIRST. Stripping every tag and taking the opening text made
+    # the description begin with the title — "A Summer Table There is a
+    # certain kind of evening…" — so the snippet spent its first words
+    # repeating the line directly above it in the result. The title and the
+    # description are two pieces of real estate, not one said twice (rule 8).
+    body_html = _re.sub(r"<h1[^>]*>.*?</h1>", " ", body_html or "",
+                        flags=_re.I | _re.S)
+    text = _re.sub(r"<[^>]+>", " ", body_html)
     text = _re.sub(r"\s+", " ", text).strip()
     if not text:
         return ""
@@ -3698,12 +3771,39 @@ def _run_blog_article(ctx: Context) -> dict:
                  f"article would rank worse than no article.")
         return {"summary": f"not drafted ({why_not})", "keyword": keyword}
 
-    title = keyword[:1].upper() + keyword[1:]
+    # THE MODEL'S OWN H1 IS THE TITLE. This line used to be
+    # `title = keyword[:1].upper() + keyword[1:]` — the article's Title was
+    # set to the capitalised SEARCH QUERY and the H1 the drafter had been
+    # explicitly asked for ("an H1 that is the article's title",
+    # `_ARTICLE_SYSTEM`) was written into the body and never read. `_seo_title`
+    # then saw the keyword already "in" the title, returned it unchanged, and
+    # both fields shipped as the raw query. Owner, 2026-08-29: "you just put
+    # in the keyword instead of optimizing with a human-facing name that
+    # incorporates the optimized keywords."
+    title = _h1_of(body)
+    if not title:
+        # No H1 came back. Say so rather than silently falling back to the
+        # query, which is how this stayed invisible: a title tag that IS the
+        # search phrase is the worst result a SERP can carry, and it looked
+        # like a deliberate optimisation.
+        title = keyword[:1].upper() + keyword[1:]
+        ctx.note("the draft returned no H1, so the title falls back to the "
+                 "keyword itself — edit it in the workroom before publishing; "
+                 "a title tag that is the bare search phrase reads as spam "
+                 "and wins no clicks")
     faqs = [{"question": q, "answer": ""} for q in questions]
     # WHAT THIS ARTICLE IS, on the artifact itself. These three were computed
     # here, handed to `_propose`, and then existed only inside the approval
     # payload — so the review page went blank the moment that approval stopped
     # being pending, and an edit made in that state was silently dropped.
+    if title and not _targets_keyword(keyword, title) \
+            and keyword.lower() not in title.lower():
+        # ACT WHERE YOU REPORT: the workroom is where a title is edited, and
+        # this is the run that knows. Better than silently stuffing the query
+        # in, which is what used to happen and what made the output unusable.
+        ctx.note(f"the title does not carry {keyword!r} — it reads well but "
+                 f"the target phrase is only in the body. Reword it in the "
+                 f"workroom if the ranking matters more than the click")
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",
              fmt="cms_article",
