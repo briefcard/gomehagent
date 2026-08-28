@@ -53,6 +53,18 @@ OUT OF BAND entries at the end of §4. One of them corrected a diagnosis of
 mine that was wrong (see A LIVE DRAFT IS NOT AN UNANSWERED ONE); the owner
 pushing back on it is what found the real bug.
 
+**THE PATTERN THE OWNER NAMED (2026-08-28), recorded in
+SYSTEMS-REFERENCE §6b:** three times in this session something was DECLARED
+done and was not — "drafts are named in all systems" (two of three
+`ArtifactBody` writers), "the guards are green" (one had gone stale in a
+shipped commit), "those emails are draftless" (they were not). Each time the
+durable fix was the same shape: **turn the claim into a check.** A claim
+about EVERY instance has to be computed from the code — `ast` over the
+writers, the anchor sweep over the guards — because the instance you did not
+think of is precisely the one that is broken. Two suites in this file's
+history exist for that reason alone, and both caught something within hours
+of being written.
+
 **Standing debts, none of them silent:**
 - Three sabotage entries are STALE and carried in `test_sabotage_anchors`'s
   dated `KNOWN_STALE` set: `drafted_is_not_published`,

@@ -250,6 +250,38 @@ the WEBSITE and the only identity source — landing pages
 
 ---
 
+## 6b. TURN THE CLAIM INTO A CHECK (the day's most expensive lesson)
+
+Named by the owner, 2026-08-28, after it happened three times in one session.
+Each time the agent DECLARED something done and it was not, and each time the
+durable fix was the same shape: stop asserting the property, start testing it.
+
+| the claim | how it was false | the check that replaced it |
+|---|---|---|
+| "drafts are named in all systems" | two of THREE `ArtifactBody` writers were fixed; the campaign writer keeps its own row and was never audited | `test_artifact_identity` parses `app/*.py` with `ast` and fails if any construction omits `meta` |
+| "the guards are green" | a Schedule rewrite left `a_dateless_plan_is_not_scheduled` pinned to code that no longer existed — in a SHIPPED commit | `test_sabotage_anchors` fails when any anchor stops matching EXACTLY once |
+| "those emails are draftless" | they were not; triage-drafted replies carry a `draft_id`, and the real bug was elsewhere entirely | the owner pushed back — the only check that caught this one |
+
+**The rules that fall out of it:**
+
+1. **A claim about EVERY instance must be computed, not surveyed.** "All the
+   writers", "every tab", "each system" — if the set is not derived from the
+   code, the one you did not think of is the one that is broken. Read the
+   source (`ast`) or the schema, never your memory of it.
+2. **Verification that only runs when someone remembers is not verification.**
+   The sabotage harness reported STALE loudly and nobody ran it for a week.
+   The cheap half — is the anchor still there — belongs in the suite that runs
+   every time.
+3. **A test that passes against emptiness proves nothing** (rule 11), and a
+   test that exercises only the paths you already know about proves only those.
+   Prefer a check over the POPULATION to a check over your examples.
+4. **When the owner contradicts a diagnosis, investigate before defending.**
+   The one defect here that no automated check would ever have found was found
+   by the owner saying "but I have been seeing drafts in Gmail". Re-read the
+   code with their observation as the premise.
+
+---
+
 ## 7. Solidify log (recent, newest first)
 
 - 2026-08-28 — the owner's walkthrough, five defects and their fixes:
