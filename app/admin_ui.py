@@ -1729,8 +1729,14 @@ def _pending_for_system(row, limit: int = 300) -> list:
                         db.Approval.status == "pending")
                 .order_by(db.Approval.created_at.desc()).limit(limit).all())
         s.expunge_all()
+    from . import approvals as _apm
     return [a for a in rows
-            if a.system_id == row.id or (a.run_id and a.run_id in run_ids)]
+            if (a.system_id == row.id or (a.run_id and a.run_id in run_ids))
+            # Same predicate as the console queue, the waiting pill and the
+            # briefing (2026-08-27). A drafted reply is answered in the
+            # mailbox, so counting it here made this system's "waiting on
+            # you" disagree with every other surface that says the phrase.
+            and _apm.decided_in_console(a)]
 
 
 def _shipped_runs(row, days: int = 0, limit: int = 0) -> list:
@@ -1745,100 +1751,130 @@ def _shipped_runs(row, days: int = 0, limit: int = 0) -> list:
     return rows[:limit] if limit else rows
 
 
+def _board_counts(rows: list) -> dict:
+    """Every board row's work strip, in TWO queries for the whole page.
+
+    The per-card version asked the database five times per system — and two
+    of those (`stats`, `_shipped_runs`) loaded that system's ENTIRE run
+    history, with `_measured` loading it a third time. On the all-accounts
+    view that multiplied by five clients (spec §8 names it: "its per-card
+    queries multiply by every installed system").
+
+    So the page asks once: one pass over the runs belonging to the systems
+    actually being rendered, one over this page's pending approvals. Each
+    number is still computed from the same rows the workflow view lists, so
+    a count and its list cannot disagree (design rule 8).
+    """
+    import datetime as _dt
+    from . import approvals as _apm
+
+    ids = [r.id for r in rows]
+    out = {i: {"planned": 0, "waiting": 0, "week": 0,
+               "measured": 0, "as_is": 0} for i in ids}
+    if not ids:
+        return out
+    week_ago = db.utcnow() - _dt.timedelta(days=7)
+    tenants_on_page = {r.tenant for r in rows}
+
+    with db.SessionLocal() as s:
+        runs = (s.query(db.SystemRun)
+                .filter(db.SystemRun.system_id.in_(ids)).all())
+        pend = (s.query(db.Approval)
+                .filter(db.Approval.tenant.in_(list(tenants_on_page)),
+                        db.Approval.status == "pending").all())
+        s.expunge_all()
+
+    run_owner = {r.id: r.system_id for r in runs}
+    for r in runs:
+        c = out.get(r.system_id)
+        if c is None:
+            continue
+        if r.stage == systems.PLANNED:
+            c["planned"] += 1
+            continue
+        if (r.edit_diff or "").strip():
+            c["measured"] += 1
+            try:
+                if json.loads(r.edit_diff).get("as_is"):
+                    c["as_is"] += 1
+            except (ValueError, AttributeError):
+                pass
+        if r.stage in ("sent", "approved") and r.decision != "denied":
+            if db.as_utc(r.finished_at or r.created_at) >= week_ago:
+                c["week"] += 1
+
+    for a in pend:
+        if not _apm.decided_in_console(a):
+            continue           # answered in the mailbox, not here
+        owner = a.system_id if a.system_id in out else run_owner.get(a.run_id)
+        if owner in out:
+            out[owner]["waiting"] += 1
+    return out
+
+
 def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0) -> str:
+    """A link into one system's workflow view.
+
+    `anchor` names both the sub-view and the in-page anchor, because the four
+    it is ever called with — planned, waiting, shipped, measured — were the
+    old stacked page's anchor ids and are now the rail's keys. Emitting both
+    means every existing link keeps working and lands on the right tab
+    (fluidity rule 3: URLs and params never break).
+    """
     url = (f"/admin/ui?key={_esc(key)}&amp;tab=systems"
            f"&amp;tenant={_esc(row.tenant)}&amp;system={_esc(row.key)}")
+    if anchor:
+        url += f"&amp;wf={anchor}"
     if ppage and ppage > 1:
         url += f"&amp;ppage={ppage}"
     return url + (f"#{anchor}" if anchor else "")
 
 
-def _work_strip(key: str, row) -> str:
+def _work_strip(key: str, row, c: dict | None = None) -> str:
     """One line of state per system: what is queued, waiting, shipped, kept.
 
     Counts, each linking into the section of the system's own view that
     holds the rows behind it — state first, and the click lands on the work
     rather than on an explanation of it.
+
+    `c` is this system's row from `_board_counts`, so a board of N systems
+    costs two queries rather than five per card. Without it the strip still
+    asks for itself, which is what the single-system workflow view wants.
     """
+    if c is None:
+        c = _board_counts([row])[row.id]
     bits: list[str] = []
     if systems.plan_capable(row.key):
-        n = len(systems.plans(row.tenant, row.key))
         bits.append(f'<a href="{_sysview_url(key, row, "planned")}">'
-                    f'<b>{n}</b> planned</a>')
-    waiting = len(_pending_for_system(row))
+                    f'<b>{c["planned"]}</b> planned</a>')
     bits.append(f'<a href="{_sysview_url(key, row, "waiting")}">'
-                f'<b>{waiting}</b> waiting on you</a>')
-    week = len(_shipped_runs(row, days=7))
+                f'<b>{c["waiting"]}</b> waiting on you</a>')
     bits.append(f'<a href="{_sysview_url(key, row, "shipped")}">'
-                f'<b>{week}</b> shipped this week</a>')
-    m = _measured(row)
-    if m["measured"]:
+                f'<b>{c["week"]}</b> shipped this week</a>')
+    if c["measured"]:
         bits.append(f'<a href="{_sysview_url(key, row, "measured")}">'
-                    f'<b>{m["as_is"]} of {m["measured"]}</b> sent as-is</a>')
+                    f'<b>{c["as_is"]} of {c["measured"]}</b> sent as-is</a>')
     return '<div class="workstrip">' + " · ".join(bits) + "</div>"
 
 
-def _system_card(key: str, row) -> str:
-    r = systems.ready(row)
-    st = systems.stats(row.id)
-    nxt = systems.can_promote(row)
+def _system_toggle(key: str, row, r: dict) -> str:
+    """ONE CONTROL THAT SHOWS THE STATE AND CHANGES IT (owner, 2026-08-23).
 
-    # THREE states, not two. A system that cannot reach its connection is
-    # blocked; a system missing knowledge or a contract now PRODUCES, thinly,
-    # and calling that "blocked" would have the console contradicting the
-    # worker -- which is running it every tick.
-    if r["ready"]:
-        gate = ('<div class="ok">Ready. Everything it needs is connected and '
-                'the contract is complete.</div>')
-    elif not r["can_produce"]:
-        items = "".join(_blocker_li(key, row.tenant, b) for b in r["impossible"])
-        gate = ('<div class="note"><strong>Blocked &mdash; it cannot run at '
-                'all.</strong><ul class="bl">' + items + '</ul>'
-                '<div class="mut">A connection is missing. Nothing else stops '
-                'a system producing.</div></div>')
-    else:
-        items = "".join(f"<li>{_esc(b)}</li>" for b in r["thin"])
-        gate = ('<div class="note"><strong>Running thin.</strong> It produces, '
-                'and says on every output what it was working without:'
-                '<ul class="bl">' + items + '</ul>'
-                '<div class="mut">These gate GOING LIVE, not producing. Each '
-                'one is filed as a knowledge task when a run hits it.</div>'
-                '</div>')
+    This was two different buttons that swapped places — "Switch on" when
+    off, "Pause" when on — so the same pixel meant opposite things and the
+    only way to know the state was to read the label of the thing that would
+    change it. And when a system could not go live, NEITHER rendered, so the
+    page fell silent exactly where it needed to explain itself.
 
-    if nxt["can"]:
-        promo = (f'<a href="/admin/system_promote?key={_esc(key)}&amp;id={_esc(row.id)}">'
-                 f'<button type="button">Promote to {_esc(nxt["target"].replace("_", " "))}</button></a>')
-    elif nxt["target"]:
-        promo = f'<span class="mut">Next rung ({_esc(nxt["target"].replace("_", " "))}): {_esc(nxt["why"])}</span>'
-    else:
-        promo = '<span class="mut">Top of the ladder.</span>'
+    The route and its semantics are unchanged: a system that is not ready
+    still cannot be switched on. What changes is that the refusal is now
+    visible and says why, instead of being an absence.
 
-    # THE LADDER GOES DOWN TOO. The nightly sweep has always advised "work
-    # them or turn the system down a rung" for a swollen queue — and only
-    # Promote existed, so the advice named a control the console did not
-    # have. One tap, one rung, through the same system_set that already
-    # accepts `autonomy`; the promote gate does not apply because LESS
-    # autonomy needs no earning.
-    _l = list(systems.AUTONOMY)
-    _cur = (row.autonomy or "shadow")
-    if _cur in _l and _l.index(_cur) > 0:
-        _down = _l[_l.index(_cur) - 1]
-        promo += (f' <a href="/admin/system_set?key={_esc(key)}'
-                  f'&amp;id={_esc(row.id)}&amp;autonomy={_esc(_down)}'
-                  f'&amp;tenant={_esc(row.tenant)}">'
-                  f'<button class="sec" type="button">Down a rung '
-                  f'({_esc(_down.replace("_", " "))})</button></a>')
-
-    # ONE CONTROL THAT SHOWS THE STATE AND CHANGES IT (owner, 2026-08-23).
-    # This was two different buttons that swapped places — "Switch on" when
-    # off, "Pause" when on — so the same pixel meant opposite things and the
-    # only way to know the state was to read the label of the thing that would
-    # change it. And when a system could not go live, NEITHER rendered, so the
-    # page fell silent exactly where it needed to explain itself.
-    #
-    # The route and its semantics are unchanged: a system that is not ready
-    # still cannot be switched on. What changes is that the refusal is now
-    # visible and says why, instead of being an absence.
+    Extracted in step 4 (spec §8: "one toggle convention everywhere") because
+    the workflow view still rendered the OLD pair of buttons — two opposite
+    labelling conventions for one operation, one click apart. Both surfaces
+    call this now, so there is one component and one vocabulary.
+    """
     on = row.status == "live"
     if on:
         live = (f'<a class="tog on" title="Live — click to pause" '
@@ -1854,35 +1890,65 @@ def _system_card(key: str, row) -> str:
         why = "; ".join(r["impossible"] or r["thin"])[:120] or "it is not ready"
         live = (f'<span class="tog dis" title="{_esc(why)}">'
                 f'<span class="tr"><span class="kn"></span></span>OFF</span>')
+    return live
 
+
+def _gate_chip(key: str, row, r: dict) -> str:
+    """The gate as ONE chip on the board — Ready, Blocked (first reason), or
+    Running thin.
+
+    THREE states, not two (design rule 2). A system that cannot reach its
+    connection is blocked; a system missing knowledge or a contract now
+    PRODUCES, thinly, and calling that "blocked" would have the console
+    contradicting the worker, which is running it every tick.
+
+    The board carries the verdict and the FIRST reason — enough to know
+    whether to go in. The full list, each blocker with its own fix link,
+    lives in the workflow view where the work is (spec §8: everything but
+    identity, toggle, description, gate, strip and the link moves there).
+    """
+    if r["ready"]:
+        return '<span class="chip on" title="Everything it needs is connected and the contract is complete.">Ready</span>'
+    if not r["can_produce"]:
+        first = (r["impossible"] or ["a connection is missing"])[0]
+        return (f'<span class="chip off" title="{_esc(first)}">Blocked &mdash; '
+                f'{_esc(str(first)[:48])}</span>')
+    first = (r["thin"] or [""])[0]
+    return (f'<span class="chip nb" title="{_esc(first)} — this gates GOING '
+            f'LIVE, not producing.">Running thin</span>')
+
+
+def _system_card(key: str, row, c: dict | None = None) -> str:
+    """One COMPACT board row (spec §8).
+
+    This card used to be fifteen kinds of thing — identity, toggle, workflow
+    link, description, work strip, the full gate, the autonomy ladder, run
+    stats, promote/demote, an 8-field contract form, the guidance thread, a
+    hard-rule form and a run log — which made a five-account board
+    unscannable and loaded every system's entire run history three times to
+    draw it.
+
+    What is left is what you scan: who it is, whether it is on, what it does,
+    whether it can run, and the work. Everything else moved to the workflow
+    view, which is one click away and is where you would act on any of it.
+    """
+    r = systems.ready(row)
     return f"""
     <div class="card">
       <div class="head">
         <h3>{_esc(row.name)}</h3>
         <code>{_esc(row.key)}</code>
         <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+        {_gate_chip(key, row, r)}
         <span class="grow"></span>
-        {live}
+        {_system_toggle(key, row, r)}
       </div>
+      <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
+      {_work_strip(key, row, c)}
       <div class="row">
         <a class="btn" href="{_sysview_url(key, row)}">Workflow &rarr;</a>
         <span class="mut">plan the work, see what ran, correct it</span>
       </div>
-      <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
-      {_work_strip(key, row)}
-      {gate}
-      {_rung(row.autonomy or "shadow")}
-      <div class="stat">
-        <span><b>{st['total']}</b> runs</span>
-        <span><b>{st['approved']}</b> approved</span>
-        <span><b>{st['edited']}</b> edited</span>
-        <span><b>{st['denied']}</b> denied</span>
-        <span><b>{st['blocked']}</b> blocked</span>
-      </div>
-      <div class="row">{promo}</div>
-      {_contract_form(key, row)}
-      {_thread(key, row)}
-      {_runs(row, st['total'])}
     </div>"""
 
 
@@ -2255,33 +2321,64 @@ def _planned_section(key: str, row, ppage: int) -> str:
 
 
 def _waiting_section(key: str, row) -> str:
+    """This system's approval queue, DECIDED IN PLACE (spec §8b).
+
+    It used to render ✅ / ❌ as bare links into the unstyled `/decide` page
+    with no way back — the same defect Review's ship queue was rebuilt to end
+    a fortnight ago, still living here. Same executor (`apply_decision`), the
+    same consequence-stating button, and the redirect returns to this tab.
+    """
     pend = _pending_for_system(row)
     if not pend:
         body = '<p class="mut">Nothing is waiting on you.</p>'
     else:
-        from . import approvals as _apm
-
-        def _acts(a) -> str:
-            ok = "/decide/" + _apm._signer.dumps([a.id, "approved"])
-            no = "/decide/" + _apm._signer.dumps([a.id, "denied"])
+        def _row(a) -> str:
+            pl = a.payload or {}
+            prov = (pl.get("esp_push") or {}).get("provider", "")
+            if prov:
+                says = f"Approve — pushes the draft to {_esc(prov)}"
+            elif a.kind == "seo_new_article":
+                says = "Approve &amp; publish"
+            elif a.kind == "send_email":
+                says = "Approve — sends it"
+            elif a.kind == "skill_output":
+                says = "Approve — marks it reviewed, ready"
+            else:
+                says = "Approve"
             review = ""
-            if a.kind == "seo_new_article" and (a.payload or {}).get("output_id"):
-                review = (f' · <a href="/admin/article/'
-                          f'{_esc((a.payload or {})["output_id"])}'
-                          f'?key={_esc(key)}">review</a>')
-            return (f'<a class="btn" href="{ok}">Approve</a> '
-                    f'<a class="btn danger" href="{no}">Deny</a>{review} · '
-                    f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content'
-                    f'&amp;sub=ship&amp;tenant={_esc(row.tenant)}">queue &rarr;</a>')
+            if a.kind == "seo_new_article" and pl.get("output_id"):
+                review = (f' <a href="/admin/article/{_esc(pl["output_id"])}'
+                          f'?key={_esc(key)}">review &amp; edit &rarr;</a>')
+            elif pl.get("output_id"):
+                review = (f' <a href="/admin/work/{_esc(pl["output_id"])}'
+                          f'?key={_esc(key)}">open workroom &rarr;</a>')
 
-        body = "".join(f"""
-        <div class="msg"><div>{_esc(a.summary or a.kind)}</div>
-          <div class="when">{a.created_at:%b %d, %H:%M} · {_acts(a)}
-          </div></div>""" for a in pend[:15])
+            def _btn(verdict: str, label: str, cls: str = "") -> str:
+                return f"""
+                <form method="post" action="/admin/ship_decide" class="inl">
+                  <input type="hidden" name="key" value="{_esc(key)}">
+                  <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+                  <input type="hidden" name="approval_id" value="{_esc(a.id)}">
+                  <input type="hidden" name="back_system" value="{_esc(row.key)}">
+                  <input type="hidden" name="verdict" value="{verdict}">
+                  <button class="{cls}">{label}</button>
+                </form>"""
+            return f"""
+            <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
+              {_ship_preview(pl)}
+              <div class="row">
+                {_btn("approved", says)}
+                {_btn("denied", "Deny", "sec")}
+                <span class="when">{a.created_at:%b %d, %H:%M}{review}</span>
+              </div>
+            </div>"""
+        body = "".join(_row(a) for a in pend[:15])
     return f"""
     <div class="card"><div class="anchor" id="waiting"></div>
       <div class="head"><h2>Waiting on you</h2>
-        <span class="mut">{len(pend)} pending — decisions happen on the approvals queue</span></div>
+        <span class="chip {'off' if pend else 'on'}">{len(pend)} pending</span>
+        <span class="mut">deciding here does the same thing as deciding on
+        Review — and brings you back here</span></div>
       <div class="thread">{body}</div>
     </div>"""
 
@@ -2307,7 +2404,6 @@ def _shipped_section(row) -> str:
 
 
 def _measured_section(row) -> str:
-    st = systems.stats(row.id)
     m = _measured(row)
     if m["measured"]:
         headline = (f'<span><b>{m["as_is"]} of {m["measured"]}</b> measured '
@@ -2321,18 +2417,39 @@ def _measured_section(row) -> str:
                f'unmeasured, which is a different fact from "sent as-is". '
                f'Mail captures its delta at send; other artifact kinds get '
                f'theirs as their ship paths land.</p>')
+    # It LEADS WITH ITS OWN FACT (spec §8b). This repeated the board's
+    # five-number run stat under a headline that was the only thing on the
+    # card anyone came for — so the number this system is trying to move sat
+    # in a row of five that say nothing about it. The stat lives once now,
+    # on Runs, beside the runs it counts.
+    deltas = ""
+    rows = [r for r in systems.runs(row.id, limit=0)
+            if (r.edit_diff or "").strip()]
+    if rows:
+        items = ""
+        for r in rows[:8]:
+            try:
+                d = json.loads(r.edit_diff)
+                what = ("sent as-is" if d.get("as_is") else
+                        f"{d.get('lines_changed', '?')} line(s) changed")
+                sample = str(d.get("sample") or "")[:160]
+            except (ValueError, AttributeError):
+                what, sample = str(r.edit_diff)[:60], ""
+            items += (f'<div class="msg"><div>{_esc(what)}'
+                      f'<span class="when"> · '
+                      f'{(r.finished_at or r.created_at):%b %d}</span></div>'
+                      + (f'<div class="when">{_esc(sample)}</div>'
+                         if sample else "") + "</div>")
+        deltas = ('<p class="mut">What a person changed, most recent first — '
+                  'this is the list the rate is computed from:</p>'
+                  f'<div class="thread">{items}</div>')
     return f"""
     <div class="card"><div class="anchor" id="measured"></div>
-      <div class="head"><h2>Measured</h2></div>
-      <div class="stat">
-        {headline}
-        <span><b>{st['decided']}</b> decided</span>
-        <span><b>{st['approved']}</b> approved</span>
-        <span><b>{st['edited']}</b> edited</span>
-        <span><b>{st['denied']}</b> denied</span>
-        <span><b>{st['blocked']}</b> blocked</span>
-      </div>
+      <div class="head"><h2>Measured</h2>
+        <span class="mut">the share of sends nobody had to touch</span></div>
+      <div class="stat">{headline}</div>
       {gap}
+      {deltas}
     </div>"""
 
 
@@ -2394,8 +2511,19 @@ def _segments_card(key: str, row) -> str:
                  f'<div class="row">'
                  f'<a href="{burl}"><button class="sec" type="button">'
                  f'Preview build</button></a>'
-                 f'<a href="{burl}&amp;apply=1"><button type="button">'
-                 f'Create {len(to_build)} in the ESP</button></a>'
+                 # A live write into the CLIENT'S ESP account asks first,
+                 # naming the account and the count (spec §8b). Preview
+                 # beside it is a dry run and does not.
+                 f'<form method="get" action="/admin/segments_build" '
+                 f'class="inl" onsubmit="return confirm('
+                 f'&quot;Create {len(to_build)} segment(s) in '
+                 f'{_esc(row.tenant)}&#39;s live ESP account?&quot;)">'
+                 f'<input type="hidden" name="key" value="{_esc(key)}">'
+                 f'<input type="hidden" name="tenant" value="{_esc(row.tenant)}">'
+                 f'<input type="hidden" name="ui" value="1">'
+                 f'<input type="hidden" name="system" value="{_esc(row.key)}">'
+                 f'<input type="hidden" name="apply" value="1">'
+                 f'<button>Create {len(to_build)} in the ESP</button></form>'
                  f'<span class="mut">preview is a dry run; create WRITES to '
                  f'the live account — segments send nothing and can be '
                  f'deleted in the ESP if wrong</span></div>')
@@ -2422,21 +2550,131 @@ def _segments_card(key: str, row) -> str:
     </div>"""
 
 
-def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
-    """One system's workflow: planned, waiting, shipped, measured — in the
-    order the work moves, with the queue's controls leading each section."""
-    wf = systems.workflow(row.key)
-    live_ctl = ""
-    if row.status != "live" and systems.ready(row)["ready"]:
-        live_ctl = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
-                    f'&amp;status=live"><button type="button">Switch on</button></a>')
-    elif row.status == "live":
-        live_ctl = (f'<a href="/admin/system_set?key={_esc(key)}&amp;id={_esc(row.id)}'
-                    f'&amp;status=paused"><button class="sec" type="button">Pause</button></a>')
+def _settings_section(key: str, row) -> str:
+    """What the board stopped carrying: the ladder, promote/demote, the
+    contract, the guidance thread — and the FULL gate with a fix link per
+    blocker (spec §8).
 
-    ship_note = (f'<p class="mut">One item is {_esc(wf["unit"])}. '
-                 f'Approving {_esc(wf["ship"] or "ships it")}.</p>'
-                 if wf["unit"] else "")
+    None of it was scannable on a board of N systems across five accounts,
+    and all of it is something you act on having already decided to work on
+    THIS system — which is the click that got you here.
+    """
+    r = systems.ready(row)
+    if r["ready"]:
+        gate = ('<div class="ok">Ready. Everything it needs is connected and '
+                'the contract is complete.</div>')
+    elif not r["can_produce"]:
+        items = "".join(_blocker_li(key, row.tenant, b) for b in r["impossible"])
+        gate = ('<div class="note"><strong>Blocked &mdash; it cannot run at '
+                'all.</strong><ul class="bl">' + items + '</ul>'
+                '<div class="mut">A connection is missing. Nothing else stops '
+                'a system producing.</div></div>')
+    else:
+        items = "".join(f"<li>{_esc(b)}</li>" for b in r["thin"])
+        gate = ('<div class="note"><strong>Running thin.</strong> It produces, '
+                'and says on every output what it was working without:'
+                '<ul class="bl">' + items + '</ul>'
+                '<div class="mut">These gate GOING LIVE, not producing. Each '
+                'one is filed as a knowledge task when a run hits it.</div>'
+                '</div>')
+
+    nxt = systems.can_promote(row)
+    if nxt["can"]:
+        promo = (f'<a href="/admin/system_promote?key={_esc(key)}&amp;id={_esc(row.id)}">'
+                 f'<button type="button">Promote to {_esc(nxt["target"].replace("_", " "))}</button></a>')
+    elif nxt["target"]:
+        promo = f'<span class="mut">Next rung ({_esc(nxt["target"].replace("_", " "))}): {_esc(nxt["why"])}</span>'
+    else:
+        promo = '<span class="mut">Top of the ladder.</span>'
+    # THE LADDER GOES DOWN TOO. The nightly sweep has always advised "work
+    # them or turn the system down a rung" for a swollen queue — and only
+    # Promote existed, so the advice named a control the console did not
+    # have. LESS autonomy needs no earning, so the promote gate does not apply.
+    _l = list(systems.AUTONOMY)
+    _cur = (row.autonomy or "shadow")
+    if _cur in _l and _l.index(_cur) > 0:
+        _down = _l[_l.index(_cur) - 1]
+        promo += (f' <a href="/admin/system_set?key={_esc(key)}'
+                  f'&amp;id={_esc(row.id)}&amp;autonomy={_esc(_down)}'
+                  f'&amp;tenant={_esc(row.tenant)}">'
+                  f'<button class="sec" type="button">Down a rung '
+                  f'({_esc(_down.replace("_", " "))})</button></a>')
+    return f"""
+    <div class="card"><div class="anchor" id="settings"></div>
+      <div class="head"><h2>Settings</h2>
+        <span class="mut">what it needs, how far it may go, and what it has
+        been told</span></div>
+      {gate}
+      {_rung(row.autonomy or "shadow")}
+      <div class="row">{promo}</div>
+      {_contract_form(key, row)}
+      {_thread(key, row)}
+    </div>"""
+
+
+def _runs_section(key: str, row) -> str:
+    """The run log, and the five numbers a promotion decision needs.
+
+    The stat row used to sit on every board card AND be repeated by Measured.
+    It lives here once now — beside the runs it counts, which is the only
+    place it can be checked.
+    """
+    st = systems.stats(row.id)
+    return f"""
+    <div class="card"><div class="anchor" id="runs"></div>
+      <div class="head"><h2>Runs</h2></div>
+      <div class="stat">
+        <span><b>{st['total']}</b> runs</span>
+        <span><b>{st['approved']}</b> approved</span>
+        <span><b>{st['edited']}</b> edited</span>
+        <span><b>{st['denied']}</b> denied</span>
+        <span><b>{st['blocked']}</b> blocked</span>
+      </div>
+      {_runs(row, st['total'])}
+    </div>"""
+
+
+#: The workflow view's inner rail (spec §8b), in the order the work moves.
+#: Segments is ESP-only and is added by `_workflow_subs`; the four names that
+#: were anchors on the old stacked page (`planned`, `waiting`, `shipped`,
+#: `measured`) are the sub keys too, so every link that pointed at an anchor
+#: still lands on the right place (fluidity rule 3).
+WORKFLOW_SUBS = (("planned", "Plan queue"), ("drafts", "Drafts"),
+                 ("waiting", "Waiting on you"), ("shipped", "Shipped"),
+                 ("measured", "Measured"), ("settings", "Settings"),
+                 ("runs", "Runs"))
+
+
+def _workflow_subs(row) -> tuple:
+    """The rail for THIS system. Segments only exists for the ones that push
+    to an ESP — offering an empty room on a blog system would be a tab that
+    teaches you it does nothing."""
+    subs = list(WORKFLOW_SUBS)
+    if systems.workflow(row.key)["artifact"] == "esp_campaign":
+        subs.insert(5, ("segments", "Segments"))
+    return tuple(subs)
+
+
+def _system_view(key: str, row, flash: str, ppage: int = 1,
+                 wf: str = "") -> str:
+    """One system's workflow: planned, waiting, shipped, measured — in the
+    order the work moves, with the queue's controls leading each section.
+
+    Step 4 (spec §8b) gave it the inner rail every other restructured tab
+    has. The page was every section stacked, so reaching Measured on a system
+    with fifteen plans meant scrolling past all of them, and the sections you
+    rarely touch (Settings, Runs) cost the same scroll as the one you came
+    for. Each section still renders whole; only one at a time is asked for.
+    """
+    wfd = systems.workflow(row.key)
+    subs = _workflow_subs(row)
+    sub = (wf or "").strip().lower()
+    if sub not in dict(subs):
+        sub = subs[0][0]
+
+    ship_note = (f'<p class="mut">One item is {_esc(wfd["unit"])}. '
+                 f'Approving {_esc(wfd["ship"] or "ships it")}.</p>'
+                 if wfd["unit"] else "")
 
     # The gate, on the page whose queue it holds shut. A Planned list on a
     # system that cannot produce reads as "will run on its date" — when the
@@ -2451,6 +2689,34 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
                      '<div class="mut">Plans keep and stay editable; they '
                      'run once this is wired.</div></div>')
 
+    counts = _board_counts([row])[row.id]
+
+    def _href(v: str) -> str:
+        return (f"/admin/ui?tab=systems&amp;tenant={_esc(row.tenant)}"
+                f"&amp;system={_esc(row.key)}&amp;wf={v}"
+                + (f"&amp;key={_esc(key)}" if key else ""))
+
+    #: Counts on the rail come from the SAME batch the strip renders, so a
+    #: tab label and the list behind it cannot disagree (design rule 8).
+    tab_counts = {"planned": counts["planned"], "waiting": counts["waiting"],
+                  "shipped": counts["week"]}
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if v == sub else ""}" href="{_href(v)}">'
+        f'{label}'
+        + (f'<span class="cnt">{tab_counts[v]}</span>' if v in tab_counts else "")
+        + '</a>' for v, label in subs) + "</div>"
+
+    sections = {
+        "planned": lambda: _planned_section(key, row, ppage),
+        "drafts": lambda: _drafts_section(key, row),
+        "waiting": lambda: _waiting_section(key, row),
+        "shipped": lambda: _shipped_section(row),
+        "measured": lambda: _measured_section(row),
+        "segments": lambda: _segments_card(key, row),
+        "settings": lambda: _settings_section(key, row),
+        "runs": lambda: _runs_section(key, row),
+    }
+
     body = f"""
 {flash}
 <div>
@@ -2462,19 +2728,15 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
       <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
       <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
     </span>
-    {live_ctl}
+    <span class="grow"></span>
+    {_system_toggle(key, row, gate)}
   </div>
   {ship_note}
-  {_work_strip(key, row)}
+  {_work_strip(key, row, counts)}
   {gate_note}
 </div>
-{_planned_section(key, row, ppage)}
-{_drafts_section(key, row)}
-{_segments_card(key, row) if systems.workflow(row.key)["artifact"] == "esp_campaign" else ""}
-{_waiting_section(key, row)}
-{_shipped_section(row)}
-{_measured_section(row)}
-{_runs(row, systems.stats(row.id)['total'])}
+{strip}
+{sections[sub]()}
 <details class="sec"><summary>How to read this page</summary>
   <p class="mut">Planned is work declared in advance — each plan is editable
   until the moment it runs, an incomplete plan waits and names its gaps, and
@@ -2482,11 +2744,18 @@ def _system_view(key: str, row, flash: str, ppage: int = 1) -> str:
   explicit approval because running it has real side effects. Waiting on you
   is this system's approval queue. Shipped is what actually went out.
   Measured is the edit delta — the share of sends a human did not have to
-  touch, which is the number this system is trying to move.</p>
+  touch, which is the number this system is trying to move. Settings holds
+  the gate, the autonomy ladder, the contract and what this system has been
+  told.</p>
 </details>"""
     return _shell(key, "systems", f"{row.name} — workflow",
                   tenant=row.tenant, body=body,
                   suffix=f"&amp;system={_esc(row.key)}")
+
+
+#: A board of systems is a list like any other, and this one was the last
+#: unpaginated queue in the console.
+SYSTEMS_PAGE = 15
 
 
 #: The Systems tab's two jobs. They are not two halves of one page: one is a
@@ -2497,7 +2766,8 @@ SYSTEM_SUBS = (("active", "Active"), ("available", "Available"))
 
 
 def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
-                   system: str = "", ppage: int = 1, sub: str = "") -> str:
+                   system: str = "", ppage: int = 1, sub: str = "",
+                   wf: str = "") -> str:
     """One account's pipelines.
 
     This tab used to render `systems.all_systems()` grouped by client, so the
@@ -2522,12 +2792,25 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     if system and not every:
         target = systems.find(tenant, system)
         if target is not None:
-            return _system_view(key, target, flash, ppage=ppage)
+            return _system_view(key, target, flash, ppage=ppage, wf=wf)
         flash += (f'<div class="note">No <code>{_esc(system)}</code> system '
                   f'is installed for this account — the list below is what '
                   f'is.</div>')
 
-    rows = systems.all_systems() if every else systems.for_tenant(tenant)
+    all_rows = systems.all_systems() if every else systems.for_tenant(tenant)
+    # THE BOARD PAGES (spec §8: it was unpaginated, and on the all-accounts
+    # view that is five clients' systems in one unbounded list). Paged before
+    # grouping, so the group headings describe what is actually on the page.
+    total_rows = len(all_rows)
+    _pages = max(1, -(-total_rows // SYSTEMS_PAGE))
+    _pg = max(1, min(ppage if sub != "available" else 1, _pages))
+    rows = all_rows[(_pg - 1) * SYSTEMS_PAGE:_pg * SYSTEMS_PAGE]
+    board_pager = _pager(
+        f"/admin/ui?tab=systems&amp;sub=active&amp;tenant={_esc(tenant)}"
+        + (f"&amp;key={_esc(key)}" if key else ""),
+        _pg, total_rows, SYSTEMS_PAGE, "systems")
+    # Two queries for the whole board, not five per card (spec §8).
+    counts = _board_counts(rows)
 
     if not rows:
         body = ('<div class="note">No systems on this account yet. '
@@ -2540,10 +2823,11 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
         by_tenant: dict[str, list] = {}
         for r in rows:
             by_tenant.setdefault(r.tenant, []).append(r)
-        body = ""
+        body = board_pager
         for tkey, group in sorted(by_tenant.items()):
             t = tenants.get(tkey)
-            cards = "".join(_system_card(key, r) for r in group)
+            cards = "".join(_system_card(key, r, counts.get(r.id))
+                            for r in group)
             live = sum(1 for r in group if r.status == "live")
             body += f"""
             <div>
@@ -2556,14 +2840,16 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
               {cards}
             </div>"""
     else:
-        live = sum(1 for r in rows if r.status == "live")
+        live = sum(1 for r in all_rows if r.status == "live")
         body = f"""
         <div>
           <div class="head" style="margin-bottom:12px">
             <h2>Installed</h2>
-            <span class="mut">{live} of {len(rows)} live</span>
+            <span class="mut">{live} of {total_rows} live</span>
           </div>
-          {"".join(_system_card(key, r) for r in rows)}
+          {board_pager}
+          {"".join(_system_card(key, r, counts.get(r.id)) for r in rows)}
+          {board_pager}
         </div>"""
 
     # Scoped to the account too. An unscoped backlog ranks another client's
@@ -2611,9 +2897,17 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
         chips = "".join(_pre_chip(i) for i in p["items"]) or (
             '<span class="pre yes">✓ nothing required</span>')
         if p["installed"]:
+            # It named a system and pointed nowhere (spec §8). The catalogue
+            # is the one place you meet a system before you own it, so the
+            # already-installed entry is exactly where "take me to it"
+            # belongs.
+            _wf = (f"/admin/ui?tab=systems&amp;tenant={_esc(tenant)}"
+                   f"&amp;system={_esc(p['key'])}"
+                   + (f"&amp;key={_esc(key)}" if key else ""))
             action = (f'<span class="mut">installed &middot; '
                       f'{_esc(p["status"] or "designed")} &middot; '
-                      f'{_esc(p["autonomy"] or "shadow")}</span>')
+                      f'{_esc(p["autonomy"] or "shadow")}</span> '
+                      f'<a class="btn sec" href="{_wf}">Workflow &rarr;</a>')
         elif p["ready"]:
             action = (f'<a class="btn" href="/admin/system_add?key={_esc(key)}'
                       f'&amp;tenant={_esc(tenant)}&amp;system={_esc(p["key"])}">'
@@ -2685,7 +2979,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     strip = "" if every else '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if v == sub else ""}" href="{_sub_href(v)}">'
         f'{label}<span class="cnt">'
-        f'{len(rows) if v == "active" else n_avail}</span></a>'
+        f'{total_rows if v == "active" else n_avail}</span></a>'
         for v, label in SYSTEM_SUBS) + "</div>"
 
     return _shell(key, "systems", "Systems", tenant=tenant, body=f"""

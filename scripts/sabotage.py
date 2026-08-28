@@ -1764,6 +1764,51 @@ SABOTAGES = [
                "newsletters — the owner has to re-sort five clients in their "
                "head, which is the reading cost that made it unread",
     },
+    {
+        "name": "the_board_asks_once",
+        "file": "app/admin_ui.py",
+        "find": "        runs = (s.query(db.SystemRun)\n"
+                "                .filter(db.SystemRun.system_id.in_(ids)).all())",
+        "replace": "        runs = [r for i in ids for r in  # SABOTAGE\n"
+                   "                s.query(db.SystemRun).filter(\n"
+                   "                    db.SystemRun.system_id == i).all()]",
+        "suites": ["test_systems_board.py"],
+        "why": "the board goes back to asking the database once per system "
+               "instead of once per page — and it was three FULL run-history "
+               "loads per card, multiplied by every installed system across "
+               "five accounts, which is what made the all-accounts view the "
+               "slowest page in the console",
+    },
+    {
+        "name": "the_board_row_stays_scannable",
+        "file": "app/admin_ui.py",
+        "find": "      {_work_strip(key, row, c)}\n"
+                "      <div class=\"row\">\n"
+                "        <a class=\"btn\" href=\"{_sysview_url(key, row)}\">Workflow &rarr;</a>",
+        "replace": "      {_work_strip(key, row, c)}\n"
+                   "      {_settings_section(key, row)}  <!-- SABOTAGE -->\n"
+                   "      <div class=\"row\">\n"
+                   "        <a class=\"btn\" href=\"{_sysview_url(key, row)}\">Workflow &rarr;</a>",
+        "suites": ["test_systems_board.py"],
+        "why": "the board row becomes fifteen kinds of thing again — ladder, "
+               "promote, an 8-field contract form and the guidance thread on "
+               "every card — which is what made a five-account board "
+               "impossible to scan and buried the one control (the toggle) "
+               "people come here to use",
+    },
+    {
+        "name": "waiting_decides_where_you_are",
+        "file": "app/web.py",
+        "find": "    sys_key = str(form.get(\"back_system\") or \"\")\n"
+                "    if sys_key:",
+        "replace": "    sys_key = \"\"  # SABOTAGE\n"
+                   "    if sys_key:",
+        "suites": ["test_systems_board.py"],
+        "why": "deciding an approval from a system's own Waiting tab dumps "
+               "you on the Review tab instead of bringing you back — a "
+               "decision costing you your place, which is the defect design "
+               "rule 3 exists to name",
+    },
 ]
 
 

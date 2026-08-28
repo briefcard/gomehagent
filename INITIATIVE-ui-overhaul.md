@@ -657,6 +657,52 @@ ALSO in this push: the previous step's `_read_off` reloaded the tenant row
 twice per claim card (~30 lookups to render one line); it now takes the
 already-loaded source list.
 
+**4·Systems + workflow BUILT + SHIPPED 2026-08-27 (spec §8).** THE BOARD IS
+THE SCAN, THE WORKFLOW VIEW IS THE WORK. The card was fifteen kinds of thing
+on every row — identity, toggle, workflow link, description, work strip, the
+full gate, the autonomy ladder, run stats, promote/demote, an 8-field
+contract form, the guidance thread, a hard-rule form and a run log — so a
+board of five accounts could not be read, and drawing ONE row loaded that
+system's entire run history three times (`stats`, `_shipped_runs`,
+`_measured`). Compact now: name · key · rung · **gate chip** (NEW
+`_gate_chip`, three states with the FIRST reason — Ready / Blocked — … /
+Running thin) · one toggle · one-line description · work strip · Workflow →
+(kept PRIMARY: `test_systems_check` pins it as "the place you work" and that
+assertion was right — the code was reverted, not the pin). NEW
+`_board_counts`: TWO queries for the whole page instead of five per system,
+every number still computed from the rows the workflow view lists (rule 8).
+The board PAGES (`SYSTEMS_PAGE`, paged before grouping so all-accounts
+headings describe what is on the page); the sub-tab count stays the real
+depth. Installer entries link at the system they name (they said "installed ·
+designed · shadow" and pointed nowhere). **8b, the workflow view** gains the
+inner rail every restructured tab has — `WORKFLOW_SUBS`: Plan queue · Drafts
+· Waiting on you · Shipped · Measured · Segments (ESP-only, via
+`_workflow_subs`) · Settings · Runs — with the four old anchor ids (planned/
+waiting/shipped/measured) doubling as sub keys so every existing link lands
+right (rule 3); `_sysview_url` emits `&wf=` AND the anchor. NEW
+`_settings_section` (full gate with per-blocker fix links, ladder, promote/
+demote, contract, thread) and `_runs_section` (the five-number stat, once,
+beside the runs it counts). **Waiting decides in place** — it was still
+rendering ✅/❌ as bare links into the unstyled `/decide` with no way back,
+the very defect Review's queue was rebuilt to end; same `apply_decision`,
+consequence-stating button, and `ship_decide` grew `back_system=` so the
+redirect returns to THIS tab (rule 3). **One toggle everywhere**: extracted
+`_system_toggle`, used by board and workflow view — the latter had a Switch
+on / Pause pair, a second labelling for one operation one click away; the
+`toggle_says_why_it_cannot_move` anchor line survives byte-identically.
+Measured leads with the sent-as-is rate and lists the actual deltas instead
+of repeating the board's stat. Creating segments in the ESP — a live write to
+the CLIENT'S account — now confirms, naming account and count.
+`_pending_for_system` reads `decided_in_console`, closing the follow-up named
+in the reply-drafts push. Guards (all caught): `the_board_asks_once`,
+`the_board_row_stays_scannable`, `waiting_decides_where_you_are`. New suite
+`test_systems_board.py`; `test_workflow_ui` pins retargeted at the rail with
+dated comments. TWO OF MY OWN ERRORS, both caught and recorded: the Workflow
+button was demoted to secondary against a documented decision (reverted), and
+the paging assertion passed for the wrong reason — `_pager` renders NOTHING
+on a single page and the check was satisfiable by the word "systems"
+appearing anywhere, so it now lowers the cap and asserts a real second page.
+
 **OUT OF BAND — THE DAILY BRIEFING (owner, 2026-08-27).** Not a console
 tab, but the surface the owner actually reads every day, and it had rotted:
 *"ever growing daily digest emails that I have no way of clearing or

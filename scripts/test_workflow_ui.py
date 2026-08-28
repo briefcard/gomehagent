@@ -56,6 +56,10 @@ skill.register(skill.Skill(
 
 
 def _view(c, tenant: str, extra: str = "") -> str:
+    """The workflow view. Defaults to the Plan queue, which is the rail's
+    first sub-view — the page used to stack every section, so anything
+    pinned below now asks for the tab that holds it (`&wf=`), retargeted
+    2026-08-27 with the step-4 rail (spec §8b)."""
     return c.get(f"/admin/ui?key=s3cret&tab=systems&tenant={tenant}"
                  f"&system=wf_probe{extra}").text
 
@@ -111,9 +115,15 @@ def main() -> int:
                    "&system=lead_responder").text
     ck("a no-plans system says WHY its Planned section is empty",
        "takes no plans" in lead_v or "declares no plan fields" in lead_v)
-    ck("…and still shows its workflow sections",
-       'id="waiting"' in lead_v and 'id="shipped"' in lead_v
-       and 'id="measured"' in lead_v)
+    # Each section is its own rail tab now (spec §8b, 2026-08-27), so the
+    # question "are they all still there" is asked of the rail plus each
+    # section rendering when asked for — which is the property that used to
+    # be checked by finding three anchors on one very long page.
+    for _sub in ("waiting", "shipped", "measured"):
+        _page = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                      f"&system=lead_responder&wf={_sub}").text
+        ck(f"…and its {_sub} section still renders", f'id="{_sub}"' in _page)
+        ck(f"  reachable from the rail", f"&amp;wf={_sub}" in lead_v)
 
     # ---- filing and editing through the routes --------------------------
     print("\n— plan_new files; the flash names completeness —")
@@ -265,7 +275,7 @@ def main() -> int:
                        edit_diff=json.dumps({"as_is": True, "similarity": 1.0}))
     rid2 = systems.start_run(ag.id, "agency", trigger="manual", ref="m2")
     systems.finish_run(rid2, "sent", decision="approved")
-    v = _view(c, "agency")
+    v = _view(c, "agency", "&wf=measured")
     ck("sent-as-is reads from the captured deltas",
        "1 of 1</b> measured" in v, "one measured, one not")
     ck("the un-captured send is a named fact, not a flattering zero",
@@ -292,11 +302,21 @@ def main() -> int:
        '<select name="entity_key">' in seg_v and "catalogue sync" in seg_v)
     ck("…while a kindless probe field stays a text input",
        '<input name="segment"' in _view(c, "agency"))
+    # The Segments card has its own rail tab now (spec §8b, 2026-08-27) —
+    # `seg_v` above is the Plan queue, which is where the plan-card selects
+    # those assertions are about actually live.
+    seg_card = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                     "&system=campaign_email&wf=segments").text
     ck("the campaign system's view carries the Segments card",
-       'id="segments"' in seg_v and "Never synced" in seg_v
-       and "Sync now" in seg_v)
+       'id="segments"' in seg_card and "Never synced" in seg_card
+       and "Sync now" in seg_card)
     ck("…and it renders from the record — no live call promised on load",
-       "reads the live ESP" in seg_v)
+       "reads the live ESP" in seg_card)
+    ck("…and the rail offers it only on an ESP system",
+       "&amp;wf=segments" in seg_card
+       and "&amp;wf=segments" not in _view(c, "agency"),
+       "an empty Segments room on a blog system teaches that a tab can mean "
+       "nothing")
     ck("a non-ESP system has no Segments card",
        'id="segments"' not in _view(c, "agency"))
 

@@ -2058,6 +2058,7 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  msg=request.query_params.get("ok", ""),
                                  err=request.query_params.get("err", ""),
                                  system=request.query_params.get("system", ""),
+                                 wf=request.query_params.get("wf", ""),
                                  ppage=pp)
     if tab == "kb":
         try:
@@ -5201,6 +5202,19 @@ async def ship_decide(request: Request, key: str = Depends(admin_key)):
         return _back_to_content(tenant, err="say approve or deny — nothing "
                                             "was decided", sub="ship")
     said = _appr.apply_decision(str(form.get("approval_id") or ""), verdict)
+    # Deciding from a system's own Waiting tab returns THERE. The executor is
+    # the same either way; only the way back differs, and sending someone to
+    # Review after they decided on the workflow page would cost them their
+    # place (design rule 3).
+    sys_key = str(form.get("back_system") or "")
+    if sys_key:
+        from urllib.parse import quote
+
+        from fastapi.responses import RedirectResponse
+        url = (f"/admin/ui?tab=systems&tenant={quote(tenant)}"
+               f"&system={quote(sys_key)}&wf=waiting"
+               f"&ok={quote(str(said)[:400])}")
+        return RedirectResponse(url, 303)
     return _back_to_content(tenant, msg=str(said)[:400], sub="ship",
                             cpage=pg,
                             keep={"q": str(form.get("q") or ""),
