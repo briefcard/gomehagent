@@ -38,7 +38,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import admin_ui, config, db, portal, tenants, web  # noqa: E402
+from app import (admin_ui, config, db, keywords, portal,  # noqa: E402
+                 tenants, web)
 
 KEY = "s3cret"
 _fail: list[str] = []
@@ -65,6 +66,24 @@ def anon() -> TestClient:
 db.init_db()
 tenants.seed()
 keys = [t.key for t in tenants.all_tenants()]
+
+# A CLASS ONLY USED WHEN THERE IS DATA IS INVISIBLE TO A CHECK RUN AGAINST
+# EMPTINESS (2026-08-27). The Plan tab's `.grp` — the tier heading row its
+# tables emit — was undefined for weeks and this coverage check never saw it,
+# because every account here had zero keywords and the rows that carry the
+# class were therefore never rendered. That is the same shape as the defect
+# the suite exists to catch, one level up: an assertion passing because the
+# thing it describes was absent rather than correct.
+_kw_seeded = 0
+for _phrase, _vol in (("italian tableware", 2400),
+                      ("colorful dinnerware sets", 880),
+                      ("melamine plates for outdoor dining", 320),
+                      ("are melamine plates dishwasher safe", 210)):
+    keywords.upsert(keys[0], _phrase, volume=_vol, source="smoke",
+                    database="us")
+    _kw_seeded += 1
+ck("the plan tab has a map to render, so its table classes are exercised",
+   _kw_seeded == 4, "an empty Plan tab checks none of its own markup")
 ck("seed produced accounts", len(keys) >= 2, str(keys))
 T1, T2 = keys[0], keys[1]
 

@@ -1809,6 +1809,20 @@ SABOTAGES = [
                "decision costing you your place, which is the defect design "
                "rule 3 exists to name",
     },
+    {
+        "name": "data_only_classes_are_covered",
+        "file": "app/admin_ui.py",
+        "find": ".grp td{background:var(--rule2);font-size:.82rem;padding-top:9px}",
+        "replace": ".grp-SABOTAGED td{background:var(--rule2)}",
+        "suites": ["test_render_smoke.py"],
+        "why": "the Plan tab's table group headings render unstyled again — "
+               "and, worse, the coverage check goes back to not being able "
+               "to SEE it. `.grp` only appears on a row that exists when the "
+               "account has keywords, so the smoke suite walked an empty "
+               "Plan tab and reported full coverage of markup it never "
+               "rendered. This entry fails only while the suite seeds a real "
+               "map, which is what makes the blind spot stay closed",
+    },
 ]
 
 

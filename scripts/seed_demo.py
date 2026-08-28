@@ -192,10 +192,36 @@ def seed_mail_queue() -> str:
     return "mail: 1 drafted reply (hidden) + 1 queue-only email (shown)"
 
 
+def seed_keyword_map() -> str:
+    """Enough of a keyword map that the Plan tab's tables actually render.
+
+    Not decoration: `.grp` — the tier/pillar heading row those tables emit —
+    was the last of the Plan tab's undefined classes, and the render-smoke
+    class check never saw it because it walks an account with no keywords.
+    A class that only appears when there is DATA is invisible to a check run
+    against emptiness, which is the same shape as the bug the smoke suite was
+    written to catch. So the demo has data.
+    """
+    from app import keywords as kw
+    seeded = 0
+    for phrase, vol, tier in (
+            ("italian tableware", 2400, "head"),
+            ("colorful dinnerware sets", 880, "body"),
+            ("melamine plates for outdoor dining", 320, "long_tail"),
+            ("are melamine plates dishwasher safe", 210, "long_tail"),
+            ("best plates for hosting dinner parties", 170, "long_tail"),
+            ("acrylic stemware", 590, "body")):
+        kw.upsert("baci", phrase, volume=vol, source="seed_demo",
+                  database="us")
+        seeded += 1
+    return f"keyword map: {seeded} phrases for baci"
+
+
 said = seed_ad_batch()
 said2 = seed_data_layer()
 said3 = seed_landing_pages()
 said4 = seed_mail_queue()
+said5 = seed_keyword_map()
 print(f"demo seeded: {made} · accounts: "
       f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}"
-      f" · {said3} · {said4}")
+      f" · {said3} · {said4} · {said5}")

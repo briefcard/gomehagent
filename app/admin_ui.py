@@ -457,6 +457,14 @@ font-family:var(--mono);font-size:.7rem;font-weight:700;padding:1px 7px;line-hei
 .lbl{font-weight:600;font-size:.85rem;color:var(--ink2)}
 .big{font-size:1.02rem;font-weight:600;margin:2px 0 4px}
 .tbl tr.grp td{background:var(--rule2);font-size:.85rem;padding-top:8px}
+/* A table's group heading row — the tier or pillar a run of rows belongs to.
+   It was the last of the Plan tab's undefined classes (spec §7's P0 named
+   six; step 1's token sheet styled five). It renders ONLY when the account
+   has clusters or opportunities, which is why the smoke suite's class
+   coverage never saw it: a class used only when there is data is invisible
+   to a check run against an account with none. The demo now seeds enough
+   keyword rows for it to render, so it is actually walked. */
+.grp td{background:var(--rule2);font-size:.82rem;padding-top:9px}
 .bad{color:var(--err);background:var(--errs);border-left:3px solid var(--err);
   padding:8px 12px;border-radius:4px}
 """
@@ -8190,6 +8198,26 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
             'can hold several, and guessing writes into the wrong one.</p>')
 
 
+def _plan_window(key: str, tenant: str, days: int) -> str:
+    """ONE window control for the whole Plan tab (spec §7).
+
+    The board was hard-coded to 7 days while this control governed only the
+    Progress section below it — so "Moved in the last 7 days" sat directly
+    above a control that silently did not affect it, which is a page telling
+    you two different things about the same word. Both tables read `days`
+    now, and the control sits in the header where it can be seen to govern
+    them.
+    """
+    return '<div class="filters">' + "".join(
+        f'<a class="{"on" if days == d else ""}" '
+        f'href="/admin/ui?tab=plan&amp;tenant={_esc(tenant)}&amp;days={d}'
+        + (f"&amp;key={_esc(key)}" if key else "")
+        + f'">{lbl}</a>' for d, lbl in ((7, "7 days"), (28, "28 days"),
+                                        (90, "90 days"))) + \
+        '<span class="mut" style="margin-left:8px">every dated table on this ' \
+        'page reads this window</span></div>'
+
+
 def _board_section(key: str, tenant: str, days: int) -> str:
     """The map as the four questions somebody asks of it, not one sorted list.
 
@@ -8419,10 +8447,6 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
     def _num(v, suffix=""):
         return "—" if v in (None, "") else f"{v}{suffix}"
 
-    windows = "".join(
-        f'<a class="{"on" if days == d else ""}" href="/admin/ui?key={_esc(key)}'
-        f'&amp;tab=plan&amp;tenant={_esc(tenant)}&amp;days={d}">{lbl}</a>'
-        for d, lbl in ((7, "7d"), (28, "28d"), (90, "90d")))
 
     # TRACKED BESIDE CONTROL, always. A rise on its own is a claim; a rise
     # against the rest of the site over the same window is a finding. The
@@ -8528,7 +8552,7 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
     <p class="mut">{_esc(a["not_measured"])}</p>"""
 
     return f"""
-    <h3>Progress <span class="when">{windows}</span></h3>
+    <h3>Progress</h3>
     {notes}
     {compare}
     <p><strong>{p["wins"]["top3"]}</strong> keyword(s) ranking 1–3 ·
@@ -9407,7 +9431,8 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     return _shell(key, "plan", "Plan", tenant=tenant, body=f"""
       {note}
       <div class="cards">{chips}</div>
-      {_board_section(key, tenant, 7)}
+      {_plan_window(key, tenant, days)}
+      {_board_section(key, tenant, days)}
       <h3>The architecture — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
       {body_map}
       <p>{actions}</p>

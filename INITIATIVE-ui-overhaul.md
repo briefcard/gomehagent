@@ -703,6 +703,31 @@ the paging assertion passed for the wrong reason — `_pager` renders NOTHING
 on a single page and the check was satisfiable by the word "systems"
 appearing anywhere, so it now lowers the cap and asserts a real second page.
 
+**4·Plan STARTED 2026-08-27 — the last undefined class, and the blind spot
+that hid it.** Spec §7's P0 named six classes rendering this tab broken;
+step 1's token sheet had already styled five, so only `.grp` — the tier /
+pillar heading row the architecture and opportunity tables emit — was left.
+Defining it is one line. THE FINDING IS WHY NOBODY SAW IT: `.grp` renders
+only on a row that exists when the account HAS keywords, and every account
+in `test_render_smoke` had none — so the class-coverage check (the one
+written precisely because the Plan tab shipped visually broken) walked an
+empty Plan tab and reported full coverage of markup it had never rendered.
+That is the same shape as the defect it exists to catch, one level up: an
+assertion passing because the thing it describes was ABSENT rather than
+correct — the `test_console_frame` lesson, again. So the suite now seeds a
+real keyword map, `seed_demo` seeds one too (the demo could not show this
+tab's tables at all), and NEW guard `data_only_classes_are_covered` fails
+only WHILE that seed exists: drop it and the guard goes quiet and says so.
+ALSO IN THIS PUSH — **one window control** (spec §7's "two windows, one
+control"): `_board_section` was called with a LITERAL 7 while the 7/28/90
+control governed only the Progress section below it, so "Moved in the last 7
+days" sat directly above a control that silently did not affect it. Both
+tables read `days` now, and NEW `_plan_window` renders the control ONCE in
+the page header, where it can be seen to govern them. Rest of §7 next: the
+rail (Strategy · Schedule · Board · Architecture · Progress · Goal &amp;
+cadence), `.tblwrap`, the 9-column Writing-next trim, folded goal form,
+sticky flash.
+
 **OUT OF BAND — THE DAILY BRIEFING (owner, 2026-08-27).** Not a console
 tab, but the surface the owner actually reads every day, and it had rotted:
 *"ever growing daily digest emails that I have no way of clearing or
