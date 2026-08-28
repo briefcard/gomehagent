@@ -145,13 +145,22 @@ is written — it is the skill that already holds its output, writes its own
 
 ---
 
-## §5 Propagation — the thing actually asked for
+## §5 What a post can be — derived AND native
 
-*"Automatic updates adhering to brand voice / content / articles we may be
-posting elsewhere propagated to GMB."* The design that makes this safe:
+**CORRECTED 2026-08-29 after the owner pushed back.** The first version of this
+section said a GBP post is *"DERIVED, never authored from nothing"* — built
+entirely around the propagation half of the question and too narrow to be the
+system a local business actually needs. Google's post types include **offers,
+events and standalone updates**, and a local business's best-performing posts
+are usually exactly those: *"open Labor Day weekend"*, *"20% off installs this
+month"*. Those will never come from a blog article, and a system that cannot
+write them is not a local-presence system.
 
-- **A GBP post is DERIVED, never authored from nothing.** Its input is an
-  artifact that has ALREADY been approved — a published blog article, a sent
+So there are **two producers**, both running the same gates:
+
+**(a) DERIVED — the propagation the owner asked for.**
+
+- Input is an artifact ALREADY approved — a published blog article, a sent
   campaign, a moment. Nothing reaches Google that a person has not already
   signed off in a longer form.
 - **The deriver shortens and adds a CTA. It does not assert.** Every factual
@@ -164,9 +173,32 @@ posting elsewhere propagated to GMB."* The design that makes this safe:
   Review row says *"derived from <that article>"* with a link both ways. This
   is **move 2 of the lineage work already on the UI backlog** — build them
   together, because this system is its first real consumer.
-- **Cadence**: one post per approved article, plus a standing weekly filler
-  drawn from the plan when no article shipped that week. Weekly because a GBP
-  post's prominence decays fast; a monthly cadence is the same as none.
+**(b) NATIVE — offers, events, updates, with no article behind them.**
+
+- Authored against the knowledge base the same way every other draft is: it
+  may assert only what an approved claim already says, and the offer's own
+  terms (dates, discount, conditions) are OWNER INPUT, not model output — a
+  generator inventing a discount is the one failure mode here that costs real
+  money.
+- Held to the LISTING'S OWN FACTS. This is why step 1 mirrors hours, address
+  and attributes before anything writes: a post announcing Sunday opening on a
+  listing that says closed Sunday is worse than no post, and only the mirror
+  can catch it.
+- Google's post types carry structure — an offer has a window and a redeem
+  link, an event has a start and end — so these are typed at emit rather than
+  being free text with a date in it.
+
+**Cadence**: one derived post per approved article, plus native posts on the
+plan's own schedule. Weekly, because a GBP post's prominence decays fast and a
+monthly cadence is the same as none.
+
+**AND THE APPROVAL POLICY IS THE OWNER'S CALL, not this design's.** "Held for
+review, approving is what publishes" is carried over from the ESP flow the
+owner inverted deliberately — it is a POLICY, not a technical limit. If routine
+native posts should go out on a cadence unattended, that is the autonomy ladder
+doing its job (`shadow` → `approve_all` → `auto`), and the contract gate in §3
+is what has to be answered before `auto` is earned. Nothing here needs
+rebuilding to allow it.
 
 ---
 
@@ -247,9 +279,10 @@ does for campaigns.
 - **Photo management** beyond the post's own image.
 - **Bulk multi-location** — until a client has more than about five, the
   per-location path is enough and the bulk path is speculative.
-- **Anything that publishes without a person.** The send is the approval,
-  here as everywhere. A local listing is the most public surface any of these
-  clients has.
+Note what is NOT on this list any more: **unattended publishing.** It was
+listed as a non-goal in the first draft and that was wrong — it is a rung on
+the autonomy ladder every other system already has, gated on the contract
+being answered (§3), not a thing this system refuses to do.
 
 ---
 
@@ -258,5 +291,27 @@ does for campaigns.
 1. **Eien** — off entirely, or restricted to non-claim content? (§6)
 2. Which listings do we actually control today, and are they verified and
    60+ days old? That decides who can be in step 1.
-3. Is the weekly filler post wanted at all, or only article-derived posts?
-   (A filler with nothing to say is how a feed becomes noise.)
+3. ~~Is the weekly filler post wanted at all?~~ **ANSWERED by §5's correction:**
+   native posts are a first-class producer, not filler. What is still open is
+   whether offers and events should reach `auto` on the ladder once the
+   contract is answered, or stay owner-approved for good — a business decision
+   about a public surface, not a technical one.
+
+---
+
+## §10 A note on how this file read the first time
+
+The owner's response to the first draft was *"I don't understand the issues …
+are we just trying to create a GBP system with only the existing pathways for
+some reason? What seems to be the issue you found?"* — and that was the right
+question. There were **no blocking issues**; ordinary design decisions were
+written up as if they were problems, which made a straightforward build sound
+fraught. Two external facts are real (the access application, the dead
+post-analytics endpoint) and neither stops anything.
+
+Reusing the existing paths for auth, drafting, the ban-list gate, review and
+push IS the right call — days instead of weeks, and GBP posts inherit the
+compliance gates that already exist. But reuse is leverage, not a boundary on
+what the system may do: where it started shaping the FEATURE SET rather than
+the implementation — derived posts only, no unattended publishing — it was
+wrong, and §5 and §8 are corrected above.
