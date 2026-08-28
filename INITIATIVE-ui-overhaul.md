@@ -45,7 +45,8 @@ Knowledge's Overview fold in), step 7 (completeness audit).
 | `a4daed8` | Turn the claim into a check |
 | `29c62d5` | Brand — the derive comes off the request, and a rule can be lifted |
 | `bf0f68a` | A landing page is a page — the scraper actually reads one |
-| _next_ | How many UI units have no piping — computed, not surveyed |
+| `b4fbb28` | How many UI units have no piping — computed, not surveyed |
+| _next_ | A run says what it lost — 38 hidden warnings down to 6 |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1317,6 +1318,67 @@ pressed and it reported zero. A check that counts its own bookkeeping as
 evidence is the emptiness trap wearing a fix. It excludes itself now, and both
 halves were verified to FAIL against a planted control and a planted hidden
 warning before being trusted.
+
+**OUT OF BAND — A RUN SAYS WHAT IT LOST (owner, 2026-08-28: "please fix
+it").** The 38-item hidden-warning backlog from the piping audit, worked.
+**38 → 6, and the 6 that remain each carry a verified reason rather than a
+name.**
+
+**FIRST, THE CHECK WAS CRYING WOLF, and a check that cries wolf gets skimmed
+— which is how the sabotage harness went a week unread.** Three false-positive
+classes, all found by looking at the flagged keys instead of trusting the
+count: (a) keys READ BACK by another module and surfaced through an aggregate
+(`extract`'s rejections roll into harvest's `not_verbatim_count`); (b) keys
+rendered by the producer's OWN module (`digest` writes AND renders its brief —
+`stale` was never hidden); (c) `web.py` excluded from the surface set, though
+it holds every route response and `_summarise`, which writes the status line
+every tab reads. With all three closed the honest number was **27**, not 38.
+
+**THE SEVENTEEN THAT WERE ONE DEFECT.** `_summarise` kept a run's GAINS and
+dropped its LOSSES, so a harvest that proposed twelve claims and REFUSED TO
+WRITE FIVE reported `proposed_count 12` and nothing else — while `harvest`'s
+own source says "What the writes actually did, as opposed to what was
+proposed. These are different numbers and conflating them hid a whole class of
+loss." It hid it in the status line. NEW `_losses()` reads the keys each
+producer already writes — `write_refused_count`, `rejected_for_banned_claim`,
+`not_verbatim_count`, `pages_skipped`, `pages_skipped_unchanged`,
+`truncated_page_count`, `drafts_skipped`, `skipped_small`,
+`dropped_for_banned_claims` — and appends `LOST: 5 writes refused · 2 rejected
+for a banned claim · 1 page skipped`. The WHY leads where a producer keeps a
+reason dict (`3 no proof, 1 too long` beats `4 dropped` at the moment somebody
+decides whether to care), and ONE REAL INSTANCE follows, because a count whose
+example you cannot see is a number you can only worry about: `e.g.
+Hand-decorated in Milan (banned phrase)`. **A clean run stays silent**, or the
+loud ones stop being read.
+
+**THE DISCRETE ONES.**
+- `systems.ready.missing_contract` was never hidden — `can_promote` walked
+  `CONTRACT` a SECOND time and rendered its own copy. Two computations of one
+  fact (rule 4). It reads `ready()`'s list now: one list, computed once.
+- `voice.propose.dropped_examples` — the Brand panel had the count of
+  sentences dropped for the ban list and not one of the sentences. A count
+  tells you to care; the sentence tells you whether the ban list is doing its
+  job or is simply too broad.
+- `keywords.cluster.orphan_pillars` — the Plan flash said "6 clusters" whether
+  it had found six themes or six unrelated phrases each promoted to a pillar
+  alone. It now says which.
+
+**THE SIX THAT REMAIN, each hand-checked, each with its reason in the suite:**
+`reconcile_drafts.still_waiting` (the whole dict renders wholesale at
+`/admin/status`); `canva`/`omnisend`'s `orphan` (both ride an `ok:False` the
+caller renders — leaked-resource detail on an error, not an unreported one);
+`propose.objection.needs_at_approval` (a tool response TO AN AGENT mid-draft);
+`shopify_webhooks.handle.needs_human` (VERIFIED: the handler already files
+`approvals.request_approval("privacy_request", …)`, so it reaches the console
+as an approval row — the key is the HTTP response body);
+`sources.fill.still_needs_a_human` (`/admin/fill` is a JSON route for hand
+calls; the same gaps render on the Data layer from `kb.completeness`).
+
+**AND THE LIMIT OF THE CHECK, STATED IN THE SUITE:** a key rendered by dumping
+the WHOLE dict is invisible to a literal search, so "no surface names it" is
+not the same as "no human can reach it". That is exactly why those six carry
+reasons instead of fixes. Guard `a_run_says_what_it_lost` (caught); the
+refined sweep was re-sabotaged with a planted key and still bites.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

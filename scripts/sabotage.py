@@ -2109,6 +2109,21 @@ SABOTAGES = [
                "zero. Absence read as success — the exact defect design rule "
                "12 was written for",
     },
+    {
+        "name": "a_run_says_what_it_lost",
+        "file": "app/web.py",
+        "find": "    lost = _losses(result)\n"
+                "    if lost:\n"
+                "        bits.append(\"LOST: \" + \" · \".join(lost))",
+        "replace": "    lost = []  # SABOTAGE",
+        "suites": ["test_brand_sources.py"],
+        "why": "a run reports only its GAINS again — a harvest that proposed "
+               "twelve claims and refused to write five says \"12\" and "
+               "nothing else. `harvest`'s own source says these are different "
+               "numbers and that conflating them hid a whole class of loss; "
+               "this is the line where they get conflated, and the owner "
+               "reads a healthy total over a run that threw work away",
+    },
 ]
 
 

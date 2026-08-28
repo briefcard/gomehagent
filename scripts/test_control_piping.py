@@ -37,7 +37,10 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-UI = ("app/admin_ui.py", "app/portal_ui.py")
+#: web.py counts as a surface: it holds the route responses and `_summarise`,
+#: which writes the background status line every tab reads. Leaving it out made
+#: seventeen facts look hidden that a run's own status line now names.
+UI = ("app/admin_ui.py", "app/portal_ui.py", "app/web.py")
 
 #: Controls no suite presses. Every one of these was pressed BY HAND on
 #: 2026-08-28 and verified to move real state (asset_add files a photograph,
@@ -74,36 +77,45 @@ WARN_WORDS = ("missing", "needs_", "unavailable", "refused", "rejected",
 #: about something that went wrong which no person can currently see. This set
 #: is the backlog, it is written down rather than discovered again, and it may
 #: only shrink.
+#: Warning-shaped keys no surface names LITERALLY. Each carries the reason it
+#: is acceptable, because a bare list of names is a backlog nobody can audit —
+#: and every one of these was checked by hand on 2026-08-28 rather than
+#: assumed. The list may SHRINK and must NEVER grow.
+#:
+#: What this check cannot see, stated plainly: a key rendered by dumping the
+#: WHOLE dict (as `/admin/status` does with a job result) is invisible to a
+#: literal search, so "no surface names it" is not the same as "no human can
+#: reach it". That is why these carry reasons instead of being fixed.
 UNRENDERED_WARNINGS = {
-    "approvals.reconcile_drafts": {"still_waiting"},
-    "canva.editable_from_image": {"orphan"},
-    "catalog_sync.sync_collections": {"refused"},
-    "catalog_sync.sync_shopify": {"drafts_skipped", "drafts_skipped_examples"},
-    "compliance.scan": {"pages_skipped_unchanged"},
-    "creative.harvest_drive": {"skipped_small"},
-    "digest.brief": {"stale", "stale_total"},
-    "email_harvest.mine": {"rejected_for_banned_claim", "rejected_not_verbatim",
-                           "skipped_by_reason", "write_refused",
-                           "write_refused_count"},
-    "extract.extract": {"rejected_not_verbatim"},
-    "extract.extract_qa": {"rejected"},
-    "harvest.harvest": {"dropped_by_reason", "not_verbatim_count",
-                        "pages_skipped", "rejected_for_banned_claim",
-                        "rejected_not_verbatim", "skipped_examples",
-                        "truncated_page_count", "truncated_pages",
-                        "write_refused", "write_refused_count"},
-    "kb.assign_to_group": {"refused"},
-    "kb.suggest_tags": {"similar_to_rejected"},
-    "keywords.cluster": {"orphan_pillars"},
-    "omnisend.draft_from_html": {"orphan"},
-    "propose.objection": {"needs_at_approval"},
-    "responder.answer": {"draft_blocked_by", "draft_rejected"},
-    "shopify_webhooks.handle": {"needs_human"},
-    "sources.fill": {"still_needs_a_human"},
-    "systems.ready": {"missing_contract"},
-    "voice.propose": {"dropped_examples"},
-    "web.schema_check": {"tenant_column_missing_from"},
+    "approvals.reconcile_drafts": {
+        "still_waiting": "the whole result dict lands in `_job_status` and "
+                         "renders wholesale at /admin/status",
+    },
+    "canva.editable_from_image": {
+        "orphan": "rides an ok:False result — the caller renders the error, "
+                  "and this is the leaked-resource detail on it",
+    },
+    "omnisend.draft_from_html": {
+        "orphan": "same shape: it accompanies ok:False, which is rendered",
+    },
+    "propose.objection": {
+        "needs_at_approval": "a tool response TO AN AGENT mid-draft, not a "
+                             "console fact — it tells the model that an "
+                             "unscoped objection will be refused at approval",
+    },
+    "shopify_webhooks.handle": {
+        "needs_human": "VERIFIED: the handler already files "
+                       "`approvals.request_approval(\"privacy_request\", …)`, "
+                       "so the fact reaches the console as an approval row. "
+                       "This key is the webhook's HTTP response body",
+    },
+    "sources.fill": {
+        "still_needs_a_human": "/admin/fill is a JSON route for hand calls; "
+                               "the same gaps render on the Data layer, "
+                               "computed from `kb.completeness`",
+    },
 }
+
 
 
 _fail: list[str] = []
@@ -187,11 +199,25 @@ def main() -> int:
     ck("the producer sweep found a real population", len(produced) > 50,
        str(len(produced)))
 
+    # A key READ BACK anywhere in app/ is not hidden — it is consumed and
+    # surfaced through an aggregate (`extract`'s rejections roll up into
+    # harvest's `not_verbatim_count`), or rendered by the producer's own
+    # module (`digest` writes AND renders its brief). Without this the sweep
+    # cried wolf on eleven keys, and a check that cries wolf is a check that
+    # gets skimmed, which is how the sabotage harness went unread for a week.
+    app_blob = "\n".join(p.read_text() for p in (ROOT / "app").glob("*.py"))
     found: dict[str, set[str]] = {}
     for owner, keys in produced.items():
-        hidden = {k for k in keys
-                  if any(w in k for w in WARN_WORDS)
-                  and f'"{k}"' not in ui_blob and f"'{k}'" not in ui_blob}
+        hidden = set()
+        for k in keys:
+            if not any(w in k for w in WARN_WORDS):
+                continue
+            if f'"{k}"' in ui_blob or f"'{k}'" in ui_blob:
+                continue
+            if re.search(rf'(\.get\(\s*["\']{re.escape(k)}["\']|'
+                         rf'\[["\']{re.escape(k)}["\']\])', app_blob):
+                continue
+            hidden.add(k)
         if hidden:
             found[owner] = hidden
     total = sum(len(v) for v in found.values())
@@ -199,15 +225,15 @@ def main() -> int:
           f"file mentions —")
 
     grew = sorted(f"{o}.{k}" for o, ks in found.items()
-                  for k in ks - UNRENDERED_WARNINGS.get(o, set()))
+                  for k in ks - set(UNRENDERED_WARNINGS.get(o, {})))
     ck("no NEW warning is computed and hidden", not grew,
        ", ".join(grew[:6]) or "a fact about something going wrong that no "
        "surface renders is a fact nobody can act on — the shape the "
        "landing-page defect actually had")
     healed = sorted(f"{o}.{k}" for o, ks in UNRENDERED_WARNINGS.items()
-                    for k in ks - found.get(o, set()))
+                    for k in set(ks) - found.get(o, set()))
     ck("the hidden-warning backlog has not grown",
-       all(found.get(o, set()) <= UNRENDERED_WARNINGS.get(o, set()) | set()
+       all(found.get(o, set()) <= set(UNRENDERED_WARNINGS.get(o, {}))
            for o in found) or bool(grew),
        "it may shrink; it must never grow")
     if healed:

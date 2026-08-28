@@ -3437,12 +3437,18 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                 f'good as the copy behind it.</div>'
                 for w in (got.get("sample_warnings") or []))
             dropped_n = int(got.get("dropped_for_banned_claims") or 0)
+            # …and SHOW one. `dropped_examples` carries the actual sentences
+            # and was unreachable: a count tells you to care, the sentence
+            # tells you whether the ban list is doing its job or is too broad.
+            eg = [str(x) for x in (got.get("dropped_examples") or []) if x][:1]
             dropped_line = (
                 f'<p class="mut">{dropped_n} sentence'
                 f'{"" if dropped_n == 1 else "s"} were dropped before this was '
                 f'measured because they use a phrase on the hard-rule list '
                 f'&mdash; the voice is read from what the brand may still '
-                f'say.</p>' if dropped_n else "")
+                f'say.'
+                + (f' e.g. &ldquo;{_esc(eg[0][:160])}&rdquo;' if eg else "")
+                + '</p>' if dropped_n else "")
             body = f"""
         <p class="mut"><b>Nothing was written.</b> A proposal from what the
         brand has already published — banned phrases filtered out, quotes

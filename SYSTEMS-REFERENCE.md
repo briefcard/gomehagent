@@ -314,6 +314,15 @@ durable fix was the same shape: stop asserting the property, start testing it.
 
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-28 — the hidden-warning backlog worked: 38 → 6. Eleven were the
+  CHECK crying wolf (keys consumed upstream, keys rendered by the producer's
+  own module, `web.py` missing from the surface set) — a noisy check gets
+  skimmed, so the filter was fixed first. Seventeen were ONE defect:
+  `_summarise` reported a run's gains and dropped its losses, so a harvest
+  that refused to write five claims said "proposed 12". `_losses()` now names
+  what was refused, skipped and dropped, reason first, with one real instance.
+  The six that remain each carry a verified reason, and the suite states what
+  the check cannot see: a key rendered by dumping the whole dict.
 - 2026-08-28 — "how many UI units did we build without piping?" Answered by
   computation, not survey: 70 console controls, 13 pressed by no suite (all 13
   then hand-pressed and all 13 work); 335 producers, 38 warning-shaped keys no

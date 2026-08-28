@@ -413,6 +413,34 @@ def main() -> int:
     brand_page = admin_ui.render_brand("s3cret", "baci")
     ck("the Brand tab says it beside the source list it is about",
        "read nothing: Spring" in brand_page)
+
+    # ── a run reports what it LOST, not only what it gained (2026-08-28) ───
+    #
+    # Every one of these numbers was computed and none reached a surface:
+    # `_summarise` kept the gains and dropped the losses, so a harvest that
+    # proposed twelve claims and REFUSED TO WRITE FIVE reported "12" and
+    # nothing else — while `harvest`'s own source says "these are different
+    # numbers and conflating them hid a whole class of loss". It hid it in the
+    # status line. Guard: `a_run_says_what_it_lost`.
+    lost = _summarise({
+        "proposed_count": 12, "pages_read": 40,
+        "write_refused_count": 5,
+        "write_refused": [{"claim": "Hand-decorated in Milan",
+                           "why": "banned phrase"}],
+        "rejected_for_banned_claim": ["a", "b"],
+        "pages_skipped": 1,
+        "dropped_by_reason": {"no proof": 3, "too long": 1}})
+    ck("a run names what it REFUSED TO WRITE, not only what it proposed",
+       "5 writes refused" in lost, lost)
+    ck("…and what the ban list stopped", "2 rejected for a banned claim" in lost)
+    ck("…and the reasons lead, most common first",
+       "3 no proof, 1 too long" in lost, lost)
+    ck("…and one real instance, so the count is actionable",
+       "Hand-decorated in Milan (banned phrase)" in lost, lost)
+    ck("singular stays singular — 1 page skipped, not 1 pages",
+       "1 page skipped" in lost, lost)
+    ck("a clean run stays QUIET, or the loud ones stop being read",
+       "LOST" not in _summarise({"proposed_count": 12, "pages_read": 40}))
     ck("…and carries the control that re-runs it (rule 1), so the fix is not "
        "an instruction to go somewhere else",
        "/admin/harvest" in brand_page and "/admin/compliance_scan" in brand_page)

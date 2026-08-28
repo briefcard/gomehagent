@@ -2681,8 +2681,16 @@ def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
     added = got.get("added") or {}
     said = ("found " + ", ".join(f"{n} from {s}" for s, n in added.items() if n)
             if any(added.values()) else "found nothing new")
+    # `orphan_pillars` counts phrases nothing else contained, so each became a
+    # pillar on its own. It is the difference between "we found a theme" and
+    # "we found six unrelated phrases and called each one a theme", and it was
+    # computed and rendered nowhere until the 2026-08-28 piping audit.
+    orphans = int(got.get("orphan_pillars") or 0)
+    lone = (f"; {orphans} phrase{'' if orphans == 1 else 's'} stood alone and "
+            f"became {'its own pillar' if orphans == 1 else 'their own pillars'}"
+            if orphans else "")
     return _plan_back(tenant, key, msg=f"{said}; {got.get('clusters', 0)} cluster(s)"
-                      + ("  " + " ".join(got.get("notes") or [])))
+                      + lone + ("  " + " ".join(got.get("notes") or [])))
 
 
 def _plan_days(raw) -> int:
@@ -6491,8 +6499,84 @@ def _summarise(result) -> str:
              if isinstance(r, dict) and not r.get("pages_found")]
     if empty:
         bits.append("READ NOTHING: " + ", ".join(str(e) for e in empty[:4]))
+    lost = _losses(result)
+    if lost:
+        bits.append("LOST: " + " · ".join(lost))
     note = result.get("extractor_note") or ""
     return " · ".join(bits) + (f" — {note[:200]}" if note else "")
+
+
+#: What a run REFUSED, SKIPPED or DROPPED, by the key each producer already
+#: writes it under. `label` is what a person needs to read; `plural` decides
+#: the wording; a value of 0 or an empty container is never mentioned, because
+#: a clean run must stay quiet or the loud ones stop being read.
+_LOSS_KEYS = (
+    ("write_refused_count", "write{s} refused"),
+    ("rejected_for_banned_claim", "rejected for a banned claim"),
+    ("not_verbatim_count", "rejected as not verbatim"),
+    ("pages_skipped", "page{s} skipped"),
+    ("pages_skipped_unchanged", "page{s} unchanged since last scan"),
+    ("truncated_page_count", "page{s} too long to read whole"),
+    ("drafts_skipped", "draft product{s} skipped"),
+    ("skipped_small", "image{s} too small to use"),
+    ("dropped_for_banned_claims", "sentence{s} dropped for a banned claim"),
+)
+
+
+def _losses(result: dict) -> list[str]:
+    """The other half of what a run did.
+
+    Every one of these numbers was already computed and NONE of them reached a
+    surface — `_summarise` kept the gains and dropped the losses, so a harvest
+    that proposed twelve claims and REFUSED TO WRITE FIVE reported "12" and
+    nothing else. `harvest`'s own source says why that matters: "What the
+    writes actually did, as opposed to what was proposed. These are different
+    numbers and conflating them hid a whole class of loss." It hid it here.
+
+    Found 2026-08-28 by the sweep the owner asked for — how many UI units have
+    no piping — which found 30 warning-shaped facts computed and rendered
+    nowhere. This closes the seventeen of them that are run losses.
+
+    `dropped_by_reason` and `skipped_by_reason` are dicts of reason → count, so
+    the WHY leads: "3 no proof, 1 too long" beats "4 dropped" at exactly the
+    moment somebody is deciding whether to care.
+    """
+    out: list[str] = []
+    for key, label in _LOSS_KEYS:
+        v = result.get(key)
+        n = len(v) if isinstance(v, (list, tuple, dict)) else (v or 0)
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out.append(f"{n} " + label.format(s="" if n == 1 else "s"))
+    for key in ("dropped_by_reason", "skipped_by_reason"):
+        why = result.get(key)
+        if isinstance(why, dict) and why:
+            top = sorted(why.items(), key=lambda kv: -int(kv[1] or 0))[:3]
+            out.append(", ".join(f"{v} {k}" for k, v in top))
+    # ONE EXAMPLE OF EACH LOSS. "5 writes refused" tells you to care; it does
+    # not tell you what to look at, and the producers already carry the list —
+    # `write_refused`, `skipped_examples`, `truncated_pages`,
+    # `drafts_skipped_examples` were all computed and all unreachable. A count
+    # whose instance you cannot see is a number you can only worry about.
+    for key in ("write_refused", "skipped_examples", "truncated_pages",
+                "drafts_skipped_examples"):
+        rows = result.get(key)
+        if isinstance(rows, (list, tuple)) and rows:
+            first = rows[0]
+            if isinstance(first, dict):
+                # WHAT it was, then WHY — in that order. `why` alone repeats
+                # the aggregate above ("2 banned phrase") and names no
+                # instance, which is the half a person needs to go and look.
+                what = (first.get("claim") or first.get("text")
+                        or first.get("url") or next(iter(first.values()), ""))
+                why = first.get("why") or ""
+                first = f"{what}{f' ({why})' if why else ''}"
+            out.append(f"e.g. {str(first)[:110]}")
+            break
+    return out
 
 
 def bg_status(label: str, tenant: str) -> dict:

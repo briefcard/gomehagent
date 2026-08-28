@@ -674,8 +674,13 @@ def can_promote(system: db.System) -> dict:
     # off, how does it break, and who notices. A system running loose with
     # those blank is the case the eight questions exist for.
     if target == "auto":
-        gaps = [label for f, label, _ in CONTRACT
-                if not (getattr(system, f, "") or "").strip()]
+        # READ `ready`'s answer rather than deriving the same list again.
+        # Both walked CONTRACT independently, which is two computations of one
+        # fact (design rule 4) — and it meant `ready()["missing_contract"]`
+        # was written and read by nothing, so the piping audit flagged it as a
+        # warning no surface renders. It renders; it just rendered a second
+        # copy of itself. One list now, computed once, read here.
+        gaps = r["missing_contract"]
         if gaps:
             return {"can": False, "target": target,
                     "why": ("nothing reads the output on `auto`, so the "
