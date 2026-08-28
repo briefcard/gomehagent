@@ -774,6 +774,11 @@ def _run_ad_copy(ctx: Context) -> dict:
                 tenant=ctx.tenant, output_id=board_rows[0]["output_id"],
                 run_id=ctx.run_id or "", system_key="ad_creative",
                 format="ad_batch", destination="",
+                # What this board IS, so it can be named in a list rather
+                # than shown as "ad batch · 2026-08-28" beside four others.
+                meta={"entity_key": entity_key, "entity_label": _label,
+                      "audience_key": audience_key,
+                      "variants": len(board_rows)},
                 body=_doc, draft_body=_doc, bytes=len(_doc)))
             s.commit()
         ctx.note("the batch is on its variant board — judge, edit, drop and "

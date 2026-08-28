@@ -311,6 +311,13 @@ def reconcile_drafts() -> dict:
     now the ONLY path for a drafted reply — closed the approval and threw the
     lesson away.
 
+    IT RECONCILES OUTBOUND MAIL, not only Gmail drafts (widened 2026-08-28).
+    An approval with no draft behind it — an RFQ, an invoice reminder, a
+    shipment follow-up — was skipped entirely, so answering that person
+    directly left the row pending for ever and the queue filled with work
+    already done. Those are asked of the mailbox the same way: by thread when
+    the approval is a reply, by recipient-since-raised when it starts one.
+
     SENT and DELETED are told apart, because to `read_draft` they are the same
     absence. A sent draft leaves a message in SENT on the thread and teaches;
     a deleted one leaves nothing, closes as `draft_discarded`, and teaches
@@ -335,8 +342,40 @@ def reconcile_drafts() -> dict:
         for ap in rows:
             p = ap.payload or {}
             draft_id, alias = p.get("draft_id"), p.get("account")
-            if not (draft_id and alias):
-                skipped += 1          # nothing to reconcile against
+            if not alias:
+                skipped += 1          # no mailbox to ask
+                continue
+            if not draft_id:
+                # NO GMAIL DRAFT BEHIND IT — an RFQ, an invoice reminder, a
+                # shipment follow-up, the report-figures ask. Nothing ever
+                # reconciled these (owner, 2026-08-28: "I'm looking at a list
+                # of emails that I've already handled"), so answering the
+                # person directly left the row in the queue for ever, and the
+                # queue filled with work already done.
+                #
+                # Asked of the mailbox, not of the console: a thread if the
+                # approval is a reply, otherwise the recipient since the
+                # approval was raised.
+                try:
+                    if p.get("thread_id"):
+                        sent = gc.sent_in_thread(alias, p["thread_id"])
+                    else:
+                        sent = gc.sent_to_since(alias, p.get("to") or "",
+                                                db.as_utc(ap.created_at))
+                except Exception:                                # noqa: BLE001
+                    skipped += 1      # unreadable: decide on the next tick
+                    continue
+                if not sent:
+                    kept += 1         # genuinely still waiting on a person
+                    continue
+                ap.status = "sent_outside"
+                ap.decided_at = db.utcnow()
+                closed += 1
+                # AND WHAT YOU WROTE INSTEAD. The whole point of noticing is
+                # to learn from it: the delta between what was drafted and
+                # what actually went reaches `SystemRun.edit_diff`, which is
+                # what `systems.edit_lessons` feeds back into the drafter.
+                learn.append((ap.id, p.get("body", ""), sent.get("body", "")))
                 continue
             try:
                 live = gc.read_draft(alias, draft_id)

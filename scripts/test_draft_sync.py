@@ -15,6 +15,7 @@ moment it was written. Approving composed a THIRD message from that copy. So:
 
     python3 scripts/test_draft_sync.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -29,6 +30,9 @@ _fail: list[str] = []
 _sent_drafts: list[str] = []
 _sent_fresh: list[dict] = []
 _DRAFTS: dict[str, dict] = {}
+#: recipient -> the most recent message this mailbox sent them since an
+#: approval was raised. The draftless half of the same question.
+_SENT_TO: dict[str, dict] = {}
 #: thread_id -> the message this mailbox actually sent on it. A draft that was
 #: SENT leaves one here; a draft that was DELETED does not, and the whole
 #: point of the 2026-08-27 change is that those two stop being the same event.
@@ -48,6 +52,7 @@ def _stub():
     gmail_client.send_email = lambda a, to, su, bo, th=None, cc="", **k: (
         _sent_fresh.append({"to": to, "body": bo}), "fresh")[1]
     gmail_client.sent_in_thread = lambda a, t: dict(_SENT_ON_THREAD.get(t) or {})
+    gmail_client.sent_to_since = lambda a, to, since: dict(_SENT_TO.get(to) or {})
 
 
 def _queue(body: str, draft_id: str = "", tenant: str = "baci",
@@ -232,6 +237,58 @@ def main() -> int:
     ck("and the email fallback queue agrees",
        "Invoice reminder" in fb and "Re: order" not in fb,
        "a signed approve link for a reply already sent would mail it twice")
+
+    # ---------------------------------------------------------------------
+    # OUTBOUND MAIL WITH NO DRAFT BEHIND IT (owner, 2026-08-28: "there was no
+    # feedback for communication with clients that lets a system know that
+    # they have already been answered … I'm looking at a list of emails that
+    # I've already handled").
+    #
+    # An RFQ, an invoice reminder, a shipment follow-up: the system wrote the
+    # words, there is no Gmail draft, and answering the person yourself used
+    # to leave the approval pending for ever.
+    # ---------------------------------------------------------------------
+    print("\n— mail you answered yourself stops asking to be sent —")
+    _SENT_TO.clear()
+    ap_r = approvals.request_approval(
+        "send_email", "[RFQ] quote request to freight@x.example",
+        {"account": "baci", "to": "freight@x.example",
+         "subject": "Quote request", "body": GEN}, notify=False)
+    res_r = approvals.reconcile_drafts()
+    with db.SessionLocal() as s:
+        ck("with nothing sent it is left alone",
+           s.get(db.Approval, ap_r).status == "pending", str(res_r))
+    _SENT_TO["freight@x.example"] = {
+        "message_id": "s1",
+        "body": "Hi — could you also quote express? Thanks, Gomeh"}
+    _sent_drafts.clear(); _sent_fresh.clear()
+    res_r2 = approvals.reconcile_drafts()
+    with db.SessionLocal() as s:
+        row_r = s.get(db.Approval, ap_r)
+        ck("once you have written to them, it closes",
+           row_r.status == "sent_outside", row_r.status)
+        ck("  and the delta is recorded — how YOU answered",
+           bool((row_r.payload or {}).get("edit")),
+           "the point of noticing is to learn from it")
+        ck("    saying it was rewritten, not sent as-is",
+           (row_r.payload or {})["edit"]["as_is"] is False,
+           str((row_r.payload or {}).get("edit")))
+    ck("the run reports it", res_r2["deltas_recorded"] >= 1, str(res_r2))
+    ck("and it still sends nothing", not _sent_drafts and not _sent_fresh)
+    # NOT "the queue is empty": the invoice reminder from the section above
+    # is still genuinely pending — nothing has been sent to that address —
+    # and asserting zero would have been asserting that reconcile closes
+    # things it should leave alone.
+    fb2 = c.get("/admin/pending", params={"key": "s3cret"}).text
+    ck("the answered one leaves the queue", "RFQ" not in fb2, "closed")
+    ck("  and the unanswered one stays", "Invoice reminder" in fb2,
+       "reconcile must close only what was actually dealt with")
+
+    print("\n— asked of the MAILBOX, not of the console —")
+    src = inspect.getsource(approvals.reconcile_drafts)
+    ck("a draftless reply is matched on its thread", "sent_in_thread" in src)
+    ck("  and one that STARTS a conversation, on the recipient",
+       "sent_to_since" in src, "an RFQ has no thread to look in")
 
     print()
     if _fail:

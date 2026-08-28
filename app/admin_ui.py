@@ -4454,6 +4454,57 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("catalogue", "Store sync"))
 
 
+def artifact_label(art) -> str:
+    """A draft's REAL NAME — what it is, who it is for, what it is trying to
+    do, and when (owner, 2026-08-28: "we need it to give them real names …
+    drafts should be labeled by their relevant identifying elements").
+
+    Every list of drafts showed `format · timestamp` — "esp campaign ·
+    2026-08-27T10:22" — so four campaigns to four different segments were
+    four identical rows and the only way to tell them apart was to open each
+    one. The identifying elements were all on the artifact already; nothing
+    read them.
+
+    Built from `ArtifactBody.meta`, per format, and falls back to the old
+    format-and-date for anything written before its skill filled it in — a
+    generic name is worse than a specific one and better than a blank.
+    """
+    meta = dict((getattr(art, "meta", None) or {}))
+    fmt = (getattr(art, "format", "") or "")
+    when = str(getattr(art, "created_at", "") or "")[:10]
+
+    def _dated(head: str, *bits: str) -> str:
+        tail = " · ".join([b for b in bits if b] + ([when] if when else []))
+        return f"{head} — {tail}" if tail else head
+
+    if fmt == "campaign_email":
+        subject = str(meta.get("subject") or "").strip()
+        seg = str(meta.get("segment") or "").strip()
+        intent = str(meta.get("intent") or "").strip()
+        if subject:
+            return _dated(subject,
+                          f"to {seg}" if seg else "",
+                          intent.replace("_", " ") if intent else "")
+    elif fmt == "cms_article":
+        title = str(meta.get("title") or "").strip()
+        kw = str(meta.get("keyword") or "").strip()
+        role = str(meta.get("role") or "").strip()
+        if title:
+            return _dated(title,
+                          f"for &ldquo;{kw}&rdquo;" if kw else "", role)
+    elif fmt == "ad_batch":
+        who = str(meta.get("entity_label") or meta.get("entity_key")
+                  or "").strip()
+        aud = str(meta.get("audience_key") or "").strip()
+        n = meta.get("variants")
+        if who or aud:
+            return _dated(f"Ads — {who}" if who else "Ads",
+                          f"to {aud}" if aud else "",
+                          f"{n} variants" if n else "")
+    generic = (fmt or "artifact").replace("_", " ")
+    return f"{generic} · {when}" if when else generic
+
+
 def _read_off(srcs: list[dict], source_text: str) -> str:
     """Which of this account's sites a finding was read off, by its own name.
 
@@ -5623,8 +5674,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         if held:
             links = " · ".join(
                 f'<a href="/admin/work/{_esc(a.output_id)}?key={_esc(key)}">'
-                f'{_esc(a.system_key or "artifact")} · '
-                f'{_esc(str(a.created_at)[:10])}</a>' for a in held)
+                f'{artifact_label(a)}</a>' for a in held)
             inprog = (f'<div class="everynote"><b>In progress</b> — '
                       f'{len(held)} kept to finish: {links}</div>')
     except Exception:                                            # noqa: BLE001
@@ -6657,8 +6707,7 @@ def _grounded_lane(key: str, tenant: str) -> str:
                               f'&hellip;{sent}&hellip;</div>')
             where = (f' · last in <a href="/admin/work/{_esc(art.output_id)}'
                      + (f'?key={_esc(key)}' if key else "")
-                     + f'">{_esc((art.format or "artifact").replace("_", " "))}'
-                     f' &middot; {_esc(str(latest.created_at)[:10])}</a>')
+                     + f'">{artifact_label(art)}</a>')
         else:
             where = (' · the artifacts were not kept whole (pre-workroom '
                      'outputs), so the sentence cannot be shown')
@@ -8857,8 +8906,7 @@ def _drafts_section(key: str, row) -> str:
         rows_html += (
             f'<div class="msg{"" if held else " gone"}">'
             f'<a href="/admin/work/{_esc(a.output_id)}?key={_esc(key)}">'
-            f'{_esc((a.format or "artifact").replace("_", " "))} · '
-            f'{_esc(str(a.created_at)[:16])}</a>'
+            f'{artifact_label(a)}</a>'
             + (' <span class="chip off">in review</span>' if held else "")
             + f' <span class="when">{a.bytes or 0} bytes</span></div>')
     if not rows_html:

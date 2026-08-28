@@ -1700,8 +1700,15 @@ SABOTAGES = [
     {
         "name": "a_sent_draft_teaches",
         "file": "app/approvals.py",
-        "find": "                learn.append((ap.id, p.get(\"body\", \"\"), sent.get(\"body\", \"\")))",
-        "replace": "                pass  # SABOTAGE",
+        # Anchored with the line ABOVE it: the draftless branch added in the
+        # same file files an identical `learn.append`, and an anchor matching
+        # twice patches whichever comes first — which may not be the one under
+        # test. Caught by `test_sabotage_anchors` the day it was written.
+        "find": "                ap.status = \"sent_outside\"\n"
+                "                closed += 1\n"
+                "                learn.append((ap.id, p.get(\"body\", \"\"), sent.get(\"body\", \"\")))",
+        "replace": "                ap.status = \"sent_outside\"\n"
+                   "                closed += 1  # SABOTAGE",
         "suites": ["test_draft_sync.py"],
         "why": "the delta between the draft and the letter is thrown away "
                "again on the ONLY path a reply now takes. `SystemRun."
@@ -1846,6 +1853,33 @@ SABOTAGES = [
                "was written: neglected cohorts, an unbalanced give:ask and a "
                "programme carried by one product, all answerable and none of "
                "it ever put in front of the owner",
+    },
+    {
+        "name": "a_draft_has_a_real_name",
+        "file": "app/admin_ui.py",
+        "find": "    if fmt == \"campaign_email\":\n"
+                "        subject = str(meta.get(\"subject\") or \"\").strip()",
+        "replace": "    if False:  # SABOTAGE\n"
+                   "        subject = str(meta.get(\"subject\") or \"\").strip()",
+        "suites": ["test_article_review.py"],
+        "why": "every draft goes back to being named 'format · timestamp', so "
+               "four campaigns to four different segments are four identical "
+               "rows and the only way to tell them apart is to open each one "
+               "— on the page whose whole job is deciding between them",
+    },
+    {
+        "name": "answered_mail_stops_asking",
+        "file": "app/approvals.py",
+        "find": "                        sent = gc.sent_to_since(alias, p.get(\"to\") or \"\",\n"
+                "                                                db.as_utc(ap.created_at))",
+        "replace": "                        sent = {}  # SABOTAGE",
+        "suites": ["test_draft_sync.py"],
+        "why": "outbound mail with no Gmail draft behind it — an RFQ, an "
+               "invoice reminder, a shipment follow-up — is never reconciled "
+               "again, so answering the person yourself leaves the approval "
+               "pending for ever and the queue fills with work already done. "
+               "The delta between what was drafted and what you actually "
+               "wrote is lost with it",
     },
     {
         "name": "attention_clears_when_read",

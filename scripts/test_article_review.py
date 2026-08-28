@@ -194,6 +194,42 @@ def main() -> int:
        == "untouched",
        "every approval queued before this column existed")
 
+    print("\n— a draft has a real name, not a format and a timestamp —")
+    from app import admin_ui as _aui
+    art_n, _k, _a = web._article_bundle(oid_b)
+    label = _aui.artifact_label(art_n)
+    ck("an article is named by its title",
+       "Renamed with no approval open" in label, label)
+    ck("  with the keyword it was written for",
+       "acrylic tumbler" in label, label)
+    ck("  and the date", "-" in label.split("—")[-1], label)
+    ck("a nameless artifact still gets SOMETHING, not a blank",
+       _aui.artifact_label(type("A", (), {"meta": {}, "format": "cms_article",
+                                          "created_at": "2026-08-28"})())
+       .startswith("cms article"),
+       "a generic name is worse than a specific one and better than a blank")
+
+    class _Camp:
+        format = "campaign_email"
+        created_at = "2026-08-28"
+        meta = {"subject": "Your table, ready for August",
+                "segment": "lapsed_buyers", "intent": "offer"}
+    lab_c = _aui.artifact_label(_Camp())
+    ck("an email is named by its SUBJECT",
+       lab_c.startswith("Your table, ready for August"), lab_c)
+    ck("  with who it is for", "to lapsed_buyers" in lab_c, lab_c)
+    ck("  and what it is trying to do", "offer" in lab_c, lab_c)
+
+    class _Ads:
+        format = "ad_batch"
+        created_at = "2026-08-28"
+        meta = {"entity_label": "Aqua set", "audience_key": "hosts",
+                "variants": 3}
+    lab_a = _aui.artifact_label(_Ads())
+    ck("an ad board is named by what it sells and to whom",
+       "Aqua set" in lab_a and "to hosts" in lab_a and "3 variants" in lab_a,
+       lab_a)
+
     print("\n— the ban list binds the owner too —")
     r3 = c.post("/admin/article_save",
                 data={"key": "s3cret", "output_id": oid,

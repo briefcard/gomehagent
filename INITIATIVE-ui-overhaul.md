@@ -836,6 +836,38 @@ instead of only when somebody remembers to sweep. Verified by breaking an
 anchor, confirming the suite named the right guard, and restoring the file
 byte-identically.
 
+**OUT OF BAND — ANSWERED MAIL STOPS ASKING, AND DRAFTS GET REAL NAMES
+(owner walkthrough, 2026-08-28).** *"There was no feedback for communication
+with clients that lets a system know that they have already been answered …
+I'm looking at a list of emails that I've already handled."* DIAGNOSIS:
+`reconcile_drafts` skipped every approval without a `draft_id` — an RFQ, an
+invoice reminder, a shipment follow-up, the report-figures ask — so
+answering that person yourself left the row pending for ever. Those are now
+asked of the MAILBOX like the drafted ones: by thread when the approval is a
+reply, and by NEW `gmail_client.sent_to_since` (one bounded Gmail query,
+recipient + date) when it starts a conversation. Closing it records the
+delta between what was drafted and what actually went — which is the second
+half of the ask ("you should also be getting the feedback of how I answered
+so you can inform future responses"): it lands on `SystemRun.edit_diff`,
+which `systems.edit_lessons` already feeds back into the drafter, guarded by
+the existing `lesson_guidance_reaches_prompt`. AND *"drafts should be
+labeled by their relevant identifying elements"*: NEW `artifact_label`, one
+function used by the Drafts index, Review's In-progress strip and the
+claim-usage link — an email by its SUBJECT · who it is for · what it is
+trying to do · date; an article by title · keyword · role; an ad board by
+what it sells · to whom · how many variants. Every element was already on
+the artifact (`meta`, wired to `ArtifactBody` the push before) and nothing
+read it, so four campaigns to four different segments rendered as four
+identical `esp campaign · 2026-08-27T10:22` rows on the page whose whole job
+is choosing between them. Unknown formats fall back to the old name rather
+than a blank. Guards (both caught): `answered_mail_stops_asking`,
+`a_draft_has_a_real_name`. AND THE NEW ANCHOR SUITE EARNED ITSELF ON DAY
+ONE: the draftless branch files an identical `learn.append` to the drafted
+one, so `a_sent_draft_teaches` started matching TWICE — an anchor that
+matches twice patches whichever copy comes first, which may not be the one
+under test. `test_sabotage_anchors` failed on it immediately; the entry is
+re-anchored with the two lines above it.
+
 **OUT OF BAND — ATTENTION CLEARS WHEN IT IS READ (owner walkthrough,
 2026-08-28).** *"'Something needs attention' should only show up if a new
 issue has appeared. Once I click check systems it should disappear until

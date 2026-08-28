@@ -454,6 +454,42 @@ def sent_in_thread(alias: str, thread_id: str) -> dict:
     return {}
 
 
+def sent_to_since(alias: str, to: str, since) -> dict:
+    """The most recent message this mailbox SENT to an address since `since`.
+
+    The thread-based check cannot answer for outbound mail that starts a
+    conversation — an RFQ, an invoice reminder, a shipment follow-up. Those
+    carry a recipient and no thread, so "has this been dealt with?" is asked
+    of the recipient and a date instead.
+
+    Deliberately narrow: one Gmail query bounded by both, so a mailbox with
+    ten thousand sent messages costs the same as one with ten.
+    """
+    addr = (to or "").strip()
+    if not addr or "@" not in addr:
+        return {}
+    try:
+        after = int(since.timestamp())
+    except Exception:                                            # noqa: BLE001
+        return {}
+    svc = service_for(alias)
+    resp = svc.users().messages().list(
+        userId="me", maxResults=5,
+        q=f"in:sent to:{addr} after:{after}").execute()
+    refs = resp.get("messages") or []
+    if not refs:
+        return {}
+    msg = svc.users().messages().get(
+        userId="me", id=refs[0]["id"], format="full").execute()
+    headers = {h["name"].lower(): h["value"]
+               for h in (msg.get("payload") or {}).get("headers", [])}
+    return {"message_id": msg.get("id", ""),
+            "thread_id": msg.get("threadId", ""),
+            "subject": headers.get("subject", ""),
+            "date": headers.get("date", ""),
+            "body": _extract_text(msg.get("payload") or {})}
+
+
 def draft_exists(alias: str, draft_id: str) -> bool:
     return bool(read_draft(alias, draft_id))
 
@@ -504,6 +540,6 @@ def _serialize(fn):
 for _name in ("fetch_unread", "fetch_unanswered", "get_thread_context",
               "fetch_sent", "fetch_recent", "fetch_with_attachments",
               "download_attachment", "ensure_label", "add_label", "mark_read",
-              "fetch_sent_threads", "sent_in_thread",
+              "fetch_sent_threads", "sent_in_thread", "sent_to_since",
               "create_draft", "send_email"):
     globals()[_name] = _serialize(globals()[_name])
