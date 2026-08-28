@@ -46,6 +46,133 @@ def all_tenants(include_paused: bool = False) -> list[db.Tenant]:
         return rows
 
 
+# ---------------------------------------------------------------------------
+# Where a brand's words live: one website, N landing pages
+# ---------------------------------------------------------------------------
+# The owner's constraint, and the whole design (2026-08-27): "some brands have
+# several domains including landing pages etc that store their information" —
+# but ONE of them is the website, and branding, positioning and tone come from
+# that one only. So this is not a list of equal domains. It is a primary with
+# a role, plus secondaries with a different, narrower one, and the difference
+# is enforced by which function a caller is allowed to reach for:
+#
+#   identity  (brand_theme, voice.gather, positioning)  reads  Tenant.domain
+#   facts     (harvest, compliance.scan)                reads  content_sources()
+#
+# Nothing that derives identity calls anything here — that is the point, and
+# `voice_reads_the_website_only` is the sabotage guard that keeps it true.
+
+WEBSITE_LABEL = "Website"
+
+
+def _norm(value: str) -> str:
+    """One vocabulary for "same site" — the connect page's, not a second one."""
+    from .connections import norm_domain
+    return norm_domain(value)
+
+
+def content_sources(key: str) -> list[dict]:
+    """Every place this account's own words are published, website first.
+
+    Each row: {"url", "label", "role"} with role in ("website",
+    "landing_page"). The website is always first and always present when the
+    account has one, so a caller that reads only `[0]` gets the identity
+    source rather than whichever row was added last.
+
+    A landing page recorded on the same host as the website is dropped here,
+    not just refused at the form: `/admin/tenant_set` can still write the
+    domain by hand, so a collision can appear after the fact, and a second
+    entry for the same site would harvest it twice and count it twice.
+    """
+    t = get(key)
+    if not t:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    site = (t.domain or "").strip()
+    if site:
+        out.append({"url": site, "label": WEBSITE_LABEL, "role": "website"})
+        seen.add(_norm(site))
+    for row in (t.sources or []):
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or "").strip()
+        if not url or _norm(url) in seen:
+            continue
+        seen.add(_norm(url))
+        out.append({"url": url,
+                    "label": str(row.get("label") or "").strip() or _norm(url),
+                    "role": "landing_page"})
+    return out
+
+
+def source_label(key: str, url: str) -> str:
+    """Which of this account's sources a URL was read off, by its own name.
+
+    Derived from the URL rather than stored beside every finding: the URL IS
+    the record of where a claim came from (rule 8, every fact stated once),
+    and a stored copy would go stale the moment a landing page is relabelled
+    or removed. An unrecognised host answers with the host — honest, and what
+    a claim harvested before a source was renamed should say.
+    """
+    host = _norm(url)
+    if not host:
+        return ""
+    for src in content_sources(key):
+        if _norm(src["url"]) == host:
+            return src["label"]
+    return host
+
+
+def set_website(key: str, url: str) -> dict:
+    """The canonical writer for the identity source."""
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, key)
+        if not t:
+            return {"error": f"unknown tenant {key!r}"}
+        t.domain = (url or "").strip()
+        s.commit()
+    return {"tenant": key, "domain": (url or "").strip()}
+
+
+def set_sources(key: str, rows: list[dict]) -> dict:
+    """The canonical writer for the landing-page list. Replaces it whole.
+
+    Refuses a row on the website's own host and says so, rather than silently
+    dropping it — the person typing it believes they are adding a source, and
+    a source that vanishes without a word reads as a broken form.
+    """
+    with db.SessionLocal() as s:
+        t = s.get(db.Tenant, key)
+        if not t:
+            return {"error": f"unknown tenant {key!r}"}
+        site = _norm(t.domain or "")
+        kept: list[dict] = []
+        seen: set[str] = {site} if site else set()
+        refused: list[str] = []
+        for row in rows or []:
+            url = str((row or {}).get("url") or "").strip()
+            if not url:
+                continue
+            host = _norm(url)
+            if host == site:
+                refused.append(url)
+                continue
+            if host in seen:
+                continue
+            seen.add(host)
+            kept.append({"url": url,
+                         "label": str((row or {}).get("label") or "").strip()
+                                  or host})
+        t.sources = kept
+        s.commit()
+    out: dict = {"tenant": key, "landing_pages": len(kept)}
+    if refused:
+        out["refused"] = (f"{', '.join(refused)} is the website itself — "
+                          f"it is already read, as the identity source")
+    return out
+
+
 def declared_capabilities(key: str) -> dict:
     """What the Tenant row *claims* is set up. Intent, not evidence.
 

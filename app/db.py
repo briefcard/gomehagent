@@ -1168,7 +1168,28 @@ class Tenant(Base):
     #: than as a shop.
     business_model = Column(String, default="")
     status = Column(String, default="active")  # active | paused | offboarded
+    #: THE WEBSITE. The one domain that says who this business is, and the
+    #: only one identity is ever read from — `brand_theme` derives the look
+    #: from it, `voice.gather` hears the tone in it, positioning is asserted
+    #: off it. Everything that resolves "which client is this?" keys on it.
     domain = Column(String)
+    #: The OTHER places this brand publishes — campaign landing pages, a
+    #: microsite, a one-page offer. Read for FACTS ONLY: `harvest` proposes
+    #: claims off them and `compliance.scan` checks them against the ban
+    #: list (a banned phrase on a landing page is just as live as one on the
+    #: homepage, and until now the scan could not see it).
+    #:
+    #: They are NOT equal domains and must never be flattened into a list
+    #: with `domain`: a landing page is written for one campaign, so deriving
+    #: a brand's voice or positioning from one would take the loudest month
+    #: of the year as the whole personality. `tenants.content_sources` is the
+    #: single reader; nothing that reads identity ever calls it.
+    #:
+    #: Shape: [{"url": "offer.example.com", "label": "Spring landing page"}].
+    #: A JSON list on the row that already holds the website, rather than a
+    #: table, because there is no per-source state to keep — the crawl memory
+    #: is `HarvestedPage`, keyed by page URL, which spans domains already.
+    sources = Column(JSON, default=list)
     timezone = Column(String, default="America/New_York")
 
     # --- connections: keys into config dicts / vault refs, not credentials ---

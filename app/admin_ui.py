@@ -2864,6 +2864,11 @@ _BRAND_CSS = """<style>
 .bt-table td,.bt-table th{border:1px solid var(--rule);padding:4px 8px;text-align:left}
 .bt-form input[type=text]{width:100%;box-sizing:border-box;padding:5px}
 .bt-form td{vertical-align:top}
+/* A source row is a label and a URL side by side, each wide enough to READ
+   at a glance — an unreadable URL in a list of sites is a list you cannot
+   check. They grow to share the row and wrap on a phone. */
+.src-cell{flex:1 1 15rem;min-width:0}
+.src-cell input{width:100%;box-sizing:border-box;padding:5px}
 </style>"""
 
 
@@ -3034,6 +3039,58 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
 </div>
 {voice_prop}"""
 
+    # --- where the facts are read from: one website, N landing pages -------
+    # The owner's constraint (2026-08-27) is the whole design: "some brands
+    # have several domains including landing pages" — but ONE of them is the
+    # website, and branding, positioning and tone come from that one only. So
+    # the page says that in words, not just in code: the website is labelled
+    # the identity source, and the landing pages are labelled facts-only.
+    srcs = tenants.content_sources(tenant)
+    lps = [x for x in srcs if x["role"] == "landing_page"]
+    src_rows = "".join(f"""
+    <div class="conn-site">
+      <span class="src-cell"><input name="lp_label" value="{_esc(x['label'])}"
+             placeholder="what this page is"></span>
+      <span class="src-cell"><input name="lp_url" value="{_esc(x['url'])}"></span>
+      <label class="pick"><input type="checkbox" name="lp_drop"
+             value="{_esc(x['url'])}"> remove</label>
+    </div>""" for x in lps) or (
+        '<p class="mut">None recorded — only the website is read. If this '
+        'brand runs campaign landing pages, the claims and the banned '
+        'phrases on them are invisible to every system until they are '
+        'listed here.</p>')
+    sources_card = f"""
+<div class="anchor" id="sources"></div>
+<div class="card">
+  <div class="head"><h2>Where their words are read from</h2>
+    <span class="mut">{len(srcs)} site{"" if len(srcs) == 1 else "s"}</span></div>
+  <p class="mut">The <b>website</b> is the identity source: positioning, tone
+  and the email theme are derived from it and from nothing else. Landing
+  pages are read for <b>facts only</b> — harvest proposes claims, objections
+  and pictures off them, and the ban-list scan checks them, because a banned
+  phrase on a landing page is exactly as live as one on the homepage.
+  <b>Voice is never derived from a landing page</b>: a page written for one
+  campaign is the loudest month of the year, not how the brand speaks.</p>
+  <form class="f" method="post" action="/admin/brand_sources">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <label>Website &mdash; the identity source</label>
+    <input name="website" value="{_esc(t.domain if t else '')}"
+           placeholder="not set — nothing can be derived, harvested or scanned">
+    <label>Landing pages &mdash; read for facts only</label>
+    {src_rows}
+    <label>Add a landing page</label>
+    <div class="conn-site">
+      <span class="src-cell"><input name="add_label"
+             placeholder="what this page is"></span>
+      <span class="src-cell"><input name="add_url"
+             placeholder="offer.example.com"></span>
+      <span class="when">a URL already listed, or the website itself, is
+      refused rather than read twice</span>
+    </div>
+    <div class="row"><button>Save sources</button></div>
+  </form>
+</div>"""
+
     # The live half: what customers' emails render with today.
     if live:
         gaps = st.get("live_gaps") or []
@@ -3117,6 +3174,7 @@ and hand-set fields survive future re-derives.</p>
   campaign email once approved. What may be ASSERTED (claims, objections, the
   catalogue) lives on Knowledge.</p>
   {identity}
+  {sources_card}
   <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
   <div class="card"><div class="head"><h2>Proposed</h2></div>{prop_body}{actions}</div>
 </div>""")
@@ -4089,6 +4147,20 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("catalogue", "Store sync"))
 
 
+def _read_off(tenant: str, source_text: str) -> str:
+    """Which of this account's sites a finding was read off, by its own name.
+
+    Derived from the URL already recorded in the finding's `source` rather
+    than stored beside it — the URL IS the record of where it came from (rule
+    8: every fact stated once), and a second copy would go stale the moment a
+    landing page is relabelled. An unrecognised host answers with the host,
+    which is the honest answer for a claim harvested before that source was
+    named.
+    """
+    m = _re.search(r"https?://[^\s\"'<>]+", source_text or "")
+    return tenants.source_label(tenant, m.group(0)) if m else ""
+
+
 def _sources_block(key: str, tenant: str) -> str:
     """The three feeders and what they last did — at the TOP (spec §4).
 
@@ -4406,6 +4478,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
       {catlist}
     </div>"""
 
+    # Named only when there is more than one site to tell apart: on a
+    # single-domain account "read off Website" on every card is a fact stated
+    # once too often (rule 8), and the whole point of the declutter was that
+    # the card leads with the decision.
+    _many_sites = len(tenants.content_sources(tenant)) > 1
+
     if pending:
         def _card(p) -> str:
             chosen = set(p.situations or [])
@@ -4517,7 +4595,9 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <details class="sec"><summary class="mut">Details — where it
               was found, what it proves</summary>
                 <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or 'source not recorded')}
-                · from {_esc(p.origin or 'unknown')}</div>
+                · from {_esc(p.origin or 'unknown')}{
+                  (" · read off " + _esc(_read_off(tenant, p.source or "")))
+                  if (_many_sites and _read_off(tenant, p.source or "")) else ""}</div>
                 {(f'<label>Found next to &mdash; copied from the page</label>'
                   f'<div class="when">&ldquo;{_esc(getattr(p, "context", ""))}&rdquo;</div>')
                  if getattr(p, "context", "") else ""}

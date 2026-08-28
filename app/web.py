@@ -621,6 +621,71 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         f"&ok={quote(' · '.join(msgs) or 'nothing to change')}#identity", 303)
 
 
+@app.post("/admin/brand_sources")
+async def brand_sources(request: Request, key: str = Depends(admin_key)):
+    """Save WHERE this account's words are read from — the website, and the
+    landing pages read for facts only (owner, 2026-08-27).
+
+    The two are written by two different canonical writers on purpose:
+    `tenants.set_website` moves the identity source, which changes what the
+    voice deriver and the brand theme read; `tenants.set_sources` replaces
+    the facts-only list, which changes what harvest and the ban-list scan
+    reach. Nothing here can promote a landing page into the identity source
+    — that is the constraint the whole feature exists to hold.
+
+    Submitted values REPLACE, the same contract as the identity editor above:
+    the form shows what IS, so what comes back is the whole intended list.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import tenants as tn
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    msgs, errs = [], []
+
+    if form.get("website") is not None:
+        site = str(form.get("website", "")).strip()
+        res = tn.set_website(tenant, site)
+        if res.get("error"):
+            errs.append(res["error"])
+        else:
+            msgs.append(f"website set to {site}" if site
+                        else "website cleared — nothing can be derived, "
+                             "harvested or scanned until one is set")
+
+    # Rebuilt from what the form carried: the rows as edited, minus the ones
+    # ticked for removal, plus the one being added.
+    labels = form.getlist("lp_label")
+    urls = form.getlist("lp_url")
+    dropped = {str(u).strip() for u in form.getlist("lp_drop")}
+    rows = [{"url": str(u).strip(), "label": str(l).strip()}
+            for l, u in zip(labels, urls)
+            if str(u).strip() and str(u).strip() not in dropped]
+    add_url = str(form.get("add_url", "")).strip()
+    if add_url:
+        rows.append({"url": add_url,
+                     "label": str(form.get("add_label", "")).strip()})
+    res = tn.set_sources(tenant, rows)
+    if res.get("error"):
+        errs.append(res["error"])
+    else:
+        if res.get("refused"):
+            errs.append(res["refused"])
+        n = res["landing_pages"]
+        msgs.append(f"{n} landing page{'' if n == 1 else 's'} on file")
+
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+    if msgs:
+        back += f"&ok={quote(' · '.join(msgs))}"
+    if errs:
+        back += f"&err={quote(' · '.join(errs)[:200])}"
+    return RedirectResponse(back + "#sources", 303)
+
+
 @app.post("/admin/brand_theme/derive")
 async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
     """Run the deriver and re-show the review page. Writes the PROPOSAL only —

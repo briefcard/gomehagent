@@ -456,17 +456,38 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         return {"error": f"{tenant} has no banned_claims — nothing to check "
                          f"against. Add them before scanning."}
 
-    pages, source = discover_pages(t.domain, limit=max(limit * 4, 200))
+    # Every site this brand publishes on, not only the website (owner,
+    # 2026-08-27). A banned phrase on a campaign landing page is exactly as
+    # live as one on the homepage, and until now the scan could not see it —
+    # so a clean report was clean about part of the estate while claiming to
+    # be clean about the brand.
+    srcs = tenants.content_sources(tenant)
+    pages, src_report = [], []
+    for src in srcs:
+        found, how = discover_pages(src["url"], limit=max(limit * 4, 200))
+        for pg in found:
+            pg["site"] = src["label"]
+        pages.extend(found)
+        src_report.append({
+            "label": src["label"], "url": src["url"], "role": src["role"],
+            "pages_found": len(found), "page_source": how,
+            "error": "" if found else
+                     f"could not enumerate any pages at {src['url']}"})
+    source = next((r["page_source"] for r in src_report
+                   if r["role"] == "website"), "")
     if not pages:
         why = getattr(discover_pages, "last_problems", [])
+        unreachable = ", ".join(x["url"] for x in srcs) or t.domain
         if why:
-            return {"error": f"could not reach {t.domain}", "detail": why,
+            return {"error": f"could not reach {unreachable}", "detail": why,
+                    "sources": src_report,
                     "note": "This is a connection problem, not a missing "
                             "sitemap. Fix the site before reading anything "
                             "into a clean scan."}
-        return {"error": f"could not enumerate any pages at {t.domain} — no "
+        return {"error": f"could not enumerate any pages at {unreachable} — no "
                          f"sitemap, no WordPress API, and no links found on the "
-                         f"homepage"}
+                         f"homepage",
+                "sources": src_report}
 
     considered = [p for p in pages
                   if not since or not p["lastmod"] or p["lastmod"][:10] >= since]
@@ -477,11 +498,15 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
             errors.append({"url": res["url"], "status": res["status"]})
             continue
         checked.append(res["url"])
+        # WHICH SITE, on the finding itself. "Fix this page" against a list
+        # spanning three domains is a different job depending on who owns the
+        # page, and the URL alone makes the reader work that out per row.
         if res["phrases"]:
             violations.append({"url": res["url"], "lastmod": p["lastmod"],
+                               "site": p.get("site", ""),
                                "hits": res["phrases"]})
         if res.get("questions"):
-            to_review.append({"url": res["url"],
+            to_review.append({"url": res["url"], "site": p.get("site", ""),
                               "hits": res["questions"]})
 
     by_phrase: dict[str, int] = {}
@@ -491,6 +516,10 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
 
     return {
         "tenant": tenant, "domain": t.domain, "page_source": source,
+        # One row per site read. `domain` and `page_source` still mean the
+        # website, so every existing reader keeps its meaning.
+        "sources": src_report,
+        "sources_read": len(src_report),
         "rules_checked": len(rules),
         "pages_in_sitemap": len(pages),
         "pages_checked": len(checked),

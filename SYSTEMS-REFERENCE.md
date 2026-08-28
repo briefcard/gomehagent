@@ -110,7 +110,9 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
 ### catalog_compliance & content_compliance
 - catalog: requires `commerce`; skills `catalog_compliance` (tier 1 report,
   weekly Monday 04:30 sweep) and `catalog_seo_rewrite` (tier 2 proposals).
-  content: requires nothing (the site is public); crawls `Tenant.domain`.
+  content: requires nothing (the site is public); crawls every source
+  `tenants.content_sources` returns — `Tenant.domain` plus the
+  facts-only landing pages — and each finding names the site it is on.
   Both constitutive on `banned_claims` — an empty ban list refuses rather
   than reporting CLEAN. Findings live on **Assurance**.
 
@@ -163,7 +165,9 @@ classifies in the change that adds it.
 
 Onboarding is product-only: `/admin/tenant_add` → `/connect/<token>` →
 `/intake/<token>` → install. `needed_for` includes cms when blog is
-installed. `Tenant.domain` alone enables scraping/compliance (no platform).
+installed. `Tenant.domain` alone enables scraping/compliance (no platform); it is
+the WEBSITE and the only identity source — landing pages
+(`Tenant.sources`) are read for facts, never for voice or theme.
 
 ---
 

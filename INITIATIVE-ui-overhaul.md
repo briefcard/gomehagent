@@ -524,7 +524,7 @@ THE DECISION — `_back_to_content` grew a `keep=` dict threaded by NAME
 `test_review_tab.py` grew sections 4b/4c (card order, each chip narrowing,
 search matching folded metadata, both decide paths preserving filters).
 
-**NEXT, NOT YET BUILT — MULTI-DOMAIN BRAND SOURCES (owner, 2026-08-27).**
+**4·MULTI-DOMAIN BRAND SOURCES — BUILT + SHIPPED 2026-08-27.**
 *"Some brands have several domains including landing pages etc that store
 their information so we can add that to the brand tab to add all the
 sources."* Owner's clarification, which is the whole design constraint:
@@ -551,6 +551,63 @@ read permissions, and the code must not blur them:
 - Guard candidates: `voice_reads_the_website_only` (a landing page must
   never feed the deriver), `harvest_reads_every_source`,
   `scan_covers_landing_pages`.
+**Built exactly to that constraint.** STORAGE: a new `Tenant.sources` JSON
+column, `[{"url", "label"}]`, landing pages only — NOT `analytics[...]`,
+because that dict is the analytics wiring (`ga4_property`/`gsc_site`/
+`semrush_db`) that `declared_capabilities` reads for the analytics chip, and
+a content-source list hidden behind an unrelated capability means every
+reader of `t.analytics` has to know it is two things; NOT a table, because
+there is no per-source state to keep — the crawl memory is `HarvestedPage`,
+already keyed by page URL, which spans domains as it stands. `db.
+_add_missing_columns` makes it a zero-touch migration. ONE READER, one
+vocabulary: `tenants.content_sources(key)` returns the website FIRST with
+`role="website"`, then the landing pages with `role="landing_page"`, so a
+caller reading `[0]` gets identity rather than whichever row was added last;
+`source_label(key, url)` names the site a finding came from; `set_website` /
+`set_sources` are the canonical writers, and a landing page on the website's
+own host is REFUSED WITH A REASON (silently dropping it reads as a broken
+form) and dropped again at read time, because `/admin/tenant_set` can still
+move the domain by hand after the fact. `_norm` delegates to
+`connections.norm_domain` rather than growing a second same-site vocabulary.
+THE TWO SEAMS, as designed: `harvest.py` and `compliance.scan` loop
+`content_sources`; each carries WHICH SOURCE onto every page it reads
+(`source_label` / `site`), each returns a per-source `sources` report, and
+"could not enumerate" only fails the RUN when every source failed — naming
+each. `domain` and `page_source` still mean the website in both return
+dicts, so no existing reader changes meaning. The one thing the design did
+not name and the build needed: harvest's page order is now **round-robin
+across sources within each of the unread/read bands** — concatenating them
+handed the whole budget to the biggest site, so a 500-page website in front
+of a 3-page landing site would have read the landing site NEVER, which is
+the same defect as not looping at all wearing a fix; the suite pins it with
+a budget smaller than the website alone. IDENTITY UNTOUCHED, which is the
+point: `voice.gather` and `brand_theme._from_site` still read `t.domain`,
+and the suite asserts the deriver fetches ZERO landing-page URLs. CONSOLE:
+Brand gains "Where their words are read from" (§6 Identity) — the website
+field labelled the identity source, landing pages editable with a per-row
+remove, an add row, and the sentence in the page's own words ("Voice is
+never derived from a landing page: a page written for one campaign is the
+loudest month of the year, not how the brand speaks"); NEW POST
+`/admin/brand_sources`, submitted values REPLACE (the identity editor's
+contract), refusals ride `err=` as a flash. The claim card's Details fold
+now says "read off <site>" — derived from the URL already in `source`, not
+stored beside it (rule 8; a stored copy goes stale the moment a page is
+relabelled) — and ONLY when the account has more than one source, because
+"read off Website" on every card of a single-domain account is a fact stated
+once too often. Guards (all three caught): `voice_reads_the_website_only`,
+`harvest_reads_every_source`, `scan_covers_landing_pages`. New suite
+`test_brand_sources.py` (32 checks); `seed_demo` gives baci a landing page
+AND a pending claim read off it, so both the editor and the "read off" line
+are clickable, and the single-source accounts still show the quiet case.
+Verified on the demo: the card in dark AND light, no horizontal overflow at
+desktop or phone width (label/URL share a row and stack when narrow), the
+add/remove round-trip, and the website-collision refusal arriving as a
+flash. FOUND IN PASSING, not fixed here (one step per push): three sabotage
+entries are STALE AT HEAD — `drafted_is_not_published` and
+`withhold_false_or_forbidden` (app/skill_pack.py) and
+`data_layer_says_what_to_fix` (app/admin_ui.py) patch code that no longer
+exists, so those guards test nothing and nothing says so. Worth a sweep that
+asserts every `find` appears exactly once, run with the ordinary suite.
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first

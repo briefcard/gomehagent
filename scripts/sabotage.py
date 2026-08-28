@@ -1640,6 +1640,47 @@ SABOTAGES = [
                "hold the thing, the defect family the pointers suite exists "
                "to end",
     },
+    {
+        "name": "voice_reads_the_website_only",
+        "file": "app/voice.py",
+        "find": "    pages, how = compliance.discover_pages(t.domain, limit=limit * 4)",
+        "replace": "    pages, how = compliance.discover_pages(  # SABOTAGE\n"
+                   "        (tenants.content_sources(tenant) or [{}])[-1].get('url', t.domain),\n"
+                   "        limit=limit * 4)",
+        "suites": ["test_brand_sources.py"],
+        "why": "a brand's voice starts being derived from a campaign landing "
+               "page — the loudest month of the year read as how the company "
+               "speaks all year. The owner's constraint on multi-domain "
+               "sources was that identity comes from the WEBSITE and nothing "
+               "else, and this is the seam where that would quietly stop "
+               "being true",
+    },
+    {
+        "name": "harvest_reads_every_source",
+        "file": "app/harvest.py",
+        "find": "    srcs = tenants.content_sources(tenant)\n"
+                "    pages, src_report = [], []",
+        "replace": "    srcs = tenants.content_sources(tenant)[:1]  # SABOTAGE\n"
+                   "    pages, src_report = [], []",
+        "suites": ["test_brand_sources.py"],
+        "why": "every landing page goes unread again: the claims, objections "
+               "and pictures published there are invisible to the knowledge "
+               "base, and the queue looks thin rather than incomplete — you "
+               "cannot review what was never enumerated",
+    },
+    {
+        "name": "scan_covers_landing_pages",
+        "file": "app/compliance.py",
+        "find": "    srcs = tenants.content_sources(tenant)\n"
+                "    pages, src_report = [], []",
+        "replace": "    srcs = tenants.content_sources(tenant)[:1]  # SABOTAGE\n"
+                   "    pages, src_report = [], []",
+        "suites": ["test_brand_sources.py"],
+        "why": "the ban-list scan reports a clean brand while a banned phrase "
+               "sits live on a landing page it never enumerated — the worst "
+               "shape a compliance check can take, because a clean report is "
+               "acted on",
+    },
 ]
 
 

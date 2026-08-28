@@ -429,10 +429,40 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     # Discover far more than one run will read: the budget decides how much is
     # read per run, the discovery cap decides how much of the site is reachable
     # at all, and conflating them capped the site at 90 pages for ever.
-    pages, source = compliance.discover_pages(t.domain, limit=max(limit * 20, 500))
+    # EVERY place this brand publishes, not only the website (owner,
+    # 2026-08-27). A campaign landing page holds real facts — an offer's
+    # terms, a venue's capacity, a spec nobody put on the main site — and
+    # until now none of them were reachable. What is NOT read here is
+    # identity: `content_sources` is the FACTS reader, and voice, positioning
+    # and the brand theme still hear the website alone.
+    srcs = tenants.content_sources(tenant)
+    pages, src_report = [], []
+    for src in srcs:
+        found, how = compliance.discover_pages(src["url"],
+                                               limit=max(limit * 20, 500))
+        for pg in found:
+            # Which site this page was read off, carried on the page itself so
+            # every finding downstream can name it without re-deriving.
+            pg["source_label"] = src["label"]
+        pages.extend(found)
+        src_report.append({
+            "label": src["label"], "url": src["url"], "role": src["role"],
+            "pages_found": len(found), "page_source": how,
+            "error": "" if found else
+                     f"could not enumerate any pages at {src['url']}"})
+    # The website's method, unchanged in meaning: "400 pages via sitemap" and
+    # "40 via homepage crawl" are still different levels of confidence, and
+    # they are still that site's. Per-source methods are in `sources`.
+    source = next((r["page_source"] for r in src_report
+                   if r["role"] == "website"), "")
     seen_pages = {} if recrawl else _page_state(tenant)
     if not pages:
-        return {"error": f"could not enumerate any pages at {t.domain}"}
+        # One source failing is a line in the report. ALL of them failing is
+        # the run failing — and it names each one, because "could not
+        # enumerate" against three sites should not read like one.
+        return {"error": "could not enumerate any pages at "
+                         + ", ".join(x["url"] for x in srcs),
+                "sources": src_report}
 
     # Claims already on file, so a repeat run does not re-propose the same line.
     # Matched on the shared normalised fingerprint rather than a lowercased
@@ -472,9 +502,28 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     import httpx
     per_page: list[tuple[str, list[dict]]] = []
     # Unread pages first, then everything else — so a run always spends its
-    # budget on new ground before re-checking what it has already seen.
-    ordered_pages = ([p for p in pages if p["url"] not in seen_pages]
-                     + [p for p in pages if p["url"] in seen_pages])
+    # budget on new ground before re-checking what it has already seen — and
+    # ROUND-ROBIN ACROSS SOURCES inside each of those two bands. Concatenating
+    # the sources instead would hand the whole budget to whichever site is
+    # biggest: a 500-page website in front of a three-page landing site means
+    # the landing site is never reached, run after run. That is the same
+    # defect as not looping at all, wearing a fix.
+    def _interleave(bucket: list[dict]) -> list[dict]:
+        by_src: dict[str, list[dict]] = {}
+        for pg in bucket:
+            by_src.setdefault(pg.get("source_label", ""), []).append(pg)
+        out: list[dict] = []
+        queues = list(by_src.values())
+        while queues:
+            for q in list(queues):
+                out.append(q.pop(0))
+                if not q:
+                    queues.remove(q)
+        return out
+
+    ordered_pages = (
+        _interleave([p for p in pages if p["url"] not in seen_pages])
+        + _interleave([p for p in pages if p["url"] in seen_pages]))
     unchanged = 0
     for p in ordered_pages[:limit]:
         url = p["url"]
@@ -753,6 +802,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "faqs": [{"q": f["question"][:90], "entity": f["entity_key"] or "(brand)"}
                  for f in faqs[:12]],
         "page_source": source,
+        # One row per source read, so a run against three sites reports three
+        # results rather than one number that hides which site was empty.
+        "sources": src_report,
+        "sources_read": len(src_report),
         "pages_enumerated": len(pages),
         "pages_read": len(per_page),
         "pages_skipped": len(skipped),

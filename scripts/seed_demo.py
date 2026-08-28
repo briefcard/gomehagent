@@ -149,7 +149,31 @@ def seed_data_layer() -> str:
     return "data layer: claims×17 (1 removed), objection, gap, 2 lessons"
 
 
+def seed_landing_pages() -> str:
+    """One account with a SECOND source, so the Brand tab's source editor and
+    the claim card's "read off …" line have something to be about.
+
+    Only one account gets one: the single-source case is the one every other
+    account is in, and both states have to be clickable — a demo where every
+    account looks the same cannot show that the site name appears on a claim
+    card only when there is more than one site to tell apart.
+    """
+    res = tenants.set_sources("baci", [
+        {"url": "https://spring.bacimilanousa.com",
+         "label": "Spring campaign landing page"}])
+    # And one claim read off it, waiting on Review — the visible half of the
+    # feature is the Details fold saying WHICH site a card came from, and a
+    # queue with nothing from a second source cannot show it.
+    kb.add_claim("baci", "The spring set ships within 2 working days.",
+                 "2 working days", ["gift_hunting"], proof_type="data",
+                 source="stated on https://spring.bacimilanousa.com/offer",
+                 status="pending", origin="crawl")
+    return f"baci reads {res['landing_pages'] + 1} sources"
+
+
 said = seed_ad_batch()
 said2 = seed_data_layer()
+said3 = seed_landing_pages()
 print(f"demo seeded: {made} · accounts: "
-      f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}")
+      f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}"
+      f" · {said3}")
