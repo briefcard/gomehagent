@@ -1453,6 +1453,38 @@ SABOTAGES = [
                "were built to end",
     },
     {
+        "name": "card_meta_folds",
+        "file": "app/admin_ui.py",
+        "find": "              <label>{\"Attribution\" if verbatim",
+        "replace": "              <div class=\"when\">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>\n              <label>{\"Attribution\" if verbatim",
+        "suites": ["test_review_tab.py"],
+        "why": "the provenance line climbs back above the fold and the card "
+               "is busy again — the exact walkthrough complaint (owner, "
+               "2026-08-27: metadata at the bottom, on toggle only) undone "
+               "one line at a time",
+    },
+    {
+        "name": "claims_filter_filters",
+        "file": "app/admin_ui.py",
+        "find": "    if _cf == \"due\":",
+        "replace": "    if False and _cf == \"due\":  # SABOTAGE",
+        "suites": ["test_review_tab.py"],
+        "why": "the came-due chip highlights and filters nothing — a control "
+               "that changes the address and not the list teaches the owner "
+               "that filtering is decoration, which kills the whole "
+               "prioritisation gesture",
+    },
+    {
+        "name": "filters_survive_the_decision",
+        "file": "app/web.py",
+        "find": "                                  \"flt\": str(form.get(\"flt\") or \"\")})",
+        "replace": "                                  \"flt\": \"\"})  # SABOTAGE",
+        "suites": ["test_review_tab.py"],
+        "why": "deciding one row silently resets the narrowed queue to "
+               "unfiltered — every decision costs the reader the view they "
+               "built, the same bounce the cpage threading was built to end",
+    },
+    {
         "name": "ship_decides_in_console",
         "file": "app/web.py",
         "find": "    said = _appr.apply_decision(str(form.get(\"approval_id\") or \"\"), verdict)",

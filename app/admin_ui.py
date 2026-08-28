@@ -4192,7 +4192,8 @@ def _ship_preview(pl: dict) -> str:
 
 def render_content(key: str, tenant: str = "", started: str = "",
                    err: str = "", msg: str = "", cpage: int = 1,
-                   sub: str = "") -> str:
+                   sub: str = "", q: str = "", flt: str = "",
+                   corigin: str = "") -> str:
     from . import compliance, credentials as cred, kb as kbm
 
     tenant, t, rows = _account(tenant)
@@ -4212,6 +4213,28 @@ def render_content(key: str, tenant: str = "", started: str = "",
     base = kbm.proposals(tenant, kind="claim",
                          analyze_ids=frozenset()).get("claim", [])
     pending = [e["row"] for e in base]
+    # FILTER, then page (owner, 2026-08-27: "the ability to filter /
+    # prioritize the claims"). Chips are the prioritisation — came-due
+    # reconfirmations are the quick wins, brand vs scoped is how you batch
+    # the judgement — and search narrows by any word on the card. Honest
+    # counts: the pager reports the filtered depth, the bar names the
+    # unfiltered total. (No date sort is offered: KbClaim carries no
+    # created_at, and ordering by a column that does not exist would be a
+    # sort by accident.)
+    total_unfiltered = len(pending)
+    _cf = (flt or "").strip().lower() if sub in ("", "claims") else ""
+    if _cf == "due":
+        pending = [p for p in pending if p.approved_at]
+    elif _cf == "brand":
+        pending = [p for p in pending if not (p.entity_key or "")]
+    elif _cf == "scoped":
+        pending = [p for p in pending if (p.entity_key or "")]
+    if corigin:
+        pending = [p for p in pending if (p.origin or "") == corigin]
+    if q and sub in ("", "claims"):
+        pending = [p for p in pending
+                   if _match(q, p.claim, p.evidence, p.source, p.entity_key,
+                             " ".join(p.situations or []))]
 
     # A harvest files claims by the dozen, and a hundred full edit-forms on
     # one page is a queue nobody works (owner, 2026-08-21). One page of cards
@@ -4449,6 +4472,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 warn = ('<div class="note">No tag matched. Pick at least one — '
                         'approval is refused without it, because an untagged '
                         'claim can never be selected.</div>')
+            # THE ESSENTIALS LEAD (owner, 2026-08-27: "the claim cards
+            # are too busy — the metadata should be at the bottom on toggle
+            # only"): claim, evidence, scope, situations, duplicates and
+            # the buttons. Everything about WHERE it came from and HOW to
+            # read it — source, found-next-to context, the proves field —
+            # folds under one Details toggle at the bottom of the card.
             return f"""
             <div class="anchor" id="c-{_esc(p.id)}"></div>
             <label class="pick"><input type="checkbox" name="claim_ids"
@@ -4458,22 +4487,16 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <input type="hidden" name="tenant" value="{_esc(tenant)}">
               <input type="hidden" name="next_id" value="{_esc(_next_of(p.id))}">
               <input type="hidden" name="cpage" value="{cpage}">
+              {_keep_fields}
               <label>{"Quoted — a customer's own words"
                       if verbatim else "Claim"}</label>
               <textarea name="claim" rows="2"{" readonly" if verbatim else ""
                         }>{_esc(p.claim)}</textarea>
-              {rule}
+              {rule if verbatim else ""}
               <label>{"Attribution" if verbatim
                       else "Evidence — the number or the proof"}</label>
               <input name="evidence" value="{_esc(p.evidence or '')}"
                      placeholder="what makes this checkable">
-              <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or '')}</div>
-              {(f'<label>Found next to &mdash; copied from the page</label>'
-                f'<div class="when">&ldquo;{_esc(getattr(p, "context", ""))}&rdquo;</div>')
-               if getattr(p, "context", "") else ""}
-              <label>What it proves &mdash; written by the model, not the site</label>
-              <textarea name="proves" rows="2"
-                placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
               <label>True of &mdash; blank means the whole brand</label>
               <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
                      placeholder="brand-level (used in any content)">
@@ -4491,6 +4514,18 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 <button class="sec" name="action" value="save">Save only</button>
                 <button class="sec" name="action" value="reject">Reject</button>
               </div>
+              <details class="sec"><summary class="mut">Details — where it
+              was found, what it proves</summary>
+                <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or 'source not recorded')}
+                · from {_esc(p.origin or 'unknown')}</div>
+                {(f'<label>Found next to &mdash; copied from the page</label>'
+                  f'<div class="when">&ldquo;{_esc(getattr(p, "context", ""))}&rdquo;</div>')
+                 if getattr(p, "context", "") else ""}
+                <label>What it proves &mdash; written by the model, not the site</label>
+                <textarea name="proves" rows="2"
+                  placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
+                {rule if (not verbatim and rule) else ""}
+              </details>
             </form>"""
         # The checkboxes live inside each card but belong to THIS form via the
         # HTML5 `form` attribute — forms cannot nest, and duplicating the queue
@@ -4504,9 +4539,24 @@ def render_content(key: str, tenant: str = "", started: str = "",
                 f'class="sec" title="A brand-level claim is already usable in '
                 f'content about every product, so these narrower copies add '
                 f'nothing">Retire {n} already covered brand-level</button>')
+        from urllib.parse import quote as _q_
+
+        def _fq(extra_flt: str = "", extra_origin: str = "") -> str:
+            s = ""
+            if q:
+                s += f"&amp;q={_esc(_q_(q, safe=''))}"
+            fv = extra_flt if extra_flt != "\x00" else _cf
+            ov = extra_origin if extra_origin != "\x00" else corigin
+            if fv:
+                s += f"&amp;flt={_esc(fv)}"
+            if ov:
+                s += f"&amp;corigin={_esc(ov)}"
+            return s
+
         def _pg(p: int) -> str:
             return (f"/admin/ui?tab=content&amp;sub=claims"
-                    f"&amp;tenant={_esc(tenant)}&amp;cpage={p}#proposals")
+                    f"&amp;tenant={_esc(tenant)}&amp;cpage={p}"
+                    + _fq("\x00", "\x00") + "#proposals")
         pager = ""
         if pages > 1:
             pager = ('<div class="pager"><span class="mut">claims '
@@ -4518,10 +4568,52 @@ def render_content(key: str, tenant: str = "", started: str = "",
                      + (f'<a href="{_pg(cpage + 1)}">older &rarr;</a>'
                         if cpage < pages else "")
                      + '</div>')
+        _chip_defs = (("", "all"), ("due", "came due"), ("brand", "brand-level"),
+                      ("scoped", "product-scoped"))
+        _origins = sorted({(p.origin or "") for p in
+                           (e["row"] for e in base) if (p.origin or "")})
+        _chips_html = '<div class="filters">' + "".join(
+            f'<a class="{"on" if _cf == v else ""}" '
+            f'href="/admin/ui?tab=content&amp;sub=claims&amp;tenant={_esc(tenant)}'
+            + _fq(v, "\x00") + f'#proposals">{label}</a>'
+            for v, label in _chip_defs) + "</div>"
+        _osel = "".join(
+            f'<option value="{_esc(o)}"{" selected" if o == corigin else ""}>'
+            f'{_esc(o)}</option>' for o in _origins)
+        filter_bar = f"""
+        <div class="row">
+          {_chips_html}
+          <form method="get" action="/admin/ui" class="row" style="flex:1">
+            <input type="hidden" name="tab" value="content">
+            <input type="hidden" name="sub" value="claims">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            {f'<input type="hidden" name="key" value="{_esc(key)}">' if key else ''}
+            {f'<input type="hidden" name="flt" value="{_esc(_cf)}">' if _cf else ''}
+            <input name="q" value="{_esc(q)}" placeholder="search claims, evidence, source"
+                   style="flex:1;min-width:180px">
+            <select name="corigin" style="width:auto">
+              <option value="">any origin</option>{_osel}</select>
+            <button class="sec">Filter</button>
+            {f'<a class="mut" href="/admin/ui?tab=content&amp;sub=claims&amp;tenant={_esc(tenant)}#proposals">clear</a>' if (q or _cf or corigin) else ''}
+          </form>
+        </div>
+        {f'<div class="when">showing {total_claims} of {total_unfiltered} pending (filtered)</div>' if (q or _cf or corigin) else ''}"""
+        _keep_fields = (
+            (f'<input type="hidden" name="q" value="{_esc(q)}">' if q else "")
+            + (f'<input type="hidden" name="flt" value="{_esc(_cf)}">' if _cf else "")
+            + (f'<input type="hidden" name="corigin" value="{_esc(corigin)}">'
+               if corigin else ""))
         bulk = f"""
         <form id="bulk" method="post" action="/admin/claims_decide"></form>
         <input type="hidden" name="tenant" value="{_esc(tenant)}" form="bulk">
         <input type="hidden" name="cpage" value="{cpage}" form="bulk">
+        {"".join(f.replace('">', '" form="bulk">', 1) for f in ([
+            f'<input type="hidden" name="q" value="{_esc(q)}">'] if q else []))}
+        {"".join(f.replace('">', '" form="bulk">', 1) for f in ([
+            f'<input type="hidden" name="flt" value="{_esc(_cf)}">'] if _cf else []))}
+        {"".join(f.replace('">', '" form="bulk">', 1) for f in ([
+            f'<input type="hidden" name="corigin" value="{_esc(corigin)}">'] if corigin else []))}
+        {filter_bar}
         {pager}
         <div class="bulkbar">
           <label class="pick"><input type="checkbox" id="allbox"> select all
@@ -4670,6 +4762,17 @@ def render_content(key: str, tenant: str = "", started: str = "",
             </form>"""
         n_other = sum(len(v) for v in other.values())
         _flat = [(k, i) for k, items in other.items() for i in items]
+        _okinds = sorted(other)
+        _of = (flt or "").strip().lower() if sub == "other" else ""
+        if _of in _okinds:
+            _flat = [(k, i) for k, i in _flat if k == _of]
+        if q and sub == "other":
+            _flat = [(k, i) for k, i in _flat
+                     if _match(q, getattr(i["row"], "name", ""),
+                               getattr(i["row"], "objection", ""),
+                               getattr(i["row"], "response", ""),
+                               getattr(i["row"], "tag", ""),
+                               getattr(i["row"], "description", ""))]
         _pages_o = max(1, -(-len(_flat) // 15))
         _opage = max(1, min(page_req, _pages_o))
         _oth_pager = _pager(
@@ -4679,8 +4782,30 @@ def render_content(key: str, tenant: str = "", started: str = "",
         _pents_opts = "".join(
             f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>'
             for e in kbm.entities(tenant, available_only=False))
+        from urllib.parse import quote as _oq
+        _oth_chips = '<div class="filters">' + "".join(
+            f'<a class="{"on" if _of == v else ""}" '
+            f'href="/admin/ui?tab=content&amp;sub=other&amp;tenant={_esc(tenant)}'
+            + (f"&amp;q={_esc(_oq(q, safe=''))}" if q else "")
+            + (f"&amp;flt={_esc(v)}" if v else "") + f'">{_esc(label)}</a>'
+            for v, label in ([("", "all")]
+                             + [(k, k + "s") for k in _okinds])) + "</div>"
+        _oth_search = f"""
+    <form method="get" action="/admin/ui" class="row" style="flex:1">
+      <input type="hidden" name="tab" value="content">
+      <input type="hidden" name="sub" value="other">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      {f'<input type="hidden" name="key" value="{_esc(key)}">' if key else ''}
+      {f'<input type="hidden" name="flt" value="{_esc(_of)}">' if _of else ''}
+      <input name="q" value="{_esc(q)}" placeholder="search proposals"
+             style="flex:1;min-width:160px">
+      <button class="sec">Search</button>
+    </form>"""
         others_html = (
             f'<datalist id="pents">{_pents_opts}</datalist>'
+            + f'<div class="row">{_oth_chips}{_oth_search}</div>'
+            + (f'<div class="when">showing {len(_flat)} of {n_other} '
+               f'(filtered)</div>' if (q and sub == "other") or _of else '')
             + '<details class="sec"><summary>How scope works</summary>'
               '<p class="mut">An objection needs one of the two: a named '
               'item, or the brand-wide box. An answer approved with neither '
@@ -4880,7 +5005,11 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                     f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
                     f'<input type="hidden" name="approval_id" value="{_esc(a.id)}">'
                     f'<input type="hidden" name="page" value="{_page}">'
-                    f'<input type="hidden" name="verdict" value="{verdict}">'
+                    + (f'<input type="hidden" name="q" value="{_esc(q)}">'
+                       if q else "")
+                    + (f'<input type="hidden" name="flt" value="{_esc(_sf)}">'
+                       if _sf else "")
+                    + f'<input type="hidden" name="verdict" value="{verdict}">'
                     f'<button{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}>'
                     f'{label}</button></form>')
         return f"""
@@ -4893,6 +5022,54 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
           </div>
         </div>"""
 
+    # FILTERABLE (owner, 2026-08-27, extended from the claims queue): a
+    # kind chip narrows to campaigns / articles / replies / ads, and the
+    # search box matches the summary — spec §4 named "no filter" among the
+    # primary queue's defects.
+    def _ship_kind(a) -> str:
+        pl = a.payload or {}
+        if (pl.get("esp_push") or {}).get("provider"):
+            return "campaign"
+        if a.kind == "seo_new_article":
+            return "article"
+        if a.kind == "send_email":
+            return "reply"
+        if a.kind == "skill_output" and pl.get("skill") == "ad_copy":
+            return "ad"
+        return "other"
+
+    total_ship = len(ship_rows)
+    _sf = (flt or "").strip().lower() if sub == "ship" or not sub else ""
+    if _sf in ("campaign", "article", "reply", "ad"):
+        ship_rows = [a for a in ship_rows if _ship_kind(a) == _sf]
+    if q and (sub == "ship" or not sub):
+        ship_rows = [a for a in ship_rows
+                     if _match(q, a.summary, a.kind,
+                               (a.payload or {}).get("skill"))]
+
+    from urllib.parse import quote as _sq
+    _ship_keep = ((f"&amp;q={_esc(_sq(q, safe=''))}" if q else "")
+                  + (f"&amp;flt={_esc(_sf)}" if _sf else ""))
+    _ship_chips = '<div class="filters">' + "".join(
+        f'<a class="{"on" if _sf == v else ""}" '
+        f'href="/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}'
+        + (f"&amp;q={_esc(_sq(q, safe=''))}" if q else "")
+        + (f"&amp;flt={v}" if v else "") + f'">{label}</a>'
+        for v, label in (("", "all"), ("campaign", "campaigns"),
+                         ("article", "articles"), ("reply", "replies"),
+                         ("ad", "ads"))) + "</div>"
+    _ship_search = f"""
+    <form method="get" action="/admin/ui" class="row" style="flex:1">
+      <input type="hidden" name="tab" value="content">
+      <input type="hidden" name="sub" value="ship">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      {f'<input type="hidden" name="key" value="{_esc(key)}">' if key else ''}
+      {f'<input type="hidden" name="flt" value="{_esc(_sf)}">' if _sf else ''}
+      <input name="q" value="{_esc(q)}" placeholder="search the queue"
+             style="flex:1;min-width:160px">
+      <button class="sec">Search</button>
+    </form>"""
+
     # Paginated at 15 (spec §4): the primary queue rendered "25 rows max
     # with no pager" — a queue whose depth nobody can see stops being
     # worked; it lived at ~200 drafts once.
@@ -4902,7 +5079,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     _ship_shown = ship_rows[(_page - 1) * SHIP_PAGE:_page * SHIP_PAGE]
     _ship_pager = _pager(
         f"/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}"
-        + (f"&amp;key={_esc(key)}" if key else ""),
+        + (f"&amp;key={_esc(key)}" if key else "") + _ship_keep,
         _page, len(ship_rows), SHIP_PAGE, "decisions")
     ship_card = f"""
 <div class="anchor" id="ship"></div>
@@ -4912,6 +5089,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   <p class="mut">Everything queued to go OUT — an article to the store, a reply
   to a customer, a change to live pages. Approving executes it; nothing leaves
   without you. The preview in each row is the thing itself.</p>
+  <div class="row">{_ship_chips}{_ship_search}</div>
+  {f'<div class="when">showing {len(ship_rows)} of {total_ship} pending (filtered)</div>' if (q or _sf) else ''}
   {_ship_pager}
   <div class="thread">{"".join(_ship_row(a) for a in _ship_shown)
                        or '<p class="mut">Nothing is waiting to ship.</p>'}</div>
@@ -4923,8 +5102,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # Counts come from the lists already built above, so the strip costs
     # nothing extra and can be trusted: a tab reading 0 is a tab with nothing
     # in it, not a tab whose count was estimated.
-    counts = {"ship": len(ship_rows),
-              "claims": len(pending), "pictures": len(waiting),
+    counts = {"ship": total_ship,
+              "claims": total_unfiltered, "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged)}
     sub = (sub or "").strip().lower()

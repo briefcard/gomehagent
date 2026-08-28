@@ -162,6 +162,9 @@ def main():
     ck("the queue pages at 15", "proposals 1&ndash;15 of 20" in h)
     ck("…with ONE pents datalist, not one per card",
        h.count('<datalist id="pents">') == 1)
+    ck("…and kind chips narrow it",
+       ">objections</a>" in h
+       and page("other", "&flt=objection").count("proposal_review") >= 1)
     for i in range(3):
         kb.add_claim("baci", f"Claim {i} strength.", f"file {i}", [],
                      origin="crawl", status="pending")
@@ -170,6 +173,66 @@ def main():
        h.count("How to read these cards") == 1
        and "invisible once approved" in h
        and "The one field here the model WROTE" not in h)
+
+    print("\n--- 4b · claims: slim cards, filters that survive deciding ---")
+    import datetime as _dt
+    with db.SessionLocal() as s:
+        rows_ = (s.query(db.KbClaim)
+                 .filter(db.KbClaim.tenant == "baci",
+                         db.KbClaim.review == prov.PROPOSED).all())
+        rows_[0].entity_key = "aqua-plate"
+        rows_[0].source = "crawl-src-marker"
+        rows_[1].approved_at = db.utcnow() - _dt.timedelta(days=370)
+        s.commit()
+        due_id = rows_[1].id
+    h = page("claims")
+    ck("the metadata folds at the bottom of the card — essentials lead",
+       "Details — where it" in h
+       and h.count("crawl-src-marker") == 1
+       and h.index('value="reject"') < h.index("crawl-src-marker"))
+    ck("the filter bar offers the priorities as chips",
+       ">came due</a>" in h and ">brand-level</a>" in h
+       and ">product-scoped</a>" in h and 'name="corigin"' in h)
+    hd = page("claims", "&flt=due")
+    ck("came-due narrows to the reconfirmations",
+       hd.count('class="anchor" id="c-') == 1 and "of 3 pending (filtered)"
+       in hd.replace("showing 1 ", "showing 1 "))
+    hs = page("claims", "&flt=scoped")
+    ck("product-scoped narrows by scope",
+       hs.count('class="anchor" id="c-') == 1 and "aqua-plate" in hs)
+    hq = page("claims", "&q=crawl-src-marker")
+    ck("search matches the folded metadata too",
+       hq.count('class="anchor" id="c-') == 1)
+    r = c.post("/admin/claim_edit",
+               data={"key": KEY, "claim_id": due_id, "tenant": "baci",
+                     "action": "reject", "cpage": "1", "flt": "due"},
+               follow_redirects=False)
+    ck("a decision keeps the filter — the reader keeps their narrowed view",
+       "flt=due" in r.headers.get("location", ""),
+       r.headers.get("location", ""))
+
+    print("\n--- 4c · the ship queue filters too ---")
+    h = page("ship", "&flt=ad")
+    ck("the kind chips narrow the primary queue",
+       ">campaigns</a>" in h and ">ads</a>" in h
+       and "Campaign email for baci" not in h)
+    h = page("ship", "&q=Restock")
+    ck("search matches the summary, and says it filtered",
+       "Campaign email for baci: Restock" in h
+       and "pending (filtered)" in h
+       and h.count('value="approved"') == 1)
+    with db.SessionLocal() as s:
+        ap2 = (s.query(db.Approval)
+               .filter(db.Approval.status == "pending",
+                       db.Approval.summary.like("%variant 1%")).first().id)
+    r = c.post("/admin/ship_decide",
+               data={"key": KEY, "tenant": "baci", "approval_id": ap2,
+                     "verdict": "denied", "page": "1", "flt": "ad",
+                     "q": "variant"}, follow_redirects=False)
+    ck("a ship decision keeps its filter and search",
+       "flt=ad" in r.headers.get("location", "")
+       and "q=variant" in r.headers.get("location", ""),
+       r.headers.get("location", ""))
 
     print("\n--- 5 · conflicts page; plans decide in place ---")
     with db.SessionLocal() as s:

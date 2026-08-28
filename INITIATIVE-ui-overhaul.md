@@ -496,6 +496,61 @@ POST forms), test_workflow_ui (in-place plan buttons), test_kb_ui
 ranked move 6) — a keyboard affordance is worth adding once the owner's
 walkthrough confirms the mouse flow; smallest-value move, no structural
 cost to defer.
+**4·Review AMENDED (owner walkthrough, 2026-08-27) — CARD DECLUTTER +
+FILTERS.** Three finds, all shipped in one push: (a) *"the claim cards are
+too busy — the metadata should be at the bottom on toggle only"*: the card
+now leads with the decision (claim, evidence, scope, duplicates,
+situations, buttons) and folds `proof_type · source · origin`, the
+found-next-to context, the `proves` field and the usage rule under one
+**Details — where it was found, what it proves** toggle BELOW the buttons.
+(b) *"the issue of the infinite scroll if I have a lot of claims"* +
+*"filter / prioritize"*: the claims queue gains priority CHIPS (all /
+came due / brand-level / product-scoped), an origin select built from the
+account's real origins, and free-text search over claim+evidence+source+
+scope+tags — filter runs BEFORE paging, the pager reports the filtered
+depth, the bar names the unfiltered total ("showing 4 of 17"), and the
+sub-tab strip count stays the queue's REAL depth so the badge never lies.
+No date sort is offered and the reason is recorded: `KbClaim` carries no
+`created_at`, so ordering by it would be a sort by accident. (c) *"look
+for opportunities to do this on the other approval cards"*: the SHIP
+queue gains kind chips (campaigns / articles / replies / ads, derived
+from the payload the same way the consequence-button is) + summary
+search; **Everything else** gains kind chips + search. FILTERS SURVIVE
+THE DECISION — `_back_to_content` grew a `keep=` dict threaded by NAME
+(never an echoed URL) through `ship_decide`, `claims_decide` and all five
+`claim_edit` exits, so deciding one row keeps the narrowed view the way
+`cpage` already kept the page. Guards (all caught): `card_meta_folds`,
+`claims_filter_filters`, `filters_survive_the_decision`. Suite
+`test_review_tab.py` grew sections 4b/4c (card order, each chip narrowing,
+search matching folded metadata, both decide paths preserving filters).
+
+**NEXT, NOT YET BUILT — MULTI-DOMAIN BRAND SOURCES (owner, 2026-08-27).**
+*"Some brands have several domains including landing pages etc that store
+their information so we can add that to the brand tab to add all the
+sources."* Owner's clarification, which is the whole design constraint:
+**one domain is THE WEBSITE; the rest are LANDING PAGES. Branding /
+positioning / tone come from the WEBSITE only.** So this is NOT a flat
+list of equal domains — it is one primary + N secondaries with different
+read permissions, and the code must not blur them:
+- `Tenant.domain` STAYS the website and stays the single source for
+  identity (`brand_theme` deriver, voice derive, positioning, tone) —
+  nothing that reads `t.domain` today changes meaning.
+- Secondary sources go in a NEW list (`Tenant.analytics["landing_pages"]`
+  or a small table — pick one and say why in the commit), each with its
+  own label, and are read for FACTS ONLY: `harvest` (claims/objections/
+  images) and `compliance.scan` (a banned phrase on a landing page is
+  live too, and today the scan cannot see it).
+- Both consumers are single-domain today and each is a one-line seam:
+  `harvest.py:432` and `compliance.py:459` both call
+  `compliance.discover_pages(t.domain, …)` — the change is to loop the
+  source list and CARRY WHICH SOURCE each finding came from, so the
+  claim card's Details fold (above) says which site a claim was read off.
+- Brand tab gets the editor (spec §6's Identity section): the website
+  field labeled as the identity source, plus add/remove landing pages
+  with a note stating plainly that voice is never derived from them.
+- Guard candidates: `voice_reads_the_website_only` (a landing page must
+  never feed the deriver), `harvest_reads_every_source`,
+  `scan_covers_landing_pages`.
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first
