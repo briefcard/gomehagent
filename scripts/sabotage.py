@@ -2194,6 +2194,46 @@ SABOTAGES = [
                "split out of `knowledge` so that the fix would land on the "
                "tab that can actually author the rule",
     },
+    {
+        "name": "the_drafter_gets_a_craft_brief",
+        "file": "app/skill_pack.py",
+        # Repointed the same day it was written: the prompt assembly moved
+        # out of `_draft_ad_live` into `ad_prompt` so it could be asserted
+        # without an API key, which de-indented this line by four spaces.
+        "find": '    parts.append("\\n## How to answer\\n" + ad_craft.REPLY_FORMAT)',
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_ad_craft.py"],
+        "why": "the drafter stops being told how to answer, so it declares no "
+               "value levers and writes no headline, and every variant then "
+               "fails the value-equation gate on a brief that was never "
+               "delivered. The wider defect this guards is the one the owner "
+               "named: an ad generator given only prohibitions writes "
+               "prohibitionally-correct slop",
+    },
+    {
+        "name": "an_offer_must_beat_the_truncation",
+        "file": "app/ad_craft.py",
+        "find": "        elif at > TRUNCATION:",
+        "replace": "        elif False:  # SABOTAGE",
+        "suites": ["test_ad_craft.py"],
+        "why": "the offer can be buried past the ~125 characters Meta shows "
+               "before the fold again — the exact defect the live copy audit "
+               "found on four of five texts. An offer nobody reads was not "
+               "made, and the ad pays full price for the impression",
+    },
+    {
+        "name": "gifting_does_not_generalise",
+        "file": "app/ad_craft.py",
+        "find": "    if any(w in low for w in _GIFT_EVIDENCE):",
+        "replace": "    if True:  # SABOTAGE",
+        "suites": ["test_ad_craft.py"],
+        "why": "every account gets a gifting angle again, so one ad in five "
+               "for an events venue or a showroom is written to a gift-buyer "
+               "who does not exist. Nothing downstream catches it: the "
+               "validator asks whether a draft is TRUE, and 'the most "
+               "personal gift' is not false, it is about somebody else's "
+               "business",
+    },
 ]
 
 

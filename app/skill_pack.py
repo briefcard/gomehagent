@@ -48,6 +48,7 @@ from __future__ import annotations
 import html as _htmllib
 import re
 
+from . import ad_craft
 from . import coherence, compliance, responder, sites, systems
 from . import kb as kb_mod
 from .skill import Context, Skill, register
@@ -506,25 +507,60 @@ register(Skill(
 # 4 · Ad copy — the model writes it, code decides what it may write from
 # ---------------------------------------------------------------------------
 
-_ANGLES = ("proof", "objection", "occasion")
+#: The angles this account may use, decided per run by `ad_craft.angles_for`
+#: from the account's OWN data — see `_run_ad_copy`. It was three hardcoded
+#: here ("proof", "objection", "occasion"), and "proof" is not an angle at
+#: all: proof is a value lever that belongs in EVERY ad, not the theme of one.
+#: Kept as the universal fallback for callers with no evidence to hand.
+_ANGLES = ad_craft.UNIVERSAL_ANGLES
 
+#: THE BRIEF USED TO BE ONLY PROHIBITIONS. Every sentence told the model what
+#: it must not do and none told it how to write an ad — which is why the owner
+#: called the output "completely terrible" (2026-08-29). The rules below are
+#: from `ad_craft`, which is the pipeline already written down and validated
+#: against a live account; this string is where the drafter finally receives
+#: them. The prohibitions stay, because they are the reason nothing false
+#: ships — they are simply no longer the whole instruction.
 _AD_SYSTEM = """You are writing one short ad for this brand.
 
+## What must be true
 You are given exactly one approved claim to build on. Use it. Do not introduce
 a second factual claim, a price, a material, an origin or a guarantee that is
 not in the context — the hard rules are enforced in code after you write, so a
 draft breaking one is thrown away rather than softened, and you will simply
-have wasted the slot.
+have wasted the slot. Match the house voice.
 
-Match the house voice. Write the ad and nothing else: no headline label, no
-options, no commentary, no hashtags. Two or three short lines."""
+## What makes it an ad rather than a description
+THE FIRST FIVE WORDS ARE THE WHOLE AUDITION. They are the only words most
+people read. Open on a concrete noun, a number, or the reader themselves —
+never an adjective, and never "Introducing", "Discover" or "Meet". Nobody is
+waiting to be introduced to anything.
 
-_ANGLE_BRIEF = {
-    "proof": "Lead with the claim as the reason to buy. Plain and confident.",
-    "objection": "Open by naming the hesitation below, then answer it with the "
-                 "claim. Do not invent a different hesitation.",
-    "occasion": "Put the claim in the moment the buyer would actually use it.",
-}
+ONE IDEA. A second idea does not add to the first, it competes with it.
+
+BE SPECIFIC OR SAY NOTHING. "Beautiful", "elegant", "timeless", "curated",
+"perfect for" are true of every competitor in the category, which is exactly
+why they persuade nobody. Name the material, the number, the moment. One real
+number does more for belief than any adjective.
+
+THE VALUE EQUATION. Pull at least two of these four levers, and say which:
+- dream_outcome — what their life looks like after
+- likelihood — why it will work FOR THEM: proof, numbers, what sold out
+- time_delay — how fast; in stock, ships in time
+- effort — what they do NOT have to do
+An ad pulling none of them is a mood board.
+
+IF THERE IS AN OFFER, IT GOES EARLY. The feed cuts at about 125 characters.
+An offer after the cut was not made. State it exactly as it is given to you —
+an offer worded differently in each variant reads as a different offer.
+
+NEVER manufacture urgency. No "last chance", "ends tonight", "while supplies
+last" unless a real deadline is given to you below. Code will stop it."""
+
+def _angle_brief(angle: str) -> str:
+    """One angle's instruction, from the ruleset. One writer, one vocabulary."""
+    a = ad_craft.ANGLES.get(angle) or {}
+    return f"{a.get('label', angle)} — {a.get('brief', '')}"
 
 
 def _compose_ad(claim: dict, angle: str, objections: list, entity_key: str) -> str:
@@ -564,38 +600,7 @@ def _draft_ad_live(bundle: dict, claim: dict, angle: str,
     try:
         import anthropic
 
-        parts = [bundle["rules"]["block"].strip()]
-        if bundle.get("revision_notes"):
-            # The board's regenerate rides through here (UI overhaul 3.4).
-            # Notes FIRST — the convention campaign_email and blog_article
-            # already hold: the owner's direction outranks everything but
-            # the rules themselves.
-            parts.append("\n## The owner reviewed the previous batch — "
-                         "address this before anything else\n"
-                         + str(bundle["revision_notes"]).strip())
-        parts.append(
-            f"\n## The one claim you may build on\n"
-            f"{claim['claim']}"
-            + (f"\n(evidence: {claim['evidence']})" if claim.get("evidence") else "")
-            + f"\n(this is true of: {claim.get('scope') or 'the brand'})")
-
-        ents = bundle.get("entities") or []
-        if ents:
-            parts.append("\n## What is being advertised")
-            for e in ents[:3]:
-                parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"
-                             [:300])
-        aud = bundle.get("audiences") or []
-        if aud:
-            parts.append("\n## Who is reading")
-            for a in aud[:2]:
-                parts.append(f"- {a.get('name') or a.get('key', '')}: "
-                             f"{a.get('pains') or a.get('description') or ''}"[:300])
-        if angle == "objection" and objections:
-            parts.append("\n## The hesitation to answer")
-            parts.append(f"- {objections[0]['objection']}")
-        parts.append(f"\n## Angle\n{_ANGLE_BRIEF.get(angle, '')}")
-
+        parts = ad_prompt(bundle, claim, angle, objections)
         client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model=config.CLAUDE_MODEL, max_tokens=400,
@@ -617,6 +622,61 @@ def _draft_ad_live(bundle: dict, claim: dict, angle: str,
         # fault rather than an account one.
         from . import model_error
         return "", model_error.explain(exc)
+
+
+def ad_prompt(bundle: dict, claim: dict, angle: str,
+              objections: list) -> list[str]:
+    """Everything the ad drafter is told, as inspectable parts.
+
+    SPLIT OUT so it can be asserted on. It used to be assembled inline inside
+    the API call, which meant the only way to check that a craft rule reached
+    the model was to have an API key — so `the_drafter_gets_a_craft_brief`
+    could be sabotaged and every suite still passed. A brief nobody can read
+    without spending money is a brief nobody checks.
+    """
+    parts = [bundle["rules"]["block"].strip()]
+    if bundle.get("revision_notes"):
+        # The board's regenerate rides through here (UI overhaul 3.4).
+        # Notes FIRST — the convention campaign_email and blog_article
+        # already hold: the owner's direction outranks everything but
+        # the rules themselves.
+        parts.append("\n## The owner reviewed the previous batch — "
+                     "address this before anything else\n"
+                     + str(bundle["revision_notes"]).strip())
+    parts.append(
+        f"\n## The one claim you may build on\n"
+        f"{claim['claim']}"
+        + (f"\n(evidence: {claim['evidence']})" if claim.get("evidence") else "")
+        + f"\n(this is true of: {claim.get('scope') or 'the brand'})")
+
+    ents = bundle.get("entities") or []
+    if ents:
+        parts.append("\n## What is being advertised")
+        for e in ents[:3]:
+            parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"
+                         [:300])
+    aud = bundle.get("audiences") or []
+    if aud:
+        parts.append("\n## Who is reading")
+        for a in aud[:2]:
+            parts.append(f"- {a.get('name') or a.get('key', '')}: "
+                         f"{a.get('pains') or a.get('description') or ''}"[:300])
+    if angle == "objection" and objections:
+        parts.append("\n## The hesitation to answer")
+        parts.append(f"- {objections[0]['objection']}")
+    parts.append(f"\n## Angle\n{_angle_brief(angle)}")
+    # The offer, once, exactly as it will be stated everywhere else, plus
+    # where it has to land. `ad_craft` measures both after the fact.
+    offer = str(bundle.get("offer") or "").strip()
+    if offer:
+        parts.append(f"\n## The offer — state it EXACTLY like this, and "
+                     f"inside the first {ad_craft.TRUNCATION} characters\n"
+                     f"{offer}")
+    deadline = str(bundle.get("deadline") or "").strip()
+    parts.append(f"\n## The real deadline\n{deadline}" if deadline else
+                 "\n## There is NO deadline for this. Do not imply one.")
+    parts.append("\n## How to answer\n" + ad_craft.REPLY_FORMAT)
+    return parts
 
 
 # Replaceable so the offline suite can drive both halves — including a model
@@ -651,6 +711,11 @@ def _run_ad_copy(ctx: Context) -> dict:
              "until those land, art direction is a human's job.")
 
     objections = ctx.bundle.get("objections") or []
+    # Onto the bundle, because `draft_ad` reads the bundle and the params live
+    # on the context. Same route `revision_notes` already takes.
+    for _k in ("offer", "deadline"):
+        if str(ctx.params.get(_k) or "").strip():
+            ctx.bundle[_k] = str(ctx.params[_k]).strip()
     by_basis: dict[str, int] = {}
     degraded_note = ""
     #: The variant board's rows (3.4): what each KEPT variant is, in the
@@ -677,12 +742,78 @@ def _run_ad_copy(ctx: Context) -> dict:
     _commit_base = dict(label=_label, audience=audience_key,
                         proof_scopes=_scopes)
 
-    for i, claim in enumerate(ctx.claims[:want]):
-        angle = _ANGLES[i % len(_ANGLES)]
+    # WHICH ANGLES THIS ACCOUNT MAY USE, from its own knowledge base rather
+    # than a fixed list. `gifting` is the one that does not generalise — an
+    # events venue advertising "the most personal gift" is writing an ad for
+    # somebody else's business, and nothing downstream would catch it because
+    # the validator checks whether a draft is TRUE, not whether it is about us.
+    _evidence = " ".join(
+        [str(a.get("name") or a.get("key") or "") + " "
+         + " ".join(a.get("pains") or []) for a in (ctx.bundle.get("audiences") or [])]
+        + [str(c.get("claim") or "") for c in ctx.claims[:12]]
+        + [str(o.get("objection") or "") for o in objections[:6]])
+    angles = ad_craft.angles_for(_evidence)
+    ctx.note("angles in play for this account: " + ", ".join(angles)
+             + ("" if "gifting" in angles else
+                " (gifting is not offered — nothing in this account's "
+                "knowledge base says people buy this for somebody else)"))
 
-        text, why_not = draft_ad(ctx.bundle, claim, angle, objections)
-        if text:
+    for i, claim in enumerate(ctx.claims[:want]):
+        angle = angles[i % len(angles)]
+
+        raw, why_not = draft_ad(ctx.bundle, claim, angle, objections)
+        headline, levers, craft_findings = "", [], []
+        text = raw
+        if raw:
             basis = "model"
+            got = ad_craft.parse(raw)
+            text, headline, levers = got["body"], got["headline"], got["levers"]
+            # THE CRAFT GATE. Model output only: the composer below is a
+            # deterministic restatement of the claim and IS a mood board by
+            # construction — it says so in `basis` — so reviewing it would
+            # produce the same findings on every offline run and teach the
+            # reader to skip them.
+            craft_findings = ad_craft.review(
+                body=text, headline=headline, angle=angle,
+                offer=str(ctx.bundle.get("offer") or ""), levers=levers,
+                urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
+                proof=str(claim.get("evidence") or ""))
+            blocked = ad_craft.block_reasons(craft_findings)
+            if blocked:
+                # ONE redraft, and KEEP IT ONLY IF THE BLOCKS WENT DOWN — the
+                # rule email learned the hard way: comparing total findings
+                # threw away a retry that fixed the blocking problem and added
+                # a nudge.
+                retry_raw, _ = draft_ad(
+                    {**ctx.bundle,
+                     "rules": {**ctx.bundle.get("rules", {}),
+                               "block": ctx.bundle.get("rules", {}).get("block", "")
+                               + ad_craft.as_prompt(craft_findings)}},
+                    claim, angle, objections)
+                if retry_raw:
+                    r = ad_craft.parse(retry_raw)
+                    left = ad_craft.review(
+                        body=r["body"], headline=r["headline"], angle=angle,
+                        offer=str(ctx.bundle.get("offer") or ""),
+                        levers=r["levers"],
+                        urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
+                        proof=str(claim.get("evidence") or ""))
+                    now = ad_craft.block_reasons(left)
+                    if len(now) < len(blocked) or (
+                            len(now) == len(blocked)
+                            and len(left) < len(craft_findings)):
+                        text, headline = r["body"], r["headline"]
+                        levers, craft_findings = r["levers"], left
+                        ctx.note(f"craft: variant {i + 1} redrafted once and "
+                                 f"came back better — "
+                                 f"{len(blocked) - len(now)} blocking "
+                                 f"problem(s) resolved")
+            sc = ad_craft.score(craft_findings)
+            ctx.note(f"craft: variant {i + 1} ({angle}) scores "
+                     f"{sc['total']}/{sc['of']}"
+                     + ("" if sc["ship"] else " — below the bar to ship"))
+            for f in craft_findings:
+                ctx.note(f"craft ({f['severity']}): {f['detail']} → {f['fix']}")
         else:
             # Degrade, and SAY SO on the row. A silent fallback is the defect
             # this codebase already met in the extractor: a path measured at
@@ -802,8 +933,13 @@ register(Skill(
     # `revision_notes` + `into_batch` are the board's regenerate loop (3.4):
     # the digest rides the brief, and `into_batch` names the board the rows
     # will be merged into (so the refill run writes no second board).
+    # `offer` and `deadline` are craft inputs, not decoration: the ruleset
+    # measures WHERE the offer lands (the feed cuts at ~125 characters) and
+    # refuses manufactured urgency when no deadline exists. Both are owner
+    # input — a generator inventing a discount or a deadline is the one
+    # failure here that costs real money.
     params=("entity_key", "audience_key", "variants", "utterance",
-            "revision_notes", "into_batch"),
+            "revision_notes", "into_batch", "offer", "deadline"),
     writes=False,
     produces="draft",
     run=_run_ad_copy))

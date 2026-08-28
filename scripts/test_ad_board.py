@@ -126,10 +126,31 @@ def main():
     art, batch = board(anchor)
     ck("one ArtifactBody, format ad_batch, anchored on variant 1",
        art is not None and art.format == "ad_batch", str(art))
+    # 2026-08-29: retargeted. The angles were three hardcoded strings and
+    # "proof" was not an angle at all — proof is a VALUE LEVER that belongs in
+    # every ad, not the theme of one. They come from `ad_craft.angles_for`
+    # now, chosen per account from its own knowledge base, so this asserts
+    # against the ruleset rather than restating a list that can drift from it.
+    from app import ad_craft
+    # Read the angle set the RUN said it was using, rather than guessing the
+    # evidence string that produced it — the angles are chosen per account
+    # from its own knowledge base, so a fixture that reconstructs the input is
+    # testing my reconstruction rather than the code.
+    said = next((n for n in r["notes"] if n.startswith("angles in play")), "")
+    in_play = [a.strip(" .") for a in
+               said.split(":", 1)[-1].split("(")[0].split(",") if a.strip()]
+    got = [v["angle"] for v in (batch or {}).get("variants", [])]
     ck("  the JSON names all three variants with their angles",
        batch is not None and len(batch["variants"]) == 3
-       and [v["angle"] for v in batch["variants"]] == ["proof", "objection",
-                                                       "occasion"])
+       and got == in_play[:3], f"{got} vs {in_play[:3]}")
+    ck("  every angle it used is one the ruleset defines",
+       bool(got) and all(v in ad_craft.ANGLES for v in got), str(got))
+    ck("  and they are three DIFFERENT angles — five texts on one angle is "
+       "the collapse the matrix exists to prevent",
+       len(set(got)) == 3, str(got))
+    ck("  gifting is withheld from an account with no evidence of it",
+       "gifting" not in in_play or "gift" in str(r["notes"]).lower(),
+       said[:120])
     ck("  every variant is flagged needs_art_direction",
        all(v["needs_art_direction"] for v in batch["variants"]))
     ck("  draft_body froze the machine's batch (virtual v1)",
