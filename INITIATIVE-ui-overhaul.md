@@ -657,6 +657,50 @@ ALSO in this push: the previous step's `_read_off` reloaded the tenant row
 twice per claim card (~30 lookups to render one line); it now takes the
 already-loaded source list.
 
+**OUT OF BAND — THE DAILY BRIEFING (owner, 2026-08-27).** Not a console
+tab, but the surface the owner actually reads every day, and it had rotted:
+*"ever growing daily digest emails that I have no way of clearing or
+updating so it's practically useless to me."* Two of its sections had no
+bound at all (every pending approval, every past-due deadline, for ever), it
+grouped by TYPE across all five clients, and no line carried a control of
+any kind. Rebuilt around one item shape — kind · ref · tenant · rank ·
+bucket · fingerprint — so ranking, grouping, suppression and the links are
+written once instead of per section, and the text and HTML renders read the
+SAME structure (they pulled their own rows before, so they could disagree).
+**Ranked, by client**: each account leads with its worst thing and the
+account with the worst thing leads the email; upcoming, still-open-over-a-
+week, and housekeeping sit below as capped lists with real counts. Overdue
+money is exempt from the staleness demotion — a bill that falls off the list
+is exactly the failure that section would otherwise cause. **Clearable from
+the email**: handled · irrelevant · updated, signed links on the same
+mechanism approval mail uses (rule 1, act where you report — the owner reads
+this on a phone with no session). `updated` is the owner's own reading —
+*"the thread context should be updated … it should not reflect outdated
+information"* — so it re-reads the source and lets a changed version come
+back. **An ack covers the item AS IT WAS**: `db.DigestAck` stores a
+fingerprint of what the line said, so a blocked draft that breaks again for
+a new reason, or a bill whose amount changed, is a NEW fact and returns
+(owner's call over "stay gone"). `irrelevant` is the one that suppresses
+regardless — it says the flag was wrong, not the world. A handled deadline
+also moves in its OWN status column, carrying `was:` so **Undo** (offered on
+the page you land on, since a phone mis-tap on `irrelevant` was otherwise
+permanent) restores rather than guesses. The digest was also the last
+surface still listing drafted replies as "awaiting your approval" — it now
+reads the same `decided_in_console` predicate as the queue and the pill.
+Two bugs the build found in itself, both fixed: three signed URLs per line
+made the plain-text briefing unreadable (text now carries ONE link per item
+opening a three-button page; HTML keeps the three inline), and the `was:`
+note was written after the ack row was built, so undo could only guess.
+Guards: `a_cleared_item_stays_cleared`, `a_changed_item_comes_back`,
+`the_briefing_leads_with_the_client` — the last one MISSED on its first run
+because the test account with the worst item was also alphabetically first,
+so the assertion passed under either ordering; the fixture now makes them
+disagree. New suite `test_digest.py` (39 checks) — the digest had none.
+NAMED, not fixed: these ack links are mutating GETs, like `/decide` before
+them, so a link-prefetching mail scanner could clear a briefing; Undo is the
+mitigation, and POST-ification belongs with the parked CSRF work in §6.
+There is no console surface for reviewing or reversing acks in bulk.
+
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first

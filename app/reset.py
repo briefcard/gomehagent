@@ -63,7 +63,8 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "seo_site_config", "system_docs", "assurance_events",
               "tool_calls", "reported_figures", "compliance_events",
               "moments", "keyword_targets", "keyword_readings",
-              "artifact_bodies", "artifact_versions", "feedback_items"}
+              "artifact_bodies", "artifact_versions", "feedback_items",
+              "digest_acks"}
 # Both classified in the change that adds them, per the lesson below.
 # `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
 # it looks like research about the brand, but what it stores is what somebody
@@ -79,6 +80,12 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
 # reset would also be the worst possible kind of survival: an emptied account
 # whose first tick writes to people about carts and enquiries from a life the
 # client believes was deleted.
+# `digest_acks` is OPERATIONS, classified in the change that adds it: it
+# records what the OWNER decided about a briefing line — handled, irrelevant,
+# or re-read — which is an act, not a fact about the brand. Leaving it behind
+# on a reset would be the bad kind of survival: a reborn account would open
+# its first briefing with live items already suppressed, cleared by decisions
+# taken about a life the client believes was deleted.
 # `assurance_events` is operations, not knowledge: it records what the system
 # DID — which drafts were checked and what was caught — and no crawl or sync
 # can rebuild it. Classified in the same change that added the table, because

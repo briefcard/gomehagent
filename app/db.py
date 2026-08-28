@@ -571,6 +571,37 @@ class Deadline(Base):
     status = Column(String, default="open")  # open | alerted | done | dismissed
 
 
+class DigestAck(Base):
+    """What the owner has already dealt with, so the digest stops repeating it.
+
+    The digest listed every open thing every twelve hours with no way to say
+    "done" — so it only ever grew, and a briefing that cannot shrink stops
+    being read (owner, 2026-08-27: *"ever growing … practically useless"*).
+
+    An ack is against the item AS IT WAS, which is why `fingerprint` exists:
+    it hashes what the line actually SAID. `handled` and `updated` suppress
+    the item only while that hash still matches, so a blocked draft that
+    breaks again for a new reason, or a deadline whose amount changed, is a
+    NEW fact and comes back (the owner's call: permanently silencing a live
+    problem is how a real one gets missed). `irrelevant` is the one that
+    suppresses regardless — it says the flag itself was wrong, not the state
+    of the world.
+    """
+
+    __tablename__ = "digest_acks"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    #: approval | deadline | defect | mail — the shape of the thing, which
+    #: decides where `updated` goes to re-read it.
+    kind = Column(String, nullable=False)
+    ref = Column(String, nullable=False, index=True)   # the row it points at
+    fingerprint = Column(String, nullable=False)       # hash of what was shown
+    state = Column(String, nullable=False)   # handled | irrelevant | updated
+    at = Column(DateTime(timezone=True), default=utcnow)
+    note = Column(Text, default="")
+
+
 class ChatMessage(Base):
     """Conversation history — one separate thread per agent (and optional
     sub-thread), so each agent keeps its own context with no bleed between them."""

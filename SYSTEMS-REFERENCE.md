@@ -211,6 +211,13 @@ the WEBSITE and the only identity source — landing pages
 
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-27 — the daily briefing became a briefing: ranked by client,
+  bounded, and clearable from the email (handled / irrelevant / updated,
+  signed links; `db.DigestAck` fingerprints what the line said so a changed
+  item comes back). Same day: the send is the approval for drafted replies —
+  they leave the review queue and `reconcile_drafts` records the draft-vs-sent
+  delta that its docstring had promised and never written.
+
 - 2026-08-27 `b67533b` — pointer-integrity sweep: 75 not-ok directions
   fixed at ~8 root causes; `test_pointers.py` + `test_pointer_fixes.py`
   hold it. Sender + attributed_to + down-a-rung controls added; digest

@@ -141,28 +141,67 @@ def approval_email(items: list[dict], intro: str | None = None) -> str:
     return wrap(intro_html + tip + "".join(blocks))
 
 
-def digest_email(deadlines: list, pending: list, sections: dict,
-                 when: str) -> str:
-    parts = [f'<p style="margin:0 0 16px;">Good {"morning" if "AM" in when else "evening"} '
-             f'Gomeh — here\'s where things stand.</p>']
-    if deadlines:
-        parts.append(heading("Money deadlines, next 7 days"))
-        parts.append(bullets([f"{d.due_date} — {d.description} ({d.amount}), "
-                              f"{d.account} inbox" for d in deadlines]))
-    if pending:
-        parts.append(heading(f"Waiting on you ({len(pending)})"))
-        parts.append(bullets([ap.summary for ap in pending]))
-    titles = {"auto_replied": "Handled automatically",
-              "drafted": "Drafted for your review",
-              "escalated": "Escalated to you",
-              "ignored": "Filtered out (no action needed)"}
-    for key, title in titles.items():
-        items = sections.get(key, [])
-        if not items:
+def _ack_row(item: dict, links: dict, with_client: bool = False) -> str:
+    """One briefing line, with the three ways to close it.
+
+    The controls are ON the line (design rule 1: act where you report). The
+    owner reads this on a phone with no session, so a briefing that says
+    "clear it in the console" is a briefing that never gets cleared — which
+    is the state this replaced.
+    """
+    verbs = " &middot; ".join(
+        f'<a href="{esc(links[v])}" style="color:#5b6470;text-decoration:'
+        f'underline;">{label}</a>'
+        for v, label in (("handled", "handled"), ("irrelevant", "irrelevant"),
+                         ("updated", "updated")))
+    # The tail sections span every account, so they name theirs. The client
+    # blocks do not — the heading above them already said it, and repeating
+    # it on every line is the same fact twice (design rule 8).
+    who = (f'<span style="{MUTED}">[{esc(item.get("tenant") or "—")}] </span>'
+           if with_client else "")
+    return (f'<li style="margin:6px 0;">{who}{esc(item["title"])}'
+            f'<span style="{MUTED}"> &mdash; {esc(item["detail"])}</span>'
+            f'<br><span style="{MUTED}font-size:12px;">{verbs}</span></li>')
+
+
+def _ack_list(items: list, linker, total: int = 0,
+              with_client: bool = False) -> str:
+    lis = "".join(_ack_row(i, linker(i), with_client) for i in items)
+    more = ""
+    if total and total > len(items):
+        more = (f'<li style="{MUTED}margin:6px 0;">&hellip; and '
+                f'{total - len(items)} more</li>')
+    return f'<ul style="margin:4px 0 12px;padding-left:22px;">{lis}{more}</ul>'
+
+
+def digest_email(brief: dict, when: str, linker) -> str:
+    """The briefing: each client first, worst thing first, then the tail.
+
+    Takes the same structure the plain-text version renders, so the two can
+    never say different things — they did before, because each pulled its own
+    rows in its own order.
+    """
+    parts = [f'<p style="margin:0 0 16px;">Good '
+             f'{"morning" if "AM" in when else "evening"} Gomeh &mdash; '
+             f'here\'s where things stand, worst first.</p>']
+    for c in brief.get("clients", []):
+        parts.append(heading(f"{c['name']} ({c['total']})"))
+        parts.append(_ack_list(c["items"], linker, c["total"]))
+    for key, title in (("upcoming", "Upcoming"),
+                       ("stale", "Still open, older than a week"),
+                       ("housekeeping",
+                        "Housekeeping \u2014 done automatically, no action")):
+        rows = brief.get(key) or []
+        if not rows:
             continue
-        parts.append(heading(f"{title} ({len(items)})"))
-        parts.append(bullets([f"{e.sender} — {e.subject} ({e.account})"
-                              for e in items[:15]]))
+        parts.append(heading(f"{title} ({brief.get(key + '_total', len(rows))})"))
+        parts.append(_ack_list(rows, linker, brief.get(key + "_total", 0),
+                               with_client=True))
+    if brief.get("cleared"):
+        parts.append(f'<p style="{MUTED}margin-top:18px;font-size:12px;">'
+                     f'{brief["cleared"]} item(s) you already cleared are not '
+                     f'shown. They come back only if they change.</p>')
     if len(parts) == 1:
-        parts.append('<p>Quiet stretch — nothing needs your attention right now.</p>')
+        parts.append('<p>Quiet stretch &mdash; nothing needs your attention '
+                     'right now.</p>')
     return wrap("".join(parts))

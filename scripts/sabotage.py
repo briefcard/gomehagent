@@ -1722,6 +1722,48 @@ SABOTAGES = [
                "recorded for a letter nobody wrote — flattering the "
                "generator with a measurement of nothing",
     },
+    {
+        "name": "a_cleared_item_stays_cleared",
+        "file": "app/digest.py",
+        "find": "    kept = [i for i in items\n"
+                "            if (i[\"kind\"], i[\"ref\"]) not in dead\n"
+                "            and (i[\"kind\"], i[\"ref\"], i[\"fingerprint\"]) not in seen]",
+        "replace": "    kept = list(items)  # SABOTAGE",
+        "suites": ["test_digest.py"],
+        "why": "the briefing goes back to repeating everything the owner has "
+               "already dealt with, every twelve hours, for ever — which is "
+               "the exact state that made it 'practically useless'. Marking "
+               "something handled would do nothing at all",
+    },
+    {
+        "name": "a_changed_item_comes_back",
+        "file": "app/digest.py",
+        "find": "    seen = {(a.kind, a.ref, a.fingerprint) for a in acks\n"
+                "            if a.state in (\"handled\", \"updated\")}",
+        "replace": "    seen = {(a.kind, a.ref, i) for a in acks  # SABOTAGE\n"
+                   "            for i in [a.fingerprint]\n"
+                   "            if a.state in (\"handled\", \"updated\")} \\\n"
+                   "        | {(a.kind, a.ref, x[\"fingerprint\"]) for a in acks\n"
+                   "           for x in items if x[\"ref\"] == a.ref}",
+        "suites": ["test_digest.py"],
+        "why": "clearing something silences it FOR EVER, whatever happens to "
+               "it afterwards: a blocked draft that breaks again for a new "
+               "reason, or a bill whose amount changed, never reaches the "
+               "owner again. Permanently silencing a live problem is how a "
+               "real one gets missed",
+    },
+    {
+        "name": "the_briefing_leads_with_the_client",
+        "file": "app/digest.py",
+        "find": "    order = sorted(by_client,\n"
+                "                   key=lambda k: (by_client[k][0][\"rank\"], -len(by_client[k])))",
+        "replace": "    order = sorted(by_client)  # SABOTAGE",
+        "suites": ["test_digest.py"],
+        "why": "the briefing goes back to alphabetical, so the account with "
+               "an overdue bill can sit below one with nothing but filtered "
+               "newsletters — the owner has to re-sort five clients in their "
+               "head, which is the reading cost that made it unread",
+    },
 ]
 
 

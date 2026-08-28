@@ -1081,6 +1081,49 @@ provider takes effect immediately. See the
 """)
 
 
+@app.get("/digest/{token}", response_class=HTMLResponse)
+def digest_ack(token: str) -> str:
+    """handled / irrelevant / updated, from a link in the briefing.
+
+    Unauthenticated by signature, exactly like /decide: the owner is reading
+    the briefing on a phone with no session, and a control that needs a login
+    is a control that never gets used — which is how the digest got to be
+    unclearable in the first place.
+    """
+    from . import digest as dg
+    page = ("<html><body style='font-family:sans-serif;padding:3em;"
+            "max-width:34em'>")
+    got = dg.read_token(token)
+    if got.get("error"):
+        # Escaped throughout: these pages carry summaries built from email
+        # subjects, which is attacker-controlled text on an unauthenticated
+        # page — the stored-XSS lesson /decide already paid for.
+        return page + f"<h2>{html.escape(got['error'])}</h2></body></html>"
+    if not got["state"]:
+        # The text briefing sends ONE link per item, because three signed
+        # URLs per line buried the content. This is where it asks which.
+        links = dg.choices(got["kind"], got["ref"], got["fingerprint"])
+        btns = "".join(
+            f"<p><a href='{html.escape(links[v])}' style='display:inline-block;"
+            f"padding:10px 18px;border:1px solid #cfd4dd;border-radius:6px;"
+            f"text-decoration:none;color:#202124'>{label}</a></p>"
+            for v, label in (
+                ("handled", "Handled — I have dealt with it"),
+                ("irrelevant", "Irrelevant — do not flag this again"),
+                ("updated", "Updated — re-read it, it may have changed")))
+        return (page + "<h2>What happened to this?</h2>" + btns
+                + "</body></html>")
+    said = dg.apply_ack(token)
+    undo = ""
+    if got["state"] in dg.STATES and not said.startswith("Nothing"):
+        # Offered where the mistake happens. A phone tap on the wrong line
+        # was otherwise unrecoverable — for "irrelevant", permanently.
+        undo = (f"<p><a href='{html.escape(dg.undo_link(got['kind'], got['ref'], got['fingerprint']))}'"
+                " style='color:#5f6368'>Undo</a></p>")
+    return (page + f"<h2>{html.escape(said)}</h2>" + undo
+            + "<p style='color:#5f6368'>You can close this.</p></body></html>")
+
+
 @app.get("/decide/{token}", response_class=HTMLResponse)
 def decide(token: str) -> str:
     """Approve/deny links from approval emails."""
