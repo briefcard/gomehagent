@@ -464,5 +464,27 @@ ck("Sign out lands on the sign-in door", r.status_code == 303
    and r.headers.get("location", "") == "/admin/signin")
 
 # ---------------------------------------------------------------------------
+# A TABLE WIDER THAN A PHONE MUST SCROLL INSIDE ITSELF, not push the page.
+#
+# Measured twice in one day at 375px: the Brand tab pushed the whole page
+# 124px sideways and Assurance 147px, in both cases because a table had no
+# `.tblwrap` around it — so every card on the page scrolled to accommodate a
+# table nobody was reading. The wrapper already existed; the call sites did
+# not use it. Fourteen more are listed rather than discovered a third time.
+# The count may SHRINK and must NEVER grow: a new table ships wrapped.
+UNWRAPPED_TABLES = 14
+_src = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "app", "admin_ui.py")).read()
+_bare = [_src[:m.start()].count("\n") + 1
+         for m in re.finditer(r'<table class="(?:bt-)?tbl(?:e)?"', _src)
+         if "tblwrap" not in _src[max(0, m.start() - 120):m.start()]]
+ck("no NEW table ships without a scroll wrapper",
+   len(_bare) <= UNWRAPPED_TABLES,
+   f"{len(_bare)} bare, was {UNWRAPPED_TABLES} — lines {_bare[-4:]}")
+if len(_bare) < UNWRAPPED_TABLES:
+    print(f"       {UNWRAPPED_TABLES - len(_bare)} fewer — lower "
+          f"UNWRAPPED_TABLES to {len(_bare)}")
+
+# ---------------------------------------------------------------------------
 print(f"\n{len(_fail)} failure(s)" if _fail else "\nall render-smoke checks pass")
 sys.exit(1 if _fail else 0)

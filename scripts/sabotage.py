@@ -2124,6 +2124,36 @@ SABOTAGES = [
                "this is the line where they get conflated, and the owner "
                "reads a healthy total over a run that threw work away",
     },
+    {
+        "name": "catches_are_not_silently_capped",
+        "file": "app/admin_ui.py",
+        "find": "    all_catches = assurance.catches(scope, days, limit=2000,\n"
+                "                                    system_key=system, rule=rule)",
+        "replace": "    all_catches = assurance.catches(scope, days, limit=20,  # SABOTAGE\n"
+                   "                                    system_key=system, rule=rule)",
+        "suites": ["test_assurance_tab.py"],
+        "why": "the catch list is silently capped again, so on any account "
+               "busy enough to be worth checking the twenty-first catch does "
+               "not exist and the page says nothing about it. A silent cap on "
+               "the one page whose whole job is to be believed teaches "
+               "exactly the wrong lesson about every other number on it",
+    },
+    {
+        "name": "every_account_can_be_scanned",
+        "file": "app/admin_ui.py",
+        # Repointed 2026-08-28 the same day it was written: `_scan_rows`
+        # grew a `rows` argument so it stops enumerating the accounts a
+        # second time (the frame contract allows exactly one), and the anchor
+        # named the old one-argument call.
+        "find": "       'is here, with when it last ran.</p>' + _scan_rows(key, _rows)}",
+        "replace": "       'is here, with when it last ran.</p>'}  # SABOTAGE",
+        "suites": ["test_assurance_tab.py"],
+        "why": "the all-accounts view goes back to telling you to go and pick "
+               "an account — a named gap whose fix is an instruction to "
+               "navigate elsewhere, which is the defect design rule 1 exists "
+               "to stop, on the page that reports whether anyone has ever "
+               "checked a client's live site",
+    },
 ]
 
 

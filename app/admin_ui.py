@@ -7806,8 +7806,51 @@ def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
                   suffix=f"&amp;tenant={_esc(tenant)}")
 
 
+def _scan_rows(key: str, rows) -> str:
+    """One scan control per account, for the all-accounts view (spec §9).
+
+    The `*` view said "pick an account to see and run it" and offered nothing
+    — a named gap whose fix is an instruction to go somewhere else, which is
+    the defect design rule 1 exists to stop, on the page that reports whether
+    anyone has ever checked a client's live site. The pooled REPORT genuinely
+    does not exist (one client's ban list against another client's site is not
+    a number), but the RUN is per account and belongs here, beside when it
+    last happened.
+
+    `rows` COMES FROM THE CALLER rather than a second enumeration of the
+    accounts here. `test_console_frame` counts the account-listing calls in
+    this module by their LITERAL NAME and pins it to exactly one — so even
+    naming it in prose here would break the count — because
+    one resolver deciding the account for the frame and the body is what
+    stopped the pill and the numbers disagreeing. `render_assurance` already
+    holds the resolved rows and hands them over.
+    """
+    from .web import bg_status
+    out = ""
+    for t in rows:
+        st = bg_status("scan", t.key)
+        when = _esc((st.get("at") or "")[:16].replace("T", " "))
+        if not st:
+            state = '<span class="mut">never scanned</span>'
+        elif st.get("state") == "failed":
+            state = (f'<span class="chip off" title="{_esc(st.get("detail", ""))}">'
+                     f'failed {when}</span>')
+        elif st.get("state") == "running":
+            state = f'<span class="chip nb">running &middot; {when}</span>'
+        else:
+            state = (f'<span class="mut" title="{_esc(st.get("detail", ""))}">'
+                     f'ran {when}</span>')
+        out += (f'<div class="conn-site"><span><b>{_esc(t.name or t.key)}</b> '
+                f'<span class="when">{_esc(t.domain or "no website on file")}'
+                f'</span></span>{state}<span class="row">'
+                + _act(key, "/admin/compliance_scan", "Scan", t.key,
+                       {"ui": "1"}, small=True) + "</span></div>")
+    return out or '<p class="mut">No accounts yet.</p>'
+
+
 def render_assurance(key: str, tenant: str = "", days: int = 30,
-                     system: str = "", rule: str = "", started: str = "") -> str:
+                     system: str = "", rule: str = "", started: str = "",
+                     page: int = 1) -> str:
     """What the layer checked, what it caught, and what cannot be measured yet.
 
     Ordered by how much each number can be trusted: catches first because they
@@ -7857,8 +7900,10 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
       about published pages is not a decision.</p>
       {_compliance_body(tenant) if not every else
        '<p class="mut">A scan reads one client&#39;s own site against one '
-       'client&#39;s ban list, so there is nothing to pool here. Pick an '
-       'account to see and run it.</p>'}
+       'client&#39;s ban list, so there is nothing to pool here &mdash; but '
+       'the RUN is per account, and telling you to go and pick one is a fix '
+       'instruction, not a control (design rule 1). Each account&#39;s scan '
+       'is here, with when it last ran.</p>' + _scan_rows(key, _rows)}
       {'' if every else
        f'<div class="row">{_act(key, "/admin/compliance_scan", "Scan now", tenant)}'
        '<span class="mut">checks every public page against this account&#39;s '
@@ -7920,8 +7965,27 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # of them — the draft was on the Output row the event already points at and
     # was never joined. A page whose whole job is to be believed has to be able
     # to show its work.
-    got = assurance.catches(scope, days, limit=40,
-                            system_key=system, rule=rule)
+    # PAGED, in the one pager vocabulary (spec §9). It was capped at 40 with
+    # no page two and no statement that there was more, so on any account
+    # busy enough to be worth checking, catch 41 did not exist. Capping
+    # silently is the "no silent caps" rule broken on the one page whose job
+    # is to be believed.
+    all_catches = assurance.catches(scope, days, limit=2000,
+                                    system_key=system, rule=rule)
+    _per = 20
+    _pages = max(1, -(-len(all_catches) // _per))
+    a_page = max(1, min(page, _pages))
+    got = all_catches[(a_page - 1) * _per:a_page * _per]
+    _pbase = (f"/admin/ui?key={_esc(key)}&amp;tab=assurance&amp;"
+              f"tenant={_esc(tenant)}&amp;days={days}"
+              + (f"&amp;system={_esc(system)}" if system else "")
+              + (f"&amp;rule={_esc(rule)}" if rule else ""))
+    catch_pager = _pager(_pbase, a_page, len(all_catches), _per, "catches")
+    # THE COUNT RIDES ON THE SUMMARY. The fold is closed by default now (spec
+    # §9: folds fold) and a closed fold that hides its own number is worse
+    # than an open one — the whole page exists to show that the layer caught
+    # something, so the number stays readable without opening anything.
+    caught_n = (f" &mdash; {len(all_catches)}" if all_catches else "")
     narrowed = ""
     if system or rule:
         what = " · ".join(x for x in (system, rule) if x)
@@ -7940,6 +8004,12 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
         + (f'<div class="msg esc">{_esc(c["body"])}</div>' if c["body"] else
            '<div class="when">no draft was filed — the gate refused before '
            'anything reached the ledger</div>')
+        # OPEN THE THING IT CAUGHT. The body is an excerpt; the workroom is
+        # where the draft is read whole, corrected or redrafted. A catch you
+        # can read 400 characters of and not act on is half a control.
+        + (f'<div><a href="/admin/work/{_esc(c["output_id"])}'
+           f'?key={_esc(key)}">open the draft it caught &rarr;</a></div>'
+           if c.get("output_id") else "")
         + '</div>' for c in got)
     if not got and (system or rule):
         catch_cards = ('<p class="mut">Nothing matches that filter in this '
@@ -7971,46 +8041,54 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     {windows}
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
 
-    <details class="conns" open><summary>What was caught</summary>
+    <details class="conns"><summary>What was caught{caught_n}</summary>
       <p class="mut">Each of these is a phrase the model wrote and
       deterministic code stopped. Without the layer it would have gone out —
       this is the one number here that needs no interpretation.</p>
-      <table class="tbl"><tr><th>rule</th><th>times</th></tr>
-      {catch_rows}</table>
+      <div class="tblwrap"><table class="tbl"><tr><th>rule</th>
+      <th>times</th></tr>
+      {catch_rows}</table></div>
       <p class="when"><strong>{rep['caught_total']}</strong> total.</p>
 
       <h3 style="font-size:.9rem;margin:16px 0 6px">Which system</h3>
-      <table class="tbl"><tr><th>system</th><th class="num">checks</th>
+      <!-- Six columns will not fit a phone, and without the wrapper the
+           table pushed the whole PAGE 147px wide so every card scrolled
+           sideways with it. `.tblwrap` again — the Plan tab's answer, the
+           same one the Brand tab needed this morning. Measured at 375px. -->
+      <div class="tblwrap"><table class="tbl"><tr><th>system</th>
+        <th class="num">checks</th>
         <th class="num">caught</th><th class="num">blocked</th>
         <th class="num">repaired</th><th>most often</th></tr>
-      {sysrows}</table>
+      {sysrows}</table></div>
 
       <h3 style="font-size:.9rem;margin:16px 0 6px">The drafts themselves</h3>
       <p class="mut">What the model actually wrote, and what stopped it. A
       number you cannot open is a number you have to take on faith — and this
       is the page whose whole job is to be believed.</p>
       {narrowed}
+      {catch_pager}
       <div class="thread">{catch_cards}</div>
+      {catch_pager}
     </details>
 
-    <details class="conns" open><summary>Where the checking happens</summary>
+    <details class="conns"><summary>Where the checking happens</summary>
       <p class="mut">The mail path uses a plain substring test; the substrate
       uses word-boundary matching. Same column, different strength.</p>
-      <table class="tbl">
+      <div class="tblwrap"><table class="tbl">
       <tr><th>source</th><th>checks</th><th>caught</th><th>blocked</th></tr>
-      {src_rows}</table>
+      {src_rows}</table></div>
     </details>
 
-    <details class="conns" open><summary>Grounding and repair</summary>
-      <table class="tbl">
+    <details class="conns"><summary>Grounding and repair</summary>
+      <div class="tblwrap"><table class="tbl">
         <tr><td>drafts carrying a claim_id</td><td class="num">{grate}</td></tr>
         <tr><td>repair attempts</td><td class="num">{rp['attempted']}</td></tr>
         <tr><td>&nbsp;&nbsp;fixed by a redraft</td><td class="num">{rp['succeeded']}</td></tr>
         <tr><td>&nbsp;&nbsp;still blocked after repair</td><td class="num">{rp['still_blocked']}</td></tr>
-      </table>
+      </table></div>
     </details>
 
-    <details class="conns" open><summary>Is it improving the output?</summary>
+    <details class="conns"><summary>Is it improving the output?</summary>
       <p>{ed_line}</p>
       <p class="mut">Catches and repairs prove the layer is doing something a
       model alone would not. They do not prove the drafts are better — that is
@@ -8019,8 +8097,9 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     </details>
 
     <details class="conns"><summary>What runs were missing</summary>
-      <table class="tbl"><tr><th>gap</th><th>runs affected</th></tr>
-      {thin_rows}</table>
+      <div class="tblwrap"><table class="tbl"><tr><th>gap</th>
+      <th>runs affected</th></tr>
+      {thin_rows}</table></div>
     </details>
 
     {comp_card}

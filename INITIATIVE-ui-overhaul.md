@@ -24,8 +24,8 @@ was verified at `/health` before the next began. Read §4's step entries for
 the detail — this is the map.
 
 **Step 4, tab by tab (spec §§4–11).** Data layer · Connections · Review ·
-Systems + workflow · Plan · **Brand** are SHIPPED. Remaining: **Assurance
-(§9)** and **Diagnostics (§10)**. Then step 5 (client product), step 6 (does
+Systems + workflow · Plan · **Brand** · **Assurance** are SHIPPED. Remaining:
+**Diagnostics (§10)**. Then step 5 (client product), step 6 (does
 Knowledge's Overview fold in), step 7 (completeness audit).
 
 | commit | what |
@@ -46,7 +46,8 @@ Knowledge's Overview fold in), step 7 (completeness audit).
 | `29c62d5` | Brand — the derive comes off the request, and a rule can be lifted |
 | `bf0f68a` | A landing page is a page — the scraper actually reads one |
 | `b4fbb28` | How many UI units have no piping — computed, not surveyed |
-| _next_ | A run says what it lost — 38 hidden warnings down to 6 |
+| `f91419f` | A run says what it lost — 38 hidden warnings down to 6 |
+| _next_ | Assurance — the page that has to be believed stops capping itself |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1379,6 +1380,58 @@ the WHOLE dict is invisible to a literal search, so "no surface names it" is
 not the same as "no human can reach it". That is exactly why those six carry
 reasons instead of fixes. Guard `a_run_says_what_it_lost` (caught); the
 refined sweep was re-sabotaged with a planted key and still bites.
+
+**4·ASSURANCE BUILT + SHIPPED 2026-08-28 (spec §9).** Four items, each
+MEASURED on the real tab before it was touched rather than read off the spec.
+Two were already done (the drill filter says what it is narrowed to and offers
+the way back); three were not.
+
+**THE CATCH LIST WAS SILENTLY CAPPED AT 40** with no page two and no
+statement that there was more — so on any account busy enough to be worth
+checking, catch 41 did not exist. A silent cap on the one page whose whole job
+is to be believed teaches exactly the wrong lesson about every other number on
+it. Paged 20 at a time through `_pager`, the same words as every other queue
+("catches 1–20 of 30"), rendered above AND below the list.
+
+**A CATCH SHOWED 400 CHARACTERS OF THE DRAFT AND NO WAY TO REACH IT.** Every
+catch now links to `/admin/work/<output_id>` — the excerpt says what happened,
+the workroom is where it is read whole, corrected or redrafted. A number you
+can read a fragment of and not act on is half a control.
+
+**EVERY SECTION OPENED AT ONCE**, so the page was a wall. All five fold now —
+and the catch COUNT rides on the summary (`What was caught — 30`), because a
+closed fold that hides its own number is worse than an open one on the page
+that exists to prove the layer caught something.
+
+**THE ALL-ACCOUNTS VIEW OFFERED NO SCAN AT ALL.** It said "pick an account to
+see and run it": a named gap whose fix is an instruction to navigate
+elsewhere, which is the defect design rule 1 exists to stop — on the page that
+reports whether anyone has ever checked a client's live site. NEW
+`_scan_rows()` puts one Scan per account there with its last-run state. The
+pooled REPORT still refuses to exist, and says why: one client's ban list
+against another client's site is not a number.
+
+**THE FRAME SUITE CAUGHT MY OWN VIOLATION, WHICH IS WHY IT EXISTS.**
+`_scan_rows` enumerated the accounts itself, and `test_console_frame` pins
+this module to exactly ONE account-listing call — one resolver for the frame
+and the body, which is what stopped the pill and the numbers disagreeing. It
+takes the caller's already-resolved rows now. The sabotage anchor for that
+same helper then went stale in the same session (the signature grew an
+argument) and `test_sabotage_anchors` failed the build over it — the guard
+written this morning catching this afternoon's edit.
+
+**AND THE TABLES, COMPUTED RATHER THAN SPOTTED.** Assurance overflowed the
+PAGE by 147px at 375px — the six-column "Which system" table with no
+`.tblwrap`, the same defect the Brand tab had at 124px this morning. Rather
+than fix the one I saw, a sweep: **18 `.tbl` tables in the console had no
+scroll wrapper.** The four on Assurance are fixed; the other 14 are pinned in
+`test_render_smoke` as `UNWRAPPED_TABLES = 14`, shrink-only, so a new table
+ships wrapped or does not ship. Verified at 375px with every fold open: zero
+page overflow.
+
+NEW suite `test_assurance_tab.py` (14 checks, seeded with 30 catches so paging
+is a real question and not a check passing against emptiness). Guards, both
+caught: `catches_are_not_silently_capped`, `every_account_can_be_scanned`.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

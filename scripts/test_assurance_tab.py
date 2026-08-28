@@ -1,0 +1,129 @@
+"""The Assurance tab, step 4 (spec §9) — the page whose whole job is believing.
+
+Four things it did not do, each measured before it was changed:
+
+  · **Every section opened at once**, so the page was a wall rather than
+    something you choose to read. Folded now — and the catch COUNT rides on
+    the summary, because a closed fold that hides its own number is worse
+    than an open one on the page that exists to show the layer caught
+    something.
+  · **The catch list was capped at 40 with no page two and no statement that
+    there was more.** On an account busy enough to be worth checking, catch
+    41 did not exist. A silent cap on the believability page is the "no
+    silent caps" rule broken where it matters most.
+  · **A catch showed 400 characters of the draft and no way to reach it.**
+    The workroom is where it is read whole, corrected or redrafted.
+  · **The all-accounts view offered no scan at all** — it said "pick an
+    account to see and run it", which is a fix instruction where a control
+    belongs (design rule 1). The pooled REPORT genuinely cannot exist; the
+    RUN is per account and now sits here with its last-run state.
+
+    python3 scripts/test_assurance_tab.py
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+import tempfile
+
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'at.db')}"
+os.environ["APPROVAL_SECRET"] = "s3cret"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import (admin_ui, assurance, db, kb_seed,  # noqa: E402
+                 systems, tenants)
+
+_fail: list[str] = []
+
+
+def ck(label: str, cond, detail: str = "") -> None:
+    print(f"[{'  ok  ' if cond else ' FAIL '}] {label}"
+          + (f"  — {detail}" if detail else ""))
+    if not cond:
+        _fail.append(label)
+
+
+def main() -> int:
+    db.init_db()
+    tenants.seed()
+    kb_seed.seed_all()
+    systems.seed_from_tenants()
+
+    # 30 catches: more than one page, so paging is a real question and not a
+    # check that passes against emptiness (design rule 11).
+    for i in range(60):
+        assurance.record("baci", source="skill", checked=["banned_claims"],
+                         caught=["banned_claims"] if i % 2 else [],
+                         verdict="blocked" if i % 2 else "passed",
+                         system_key="blog" if i % 3 else "campaign_email",
+                         output_id=f"o{i}")
+    total = len(assurance.catches("baci", 30, limit=9999))
+    ck("the fixture actually has more than one page of catches", total > 20,
+       str(total))
+
+    page1 = admin_ui.render_assurance("s3cret", "baci")
+    page2 = admin_ui.render_assurance("s3cret", "baci", page=2)
+
+    # ── 1. folds fold, and the number survives the fold ────────────────────
+    print("\n— folds fold (spec §9) —")
+    ck("no section on this tab opens itself",
+       'class="conns" open' not in page1,
+       "every one open at once is a wall, not a page")
+    ck("the catch count rides on the summary, so folding hides no number",
+       re.search(r"What was caught &mdash; \d+", page1) is not None)
+
+    # ── 2. the drill filter says it is on, and offers the way out ──────────
+    print("\n— a filtered view says so —")
+    drilled = admin_ui.render_assurance("s3cret", "baci", rule="banned_claims")
+    ck("a narrowed page says what it is narrowed to",
+       "Showing only" in drilled and "banned_claims" in drilled)
+    ck("…and carries the way back to everything",
+       "show everything" in drilled)
+
+    # ── 3. catches paginate, and each opens the draft it caught ────────────
+    print("\n— no silent cap on the page that has to be believed —")
+    ck("the catch list pages", "page=2" in page1)
+    ck("the pager states the depth in the one pager vocabulary",
+       re.search(r"catches \d+&ndash;\d+ of \d+", page1) is not None,
+       "X–Y of N, newer/older — the same words as every other queue")
+    ck("page two is a different page, not the same one re-rendered",
+       page1 != page2)
+    first_ids = set(re.findall(r"/admin/work/(o\d+)", page1))
+    second_ids = set(re.findall(r"/admin/work/(o\d+)", page2))
+    ck("…and holds catches the first page did not",
+       bool(second_ids) and not (second_ids & first_ids),
+       f"p1={len(first_ids)} p2={len(second_ids)} overlap="
+       f"{len(second_ids & first_ids)}")
+    ck("every catch opens the draft it caught",
+       "open the draft it caught" in page1,
+       "400 characters and no way through is half a control")
+
+    # ── 4. the all-accounts view can RUN a scan ────────────────────────────
+    print("\n— a control, not an instruction to go elsewhere —")
+    every = admin_ui.render_assurance("s3cret", "*")
+    n_scan = every.count("/admin/compliance_scan")
+    ck("the * view carries one scan per account",
+       n_scan >= len(tenants.all_tenants()), f"{n_scan} controls")
+    ck("…and says when each last ran, so the button is not a guess",
+       "never scanned" in every or "ran " in every)
+    ck("it still refuses to POOL what cannot be pooled",
+       "nothing to pool here" in every,
+       "one client's ban list against another client's site is not a number")
+
+    # The single-account view is unchanged in what it offers.
+    ck("a single account still has its own Scan now",
+       "Scan now" in page1)
+
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED:")
+        for f in _fail:
+            print(f"  - {f}")
+        return 1
+    print("all checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

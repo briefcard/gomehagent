@@ -2036,6 +2036,19 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
         "scoped_to": tenant or "all accounts"}
 
 
+def _page_param(request, *names: str) -> int:
+    """The page number, from the first name present. One reader for every
+    tab's pager, and the old parameter names keep working."""
+    for n in names:
+        raw = request.query_params.get(n)
+        if raw:
+            try:
+                return max(1, min(int(raw), 10_000))
+            except (TypeError, ValueError):
+                return 1
+    return 1
+
+
 @app.get("/admin/ui", response_class=HTMLResponse)
 def admin_ui(request: Request, key: str = Depends(admin_key),
              tab: str = "content", tenant: str = "",
@@ -2141,7 +2154,10 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             link_key, tenant, days=max(1, min(days, 365)),
             system=request.query_params.get("system", ""),
             rule=request.query_params.get("rule", ""),
-            started=request.query_params.get("started", ""))
+            started=request.query_params.get("started", ""),
+            # `page` is the step-4 name; `cpage` was the old one and still
+            # resolves, because URLs never break (fluidity rule 3).
+            page=_page_param(request, "page", "cpage"))
     if tab == "diagnostics":
         def _int(name: str, default: int, lo: int, hi: int) -> int:
             try:
