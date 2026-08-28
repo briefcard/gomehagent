@@ -1403,7 +1403,29 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     elif CAMPAIGN_INTENTS.get(intent, {}).get("asks") and fmt == "letter":
         fmt = "designed"
         why = (why + "; " if why else "") + "an offer shows the product"
+    # WHERE THE READER IS, DERIVED — not a fourth knob. `warmth` already
+    # answers "does this cohort know us" and the intent already answers "does
+    # this send ask", so the stage is a reading of two decisions that have
+    # been made rather than a new one to make (design rule 4). The account's
+    # own objections and situations are then quoted into the brief for that
+    # stage, which is the owner's 2026-08-29 correction applied to email.
+    stage = funnel.stage_from(
+        warmth=warmth, asks=bool(CAMPAIGN_INTENTS.get(intent, {}).get("asks")))
+    plan = funnel.inputs_for(
+        ctx.tenant, stage, claims=ctx.claims,
+        objections=ctx.bundle.get("objections"),
+        entities=ctx.bundle.get("entities"),
+        audiences=ctx.bundle.get("audiences"),
+        offer=str(ctx.params.get("offer") or ""))
+    for n in plan.get("note") or []:
+        ctx.note(f"funnel (thin): {n}")
+    if plan.get("missing"):
+        ctx.thin.extend(f"funnel:{m}" for m in plan["missing"])
+    ctx.note(f"funnel stage: {plan['label']} — derived from a {warmth} list "
+             f"on a{'n asking' if plan['asks'] else ' giving'} send")
+
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
+            "funnel": plan,
             "deadline": str(ctx.params.get("deadline") or "").strip(),
             # A redraft's marching orders — set by the workroom's
             # Request-changes path, empty on a fresh draft. Rides `craft`
@@ -1434,6 +1456,12 @@ def _craft_brief(craft: dict) -> str:
                    "BACK\nFix every item below. These outrank the style "
                    "brief and the anti-repeat list:\n"
                    + str(craft["revision_notes"]))
+    # THE READER, BEFORE THE PURPOSE. What this send is FOR only makes sense
+    # after who is receiving it — and the account's own hesitations and
+    # situations are what make "answer their doubt" a real instruction rather
+    # than a category.
+    if craft.get("funnel"):
+        out.append(funnel.brief(craft["funnel"]))
     if intent:
         lo, hi = intent["words"]
         out += [f"\n## WHAT THIS SEND IS FOR: {intent['label']}",

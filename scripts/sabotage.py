@@ -2262,6 +2262,19 @@ SABOTAGES = [
                "available, of course' is a licence to run thin, not a licence "
                "to run thin in silence",
     },
+    {
+        "name": "email_reads_the_same_funnel",
+        "file": "app/skill_pack.py",
+        "find": "    if craft.get(\"funnel\"):\n        out.append(funnel.brief(craft[\"funnel\"]))",
+        "replace": "    if False:  # SABOTAGE\n        pass",
+        "suites": ["test_campaign.py", "test_funnel.py"],
+        "why": "the campaign drafter stops being shown the account's own "
+               "objections and situations, so 'answer their doubt' goes back "
+               "to being a category rather than an instruction — and the "
+               "shared strategy layer becomes a thing only the ad skill "
+               "reads, which is the unwired-claim shape this codebase keeps "
+               "having to fix",
+    },
 ]
 
 

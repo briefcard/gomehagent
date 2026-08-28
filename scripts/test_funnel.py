@@ -190,6 +190,30 @@ def main() -> int:
     ck("…and none of them asks for the sale at awareness",
        "offer" not in angles2, str(angles2))
 
+    print("\n— EMAIL derives its stage; it does not get a fourth knob —")
+    # `segments.warmth` already answers "does this cohort know us" and the
+    # intent already answers "does this send ask". A `funnel_stage` parameter
+    # beside them would be a third vocabulary for a thing decided twice.
+    ck("a giving send to a cold list is awareness",
+       funnel.stage_from(warmth="cold", asks=False) == "awareness")
+    ck("a giving send to a warm list is consideration",
+       funnel.stage_from(warmth="warm", asks=False) == "consideration")
+    ck("any send that ASKS is bottom of funnel, whoever it is addressed to",
+       funnel.stage_from(warmth="cold", asks=True) == "bottom"
+       and funnel.stage_from(warmth="warm", asks=True) == "bottom",
+       "a cold ask is not an awareness email with a button on it")
+    ck("an unknown warmth is treated as cold, the safer read",
+       funnel.stage_from(warmth="", asks=False) == "awareness")
+
+    cold = funnel.brief(funnel.inputs_for("baci", "awareness"))
+    hot = funnel.brief(funnel.inputs_for("baci", "bottom", offer="15% off"))
+    ck("the two ends of the funnel brief the drafter DIFFERENTLY",
+       cold != hot and "Awareness" in cold and "Bottom" in hot)
+    ck("the cold one leads on the situation, not the hesitation",
+       "SITUATIONS" in cold and "HESITATIONS" not in cold)
+    ck("the asking one leads on the hesitation and names the offer",
+       "HESITATIONS" in hot and "OFFER TO CLOSE ON" in hot)
+
     print("\n— an unknown stage is refused by name, not silently ignored —")
     r3 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
                    audience_key="hosts", variants=1, funnel_stage="middle-ish")

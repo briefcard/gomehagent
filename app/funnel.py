@@ -328,3 +328,29 @@ def angles_for_stage(stage: str, available: tuple = ()) -> tuple:
         return want
     keep = tuple(a for a in want if a in available)
     return keep or tuple(available)
+
+
+def stage_from(*, warmth: str = "", asks: bool = False) -> str:
+    """The stage an EMAIL is at, derived from what the send already knows.
+
+    Deliberately NOT a new parameter on the campaign skill. `segments.warmth`
+    already answers "does this cohort know us" and `CAMPAIGN_INTENTS[...]
+    ["asks"]` already answers "is this send asking for the sale" — two facts
+    that between them place the reader. Adding a `funnel_stage` knob beside
+    them would be a third vocabulary for a thing already decided twice, which
+    is the defect design rule 4 exists to stop.
+
+    THE HONEST LIMIT, stated rather than faked: warmth is two-state, so this
+    cannot distinguish `interest` from `awareness` — a cold reader being given
+    something might be either. It returns the safer of the two. Reaching
+    `interest` needs a real signal that a cold reader has engaged, which the
+    segment layer does not yet carry; when it does, this function is where
+    that lands and nothing else changes.
+    """
+    if asks:
+        # An email that asks for the sale is bottom-of-funnel behaviour
+        # whoever it is addressed to. A cold ask is not an awareness email
+        # with a button on it — it is a bottom-of-funnel email sent early,
+        # and it should be briefed as the thing it is.
+        return "bottom"
+    return "consideration" if str(warmth or "").lower() == "warm" else "awareness"
