@@ -718,15 +718,51 @@ correct — the `test_console_frame` lesson, again. So the suite now seeds a
 real keyword map, `seed_demo` seeds one too (the demo could not show this
 tab's tables at all), and NEW guard `data_only_classes_are_covered` fails
 only WHILE that seed exists: drop it and the guard goes quiet and says so.
-ALSO IN THIS PUSH — **one window control** (spec §7's "two windows, one
+ALSO IN THAT PUSH — **one window control** (spec §7's "two windows, one
 control"): `_board_section` was called with a LITERAL 7 while the 7/28/90
 control governed only the Progress section below it, so "Moved in the last 7
 days" sat directly above a control that silently did not affect it. Both
 tables read `days` now, and NEW `_plan_window` renders the control ONCE in
-the page header, where it can be seen to govern them. Rest of §7 next: the
-rail (Strategy · Schedule · Board · Architecture · Progress · Goal &amp;
-cadence), `.tblwrap`, the 9-column Writing-next trim, folded goal form,
-sticky flash.
+the page header, where it can be seen to govern them.
+
+**4·Plan BUILT + SHIPPED 2026-08-27 (spec §7 + the owner's EXPANDED
+INTENT).** `PLAN_SUBS` rail: **Strategy · Schedule · Board · Architecture ·
+Progress · Goal &amp; cadence**. Readiness chips and the window control stay
+ABOVE the rail because both govern every room. NEW **Strategy** — the
+cross-system half the owner asked for ("the plan page should help make sense
+of what we want to do and how each system fits into that plan") — surfaces
+`strategy.read`, which has existed since the moments work, is deterministic
+(no model call), and which NOTHING had ever shown the owner: only
+`planner.campaign_rollout` read it. Findings NAMED, NOT SCORED (what is
+true / why it matters / what would change it — the `systems.ready()` shape),
+the give:ask headline with the honest-zero convention, and beneath it "what
+each system is doing about it" from the SAME `_board_counts` the Systems
+board renders, so the two pages cannot disagree. Deliberately NOT an
+invented finding→system mapping: the findings carry their own fix. NEW
+**Schedule** — every system's planned work on one timeline; each system's
+Plan queue answered this for itself and nothing answered it for the account.
+**Goal &amp; cadence** split out of Progress (`goal_only=`): set once a
+quarter, its form was rendering unfolded under a section read weekly, and is
+now folded in its own room. `.tblwrap` on the wide tables. TWO FINDS DURING
+THE BUILD: (a) my own Schedule classified "no date" by TRUTHINESS while
+`plan_complete` requires a VALID one — so a plan carrying an unparseable
+date would have been listed under a heading saying it will come due, when
+the gate will never pass it; it uses `systems._valid_date` now. (b)
+`test_blog_readiness` and `test_console_controls` failed asserting the
+publish/measure readiness on the default landing, AND THEY WERE RIGHT: that
+block says whether this tab's work can LAND, which governs every room, so
+`downstream_html` moved ABOVE the rail rather than the pins being
+retargeted. The pins that genuinely moved (the map, the Exclude control, the
+goal form) were retargeted at their rooms with dated comments — the Exclude
+one at first pointed at Architecture and belongs to Board, caught by
+checking where the control actually lives. Guards (all caught):
+`one_window_governs_the_page`, `strategy_reaches_the_owner`,
+`a_dateless_plan_is_not_scheduled`. New suite `test_plan_tab.py`;
+`seed_demo` seeds a keyword map AND planned work across systems so both new
+rooms show something real. PARKED, named: the 9-column Writing-next trim to
+6 with a row-expand (the table is `.tblwrap`-scrolled now, so it no longer
+overflows the page — the trim is a readability improvement, not a defect,
+and belongs with the owner's walkthrough of what those columns are worth).
 
 **OUT OF BAND — THE DAILY BRIEFING (owner, 2026-08-27).** Not a console
 tab, but the surface the owner actually reads every day, and it had rotted:

@@ -45,7 +45,9 @@ def main() -> int:
     for ph in ("wedding venue quotes", "wedding photographer packages",
                "wedding catering menus"):
         keywords.set_priority("ironside", ph, "muted")
-    page = admin_ui.render_plan("s3cret", "ironside")
+    # The muted-keyword fold and its Exclude control live in the BOARD room
+    # (2026-08-27: the Plan tab gained a rail; each room renders alone).
+    page = admin_ui.render_plan("s3cret", "ironside", sub="board")
     ck("the proposal carries its button",
        "Exclude it" in page and "exclude_term" in page,
        "it was prose with an explicit 'Proposals, not actions' disclaimer "
@@ -83,7 +85,7 @@ def main() -> int:
     with db.SessionLocal() as s:
         s.get(db.System, row.id).status = "live"
         s.commit()
-    page = admin_ui.render_plan("s3cret", "ironside")
+    page = admin_ui.render_plan("s3cret", "ironside", sub="architecture")
     ck("the form is on the chip that states the fact",
        "market_set" in page and "Set market" in page,
        "the advisory's only write path was the raw-JSON analytics field")

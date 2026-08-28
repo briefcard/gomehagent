@@ -314,7 +314,7 @@ def main() -> int:
     # existed, and planning an article therefore meant typing a keyword in by
     # hand — the one thing the map exists to stop.
     from app import admin_ui
-    page = admin_ui.render_plan("s3cret", "good")
+    page = admin_ui.render_plan("s3cret", "good", sub="architecture")
     for probe, why in (
             ("Switch", "the two that GATE planning lead the page"),
             ("Knows what to write", ""),
@@ -325,7 +325,8 @@ def main() -> int:
                                           "shows the state")):
         ck(f"the page shows {probe!r}", probe in page, why)
     ck("an empty map SAYS it is the system's half that is missing",
-       "has not done its half" in admin_ui.render_plan("s3cret", "nocms"),
+       "has not done its half" in admin_ui.render_plan(
+           "s3cret", "nocms", sub="architecture"),
        "asking the owner to invent a keyword is the failure, not the prompt")
     ck("cross-account refuses rather than blending domains",
        "one site" in admin_ui.render_plan("s3cret", admin_ui.ALL),
@@ -341,7 +342,8 @@ def main() -> int:
     keywords.upsert("good", "acrylic jug", status="published")
     keywords.record_reading("good", "acrylic jug", position=14.0, clicks=9)
     keywords.record_reading("good", "a page we did not write", position=6.0, clicks=30)
-    flat = _re.sub(r"\s+", " ", admin_ui.render_plan("s3cret", "good"))
+    flat = _re.sub(r"\s+", " ",
+                   admin_ui.render_plan("s3cret", "good", sub="progress"))
 
     ck("the tracked row is there", "Articles we wrote" in flat)
     ck("and the CONTROL row beside it", "The rest of the site" in flat,
@@ -352,16 +354,21 @@ def main() -> int:
        "the sign convention is the thing somebody misreports first")
     ck("it separates attributable from too-recent",
        "too recent to claim" in flat)
+    goal_v = _re.sub(r"\s+", " ",
+                     admin_ui.render_plan("s3cret", "good", sub="goal"))
     ck("with no goal it says so and does not invent one",
-       "No goal set" in flat and "nobody chose is a target nobody can fail" in flat)
+       "No goal set" in goal_v
+       and "nobody chose is a target nobody can fail" in goal_v)
     ck("and the form to set it is RIGHT THERE",
-       "Set the goal" in flat and 'action="/admin/keywords_goal"' in flat,
+       "Set the goal" in goal_v
+       and 'action="/admin/keywords_goal"' in goal_v,
        "act where you report — set_goal was reachable only as a URL with four "
        "query parameters")
 
     _web.admin_keywords_goal(key="s3cret", tenant="good", organic_clicks="2000",
                              top3="8", top10="25", horizon_days="90")
-    flat2 = _re.sub(r"\s+", " ", admin_ui.render_plan("s3cret", "good"))
+    flat2 = _re.sub(r"\s+", " ",
+                    admin_ui.render_plan("s3cret", "good", sub="goal"))
     ck("once set, attainment is shown against it",
        "2000" in flat2 and "No goal set" not in flat2)
     ck("and the form is pre-filled with what IS, not blank",

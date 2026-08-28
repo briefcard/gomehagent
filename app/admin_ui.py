@@ -8198,6 +8198,163 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
             'can hold several, and guessing writes into the wrong one.</p>')
 
 
+def _strategy_section(key: str, tenant: str, days: int) -> str:
+    """IS THE PROGRAMME SOUND — and what is each system doing about it.
+
+    The owner's expanded intent for this tab (2026-08-27): "as we run
+    different systems in parallel and add new systems into it, the plan page
+    should help make sense of what we want to do and how each system fits
+    into that plan."
+
+    Built entirely on `strategy.read`, which has existed since the moments
+    work and which NOTHING has ever shown the owner — only `planner.
+    campaign_rollout` read it. It is deterministic (no model call: which
+    cohort has gone longest without a send is arithmetic), and its findings
+    are NAMED, NOT SCORED — what is true, why it matters, what would change
+    it, the same shape `systems.ready()` uses for blockers. A single
+    "strategy health: 62%" would tell nobody what to do.
+    """
+    from . import strategy
+    try:
+        st = strategy.read(tenant, days=max(days, 90))
+    except Exception as exc:                                     # noqa: BLE001
+        return (f'<div class="card"><div class="head"><h2>Strategy</h2></div>'
+                f'<p class="mut">Could not read the programme: '
+                f'{_esc(exc.__class__.__name__)}. The keyword plan below is '
+                f'unaffected.</p></div>')
+
+    findings = st.get("findings") or []
+    if findings:
+        items = "".join(
+            f'<div class="msg"><div><b>{_esc(f.get("what", ""))}</b></div>'
+            f'<div class="when">{_esc(f.get("why", ""))}</div>'
+            + (f'<div class="when"><b>What would change it:</b> '
+               f'{_esc(f["fix"])}</div>' if f.get("fix") else "")
+            + "</div>" for f in findings)
+        found = f'<div class="thread">{items}</div>'
+    else:
+        found = ('<div class="ok">Nothing is out of balance over this window '
+                 '&mdash; every cohort has been written to, the give:ask '
+                 'ratio holds, and no single product is carrying the '
+                 'programme.</div>')
+
+    b = st.get("brand") or {}
+    ratio = b.get("give_ask_ratio")
+    head = (f'<div class="stat">'
+            f'<span><b>{b.get("sends", 0)}</b> sends</span>'
+            f'<span><b>{b.get("gives", 0)}</b> gave</span>'
+            f'<span><b>{b.get("asks", 0)}</b> asked</span>'
+            + (f'<span><b>{ratio}</b> per ask</span>' if ratio is not None
+               else '<span class="mut">give:ask not measurable yet</span>')
+            + '</div>')
+
+    # WHAT EACH SYSTEM IS DOING ABOUT IT. Not an invented mapping from finding
+    # to system — the findings carry their own fix. This is the other half of
+    # the owner's question, answered from the same counts the Systems board
+    # renders, so the two pages cannot disagree about a system's state.
+    rows = systems.for_tenant(tenant)
+    counts = _board_counts(rows)
+    if rows:
+        trs = "".join(
+            f'<tr><td><a href="{_sysview_url(key, r)}">{_esc(r.name)}</a>'
+            f'<br><span class="when">{_esc(r.autonomy or "shadow")}</span></td>'
+            f'<td><span class="chip {"on" if r.status == "live" else "off"}">'
+            f'{_esc(r.status)}</span></td>'
+            f'<td>{counts[r.id]["planned"]}</td>'
+            f'<td>{counts[r.id]["waiting"]}</td>'
+            f'<td>{counts[r.id]["week"]}</td>'
+            f'<td>' + (f'{counts[r.id]["as_is"]} of {counts[r.id]["measured"]}'
+                       if counts[r.id]["measured"]
+                       else '<span class="mut">not measured</span>')
+            + '</td></tr>' for r in rows)
+        per_system = f"""
+        <div class="tblwrap"><table class="tbl">
+          <tr><th>system</th><th>state</th><th>planned</th><th>waiting</th>
+              <th>shipped this week</th><th>sent as-is</th></tr>
+          {trs}
+        </table></div>"""
+    else:
+        per_system = ('<p class="mut">No systems installed on this account, '
+                      'so nothing is carrying the plan yet.</p>')
+
+    return f"""
+    <div class="card"><div class="anchor" id="strategy"></div>
+      <div class="head"><h2>Strategy</h2>
+        <span class="mut">what this brand has actually been saying, to whom,
+        and how often &mdash; last {max(days, 90)} days</span></div>
+      {head}
+      {found}
+      <h3>What each system is doing about it</h3>
+      <p class="mut">The same counts the Systems board renders, so the two
+      pages cannot disagree about a system's state. Each name opens its
+      workflow.</p>
+      {per_system}
+    </div>"""
+
+
+def _schedule_section(key: str, tenant: str) -> str:
+    """WHAT IS COMING, across every system, on one timeline.
+
+    Each system's Plan queue answers this for itself; nothing answered it for
+    the account. A plan with no date can never come due — which reads as
+    "queued" and means "lost" — so those are listed FIRST rather than sorted
+    to the bottom where a date would put them.
+    """
+    plans = systems.plans(tenant)
+    if not plans:
+        return """
+    <div class="card"><div class="anchor" id="schedule"></div>
+      <div class="head"><h2>Schedule</h2></div>
+      <p class="mut">Nothing is planned on any system for this account. Each
+      system's own Plan queue is where work is declared, and its Propose
+      button is what fills it.</p>
+    </div>"""
+
+    by_id = {r.id: r for r in systems.for_tenant(tenant)}
+    dated, undated = [], []
+    for pl in plans:
+        row = by_id.get(pl.system_id)
+        brief = getattr(pl, "brief", None) or {}
+        when = str(brief.get("planned_for", "") or "")
+        comp = systems.plan_complete(pl, row.key) if row else {
+            "complete": False, "missing": ["its system is not installed"]}
+        entry = (pl, row, when, comp)
+        (dated if systems._valid_date(when) else undated).append(entry)
+    dated.sort(key=lambda e: e[2])
+
+    def _tr(pl, row, when, comp) -> str:
+        plan = (getattr(pl, "brief", None) or {}).get("plan") or {}
+        what = ", ".join(f"{k}: {v}" for k, v in plan.items() if v)[:120]
+        state = ('<span class="chip on">ready</span>' if comp["complete"]
+                 else '<span class="chip off" title="'
+                      + _esc("; ".join(comp["missing"]))
+                      + '">needs ' + _esc(comp["missing"][0]) + '</span>')
+        link = (f'<a href="{_sysview_url(key, row, "planned")}">'
+                f'{_esc(row.name)}</a>' if row else
+                '<span class="mut">unknown system</span>')
+        return (f'<tr><td>{_esc(when) or "<span class=\'mut\'>no date</span>"}'
+                f'</td><td>{link}</td>'
+                f'<td>{_esc(what) or "<span class=\'mut\'>—</span>"}</td>'
+                f'<td>{state}</td></tr>')
+
+    undated_rows = "".join(_tr(*e) for e in undated)
+    dated_rows = "".join(_tr(*e) for e in dated)
+    undated_note = ('<p class="note">A plan with no date can never come due. '
+                    'These read as queued and are not.</p>'
+                    if undated else "")
+    return f"""
+    <div class="card"><div class="anchor" id="schedule"></div>
+      <div class="head"><h2>Schedule</h2>
+        <span class="mut">{len(plans)} planned across every system on this
+        account</span></div>
+      {undated_note}
+      <div class="tblwrap"><table class="tbl">
+        <tr><th>when</th><th>system</th><th>what</th><th>state</th></tr>
+        {undated_rows}{dated_rows}
+      </table></div>
+    </div>"""
+
+
 def _plan_window(key: str, tenant: str, days: int) -> str:
     """ONE window control for the whole Plan tab (spec §7).
 
@@ -8427,7 +8584,8 @@ def _board_section(key: str, tenant: str, days: int) -> str:
     {muted_html}"""
 
 
-def _progress_section(key: str, tenant: str, days: int) -> str:
+def _progress_section(key: str, tenant: str, days: int,
+                     goal_only: bool = False) -> str:
     """Did the work move anything, and may we say it was the work.
 
     On the same page as the plan, deliberately. A plan and its result are one
@@ -8551,7 +8709,23 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
     measurement.</p>
     <p class="mut">{_esc(a["not_measured"])}</p>"""
 
+    if goal_only:
+        # ITS OWN ROOM (spec §7). The goal is set once a quarter and the
+        # form was rendered unfolded under a Progress section read weekly —
+        # so the thing you almost never touch was always open beneath the
+        # thing you always read.
+        return f"""
+    <div class="anchor" id="goal"></div>
+    <h3>The goal</h3>
+    {goal_html}
+    <details class="sec"><summary>Set or change the goal</summary>
+      <p class="mut">Set once a quarter. Changing it does not re-baseline
+      what has already been measured.</p>
+      {form}
+    </details>"""
+
     return f"""
+    <div class="anchor" id="progress"></div>
     <h3>Progress</h3>
     {notes}
     {compare}
@@ -8559,15 +8733,12 @@ def _progress_section(key: str, tenant: str, days: int) -> str:
        <strong>{p["wins"]["top10"]}</strong> in the top 10 ·
        {p["attributable"]} attributable, {p["too_early_to_attribute"]} too
        recent to claim</p>
-    <table class="tbl">
+    <div class="tblwrap"><table class="tbl">
       <tr><th>keyword</th><th>tier</th><th>was</th><th>now</th><th>gain</th>
           <th>clicks</th><th>published</th></tr>
       {moves}
-    </table>
-    {aeo_html}
-    <h3>The goal</h3>
-    {goal_html}
-    {form}"""
+    </table></div>
+    {aeo_html}"""
 
 
 def _drafts_section(key: str, row) -> str:
@@ -9236,8 +9407,18 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     return _shell(key, "content", title, body=body_html, tenant=tenant)
 
 
+#: The Plan tab's rail. Strategy and Schedule are the cross-system half the
+#: owner asked for; Board / Architecture / Progress / Goal are the keyword
+#: plan this tab has always been, each finally in its own room instead of
+#: stacked on one page you had to scroll past to reach the next.
+PLAN_SUBS = (("strategy", "Strategy"), ("schedule", "Schedule"),
+             ("board", "Board"), ("architecture", "Architecture"),
+             ("progress", "Progress"), ("goal", "Goal &amp; cadence"))
+
+
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
-                pick: bool = False, days: int = 28, probe: bool = False) -> str:
+                pick: bool = False, days: int = 28, probe: bool = False,
+                sub: str = "") -> str:
     """The keyword plan the blog is built from.
 
     STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
@@ -9428,16 +9609,49 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     if note:
         note = f'<div class="flash">{note}</div>'
 
+    # THE RAIL (spec §7, plus the owner's expanded intent 2026-08-27: "the
+    # plan page should help make sense of what we want to do and how each
+    # system fits into that plan"). Strategy and Schedule are the new
+    # cross-system half; the four that follow are the keyword plan this tab
+    # has always been. Readiness and the window control stay ABOVE the rail,
+    # because both govern every room in it.
+    sub = (sub or "").strip().lower()
+    if sub not in dict(PLAN_SUBS):
+        sub = PLAN_SUBS[0][0]
+
+    def _sub_href(v: str) -> str:
+        return (f"/admin/ui?tab=plan&amp;tenant={_esc(tenant)}&amp;days={days}"
+                f"&amp;sub={v}" + (f"&amp;key={_esc(key)}" if key else ""))
+
+    strip = '<div class="subtabs">' + "".join(
+        f'<a class="subtab{" on" if v == sub else ""}" '
+        f'href="{_sub_href(v)}">{label}</a>' for v, label in PLAN_SUBS) \
+        + "</div>"
+
+    arch = f"""
+      <div class="anchor" id="architecture"></div>
+      <h3>The architecture — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
+      {body_map}
+      <p>{actions}</p>"""
+
+    rooms = {
+        "strategy": lambda: _strategy_section(key, tenant, days),
+        "schedule": lambda: _schedule_section(key, tenant),
+        "board": lambda: (_board_section(key, tenant, days)
+                          or '<p class="mut">No keyword map yet — Architecture '
+                             'is where one gets built.</p>'),
+        "architecture": lambda: arch,
+        "progress": lambda: _progress_section(key, tenant, days),
+        "goal": lambda: _progress_section(key, tenant, days, goal_only=True),
+    }
+
     return _shell(key, "plan", "Plan", tenant=tenant, body=f"""
       {note}
       <div class="cards">{chips}</div>
-      {_plan_window(key, tenant, days)}
-      {_board_section(key, tenant, days)}
-      <h3>The architecture — {m["keywords"]} keyword(s): {_esc(tiers)}</h3>
-      {body_map}
-      <p>{actions}</p>
       {downstream_html}
-      {_progress_section(key, tenant, days)}
+      {_plan_window(key, tenant, days)}
+      {strip}
+      {rooms[sub]()}
       <details><summary>How this decides what to write next</summary>
         <p class="when">A head term is never targeted with an article. It is
         targeted with a <strong>pillar</strong> page plus the long-tail

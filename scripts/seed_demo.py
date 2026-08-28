@@ -217,11 +217,41 @@ def seed_keyword_map() -> str:
     return f"keyword map: {seeded} phrases for baci"
 
 
+def seed_schedule() -> str:
+    """Planned work on more than one system, so the Plan tab's Schedule has a
+    timeline to draw — including one plan with NO DATE, which is the state
+    that reads as queued and means lost, and is the row that section exists
+    to put first."""
+    import datetime as _dt
+
+    from app import systems as sysm
+    made = 0
+    soon = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
+    later = (_dt.date.today() + _dt.timedelta(days=10)).isoformat()
+    for skey, ref, plan, when in (
+            ("campaign_email", "demo-plan-1",
+             {"segment": "lapsed_buyers", "intent": "offer"}, soon),
+            ("campaign_email", "demo-plan-2",
+             {"segment": "engaged_no_purchase"}, later),
+            ("ad_creative", "demo-plan-3", {"audience_key": "hosts"}, "")):
+        row = sysm.find("baci", skey)
+        if not row:
+            continue
+        try:
+            sysm.open_plan("baci", skey, ref=ref, plan=plan,
+                           planned_for=when, trigger="seed_demo")
+            made += 1
+        except Exception:                                        # noqa: BLE001
+            pass
+    return f"schedule: {made} planned across systems"
+
+
 said = seed_ad_batch()
 said2 = seed_data_layer()
 said3 = seed_landing_pages()
 said4 = seed_mail_queue()
 said5 = seed_keyword_map()
+said6 = seed_schedule()
 print(f"demo seeded: {made} · accounts: "
       f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}"
-      f" · {said3} · {said4} · {said5}")
+      f" · {said3} · {said4} · {said5} · {said6}")

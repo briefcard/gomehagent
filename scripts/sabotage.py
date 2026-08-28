@@ -1823,6 +1823,42 @@ SABOTAGES = [
                "rendered. This entry fails only while the suite seeds a real "
                "map, which is what makes the blind spot stay closed",
     },
+    {
+        "name": "one_window_governs_the_page",
+        "file": "app/admin_ui.py",
+        "find": "        \"board\": lambda: (_board_section(key, tenant, days)",
+        "replace": "        \"board\": lambda: (_board_section(key, tenant, 7)  # SABOTAGE",
+        "suites": ["test_plan_tab.py"],
+        "why": "the board goes back to a hard-coded 7 days while the "
+               "7/28/90 control governs only the section below it — so "
+               "'Moved in the last 7 days' sits directly above a control "
+               "that silently does not affect it, and the page says two "
+               "different things with the same word",
+    },
+    {
+        "name": "strategy_reaches_the_owner",
+        "file": "app/admin_ui.py",
+        "find": "        \"strategy\": lambda: _strategy_section(key, tenant, days),",
+        "replace": "        \"strategy\": lambda: \"\",  # SABOTAGE",
+        "suites": ["test_plan_tab.py"],
+        "why": "`strategy.read` goes back to being computed for the planner "
+               "and shown to nobody — which is the state it was in since it "
+               "was written: neglected cohorts, an unbalanced give:ask and a "
+               "programme carried by one product, all answerable and none of "
+               "it ever put in front of the owner",
+    },
+    {
+        "name": "a_dateless_plan_is_not_scheduled",
+        "file": "app/admin_ui.py",
+        "find": "        (dated if systems._valid_date(when) else undated).append(entry)",
+        "replace": "        (dated if True else undated).append(entry)  # SABOTAGE",
+        "suites": ["test_plan_tab.py"],
+        "why": "a plan whose date is missing or unparseable is listed under "
+               "a heading that says it will come due. `plan_complete` will "
+               "never pass it and the tick will never consume it, so it "
+               "reads as queued and means lost — which is the one thing the "
+               "Schedule view exists to make visible",
+    },
 ]
 
 
