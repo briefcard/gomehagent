@@ -44,6 +44,8 @@ step 6 (does Knowledge's Overview fold in), step 7 (completeness audit).
 | `190a581` | Answered mail stops asking; drafts get real names |
 | `a3ad78d` | A live draft is not an unanswered thread |
 | `99a8ddd` | The queues name the thing; `reconcile_mail` on demand |
+| `cec1ad1` | Documentation catches up with the session |
+| _next_ | The writer I missed — campaign artifacts carry identity too |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -901,6 +903,28 @@ DRAFT IS NOT AN UNANSWERED ONE, which is the one that actually mattered); the
 attention card that never cleared (→ ATTENTION CLEARS WHEN IT IS READ);
 drafts named `format · timestamp` (→ DRAFTS GET REAL NAMES, extended to the
 queues by THE QUEUES NAME THE THING). The entries follow, newest first.
+
+**OUT OF BAND — THE WRITER I MISSED (owner, 2026-08-28).** Owner, with a
+screenshot of three rows reading `campaign email · 2026-08-28`: *"Why am I
+still seeing that these drafts are not named correctly? This is in the
+campaign email system but I asked you to take care of this in all systems."*
+Correct. There are THREE places an `ArtifactBody` is constructed —
+`ledger.record` (the general path), the ad-batch writer, and the CAMPAIGN
+writer, which keeps its own row because the HTML is only final after render,
+personalization and rehosting. I wired `meta` through `ctx.emit` →
+`ledger.record`, fixed the ad-batch writer, and called it "all systems"
+without auditing the third. Fixed on both its branches (create and update,
+merging rather than overwriting). Existing campaigns need NO backfill: the
+`push` recipe already on the row holds `subject` and `segment_key`, so
+`artifact_label` reads it as the fallback — derived, not copied (rule 8).
+NEW SUITE `test_artifact_identity.py` makes "all systems" a CHECK instead of
+a claim: it parses `app/*.py` with `ast` and fails if ANY `ArtifactBody(...)`
+construction omits `meta`. Reading the source rather than exercising the
+skills is deliberate — the failure mode is a writer nobody thought about,
+and a test that walks the writers it knows about would have missed this one
+exactly the way I did. Guard (caught): `every_writer_names_its_artifact`.
+`test_sabotage_anchors` caught `a_draft_has_a_real_name` going stale from
+the same edit, in the same run — twice in one day it has paid for itself.
 
 **OUT OF BAND — THE QUEUES NAME THE THING, AND A MANUAL RECONCILE (owner,
 2026-08-28).** *"Make sure you've changed the naming mechanisms for the

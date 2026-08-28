@@ -1855,6 +1855,19 @@ SABOTAGES = [
                "it ever put in front of the owner",
     },
     {
+        "name": "every_writer_names_its_artifact",
+        "file": "app/skill_pack.py",
+        "find": "                    body=final_html, draft_body=final_html, meta=_meta,",
+        "replace": "                    body=final_html, draft_body=final_html,",
+        "suites": ["test_artifact_identity.py"],
+        "why": "the campaign writer — which keeps its own ArtifactBody row "
+               "because the HTML is only final after render — stops giving "
+               "the email an identity, and the Drafts index shows three "
+               "'campaign email · <date>' rows again. This is the writer "
+               "that was missed when the other two were fixed and the job "
+               "was called done",
+    },
+    {
         "name": "the_queue_names_the_thing",
         "file": "app/admin_ui.py",
         "find": "    art = (arts or {}).get(oid)\n"
@@ -1873,10 +1886,12 @@ SABOTAGES = [
     {
         "name": "a_draft_has_a_real_name",
         "file": "app/admin_ui.py",
+        # Repointed 2026-08-28: the campaign branch gained a `push` fallback
+        # so pre-`meta` rows are named too, which moved the old anchor.
         "find": "    if fmt == \"campaign_email\":\n"
-                "        subject = str(meta.get(\"subject\") or \"\").strip()",
+                "        # `push` is the machine recipe this artifact already carries",
         "replace": "    if False:  # SABOTAGE\n"
-                   "        subject = str(meta.get(\"subject\") or \"\").strip()",
+                   "        # `push` is the machine recipe this artifact already carries",
         "suites": ["test_article_review.py"],
         "why": "every draft goes back to being named 'format · timestamp', so "
                "four campaigns to four different segments are four identical "

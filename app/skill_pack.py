@@ -2576,18 +2576,26 @@ def _run_campaign_email(ctx: Context) -> dict:
             _row = (s.query(_db.ArtifactBody)
                     .filter(_db.ArtifactBody.output_id == item["output_id"])
                     .first())
+            # WHAT THIS EMAIL IS, on the artifact. `ledger.record` carries
+            # `meta` for everything it writes, and this path is its own
+            # writer — so a campaign was the one artifact with no identity
+            # on it, and the Drafts index named three of them "campaign
+            # email · 2026-08-28" (owner, 2026-08-28). `item["meta"]` is the
+            # dict `emit` already resolved after the repair loop.
+            _meta = dict(item.get("meta") or {})
             if _row is None:
                 s.add(_db.ArtifactBody(
                     tenant=ctx.tenant, output_id=item["output_id"],
                     run_id=ctx.run_id or "", system_key="campaign_email",
                     format="campaign_email", destination="",
-                    body=final_html, draft_body=final_html,
+                    body=final_html, draft_body=final_html, meta=_meta,
                     bytes=len(final_html), push=_push_recipe))
             else:
                 _row.body = final_html
                 if not (_row.draft_body or ""):
                     _row.draft_body = final_html
                 _row.bytes = len(final_html)
+                _row.meta = {**(_row.meta or {}), **_meta}
                 _row.push = _push_recipe
             s.commit()
 

@@ -4521,8 +4521,14 @@ def artifact_label(art) -> str:
         return f"{head} — {tail}" if tail else head
 
     if fmt == "campaign_email":
-        subject = str(meta.get("subject") or "").strip()
-        seg = str(meta.get("segment") or "").strip()
+        # `push` is the machine recipe this artifact already carries, and it
+        # holds the subject and the segment — so every campaign written
+        # BEFORE `meta` existed is named from what is on it rather than
+        # needing a backfill. Derived, not copied (rule 8).
+        push = dict((getattr(art, "push", None) or {}))
+        subject = str(meta.get("subject") or push.get("subject") or "").strip()
+        seg = str(meta.get("segment")
+                  or push.get("segment_key") or "").strip()
         intent = str(meta.get("intent") or "").strip()
         if subject:
             return _dated(subject,
