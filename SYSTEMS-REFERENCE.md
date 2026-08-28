@@ -296,8 +296,31 @@ durable fix was the same shape: stop asserting the property, start testing it.
 
 ---
 
+14. **A route that exists is not a route that works.** `test_pointers` refuses
+   a control pointing nowhere and passed the whole time a landing page
+   scraped nothing. Two further questions have to be computed, not surveyed,
+   and `test_control_piping.py` computes both with shrink-only allowlists:
+   does any suite PRESS this control, and does any surface RENDER the
+   warnings this producer computes? The second is where the expensive
+   defects live — a fact about something going wrong that no human can reach
+   is the same defect as a KB rule that never reaches a validator.
+15. **A check that reads its own bookkeeping is an empty check.** The piping
+   suite's first version grepped every suite including itself, and its own
+   allowlist named the thirteen unpressed controls — so it reported zero.
+   Exclude self, then SABOTAGE THE CHECK: plant the defect it claims to
+   catch and watch it fail before trusting it green.
+
+---
+
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-28 — "how many UI units did we build without piping?" Answered by
+  computation, not survey: 70 console controls, 13 pressed by no suite (all 13
+  then hand-pressed and all 13 work); 335 producers, 38 warning-shaped keys no
+  surface renders — which is where the landing-page defect actually lived.
+  Both are now shrink-only allowlists in `test_control_piping.py`. One fixed
+  on the spot: the voice panel offered Adopt without saying the tone came from
+  arithmetic rather than a model, or that the sample was one sentence.
 - 2026-08-28 — a landing page is a PAGE. The owner asked whether the scraper
   actually pulls facts off one; it did not, and 113 suites said nothing.
   `discover_pages` treated every source as a SITE (sitemap under the path,

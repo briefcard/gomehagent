@@ -44,7 +44,8 @@ Knowledge's Overview fold in), step 7 (completeness audit).
 | `cec1ad1` | Documentation catches up with the session |
 | `a4daed8` | Turn the claim into a check |
 | `29c62d5` | Brand — the derive comes off the request, and a rule can be lifted |
-| _next_ | A landing page is a page — the scraper actually reads one |
+| `bf0f68a` | A landing page is a page — the scraper actually reads one |
+| _next_ | How many UI units have no piping — computed, not surveyed |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1257,6 +1258,65 @@ Guards, all three caught: `a_landing_page_is_a_page`, `a_page_is_not_its_host`,
 httpx response has one and `_one_page` reads it — a stub missing a field the
 code under test reads is the same defect as the voice panel's stub using a key
 `propose` never returns.
+
+**OUT OF BAND — HOW MANY UI UNITS HAVE NO PIPING (owner, 2026-08-28).**
+Owner, immediately after the landing-page fix: *"The real question is how many
+UI units we built that you didn't build the piping for?"* The honest answer to
+that is not a survey — it is two COMPUTED populations, each with a shrink-only
+allowlist, so anybody can ask it again and the number cannot drift upward in
+silence. New suite `test_control_piping.py`.
+
+**POPULATION 1 — CONTROLS. 70 in the console; 13 that no suite presses.**
+Every `<form action=…>` and `_act(…)` target in `admin_ui.py`/`portal_ui.py`,
+mapped to its route. `test_pointers` already refuses a control pointing
+nowhere; this refuses one nothing exercises, because a route that EXISTS and a
+route that WORKS are different claims. **All 13 were then pressed by hand and
+all 13 work** — `asset_add` files a photograph, `assets_decide` flips it
+publishable, `system_note` reaches `feedback_block`, `plan_cadence` persists
+the horizon, `merge_situation` retags, `person_access` changes access,
+`brand_theme/approve` writes the live theme; `connect_test`,
+`segments_build`, `esp_push`, `campaign_meta_save` and `brand_theme/derive`
+refuse with named reasons when their third party is absent. THREE OF MY OWN
+PROBES WERE WRONG BEFORE THE CODE WAS: `asset_add` "did nothing" until I
+passed the required `rights` (the rights gate, working as designed),
+`person_access` "did nothing" until I used the form's own field names, and
+`palette.accent` is `colors.accent`. Verify the probe before believing the
+verdict — hand-verified is still not suite-verified, which is exactly why the
+13 are written down rather than quietly passing.
+
+**POPULATION 2 — HIDDEN WARNINGS, and this is where the landing-page defect
+actually lived.** That bug was NOT in a control nobody presses: `harvest` is
+heavily exercised. It was a fact the producer computed that no surface
+rendered — the per-source report naming the source that read nothing, while
+`_summarise` kept only the numeric keys. So the second sweep parses every
+public producer in `app/` with `ast`, takes every key a returned dict carries
+whose NAME says something went wrong (`missing`, `refused`, `dropped`,
+`needs_human`, `skipped`, `truncated`, `orphan`, …) and asks whether ANY UI
+file mentions it. **335 producers · 38 warning-shaped keys nothing renders.**
+The list is written into the suite as a backlog that may only shrink. The
+sharpest of them: `harvest.write_refused` / `write_refused_count` (the
+docstring says "what the writes actually did, as opposed to what was proposed
+— conflating them hid a whole class of loss", and nothing shows either),
+`email_harvest.mine`'s five, `shopify_webhooks.handle.needs_human`,
+`systems.ready.missing_contract`, `sources.fill.still_needs_a_human`,
+`digest.brief.stale`.
+
+**ONE FIXED ON THE SPOT, because it was in the tab shipped an hour earlier.**
+`voice.propose` returns `tone_from` — "model, with evidence" or "measurement
+only — no model ran" — and `sample_warnings` ("only 1 sentences — too few to
+lean on"). The panel rendered four adjectives and an **Adopt** button and
+neither qualifier, so a tone computed by pure arithmetic off one sentence
+looked exactly like one inferred from the brand's copy with quotes behind it.
+Both now render beside the tone, with the count of sentences dropped for the
+ban list.
+
+**THE SUITE HAD TO BE SABOTAGE-TESTED AGAINST ITSELF.** Its first version
+grepped every suite INCLUDING ITSELF for each control path — and `UNPRESSED`
+names all thirteen, so the allowlist was read as proof the controls were
+pressed and it reported zero. A check that counts its own bookkeeping as
+evidence is the emptiness trap wearing a fix. It excludes itself now, and both
+halves were verified to FAIL against a planted control and a planted hidden
+warning before being trusted.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

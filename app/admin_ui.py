@@ -3416,12 +3416,41 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
             adopts = " + ".join(x for x, v in (("tone", tone_s),
                                                ("positioning", pos),
                                                ("elevator", elev)) if v)
+            # WHERE THE TONE CAME FROM, beside the tone. `propose` returns
+            # `tone_from` — "model, with evidence" or "measurement only — no
+            # model ran" — and the panel showed the words without it, so an
+            # owner could press Adopt on four adjectives produced by pure
+            # arithmetic believing they had been inferred from the copy with
+            # quotes behind them. Same for `sample_warnings` ("only 1
+            # sentences — too few to lean on"): a tone drawn off one sentence
+            # and a tone drawn off four hundred looked identical. Both facts
+            # were computed and neither reached a surface — found 2026-08-28
+            # by auditing every key a producer returns against every key the
+            # console renders, after the owner asked how many UI units had no
+            # piping behind them.
+            tone_from = str(got.get("tone_from") or "")
+            measured_only = "measurement" in tone_from
+            tone_src = (f' <span class="chip {"nb" if measured_only else "on"}">'
+                        f'{_esc(tone_from)}</span>' if tone_from else "")
+            warn = "".join(
+                f'<div class="note">{_esc(str(w))} &mdash; a tone is only as '
+                f'good as the copy behind it.</div>'
+                for w in (got.get("sample_warnings") or []))
+            dropped_n = int(got.get("dropped_for_banned_claims") or 0)
+            dropped_line = (
+                f'<p class="mut">{dropped_n} sentence'
+                f'{"" if dropped_n == 1 else "s"} were dropped before this was '
+                f'measured because they use a phrase on the hard-rule list '
+                f'&mdash; the voice is read from what the brand may still '
+                f'say.</p>' if dropped_n else "")
             body = f"""
         <p class="mut"><b>Nothing was written.</b> A proposal from what the
         brand has already published — banned phrases filtered out, quotes
         verbatim, and the positioning may assert only what the copy asserts.
         Adopt it below, or copy what fits into the editor above.</p>
-        <p><b>Proposed tone:</b> {_esc(tone_s) or '<span class="mut">nothing inferred</span>'}</p>
+        {warn}
+        <p><b>Proposed tone:</b> {_esc(tone_s) or '<span class="mut">nothing inferred</span>'}{tone_src}</p>
+        {dropped_line}
         {identity_rows}
         {quotes}
         {f'''<form method="post" action="/admin/brand_update" class="row">
