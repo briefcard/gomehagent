@@ -759,8 +759,36 @@ checking where the control actually lives. Guards (all caught):
 `one_window_governs_the_page`, `strategy_reaches_the_owner`,
 `a_dateless_plan_is_not_scheduled`. New suite `test_plan_tab.py`;
 `seed_demo` seeds a keyword map AND planned work across systems so both new
-rooms show something real. PARKED, named: the 9-column Writing-next trim to
-6 with a row-expand (the table is `.tblwrap`-scrolled now, so it no longer
+rooms show something real. **AMENDED same day — THE SCHEDULE RUNS BOTH WAYS (owner, 2026-08-27):**
+*"if something is changed / added to the plan it should be seen at a high
+level on the planning side so we can see what actually happened and what was
+planned."* The wiring was already real end to end — `keywords.score` →
+`planner.blog_rollout` (pillar before support, cadence, monthly cap) →
+`systems.open_plan` → the tick's `systems.plans(due_by=today)` →
+`skill.run(run_id=plan.id)`, where **the plan row IS the run row**
+(`take_plan` advances the same row: "one row is one item") → artifact →
+approval → `keywords.mark_published` writes back. What was missing was that
+EVERY Plan-side view filtered `stage == PLANNED`, so a plan VANISHED the
+moment the tick consumed it: the tab could show what was coming and never
+what became of it. `_schedule_section` now reads the items carrying a
+`brief.plan` at ANY stage — one query, not a second "actuals" surface, since
+splitting one record across two pages would invent a distinction the data
+does not have. NEW `_plan_outcome` names the state and ranks it: **overdue —
+held** (with `systems.consumable`'s own reason: system off / incomplete
+instruction / the rung wants you — the worker already refuses these every
+tick and increments a counter nobody saw), due-and-waiting-for-the-tick,
+shipped with its output, skipped with the reason, blocked with `blocked_on`,
+no-date. Stuck rows LEAD, with a count. Two things surfaced that the data
+already held and nothing showed: `brief["edited"]` (the fields the owner
+changed, recorded so the planner cannot overwrite them) now renders as "you
+changed: …", and a DIRECT run is deliberately excluded with the reason
+stated — it carries no plan, so it is not a departure from one. Guards (both
+caught): `the_plan_shows_what_happened`, `a_stuck_plan_says_why`.
+`test_plan_tab` grew section 4b. `seed_demo` seeds every state AND every
+demo seeder is now idempotent — `open_plan` is idempotent per ref only while
+a plan is OPEN, so a consumed one was re-created on each server start and the
+demo timeline grew on every restart. PARKED, named: the 9-column
+Writing-next trim to 6 with a row-expand (the table is `.tblwrap`-scrolled now, so it no longer
 overflows the page — the trim is a readability improvement, not a defect,
 and belongs with the owner's walkthrough of what those columns are worth).
 

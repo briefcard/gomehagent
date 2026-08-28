@@ -164,6 +164,11 @@ def seed_landing_pages() -> str:
     # And one claim read off it, waiting on Review — the visible half of the
     # feature is the Details fold saying WHICH site a card came from, and a
     # queue with nothing from a second source cannot show it.
+    # `set_sources` replaces the list so it is idempotent by construction;
+    # the claim is not, so it is filed only once.
+    if any("spring set ships" in (c.claim or "")
+           for c in kb.pending_claims("baci")):
+        return f"baci reads {res['landing_pages'] + 1} sources (claim already filed)"
     kb.add_claim("baci", "The spring set ships within 2 working days.",
                  "2 working days", ["gift_hunting"], proof_type="data",
                  source="stated on https://spring.bacimilanousa.com/offer",
@@ -177,6 +182,13 @@ def seed_mail_queue() -> str:
     email that exists nowhere but the queue (which must).
     """
     from app import approvals
+    # Same reason as the schedule seed: re-running on every server start
+    # would stack another copy of each, and a demo queue that grows on
+    # restart teaches the wrong thing about the queue.
+    with db.SessionLocal() as s:
+        if s.query(db.Approval).filter(
+                db.Approval.kind == "send_email").count():
+            return "mail: already seeded"
     approvals.request_approval(
         "send_email", "Re: is the Aqua set dishwasher safe?",
         {"account": "baci", "to": "marisa@example.com",
@@ -228,22 +240,58 @@ def seed_schedule() -> str:
     made = 0
     soon = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
     later = (_dt.date.today() + _dt.timedelta(days=10)).isoformat()
-    for skey, ref, plan, when in (
-            ("campaign_email", "demo-plan-1",
-             {"segment": "lapsed_buyers", "intent": "offer"}, soon),
-            ("campaign_email", "demo-plan-2",
-             {"segment": "engaged_no_purchase"}, later),
-            ("ad_creative", "demo-plan-3", {"audience_key": "hosts"}, "")):
+    # ALREADY SEEDED? `open_plan` is idempotent per ref only while the plan is
+    # still OPEN — once one is shipped or skipped it is not reopened (which is
+    # right), so re-running this on every server start would stack a fresh set
+    # of rows beside the old ones and the timeline would grow every restart.
+    with db.SessionLocal() as s:
+        if s.query(db.SystemRun).filter(
+                db.SystemRun.tenant == "baci",
+                db.SystemRun.trigger == "seed_demo").count():
+            return "schedule: already seeded"
+
+    was = (_dt.date.today() - _dt.timedelta(days=6)).isoformat()
+    late = (_dt.date.today() - _dt.timedelta(days=4)).isoformat()
+    skipped_on = (_dt.date.today() - _dt.timedelta(days=2)).isoformat()
+    # Every state the Schedule can show, so the walkthrough sees the whole
+    # timeline rather than only what is coming: shipped, skipped-with-reason,
+    # overdue-and-held (the row that needs a person), and upcoming.
+    for skey, ref, plan, when, then in (
+            ("ad_creative", "demo-done", {"audience_key": "hosts"}, was,
+             "shipped"),
+            ("ad_creative", "demo-skip", {"audience_key": "hosts"},
+             skipped_on, "skipped"),
+            ("ad_creative", "demo-late", {"audience_key": "hosts"}, late, ""),
+            ("ad_creative", "demo-next", {"audience_key": "hosts"}, soon, ""),
+            ("campaign_email", "demo-plan-2", {}, later, "")):
         row = sysm.find("baci", skey)
         if not row:
             continue
         try:
-            sysm.open_plan("baci", skey, ref=ref, plan=plan,
-                           planned_for=when, trigger="seed_demo")
+            got = sysm.open_plan("baci", skey, ref=ref, plan=plan,
+                                 planned_for=when, trigger="seed_demo")
+            if not got.get("run_id"):
+                continue
             made += 1
+            if then == "shipped":
+                sysm.finish_run(got["run_id"], "sent", decision="approved",
+                                output="3 ad variants drafted and approved")
+            elif then == "skipped":
+                sysm.skip_plan(got["run_id"],
+                               reason="the campaign moved to September")
         except Exception:                                        # noqa: BLE001
             pass
-    return f"schedule: {made} planned across systems"
+    # One plan carrying an owner edit, so "you changed:" has something to say.
+    with db.SessionLocal() as s:
+        r = (s.query(db.SystemRun)
+             .filter(db.SystemRun.tenant == "baci",
+                     db.SystemRun.ref == "demo-late").first())
+        if r is not None:
+            brief = dict(r.brief or {})
+            brief["edited"] = ["audience_key"]
+            r.brief = brief
+            s.commit()
+    return f"schedule: {made} planned across systems (shipped / skipped / overdue / upcoming)"
 
 
 said = seed_ad_batch()

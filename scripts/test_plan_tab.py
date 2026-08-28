@@ -104,7 +104,7 @@ def main() -> int:
     print("\n— what is coming, across every system —")
     empty = admin_ui.render_plan("s3cret", T, sub="schedule")
     ck("an empty schedule says so and names what fills it",
-       "Nothing is planned" in empty and "Plan queue" in empty)
+       "Nothing has been planned" in empty and "Plan queue" in empty)
 
     # Whichever plan-capable system this account actually has — the fixture
     # must not assume a catalogue entry is installed here.
@@ -148,7 +148,74 @@ def main() -> int:
     ck("  and the page says why that matters",
        "can never come due" in sched)
     ck("an incomplete plan names its gap",
-       "needs " in sched, "a plan waiting on a field says which field")
+       "not a complete instruction" in sched or "still missing" in sched
+       or "needs " in sched, "a plan waiting on a field says which field")
+
+    # ---- 4b. WHAT BECAME OF IT (owner, 2026-08-27) -----------------------
+    # Every Plan-side view filtered stage == PLANNED, so a plan VANISHED the
+    # moment the tick consumed it: you could see what was coming and never
+    # what happened to it. The plan row IS the run row, so this is one query.
+    print("\n— and what became of what was planned —")
+    shipped = systems.open_plan(T, row.key, ref="p-done", plan={},
+                               planned_for=(dt.date.today()
+                                            - dt.timedelta(days=6)).isoformat(),
+                               trigger="test")
+    systems.finish_run(shipped["run_id"], "sent", decision="approved",
+                       output="campaign sent to 412 people")
+    skipped = systems.open_plan(T, row.key, ref="p-skip", plan={},
+                                planned_for=(dt.date.today()
+                                             - dt.timedelta(days=2)).isoformat(),
+                                trigger="test")
+    systems.skip_plan(skipped["run_id"], reason="the offer moved to September")
+    # An overdue plan the system cannot run: due days ago, still sitting.
+    late = systems.open_plan(T, row.key, ref="p-late", plan={},
+                             planned_for=(dt.date.today()
+                                          - dt.timedelta(days=5)).isoformat(),
+                             trigger="test")
+    with db.SessionLocal() as s:
+        s.get(db.System, row.id).status = "paused"   # so it cannot be consumed
+        s.commit()
+
+    sched2 = admin_ui.render_plan("s3cret", T, sub="schedule")
+    ck("a plan that SHIPPED is still on the timeline",
+       "shipped" in sched2 and "campaign sent to 412 people" in sched2,
+       "it used to vanish the moment the tick consumed it")
+    ck("a plan that was SKIPPED says so, with the reason",
+       "skipped" in sched2 and "moved to September" in sched2,
+       "a decision recorded, never a silent delete")
+    ck("an overdue plan says it is overdue AND why it is stuck",
+       "overdue 5d" in sched2 and "a plan is only consumed by a system that "
+       "is on" in sched2,
+       "the worker counts these as held and nothing told the owner")
+    ck("  and the stuck ones LEAD the table",
+       sched2.index("overdue 5d") < sched2.index("campaign sent to 412"),
+       "the row that reads as queued and is not moving is the only one that "
+       "needs a person")
+    ck("  with a count at the top", "are not moving" in sched2)
+    # A run nobody planned is not a deviation from the plan — it was never on
+    # it. Tested by making one and looking for its own marker, rather than by
+    # reading the sentence that says so.
+    direct = systems.start_run(row.id, T, trigger="manual", ref="not-planned")
+    systems.finish_run(direct, "sent", decision="approved",
+                       output="MARKER-direct-run-never-planned")
+    sched_d = admin_ui.render_plan("s3cret", T, sub="schedule")
+    ck("a direct run is NOT listed as a departure from the plan",
+       "MARKER-direct-run-never-planned" not in sched_d
+       and "it carries no plan" in sched_d,
+       "a run nobody planned is not a deviation — it was never on the plan")
+
+    # The owner's own edits, carried forward and finally visible.
+    with db.SessionLocal() as s:
+        r = s.get(db.SystemRun, late["run_id"])
+        br = dict(r.brief or {})
+        br["edited"] = ["segment"]
+        r.brief = br
+        s.commit()
+    sched3 = admin_ui.render_plan("s3cret", T, sub="schedule")
+    ck("a field YOU changed is shown against the plan",
+       "you changed:" in sched3 and "segment" in sched3,
+       "`edited` has always been recorded so the planner cannot overwrite "
+       "you — and was never shown to you")
 
     # ---- 5. the goal has its own room ------------------------------------
     print("\n— the goal is set once a quarter, so it is not always open —")

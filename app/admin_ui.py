@@ -8292,66 +8292,141 @@ def _strategy_section(key: str, tenant: str, days: int) -> str:
     </div>"""
 
 
-def _schedule_section(key: str, tenant: str) -> str:
-    """WHAT IS COMING, across every system, on one timeline.
+def _plan_outcome(run, sysrow) -> tuple[str, str, int]:
+    """What became of one planned item: (chip html, detail, sort rank).
 
-    Each system's Plan queue answers this for itself; nothing answered it for
-    the account. A plan with no date can never come due — which reads as
-    "queued" and means "lost" — so those are listed FIRST rather than sorted
-    to the bottom where a date would put them.
+    The plan row IS the run row — `skill.run(run_id=…)` advances the same row
+    through the stages, so "what was planned" and "what happened" are one
+    record and are read here from one place. Rank orders the timeline:
+    overdue-and-stuck first, because that is the row that reads as queued and
+    is not moving.
     """
-    plans = systems.plans(tenant)
-    if not plans:
+    import datetime as _dt
+    brief = getattr(run, "brief", None) or {}
+    stage = (run.stage or "").lower()
+    when = str(brief.get("planned_for", "") or "")
+    today = _dt.date.today().isoformat()
+
+    if stage == systems.PLANNED:
+        if not systems._valid_date(when):
+            return ('<span class="chip off">no date</span>',
+                    "it can never come due — a date is what makes a plan "
+                    "reachable", 0)
+        if when < today:
+            why = ""
+            if sysrow is not None:
+                verdict = systems.consumable(run, sysrow)
+                why = "" if verdict["ok"] else verdict["why"]
+            late = (_dt.date.fromisoformat(today)
+                    - _dt.date.fromisoformat(when)).days
+            if why:
+                return (f'<span class="chip off">overdue {late}d — held</span>',
+                        why, 0)
+            # Due, consumable, and still sitting here: the tick has not
+            # reached it yet. Not an error, but not silence either.
+            return (f'<span class="chip nb">due {late}d ago</span>',
+                    "consumable — waiting for the next tick", 1)
+        return ('<span class="chip">planned</span>', "", 3)
+
+    if stage == "skipped":
+        return ('<span class="chip off">skipped</span>',
+                str(brief.get("skip_reason") or "declined, with no reason "
+                    "recorded"), 2)
+    if stage == "blocked":
+        return ('<span class="chip off">blocked</span>',
+                "; ".join(str(x) for x in (run.blocked_on or []))[:200], 2)
+    if stage in ("sent", "approved"):
+        return ('<span class="chip on">shipped</span>',
+                str(run.output or run.decision or "")[:160], 2)
+    return (f'<span class="chip nb">{_esc(stage or "ran")}</span>',
+            str(run.output or "")[:160], 2)
+
+
+def _schedule_section(key: str, tenant: str) -> str:
+    """WHAT WAS PLANNED, AND WHAT BECAME OF IT — across every system.
+
+    The owner's question (2026-08-27): *"if something is changed / added to
+    the plan it should be seen at a high level on the planning side so we can
+    see what actually happened and what was planned."*
+
+    Every Plan-side view filtered `stage == PLANNED`, so the moment the tick
+    consumed a plan it VANISHED from this tab: you could see what was coming
+    and never what became of it. Since the plan row and the run row are the
+    same row, this is one query over the items that carry a plan — not a
+    second "actuals" surface, which would split one record across two pages
+    and invent a distinction the data does not have.
+
+    Ordered by state, not by date: overdue-and-held leads, because a plan
+    that reads as queued and is not moving is the only row here anyone has to
+    act on.
+    """
+    with db.SessionLocal() as s:
+        runs = (s.query(db.SystemRun)
+                .filter(db.SystemRun.tenant == tenant)
+                .order_by(db.SystemRun.created_at.desc()).limit(400).all())
+        s.expunge_all()
+    # Only items that were PLANNED. A direct run carries no brief.plan and is
+    # not a departure from the plan — it was never on it.
+    items = [r for r in runs
+             if (getattr(r, "brief", None) or {}).get("plan") is not None]
+    if not items:
         return """
     <div class="card"><div class="anchor" id="schedule"></div>
       <div class="head"><h2>Schedule</h2></div>
-      <p class="mut">Nothing is planned on any system for this account. Each
-      system's own Plan queue is where work is declared, and its Propose
-      button is what fills it.</p>
+      <p class="mut">Nothing has been planned on any system for this account.
+      Each system's own Plan queue is where work is declared, and its Propose
+      button is what fills it. Once something is planned, this is where you
+      see what became of it.</p>
     </div>"""
 
     by_id = {r.id: r for r in systems.for_tenant(tenant)}
-    dated, undated = [], []
-    for pl in plans:
-        row = by_id.get(pl.system_id)
-        brief = getattr(pl, "brief", None) or {}
-        when = str(brief.get("planned_for", "") or "")
-        comp = systems.plan_complete(pl, row.key) if row else {
-            "complete": False, "missing": ["its system is not installed"]}
-        entry = (pl, row, when, comp)
-        (dated if systems._valid_date(when) else undated).append(entry)
-    dated.sort(key=lambda e: e[2])
+    rows = []
+    for run in items:
+        sysrow = by_id.get(run.system_id)
+        brief = getattr(run, "brief", None) or {}
+        chip, detail, rank = _plan_outcome(run, sysrow)
+        rows.append((rank, str(brief.get("planned_for", "") or ""), run,
+                     sysrow, brief, chip, detail))
+    # Rank first, then date: within "still open" soonest leads; within "done"
+    # the most recent does.
+    rows.sort(key=lambda e: (e[0], e[1] if e[0] < 2 else ""), reverse=False)
+    stuck = sum(1 for e in rows if e[0] == 0)
 
-    def _tr(pl, row, when, comp) -> str:
-        plan = (getattr(pl, "brief", None) or {}).get("plan") or {}
-        what = ", ".join(f"{k}: {v}" for k, v in plan.items() if v)[:120]
-        state = ('<span class="chip on">ready</span>' if comp["complete"]
-                 else '<span class="chip off" title="'
-                      + _esc("; ".join(comp["missing"]))
-                      + '">needs ' + _esc(comp["missing"][0]) + '</span>')
-        link = (f'<a href="{_sysview_url(key, row, "planned")}">'
-                f'{_esc(row.name)}</a>' if row else
+    def _tr(rank, when, run, sysrow, brief, chip, detail) -> str:
+        plan = brief.get("plan") or {}
+        planned = ", ".join(f"{k}: {v}" for k, v in plan.items() if v)[:110]
+        # WHAT YOU CHANGED. `open_plan` records every field the owner edited
+        # so the planner never writes over it — and nothing had ever shown
+        # the owner that their own edit was carried.
+        edited = [e for e in (brief.get("edited") or []) if e]
+        yours = (f'<div class="when"><b>you changed:</b> '
+                 f'{_esc(", ".join(edited))}</div>' if edited else "")
+        link = (f'<a href="{_sysview_url(key, sysrow, "planned")}">'
+                f'{_esc(sysrow.name)}</a>' if sysrow else
                 '<span class="mut">unknown system</span>')
-        return (f'<tr><td>{_esc(when) or "<span class=\'mut\'>no date</span>"}'
-                f'</td><td>{link}</td>'
-                f'<td>{_esc(what) or "<span class=\'mut\'>—</span>"}</td>'
-                f'<td>{state}</td></tr>')
+        return (f'<tr><td>{_esc(when) or "&mdash;"}</td>'
+                f'<td>{link}</td>'
+                f'<td>{_esc(planned) or "<span class=\'mut\'>—</span>"}{yours}</td>'
+                f'<td>{chip}'
+                + (f'<div class="when">{_esc(detail)}</div>' if detail else "")
+                + "</td></tr>")
 
-    undated_rows = "".join(_tr(*e) for e in undated)
-    dated_rows = "".join(_tr(*e) for e in dated)
-    undated_note = ('<p class="note">A plan with no date can never come due. '
-                    'These read as queued and are not.</p>'
-                    if undated else "")
+    stuck_note = (f'<div class="note"><strong>{stuck} planned item(s) are not '
+                  f'moving.</strong> Each says why below — a plan that reads '
+                  f'as queued and is stuck is the only row here that needs '
+                  f'you.</div>' if stuck else "")
     return f"""
     <div class="card"><div class="anchor" id="schedule"></div>
       <div class="head"><h2>Schedule</h2>
-        <span class="mut">{len(plans)} planned across every system on this
-        account</span></div>
-      {undated_note}
+        <span class="mut">{len(items)} planned item(s) across every system —
+        what was planned, and what became of it</span></div>
+      {stuck_note}
       <div class="tblwrap"><table class="tbl">
-        <tr><th>when</th><th>system</th><th>what</th><th>state</th></tr>
-        {undated_rows}{dated_rows}
+        <tr><th>when</th><th>system</th><th>planned</th><th>what happened</th></tr>
+        {"".join(_tr(*e) for e in rows[:60])}
       </table></div>
+      <p class="when">A direct run is not listed: it carries no plan, so it
+      is not a departure from one.</p>
     </div>"""
 
 

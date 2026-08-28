@@ -1848,6 +1848,35 @@ SABOTAGES = [
                "it ever put in front of the owner",
     },
     {
+        "name": "the_plan_shows_what_happened",
+        "file": "app/admin_ui.py",
+        "find": "    items = [r for r in runs\n"
+                "             if (getattr(r, \"brief\", None) or {}).get(\"plan\") is not None]",
+        "replace": "    items = [r for r in runs  # SABOTAGE\n"
+                   "             if (getattr(r, \"brief\", None) or {}).get(\"plan\") is not None\n"
+                   "             and r.stage == systems.PLANNED]",
+        "suites": ["test_plan_tab.py"],
+        "why": "the Plan tab goes back to showing only what is COMING: a "
+               "plan vanishes the moment the tick consumes it, so nothing "
+               "on the planning side can answer what was planned last week "
+               "and what became of it — no shipped item, no skip and its "
+               "reason, and no overdue plan sitting held while the worker "
+               "counts it and says nothing",
+    },
+    {
+        "name": "a_stuck_plan_says_why",
+        "file": "app/admin_ui.py",
+        "find": "                verdict = systems.consumable(run, sysrow)\n"
+                "                why = \"\" if verdict[\"ok\"] else verdict[\"why\"]",
+        "replace": "                why = \"\"  # SABOTAGE",
+        "suites": ["test_plan_tab.py"],
+        "why": "an overdue plan is listed as merely late when it is actually "
+               "STUCK — the system is off, or its instruction is incomplete, "
+               "or the rung wants a human. The worker already refuses it "
+               "every tick and increments a counter nobody sees; without "
+               "this the console repeats that silence",
+    },
+    {
         "name": "a_dateless_plan_is_not_scheduled",
         "file": "app/admin_ui.py",
         "find": "        (dated if systems._valid_date(when) else undated).append(entry)",
