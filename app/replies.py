@@ -99,8 +99,13 @@ def owner(tenant: str, thread_id: str) -> dict:
         for r in aq.all():
             if (r.payload or {}).get("thread_id") != thread_id:
                 continue
-            if r.status in ("denied", "expired"):
-                continue          # decided against: the thread is free again
+            if r.status in ("denied", "expired", "draft_discarded"):
+                # Decided against, or the draft was deleted without being
+                # sent — either way nobody wrote to this customer, so the
+                # thread is free again. Leaving a discarded draft owning the
+                # thread would block every other system from ever answering
+                # a question that never got a reply.
+                continue
             found.append({"system": _system_name(s, r.system_id) or "a system",
                           "what": f"approval {r.status}",
                           "when": db.as_utc(r.created_at)})

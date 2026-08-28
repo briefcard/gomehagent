@@ -171,9 +171,31 @@ def seed_landing_pages() -> str:
     return f"baci reads {res['landing_pages'] + 1} sources"
 
 
+def seed_mail_queue() -> str:
+    """Both halves of the 2026-08-27 rule, so the walkthrough can see the
+    difference: a drafted reply (which must NOT appear on Review) and an
+    email that exists nowhere but the queue (which must).
+    """
+    from app import approvals
+    approvals.request_approval(
+        "send_email", "Re: is the Aqua set dishwasher safe?",
+        {"account": "baci", "to": "marisa@example.com",
+         "subject": "Re: is the Aqua set dishwasher safe?",
+         "body": "Hi Marisa,\n\nYes — tested at 65 degrees.\n\nBest,\nBaci",
+         "thread_id": "demo-t1", "draft_id": "demo-d1"}, notify=False)
+    approvals.request_approval(
+        "send_email", "[Invoice reminder] studio@example.com: Invoice 1042",
+        {"account": "baci", "to": "studio@example.com",
+         "subject": "Re: Invoice 1042",
+         "body": "Hi,\n\nJust following up on the invoice.\n\nBest,\nGomeh"},
+        notify=False)
+    return "mail: 1 drafted reply (hidden) + 1 queue-only email (shown)"
+
+
 said = seed_ad_batch()
 said2 = seed_data_layer()
 said3 = seed_landing_pages()
+said4 = seed_mail_queue()
 print(f"demo seeded: {made} · accounts: "
       f"{', '.join(t.key for t in tenants.all_tenants())} · {said} · {said2}"
-      f" · {said3}")
+      f" · {said3} · {said4}")

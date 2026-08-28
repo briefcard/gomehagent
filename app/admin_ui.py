@@ -4147,7 +4147,7 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("catalogue", "Store sync"))
 
 
-def _read_off(tenant: str, source_text: str) -> str:
+def _read_off(srcs: list[dict], source_text: str) -> str:
     """Which of this account's sites a finding was read off, by its own name.
 
     Derived from the URL already recorded in the finding's `source` rather
@@ -4156,9 +4156,21 @@ def _read_off(tenant: str, source_text: str) -> str:
     landing page is relabelled. An unrecognised host answers with the host,
     which is the honest answer for a claim harvested before that source was
     named.
+
+    Takes the ALREADY-LOADED source list rather than a tenant key: called per
+    card, the key form reloaded the tenant row for every claim on the page
+    (twice each, once to ask and once to answer), so a full queue cost thirty
+    lookups to render one line. Amended the day it shipped.
     """
     m = _re.search(r"https?://[^\s\"'<>]+", source_text or "")
-    return tenants.source_label(tenant, m.group(0)) if m else ""
+    if not m:
+        return ""
+    from .connections import norm_domain
+    host = norm_domain(m.group(0))
+    for src in srcs:
+        if norm_domain(src["url"]) == host:
+            return src["label"]
+    return host
 
 
 def _sources_block(key: str, tenant: str) -> str:
@@ -4482,11 +4494,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # single-domain account "read off Website" on every card is a fact stated
     # once too often (rule 8), and the whole point of the declutter was that
     # the card leads with the decision.
-    _many_sites = len(tenants.content_sources(tenant)) > 1
+    _srcs = tenants.content_sources(tenant)
+    _many_sites = len(_srcs) > 1
 
     if pending:
         def _card(p) -> str:
             chosen = set(p.situations or [])
+            _site_of = _read_off(_srcs, p.source or "") if _many_sites else ""
             # A testimonial's wording IS its evidence. The field is read-only
             # rather than merely discouraged, because rewording a review turns a
             # record of what a customer said into something the brand asserts.
@@ -4596,8 +4610,8 @@ def render_content(key: str, tenant: str = "", started: str = "",
               was found, what it proves</summary>
                 <div class="when">{_esc(p.proof_type or '')} · {_esc(p.source or 'source not recorded')}
                 · from {_esc(p.origin or 'unknown')}{
-                  (" · read off " + _esc(_read_off(tenant, p.source or "")))
-                  if (_many_sites and _read_off(tenant, p.source or "")) else ""}</div>
+                  (" · read off " + _esc(_site_of))
+                  if (_many_sites and _site_of) else ""}</div>
                 {(f'<label>Found next to &mdash; copied from the page</label>'
                   f'<div class="when">&ldquo;{_esc(getattr(p, "context", ""))}&rdquo;</div>')
                  if getattr(p, "context", "") else ""}
@@ -5042,6 +5056,18 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
             _q = _q.filter(db.Approval.tenant == tenant)
         ship_rows = _q.order_by(db.Approval.created_at.desc()).all()
         _s.expunge_all()
+    # THE SEND IS THE APPROVAL (owner, 2026-08-27): a drafted reply is not a
+    # decision this page collects. The draft is sitting in the client's own
+    # mailbox; the person answers the customer from there, and pressing send
+    # IS the approval. `approvals.reconcile_drafts` notices it went, closes
+    # the row, and records what changed between the draft and the letter —
+    # which is the lesson, and the reason the row is not simply deleted.
+    #
+    # Only replies with a draft BEHIND them leave. A `send_email` approval
+    # with no `draft_id` (an RFQ, an invoice reminder, a shipment follow-up)
+    # exists nowhere but here, so approving here is the only way it can ever
+    # go out — dropping those would silently strand them.
+    ship_rows = [a for a in ship_rows if _apm.decided_in_console(a)]
 
     def _ship_row(a) -> str:
         pl = a.payload or {}
@@ -5113,14 +5139,19 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         if a.kind == "seo_new_article":
             return "article"
         if a.kind == "send_email":
-            return "reply"
+            # What is left of this kind after drafted replies leave: mail
+            # that exists nowhere but this queue. "replies" was the old name
+            # and stays an accepted `flt=` value so a bookmark still works.
+            return "email"
         if a.kind == "skill_output" and pl.get("skill") == "ad_copy":
             return "ad"
         return "other"
 
     total_ship = len(ship_rows)
     _sf = (flt or "").strip().lower() if sub == "ship" or not sub else ""
-    if _sf in ("campaign", "article", "reply", "ad"):
+    if _sf == "reply":
+        _sf = "email"      # 2026-08-27: renamed when drafted replies left
+    if _sf in ("campaign", "article", "email", "ad"):
         ship_rows = [a for a in ship_rows if _ship_kind(a) == _sf]
     if q and (sub == "ship" or not sub):
         ship_rows = [a for a in ship_rows
@@ -5136,7 +5167,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         + (f"&amp;q={_esc(_sq(q, safe=''))}" if q else "")
         + (f"&amp;flt={v}" if v else "") + f'">{label}</a>'
         for v, label in (("", "all"), ("campaign", "campaigns"),
-                         ("article", "articles"), ("reply", "replies"),
+                         ("article", "articles"), ("email", "emails"),
                          ("ad", "ads"))) + "</div>"
     _ship_search = f"""
     <form method="get" action="/admin/ui" class="row" style="flex:1">
@@ -5166,9 +5197,12 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 <div class="card">
   <div class="head"><h2>May it ship?</h2>
     <span class="chip {'off' if ship_rows else 'on'}">{len(ship_rows)} pending</span></div>
-  <p class="mut">Everything queued to go OUT — an article to the store, a reply
-  to a customer, a change to live pages. Approving executes it; nothing leaves
-  without you. The preview in each row is the thing itself.</p>
+  <p class="mut">Everything queued to go OUT — an article to the store, a
+  change to live pages, an email that exists nowhere else. Approving executes
+  it; nothing leaves without you. The preview in each row is the thing itself.
+  <b>Drafted replies are not here</b>: they are waiting in the mailbox, and
+  sending one from there is what approves it — what changed between the draft
+  and the letter is then recorded as the lesson.</p>
   <div class="row">{_ship_chips}{_ship_search}</div>
   {f'<div class="when">showing {len(ship_rows)} of {total_ship} pending (filtered)</div>' if (q or _sf) else ''}
   {_ship_pager}

@@ -1681,6 +1681,47 @@ SABOTAGES = [
                "shape a compliance check can take, because a clean report is "
                "acted on",
     },
+    {
+        "name": "the_send_is_the_approval",
+        "file": "app/approvals.py",
+        # Pinned on the shared predicate rather than on the queue's filter:
+        # the pill, the queue and the email fallback all read it, so one
+        # sabotage here proves all three are covered at once.
+        "find": "    return not (getattr(ap, \"kind\", \"\") == \"send_email\"\n"
+                "                and (getattr(ap, \"payload\", None) or {}).get(\"draft_id\"))",
+        "replace": "    return True  # SABOTAGE",
+        "suites": ["test_draft_sync.py"],
+        "why": "every drafted reply is back in the ship queue asking to be "
+               "approved — a decision whose subject is sitting in the "
+               "client's own mailbox, already answerable there. Approving it "
+               "from the console after it was sent by hand is the duplicate "
+               "delivery this whole path exists to prevent",
+    },
+    {
+        "name": "a_sent_draft_teaches",
+        "file": "app/approvals.py",
+        "find": "                learn.append((ap.id, p.get(\"body\", \"\"), sent.get(\"body\", \"\")))",
+        "replace": "                pass  # SABOTAGE",
+        "suites": ["test_draft_sync.py"],
+        "why": "the delta between the draft and the letter is thrown away "
+               "again on the ONLY path a reply now takes. `SystemRun."
+               "edit_diff` goes back to never being written, `% sent as-is` "
+               "goes back to unmeasurable, and the generator stops learning "
+               "from the one honest signal it has — exactly the state this "
+               "function's docstring described while quietly having it",
+    },
+    {
+        "name": "a_deleted_draft_is_not_a_send",
+        "file": "app/approvals.py",
+        "find": "                sent = gc.sent_in_thread(alias, p.get(\"thread_id\") or \"\")",
+        "replace": "                sent = {\"body\": p.get(\"body\", \"\")}  # SABOTAGE",
+        "suites": ["test_draft_sync.py"],
+        "why": "a draft the owner DELETED is filed as a reply the customer "
+               "received: the thread stays owned so no other system may ever "
+               "answer a question that got no answer, and a 'sent as-is' is "
+               "recorded for a letter nobody wrote — flattering the "
+               "generator with a measurement of nothing",
+    },
 ]
 
 

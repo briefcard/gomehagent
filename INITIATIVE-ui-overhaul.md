@@ -608,6 +608,55 @@ entries are STALE AT HEAD — `drafted_is_not_published` and
 `data_layer_says_what_to_fix` (app/admin_ui.py) patch code that no longer
 exists, so those guards test nothing and nothing says so. Worth a sweep that
 asserts every `find` appears exactly once, run with the ordinary suite.
+**4·Review AMENDED AGAIN (owner, 2026-08-27) — THE SEND IS THE APPROVAL.**
+*"Remove 'reply' drafts from the review page. All emails will be considered
+approved when they are sent, and the difference between the draft and the
+sent email will be the learning difference for the agent to learn from."*
+A drafted reply is not a decision this console collects: the draft is in the
+client's own mailbox, answering the customer from there IS the approval.
+Shipped as three things, because removing the rows alone would have thrown
+away the very signal the owner named. (1) **The rows leave**, through ONE
+shared predicate `approvals.decided_in_console` — read by the ship queue,
+by `pending_count` (the frame's "N waiting" pill, which links straight AT
+that queue, so an over-count is a lie you catch in one click — rule 8) and
+by `/admin/pending` (whose signed approve link would otherwise mail a
+second copy of a letter already sent). Only replies WITH a `draft_id`
+leave: a `send_email` with none — an RFQ, an invoice reminder, a shipment
+follow-up — exists nowhere but that queue, and dropping those would strand
+them silently; the chip is renamed `replies` → `emails` to match the
+population that is left, with `flt=reply` kept as an accepted alias.
+(2) **The lesson is finally recorded.** `reconcile_drafts` already closed
+these rows, and its own docstring promised the delta — `edits` was imported
+for it and never called, so the normal path threw the lesson away every
+time. It now reads what was actually sent on the thread (NEW
+`gmail_client.sent_in_thread`) and calls `edits.record`, which writes
+`Approval.payload["edit"]` and `SystemRun.edit_diff` and marks the run
+`approved` when it went as-is, `edited` when it did not. (3) **SENT and
+DELETED stop being the same event.** To `read_draft` both are one absence;
+filing a discarded draft as a send would measure an "edit" against a letter
+nobody wrote AND leave the thread owned so no other system could ever
+answer it. A deleted draft now closes as `draft_discarded`, records no
+delta, and frees the thread in `replies.owner`. An UNREADABLE thread
+decides nothing and waits for the next tick — concluding from a network
+error would lose a real reply's lesson permanently, since only PENDING rows
+are ever revisited. Also fixed in passing, same defect family:
+`command_agent`'s WhatsApp-drafted mail created a Gmail draft and then
+queued an approval WITHOUT its `draft_id`, so approving composed a SECOND
+message on the same thread while the draft sat there — the exact shape
+`send_draft` exists to prevent. Guards (all three caught):
+`the_send_is_the_approval` (pinned on the shared predicate, so one sabotage
+proves the queue, the pill and the fallback at once), `a_sent_draft_teaches`,
+`a_deleted_draft_is_not_a_send`. `test_draft_sync.py` grew four sections;
+its two `sent_outside` pins were retargeted with a dated comment because the
+scenario always MEANT "already sent from Gmail" and the fixture now says so.
+NOT changed, named: `_pending_for_system` (Systems tab) and the digest still
+count a drafted reply as waiting — it genuinely IS waiting on a person, just
+not in the console, and redefining "waiting" app-wide belongs with the
+Systems restructure that is the next push, not smuggled into this one.
+ALSO in this push: the previous step's `_read_off` reloaded the tenant row
+twice per claim card (~30 lookups to render one line); it now takes the
+already-loaded source list.
+
 Order: **Data layer** (§5 — Queue & Insights + Active Learning + domain
 views with pagination/search/editors; Advanced folds the schema reference;
 COUNT queries replace full-table loads) → **Connections** (§11 — status-first

@@ -423,6 +423,37 @@ def send_draft(alias: str, draft_id: str) -> str:
     return sent.get("id", "")
 
 
+def sent_in_thread(alias: str, thread_id: str) -> dict:
+    """The most recent message THIS mailbox sent on a thread, or {}.
+
+    What makes "the draft is gone" answerable rather than merely noticed. A
+    draft that was SENT leaves a message in SENT on the same thread; a draft
+    that was DELETED leaves nothing. To `read_draft` those are the same
+    absence, and treating them alike files a discarded draft as a reply the
+    customer received — then measures a human "edit" against a letter nobody
+    ever wrote, which poisons the one quality signal this system has.
+    """
+    if not thread_id:
+        return {}
+    # Deliberately NOT wrapped in a try: an empty answer here means "nothing
+    # was sent on this thread", and a caller acts on that by closing a row as
+    # discarded. Swallowing a network error would make those two the same
+    # answer again, one level down from the distinction this exists to draw.
+    thread = (service_for(alias).users().threads()
+              .get(userId="me", id=thread_id, format="full").execute())
+    for msg in reversed(thread.get("messages", []) or []):
+        if "SENT" not in (msg.get("labelIds") or []):
+            continue
+        headers = {h["name"].lower(): h["value"]
+                   for h in (msg.get("payload") or {}).get("headers", [])}
+        return {"message_id": msg.get("id", ""),
+                "thread_id": thread_id,
+                "subject": headers.get("subject", ""),
+                "date": headers.get("date", ""),
+                "body": _extract_text(msg.get("payload") or {})}
+    return {}
+
+
 def draft_exists(alias: str, draft_id: str) -> bool:
     return bool(read_draft(alias, draft_id))
 
@@ -473,6 +504,6 @@ def _serialize(fn):
 for _name in ("fetch_unread", "fetch_unanswered", "get_thread_context",
               "fetch_sent", "fetch_recent", "fetch_with_attachments",
               "download_attachment", "ensure_label", "add_label", "mark_read",
-              "fetch_sent_threads",
+              "fetch_sent_threads", "sent_in_thread",
               "create_draft", "send_email"):
     globals()[_name] = _serialize(globals()[_name])

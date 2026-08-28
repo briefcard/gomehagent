@@ -1230,7 +1230,11 @@ def pending_page(key: str = Depends(admin_key), tenant: str = "") -> str:
         q = s.query(db.Approval).filter(db.Approval.status == "pending")
         if scoped:
             q = q.filter(db.Approval.tenant == tenant)
-        aps = q.order_by(db.Approval.created_at.desc()).all()
+        # Same predicate as the console queue and the waiting pill: a
+        # drafted reply is answered in the mailbox, so offering a signed
+        # approve link for one here would mail the customer a second copy.
+        aps = [a for a in q.order_by(db.Approval.created_at.desc()).all()
+               if ap_mod.decided_in_console(a)]
         rows = []
         for ap in aps:
             approve = "/decide/" + ap_mod._signer.dumps([ap.id, "approved"])

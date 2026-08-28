@@ -1008,6 +1008,13 @@ def admin_dispatch(name: str, args: dict, session_files: dict) -> str:
                 {"account": args["account"], "to": args["to"],
                  "subject": args["subject"], "body": args["body"],
                  "cc": args.get("cc", ""),
+                 # The draft IS the thing. Without this the approval was built
+                 # from a copy while the real draft sat in Gmail — so an edit
+                 # made there was discarded, approving composed a SECOND
+                 # message on the same thread, and the draft was left behind
+                 # to pile up. That is the exact shape `send_draft` exists to
+                 # prevent, and this path was still carrying it (2026-08-27).
+                 "draft_id": draft_id,
                  "inbound_from": "command",
                  "inbound_snippet": "(drafted on your instruction)",
                  "reason": "Drafted via command agent", "bucket": "client_comms"},

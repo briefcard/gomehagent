@@ -294,16 +294,29 @@ def apply_decision(ap_id: str, decision: str) -> str:
 
 
 def reconcile_drafts() -> dict:
-    """Close approvals whose draft is gone, and record what was sent.
+    """Close approvals whose draft is gone, and LEARN from what was sent.
 
-    The other half of keeping the two in step. Sending the draft from Gmail —
-    the natural thing to do, and the thing the delta is measured from — leaves
-    the approval pending for ever. It then shows in the waiting count, and
-    approving it later would deliver the ORIGINAL text a second time.
+    THE SEND IS THE APPROVAL (owner, 2026-08-27). A drafted reply is not a
+    decision the console has to collect: the draft is sitting in the client's
+    mailbox, the person answers the customer from there, and the moment they
+    press send they have approved it. What the console is for is the other
+    half — noticing that it went, closing the row so the queue does not fill
+    with work already done, and measuring *what changed between the draft and
+    the letter*, which is the only honest signal of where the generator is
+    wrong.
 
-    So a missing draft is read as "a human dealt with this", the approval is
-    closed as `sent_outside`, and the delta is measured from what actually
-    went out where the thread can still be read.
+    That last part is why this function exists and it was the part that was
+    missing: the docstring promised the delta, `edits` was imported for it,
+    and nothing ever called it. So sending from Gmail — the normal path, and
+    now the ONLY path for a drafted reply — closed the approval and threw the
+    lesson away.
+
+    SENT and DELETED are told apart, because to `read_draft` they are the same
+    absence. A sent draft leaves a message in SENT on the thread and teaches;
+    a deleted one leaves nothing, closes as `draft_discarded`, and teaches
+    nothing — filing it as sent would measure an "edit" against a letter that
+    was never written, and free-riding on that number is worse than not having
+    it.
 
     Runs on a tick. It only ever CLOSES approvals — it never sends anything —
     so the worst case of a wrong reading here is an approval that needed a
@@ -311,7 +324,10 @@ def reconcile_drafts() -> dict:
     """
     from . import edits, gmail_client as gc
 
-    closed, kept, skipped = 0, 0, 0
+    closed, discarded, kept, skipped = 0, 0, 0, 0
+    #: (approval_id, drafted body, sent body) — recorded AFTER this session
+    #: commits, because `edits.record` opens its own and writes the same rows.
+    learn: list[tuple[str, str, str]] = []
     with db.SessionLocal() as s:
         rows = (s.query(db.Approval)
                 .filter(db.Approval.status == "pending",
@@ -330,14 +346,41 @@ def reconcile_drafts() -> dict:
             if live:
                 kept += 1             # still sitting there, still needs a person
                 continue
-            ap.status = "sent_outside"
+            try:
+                sent = gc.sent_in_thread(alias, p.get("thread_id") or "")
+            except Exception:                                    # noqa: BLE001
+                # An unreadable thread means DECIDE NEXT TICK, never
+                # "discarded". Concluding from a network error would file a
+                # reply the customer actually received as one that never
+                # happened — and lose its lesson permanently, because this
+                # only ever looks at PENDING rows.
+                skipped += 1
+                continue
             ap.decided_at = db.utcnow()
-            closed += 1
+            if sent:
+                ap.status = "sent_outside"
+                closed += 1
+                learn.append((ap.id, p.get("body", ""), sent.get("body", "")))
+            else:
+                # No draft and nothing sent on the thread: it was deleted, or
+                # the thread cannot be read. Either way nobody was written to,
+                # so the thread is free for another system to answer.
+                ap.status = "draft_discarded"
+                discarded += 1
         s.commit()
-    return {"closed": closed, "still_waiting": kept, "not_applicable": skipped,
+
+    measured = 0
+    for ap_id, generated, sent_body in learn:
+        if edits.record(ap_id, generated, sent_body).get("measured"):
+            measured += 1
+
+    return {"closed": closed, "discarded": discarded, "still_waiting": kept,
+            "not_applicable": skipped, "deltas_recorded": measured,
             "note": "an approval whose draft has gone was dealt with in Gmail; "
                     "leaving it pending is how the queue fills with work "
-                    "already done"}
+                    "already done. What was sent is compared with what was "
+                    "drafted, and that difference is what the generator "
+                    "learns from."}
 
 
 def _published(res: str) -> bool:
@@ -521,6 +564,27 @@ def autonomy_stats(days: int = 30) -> dict:
     return stats
 
 
+def decided_in_console(ap) -> bool:
+    """Is this approval a decision the console actually collects?
+
+    ONE predicate, because the count and the list must never disagree (design
+    rule 8: counts come from the lists actually rendered). The "N waiting"
+    pill links straight at the queue, so a pill that counts a row the queue
+    does not show is a lie you catch in a single click.
+
+    A drafted reply is the one exception, and it is the owner's rule
+    (2026-08-27): the draft is in the client's own mailbox, answering the
+    customer from there IS approving it, and `reconcile_drafts` closes the
+    row and records what changed. Nothing is lost by not asking here — the
+    only thing asking could add is a second copy of the same letter.
+
+    A `send_email` with NO `draft_id` — an RFQ, an invoice reminder, a
+    shipment follow-up — exists nowhere but this queue, so it stays.
+    """
+    return not (getattr(ap, "kind", "") == "send_email"
+                and (getattr(ap, "payload", None) or {}).get("draft_id"))
+
+
 def pending_count(tenant: str = "") -> int:
     """How many decisions are waiting — for one client, or for everyone.
 
@@ -528,12 +592,15 @@ def pending_count(tenant: str = "") -> int:
     counted every row regardless, so the "N waiting" beside one client's name
     in the console was another client's backlog. `tenant=""` still means every
     account, because the digest and the ops channel genuinely want that number.
+
+    Counted through `decided_in_console`, not with a bare `.count()`, so the
+    pill and the queue it points at can never drift apart.
     """
     with db.SessionLocal() as s:
         q = s.query(db.Approval).filter(db.Approval.status == "pending")
         if tenant:
             q = q.filter(db.Approval.tenant == tenant)
-        return q.count()
+        return sum(1 for ap in q.all() if decided_in_console(ap))
 
 
 def _fmt(payload: dict) -> str:

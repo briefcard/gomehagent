@@ -29,6 +29,10 @@ _fail: list[str] = []
 _sent_drafts: list[str] = []
 _sent_fresh: list[dict] = []
 _DRAFTS: dict[str, dict] = {}
+#: thread_id -> the message this mailbox actually sent on it. A draft that was
+#: SENT leaves one here; a draft that was DELETED does not, and the whole
+#: point of the 2026-08-27 change is that those two stop being the same event.
+_SENT_ON_THREAD: dict[str, dict] = {}
 
 
 def ck(label, cond, detail=""):
@@ -43,13 +47,15 @@ def _stub():
                                             _DRAFTS.pop(d, None), "sent")[2]
     gmail_client.send_email = lambda a, to, su, bo, th=None, cc="", **k: (
         _sent_fresh.append({"to": to, "body": bo}), "fresh")[1]
+    gmail_client.sent_in_thread = lambda a, t: dict(_SENT_ON_THREAD.get(t) or {})
 
 
-def _queue(body: str, draft_id: str = "", tenant: str = "baci") -> str:
+def _queue(body: str, draft_id: str = "", tenant: str = "baci",
+           thread_id: str = "t1") -> str:
     return approvals.request_approval(
         "send_email", "reply", {"account": "baci", "to": "c@x.example",
                                 "subject": "Re: order", "body": body,
-                                "thread_id": "t1", "draft_id": draft_id},
+                                "thread_id": thread_id, "draft_id": draft_id},
         notify=False)
 
 
@@ -103,7 +109,11 @@ def main() -> int:
     print("\n— and the queue does not fill with work already done —")
     _DRAFTS["d5"] = {"draft_id": "d5", "body": GEN}
     ap5 = _queue(GEN, "d5")
-    ap6 = _queue(GEN, "vanished")
+    ap6 = _queue(GEN, "vanished", thread_id="t6")
+    # 2026-08-27: this scenario always MEANT "already sent it from Gmail", and
+    # said so in prose; the code could not tell that from a deleted draft, so
+    # the fixture now states it. The deleted case gets its own section below.
+    _SENT_ON_THREAD["t6"] = {"message_id": "m6", "body": GEN}
     res = approvals.reconcile_drafts()
     ck("an approval whose draft is gone is closed", res["closed"] >= 1)
     ck("  one still sitting there is left alone", res["still_waiting"] >= 1)
@@ -133,6 +143,95 @@ def main() -> int:
     approvals.apply_decision(_queue(GEN, ""), "approved")
     ck("it composes a message, as before", len(_sent_fresh) == 1,
        "approvals queued before this existed, and replies composed elsewhere")
+
+    # ---------------------------------------------------------------------
+    # THE SEND IS THE APPROVAL (owner, 2026-08-27): "all emails will be
+    # considered approved when they are sent, and the difference between the
+    # draft and the sent email will be the learning difference for the agent
+    # to learn from."
+    #
+    # `reconcile_drafts` already closed the row. It did NOT record the delta —
+    # its own docstring promised it and `edits` was imported for it — so the
+    # normal path, sending from Gmail, threw the lesson away every time.
+    # ---------------------------------------------------------------------
+    print("\n— sending it yourself IS approving it, and it teaches —")
+    _SENT_ON_THREAD.clear()
+    HAND = "Hi Marisa,\n\nYour order ships Tuesday — I've added a note.\n\nBest,\nBaci"
+    ap7 = _queue(GEN, "d7", thread_id="t7")
+    _SENT_ON_THREAD["t7"] = {"message_id": "m7", "body": HAND}   # sent by hand
+    res = approvals.reconcile_drafts()
+    ck("a draft sent from Gmail closes its approval",
+       res["closed"] >= 1, str(res))
+    ck("  and the delta IS recorded", res["deltas_recorded"] >= 1,
+       "this is the whole point: what changed between the draft and the "
+       "letter is the only honest signal of where the generator is wrong")
+    with db.SessionLocal() as s:
+        pay7 = (s.get(db.Approval, ap7).payload or {})
+    ck("  the edit lands on the approval", bool(pay7.get("edit")), str(pay7)[:120])
+    ck("  and says a human changed it", pay7["edit"]["as_is"] is False,
+       str(pay7.get("edit")))
+    ck("  with a sample, not the letter",
+       0 < len(pay7.get("edit_sample", "")) <= 1200)
+
+    print("\n— a DELETED draft is not a send, and must not teach —")
+    ap8 = _queue(GEN, "d8", thread_id="t8")     # nothing sent on t8
+    res8 = approvals.reconcile_drafts()
+    with db.SessionLocal() as s:
+        ap8row = s.get(db.Approval, ap8)
+        ck("it is closed as discarded, not as sent",
+           ap8row.status == "draft_discarded", ap8row.status)
+        ck("  and NO delta is recorded against it",
+           not (ap8row.payload or {}).get("edit"),
+           "measuring an edit against a letter nobody wrote poisons the one "
+           "quality number this system has")
+    ck("  the run reports them apart", res8["discarded"] >= 1, str(res8))
+    _sent_drafts.clear(); _sent_fresh.clear()
+    approvals.reconcile_drafts()
+    ck("reconciling still sends nothing", not _sent_drafts and not _sent_fresh,
+       "the worst case of a wrong reading must be a closed approval, never a "
+       "mailed customer")
+
+    print("\n— a discarded draft frees the thread —")
+    from app import replies
+    own = replies.owner("baci", "t8")
+    ck("nobody owns a thread that was never answered", not own, str(own))
+    ck("but a thread that WAS answered is still owned",
+       bool(replies.owner("baci", "t7")), str(replies.owner("baci", "t7")))
+
+    print("\n— and the console no longer asks about a drafted reply —")
+    from app import admin_ui
+    _DRAFTS["d9"] = {"draft_id": "d9", "body": GEN}
+    ap9 = _queue(GEN, "d9", thread_id="t9")     # a reply, waiting in Gmail
+    ap10 = approvals.request_approval(          # an email with NO draft
+        "send_email", "[Invoice reminder] c@x.example: Invoice",
+        {"account": "baci", "to": "c@x.example", "subject": "Invoice",
+         "body": "Just following up."}, notify=False)
+    page = admin_ui.render_content("s3cret", tenant="baci", sub="ship")
+    # Pinned on the approval's own id and its subject, not on the draft id:
+    # "d9" is a substring of the hex colour #6d28d9 in the stylesheet, and an
+    # assertion that can be satisfied by a token value is not an assertion.
+    ck("the drafted reply is NOT in the ship queue",
+       ap9 not in page and "Re: order" not in page,
+       "the draft is in the mailbox; sending it there is the approval")
+    ck("but an email that exists nowhere else still is",
+       "Invoice reminder" in page,
+       "it has no draft anywhere, so this queue is its only way out")
+    ck("the queue says where drafted replies went",
+       "Drafted replies are not here" in page)
+    ck("and the chip names what is left", ">emails<" in page, "was 'replies'")
+
+    # The pill and the queue must never disagree — it links straight at the
+    # queue, so an over-count is a lie you catch in one click (rule 8).
+    n = approvals.pending_count("baci")
+    ck("the waiting pill counts what the queue shows", n == 1,
+       f"pill says {n}; the queue shows the invoice reminder only")
+    from fastapi.testclient import TestClient
+    from app import web
+    c = TestClient(web.app, base_url="https://testserver")
+    fb = c.get("/admin/pending", params={"key": "s3cret"}).text
+    ck("and the email fallback queue agrees",
+       "Invoice reminder" in fb and "Re: order" not in fb,
+       "a signed approve link for a reply already sent would mail it twice")
 
     print()
     if _fail:
