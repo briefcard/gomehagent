@@ -48,7 +48,7 @@ from __future__ import annotations
 import html as _htmllib
 import re
 
-from . import ad_craft
+from . import ad_craft, funnel
 from . import coherence, compliance, responder, sites, systems
 from . import kb as kb_mod
 from .skill import Context, Skill, register
@@ -664,6 +664,13 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
     if angle == "objection" and objections:
         parts.append("\n## The hesitation to answer")
         parts.append(f"- {objections[0]['objection']}")
+    # WHERE THE READER IS, before the angle — because the angle is HOW to say
+    # it and the stage is WHO IS LISTENING, and getting the second one wrong
+    # produces a well-formed ad aimed at somebody else. The objections and
+    # situations this account actually has are quoted here, which is the whole
+    # of the owner's 2026-08-29 correction: they are strategy, not grounding.
+    if bundle.get("funnel"):
+        parts.append(funnel.brief(bundle["funnel"]))
     parts.append(f"\n## Angle\n{_angle_brief(angle)}")
     # The offer, once, exactly as it will be stated everywhere else, plus
     # where it has to land. `ad_craft` measures both after the fact.
@@ -753,6 +760,42 @@ def _run_ad_copy(ctx: Context) -> dict:
         + [str(c.get("claim") or "") for c in ctx.claims[:12]]
         + [str(o.get("objection") or "") for o in objections[:6]])
     angles = ad_craft.angles_for(_evidence)
+
+    # THE FUNNEL STAGE, if one was asked for. Optional by design: a run with
+    # no stage behaves exactly as it did before, so nothing that already works
+    # changes shape. With one, the account's own objections and situations are
+    # quoted into the brief and the angles narrow to the ones that make sense
+    # for that reader — an offer-led ad at awareness is asking a stranger to
+    # buy, and an objection-killer at awareness answers a hesitation nobody
+    # has yet.
+    stage = funnel.normalise(str(ctx.params.get("funnel_stage") or ""))
+    if str(ctx.params.get("funnel_stage") or "").strip() and not stage:
+        ctx.note(f"unknown funnel stage "
+                 f"{str(ctx.params['funnel_stage'])!r} — the ones that exist "
+                 f"are: " + ", ".join(funnel.STAGES)
+                 + ". Running without one.")
+    if stage:
+        plan = funnel.inputs_for(
+            ctx.tenant, stage, claims=ctx.claims, objections=objections,
+            entities=ctx.bundle.get("entities"),
+            audiences=ctx.bundle.get("audiences"),
+            offer=str(ctx.bundle.get("offer") or ""))
+        ctx.bundle["funnel"] = plan
+        angles = funnel.angles_for_stage(stage, angles)
+        ctx.note(f"funnel stage: {plan['label']} — the reader "
+                 f"{plan['reader']}")
+        # WHAT IS MISSING, BY NAME. The owner's "if they are available, of
+        # course" is not permission to proceed quietly: a stage whose leading
+        # input is absent produces something plausible and wrong, and the run
+        # is the only place that can say so.
+        for n in plan.get("note") or []:
+            ctx.note(f"funnel (thin): {n}")
+        if plan.get("missing"):
+            # `Context.thin` is the list the assurance ledger reads as "what
+            # this run was working WITHOUT" — appending here puts a strategy
+            # gap on the same record as a knowledge gap, which is what it is.
+            ctx.thin.extend(f"funnel:{m}" for m in plan["missing"])
+
     ctx.note("angles in play for this account: " + ", ".join(angles)
              + ("" if "gifting" in angles else
                 " (gifting is not offered — nothing in this account's "
@@ -939,7 +982,10 @@ register(Skill(
     # input — a generator inventing a discount or a deadline is the one
     # failure here that costs real money.
     params=("entity_key", "audience_key", "variants", "utterance",
-            "revision_notes", "into_batch", "offer", "deadline"),
+            "revision_notes", "into_batch", "offer", "deadline",
+            # awareness | interest | consideration | bottom — see app/funnel.py.
+            # Optional: without it the run behaves exactly as before.
+            "funnel_stage"),
     writes=False,
     produces="draft",
     run=_run_ad_copy))

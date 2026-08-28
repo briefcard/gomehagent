@@ -2234,6 +2234,34 @@ SABOTAGES = [
                "personal gift' is not false, it is about somebody else's "
                "business",
     },
+    {
+        "name": "the_stage_decides_who_is_listening",
+        "file": "app/skill_pack.py",
+        "find": "        angles = funnel.angles_for_stage(stage, angles)",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_funnel.py"],
+        "why": "the funnel stage stops narrowing the angles, so an awareness "
+               "batch is written with the offer-led and objection-killer "
+               "angles — asking a stranger to buy, and answering a hesitation "
+               "the reader has not formed yet. Both are well-formed ads aimed "
+               "at the wrong reader, and NOTHING else in the pipeline can see "
+               "it: the validator asks whether a draft is true and the craft "
+               "ruleset asks whether it is well written. Neither asks who is "
+               "listening",
+    },
+    {
+        "name": "a_missing_input_is_named",
+        "file": "app/funnel.py",
+        "find": "    note = [_COST.get(k, f\"no {k} on file\") for k in missing]",
+        "replace": "    note = []  # SABOTAGE",
+        "suites": ["test_funnel.py"],
+        "why": "a stage whose leading knowledge is absent goes quiet about "
+               "it, so an account with no objections gets a consideration ad "
+               "built out of whatever else was lying around — plausible, "
+               "wrong, and undetectable downstream. The owner's 'if they are "
+               "available, of course' is a licence to run thin, not a licence "
+               "to run thin in silence",
+    },
 ]
 
 
