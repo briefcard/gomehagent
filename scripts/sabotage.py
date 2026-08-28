@@ -2275,6 +2275,23 @@ SABOTAGES = [
                "reads, which is the unwired-claim shape this codebase keeps "
                "having to fix",
     },
+    {
+        "name": "the_blog_reads_the_same_funnel",
+        "file": "app/skill_pack.py",
+        # The ad prompt now carries the identical two lines, so the anchor
+        # takes the line AFTER them to stay unique — `test_sabotage_anchors`
+        # caught the collision the moment the blog was wired.
+        "find": "    if bundle.get(\"funnel\"):\n"
+                "        parts.append(funnel.brief(bundle[\"funnel\"]))\n"
+                "    if angle:",
+        "replace": "    if False:  # SABOTAGE\n        pass\n    if angle:",
+        "suites": ["test_blog.py", "test_funnel.py"],
+        "why": "an article for 'best X vs Y' stops being briefed as writing "
+               "for somebody comparing alternatives, so a comparison search "
+               "gets an explainer — the right words about the wrong reader. "
+               "The keyword layer knew the intent all along and the drafter "
+               "was never told",
+    },
 ]
 
 

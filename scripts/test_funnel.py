@@ -214,6 +214,24 @@ def main() -> int:
     ck("the asking one leads on the hesitation and names the offer",
        "HESITATIONS" in hot and "OFFER TO CLOSE ON" in hot)
 
+    print("\n— THE BLOG derives its stage from the keyword's own intent —")
+    from app import keywords as kwmod
+    for phrase, want in (("how to set a dinner table", "awareness"),
+                         ("best melamine dinnerware vs acrylic", "consideration"),
+                         ("buy acrylic dinnerware", "bottom")):
+        got = funnel.stage_from_keyword(
+            kwmod.classify_intent(phrase, kwmod.brand_tokens_for("baci")))
+        ck(f"  {phrase!r} → {want}", got == want, got)
+    ck("a brand search is somebody who already knows you",
+       funnel.stage_from_keyword("navigational") == "interest")
+    ck("an unknown intent falls to awareness — the stage that assumes least",
+       funnel.stage_from_keyword("") == "awareness"
+       and funnel.stage_from_keyword("nonsense") == "awareness")
+    ck("every intent the keyword layer can emit maps to a real stage",
+       all(funnel.stage_from_keyword(lbl) in funnel.STAGES
+           for lbl, _m in kwmod.INTENT_MARKERS),
+       "a marker added to the keyword layer must not fall off the funnel")
+
     print("\n— an unknown stage is refused by name, not silently ignored —")
     r3 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
                    audience_key="hosts", variants=1, funnel_stage="middle-ish")

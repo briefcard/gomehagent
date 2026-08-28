@@ -354,3 +354,29 @@ def stage_from(*, warmth: str = "", asks: bool = False) -> str:
         # and it should be briefed as the thing it is.
         return "bottom"
     return "consideration" if str(warmth or "").lower() == "warm" else "awareness"
+
+
+#: Search intent → funnel stage. `keywords.INTENT_MARKERS` already sorts a
+#: phrase into transactional / commercial / informational / navigational, and
+#: those ARE funnel positions under different names: "best X vs Y" is somebody
+#: comparing alternatives, which is the consideration stage's own definition.
+#: Mapped rather than re-derived, so a marker added to the keyword layer
+#: reaches the funnel without a second list learning about it.
+_INTENT_STAGE = {
+    "informational": "awareness",
+    "navigational": "interest",
+    "commercial": "consideration",
+    "transactional": "bottom",
+}
+
+
+def stage_from_keyword(intent: str) -> str:
+    """The stage an ARTICLE is at, from what its target keyword wants.
+
+    Derived for the same reason email's is: the blog already classifies every
+    keyword's intent to rank and cluster it, so the stage is a reading of a
+    decision already made. An unknown intent returns awareness — the stage
+    that assumes the least about the reader, and therefore the one whose brief
+    is safe to be wrong about.
+    """
+    return _INTENT_STAGE.get(str(intent or "").strip().lower(), "awareness")

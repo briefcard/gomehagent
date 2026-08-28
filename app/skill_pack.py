@@ -3442,6 +3442,13 @@ def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
         parts.append("\n## Internal links you may use (and no others)")
         for L in links[:6]:
             parts.append(f'- <a href="{L["url"]}">{L["anchor"]}</a>')
+    # WHERE THE SEARCHER IS, before what the article does. Derived from the
+    # keyword's own intent (see `_run_blog_article`), so somebody who typed
+    # "best X vs Y" is briefed as a person comparing alternatives and shown
+    # this account's actual objections — rather than written at as though
+    # they had typed "what is X".
+    if bundle.get("funnel"):
+        parts.append(funnel.brief(bundle["funnel"]))
     if angle:
         spec = ARTICLE_ANGLES.get(angle)
         if spec:
@@ -3609,6 +3616,30 @@ def _run_blog_article(ctx: Context) -> dict:
     cluster_key = str(ctx.params.get("cluster") or "") or (row.cluster_key if row else "")
     if row is not None:
         role = ctx.params.get("role") or row.role or role
+
+    # WHERE THE SEARCHER IS, from the keyword's OWN intent. `keywords` already
+    # sorts every phrase into transactional / commercial / informational /
+    # navigational in order to rank and cluster it, and those are funnel
+    # positions under different names — "best X vs Y" is somebody comparing
+    # alternatives, which is the consideration stage's definition. Derived
+    # rather than parameterised, for the same reason email's is: the decision
+    # has already been made once and a second knob for it is a second
+    # vocabulary (design rule 4).
+    _intent = (getattr(row, "intent", "") if row is not None else "") \
+        or kw_mod.classify_intent(keyword, kw_mod.brand_tokens_for(ctx.tenant))
+    _stage = funnel.stage_from_keyword(_intent)
+    _plan = funnel.inputs_for(
+        ctx.tenant, _stage, claims=ctx.claims,
+        objections=ctx.bundle.get("objections"),
+        entities=ctx.bundle.get("entities"),
+        audiences=ctx.bundle.get("audiences"))
+    ctx.bundle["funnel"] = _plan
+    ctx.note(f"funnel stage: {_plan['label']} — '{keyword}' is a "
+             f"{_intent} search")
+    for _n in _plan.get("note") or []:
+        ctx.note(f"funnel (thin): {_n}")
+    if _plan.get("missing"):
+        ctx.thin.extend(f"funnel:{m}" for m in _plan["missing"])
 
     # The AEO half, and it is not an extra: `semrush_questions` harvested these
     # into the map, so the questions this article answers are ones people
