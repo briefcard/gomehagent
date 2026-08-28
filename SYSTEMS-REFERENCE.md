@@ -144,10 +144,28 @@ writer per table that matters:**
 | artifact_bodies | ledger.py | the artifact whole; `draft_body` frozen at emit for the delta |
 | system_runs / systems | systems.py | every run incl. blocked; the ladder's evidence |
 | approvals | approvals.py | what waits on a person; kind travels into every digest card |
+| digest_acks | digest.py | what the owner has already dealt with in the briefing — fingerprinted, so a changed item comes back |
 | tool_calls | toolcalls.py | every provider round trip per account — Semrush included (one shared key, attributed) |
 
 Reset groups: knowledge / operations / access (`reset.py`); every new table
-classifies in the change that adds it.
+classifies in the change that adds it — `test_reset` fails the build otherwise.
+
+**Two columns carry identity, added 2026-08-27/28 and worth knowing:**
+
+- `Tenant.sources` — the FACTS-only landing pages. `Tenant.domain` stays the
+  WEBSITE and is still the single identity source (`brand_theme`, `voice.
+  gather`); `tenants.content_sources()` returns website-first and is read by
+  `harvest` and `compliance.scan` ONLY. Nothing that derives identity calls it.
+- `ArtifactBody.meta` — what the artifact IS (title, seo_title,
+  seo_description, subject, segment, intent…). It used to live only in the
+  approval payload, so an artifact was a complete object only while a decision
+  was pending on it. The executor overlays `meta` + `body` onto the payload's
+  machine-set fields at publish, so what was reviewed is what is pushed.
+
+**Approval statuses beyond pending/approved/denied:** `sent_outside` (the
+draft went, from the mailbox), `answered_elsewhere` (the thread was answered
+another way and OUR draft is still sitting there), `draft_discarded` (deleted
+unsent — frees the thread in `replies.owner`; the other two do not).
 
 ---
 
@@ -206,11 +224,47 @@ the WEBSITE and the only identity source — landing pages
 7. **Refusals are flashes with reasons where the button was** — never raw
    JSON, never a dead 401 (chat links redirect to sign-in).
 8. **Every fact stated once**; counts come from the lists actually rendered.
+   Stronger form paid for in 2026-08-27/28: a count and the list it counts
+   read ONE predicate (`approvals.decided_in_console`, `systems.
+   attention_unseen`, `_board_counts`), because a badge counting what the
+   page does not show is a number nobody can act on.
+9. **One fact, one home; every surface is a view over it.** An artifact's
+   identity lived only in its pending approval, so it was a complete object
+   only while a decision was open on it — the review page went blank and an
+   edit made there was discarded in silence. Where a thing IS decides where
+   it is stored; the approval, the run and the queue all read it.
+10. **An acknowledgement covers the item AS IT WAS.** "Handled", "seen",
+   "cleared" are fingerprinted against what the line actually said, so a
+   changed item returns and an unchanged one stays quiet (`digest_acks`,
+   `systems.attention_fingerprint`). Seen never means "stop telling me" —
+   permanently silencing a live problem is how a real one is missed.
+11. **A check run against emptiness checks nothing.** `.grp` was undefined
+   for weeks while the class-coverage suite walked a Plan tab with no
+   keywords in it, and `test_console_frame` once passed against a database
+   with no systems. A suite must seed the state whose markup it claims to
+   cover — `data_only_classes_are_covered` fails while that seed is absent.
+12. **Absence is not an answer.** A Gmail draft that still exists is not a
+   thread nobody answered; a missing draft is not necessarily a send. Ask
+   the source the second question (`sent_in_thread`, `sent_to_since`) rather
+   than reading one silence as a verdict.
 
 ---
 
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-28 — the owner's walkthrough, five defects and their fixes:
+  the artifact became self-describing (`ArtifactBody.meta`) after the blog
+  review page rendered three empty boxes above a perfect preview AND
+  discarded edits made there in silence; `reconcile_drafts` widened twice —
+  first to outbound mail with no Gmail draft behind it, then (the one the
+  owner actually had) to a thread ANSWERED ANOTHER WAY while our draft sat
+  there unsent; the Systems attention card clears when the check is read and
+  returns only on a new reason; every draft and every queued decision gained
+  a real name (`artifact_label`, `approval_title`) instead of
+  `format · timestamp` or the skill name plus eighty bytes of HTML. Also
+  `test_sabotage_anchors`, after a Schedule rewrite left a guard covering
+  nothing in a SHIPPED commit — it now fails the build the moment an anchor
+  stops matching exactly once.
 - 2026-08-27 — the daily briefing became a briefing: ranked by client,
   bounded, and clearable from the email (handled / irrelevant / updated,
   signed links; `db.DigestAck` fingerprints what the line said so a changed

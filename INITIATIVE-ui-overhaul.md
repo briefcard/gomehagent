@@ -17,6 +17,58 @@ arithmetic visibly · refusals are flashes, never raw JSON · every fact once.
 
 ---
 
+## §0 Where this stands (updated 2026-08-28)
+
+Production is on the last commit listed below; every one of them deployed and
+was verified at `/health` before the next began. Read §4's step entries for
+the detail — this is the map.
+
+**Step 4, tab by tab (spec §§4–11).** Data layer · Connections · Review ·
+Systems + workflow · Plan are SHIPPED. Remaining: **Brand (§6)** — the
+identity editor and multi-domain source list already landed, so what is left
+is the voice deriver behind `_run_bg`, hard-rule REMOVAL (the ban list can be
+added to and never subtracted from), and theme-error containment — then
+**Assurance (§9)** and **Diagnostics (§10)**. Then step 5 (client product),
+step 6 (does Knowledge's Overview fold in), step 7 (completeness audit).
+
+| commit | what |
+|---|---|
+| `ca6556e` | Multi-domain brand sources — one website, N facts-only landing pages |
+| `c55795b` | The send is the approval; drafted replies leave Review |
+| `0634bda` | The briefing: ranked by client, bounded, clearable |
+| `1d5c563` | Systems board compact + workflow rail |
+| `7d9fe94` | `.grp`, and the coverage blind spot that hid it |
+| `3b4afa3` | Plan as strategy (Strategy · Schedule rooms) |
+| `abf5ec9` | The Schedule runs both ways — planned vs what happened |
+| `b7cd6b4` | The artifact is self-describing; `test_sabotage_anchors` |
+| `190a581` | Answered mail stops asking; drafts get real names |
+| `a3ad78d` | A live draft is not an unanswered thread |
+| `99a8ddd` | The queues name the thing; `reconcile_mail` on demand |
+
+**THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
+in this file** — five defects found by using the app, all fixed, all in the
+OUT OF BAND entries at the end of §4. One of them corrected a diagnosis of
+mine that was wrong (see A LIVE DRAFT IS NOT AN UNANSWERED ONE); the owner
+pushing back on it is what found the real bug.
+
+**Standing debts, none of them silent:**
+- Three sabotage entries are STALE and carried in `test_sabotage_anchors`'s
+  dated `KNOWN_STALE` set: `drafted_is_not_published`,
+  `withhold_false_or_forbidden`, `data_layer_says_what_to_fix`. That list may
+  shrink and must never grow.
+- The briefing's ack links are mutating GETs (Undo is the mitigation);
+  POST-ification belongs with the CSRF work in §6.
+- Everything still executes in the browser request — the owner has named this
+  and parked it behind the UI work, alongside a general optimisation of how
+  systems execute. `ArtifactBody.meta` was deliberately done FIRST because a
+  worker reading a self-contained artifact is a change of caller, not of data
+  model.
+- No console surface reviews or reverses digest acks in bulk.
+- `_pending_for_system` and the digest once disagreed with the queue about
+  the word "waiting"; both now read `decided_in_console`.
+
+---
+
 ## §1 The fluidity contract
 
 Six rules that keep the app feeling whole while it changes underneath:
@@ -41,7 +93,12 @@ Six rules that keep the app feeling whole while it changes underneath:
 
 ---
 
-## §2 Facts (as of `ed54385`, 2026-08-27 — re-verify anchors before relying)
+## §2 Facts (captured at `ed54385`, 2026-08-27 — MUCH OF THIS IS NOW HISTORY)
+
+**Read this section as the STARTING STATE, not the current one.** Most of the
+defects catalogued below have been fixed by the steps in §4 and the line
+numbers have all moved; `test_sabotage_anchors` is what keeps the guards
+honest about where code actually is. Re-verify before relying on any anchor.
 
 - `app/admin_ui.py` (6,163 lines) renders the whole console: `_CSS` at :85,
   `_shell` at :552, `_TABS` at :393. Two `<script>` tags total. No build step.
@@ -835,6 +892,15 @@ are carried in a dated `KNOWN_STALE` set that MAY SHRINK AND MUST NEVER GROW
 instead of only when somebody remembers to sweep. Verified by breaking an
 anchor, confirming the suite named the right guard, and restoring the file
 byte-identically.
+
+**THE OWNER'S WALKTHROUGH, 2026-08-28 — five defects found by USING the
+app.** In the order they were found: the blog review page's empty identity
+fields (→ THE ARTIFACT IS SELF-DESCRIBING); mail already handled still
+sitting in the queue (→ ANSWERED MAIL STOPS ASKING, then corrected by A LIVE
+DRAFT IS NOT AN UNANSWERED ONE, which is the one that actually mattered); the
+attention card that never cleared (→ ATTENTION CLEARS WHEN IT IS READ);
+drafts named `format · timestamp` (→ DRAFTS GET REAL NAMES, extended to the
+queues by THE QUEUES NAME THE THING). The entries follow, newest first.
 
 **OUT OF BAND — THE QUEUES NAME THE THING, AND A MANUAL RECONCILE (owner,
 2026-08-28).** *"Make sure you've changed the naming mechanisms for the
