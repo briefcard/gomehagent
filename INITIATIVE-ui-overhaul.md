@@ -836,6 +836,34 @@ instead of only when somebody remembers to sweep. Verified by breaking an
 anchor, confirming the suite named the right guard, and restoring the file
 byte-identically.
 
+**OUT OF BAND — A LIVE DRAFT IS NOT AN UNANSWERED ONE (owner, 2026-08-28,
+correcting my diagnosis).** I told the owner the mail they were looking at
+was "draftless"; they answered *"but I have been seeing drafts to these
+emails inside of gmail. Are the inbox triage and the lead responder
+conflicting?"* — and they were right to push. TWO ANSWERS. (1) NO CONFLICT,
+structurally: `worker.py:356` checks `replies.may_reply(... "inbox_triage")`
+BEFORE drafting, and `lead_responder`/`service_desk` never draft at all —
+`_rehome` only re-attributes the run's LEDGER entry to them when they are
+installed and on, so a correction teaches that kind of mail specifically.
+One drafter, one draft per thread. (2) MY DIAGNOSIS WAS WRONG about which
+rows: triage-drafted replies DO carry a `draft_id` (`worker.py:389`), so the
+draftless fix — real, and worth having — was about RFQs and invoice
+reminders, not about what the owner was seeing. THE ACTUAL DEFECT:
+`reconcile_drafts` stopped at `read_draft`, and a draft that still EXISTS is
+not the same as a thread nobody has answered. Reply from a phone, or compose
+fresh instead of sending the draft, and the draft sits in the mailbox while
+the approval asks to be decided for ever — which is exactly "a list of
+emails I've already handled", with the drafts piling up in Gmail beside it.
+Now: when the draft is still live, the THREAD is checked too, and a message
+sent AFTER the approval was raised (`internalDate`, not the Date header a
+client writes) closes it as `answered_elsewhere` — a status distinct from
+`sent_outside` because the draft did NOT go and is still there. The delta is
+recorded against what the owner ACTUALLY wrote, and the run names the drafts
+left behind. It DELETES NOTHING: closing an approval is this function's job,
+clearing somebody's mailbox is not. `replies.owner` deliberately does not
+free an `answered_elsewhere` thread — somebody did write to that customer.
+Guard (caught): `a_live_draft_is_not_an_unanswered_one`.
+
 **OUT OF BAND — ANSWERED MAIL STOPS ASKING, AND DRAFTS GET REAL NAMES
 (owner walkthrough, 2026-08-28).** *"There was no feedback for communication
 with clients that lets a system know that they have already been answered …

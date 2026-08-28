@@ -1868,6 +1868,19 @@ SABOTAGES = [
                "— on the page whose whole job is deciding between them",
     },
     {
+        "name": "a_live_draft_is_not_an_unanswered_one",
+        "file": "app/approvals.py",
+        "find": "                if answered and float(answered.get(\"at\") or 0) > raised:",
+        "replace": "                if False:  # SABOTAGE",
+        "suites": ["test_draft_sync.py"],
+        "why": "a reply answered from a phone — or composed fresh instead of "
+               "sending the draft — leaves the draft sitting in the mailbox, "
+               "and the approval asks to be decided for ever. The console "
+               "shows a queue of mail already handled, the drafts pile up in "
+               "Gmail, and what the owner actually wrote is never learned "
+               "from. This is the exact state the owner found",
+    },
+    {
         "name": "answered_mail_stops_asking",
         "file": "app/approvals.py",
         "find": "                        sent = gc.sent_to_since(alias, p.get(\"to\") or \"\",\n"

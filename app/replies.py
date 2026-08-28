@@ -99,6 +99,9 @@ def owner(tenant: str, thread_id: str) -> dict:
         for r in aq.all():
             if (r.payload or {}).get("thread_id") != thread_id:
                 continue
+            # NOTE `answered_elsewhere` is deliberately absent: somebody DID
+            # write to that customer, so the thread is owned and a second
+            # system must not answer it.
             if r.status in ("denied", "expired", "draft_discarded"):
                 # Decided against, or the draft was deleted without being
                 # sent — either way nobody wrote to this customer, so the

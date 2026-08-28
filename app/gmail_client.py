@@ -446,10 +446,17 @@ def sent_in_thread(alias: str, thread_id: str) -> dict:
             continue
         headers = {h["name"].lower(): h["value"]
                    for h in (msg.get("payload") or {}).get("headers", [])}
+        # `internalDate` (epoch ms) rather than the Date header: a caller
+        # needs to know whether this went out BEFORE or AFTER a given moment,
+        # and the header is whatever the sending client wrote in it.
+        try:
+            at = int(msg.get("internalDate") or 0) / 1000.0
+        except (TypeError, ValueError):
+            at = 0.0
         return {"message_id": msg.get("id", ""),
                 "thread_id": thread_id,
                 "subject": headers.get("subject", ""),
-                "date": headers.get("date", ""),
+                "date": headers.get("date", ""), "at": at,
                 "body": _extract_text(msg.get("payload") or {})}
     return {}
 

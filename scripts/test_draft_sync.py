@@ -284,6 +284,53 @@ def main() -> int:
     ck("  and the unanswered one stays", "Invoice reminder" in fb2,
        "reconcile must close only what was actually dealt with")
 
+    # ---------------------------------------------------------------------
+    # THE DRAFT IS STILL THERE, AND YOU ANSWERED ANYWAY (owner, 2026-08-28:
+    # "I have been seeing drafts to these emails inside of gmail", on a list
+    # of mail already handled). Replying from a phone, or composing fresh
+    # rather than sending the draft, leaves the draft sitting in the mailbox.
+    # Reconcile stopped at `read_draft`, counted the row as still waiting,
+    # and asked again for ever.
+    # ---------------------------------------------------------------------
+    print("\n— you answered another way; the draft is still sitting there —")
+    _DRAFTS["d10"] = {"draft_id": "d10", "body": GEN}
+    ap10 = _queue(GEN, "d10", thread_id="t10")
+    with db.SessionLocal() as s:
+        raised = db.as_utc(s.get(db.Approval, ap10).created_at).timestamp()
+    # A message sent on that thread BEFORE the approval was raised is the
+    # earlier half of the conversation, not an answer to it.
+    _SENT_ON_THREAD["t10"] = {"message_id": "old", "at": raised - 600,
+                              "body": "an earlier message on this thread"}
+    approvals.reconcile_drafts()
+    with db.SessionLocal() as s:
+        ck("an OLDER message on the thread is not an answer",
+           s.get(db.Approval, ap10).status == "pending",
+           "or every thread with any history would close itself")
+    TYPED = "Hi Marisa — answered from my phone, shipping Thursday."
+    _SENT_ON_THREAD["t10"] = {"message_id": "m10", "at": raised + 60,
+                              "body": TYPED}
+    _sent_drafts.clear(); _sent_fresh.clear()
+    res10 = approvals.reconcile_drafts()
+    with db.SessionLocal() as s:
+        row10 = s.get(db.Approval, ap10)
+        ck("answering another way closes the approval",
+           row10.status == "answered_elsewhere", row10.status)
+        ck("  and it is NOT filed as 'the draft was sent'",
+           row10.status != "sent_outside",
+           "the draft is still in the mailbox; saying it went would be wrong")
+        ck("  the delta is against what you ACTUALLY wrote",
+           (row10.payload or {}).get("edit_sample", "").find("phone") >= 0
+           or (row10.payload or {})["edit"]["as_is"] is False,
+           str((row10.payload or {}).get("edit")))
+    ck("the run names the drafts left behind",
+       res10["answered_elsewhere"] >= 1
+       and any("order" in x for x in res10["drafts_left_in_the_mailbox"]),
+       str(res10["drafts_left_in_the_mailbox"]))
+    ck("  and it deletes nothing", "d10" in _DRAFTS,
+       "closing an approval is this function's job; clearing somebody's "
+       "mailbox is not")
+    ck("  and still sends nothing", not _sent_drafts and not _sent_fresh)
+
     print("\n— asked of the MAILBOX, not of the console —")
     src = inspect.getsource(approvals.reconcile_drafts)
     ck("a draftless reply is matched on its thread", "sent_in_thread" in src)

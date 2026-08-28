@@ -332,6 +332,12 @@ def reconcile_drafts() -> dict:
     from . import edits, gmail_client as gc
 
     closed, discarded, kept, skipped = 0, 0, 0, 0
+    #: Answered another way while our draft sat there — counted apart from
+    #: `closed`, because the draft is still in the mailbox and the owner may
+    #: want to clear it. NOTHING here deletes it: this function only ever
+    #: closes approvals, and removing somebody's mail is not its decision.
+    answered_n = 0
+    stale_drafts: list[str] = []
     #: (approval_id, drafted body, sent body) — recorded AFTER this session
     #: commits, because `edits.record` opens its own and writes the same rows.
     learn: list[tuple[str, str, str]] = []
@@ -383,6 +389,29 @@ def reconcile_drafts() -> dict:
                 skipped += 1
                 continue
             if live:
+                # THE DRAFT STILL EXISTS — WHICH IS NOT THE SAME AS UNANSWERED
+                # (owner, 2026-08-28: "I have been seeing drafts to these
+                # emails inside of gmail" on a list of mail already handled).
+                # Answering from a phone, or composing fresh instead of
+                # sending the draft, leaves the draft sitting there: this
+                # stopped at `read_draft`, counted the row as still waiting,
+                # and asked again for ever while the drafts piled up.
+                try:
+                    answered = gc.sent_in_thread(alias, p.get("thread_id") or "")
+                except Exception:                                # noqa: BLE001
+                    kept += 1        # unreadable thread: ask again next tick
+                    continue
+                raised = db.as_utc(ap.created_at).timestamp()
+                if answered and float(answered.get("at") or 0) > raised:
+                    # Sent AFTER this was raised, so it is a reply to the same
+                    # conversation that is not the draft we are holding.
+                    ap.status = "answered_elsewhere"
+                    ap.decided_at = db.utcnow()
+                    answered_n += 1
+                    stale_drafts.append(p.get("subject") or ap.summary or "")
+                    learn.append((ap.id, p.get("body", ""),
+                                  answered.get("body", "")))
+                    continue
                 kept += 1             # still sitting there, still needs a person
                 continue
             try:
@@ -414,6 +443,8 @@ def reconcile_drafts() -> dict:
             measured += 1
 
     return {"closed": closed, "discarded": discarded, "still_waiting": kept,
+            "answered_elsewhere": answered_n,
+            "drafts_left_in_the_mailbox": stale_drafts[:10],
             "not_applicable": skipped, "deltas_recorded": measured,
             "note": "an approval whose draft has gone was dealt with in Gmail; "
                     "leaving it pending is how the queue fills with work "
