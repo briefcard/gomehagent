@@ -1,8 +1,11 @@
 # INITIATIVE — Google Business Profile as a system
 
-Local presence, run the way every other system here is run: derived from what
-the brand has already published, gated by the ban list, **held for review**, and
-pushed only when a person approves it. Written 2026-08-28 after the owner asked
+**Local SEO for venues and local clients**, run the way every other system here
+is run: gated by the ban list, held for review, and pushed only when a person
+approves it. Owner, 2026-08-29: *"I want GBP to be native so that we can
+optimize SEO and listings for local venues / clients."* That is the frame — the
+LISTING is the ranking surface and the primary work; posts are one producer on
+top of it, not the point. Written 2026-08-28 after the owner asked
 whether Claude has a GMB skill to automate this. It does not — nothing in the
 skill set, no connector on any MCP server, no scaffolding in this repo — so
 this is the plan to build it here.
@@ -22,6 +25,7 @@ Nothing is built. The critical path is not engineering:
 |---|---|
 | Google API access | **NOT APPLIED FOR — do this first, it is a queue** |
 | `app/gbp.py` provider adapter | not written |
+| `gbp_listing_audit` skill (the SEO half — build first) | not written |
 | `gbp_post` skill in `app/skill_pack.py` | not written |
 | `gbp_post` system in `systems.SPECS` | not declared |
 | `gbp` capability + connection | not wired |
@@ -145,6 +149,55 @@ is written — it is the skill that already holds its output, writes its own
 
 ---
 
+## §4b THE LISTING IS THE RANKING SURFACE (owner, 2026-08-29)
+
+*"I want GBP to be native so that we can optimize SEO and listings for local
+venues / clients."* This section did not exist in the first draft, which
+treated GBP as a posting pipe. That was the wrong centre of gravity: **posts
+are a freshness signal; the LISTING is what ranks.** In local search the
+fields that move the map pack are the primary category, the secondary
+categories, the services/products list, the business description, the
+attributes, the hours (including special hours), the photos, and NAP
+consistency — none of which is a post.
+
+So the system has **two producers of work, and the listing one comes first**:
+
+**(a) LISTING OPTIMISATION — the SEO half.** A recurring audit that reads the
+live listing through Business Information v1 and proposes concrete field
+changes, each held for review like any other artifact:
+- **Primary category** — the single highest-leverage field on a listing, and
+  the one clients most often have wrong. Proposed against what the business
+  actually is, evidenced from the website and the knowledge base.
+- **Secondary categories, services, products** — the long tail. A venue that
+  lists "event venue" and nothing else is invisible for "wedding venue",
+  "corporate event space", "photo studio rental".
+- **The business description** — 750 characters, written in the brand voice,
+  through the same ban list and validator as every other draft.
+- **Attributes and hours**, including special hours, because a wrong holiday
+  hour is a lost booking and a bad review in the same afternoon.
+- **Photos** — coverage by type (exterior, interior, team, product), drawn
+  from the approved asset library that already exists (`kb.assets`, rights-
+  gated), never from anywhere else.
+- **Gaps stated as gaps** — a missing field is reported as missing, with the
+  control to fill it, not silently skipped.
+
+**(b) POSTS — the freshness half.** §5 below.
+
+**WHY THIS ORDERING MATTERS FOR THE BUILD:** step 1 already mirrors the
+listing read-only, so listing optimisation is *the natural first thing that
+produces value* and needs no write access to Google at all until the owner
+approves a change. A client can be audited and given a prioritised list of
+listing fixes before the posting path exists. That is a sellable deliverable
+on its own, and it is the half that actually moves local rank.
+
+**A SECOND SKILL, THEREFORE.** `app/skill_pack.py` gains two blocks, not one:
+`gbp_listing_audit` (`produces="report"`, `writes=False`, tier 1 — modelled on
+**`catalog_compliance`**, which is exactly this shape: read a live surface,
+check it against what this brand may say, report violations grouped by cause)
+and `gbp_post` (§4). The audit skill is the one to build first.
+
+---
+
 ## §5 What a post can be — derived AND native
 
 **CORRECTED 2026-08-29 after the owner pushed back.** The first version of this
@@ -211,11 +264,16 @@ lands. The existing per-brand rules bind harder here than anywhere else.
   hand-decorated, artisanal, craftsmanship. There is no room in 1,500
   characters for the qualifying sentence that makes those safe elsewhere, so
   `constitutive=("banned_claims",)` is not optional: no ban list, no post.
-- **Eien Health** — the mandatory FDA/DSHEA disclaimer and the † convention
-  have **nowhere to live** in a GBP post, and AI-generated imagery must be
-  labelled next to the image. This needs an owner decision before Eien is
-  enabled: either the system is off for Eien, or Eien posts only
-  non-structure/function content. **Do not default it on.**
+- **Eien Health — ANSWERED by the owner 2026-08-29, and it is simpler than the
+  question.** *"We dont have to have a disclaimer on every post, should on the
+  website and we can just ensure no claims are made on posts too much."* So:
+  **Eien is IN.** The FDA/DSHEA disclaimer belongs on the WEBSITE, where the
+  claims are made; a post that makes no structure/function claim needs no
+  disclaimer, because there is nothing to disclaim. The rule the generator is
+  held to is therefore *no health claim in a post*, enforced the way every
+  other content rule here is — the ban list plus the validator — rather than a
+  block of legal text stapled to 1,500 characters. AI-generated imagery still
+  carries its label; that is about the image, not the copy.
 - **Any local client** — a post that contradicts the listing's own hours,
   address or attributes is worse than no post. The read-only mirror in step 1
   exists partly so the drafter can be held to the listing's own facts.
@@ -232,12 +290,16 @@ the next begins.
 Cloud project + application from an owner/manager email, per §2. Costs an
 hour; buys weeks. No code.
 
-**Step 1 — read-only. Connect and MIRROR.**
+**Step 1 — read-only. Connect, MIRROR, and AUDIT.**
 `app/gbp.py` with auth + Business Information v1 reads only. Locations, hours,
 attributes, review count land in the data layer. Connections gains a `gbp`
 provider with a real Test button; the capability appears; Diagnostics sees a
-platform that answers. **Nothing writes.** Gate: the credential is proven
-against a live listing before a single write path exists.
+platform that answers. **Nothing writes.** **And `gbp_listing_audit` lands here** — it needs
+nothing but reads, and it is the half that moves local rank, so the first
+deliverable is a prioritised list of listing fixes for a real client rather
+than a connection nobody can use yet. Gate: the credential is proven against a
+live listing before a single write path exists, and the audit produces a
+reviewable report for one real venue.
 Guards: `gbp_reads_do_not_write`, `gbp_capability_gates_the_system`.
 
 **Step 2 — the deriver and the skill. Drafts only, no push.**
@@ -288,9 +350,13 @@ being answered (§3), not a thing this system refuses to do.
 
 ## §9 Open questions for the owner
 
-1. **Eien** — off entirely, or restricted to non-claim content? (§6)
-2. Which listings do we actually control today, and are they verified and
-   60+ days old? That decides who can be in step 1.
+1. ~~**Eien** — off entirely, or restricted to non-claim content?~~
+   **ANSWERED 2026-08-29: Eien is IN.** The disclaimer belongs on the website;
+   posts simply make no claims. See §6.
+2. **STILL OPEN, and it is the only thing blocking step 1:** which listings do
+   we actually control today, and are they verified and 60+ days old? That
+   decides who can be audited first — and the audit is the half that moves
+   local rank, so it decides where the first value lands.
 3. ~~Is the weekly filler post wanted at all?~~ **ANSWERED by §5's correction:**
    native posts are a first-class producer, not filler. What is still open is
    whether offers and events should reach `auto` on the ladder once the
