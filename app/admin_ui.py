@@ -2343,6 +2343,8 @@ def _waiting_section(key: str, row) -> str:
     if not pend:
         body = '<p class="mut">Nothing is waiting on you.</p>'
     else:
+        _wait_arts = _artifacts_for(pend[:15])
+
         def _row(a) -> str:
             pl = a.payload or {}
             prov = (pl.get("esp_push") or {}).get("provider", "")
@@ -2375,7 +2377,7 @@ def _waiting_section(key: str, row) -> str:
                   <button class="{cls}">{label}</button>
                 </form>"""
             return f"""
-            <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
+            <div class="msg"><div><b>{approval_title(a, _wait_arts)}</b></div>
               {_ship_preview(pl)}
               <div class="row">
                 {_btn("approved", says)}
@@ -4454,6 +4456,47 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("catalogue", "Store sync"))
 
 
+def _artifacts_for(rows: list) -> dict:
+    """The artifacts behind a page of approvals, in ONE query.
+
+    A queue of fifteen rows asking per row is the N+1 the board already had
+    to be rescued from; the ids are all in the payloads, so ask once.
+    """
+    ids = [str((getattr(a, "payload", None) or {}).get("output_id") or "")
+           for a in rows]
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    try:
+        with db.SessionLocal() as s:
+            arts = (s.query(db.ArtifactBody)
+                    .filter(db.ArtifactBody.output_id.in_(ids)).all())
+            s.expunge_all()
+    except Exception:                                            # noqa: BLE001
+        return {}
+    return {a.output_id: a for a in arts}
+
+
+def approval_title(a, arts: dict | None = None) -> str:
+    """What a queued decision is CALLED (owner, 2026-08-28: the drafts need
+    real names "both in the Review tab and inside the workflow drafts tab").
+
+    A `skill_output` approval's summary is `"{skill} for {tenant}: {body[:80]}"`
+    — the skill's name and eighty characters of raw body, which for a campaign
+    is the head of its HTML. So the queue whose whole job is choosing between
+    things named several of them almost identically.
+
+    The artifact knows what it is, so ask it, and keep the approval's own
+    summary for everything with no artifact behind it (an RFQ, a theme asset,
+    an SEO update) — those summaries are already written for a person.
+    """
+    oid = str((getattr(a, "payload", None) or {}).get("output_id") or "")
+    art = (arts or {}).get(oid)
+    if art is not None and (getattr(art, "meta", None) or {}):
+        return artifact_label(art)
+    return _esc(getattr(a, "summary", "") or getattr(a, "kind", ""))
+
+
 def artifact_label(art) -> str:
     """A draft's REAL NAME — what it is, who it is for, what it is trying to
     do, and when (owner, 2026-08-28: "we need it to give them real names …
@@ -5427,6 +5470,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # go out — dropping those would silently strand them.
     ship_rows = [a for a in ship_rows if _apm.decided_in_console(a)]
 
+    _ship_arts: dict = {}
+
     def _ship_row(a) -> str:
         pl = a.payload or {}
         review = ""
@@ -5477,7 +5522,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                     f'<button{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}>'
                     f'{label}</button></form>')
         return f"""
-        <div class="msg"><div><b>{_esc(a.summary or a.kind)}</b></div>
+        <div class="msg"><div><b>{approval_title(a, _ship_arts)}</b></div>
           {_ship_preview(pl)}
           <div class="row">
             {_btn("approved", says)}
@@ -5546,6 +5591,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     _pages_s = max(1, -(-len(ship_rows) // SHIP_PAGE))
     _page = max(1, min(page_req, _pages_s))
     _ship_shown = ship_rows[(_page - 1) * SHIP_PAGE:_page * SHIP_PAGE]
+    # One query for the page, so every row can be named by the thing it is.
+    _ship_arts = _artifacts_for(_ship_shown)
     _ship_pager = _pager(
         f"/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}"
         + (f"&amp;key={_esc(key)}" if key else "") + _ship_keep,

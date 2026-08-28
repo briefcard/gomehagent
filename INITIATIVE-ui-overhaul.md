@@ -836,6 +836,30 @@ instead of only when somebody remembers to sweep. Verified by breaking an
 anchor, confirming the suite named the right guard, and restoring the file
 byte-identically.
 
+**OUT OF BAND — THE QUEUES NAME THE THING, AND A MANUAL RECONCILE (owner,
+2026-08-28).** *"Make sure you've changed the naming mechanisms for the
+drafts both in the Review tab and inside the workflow drafts tab."* The
+Drafts index and the In-progress strip already used `artifact_label`; the
+QUEUE ROWS did not — they render `Approval.summary`, and a `skill_output`
+summary is `"{skill} for {tenant}: {body[:80]}"`, which for a campaign is
+the head of its HTML. So the page whose entire job is choosing between
+things titled several of them almost identically. NEW `approval_title`
+names a row by its artifact when there is one, keeping the approval's own
+summary for everything with none (an RFQ, a theme asset, an SEO update —
+those are already written for a person), fed by NEW `_artifacts_for`: ONE
+query per page, not one per row. Used by Review's ship queue and the
+workflow view's Waiting queue. Guard (caught): `the_queue_names_the_thing`.
+ALSO: `reconcile_mail` registered in `ops_jobs.JOBS`, so the mailbox check
+can be run on demand (`/admin/run/reconcile_mail`) instead of only on the
+worker's 20-minute tick — the owner asked whether existing drafts update
+themselves (they do, the query is over ALL pending rows, no backfill) or
+whether a check can be run (it could not be). Deliberately NOT a console
+button: it would be another action executing in the browser request, which
+is the thing the owner has already parked for the worker migration. AND
+`/admin/run/{job}` stopped claiming "report will be emailed" — true for
+some jobs, not for this one; it names `/admin/status`, which holds every
+job's result.
+
 **OUT OF BAND — A LIVE DRAFT IS NOT AN UNANSWERED ONE (owner, 2026-08-28,
 correcting my diagnosis).** I told the owner the mail they were looking at
 was "draftless"; they answered *"but I have been seeing drafts to these

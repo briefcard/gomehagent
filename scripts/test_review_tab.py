@@ -285,6 +285,53 @@ def main():
     ck("the purge dry-run lands back as a flash, not JSON",
        r.status_code == 303 and "dry run" in loc.replace("%20", " "), loc[:120])
 
+    # ---------------------------------------------------------------------
+    # A QUEUED DECISION IS CALLED WHAT IT IS (owner, 2026-08-28: real names
+    # "both in the Review tab and inside the workflow drafts tab").
+    #
+    # A skill_output approval's summary is "{skill} for {tenant}: {body[:80]}"
+    # — for a campaign that is the head of its HTML — so a queue whose whole
+    # job is choosing between things named several of them almost the same.
+    # ---------------------------------------------------------------------
+    print("\n— the queue names the thing, not the skill and 80 bytes of body —")
+    with db.SessionLocal() as s:
+        out = db.Output(tenant="baci", system_key="campaign_email",
+                        format="campaign_email", status="draft")
+        s.add(out)
+        s.flush()
+        oid_c = out.id
+        s.add(db.ArtifactBody(
+            tenant="baci", output_id=oid_c, system_key="campaign_email",
+            format="campaign_email", body="<p>hi</p>", draft_body="<p>hi</p>",
+            meta={"subject": "Your table, ready for August",
+                  "segment": "lapsed_buyers", "intent": "offer"},
+            bytes=9))
+        s.commit()
+    ap_c = approvals.request_approval(
+        "skill_output", "Campaign email for baci: <!doctype html><html><head>",
+        {"tenant": "baci", "skill": "campaign_email", "output_id": oid_c},
+        notify=False)
+    with db.SessionLocal() as s:
+        s.get(db.Approval, ap_c).tenant = "baci"
+        s.commit()
+    page_n = admin_ui.render_content("s3cret", tenant="baci", sub="ship")
+    ck("the row is named by the email's SUBJECT",
+       "Your table, ready for August" in page_n,
+       "it was the skill name and the head of the HTML")
+    ck("  with who it is for and what it is for",
+       "to lapsed_buyers" in page_n and "offer" in page_n)
+    ck("  and the raw body head is gone", "&lt;!doctype" not in page_n)
+
+    with db.SessionLocal() as s:
+        row_c = s.get(db.Approval, ap_c)
+        arts = admin_ui._artifacts_for([row_c])
+        ck("an approval with NO artifact keeps its own summary",
+           admin_ui.approval_title(
+               type("A", (), {"payload": {}, "summary": "[RFQ] quote request",
+                              "kind": "send_email"})(), arts)
+           == "[RFQ] quote request",
+           "those summaries are already written for a person")
+
     print()
     if _fail:
         print(f"FAILED: {len(_fail)} — " + "; ".join(_fail[:8]))

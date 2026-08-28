@@ -1001,7 +1001,24 @@ def _skill_job(fn_name: str):
     return run
 
 
+def reconcile_mail() -> dict:
+    """Ask the mailbox which queued mail has already been dealt with.
+
+    The worker runs this on a 20-minute tick, which is right for the steady
+    state and useless the moment somebody wants to KNOW — after a deploy, or
+    after clearing a backlog by hand (owner, 2026-08-28: "would the drafts
+    that were already there automatically update, or do we need to run a
+    check?"). They do update themselves; this is how you see it happen now.
+
+    Read-only against Gmail and it only ever CLOSES approvals — it sends
+    nothing and deletes nothing, so running it twice costs two reads.
+    """
+    from . import approvals
+    return approvals.reconcile_drafts()
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
+        "reconcile_mail": reconcile_mail,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet, "organize": organize,
         "daily_review": daily_review, "sync_catalog": sync_catalog,

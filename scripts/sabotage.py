@@ -1855,6 +1855,22 @@ SABOTAGES = [
                "it ever put in front of the owner",
     },
     {
+        "name": "the_queue_names_the_thing",
+        "file": "app/admin_ui.py",
+        "find": "    art = (arts or {}).get(oid)\n"
+                "    if art is not None and (getattr(art, \"meta\", None) or {}):\n"
+                "        return artifact_label(art)",
+        "replace": "    art = (arts or {}).get(oid)  # SABOTAGE\n"
+                   "    if False:\n"
+                   "        return artifact_label(art)",
+        "suites": ["test_review_tab.py"],
+        "why": "every queued decision goes back to being titled by its "
+               "approval summary — for a skill_output that is the skill's "
+               "name and eighty characters of raw body, so a queue of "
+               "campaigns reads as several near-identical rows of HTML head, "
+               "on the page whose entire job is choosing between them",
+    },
+    {
         "name": "a_draft_has_a_real_name",
         "file": "app/admin_ui.py",
         "find": "    if fmt == \"campaign_email\":\n"

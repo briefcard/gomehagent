@@ -1164,7 +1164,11 @@ def run_job(job: str, key: str = Depends(admin_key)) -> dict:
             _job_status[job] = f"FAILED: {exc.__class__.__name__}: {str(exc)[:300]}"
 
     threading.Thread(target=_run, daemon=True).start()
-    return {"status": f"{job} started — report will be emailed"}
+    # Where the result ACTUALLY lands. Some jobs mail a report and some do
+    # not; `/admin/status` holds every one of them, so naming it is true for
+    # all and "will be emailed" was true for only some.
+    return {"status": f"{job} started",
+            "result_at": "/admin/status?key=…"}
 
 
 @app.get("/admin/status")
