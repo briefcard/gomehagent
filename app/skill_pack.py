@@ -3446,10 +3446,17 @@ def _run_blog_article(ctx: Context) -> dict:
 
     title = keyword[:1].upper() + keyword[1:]
     faqs = [{"question": q, "answer": ""} for q in questions]
+    # WHAT THIS ARTICLE IS, on the artifact itself. These three were computed
+    # here, handed to `_propose`, and then existed only inside the approval
+    # payload — so the review page went blank the moment that approval stopped
+    # being pending, and an edit made in that state was silently dropped.
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",
              fmt="cms_article",
-             meta={"keyword": keyword, "role": role, "cluster": cluster_key,
+             meta={"title": title,
+                   "seo_title": _seo_title(keyword, title),
+                   "seo_description": _meta_description(keyword, body),
+                   "keyword": keyword, "role": role, "cluster": cluster_key,
                    "questions": questions, "internal_links": len(links),
                    "angle_why": angle_why})
 

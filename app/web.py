@@ -2811,6 +2811,15 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
         row = s.get(db.ArtifactBody, art.id)
         row.body = body
         row.bytes = len(body)
+        # IDENTITY SAVES WHETHER OR NOT AN APPROVAL IS PENDING. It used to be
+        # written only into the approval payload, under `if ap is not None` —
+        # so typing a title and a meta description on an artifact with no
+        # pending approval, and pressing a button that says "the push uses
+        # exactly this", threw all three away without a word.
+        row.meta = {**(row.meta or {}),
+                    "title": edited["title"],
+                    "seo_title": edited["seo_title"],
+                    "seo_description": edited["seo_description"]}
         # Save-for-later HOLDS; a plain save RELEASES. The state is what the
         # Review tab's In-progress strip indexes — held work is work someone
         # intends to come back to, and a finished save is the coming-back.

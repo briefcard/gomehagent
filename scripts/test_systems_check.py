@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import db, systems, tenants  # noqa: E402
+from app import admin_ui, db, systems, tenants  # noqa: E402
 from app.web import app  # noqa: E402
 
 KEY = "s3cret"
@@ -145,6 +145,14 @@ def main() -> int:
        systems.classify_reason("a thing nobody has seen before")["kind"] == "other")
 
     print("\n— the page —")
+    # BEFORE looking at the check: the card is up. Fetched first because
+    # rendering the check is now what marks it seen (2026-08-28).
+    pre = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    ck("the Systems tab raises a new issue",
+       "Something needs attention" in pre and "view=systems" in pre)
+    ck("…and the tab badge counts it",
+       admin_ui._badges("baci")["systems"] > 0)
+
     h = client.get(f"/admin/ui?tab=diagnostics&view=systems&tenant=baci&key={KEY}").text
     ck("Systems check renders", "Systems check" in h and "Needs attention" in h)
     ck("…the reason is on the page", "no_ban_list" in h)
@@ -158,9 +166,39 @@ def main() -> int:
     sysview = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
     ck("the Systems tab no longer carries the flat refused list",
        "What the systems refused on" not in sysview)
-    ck("…but still says something needs attention, and where to look",
-       "Something needs attention" in sysview
-       and "view=systems" in sysview)
+    # 2026-08-28, owner: "should only show up if a NEW issue has appeared.
+    # Once I click check systems it should disappear until there's a new
+    # issue. Then the notification icon should disappear." This assertion
+    # used to require the card to stand for ever; it now requires it to go
+    # quiet once the check has been read, and to come back when the set of
+    # reasons changes.
+    ck("having READ the check, the card goes quiet",
+       "Something needs attention" not in sysview,
+       "a card that never clears is a card that stops being read")
+    ck("…and so does the tab badge",
+       admin_ui._badges("baci")["systems"] == 0,
+       "the badge and the card read one predicate")
+
+    run_n = systems.start_run(ce.id, "baci", trigger="test")
+    systems.finish_run(run_n, "blocked",
+                       blocked_on=["a brand new kind of refusal"])
+    back = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    ck("a NEW reason brings it back",
+       "Something needs attention" in back,
+       "acknowledged means 'I have seen these', never 'stop telling me'")
+    ck("…and the badge with it", admin_ui._badges("baci")["systems"] > 0)
+
+    # More of the SAME reason is the same problem continuing, not a new one.
+    seen_again = client.get(
+        f"/admin/ui?tab=diagnostics&view=systems&tenant=baci&key={KEY}").text
+    assert "Systems check" in seen_again
+    run_m = systems.start_run(ce.id, "baci", trigger="test")
+    systems.finish_run(run_m, "blocked",
+                       blocked_on=["a brand new kind of refusal"])
+    quiet = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text
+    ck("the same reason recurring does NOT raise it again",
+       "Something needs attention" not in quiet,
+       "a card reappearing because a count moved is the noise this replaced")
 
     print("\n— the Systems tab: work first, catalogue second —")
     act = client.get(f"/admin/ui?tab=systems&tenant=baci&key={KEY}").text

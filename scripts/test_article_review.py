@@ -124,6 +124,76 @@ def main() -> int:
     ck("and the new title travels with it",
        ((ap.payload or {}).get("fields") or {}).get("title") == "Acrylic jugs, properly")
 
+    # ================= the artifact is self-describing ==================
+    # Owner, 2026-08-28, looking at a blog draft: "the title, SEO title, and
+    # meta description in the edit area are not available in the review
+    # process". They were computed at draft time and then lived ONLY in the
+    # approval payload — which the review page finds by scanning PENDING
+    # approvals — so the moment one stopped being pending the boxes went
+    # blank above a perfect body preview. Worse, saving in that state wrote
+    # the body and dropped all three without a word.
+    # A SECOND article, kept entirely separate: `oid` above is still needed by
+    # the publish section below, and the first version of this reassigned it.
+    print("\n— identity lives on the artifact, not on a pending approval —")
+    r_b = skill.run("blog_article", "acme", keyword="acrylic tumbler",
+                    role="pillar")
+    oid_b = r_b["items"][0]["output_id"]
+    art_b, _k2, ap2 = web._article_bundle(oid_b)
+    ck("the draft carried its identity from birth — BEFORE any edit",
+       (art_b.meta or {}).get("seo_title")
+       and (art_b.meta or {}).get("seo_description")
+       and (art_b.meta or {}).get("title"),
+       str(art_b.meta)[:150])
+    page_i = c.get(f"/admin/article/{oid_b}?key=s3cret").text
+    ck("  and the edit form is PREFILLED with it",
+       f'value="{(art_b.meta or {}).get("seo_title")}"' in page_i,
+       "state before instructions")
+
+    # Decide it, so the "no pending approval" state is real.
+    with db.SessionLocal() as s_:
+        s_.get(db.Approval, ap2.id).status = "approved"
+        s_.commit()
+    art_d, _kw, ap_d = web._article_bundle(oid_b)
+    ck("with no pending approval there is nothing to fall back on",
+       ap_d is None)
+    page_d = c.get(f"/admin/article/{oid_b}?key=s3cret").text
+    ck("  the fields are STILL there",
+       f'value="{(art_d.meta or {}).get("seo_title")}"' in page_d
+       and bool((art_d.meta or {}).get("seo_title")),
+       "this is the state the owner found empty")
+    r_d = c.post("/admin/article_save",
+                 data={"key": "s3cret", "output_id": oid_b, "body": edited,
+                       "title": "Renamed with no approval open",
+                       "seo_title": "SEO title typed later",
+                       "seo_description": "Meta typed later"},
+                 follow_redirects=False)
+    ck("  and an edit made now is not thrown away",
+       "ok=" in r_d.headers.get("location", ""))
+    art_e, _kw, _ = web._article_bundle(oid_b)
+    ck("    the title saved", (art_e.meta or {}).get("title")
+       == "Renamed with no approval open",
+       "it used to be written only under `if ap is not None`")
+    ck("    the SEO title saved",
+       (art_e.meta or {}).get("seo_title") == "SEO title typed later")
+    ck("    the meta description saved",
+       (art_e.meta or {}).get("seo_description") == "Meta typed later")
+
+    print("\n— and THAT is what a push would send —")
+    pushed = approvals._fields_from_artifact(oid_b, {"handle": "acrylic-jug",
+                                                    "title": "stale",
+                                                    "body_html": "<p>stale</p>"})
+    ck("the artifact's text overlays the payload",
+       pushed["title"] == "Renamed with no approval open"
+       and "indoors or out" in pushed["body_html"])
+    ck("  while the machine-set fields survive",
+       pushed["handle"] == "acrylic-jug",
+       "the proposer owns the handle and the structured data; a person owns "
+       "the words")
+    ck("  and an unknown artifact publishes exactly as before",
+       approvals._fields_from_artifact("", {"title": "untouched"})["title"]
+       == "untouched",
+       "every approval queued before this column existed")
+
     print("\n— the ban list binds the owner too —")
     r3 = c.post("/admin/article_save",
                 data={"key": "s3cret", "output_id": oid,
@@ -138,6 +208,16 @@ def main() -> int:
     ck("and nothing changed", "handmade" not in (art2.body or ""))
 
     print("\n— approving closes the loop —")
+    # Make the artifact and the approval payload DIVERGE on purpose, so the
+    # assertion below can tell which one the push actually read. In the wild
+    # they diverge whenever an edit is made with no approval pending.
+    with db.SessionLocal() as s_:
+        _row = (s_.query(db.ArtifactBody)
+                .filter(db.ArtifactBody.output_id == oid).first())
+        _row.body = (_row.body or "") + "<p>DIVERGED-ON-THE-ARTIFACT</p>"
+        _row.meta = {**(_row.meta or {}),
+                     "title": "Title only the artifact has"}
+        s_.commit()
     calls = {}
 
     def _fake_create(profile, blog_id, fields):
@@ -152,6 +232,15 @@ def main() -> int:
         shopify_seo.create_article = _real
     ck("what shipped is the REVIEWED text",
        "indoors or out" in calls["fields"].get("body_html", ""))
+    ck("  and it came from the ARTIFACT, not the payload's copy",
+       "DIVERGED-ON-THE-ARTIFACT" in calls["fields"].get("body_html", "")
+       and calls["fields"].get("title") == "Title only the artifact has",
+       "the two used to be kept in step by hand, and an edit made with no "
+       "approval pending never reached the payload at all")
+    ck("  while the proposer's own fields survived the overlay",
+       bool(calls["fields"].get("handle")),
+       "a person owns the words; the proposer owns the handle and the "
+       "structured data")
     with db.SessionLocal() as s:
         kw = (s.query(db.KeywordTarget)
               .filter_by(tenant="acme", phrase="acrylic jug").first())

@@ -43,7 +43,8 @@ def record(tenant: str, system_key: str, *, situation: str = "",
            blocked_on: list[str] | None = None, destination: str = "",
            body: str = "", conversation_id: str = "", touch_id: str = "",
            run_id: str = "", lookups: list[str] | None = None,
-           shape: list[str] | None = None) -> db.Output:
+           shape: list[str] | None = None,
+           meta: dict | None = None) -> db.Output:
     """File one output and the brief behind it.
 
     A **blocked** run is recorded too, and that is the point of taking
@@ -93,6 +94,9 @@ def record(tenant: str, system_key: str, *, situation: str = "",
                 tenant=tenant, output_id=row.id, run_id=run_id,
                 system_key=system_key, format=format,
                 destination=destination, body=body, draft_body=body,
+                # Identity travels WITH the thing, from birth. Kept on the
+                # approval too until every consumer reads it from here.
+                meta=dict(meta or {}),
                 bytes=len(body)))
         s.commit()
         s.refresh(row)

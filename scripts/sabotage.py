@@ -1848,6 +1848,55 @@ SABOTAGES = [
                "it ever put in front of the owner",
     },
     {
+        "name": "attention_clears_when_read",
+        "file": "app/admin_ui.py",
+        "find": "    backlog = systems.attention_unseen(\"\" if every else tenant, 30)",
+        "replace": "    backlog = systems.attention(\"\" if every else tenant, 30)",
+        "suites": ["test_systems_check.py"],
+        "why": "the Systems tab's attention card stands for ever again, "
+               "whether or not the owner has read the check it points at — "
+               "and a card that never clears is a card that stops being "
+               "read, which is the whole reason it was worth raising",
+    },
+    {
+        "name": "attention_returns_for_a_new_reason",
+        "file": "app/systems.py",
+        "find": "    return [] if seen_fp and seen_fp == attention_fingerprint(rows) else rows",
+        "replace": "    return [] if seen_fp else rows  # SABOTAGE",
+        "suites": ["test_systems_check.py"],
+        "why": "acknowledged stops meaning 'I have seen THESE' and starts "
+               "meaning 'stop telling me'. A brand-new kind of refusal — a "
+               "connection that just died, a gate nobody has hit before — "
+               "never raises the card again, because one glance months ago "
+               "silenced every future issue",
+    },
+    {
+        "name": "the_artifact_is_self_describing",
+        "file": "app/web.py",
+        "find": "        row.meta = {**(row.meta or {}),\n"
+                "                    \"title\": edited[\"title\"],",
+        "replace": "        row.meta = {**(row.meta or {}),  # SABOTAGE\n"
+                   "                    \"title\": (row.meta or {}).get(\"title\", \"\"),",
+        "suites": ["test_article_review.py"],
+        "why": "a title typed on an artifact with no pending approval is "
+               "silently discarded again — the body saves, the identity does "
+               "not, and the button doing it says 'the push uses exactly "
+               "this'. Silent loss under a promise is the worst shape a save "
+               "can have",
+    },
+    {
+        "name": "the_push_uses_what_was_reviewed",
+        "file": "app/approvals.py",
+        "find": "            _fields_from_artifact(p.get(\"output_id\") or \"\", p[\"fields\"]))",
+        "replace": "            p[\"fields\"])  # SABOTAGE",
+        "suites": ["test_article_review.py"],
+        "why": "the CMS write goes back to publishing the approval payload's "
+               "copy of the text rather than the artifact the owner actually "
+               "read and edited — so any edit made while no approval was "
+               "pending reaches the store as the older words, with nothing "
+               "anywhere saying the two had diverged",
+    },
+    {
         "name": "the_plan_shows_what_happened",
         "file": "app/admin_ui.py",
         "find": "    items = [r for r in runs\n"
@@ -1879,8 +1928,13 @@ SABOTAGES = [
     {
         "name": "a_dateless_plan_is_not_scheduled",
         "file": "app/admin_ui.py",
-        "find": "        (dated if systems._valid_date(when) else undated).append(entry)",
-        "replace": "        (dated if True else undated).append(entry)  # SABOTAGE",
+        # Repointed 2026-08-28: the bidirectional Schedule rewrote this
+        # section, so the old anchor stopped existing and the guard went
+        # quiet. The rule it protects moved into `_plan_outcome`.
+        "find": "        if not systems._valid_date(when):\n"
+                "            return ('<span class=\"chip off\">no date</span>',",
+        "replace": "        if False:  # SABOTAGE\n"
+                   "            return ('<span class=\"chip off\">no date</span>',",
         "suites": ["test_plan_tab.py"],
         "why": "a plan whose date is missing or unparseable is listed under "
                "a heading that says it will come due. `plan_complete` will "

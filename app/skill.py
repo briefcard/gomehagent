@@ -432,6 +432,13 @@ class Context:
             # change the layout, and recording the shape of a superseded draft
             # would teach the next send to avoid the wrong thing.
             shape=list((shape() if callable(shape) else shape) or []),
+            # IDENTITY TRAVELS WITH THE ARTIFACT. The same `meta` the item
+            # carries is written onto `ArtifactBody`, so what the thing IS
+            # (its title, its SEO title, its meta description) survives past
+            # the pending approval that used to be its only home — read after
+            # the repair loop, like `shape`, so it describes what finally
+            # passed rather than a superseded draft.
+            meta=(meta() if callable(meta) else meta) or {},
             # WHICH ASSET CARRIED IT. `Output.media_ids` has existed since the
             # table did and nothing ever wrote it, so `ledger.publish` — whose
             # whole second job is crediting the creative that went out — has

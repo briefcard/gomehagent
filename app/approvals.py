@@ -383,6 +383,37 @@ def reconcile_drafts() -> dict:
                     "learns from."}
 
 
+def _fields_from_artifact(output_id: str, payload_fields: dict) -> dict:
+    """The payload's fields, with the artifact's current text laid over them.
+
+    One home for what a person edits (`ArtifactBody.body` + `.meta`), one for
+    what the proposer computed (handle, structured data, published flag), and
+    a single place they are joined — here, at the moment of the write.
+
+    Falls back to the payload untouched when there is no artifact or no meta,
+    so every approval queued before the column existed publishes exactly as
+    it did before.
+    """
+    if not output_id:
+        return payload_fields
+    try:
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id).first())
+            if art is None:
+                return payload_fields
+            body, meta = art.body, dict(art.meta or {})
+    except Exception:                                            # noqa: BLE001
+        return payload_fields
+    out = dict(payload_fields or {})
+    if body and body.strip():
+        out["body_html"] = body
+    for k in ("title", "seo_title", "seo_description"):
+        if str(meta.get(k, "") or "").strip():
+            out[k] = meta[k]
+    return out
+
+
 def _published(res: str) -> bool:
     """Did a backend write actually happen? Every SEO arm below asks this.
 
@@ -487,8 +518,16 @@ def _execute(ap: db.Approval) -> None:
         from . import keywords, seo_guard, sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
+        # THE PUSH USES WHAT WAS REVIEWED. The payload's fields carry the
+        # machine-set half (handle, structured_data, published, tags), and the
+        # ARTIFACT carries what a person can change — its body and its
+        # identity. Overlaying rather than choosing means the edit screen's
+        # promise ("the push uses exactly this") is true by construction
+        # instead of by two copies staying in step, which they did not: an
+        # edit made with no pending approval never reached the payload at all.
         res = sites.backend(profile).create_article(
-            profile, p.get("blog_id") or None, p["fields"])
+            profile, p.get("blog_id") or None,
+            _fields_from_artifact(p.get("output_id") or "", p["fields"]))
         if _published(res):
             # CLOSE THE LOOP, which this arm never did: the 2026-08-26 audit
             # found create_article's return — which BEGINS with the live URL —

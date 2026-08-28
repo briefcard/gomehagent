@@ -792,6 +792,72 @@ Writing-next trim to 6 with a row-expand (the table is `.tblwrap`-scrolled now, 
 overflows the page — the trim is a readability improvement, not a defect,
 and belongs with the owner's walkthrough of what those columns are worth).
 
+**OUT OF BAND — THE ARTIFACT IS SELF-DESCRIBING (owner walkthrough,
+2026-08-28).** *"The blog system generates a draft correctly and puts a
+preview correctly, but the title, SEO title, and meta description in the edit
+area are not available in the review process."* CORRECTED FIRST: the fields
+ARE generated (`skill_pack:3505`) and the push IS right — the executor sends
+`payload["fields"]`, which carries them; WordPress/Shopify were never the
+problem. The bug was that `_article_bundle` finds the approval by scanning
+**pending** approvals only, and the workroom read `fields` from it — so a
+drafted-but-unqueued or already-decided article rendered a perfect body
+preview above three empty boxes. UNDERNEATH IT, SILENT LOSS the owner had not
+yet seen: `article_save` wrote the body to `ArtifactBody` but title/SEO/meta
+into the approval payload under `if ap is not None`, so typing all three with
+no approval pending and pressing a button that says *"the push uses exactly
+this"* discarded them without a word. ROOT CAUSE, and the answer to the
+owner's larger question about data "hopping around": the artifact was a
+complete object only while a decision was pending on it. FIXED by moving
+identity to where the thing lives — NEW `ArtifactBody.meta` carries title /
+seo_title / seo_description from birth (`ctx.emit`'s `meta` now reaches
+`ledger.record`, which was already taking the kwarg and dropping it on the
+floor for artifacts); the workroom reads the artifact FIRST with the payload
+as fallback for pre-column rows; the save writes it unconditionally; and NEW
+`approvals._fields_from_artifact` overlays the artifact's body and identity
+onto the payload's machine-set half (handle, structured_data, published) at
+publish time — so the edit screen's promise is true by construction rather
+than by two copies kept in step by hand. Guards: `the_artifact_is_self_
+describing`, `the_push_uses_what_was_reviewed` — the second MISSED on its
+first run because the suite called the helper directly, so sabotaging the
+real call site changed nothing; it now makes the artifact and the payload
+DIVERGE and asserts which one the write read.
+**ALSO — A GUARD I BROKE AND SHIPPED.** The bidirectional Schedule rewrite
+(`abf5ec9`) replaced the section `a_dateless_plan_is_not_scheduled` was
+pinned to, so that guard has been covering NOTHING since it went live. The
+full suite was green; the anchor sweep is a separate command and I did not
+run it. Repointed at `_plan_outcome`, and NEW SUITE
+`test_sabotage_anchors.py` closes the hole: it patches nothing and runs no
+sub-suites, only asserting that each of the 163 anchors appears EXACTLY ONCE
+in the file it names (once, not at-least-once — an anchor matching twice
+patches whichever copy comes first). The three long-standing stale entries
+are carried in a dated `KNOWN_STALE` set that MAY SHRINK AND MUST NEVER GROW
+(the smoke suite's `ALLOWED_BARE` contract), so they are visible on every run
+instead of only when somebody remembers to sweep. Verified by breaking an
+anchor, confirming the suite named the right guard, and restoring the file
+byte-identically.
+
+**OUT OF BAND — ATTENTION CLEARS WHEN IT IS READ (owner walkthrough,
+2026-08-28).** *"'Something needs attention' should only show up if a new
+issue has appeared. Once I click check systems it should disappear until
+there's a new issue. Then the notification icon should disappear."* Same
+shape as the briefing's ack, and the same rule: seen means "I have seen
+THESE", never "stop telling me". NEW `systems.attention_fingerprint` hashes
+the DISTINCT REASONS and deliberately not their counts — the same gap
+failing three more runs overnight is one problem continuing, and a card
+reappearing because a number moved is the noise this replaces; the trade is
+stated in the docstring rather than hidden (a known problem getting worse
+stays quiet, and the check is one click away with the full counts). NEW
+`mark_attention_seen` is called when the systems check RENDERS, not behind
+the one link that points at it, so arriving another way counts too. NEW
+`attention_unseen` is read by BOTH the card and the tab badge — one
+predicate, because a badge counting what the page does not show is the
+lesson the waiting pill already paid for. Guards (both caught):
+`attention_clears_when_read`, `attention_returns_for_a_new_reason`.
+`test_systems_check`'s pin — which required the card to stand for ever — was
+retargeted at the new contract with a dated comment, and now asserts the
+whole cycle: raised, read, quiet, a NEW reason raises it again, and MORE of
+the same reason does not.
+
 **OUT OF BAND — THE DAILY BRIEFING (owner, 2026-08-27).** Not a console
 tab, but the surface the owner actually reads every day, and it had rotted:
 *"ever growing daily digest emails that I have no way of clearing or

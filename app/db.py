@@ -1075,6 +1075,21 @@ class ArtifactBody(Base):
     #: after the edit that makes it interesting.
     body = Column(Text)
     draft_body = Column(Text)
+    #: WHAT THIS THING IS, beside what it says — title, seo_title,
+    #: seo_description, and whatever else a format's identity needs.
+    #:
+    #: It lived ONLY in the approval payload, so an artifact was a complete
+    #: object only while a decision was pending on it (owner, 2026-08-28,
+    #: looking at a blog draft): the workroom read the fields from a PENDING
+    #: approval, so a drafted-but-unqueued or already-decided article showed a
+    #: perfect body preview above three empty boxes. Worse, saving in that
+    #: state wrote the body and DISCARDED the title and meta silently, under a
+    #: button that says "the push uses exactly this".
+    #:
+    #: One home, and it is this one. The executor overlays these onto the
+    #: approval's machine-set fields at publish time, so what was reviewed is
+    #: literally what is pushed rather than a second copy hoped to be in sync.
+    meta = Column(JSON, default=dict)
     bytes = Column(Integer, default=0)
     #: "" (nothing held) or "in_review" — the workroom's Save-for-later. The
     #: owner's complaint that created the workroom was that an edit screen

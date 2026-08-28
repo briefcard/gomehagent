@@ -843,6 +843,68 @@ def classify_reason(reason: str) -> dict:
     return {"kind": "other", "label": "Other", "where": "diagnostics"}
 
 
+def attention_fingerprint(rows: list[dict]) -> str:
+    """What the attention list SAYS, hashed — the distinct reasons, not their
+    counts.
+
+    Counts are deliberately excluded. The same gap failing three more runs
+    overnight is the SAME problem continuing, and a card that reappeared on
+    every tick because a number moved is the noise this acknowledgement
+    exists to end (owner, 2026-08-28: "should only show up if a NEW issue has
+    appeared"). A reason nobody has seen before changes the hash and brings
+    it back.
+
+    The trade is stated rather than hidden: a known problem getting much
+    worse stays quiet. The systems check is one click away and always shows
+    the full list with its counts.
+    """
+    import hashlib
+    reasons = sorted({str(r.get("reason", "")) for r in (rows or [])})
+    if not reasons:
+        return ""
+    return hashlib.sha256("|".join(reasons).encode()).hexdigest()[:16]
+
+
+def _attention_key(tenant: str) -> str:
+    return f"attention_seen:{tenant or '*'}"
+
+
+def mark_attention_seen(tenant: str, rows: list[dict] | None = None) -> str:
+    """Record that the owner has LOOKED at this account's systems check.
+
+    Called when the check itself renders, not by a dedicated button: reaching
+    the page is what "I have seen this" means, and tying it to one link would
+    leave the card standing for anyone who navigated there another way.
+    """
+    rows = attention(tenant, 30) if rows is None else rows
+    fp = attention_fingerprint(rows)
+    with db.SessionLocal() as s:
+        k = _attention_key(tenant)
+        row = s.get(db.Setting, k)
+        if row is None:
+            s.add(db.Setting(key=k, value=fp))
+        else:
+            row.value = fp
+        s.commit()
+    return fp
+
+
+def attention_unseen(tenant: str = "", days: int = 30) -> list[dict]:
+    """The attention list, EMPTY once the owner has seen this exact set.
+
+    ONE predicate for the card and the tab badge, because a badge that counts
+    something the page does not show is a number you cannot act on — the
+    lesson the waiting pill already paid for.
+    """
+    rows = attention(tenant, days)
+    if not rows:
+        return []
+    with db.SessionLocal() as s:
+        seen = s.get(db.Setting, _attention_key(tenant))
+        seen_fp = (seen.value if seen is not None else "") or ""
+    return [] if seen_fp and seen_fp == attention_fingerprint(rows) else rows
+
+
 def attention(tenant: str = "", days: int = 30, system_key: str = "",
               examples: int = 3) -> list[dict]:
     """What needs attention, ranked, WITH THE RUNS THAT PROVE IT.

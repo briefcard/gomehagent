@@ -649,7 +649,10 @@ def _badges(tenant: str, full: bool = True) -> dict:
     if not full:
         return out
     try:
-        out["systems"] = len(systems.attention(tenant, 30))
+        # THE SAME predicate the card reads. A badge counting something the
+        # page does not show is a number you cannot act on — the lesson the
+        # waiting pill already paid for.
+        out["systems"] = len(systems.attention_unseen(tenant, 30))
     except Exception:                                            # noqa: BLE001
         pass
     try:
@@ -2873,7 +2876,9 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     # What replaces it is a SIGNPOST, not the list: one line with the count and
     # the way through. A tab that silently drops a number people relied on
     # teaches them the number was never real.
-    backlog = systems.attention("" if every else tenant, 30)
+    # `attention_unseen`, not `attention`: the same list, empty once the owner
+    # has looked at exactly this set of reasons.
+    backlog = systems.attention_unseen("" if every else tenant, 30)
     backlog_html = ""
     if backlog:
         _n = sum(a["count"] for a in backlog)
@@ -8101,6 +8106,16 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         for v, label in DIAG_VIEWS) + "</div>"
 
     if view == "systems":
+        # LOOKING AT IT IS THE ACKNOWLEDGEMENT (owner, 2026-08-28: "once I
+        # click check systems it should disappear until there's a new
+        # issue"). Recorded on the render rather than behind the one link
+        # that points here, so arriving any other way counts too — a card
+        # still standing after you have read the page is the same noise.
+        if tenant and tenant != ALL:
+            try:
+                systems.mark_attention_seen(tenant)
+            except Exception:                                    # noqa: BLE001
+                pass          # a marker must never break the page it marks
         return _shell(key, "diagnostics", "Diagnostics", tenant=tenant,
                       head=refresh, suffix=f"&amp;days={days}",
                       body=_every_note(
@@ -8877,7 +8892,16 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
 
     tenant = art.tenant or ""
     syskey = art.system_key or ""
-    fields = (ap.payload or {}).get("fields", {}) if ap else {}
+    # THE ARTIFACT IS THE HOME (2026-08-28). This read the fields from a
+    # PENDING approval, so an artifact that was drafted-but-unqueued, or
+    # already decided, rendered a perfect body preview above three empty
+    # boxes — and saving in that state dropped the title and meta silently.
+    # The approval payload is still read as the fallback, for every artifact
+    # written before the column existed.
+    fields = dict((getattr(art, "meta", None) or {}))
+    if ap:
+        for k, v in ((ap.payload or {}).get("fields") or {}).items():
+            fields.setdefault(k, v)
     published = bool(kw and (kw.status or "") in ("published", "won"))
     title = fields.get("title") or (kw.phrase if kw else "") or "Artifact"
 
