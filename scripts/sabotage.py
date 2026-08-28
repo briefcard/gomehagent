@@ -2318,6 +2318,33 @@ SABOTAGES = [
                "readable half to the 60-character trim. The reader sees the "
                "search phrase followed by a fragment",
     },
+    {
+        "name": "a_dose_does_not_back_an_effect",
+        "file": "app/claim_trace.py",
+        "find": "            if r[\"figures\"] and not (r[\"figures\"] & set(_FIGURE.findall(sent))):",
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_claim_trace.py"],
+        "why": "a claim about a DOSE starts backing a sentence about an "
+               "EFFECT — 'each serving contains 1000mg of omega-3' credited "
+               "as the support for 'omega-3 is widely researched for "
+               "moderating inflammation'. They share the ingredient and "
+               "nothing else, and the review page then shows a green mark on "
+               "an unapproved health claim. Of every mistake available here "
+               "that is the worst: it does not fail to flag a problem, it "
+               "actively vouches for one",
+    },
+    {
+        "name": "the_review_shows_what_is_unbacked",
+        "file": "app/admin_ui.py",
+        "find": "    return f\"\"\"\n<div class=\"anchor\" id=\"grounding\"></div>",
+        "replace": "    return \"\"  # SABOTAGE\n    return f\"\"\"\n<div class=\"anchor\" id=\"grounding\"></div>",
+        "suites": ["test_claim_trace.py"],
+        "why": "the workroom stops showing which sentences stand on a claim, "
+               "so an article that is 0% grounded looks exactly like one that "
+               "is fully grounded — which is the state the Eien article "
+               "shipped in, past every gate, because nothing rendered the "
+               "difference",
+    },
 ]
 
 

@@ -157,6 +157,17 @@ h1{font:700 1.7rem/1.2 var(--sans);letter-spacing:-.02em;margin:0}
 h2{font:700 1.15rem/1.25 var(--sans);letter-spacing:-.015em;margin:0}
 h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .tblwrap{overflow-x:auto}
+/* Grounding annotations (workroom). A backed sentence is UNDERLINED rather
+   than filled: the reader is reading prose, and a page of highlighter blocks
+   is harder to read than the thing it annotates. The unbacked-assertion state
+   is the loud one, because it is the one worth acting on. */
+.gr{padding:3px 0;line-height:1.55}
+.gr.ok>summary{cursor:pointer;text-decoration:underline;
+  text-decoration-color:var(--ok);text-decoration-thickness:2px;
+  text-underline-offset:3px;list-style:none}
+.gr.ok>summary::-webkit-details-marker{display:none}
+.gr.no{border-left:2px solid var(--gap);padding-left:8px;
+  display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
 .mut{color:var(--mut);font-size:.86rem}
 .card{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px 18px;
 display:flex;flex-direction:column;gap:12px}
@@ -9394,6 +9405,83 @@ def _drafts_section(key: str, row) -> str:
 </div>"""
 
 
+def _grounding_card(tenant: str, art) -> str:
+    """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
+
+    The owner's framing was Figma's comments over a design: the text as it is,
+    annotated, and a marker you open to see what stands behind it. This is
+    that, for every kind of artifact — an article, an ad, an email — because
+    the failure it exists to catch is the same in all three: an output that
+    passed every gate while asserting things nobody approved.
+
+    THE ANNOTATION IS OVER THE PLAIN TEXT, not the stored HTML. Re-marking the
+    original markup would mean editing tags the CMS owns, and a review aid
+    that can corrupt the thing it reviews is not worth having. The reader sees
+    the sentences; the preview above is still the real artifact.
+
+    Three states, not two (design rule 2): backed · asserts-and-unbacked ·
+    prose. Flattening the last two is what would make this cry wolf — most
+    good writing is connective tissue that needs no citation, and marking it
+    all as ungrounded is how a real 0% gets skimmed past.
+    """
+    from . import claim_trace
+    body = str(getattr(art, "body", "") or "")
+    if not body.strip():
+        return ""
+    fmt = str(getattr(art, "format", "") or "")
+    if fmt == "ad_batch":
+        # The board renders its own variants; annotating the raw JSON would
+        # mark up field names.
+        try:
+            import json as _json
+            body = " ".join(str(v.get("text") or "")
+                            for v in (_json.loads(body) or {}).get("variants", []))
+        except Exception:                                        # noqa: BLE001
+            return ""
+    claims = kb.claims(tenant)
+    rep = claim_trace.annotate(body, claims)
+    if not rep.get("total"):
+        return ""
+    pct = rep.get("coverage_pct")
+    chip = ('<span class="chip">nothing to check</span>' if pct is None
+            else f'<span class="chip {"on" if pct >= 80 else "off"}">'
+                 f'{pct}% grounded</span>')
+    rows = ""
+    for sent in rep["sentences"]:
+        txt = _esc(sent["text"])
+        if sent["backed"]:
+            inner = "".join(
+                f'<div class="msg"><div><b>{_esc(c["claim"])}</b>'
+                + (f'<div class="when">{_esc(c["evidence"])}</div>'
+                   if c["evidence"] else "")
+                + (f'<div class="row"><a href="/admin/ui?tab=kb&amp;tenant='
+                   f'{_esc(tenant)}&amp;sub=claims&amp;q={_esc(c["claim"][:40])}">'
+                   f'open the claim &rarr;</a></div>' if c["id"] else "")
+                + "</div></div>" for c in sent["claims"])
+            rows += (f'<details class="gr ok"><summary>{txt}</summary>'
+                     f'{inner}</details>')
+        elif sent["assertion"]:
+            # THE ONES THAT MATTER. It asserts something and nothing on file
+            # says so — the state the Eien article was in from end to end.
+            rows += (f'<div class="gr no"><span>{txt}</span>'
+                     f'<span class="when">nothing on file says this</span>'
+                     f'</div>')
+        else:
+            rows += f'<div class="gr">{txt}</div>'
+    return f"""
+<div class="anchor" id="grounding"></div>
+<div class="card">
+  <div class="head"><h3>What here is confirmed by a claim</h3>{chip}</div>
+  <p class="mut">{_esc(claim_trace.summary(rep))}</p>
+  <p class="when">Underlined sentences open to the approved claim behind
+  them. A sentence marked <b>nothing on file says this</b> asserts something
+  no claim covers &mdash; the fix is usually to correct or add the CLAIM and
+  regenerate, not to ban a word. Sentences that assert nothing are left
+  plain.</p>
+  <div class="thread">{rows}</div>
+</div>"""
+
+
 def render_workroom(key: str, output_id: str, art, kw, ap,
                     ok: str = "", err: str = "") -> str:
     """One artifact's home: preview, edit, feedback, history — the work loop.
@@ -9990,6 +10078,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
 </div>
 {f'<div class="card"><h3>Structural flags</h3><ul class="bl">{flag_html}</ul></div>' if flag_html else ""}
 {preview_card}
+{_grounding_card(tenant, art)}
 {edit_card}
 <div class="anchor" id="feedback"></div>
 <div class="card">
