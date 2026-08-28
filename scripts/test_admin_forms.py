@@ -134,8 +134,17 @@ def main() -> int:
         wanted = set(re.findall(r'\bform="([^"]+)"', html))
         ck(f"diagnostics/{v}: every form= points at a real <form>",
            not (wanted - forms), ", ".join(sorted(wanted - forms)[:4]))
+        # 2026-08-28: retargeted from `view={v}` to `sub={v}`. The tab now
+        # MINTS `sub=` — the console-wide name every other rail already uses
+        # — while the route still ACCEPTS `view=`, so pinned URLs and
+        # bookmarks keep working. Both halves are asserted: the room is named
+        # in the links it mints, and the old parameter still resolves to it.
         ck(f"diagnostics/{v}: it is the view that rendered",
-           'class="subtab on"' in html and f"view={v}" in html)
+           'class="subtab on"' in html and f"sub={v}" in html)
+        by_alias = client.get(
+            f"/admin/ui?tab=diagnostics&view={v}&tenant=baci&key={KEY}").text
+        ck(f"diagnostics/{v}: the old view= URL still lands on it",
+           'class="subtab on"' in by_alias and f"sub={v}" in by_alias)
 
     # A report about pages already published is not a decision, so it is not on
     # the decision queue.

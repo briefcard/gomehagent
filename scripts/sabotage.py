@@ -2154,6 +2154,46 @@ SABOTAGES = [
                "to stop, on the page that reports whether anyone has ever "
                "checked a client's live site",
     },
+    {
+        "name": "the_counts_describe_the_window",
+        "file": "app/diagnostics.py",
+        "find": "    everything = events(tenant, days, system=system, limit=WINDOW_CEILING)",
+        "replace": "    everything = events(tenant, days, system=system, limit=limit)  # SABOTAGE",
+        "suites": ["test_diagnostics_surface.py"],
+        "why": "the triage tab contradicts itself again: the cap is applied "
+               "before the counting, so on a busy account the level chips "
+               "describe the newest 200 rows rather than the window, and "
+               "choosing \"problems only\" renders \"nothing at all was "
+               "recorded ... a finding about the plumbing\" on the same page "
+               "whose Platforms table shows the failures. It errs toward "
+               "calling a broken account healthy, on the one page whose job "
+               "is to say whether anything is broken",
+    },
+    {
+        "name": "silent_means_nothing_was_recorded",
+        "file": "app/diagnostics.py",
+        "find": '            "silent": not everything,',
+        "replace": '            "silent": not ev,  # SABOTAGE',
+        "suites": ["test_diagnostics_surface.py"],
+        "why": "a filter that simply matched nothing is reported as broken "
+               "plumbing — \"no run, no tool call, no check and no approval\" "
+               "— so a healthy account viewed through a narrow filter reads "
+               "as dead. Design rule 12: absence is not an answer, and the "
+               "absence of MATCHES is a different fact from the absence of "
+               "RECORDS",
+    },
+    {
+        "name": "a_named_gap_reaches_a_tab_that_can_clear_it",
+        "file": "app/admin_ui.py",
+        "find": '    "brand": ("Brand", "add the hard rule"),',
+        "replace": "    # SABOTAGE",
+        "suites": ["test_diagnostics_surface.py"],
+        "why": "the missing-ban-list card renders an EMPTY control row again "
+               "— the reader is told the ban list is missing and given "
+               "nothing to press, on the class that `systems.py` deliberately "
+               "split out of `knowledge` so that the fix would land on the "
+               "tab that can actually author the rule",
+    },
 ]
 
 

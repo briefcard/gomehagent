@@ -8165,11 +8165,24 @@ LIVE_EVERY = (0, 15, 60)
 #: Where each kind of problem is actually fixed. The label is what the button
 #: says; the tab is where it goes. A list of things that went wrong is only
 #: useful if every line knows where its fix lives.
+#: 2026-08-28: `brand` and `assurance` were MISSING while
+#: `systems.ATTENTION_KINDS` emitted both, so the two most actionable classes
+#: — a missing ban list and a live banned claim — rendered an EMPTY control
+#: row. `systems.py` records that banlist was split out of `knowledge`
+#: PRECISELY so the reader lands on a tab that can clear it, and then the
+#: destination was never added here. `content` went the other way: nothing has
+#: ever emitted it. These keys and ATTENTION_KINDS' `where` values are ONE
+#: vocabulary, and `test_diagnostics_surface` computes that they agree in both
+#: directions rather than trusting that they do.
 _FIX_WHERE = {
     "accounts": ("Connections", "connect the account"),
     "systems": ("Systems", "install or switch it on"),
     "kb": ("Knowledge", "author what is missing"),
-    "content": ("Review", "decide what is queued"),
+    "brand": ("Brand", "add the hard rule"),
+    "assurance": ("Assurance", "scan the live site and clear it"),
+    # Deliberately blank: a coherence or dead-link defect is cleared by
+    # redrafting the thing, not by visiting a tab. The card says so instead of
+    # rendering an empty row where a button should be.
     "diagnostics": ("", ""),
 }
 
@@ -8190,7 +8203,10 @@ def _systems_check(key: str, tenant: str, days: int, need: list,
         return _esc(db.as_utc(dt_).strftime("%b %d, %H:%M")) if dt_ else "never"
 
     if rows:
-        table = ('<table class="tbl"><tr><th>system</th><th>state</th>'
+        # Seven columns, measured overflowing by 128px at 375px — and by
+        # 71px with no rows at all, because the header alone does not fit.
+        table = ('<div class="tblwrap"><table class="tbl">'
+                 '<tr><th>system</th><th>state</th>'
                  '<th class="num">runs</th><th class="num">shipped</th>'
                  '<th class="num">blocked</th><th class="num">defective</th>'
                  '<th>last run</th></tr>' + "".join(
@@ -8208,7 +8224,7 @@ def _systems_check(key: str, tenant: str, days: int, need: list,
             f'<td class="num">{r["blocked"] or ""}</td>'
             f'<td class="num">{r["defective"] or ""}</td>'
             f'<td class="when">{_when(r["last_at"])}</td></tr>'
-            for r in rows) + "</table>")
+            for r in rows) + "</table></div>")
     else:
         table = ('<p class="mut">No systems installed for this account yet — '
                  'install one on the Systems tab and its runs appear here.</p>')
@@ -8320,10 +8336,21 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
     every = tenant == ALL
     scope = "" if every else tenant
     rep = diag.report(scope, days, level=level, system=system, limit=limit)
+    # Resolved here rather than 200 lines down, because `_link` closes over it
+    # and every link on the page has to know which room it is in.
+    view = (view or "").strip().lower()
+    if view not in dict(DIAG_VIEWS):
+        view = DIAG_VIEWS[0][0]
 
     def _link(**over) -> str:
+        # EVERY PIECE OF THE READER'S STATE TRAVELS. `sub` was missing, so all
+        # eight controls in the Systems-check filter bar navigated the reader
+        # back to Overview; `limit` was missing, so a hand-typed one was
+        # silently reverted by the next click. Design rule 3 — a decision, a
+        # filter or a preference never costs the reader their place.
         q = {"key": key, "tab": "diagnostics", "tenant": tenant,
-             "days": days, "level": level, "system": system, "live": live}
+             "days": days, "level": level, "system": system, "live": live,
+             "sub": view, "limit": limit if limit != 200 else ""}
         q.update(over)
         return "/admin/ui?" + "&amp;".join(
             f"{k}={_esc(v)}" for k, v in q.items() if v not in ("", None))
@@ -8419,30 +8446,65 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
             f'<tr><td colspan="4" class="mut">nothing had a median over '
             f'{pf["slow_after_ms"]} ms</td></tr>')
         pf_html = f"""
-        <table class="tbl">
+        <div class="tblwrap"><table class="tbl">
           <tr><th>platform</th><th>calls</th><th>failed</th><th>rate</th>
               <th>median ms</th><th>slowest</th><th>last error</th></tr>
           {prow}
-        </table>
+        </table></div>
         <p class="when">Failure <em>rate</em> leads, not count: a platform
         failing most of the time is a broken connection, one failing
         occasionally is the internet.</p>
         <h3 style="font-size:.9rem;margin:16px 0 6px">Slow tools</h3>
-        <table class="tbl">
+        <div class="tblwrap"><table class="tbl">
           <tr><th>tool</th><th>calls</th><th>median ms</th><th>slowest</th></tr>
           {slow}
-        </table>
+        </table></div>
         <p class="when">A round trip, not a queue wait — a slow tool and a slow
         provider are indistinguishable from here.</p>"""
 
     sp = rep["spend"]
+    # THREE STATES FOR MONEY, and none of them a bare float. `${sp["cost_usd"]}`
+    # printed "$12.5" for a $12.50 bill and "$0.0" beside "model calls 1" for
+    # real sub-cent spend — a number that reads as free next to evidence that
+    # it was not. `< $0.01` is the third state (rule 2 applied to money).
+    def _money(v, calls: int = 0) -> str:
+        try:
+            v = float(v or 0)
+        except (TypeError, ValueError):
+            return "$0.00"
+        # `usage.report` rounds to 2dp BEFORE this sees it, so a real sub-cent
+        # bill arrives as exactly 0.0 and is indistinguishable from free at
+        # this layer. Calls having happened is the evidence that it was not:
+        # "$0.00" beside "model calls 1" states a falsehood, "< $0.01" states
+        # the truth this layer can actually support.
+        if v == 0 and calls > 0:
+            return "&lt; $0.01"
+        if 0 < v < 0.01:
+            return "&lt; $0.01"
+        return f"${v:,.2f}"
+
+    # At days=30 "cost in window" and "projected / month" are the SAME
+    # expression, printed as two independent facts (rule 8). Suppress the
+    # projection there rather than stating one number twice.
+    proj_row = ("" if days == 30 else
+                f'<tr><td>projected / month</td>'
+                f'<td class="num">{_money(sp["projected_monthly_usd"])}</td></tr>')
+    # What no client owns, named on the only page that pools clients.
+    unattr = ""
+    if sp.get("unattributed_usd"):
+        unattr = (f'<tr><td>not attributed to a client</td>'
+                  f'<td class="num">{_money(sp["unattributed_usd"])}</td></tr>')
     spend_html = (f'<p class="mut">{_esc(sp["note"])}</p>' if sp["note"] else f"""
-        <table class="tbl">
-          <tr><td>model calls</td><td class="num">{sp["calls"]}</td></tr>
-          <tr><td>cost in window</td><td class="num">${sp["cost_usd"]}</td></tr>
-          <tr><td>projected / month</td><td class="num">${sp["projected_monthly_usd"]}</td></tr>
+        <div class="tblwrap"><table class="tbl">
+          <tr><td>model calls</td><td class="num">{sp["calls"]:,}</td></tr>
+          <tr><td>cost in window</td><td class="num">{_money(sp["cost_usd"], sp["calls"])}</td></tr>
+          {unattr}
+          {proj_row}
           <tr><td>cache hit rate</td><td class="num">{sp["cache_hit_rate_pct"]}%</td></tr>
-        </table>""")
+        </table></div>"""
+        + (f'<p class="when">{_esc(sp["attribution_note"])} '
+           f'<a href="/admin/usage?key={_esc(key)}">the full breakdown &rarr;</a></p>'
+           if sp.get("attribution_note") else ""))
 
     # --- the log ------------------------------------------------------------
     if rep["silent"]:
@@ -8463,9 +8525,27 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
               {acct}
               <span class="layer">{_esc(e["layer"])}</span>
             </div>"""
-        more = ('<p class="when">Showing the most recent '
-                f'{len(rep["events"])} — the window holds more.</p>'
-                if rep["truncated"] else "")
+        # "the window holds more" named no number and offered no way to see
+        # it — and a hand-typed &limit= was silently reverted by the next
+        # click, because no link carried it. Now: how many of how many, and
+        # the control beside the sentence (design rule 1, "no silent caps").
+        more = ""
+        if rep.get("truncated"):
+            chips = " ".join(
+                f'<a class="{"on" if rep["limit"] == n else ""}" '
+                f'href="{_link(limit=n)}">{n}</a>'
+                for n in (200, 500, 1000) if n <= max(1000, rep["limit"]))
+            more = (f'<div class="filters" style="margin-top:6px">'
+                    f'<span class="mut">Showing {rep["shown"]:,} of '
+                    f'{rep["total"]:,} in this window &mdash; show </span>'
+                    f'{chips}</div>')
+        elif rep.get("shown"):
+            more = (f'<p class="when">All {rep["shown"]:,} in this window.</p>')
+        if rep.get("ceiling_hit"):
+            more += ('<div class="note">This window is larger than the '
+                     f'{diag.WINDOW_CEILING:,} events read into one page, so '
+                     'the counts above are of that much and not of everything '
+                     '&mdash; narrow the window.</div>')
         log = f'<div class="log">{rowsh}</div>{more}'
 
     sysfilter = ""
@@ -8507,24 +8587,30 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
     # content was on the run row the whole time and was never joined (owner,
     # 2026-08-23). It lives here instead, because it is a diagnosis and not a
     # thing you install.
-    view = (view or "").strip().lower()
-    if view not in dict(DIAG_VIEWS):
-        view = DIAG_VIEWS[0][0]
-
     def _dv(v: str) -> str:
-        bits = [f"tab=diagnostics", f"view={v}", f"days={days}",
+        # Switching rooms kept the window and the system filter and silently
+        # dropped the LEVEL filter and the live-refresh setting — so the same
+        # page preserved them on one strip and discarded them on the other.
+        # `sub` is the console-wide name; `view` stays accepted by the route.
+        bits = [f"tab=diagnostics", f"sub={v}", f"days={days}",
                 f"tenant={_esc(tenant)}"]
-        if system:
-            bits.append(f"system={_esc(system)}")
-        if key:
-            bits.append(f"key={_esc(key)}")
+        for name, val in (("system", system), ("level", level),
+                          ("live", live), ("key", key)):
+            if val:
+                bits.append(f"{name}={_esc(val)}")
+        if limit != 200:
+            bits.append(f"limit={limit}")
         return "/admin/ui?" + "&amp;".join(bits)
 
     need = systems.attention("" if every else tenant, days,
                              system_key=system or "")
     strip = '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if v == view else ""}" href="{_dv(v)}">{label}'
-        + (f'<span class="cnt">{sum(a["count"] for a in need)}</span>'
+        # len(need), NOT the occurrence total: the room this links to renders
+        # one card per DISTINCT reason and states "{len(need)} distinct",
+        # so summing counts here put two different numbers for one list
+        # side by side on a single render (rule 8).
+        + (f'<span class="cnt">{len(need)}</span>'
            if v == "systems" else "") + "</a>"
         for v, label in DIAG_VIEWS) + "</div>"
 
@@ -8536,11 +8622,23 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         # still standing after you have read the page is the same noise.
         if tenant and tenant != ALL:
             try:
-                systems.mark_attention_seen(tenant)
+                # THE LIST THAT WAS RENDERED, not a 30-day one the room never
+                # showed. The default re-derives `attention(tenant, 30)` while
+                # this room shows `days` (7 by default) filtered by `system`,
+                # so opening it acknowledged items it had not displayed — and
+                # because the fingerprint excludes counts, the badge stayed
+                # cleared while the unseen problem kept firing. Rule 10: an
+                # acknowledgement covers the item AS IT WAS.
+                systems.mark_attention_seen(tenant, need)
             except Exception:                                    # noqa: BLE001
                 pass          # a marker must never break the page it marks
         return _shell(key, "diagnostics", "Diagnostics", tenant=tenant,
-                      head=refresh, suffix=f"&amp;days={days}",
+                      # The theme toggle rebuilds the URL from tab + tenant +
+                      # THIS suffix, so a suffix without `sub` costs the
+                      # reader their room for a display preference — which is
+                      # exactly what `_shell`'s own comment promises it never
+                      # does.
+                      head=refresh, suffix=f"&amp;days={days}&amp;sub={view}",
                       body=_every_note(
                           every, "Every account's systems in one table. Each "
                                  "row names the client it belongs to.")
@@ -8590,7 +8688,7 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
 </div>
 """
     return _shell(key, "diagnostics", "Diagnostics", body=body, tenant=tenant,
-                  head=refresh, suffix=f"&amp;days={days}")
+                  head=refresh, suffix=f"&amp;days={days}&amp;sub={view}")
 
 
 def _blog_picker(key: str, tenant: str, pick: bool) -> str:

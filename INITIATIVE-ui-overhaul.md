@@ -24,8 +24,10 @@ was verified at `/health` before the next began. Read §4's step entries for
 the detail — this is the map.
 
 **Step 4, tab by tab (spec §§4–11).** Data layer · Connections · Review ·
-Systems + workflow · Plan · **Brand** · **Assurance** are SHIPPED. Remaining:
-**Diagnostics (§10)**. Then step 5 (client product), step 6 (does
+Systems + workflow · Plan · **Brand** · **Assurance** · **Diagnostics (part
+1)** are SHIPPED. Remaining on Diagnostics: **orphan adopt/archive** and the
+**cost room** — the two §10 items needing new routes and a column, carved out
+deliberately as a second push. Then step 5 (client product), step 6 (does
 Knowledge's Overview fold in), step 7 (completeness audit).
 
 | commit | what |
@@ -47,7 +49,9 @@ Knowledge's Overview fold in), step 7 (completeness audit).
 | `bf0f68a` | A landing page is a page — the scraper actually reads one |
 | `b4fbb28` | How many UI units have no piping — computed, not surveyed |
 | `f91419f` | A run says what it lost — 38 hidden warnings down to 6 |
-| _next_ | Assurance — the page that has to be believed stops capping itself |
+| `eff61c9` | Assurance — the page that has to be believed stops capping itself |
+| `0287e95` `d8caef1` | The GBP plan (INITIATIVE-gbp.md) — not scheduled |
+| _next_ | Diagnostics — the triage tab stops contradicting itself |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1432,6 +1436,76 @@ page overflow.
 NEW suite `test_assurance_tab.py` (14 checks, seeded with 30 catches so paging
 is a real question and not a check passing against emptiness). Guards, both
 caught: `catches_are_not_silently_capped`, `every_account_can_be_scanned`.
+
+**4·DIAGNOSTICS, PART 1 — BUILT + SHIPPED 2026-08-28 (spec §10).** Audited by a
+16-agent workflow whose adversarial pass had to REPRODUCE each finding by
+running code or mark it refuted. **27 confirmed, 2 refuted** — one agent cited
+a roadmap line as if it were delivered behaviour, another modelled browser
+line-breaking as Python `split()`. Both refutations are recorded so nobody
+re-finds them.
+
+**THE HEADLINE: the triage tab contradicted itself, in the direction of
+reassurance.** `report()` passed `limit` INTO `events()`, so the level chips
+counted the newest 200 rows rather than the window, and `silent` was computed
+on the POST-filter list. Reproduced: a 253-event window holding 3 failures
+older than the newest 200 rendered, on `level=fail`, *"nothing at all was
+recorded — no run, no tool call, no check and no approval. That is a finding
+about the plumbing, not a clean report"* — **on the same page whose Platforms
+table showed `shopify 3 3 401 invalid token`.** The one page whose job is to
+say whether anything is broken called a broken account silent. The producer now
+reads the window, counts it, filters it and slices LAST, returning
+`total`/`shown`/`limit`/`window_total` as four distinct numbers; `silent` means
+nothing was recorded and `empty_filter` means your filter matched nothing. And
+`test_diagnostics.py` PASSED throughout, because its fixture never reaches 200
+— design rule 11 in the place it cost most.
+
+**NO SILENT CAPS.** "the window holds more" named no number and offered
+nothing, and a hand-typed `&limit=` was reverted by the next click because no
+link carried it. Now *"Showing 200 of 308 — show 200 · 500 · 1000"*, with the
+limit riding every link. `WINDOW_CEILING` (20,000) is a memory backstop that
+SAYS SO when it bites rather than quietly becoming the truth.
+
+**THE READER KEEPS THEIR ROOM.** `_link()` never carried `sub`, so all eight
+Systems-check filter controls navigated back to Overview; `_dv()` carried
+neither `level` nor `live`, so switching rooms discarded a filter the other
+strip preserved; and the theme suffix dropped the room, so changing a display
+preference cost the reader their place — contradicting `_shell`'s own written
+contract. All three carry the whole state now. The minted parameter is `sub=`
+(console-wide); `view=` stays accepted, and `test_admin_forms` asserts BOTH the
+new name and that the old URL still resolves.
+
+**EVERY NAMED GAP REACHES A TAB THAT CAN CLEAR IT.** `_FIX_WHERE` had no
+`brand` and no `assurance` while `ATTENTION_KINDS` emitted both — so a missing
+ban list and a live banned claim, the two most actionable classes, rendered an
+EMPTY control row. `systems.py` records that banlist was split out of
+`knowledge` PRECISELY so the reader would land on a tab that can author the
+rule, and then the destination was never added here. `content` was declared and
+never emitted. The suite COMPUTES that the two vocabularies agree in both
+directions rather than trusting that they do.
+
+**AND THE REST:** the rail chip counted occurrences while the room it links to
+counts distinct reasons — two numbers for one list on one render; opening the
+Systems room acknowledged a 30-day list it had never displayed (rule 10 — it
+passes the rendered list now); money printed as a bare float (`$12.5`, and
+`$0.0` beside "model calls 1" — `usage.report` rounds to 2dp upstream, so
+sub-cent arrives as exactly 0 and now renders `< $0.01` on the evidence that
+calls happened); "cost in window" and "projected / month" printed the identical
+expression twice at 30d; `spend()` dropped `by_tenant` and `attribution_note`,
+so the `*` page read $22.50 while the five per-account pages summed to $10.50
+with nothing saying where the rest went; and three tables had no `.tblwrap` —
+the Platforms one pushed the page **394px** sideways at 375px.
+
+Verified on the demo at 375px and 1280px: zero page overflow, *"Showing 200 of
+308"* with its controls, 10 of 11 links keeping the room (the 11th is the rail
+link whose job is to change it), zero empty control rows. NEW suite
+`test_diagnostics_surface.py`, seeded past every cap it tests. Guards, all
+caught: `the_counts_describe_the_window`, `silent_means_nothing_was_recorded`,
+`a_named_gap_reaches_a_tab_that_can_clear_it`.
+
+**CARVED OUT AS PART 2, NOT DROPPED:** orphan adopt/archive (§10 — needs new
+routes, a `SystemRun.archived` column, and the renderer to stop dropping the
+orphan's tenant on the `*` view) and the cost room (§10's "cost off the default
+view"). Both are new-surface work rather than corrections.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

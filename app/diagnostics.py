@@ -312,11 +312,25 @@ def spend(tenant: str = "", days: int = 30) -> dict:
     """
     from . import usage
     rep = usage.report(days=days, tenant=tenant)
+    # THE SPLIT AND ITS SENTENCE TRAVEL. `usage.report` computes `by_tenant`
+    # — including an "unattributed" bucket for calls no client owns — and an
+    # `attribution_note` explaining it, and both were dropped here. The result
+    # (verified 2026-08-28): the all-accounts page read $22.50 while the five
+    # per-account pages summed to $10.50, with nothing on either saying where
+    # the $12 went. `test_usage_attribution` asserts that clients plus
+    # unattributed equal the total AND PASSES — the guarantee was produced and
+    # then defeated one layer up, which is design rule 12 exactly.
+    by_tenant = rep.get("by_tenant") or {}
+    unattributed = (by_tenant.get("unattributed") or {}) if not tenant else {}
     return {"calls": rep.get("calls", 0),
             "cost_usd": rep.get("est_cost_usd", 0),
             "projected_monthly_usd": rep.get("projected_monthly_usd", 0),
             "cache_hit_rate_pct": rep.get("cache_hit_rate_pct", 0),
             "by_purpose": rep.get("by_purpose", {}),
+            "by_tenant": by_tenant,
+            "unattributed_usd": unattributed.get("cost_usd", 0),
+            "unattributed_calls": unattributed.get("calls", 0),
+            "attribution_note": rep.get("attribution_note", "") if not tenant else "",
             "note": ("" if rep.get("calls") else
                      "no model call was attributed to this account in the "
                      "window — either nothing ran, or it ran before "
@@ -456,6 +470,12 @@ def _ev(when, kind: str, level: str, layer: str, tenant: str, system: str,
             **{k: v for k, v in extra.items() if v}}
 
 
+#: The most events one window will ever be read into memory. Not a display
+#: cap — the page's own `limit` is that — but a backstop, and `report` reports
+#: when it bites so a truncated window can never quietly become the truth.
+WINDOW_CEILING = 20_000
+
+
 def report(tenant: str = "", days: int = 7, level: str = "",
            system: str = "", limit: int = 200) -> dict:
     """Everything the Diagnostics tab shows, in one call.
@@ -465,28 +485,53 @@ def report(tenant: str = "", days: int = 7, level: str = "",
     moment a dead token is discovered: a page that half-fails while reporting
     on failures is worse than one built from what was already written down.
     """
-    # Read once, filter in memory. The counts beside each filter have to be
-    # of the UNFILTERED window or the chips agree with nothing -- pick
-    # "failures" and the warnings chip would read 0, because there are no
-    # warnings among failures. So the level filter is applied after counting
-    # rather than by a second query.
-    everything = events(tenant, days, system=system, limit=limit)
+    # READ THE WHOLE WINDOW, COUNT IT, FILTER IT, AND SLICE LAST.
+    #
+    # The comment that stood here said the counts are "of the UNFILTERED
+    # window", and that was true of the LEVEL and false of the CAP: `limit`
+    # was passed into `events()`, so `everything` was already the newest 200
+    # rows and every chip counted the slice. Verified 2026-08-28 on a 253-event
+    # window holding 3 failures older than the newest 200: the "problems only"
+    # chip read 0, the "clean" chip read 200 against a true 250, and choosing
+    # that filter rendered "nothing at all was recorded ... a finding about the
+    # plumbing" ON THE SAME PAGE whose Platforms table showed shopify 3/3 100%
+    # failed. The triage tab contradicted itself, in the direction of calling a
+    # broken account healthy.
+    #
+    # Costs nothing: every query in `events()` filters on `>= since` and the
+    # limit was a Python slice at the end, so reading the window unbounded is
+    # the same database work. WINDOW_CEILING exists only so a pathological
+    # window cannot exhaust memory, and when it bites it SAYS SO rather than
+    # silently becoming the new truth.
+    everything = events(tenant, days, system=system, limit=WINDOW_CEILING)
     counts = {lv: sum(1 for e in everything if e["level"] == lv) for lv in LEVELS}
     layers = {ly: sum(1 for e in everything if e["layer"] == ly) for ly in LAYERS}
     if level == "problems":
-        ev = [e for e in everything if e["level"] in ("fail", "warn")]
+        matching = [e for e in everything if e["level"] in ("fail", "warn")]
     elif level:
-        ev = [e for e in everything if e["level"] == level]
+        matching = [e for e in everything if e["level"] == level]
     else:
-        ev = everything
+        matching = everything
+    limit = max(1, limit)
+    ev = matching[:limit]
     return {"tenant": tenant, "days": days, "level": level, "system": system,
             "health": health(tenant, days),
             "platforms": platforms(tenant, days),
             "spend": spend(tenant, days),
             "events": ev, "counts": counts, "layers": layers,
-            "truncated": len(ev) >= limit,
-            "silent": not ev,
+            # WHAT MATCHED vs WHAT IS SHOWN vs WHAT WAS ASKED FOR. Three
+            # different numbers; the page renders "showing N of M" from them
+            # instead of a bare "the window holds more".
+            "total": len(matching), "shown": len(ev), "limit": limit,
+            "window_total": len(everything),
+            "truncated": len(matching) > len(ev),
+            "ceiling_hit": len(everything) >= WINDOW_CEILING,
+            # SILENT MEANS NOTHING WAS RECORDED. It used to mean "your filter
+            # matched nothing", which is how a clean window under a narrow
+            # filter got reported as broken plumbing.
+            "silent": not everything,
+            "empty_filter": bool(everything) and not matching,
             "note": ("nothing at all was recorded for this account in the "
                      "window — no run, no tool call, no check and no "
                      "approval. That is a finding about the plumbing, not a "
-                     "clean report" if not ev else "")}
+                     "clean report" if not everything else "")}
