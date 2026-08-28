@@ -246,7 +246,21 @@ the WEBSITE and the only identity source — landing pages
 12. **Absence is not an answer.** A Gmail draft that still exists is not a
    thread nobody answered; a missing draft is not necessarily a send. Ask
    the source the second question (`sent_in_thread`, `sent_to_since`) rather
-   than reading one silence as a verdict.
+   than reading one silence as a verdict. Stronger form paid for 2026-08-28:
+   a run over SEVERAL sources reported one set of totals, so a landing page
+   that read nothing hid behind a website that read plenty — the per-source
+   report existed and no surface rendered it. A total is not a per-source
+   answer, and a source that contributed zero has to say so where the run is
+   reported (`_summarise`'s `READ NOTHING`, the Brand source card).
+13. **A feature is not the storing of it.** `test_brand_sources` had 32
+   checks — every one about STORING and NAMING a content source, not one
+   about READING one — so multi-domain sources passed for a day while a
+   landing page on a path scraped nothing at all. The seed made it worse by
+   demonstrating a bare subdomain, the shape that happened to work, with a
+   hand-filed claim. When a feature's point is that something HAPPENS, the
+   suite has to make it happen and inspect what came back; and the fixture
+   has to be the shape people actually have (for landing pages that is
+   `theirdomain.com/pages/x`, not a subdomain).
 
 ---
 
@@ -284,6 +298,16 @@ durable fix was the same shape: stop asserting the property, start testing it.
 
 ## 7. Solidify log (recent, newest first)
 
+- 2026-08-28 — a landing page is a PAGE. The owner asked whether the scraper
+  actually pulls facts off one; it did not, and 113 suites said nothing.
+  `discover_pages` treated every source as a SITE (sitemap under the path,
+  then wp-json under the path, then the links OUT of the page — never the
+  page itself), source identity was the HOST so
+  `theirdomain.com/pages/spring` could not be added at all, and a source that
+  enumerated nothing was invisible behind one that did. Fixed with
+  `compliance._one_page`, `tenants._norm_url`, a normalising `set_website`,
+  and `READ NOTHING` in `_summarise` plus last-read state and its buttons on
+  the Brand source card. Rules 12 (stronger) and 13 are the price.
 - 2026-08-28 — Brand, the last tab of step 4: the voice deriver came OFF the
   page request (`voice.derive` behind `_run_bg`, proposal stored on
   `KbBrand.voice_proposed` so it outlives the request that made it — 8ms

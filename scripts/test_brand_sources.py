@@ -85,6 +85,21 @@ LANDING_PAGES = {
 }
 
 
+#: THE COMMONEST LANDING PAGE THERE IS: a path on the client's own domain,
+#: absent from the sitemap above. Before 2026-08-28 it could not even be
+#: ADDED (dedupe was by host, so it collided with the website) and, once
+#: added, discovery asked for `/pages/spring-lp/sitemap.xml` and gave up.
+LP_PATH = f"https://{SITE}/pages/spring-lp"
+PATH_PAGES = {
+    LP_PATH: (
+        "<html><body><h1>The Spring Set</h1>"
+        "<p>The spring set ships within 2 working days, and every order "
+        "travels insured with a tracking number.</p>"
+        "<p>Every piece is hand-decorated in Milan by our artisans.</p>"
+        f"<p>{_FILLER}</p></body></html>"),
+}
+
+
 def _sitemap(urls) -> str:
     return ('<?xml version="1.0"?><urlset>'
             + "".join(f"<url><loc>{u}</loc><lastmod>2026-08-11</lastmod></url>"
@@ -93,8 +108,12 @@ def _sitemap(urls) -> str:
 
 
 class _Resp:
-    def __init__(self, text, code=200):
-        self.text, self.status_code = text, code
+    #: `url` because a real httpx response has one and `_one_page` reads it to
+    #: learn where a redirect landed. A stub missing a field the code under
+    #: test reads is the same defect as the voice panel's stub that used a key
+    #: `propose` never returns — the suite passes and the page is broken.
+    def __init__(self, text, code=200, url=""):
+        self.text, self.status_code, self.url = text, code, url
 
 
 #: Every URL this suite's stub was asked for, in order — the only way to prove
@@ -108,10 +127,10 @@ def _fake_get(url, **kw):
         return _Resp(_sitemap(SITE_PAGES))
     if url == f"https://{LANDING}/sitemap.xml":
         return _Resp(_sitemap(LANDING_PAGES))
-    for bag in (SITE_PAGES, LANDING_PAGES):
+    for bag in (SITE_PAGES, LANDING_PAGES, PATH_PAGES):
         if url in bag:
-            return _Resp(bag[url])
-    return _Resp("", 404)
+            return _Resp(bag[url], url=url)
+    return _Resp("", 404, url=url)
 
 
 def main() -> int:
@@ -279,6 +298,124 @@ def main() -> int:
     ck("with only a website, the card does NOT repeat it on every row",
        "read off Website" not in content1,
        "one site to tell apart is no site to tell apart")
+
+    # ---- 5. A LANDING PAGE IS A PAGE (owner, 2026-08-28) ------------------
+    #
+    # "as long as the functionalities all work i.e. the scraper takes landing
+    # pages and actually pulls the facts when a scrape is set up" — it did
+    # not. Everything above this section passed while the feature did
+    # nothing, because every check here was about STORING and NAMING a
+    # source and none was about READING one. Proven against a real HTTP
+    # server: `discover_pages` treated every source as a SITE, so given
+    # `example.com/spring-offer` it asked for `/spring-offer/sitemap.xml`,
+    # then wp-json under the path, then crawled the links OUT of the page —
+    # and never fetched the page itself. A campaign landing page is
+    # deliberately link-free, so the commonest landing page in the world
+    # discovered exactly zero pages and its facts reached no queue.
+    print("\n— a landing page is a PAGE, and its facts actually arrive —")
+    from app import compliance as _comp
+    found, how = _comp.discover_pages(LP_PATH, limit=50)
+    ck("a source naming ONE PAGE is read as that page",
+       len(found) == 1 and found[0]["url"] == LP_PATH,
+       f"{how!r} {[f['url'] for f in found]}")
+    ck("…and says so, rather than borrowing the website's method name",
+       how == "landing page", how)
+    ck("the fetched HTML rides along, so the reader does not re-request it",
+       bool(found and found[0].get("html")))
+
+    # THE WHOLE POINT: the facts on it arrive.
+    tenants.set_sources("baci", [{"url": LP_PATH, "label": "Spring campaign"}])
+    ck("a path on the website's own host can be ADDED at all",
+       any(x["url"] == LP_PATH for x in tenants.content_sources("baci")),
+       str(tenants.content_sources("baci")))
+    from app import harvest as _hv
+    out = _hv.harvest("baci", limit=60, apply=False, recrawl=True)
+    props = out.get("proposed") or []
+    # `text`, which is the key `harvest` actually returns — the first version
+    # of this read `claim`, got "" for every row, and the ban-list assertion
+    # below then passed against a list of empty strings. A check that reads a
+    # key the producer does not write proves nothing, loudly and in green.
+    ck("a proposal carries its sentence under the key harvest writes",
+       all("text" in c for c in props), str(props[:1])[:160])
+    claims = [str(c.get("text", "")) for c in props]
+    ck("the landing page's facts are actually proposed",
+       any("ships within 2 working days" in c for c in claims),
+       str(claims)[:220])
+    ck("…and the ban list still filters what it read",
+       not any("hand-decorated" in c.lower() for c in claims), str(claims)[:220])
+    rep = {r["label"]: r for r in (out.get("sources") or [])}
+    ck("the per-source report counts the landing page's pages",
+       rep.get("Spring campaign", {}).get("pages_found") == 1, str(rep)[:220])
+    ck("a proposal records the landing page as its source",
+       any(LP_PATH in str(c.get("source", ""))
+           for c in (out.get("proposed") or [])),
+       str([c.get("source") for c in (out.get("proposed") or [])])[:200])
+
+    # And the ban-list scan sees a phrase that is live on it — the half of
+    # this feature that is a compliance question, not a knowledge one.
+    kb.add_banned("baci", "hand-decorated")
+    sc = compliance.scan("baci", limit=60)
+    hit = [v for v in (sc.get("violations") or []) if v.get("url") == LP_PATH]
+    ck("the ban-list scan checks the landing page too",
+       bool(hit), str(sc.get("violations"))[:220])
+    ck("…and names WHICH source the live breach is on",
+       bool(hit) and hit[0].get("site") == "Spring campaign", str(hit)[:200])
+
+    # ---- 6. same host, different page ------------------------------------
+    print("\n— the commonest landing page there is: a path on the site --")
+    res6 = tenants.set_sources("baci", [
+        {"url": f"https://{SITE}/pages/spring", "label": "Spring"},
+        {"url": f"https://{SITE}/pages/summer", "label": "Summer"},
+        {"url": f"https://www.{SITE}", "label": "the website, wearing a www"},
+    ])
+    srcs6 = tenants.content_sources("baci")
+    lps6 = [x for x in srcs6 if x["role"] == "landing_page"]
+    ck("a path on the website's own host IS a landing page — for a Shopify "
+       "store it is the only kind they have",
+       len(lps6) == 2, str(lps6))
+    ck("two pages on ONE host are two sources, not one",
+       {x["label"] for x in lps6} == {"Spring", "Summer"}, str(lps6))
+    ck("the bare website is still refused, however it is written",
+       "website itself" in (res6.get("refused") or ""), str(res6))
+    ck("each page answers with ITS OWN label, not whichever came first",
+       tenants.source_label("baci", f"https://{SITE}/pages/summer") == "Summer"
+       and tenants.source_label("baci", f"https://{SITE}/pages/spring") == "Spring")
+    ck("a page under a landing page belongs to that landing page",
+       tenants.source_label("baci", f"https://{SITE}/pages/spring/checkout")
+       == "Spring")
+    ck("an ordinary website page still answers Website",
+       tenants.source_label("baci", f"https://{SITE}/pages/about") == "Website")
+
+    ck("the WEBSITE is stored as a bare host, so it is never reduced to one "
+       "page by the landing-page branch",
+       tenants.set_website("baci", "https://www.bacimilanousa.com/en/")
+       .get("domain") == "bacimilanousa.com",
+       str(tenants.set_website("baci", "https://www.bacimilanousa.com/en/")))
+    tenants.set_website("baci", SITE)
+
+    # ---- 7. a source that read nothing SAYS SO ----------------------------
+    print("\n— absence is not an answer: an empty source is named —")
+    from app.web import _summarise
+    line = _summarise({"proposed_count": 12, "pages_read": 40, "sources": [
+        {"label": "Website", "pages_found": 40},
+        {"label": "Spring", "pages_found": 0}]})
+    ck("a run that missed a source names it in the status line",
+       "READ NOTHING: Spring" in line, line)
+    ck("…and a run that missed nothing stays quiet",
+       "READ NOTHING" not in _summarise(
+           {"proposed_count": 12, "sources": [{"label": "Website",
+                                               "pages_found": 40}]}))
+    import json as _json
+    with db.SessionLocal() as _s:
+        _s.merge(db.Setting(key="bg:harvest:baci", value=_json.dumps(
+            {"state": "done", "detail": line, "at": "2026-08-28T16:40:00"})))
+        _s.commit()
+    brand_page = admin_ui.render_brand("s3cret", "baci")
+    ck("the Brand tab says it beside the source list it is about",
+       "read nothing: Spring" in brand_page)
+    ck("…and carries the control that re-runs it (rule 1), so the fix is not "
+       "an instruction to go somewhere else",
+       "/admin/harvest" in brand_page and "/admin/compliance_scan" in brand_page)
 
     print()
     if _fail:

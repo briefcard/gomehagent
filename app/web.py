@@ -6466,7 +6466,18 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
 
 
 def _summarise(result) -> str:
-    """The two or three numbers that say whether a run was worth anything."""
+    """The two or three numbers that say whether a run was worth anything.
+
+    AND WHICH SOURCE CAME BACK EMPTY. A run over several sites reported one
+    set of totals, so a landing page that enumerated nothing was invisible
+    behind a website that enumerated plenty: the line read "proposed_count 12
+    · pages_read 40" and the owner had no way to learn the landing page they
+    had just added contributed zero. The per-source report existed in the
+    return value the whole time and no surface rendered it, which is the
+    same shape as a KB rule that never reaches a validator. Absence is not an
+    answer (design rule 12): a source that read nothing has to say so where
+    the run is reported.
+    """
     if not isinstance(result, dict):
         return ""
     if result.get("error"):
@@ -6475,6 +6486,11 @@ def _summarise(result) -> str:
             "faqs_filed_as_objections", "claims_count", "objections_count",
             "threads_seen", "added", "updated", "violations", "extractor")
     bits = [f"{k} {result[k]}" for k in keep if result.get(k) not in (None, "")]
+    empty = [r.get("label") or r.get("url", "")
+             for r in (result.get("sources") or [])
+             if isinstance(r, dict) and not r.get("pages_found")]
+    if empty:
+        bits.append("READ NOTHING: " + ", ".join(str(e) for e in empty[:4]))
     note = result.get("extractor_note") or ""
     return " · ".join(bits) + (f" — {note[:200]}" if note else "")
 

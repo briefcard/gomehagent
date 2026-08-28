@@ -43,7 +43,8 @@ Knowledge's Overview fold in), step 7 (completeness audit).
 | `99a8ddd` | The queues name the thing; `reconcile_mail` on demand |
 | `cec1ad1` | Documentation catches up with the session |
 | `a4daed8` | Turn the claim into a check |
-| _next_ | Brand — the derive comes off the request, and a rule can be lifted |
+| `29c62d5` | Brand — the derive comes off the request, and a rule can be lifted |
+| _next_ | A landing page is a page — the scraper actually reads one |
 
 **THE OWNER'S WALKTHROUGH (2026-08-28) is the newest and most valuable input
 in this file** — five defects found by using the app, all fixed, all in the
@@ -1188,6 +1189,74 @@ Verified on the demo: the real derive read 6 pages of bacimilanousa.com via
 sitemap and proposed measured tone with no model key (the degraded path), the
 lift/restore round trip, the containment with `status()` raising, and zero
 horizontal overflow at 375px and desktop.
+
+**OUT OF BAND — A LANDING PAGE IS A PAGE (owner, 2026-08-28).** Owner, on
+being shown the Brand tab: *"Looks good as long as the functionalities all
+work i.e. the scraper takes landing pages and actually pulls the facts when a
+scrape is set up."* It did not, and nothing in 113 suites said so. Proven
+against a REAL HTTP server before a line was changed: a landing page on a
+path enumerated ZERO pages and its facts reached no queue.
+
+THREE DEFECTS, all in the 2026-08-27 multi-domain work, none visible from
+inside the tests it shipped with.
+
+1. **`discover_pages` treated every source as a SITE, because until landing
+   pages existed every source was one.** Given `example.com/spring-offer` it
+   asked for `/spring-offer/sitemap.xml`, then wp-json under the path, then
+   crawled the links OUT of the page — and never fetched the page itself as
+   something to read. A campaign landing page is deliberately link-free so
+   the reader cannot leak out of the funnel, so the commonest landing page in
+   the world discovered nothing at all. NEW `compliance._one_page`: a source
+   naming one page is read as that page, plus same-prefix links only (a
+   two-step funnel `/offer/checkout` belongs to the landing page;
+   `/collections/all` is the website's job and must not be dragged onto a
+   landing page's budget). The branch has to come FIRST in `discover_pages`,
+   because every method below it asks the network a question that only makes
+   sense about a whole site and reads the 404 as "this source is empty". The
+   method reports as `landing page`, and the fetched HTML rides along so the
+   reader does not request it twice.
+2. **Source identity was the HOST, so the commonest landing page could not be
+   ADDED.** `theirdomain.com/pages/spring` — the only kind a Shopify client
+   has — was refused as "the website itself", and two campaigns sharing one
+   host (`unbounce.com/a`, `unbounce.com/b`) silently collapsed into one with
+   the wrong campaign's name on every claim read off either. NEW
+   `tenants._norm_url` (host + path) is the vocabulary for "the same PAGE";
+   `_norm` stays "the same SITE" and is still the right question for a
+   credential. Only a BARE HOST now collides with the website, `source_label`
+   matches the exact page first and then the longest containing source, and
+   `set_website` normalises to a bare host — without that last one a domain
+   saved as `theirdomain.com/en` would silently reduce the identity source to
+   a single page now that the new branch exists.
+3. **A source that read nothing was invisible.** The per-source report existed
+   in harvest's return value the whole time and NO SURFACE RENDERED IT:
+   `_summarise` keeps only numeric keys, so a landing page contributing zero
+   hid behind a website contributing plenty and the line read
+   `proposed_count 12 · pages_read 40`. Same shape as a KB rule that never
+   reaches a validator. `_summarise` now appends `READ NOTHING: <source>`,
+   and the Brand tab's source card carries the last-read state for harvest
+   and the ban-list scan WITH the buttons that re-run them — a named gap
+   carries its control (rule 1), and "go to Review and press Run harvest" is
+   a fix instruction, which is the defect that rule exists to stop.
+
+WHY THE SUITE MISSED IT, which is the durable lesson: `test_brand_sources.py`
+had 32 checks and every one was about STORING and NAMING a source. Not one
+read one. And `seed_demo` seeded a bare SUBDOMAIN — the shape that happened
+to work — with a HAND-FILED claim, so the demo showed the feature succeeding
+at exactly the case that was never broken. Both are fixed: the suite's stub
+now serves a path landing page absent from the sitemap and the suite asserts
+the FACTS ARRIVE (proposed, ban-filtered, attributed) and that the ban-list
+scan catches a live breach on it naming which source; the demo seeds a path
+URL and says in its own docstring that a seeded row can only demonstrate the
+display. One check found in the writing: the first version read the proposal
+key `claim`, which `harvest` does not write — it got "" for every row and the
+ban-list assertion passed against a list of empty strings. The suite now
+asserts the key exists, so a rename fails loudly instead of in green.
+
+Guards, all three caught: `a_landing_page_is_a_page`, `a_page_is_not_its_host`,
+`an_empty_source_says_so`. `_Resp` in the suite gained `.url` because a real
+httpx response has one and `_one_page` reads it — a stub missing a field the
+code under test reads is the same defect as the voice panel's stub using a key
+`propose` never returns.
 
 ### Step 5 — The client product (spec §§13–16)
 - **Ships:** portal five tabs (Overview / **Work** — deliverables via the

@@ -3499,6 +3499,42 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     # the identity source, and the landing pages are labelled facts-only.
     srcs = tenants.content_sources(tenant)
     lps = [x for x in srcs if x["role"] == "landing_page"]
+
+    # WHAT THE LAST SCRAPE DID, WHERE THE SOURCES ARE EDITED. A source that
+    # enumerated nothing used to be invisible: the per-source report existed
+    # in harvest's return value and no surface rendered it, so a landing page
+    # contributing zero hid behind a website contributing plenty. `_summarise`
+    # now names them and this puts that line next to the list it is about —
+    # with the button that re-runs it, because a named gap carries its own
+    # control (design rule 1) and "go and press Run harvest on Review" is a
+    # fix instruction, which is the defect that rule exists to stop.
+    def _last_run(label_: str, name: str, action: str, extra: dict) -> str:
+        st = _bg_status(label_, tenant)
+        stamp = _esc((st.get("at") or "")[:16].replace("T", " "))
+        detail = str(st.get("detail", ""))
+        if not st:
+            state = '<span class="mut">never run</span>'
+        elif st.get("state") == "failed":
+            state = (f'<span class="chip off" title="{_esc(detail)}">failed '
+                     f'{stamp}</span>')
+        elif st.get("state") == "running":
+            state = f'<span class="chip nb">running · {stamp}</span>'
+        else:
+            # "READ NOTHING: <source>" is the half that matters here, so it is
+            # loud rather than a title attribute nobody hovers.
+            miss = detail.split("READ NOTHING:", 1)
+            state = f'<span class="mut">ran {stamp}</span>'
+            if len(miss) > 1:
+                state += ('<br><span class="chip off">read nothing: '
+                          + _esc(miss[1].split(" — ")[0].strip()) + "</span>")
+        return (f'<div class="conn-site"><span><b>{_esc(name)}</b></span>'
+                f'{state}<span class="row">'
+                + _act(key, action, f"Run {name.lower()}", tenant, extra,
+                       small=True) + "</span></div>")
+
+    reads = (_last_run("harvest", "Harvest", "/admin/harvest", {"apply": "1"})
+             + _last_run("scan", "Ban-list scan", "/admin/compliance_scan",
+                         {"ui": "1"}))
     src_rows = "".join(f"""
     <div class="conn-site">
       <span class="src-cell"><input name="lp_label" value="{_esc(x['label'])}"
@@ -3541,6 +3577,11 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     </div>
     <div class="row"><button>Save sources</button></div>
   </form>
+  <div style="margin-top:10px"><span class="mut">What the last read of these
+  sources did &mdash; a source that came back empty is named, because a
+  landing page contributing nothing looks exactly like one contributing
+  plenty when only the totals are reported:</span></div>
+  {reads}
 </div>"""
 
     # The live half: what customers' emails render with today. When the theme

@@ -350,14 +350,78 @@ def _crawl_urls(base: str, limit: int = 60) -> list[dict]:
     return []
 
 
-def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
-    """Every public page, by whichever method this site supports.
+def _one_page(base: str, limit: int = 60) -> list[dict]:
+    """A source that names ONE PAGE: that page, plus anything under it.
 
-    Sitemap first — it is complete and carries lastmod, which is what makes a
-    repeat scan cheap. Then the WordPress API. Then the homepage. Returns the
-    source alongside the pages, because "40 pages via homepage crawl" and "400
-    pages via sitemap" are very different levels of confidence in a clean scan.
+    `discover_pages` assumed every source is a SITE, because until landing
+    pages existed every source was. Given `example.com/spring-offer` it asked
+    for `/spring-offer/sitemap.xml`, then `/spring-offer/wp-json/…`, then
+    crawled the links OUT of the page — and never once fetched the page
+    itself as something to read. A campaign landing page is deliberately
+    link-free so the reader cannot leak out of the funnel, so the commonest
+    landing page in the world discovered exactly nothing and the facts on it
+    (an offer's terms, a spec, a capacity) reached no queue. Proven against a
+    real server, 2026-08-28, after the owner asked whether it actually works.
+
+    Same-prefix links come too, capped: a two-step funnel
+    (`/spring-offer/checkout`) is part of the same landing page, while
+    `/collections/all` is the website's job and must not be dragged in here
+    on a landing page's budget.
     """
+    import httpx
+    url = base if base.startswith("http") else "https://" + base
+    url = url.rstrip("/")
+    try:
+        r = httpx.get(url, timeout=25, follow_redirects=True, headers=HEADERS)
+        if r.status_code != 200:
+            _one_page.last_problems = [f"{url} → HTTP {r.status_code}"]
+            return []
+    except Exception as exc:                                     # noqa: BLE001
+        _one_page.last_problems = [f"{url} → {exc.__class__.__name__}"]
+        return []
+    landed = str(r.url).rstrip("/")
+    out = [{"url": landed, "lastmod": "", "html": r.text}]
+    seen = {landed}
+    for href in re.findall(r'href=["\']([^"\'#?]+)', r.text):
+        if len(out) >= limit:
+            break
+        if href.startswith("//") or href.startswith("mailto:"):
+            continue
+        nxt = (landed.split("://", 1)[0] + "://"
+               + landed.split("://", 1)[1].split("/", 1)[0] + href
+               if href.startswith("/") else href)
+        nxt = nxt.rstrip("/")
+        if not nxt.startswith(landed + "/") or nxt in seen:
+            continue
+        if any(sk in nxt.lower() for sk in _SKIP):
+            continue
+        seen.add(nxt)
+        out.append({"url": nxt, "lastmod": ""})
+    return out
+
+
+def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
+    """Every public page, by whichever method this source supports.
+
+    A source naming ONE PAGE is read as one page (see `_one_page`) — that
+    branch has to come first, because every method below it asks the network
+    a question that only makes sense about a whole site and reads the 404 as
+    "this source has nothing".
+
+    For a site: sitemap first — it is complete and carries lastmod, which is
+    what makes a repeat scan cheap. Then the WordPress API. Then the
+    homepage. Returns the method alongside the pages, because "40 pages via
+    homepage crawl" and "400 pages via sitemap" are very different levels of
+    confidence in a clean scan.
+    """
+    from . import tenants
+    if not tenants._is_bare_host(base):
+        pages = _one_page(base, limit=min(limit, 60))
+        if pages:
+            return pages, "landing page"
+        discover_pages.last_problems = list(
+            getattr(_one_page, "last_problems", []))
+        return [], ""
     pages = _sitemap_urls(base, limit=limit)
     if pages:
         return pages, "sitemap"

@@ -66,9 +66,37 @@ WEBSITE_LABEL = "Website"
 
 
 def _norm(value: str) -> str:
-    """One vocabulary for "same site" — the connect page's, not a second one."""
+    """One vocabulary for "same HOST" — the connect page's, not a second one."""
     from .connections import norm_domain
     return norm_domain(value)
+
+
+def _norm_url(value: str) -> str:
+    """One vocabulary for "the same PAGE" — host plus path.
+
+    `_norm` answers "same site", which is the right question for a credential
+    and the WRONG one for a content source. A landing page is a page: for a
+    Shopify store the commonest one there is lives at
+    `theirdomain.com/pages/spring`, and two campaigns often share one host
+    (`unbounce.com/a`, `unbounce.com/b`). Deduping those by host dropped the
+    second one silently and refused the first as "the website itself", so the
+    single most likely landing page a client has could not be added at all.
+
+    Trailing slashes and `www.` are noise; a query string is not — a landing
+    page addressed by `?variant=b` is a different page — so it is kept.
+    """
+    v = (value or "").strip().lower()
+    v = v.split("://", 1)[-1]
+    host, _, rest = v.partition("/")
+    if host.startswith("www."):
+        host = host[4:]
+    rest = rest.rstrip("/")
+    return f"{host}/{rest}" if rest else host
+
+
+def _is_bare_host(value: str) -> bool:
+    """True when a URL names a whole site rather than one page on it."""
+    return "/" not in _norm_url(value)
 
 
 def content_sources(key: str) -> list[dict]:
@@ -79,10 +107,13 @@ def content_sources(key: str) -> list[dict]:
     account has one, so a caller that reads only `[0]` gets the identity
     source rather than whichever row was added last.
 
-    A landing page recorded on the same host as the website is dropped here,
-    not just refused at the form: `/admin/tenant_set` can still write the
-    domain by hand, so a collision can appear after the fact, and a second
-    entry for the same site would harvest it twice and count it twice.
+    A landing page that IS the website — the bare host, however written — is
+    dropped here and not just refused at the form: `/admin/tenant_set` can
+    still write the domain by hand, so a collision can appear after the fact,
+    and a second entry for the same site would harvest it twice and count it
+    twice. `theirdomain.com/pages/spring` is NOT that collision: it is one
+    page on the site, it is the commonest landing page a Shopify client has,
+    and deduping it away by host is why none of them could be added.
     """
     t = get(key)
     if not t:
@@ -92,16 +123,16 @@ def content_sources(key: str) -> list[dict]:
     site = (t.domain or "").strip()
     if site:
         out.append({"url": site, "label": WEBSITE_LABEL, "role": "website"})
-        seen.add(_norm(site))
+        seen.add(_norm_url(site))
     for row in (t.sources or []):
         if not isinstance(row, dict):
             continue
         url = str(row.get("url") or "").strip()
-        if not url or _norm(url) in seen:
+        if not url or _norm_url(url) in seen:
             continue
-        seen.add(_norm(url))
+        seen.add(_norm_url(url))
         out.append({"url": url,
-                    "label": str(row.get("label") or "").strip() or _norm(url),
+                    "label": str(row.get("label") or "").strip() or _norm_url(url),
                     "role": "landing_page"})
     return out
 
@@ -115,24 +146,46 @@ def source_label(key: str, url: str) -> str:
     or removed. An unrecognised host answers with the host — honest, and what
     a claim harvested before a source was renamed should say.
     """
-    host = _norm(url)
-    if not host:
+    want = _norm_url(url)
+    if not want:
         return ""
-    for src in content_sources(key):
-        if _norm(src["url"]) == host:
+    srcs = content_sources(key)
+    # Exact page first: two landing pages can share a host, and answering
+    # with whichever was added first would put the wrong campaign's name on
+    # a claim.
+    for src in srcs:
+        if _norm_url(src["url"]) == want:
             return src["label"]
-    return host
+    # Then the page's own site — a claim read off `site.com/about` was read
+    # off the Website, and every page under a landing page belongs to it.
+    for src in sorted(srcs, key=lambda x: -len(_norm_url(x["url"]))):
+        base = _norm_url(src["url"])
+        if want == base or want.startswith(base + "/"):
+            return src["label"]
+    return _norm(url)
 
 
 def set_website(key: str, url: str) -> dict:
-    """The canonical writer for the identity source."""
+    """The canonical writer for the identity source.
+
+    Stored as a BARE HOST, whatever was typed. The website is a site by
+    definition — the whole point of the role is that everything under it is
+    this brand's own words — and since 2026-08-28 `discover_pages` reads a
+    source with a path as ONE PAGE. So a domain saved as
+    `theirdomain.com/en` would silently reduce the identity source to a
+    single page: voice derived from one page, harvest reading one page,
+    the ban-list scan checking one page, all of it looking like it worked.
+    Normalising here is what keeps that branch safe, and it matches the
+    values already on file (`bacimilanousa.com`, no scheme, no www).
+    """
+    clean = _norm(url)
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, key)
         if not t:
             return {"error": f"unknown tenant {key!r}"}
-        t.domain = (url or "").strip()
+        t.domain = clean
         s.commit()
-    return {"tenant": key, "domain": (url or "").strip()}
+    return {"tenant": key, "domain": clean}
 
 
 def set_sources(key: str, rows: list[dict]) -> dict:
@@ -146,7 +199,7 @@ def set_sources(key: str, rows: list[dict]) -> dict:
         t = s.get(db.Tenant, key)
         if not t:
             return {"error": f"unknown tenant {key!r}"}
-        site = _norm(t.domain or "")
+        site = _norm_url(t.domain or "")
         kept: list[dict] = []
         seen: set[str] = {site} if site else set()
         refused: list[str] = []
@@ -154,16 +207,19 @@ def set_sources(key: str, rows: list[dict]) -> dict:
             url = str((row or {}).get("url") or "").strip()
             if not url:
                 continue
-            host = _norm(url)
-            if host == site:
+            # Only the WHOLE SITE collides with the website. A path on the
+            # same host is a page the site happens to contain, and refusing
+            # it made the Shopify case — `/pages/spring` — unaddable.
+            page = _norm_url(url)
+            if page == site:
                 refused.append(url)
                 continue
-            if host in seen:
+            if page in seen:
                 continue
-            seen.add(host)
+            seen.add(page)
             kept.append({"url": url,
                          "label": str((row or {}).get("label") or "").strip()
-                                  or host})
+                                  or page})
         t.sources = kept
         s.commit()
     out: dict = {"tenant": key, "landing_pages": len(kept)}

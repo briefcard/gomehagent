@@ -2065,6 +2065,50 @@ SABOTAGES = [
                "half removing the other half's controls is how a fixable "
                "problem becomes an unfixable one",
     },
+    {
+        "name": "a_landing_page_is_a_page",
+        "file": "app/compliance.py",
+        "find": "    if not tenants._is_bare_host(base):",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_brand_sources.py"],
+        "why": "every source is treated as a SITE again, so a landing page "
+               "on a path asks for `<path>/sitemap.xml`, then wp-json under "
+               "the path, then crawls the links OUT of the page — and never "
+               "reads the page itself. A campaign landing page is "
+               "deliberately link-free, so the commonest landing page in the "
+               "world discovers nothing and its facts reach no queue, while "
+               "the run reports a healthy total from the website beside it",
+    },
+    {
+        "name": "a_page_is_not_its_host",
+        "file": "app/tenants.py",
+        "find": "            page = _norm_url(url)\n"
+                "            if page == site:",
+        "replace": "            page = _norm(url)  # SABOTAGE\n"
+                   "            if page == _norm(t.domain or ''):",
+        "suites": ["test_brand_sources.py"],
+        "why": "source identity collapses back to the HOST, so "
+               "`theirdomain.com/pages/spring` is refused as \"the website "
+               "itself\" — which is the only kind of landing page a Shopify "
+               "client has — and two campaigns sharing one host silently "
+               "become one source with the wrong campaign's name on every "
+               "claim read off either",
+    },
+    {
+        "name": "an_empty_source_says_so",
+        "file": "app/web.py",
+        "find": "    if empty:\n"
+                "        bits.append(\"READ NOTHING: \" + \", \".join(str(e) for e in empty[:4]))",
+        "replace": "    if False:  # SABOTAGE\n"
+                   "        pass",
+        "suites": ["test_brand_sources.py"],
+        "why": "a source that enumerated nothing goes silent again, hidden "
+               "behind a website that enumerated plenty: the line reads "
+               "\"proposed_count 12 · pages_read 40\" and the owner cannot "
+               "learn that the landing page they just added contributed "
+               "zero. Absence read as success — the exact defect design rule "
+               "12 was written for",
+    },
 ]
 
 

@@ -158,8 +158,13 @@ def seed_landing_pages() -> str:
     account looks the same cannot show that the site name appears on a claim
     card only when there is more than one site to tell apart.
     """
+    # A PATH on the client's own domain — the commonest landing page there
+    # is, and the one that could not be added at all before 2026-08-28. The
+    # old seed used a bare subdomain that does not exist, which is the shape
+    # that happened to work, so the demo showed the feature succeeding at
+    # exactly the case that was never broken.
     res = tenants.set_sources("baci", [
-        {"url": "https://spring.bacimilanousa.com",
+        {"url": "https://bacimilanousa.com/pages/spring-set",
          "label": "Spring campaign landing page"}])
     # And one claim read off it, waiting on Review — the visible half of the
     # feature is the Details fold saying WHICH site a card came from, and a
@@ -169,9 +174,14 @@ def seed_landing_pages() -> str:
     if any("spring set ships" in (c.claim or "")
            for c in kb.pending_claims("baci")):
         return f"baci reads {res['landing_pages'] + 1} sources (claim already filed)"
+    # Hand-filed, and worth saying plainly: seeding does not crawl (a demo
+    # must not reach out to the live site), so this stands in for what a real
+    # harvest of that page proposes. The scrape itself is proven in
+    # `test_brand_sources.py` section 5 against a served page, which is where
+    # that claim belongs — a seeded row can only ever demonstrate the DISPLAY.
     kb.add_claim("baci", "The spring set ships within 2 working days.",
                  "2 working days", ["gift_hunting"], proof_type="data",
-                 source="stated on https://spring.bacimilanousa.com/offer",
+                 source="stated on https://bacimilanousa.com/pages/spring-set",
                  status="pending", origin="crawl")
     return f"baci reads {res['landing_pages'] + 1} sources"
 
