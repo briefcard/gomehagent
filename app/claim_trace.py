@@ -106,8 +106,23 @@ _ASSERTIVE = (
 _NUMBER = re.compile(r"\b\d")
 
 
+#: Tags that end a line of reading. Kept as a newline rather than a space so
+#: two things hold that did not before: a heading with no full stop is its own
+#: sentence instead of being glued to the paragraph under it, and the review
+#: surface can put the author's paragraphs back.
+_BLOCK = re.compile(
+    r"</?(?:p|div|br|li|h[1-6]|tr|td|th|section|article|header|footer"
+    r"|blockquote|ul|ol|table|figure|figcaption)\b[^>]*>", re.I)
+
+
 def _sentences(text: str) -> list[str]:
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", str(text or ""))
+    """Split on sentence ends AND on line breaks.
+
+    A line break is a hard boundary because a heading rarely carries a full
+    stop: without this, "Glucosamine and chondroitin work" merges with the
+    first sentence of the paragraph below it and the pair is scored as one.
+    """
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", str(text or ""))
             if s.strip()]
 
 
@@ -116,10 +131,28 @@ def plain_text(body: str) -> str:
     assert as loudly as a paragraph ("Glucosamine and chondroitin work")."""
     t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", str(body or ""),
                flags=re.I | re.S)
+    t = _BLOCK.sub("\n", t)
     t = re.sub(r"<[^>]+>", " ", t)
     t = (t.replace("&amp;", "&").replace("&nbsp;", " ")
          .replace("&#39;", "'").replace("&quot;", '"'))
-    return re.sub(r"[ \t]+", " ", t).strip()
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r" ?\n ?", "\n", t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+_HEADING = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.I | re.S)
+
+
+def headings(body: str) -> set:
+    """Which lines were headings, so a review surface can render them as such.
+
+    Deliberately NOT folded into `plain_text`. The scoring path wants the
+    words and nothing else: turning `<h2>` into `# ` would put a hash inside
+    the sentence text, and that text is quoted verbatim in every note, every
+    `unbacked_assertions` entry and every marker tip.
+    """
+    return {t for t in (plain_text(m.group(2)) for m in _HEADING.finditer(
+        str(body or ""))) if t}
 
 
 def _tokens(s: str) -> set:
@@ -148,7 +181,9 @@ def annotate(text: str, claims: list) -> dict:
     `evidence` ride along when present so the reader can open the claim it
     matched. Returns:
 
-        sentences  [{text, backed, assertion, claims:[{id, claim, evidence}]}]
+        sentences  [{text, backed, assertion, note, claims:[{id, claim, …}]}]
+                   `note` is a 1-based index over the sentences that assert
+                   something, 0 for prose. Marker and panel entry share it.
         backed     how many sentences a claim stands behind
         assertions how many sentences assert something checkable
         unbacked_assertions  the ones that assert and have nothing behind them
@@ -197,7 +232,18 @@ def annotate(text: str, claims: list) -> dict:
         # marker list.
         out.append({"text": sent, "backed": bool(hits),
                     "assertion": bool(hits) or is_assertion(sent),
-                    "claims": hits})
+                    "claims": hits, "note": 0})
+
+    # THE NUMBER IS ASSIGNED HERE, ONCE, and every reader uses it. The old
+    # gutter built a second list of cards in its own order and hoped card
+    # three sat beside sentence three; nothing linked them, and on any body
+    # where prose interleaved with assertions nothing did. A shared index
+    # cannot drift, because there is only one.
+    n = 0
+    for s in out:
+        if s["assertion"]:
+            n += 1
+            s["note"] = n
 
     assertions = [s for s in out if s["assertion"]]
     backed_assertions = [s for s in assertions if s["backed"]]

@@ -219,27 +219,57 @@ def main() -> int:
        "defect, authored by me")
     ck("…with the systems it grouped", "seo" in page and "spark" in page)
 
-    print("\n— the shape follows the asset —")
+    print("\n— nothing is inserted into the artifact —")
+    import re as _re2
     from app import admin_ui as ui
 
     class Long:
         tenant = "eien"; format = "cms_article"; system_key = "blog"
         output_id = "L"
-        body = " ".join(
-            ["Glucosamine remains the benchmark for joints."] * 4
-            + ["You stood up from your desk."] * 6)
+        body = ("<h2>What the label tells you</h2>"
+                "<p>Glucosamine remains the benchmark for joints. "
+                "You stood up from your desk.</p>"
+                "<p>Roughly one in four adults over 50 reports knee pain. "
+                "The kettle had boiled twice.</p>"
+                "<p>Every batch is third-party tested in a US facility.</p>")
 
     class Short:
         tenant = "eien"; format = "ad_batch"; system_key = "ad_creative"
         output_id = "S"
         body = '{"variants":[{"text":"Rebuilds cartilage fast."}]}'
 
-    long_card, short_card = ui._grounding_card("eien", Long()), ui._grounding_card("eien", Short())
-    ck("long-form gets the claim gutter", 'class="gutter"' in long_card)
-    ck("a short ad does not — inline is readable at that length",
-       'class="gutter"' not in short_card and bool(short_card))
-    ck("both carry the at-a-glance bar",
+    long_card = ui._grounding_card("eien", Long())
+    short_card = ui._grounding_card("eien", Short())
+    read = long_card.split('class="gread"', 1)[1].split('class="gpanel"', 1)[0]
+
+    ck("no marker is inside the reading",
+       'class="mk"' not in read,
+       "a marker in the flow moves where lines wrap — and on an ad, the fold")
+    ck("a wrapped sentence is a span and nothing else",
+       ui._sentence_html({"text": "Every batch is tested.", "assertion": True,
+                          "note": 4}, "gap")
+       == '<span class="s" data-note="4" data-state="gap">'
+          'Every batch is tested.</span>',
+       ui._sentence_html({"text": "Every batch is tested.", "assertion": True,
+                          "note": 4}, "gap"))
+    ck("no commentary is inside the reading",
+       "nothing on file says this" not in read,
+       "that is the mixing the owner rejected")
+
+    mk = _re2.findall(r'class="mk" data-note="(\d+)" data-state="(\w+)"', long_card)
+    sp = _re2.findall(r'class="s" data-note="(\d+)" data-state="(\w+)"', long_card)
+    nt = _re2.findall(r'class="gnote" data-note="(\d+)" data-state="(\w+)"', long_card)
+    ck("marker n, sentence n and note n are the same n",
+       bool(mk) and sorted(mk) == sorted(sp) == sorted(nt),
+       f"markers={mk} spans={sp} notes={nt}")
+
+    ck("the author's paragraphs survive into the reading",
+       read.count("<p>") >= 2 and "<h4>" in read,
+       "a heading glued to the next paragraph was scored as one sentence")
+    ck("both formats carry the at-a-glance bar",
        'class="meter"' in long_card and 'class="meter"' in short_card)
+    ck("the panel is filterable by state",
+       'data-f="gap"' in long_card and 'data-f="ok"' in long_card)
 
     print()
     if _fail:

@@ -157,17 +157,93 @@ h1{font:700 1.7rem/1.2 var(--sans);letter-spacing:-.02em;margin:0}
 h2{font:700 1.15rem/1.25 var(--sans);letter-spacing:-.015em;margin:0}
 h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .tblwrap{overflow-x:auto}
-/* Grounding annotations (workroom). A backed sentence is UNDERLINED rather
-   than filled: the reader is reading prose, and a page of highlighter blocks
-   is harder to read than the thing it annotates. The unbacked-assertion state
-   is the loud one, because it is the one worth acting on. */
-.gr{padding:3px 0;line-height:1.55}
-.gr.ok>summary{cursor:pointer;text-decoration:underline;
-  text-decoration-color:var(--ok);text-decoration-thickness:2px;
-  text-underline-offset:3px;list-style:none}
-.gr.ok>summary::-webkit-details-marker{display:none}
-.gr.no{border-left:2px solid var(--gap);padding-left:8px;
-  display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+/* CLAIM MARGIN (workroom). NOTHING IS EVER INSERTED INTO THE ARTIFACT.
+   The first version made every sentence a block element and appended the
+   note into the reading line, so a six-sentence paragraph rendered as six
+   stacked rows with commentary between them — the owner's words, 2026-08-29:
+   "all the notes and the text look mixed up. thats absolutely unacceptable."
+
+   A marker in the text flow is not an annotation, it is an EDIT: it changes
+   where lines wrap, and on an ad it moves Meta's 125-character fold, which is
+   the one thing `ad_craft.offer_position()` exists to check. So the markers
+   live in a gutter beside the reading and are positioned by measuring where
+   each sentence actually lands. The sentence itself gets a bare span —
+   layout-neutral, because an unstyled inline element changes no metrics and
+   `text-decoration` is painted rather than measured. At rest it paints
+   nothing at all; the mark appears only while its marker is hovered or held.
+   Figma's pin over a clean design, which is what was asked for. */
+.gwrap{display:grid;grid-template-columns:34px minmax(0,1fr) 320px;gap:0;
+  border:1px solid var(--rule);border-radius:6px;overflow:visible}
+@media(max-width:900px){.gwrap{grid-template-columns:30px minmax(0,1fr)}
+  .gpanel{grid-column:1/-1;border-top:1px solid var(--rule)}
+  .gread{border-right:0}}
+.gut{position:relative;border-right:1px solid var(--rule2)}
+.mk{position:absolute;right:4px;top:0;width:21px;height:19px;padding:0;
+  display:grid;place-items:center;font-family:var(--mono);font-size:.6rem;
+  font-weight:700;line-height:1;border-radius:3px;cursor:pointer;
+  border:1px solid;background:var(--panel);transition:transform .1s ease}
+.mk:hover{transform:scale(1.14)}
+.mk[data-state=ok]{color:var(--ok);border-color:var(--ok)}
+.mk[data-state=gap]{color:var(--gap);border-color:var(--gap);background:var(--gaps)}
+.mk[data-state=off]{color:var(--err);border-color:var(--err);background:var(--errs)}
+.mk.sel{box-shadow:0 0 0 2px var(--acc)}
+.mk.dim{opacity:.2}
+.gread{padding:16px 20px;border-right:1px solid var(--rule);min-width:0}
+.gread .body{max-width:64ch;display:flex;flex-direction:column;gap:13px}
+.gread p{line-height:1.72;margin:0}
+.gread h4{font-size:1.02rem;margin:4px 0 0}
+.s{border-radius:2px;transition:background-color .12s ease}
+.s.lit{text-decoration:underline;text-decoration-thickness:1.5px;
+  text-underline-offset:3.5px;text-decoration-skip-ink:auto}
+.s.lit[data-state=ok]{text-decoration-color:var(--ok)}
+.s.lit[data-state=gap]{text-decoration-color:var(--gap)}
+.s.lit[data-state=off]{text-decoration-color:var(--err);text-decoration-style:wavy}
+.s.sel{background:var(--accs);box-shadow:0 0 0 3px var(--accs)}
+/* The hover popup hangs off the MARKER, in the gutter — never over the
+   sentence it is about. */
+.tip{position:absolute;left:calc(100% + 9px);top:-6px;width:262px;z-index:60;
+  background:var(--panel);border:1px solid var(--rule);border-radius:6px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);padding:10px 12px;text-align:left;
+  font:400 .8rem/1.5 var(--sans);color:var(--ink2);
+  opacity:0;visibility:hidden;transition:opacity .11s ease;pointer-events:none}
+.mk:hover .tip,.mk:focus-visible .tip{opacity:1;visibility:visible}
+.tip b{display:block;font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;
+  text-transform:uppercase;margin-bottom:5px}
+.tip[data-state=ok] b{color:var(--ok)}
+.tip[data-state=gap] b{color:var(--gap)}
+.tip[data-state=off] b{color:var(--err)}
+.tip i{display:block;margin-top:6px;color:var(--mut);font-size:.72rem;font-style:normal}
+@media(hover:none){.tip{display:none}}
+/* The panel: every note, and nothing but notes. */
+.gpanel{display:flex;flex-direction:column;min-width:0}
+.gfilt{padding:11px 12px;border-bottom:1px solid var(--rule);
+  display:flex;flex-wrap:wrap;gap:5px}
+.gfilt button{font-family:var(--mono);font-size:.64rem;padding:.34em .55em;
+  border-radius:4px;cursor:pointer;border:1px solid var(--rule);
+  background:transparent;color:var(--mut)}
+.gfilt button.on{background:var(--accs);border-color:var(--acc);
+  color:var(--acc);font-weight:700}
+.gnotes{list-style:none;margin:0;padding:7px;display:flex;flex-direction:column;
+  gap:5px;overflow-y:auto;max-height:70vh}
+.gnote{display:grid;grid-template-columns:23px minmax(0,1fr);gap:9px;padding:10px;
+  border:1px solid transparent;border-radius:6px;cursor:pointer}
+.gnote:hover{background:var(--rule2)}
+.gnote.sel{background:var(--accs);border-color:var(--acc)}
+.gnote.hide{display:none}
+.gnote .bdg{width:21px;height:19px;border-radius:3px;border:1px solid;
+  display:grid;place-items:center;font-family:var(--mono);font-size:.61rem;
+  font-weight:700}
+.gnote[data-state=ok] .bdg{color:var(--ok);border-color:var(--ok)}
+.gnote[data-state=gap] .bdg{color:var(--gap);border-color:var(--gap);background:var(--gaps)}
+.gnote[data-state=off] .bdg{color:var(--err);border-color:var(--err);background:var(--errs)}
+.gnote .lb{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;
+  text-transform:uppercase;font-weight:700;display:block;margin-bottom:4px}
+.gnote[data-state=ok] .lb{color:var(--ok)}
+.gnote[data-state=gap] .lb{color:var(--gap)}
+.gnote[data-state=off] .lb{color:var(--err)}
+.gnote .tx{font-size:.85rem;line-height:1.5;display:block}
+.gnote .mt{font-size:.74rem;color:var(--mut);line-height:1.45;display:block;
+  margin-top:4px}
 /* The whole output at a glance, before a word of it is read. */
 .meter{display:flex;height:6px;border-radius:4px;overflow:hidden;gap:2px;margin:8px 0 10px}
 .meter i{display:block;height:100%}
@@ -178,16 +254,6 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
    average that flattens it. No library: a strict CSP and a dozen divs. */
 .spark{display:inline-flex;align-items:flex-end;gap:1px;height:22px;min-width:40px}
 .spark i{display:block;width:4px;border-radius:1px;background:var(--acc)}
-/* Long-form drowns in inline popovers, so its claims move into a gutter
-   aligned to the text — the shape the owner asked for by pointing at Figma. */
-.gutter{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:18px}
-@media(max-width:820px){.gutter{grid-template-columns:1fr}}
-.gutter .rail{display:flex;flex-direction:column;gap:8px;font-size:.82rem}
-.railcard{border:1px solid var(--rule);border-left:3px solid var(--ok);
-  border-radius:6px;padding:8px 10px}
-.railcard.none{border-left-color:var(--gap)}
-.railcard .who{font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--mut);display:block;margin-bottom:3px}
 .mut{color:var(--mut);font-size:.86rem}
 .card{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px 18px;
 display:flex;flex-direction:column;gap:12px}
@@ -9447,56 +9513,187 @@ def _drafts_section(key: str, row) -> str:
 </div>"""
 
 
-def _claim_pop(c: dict, uses: dict, tenant: str) -> str:
-    """One claim, opened. `uses` is `claim_trace.usage_counts` — read ONCE by
-    the caller, because a per-claim query here is the N+1 on the page that
-    exists to explain the account to you.
+#: Positions every marker against the line its sentence actually starts on,
+#: and joins marker to panel note. Measured, never guessed — and re-measured
+#: whenever the text could have moved: on resize, and after the webfont swaps
+#: in, which is the one that bites (Hanken Grotesk loads async and every line
+#: shifts). If it never runs at all the markers stack in document order and
+#: the panel still works, because the artifact was never touched.
+_MARGIN_JS = """
+<script>
+(function(){if(window.__cm)return;window.__cm=1;var d=document,sel=null;
+function layout(){Array.prototype.forEach.call(d.querySelectorAll('.gwrap'),
+function(w){var g=w.querySelector('.gut'),r=w.querySelector('.gread');
+if(!g||!r)return;var base=g.getBoundingClientRect().top,floor=-999;
+Array.prototype.forEach.call(r.querySelectorAll('.s[data-note]'),function(x){
+var m=g.querySelector('.mk[data-note="'+x.dataset.note+'"]');if(!m)return;
+var b=x.getClientRects()[0];if(!b)return;var t=b.top-base;
+if(t<floor)t=floor;floor=t+22;m.style.top=Math.max(0,t)+'px';});
+g.style.minHeight=r.offsetHeight+'px';});}
+function pick(n){['mk','s','gnote'].forEach(function(c){
+Array.prototype.forEach.call(d.querySelectorAll('.'+c+'[data-note]'),function(e){
+e.classList.toggle('sel',n!==null&&e.dataset.note===n);});});
+Array.prototype.forEach.call(d.querySelectorAll('.s[data-note]'),function(e){
+e.classList.toggle('lit',n!==null&&e.dataset.note===n);});sel=n;}
+Array.prototype.forEach.call(d.querySelectorAll('.mk[data-note]'),function(m){
+var n=m.dataset.note,x=d.querySelector('.s[data-note="'+n+'"]');
+m.addEventListener('mouseenter',function(){if(x&&sel!==n)x.classList.add('lit');});
+m.addEventListener('mouseleave',function(){if(x&&sel!==n)x.classList.remove('lit');});
+m.addEventListener('click',function(e){e.preventDefault();pick(sel===n?null:n);
+if(sel){var o=d.querySelector('.gnote[data-note="'+sel+'"]');
+if(o)o.scrollIntoView({block:'nearest'});}});});
+Array.prototype.forEach.call(d.querySelectorAll('.gnote[data-note]'),function(o){
+o.addEventListener('click',function(e){if(e.target.closest('a'))return;
+var n=o.dataset.note;pick(sel===n?null:n);
+if(sel){var m=d.querySelector('.mk[data-note="'+sel+'"]');
+if(m)m.scrollIntoView({block:'center'});}});});
+var f=d.querySelector('.gfilt');if(f)f.addEventListener('click',function(e){
+var b=e.target.closest('button');if(!b)return;var k=b.dataset.f;
+Array.prototype.forEach.call(f.querySelectorAll('button'),function(x){
+x.classList.toggle('on',x===b);});
+Array.prototype.forEach.call(d.querySelectorAll('.gnote'),function(o){
+o.classList.toggle('hide',!(k==='all'||o.dataset.state===k));});
+Array.prototype.forEach.call(d.querySelectorAll('.mk'),function(m){
+m.classList.toggle('dim',!(k==='all'||m.dataset.state===k));});pick(null);});
+d.addEventListener('keydown',function(e){if(e.key==='Escape')pick(null);});
+addEventListener('resize',layout);layout();
+if(d.fonts&&d.fonts.ready)d.fonts.ready.then(layout);setTimeout(layout,400);})();
+</script>"""
 
-    The usage count is the point of this popover as much as the claim text is:
-    "used in 9 outputs" turns "this claim looks wrong" into "this claim is
-    wrong in nine places", which is the difference between noticing something
-    and fixing what caused it.
-    """
-    n = int(uses.get(c.get("id") or "", 0) or 0)
-    return (f'<div class="pop"><b>{_esc(c["claim"])}</b>'
-            + (f'<span class="when">{_esc(c["evidence"])}</span>'
-               if c.get("evidence") else "")
-            + (f'<span class="when">used in {n} output'
-               f'{"" if n == 1 else "s"}</span>' if n else "")
-            + (f'<div class="row"><a href="/admin/ui?tab=kb&amp;tenant='
-               f'{_esc(tenant)}&amp;sub=claims&amp;q={_esc(c["claim"][:40])}">'
-               f'open the claim &rarr;</a></div>' if c.get("id") else "")
-            + "</div>")
+#: Label and state, in one place. A note's state decides its colour, its
+#: marker, its filter bucket and its wording, and three of those used to be
+#: decided separately.
+_NOTE_LABEL = {"ok": "Backed", "gap": "Needs a claim", "off": "Off catalogue"}
 
 
-def _sentence_html(sent: dict, uses: dict, tenant: str, vocab: set) -> str:
-    """One annotated sentence, in the vocabulary the whole console shares.
+def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set) -> list:
+    """Every annotated sentence as ONE record, read by three renderers.
 
-    Three states (design rule 2). A backed sentence UNDERLINES and opens to
-    its claim; an unbacked assertion carries an amber rail and says what is
-    missing; prose is left alone, because marking every line is how the lines
-    that matter stop being read.
+    The marker, the hover tip and the panel entry are three views of the same
+    row, built from the same `note` index — so they cannot drift apart. That
+    drift is the actual bug in the rail this replaces: it built a second list
+    of cards in its own order and hoped card three sat beside sentence three.
     """
     from . import claim_trace
+    out = []
+    for sent in rep.get("sentences") or []:
+        if not sent.get("assertion"):
+            continue
+        off = [] if sent["backed"] else claim_trace.off_catalogue(
+            sent["text"], vocab)
+        state = "ok" if sent["backed"] else ("off" if off else "gap")
+        claim = (sent["claims"] or [{}])[0] if sent["backed"] else {}
+        cid = str(claim.get("id") or "")
+        n = int(uses.get(cid, 0) or 0) if cid else 0
+        out.append({
+            "n": str(sent.get("note") or 0), "state": state,
+            "label": _NOTE_LABEL[state] + (f" · {cid[:12]}" if cid else ""),
+            # What the note SAYS, per state. The backed one shows the claim,
+            # because the point is to check the claim as much as the draft —
+            # "used in 14 outputs" turns "this looks wrong" into "this is
+            # wrong in fourteen places".
+            "text": (claim.get("claim") or "") if state == "ok"
+                    else sent["text"],
+            "meta": (
+                (f'evidence: {claim["evidence"]}<br>' if claim.get("evidence")
+                 else "") + (f"used in {n} output{'' if n == 1 else 's'}"
+                             if n else "")
+                if state == "ok" else
+                "nothing on file says this, and it recommends something this "
+                "account has never mentioned: " + ", ".join(off)
+                if state == "off" else
+                "nothing on file says this — approve a claim carrying the "
+                "source, or cut it"),
+            "href": (f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;"
+                     f"sub=claims&amp;q={_esc((claim.get('claim') or '')[:40])}"
+                     if state == "ok" else
+                     f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;sub=claims"),
+            "act": "open the claim" if state == "ok" else "approve a claim",
+        })
+    return out
+
+
+def _marker_html(note: dict) -> str:
+    """The number, in the gutter. Its `top` is set by the script; document
+    order is the fallback if the script never runs."""
+    meta = _re.sub(r"<br>", " · ", note["meta"])
+    return (f'<button class="mk" data-note="{note["n"]}" '
+            f'data-state="{note["state"]}" aria-label="Note {note["n"]}">'
+            f'{note["n"]}<span class="tip" data-state="{note["state"]}">'
+            f'<b>{_esc(note["label"])}</b>{_esc(note["text"][:190])}'
+            f'<i>{_esc(meta[:130])}</i></span></button>')
+
+
+def _note_html(note: dict) -> str:
+    """The same record, opened, in the panel."""
+    return (f'<li class="gnote" data-note="{note["n"]}" '
+            f'data-state="{note["state"]}"><span class="bdg">{note["n"]}</span>'
+            f'<span><span class="lb">{_esc(note["label"])}</span>'
+            f'<span class="tx">{_esc(note["text"])}</span>'
+            f'<span class="mt">{note["meta"]}</span>'
+            f'<a class="mt" href="{note["href"]}">{note["act"]} &rarr;</a>'
+            f'</span></li>')
+
+
+def _esc_strip(html_: str) -> str:
+    """A rendered block back to the plain string `headings` would have made.
+
+    The block has already been escaped and may carry a span, so comparing it
+    to a heading text means undoing exactly that much and no more.
+    """
+    t = _re.sub(r"<[^>]+>", "", html_)
+    return (t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&#39;", "'").replace("&quot;", '"').strip())
+
+
+def _sentence_html(sent: dict, state: str) -> str:
+    """One sentence, wrapped and nothing more.
+
+    Emits NO commentary and NO block element. A bare inline span changes no
+    metrics, so the reading below is line-for-line what the plain text is —
+    which is the whole reason the markers had to leave the flow.
+    """
     txt = _esc(sent["text"])
-    if sent["backed"]:
-        return (f'<details class="gr ok"><summary>{txt}</summary>'
-                + "".join(_claim_pop(c, uses, tenant) for c in sent["claims"])
-                + "</details>")
-    if not sent["assertion"]:
-        return f'<div class="gr">{txt}</div>'
-    # A DIFFERENT PROBLEM FROM "no claim covers this", and the one that made
-    # the Eien article wrong rather than merely thin: it RECOMMENDED a product
-    # category the account has nothing in. Mentioning is allowed on purpose —
-    # a competitor comparison has to be able to name the shelf — so only the
-    # steer is called out, with the words, so the reader can judge which it is.
-    off = claim_trace.off_catalogue(sent["text"], vocab)
-    tag = "nothing on file says this"
-    if off:
-        tag += (" &middot; recommends something this account has never "
-                "mentioned: " + _esc(", ".join(off)))
-    return (f'<div class="gr no"><span>{txt}</span>'
-            f'<span class="when">{tag}</span></div>')
+    if not sent.get("assertion"):
+        return txt
+    return (f'<span class="s" data-note="{sent.get("note") or 0}" '
+            f'data-state="{state}">{txt}</span>')
+
+
+def _reading_html(plain: str, rep: dict, states: dict, heads: set) -> str:
+    """The plain text with the author's paragraphs put back.
+
+    Walks the ORIGINAL string and swaps each sentence for its span in place,
+    keeping every character between them verbatim, so nothing is reordered or
+    dropped. `claim_trace.plain_text` now turns block tags into line breaks,
+    so a blank-line run is a real paragraph and a heading is its own line.
+    """
+    parts, cur = [], 0
+    for sent in rep.get("sentences") or []:
+        i = plain.find(sent["text"], cur)
+        if i < 0:
+            continue
+        parts.append(_esc(plain[cur:i]))
+        parts.append(_sentence_html(sent, states.get(sent.get("note"), "gap")))
+        cur = i + len(sent["text"])
+    parts.append(_esc(plain[cur:]))
+    blocks = [b.strip() for b in _re.split(r"\n\s*\n", "".join(parts))
+              if b.strip()]
+    out = []
+    for b in blocks:
+        # Two ways a heading reaches here: markdown bodies carry it as a
+        # #-prefixed line, HTML bodies had the tag stripped and are recognised
+        # by `claim_trace.headings`. Both render as a heading, because a
+        # preview that flattens every heading into a paragraph is not showing
+        # how the output will actually look.
+        m = _re.match(r"^#{1,6}\s+(.*)$", b, _re.S)
+        if m:
+            out.append(f"<h4>{m.group(1)}</h4>")
+        elif _esc_strip(b) in heads:
+            out.append(f"<h4>{b}</h4>")
+        else:
+            out.append(f"<p>{b}</p>")
+    return "".join(out)
 
 
 def _grounding_trend(tenant: str, days: int) -> str:
@@ -9583,19 +9780,25 @@ def _grounding_card(tenant: str, art) -> str:
     is the same in all of them: an output that passed every gate while
     asserting things nobody approved.
 
-    ONE VOCABULARY, THREE SHAPES. The annotation means the same thing
-    everywhere; how it is laid out follows the asset, because the assets are
-    not the same shape. An ad is short enough to annotate inline. An article
-    would drown in twenty popovers, so its claims move into a gutter beside
-    the paragraph they belong to. An email is assembled from BLOCKS rather
-    than written as one flow, so the block is its unit and the mark runs down
-    the edge — which keeps the rendered email readable as an email, the whole
-    point of previewing it.
+    TWO LANES, NEVER INTERLEAVED. The first build put the note inside the
+    reading line and made every sentence a block element, which is not a busy
+    layout, it is a broken one — owner, 2026-08-29: "all the notes and the
+    text look mixed up." The draft now reads as a draft; every note lives in
+    the panel; a very small number in the gutter joins them, and the two are
+    the SAME number because `annotate` assigns it once.
 
-    THE ANNOTATION IS OVER THE PLAIN TEXT, not the stored HTML. Re-marking the
+    NOTHING IS INSERTED INTO THE ARTIFACT — the constraint the owner set, and
+    the one that decides the mechanism. A marker in the flow is an edit: it
+    moves where lines wrap, and on an ad it moves Meta's 125-character fold,
+    the one thing `ad_craft.offer_position()` exists to check. So markers are
+    positioned in a gutter by measuring the rendered lines, and the sentence
+    itself carries a bare span that paints nothing until you point at it.
+
+    THE READING IS OVER THE PLAIN TEXT, not the stored HTML. Re-marking the
     original markup would mean editing tags the CMS owns, and a review aid
-    that can corrupt the thing it reviews is not worth having. The preview
-    above is still the real artifact.
+    that can corrupt the thing it reviews is not worth having. The rendered
+    preview above is untouched and is still the real artifact; what this adds
+    is the author's paragraphs, which the plain text used to lose.
     """
     from . import claim_trace
     body = str(getattr(art, "body", "") or "")
@@ -9610,42 +9813,40 @@ def _grounding_card(tenant: str, art) -> str:
         except Exception:                                        # noqa: BLE001
             return ""
     claims = kb.claims(tenant)
+    plain = claim_trace.plain_text(body)
     rep = claim_trace.annotate(body, claims)
     if not rep.get("total"):
         return ""
     uses = claim_trace.usage_counts(tenant)
     vocab = claim_trace.vocabulary(tenant)
+    notes = _notes_for(rep, uses, tenant, vocab)
+    states = {int(n["n"]): n["state"] for n in notes}
     pct = rep.get("coverage_pct")
     chip = ('<span class="chip">nothing to check</span>' if pct is None
             else f'<span class="chip {"on" if pct >= 80 else "off"}">'
                  f'{pct}% grounded</span>')
 
-    # THE BAR: the whole output at a glance, before any sentence is read.
-    backed = sum(1 for s_ in rep["sentences"] if s_["backed"])
-    openn = len(rep.get("unbacked_assertions") or [])
-    plain = rep["total"] - backed - openn
-    meter = (f'<div class="meter">'
+    # THE BAR: the whole output at a glance, before a word of it is read.
+    # Four bands now, not three — an off-catalogue steer is a different
+    # problem from a missing claim and was being counted as the same one.
+    backed = sum(1 for n in notes if n["state"] == "ok")
+    offs = sum(1 for n in notes if n["state"] == "off")
+    openn = sum(1 for n in notes if n["state"] == "gap")
+    plainn = rep["total"] - len(notes)
+    meter = ('<div class="meter">'
              + (f'<i class="b" style="flex:{backed}"></i>' if backed else "")
              + (f'<i class="o" style="flex:{openn}"></i>' if openn else "")
-             + (f'<i class="p" style="flex:{plain}"></i>' if plain else "")
+             + (f'<i class="x" style="flex:{offs}"></i>' if offs else "")
+             + (f'<i class="p" style="flex:{plainn}"></i>' if plainn else "")
              + "</div>")
 
-    rows = "".join(_sentence_html(s_, uses, tenant, vocab)
-                   for s_ in rep["sentences"])
-    # THE GUTTER, for anything long enough that inline popovers would bury the
-    # prose. The claims sit beside the paragraph they belong to instead.
-    long_form = rep["total"] >= 8
-    if long_form:
-        rail = "".join(
-            f'<div class="railcard{"" if s_["backed"] else " none"}">'
-            f'<span class="who">{"claim" if s_["backed"] else "no claim"}'
-            f'</span>'
-            + (_esc(s_["claims"][0]["claim"]) if s_["backed"]
-               else _esc(s_["text"][:90]))
-            + "</div>"
-            for s_ in rep["sentences"] if s_["assertion"])
-        rows = (f'<div class="gutter"><div>{rows}</div>'
-                f'<div class="rail">{rail}</div></div>')
+    counts = {"all": len(notes), "gap": openn, "off": offs, "ok": backed}
+    filters = '<div class="gfilt">' + "".join(
+        f'<button type="button" class="{"on" if k == "all" else ""}" '
+        f'data-f="{k}">{lbl} {counts[k]}</button>'
+        for k, lbl in (("all", "All"), ("gap", "Needs a claim"),
+                       ("off", "Off catalogue"), ("ok", "Backed"))
+        if counts[k] or k == "all") + "</div>"
 
     return f"""
 <div class="anchor" id="grounding"></div>
@@ -9653,14 +9854,25 @@ def _grounding_card(tenant: str, art) -> str:
   <div class="head"><h3>What here is confirmed by a claim</h3>{chip}</div>
   {meter}
   <p class="mut">{_esc(claim_trace.summary(rep))}</p>
-  <p class="when">Underlined sentences open to the approved claim behind
-  them. A sentence marked <b>nothing on file says this</b> asserts something
-  no claim covers &mdash; the fix is usually to correct or add the CLAIM and
-  regenerate, not to ban a word, because banning it would also stop the
-  competitor comparisons you may want. Sentences that assert nothing are left
-  plain.</p>
-  {rows}
-</div>"""
+  <p class="when">The reading below is the draft, unmarked &mdash; every note
+  lives in the panel beside it and nothing is drawn inside the text, so the
+  preview above still shows what will actually ship. Hover a number for the
+  gist, click it to hold it open. A note marked <b>nothing on file says
+  this</b> asserts something no claim covers; the fix is usually to correct or
+  add the CLAIM and regenerate, not to ban a word, because banning it would
+  also stop the competitor comparisons you may want.</p>
+  <div class="gwrap">
+    <div class="gut">{"".join(_marker_html(n) for n in notes)}</div>
+    <div class="gread"><div class="body">
+      {_reading_html(plain, rep, states, claim_trace.headings(body))}
+    </div></div>
+    <div class="gpanel">{filters}
+      <ul class="gnotes">{"".join(_note_html(n) for n in notes)
+        or '<li class="gnote"><span></span><span class="mt">This output '
+           'asserts nothing checkable, so there is nothing to trace.</span></li>'}</ul>
+    </div>
+  </div>
+</div>{_MARGIN_JS}"""
 
 
 def render_workroom(key: str, output_id: str, art, kw, ap,
