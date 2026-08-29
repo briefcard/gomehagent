@@ -2076,6 +2076,51 @@ def _gate_chip(key: str, row, r: dict) -> str:
             f'LIVE, not producing.">Running thin</span>')
 
 
+def _awaiting_strip(key: str, row) -> str:
+    """What this system is waiting on somebody to approve, where it works.
+
+    Owner, 2026-08-29: *"there should be a way to navigate to approvals inside
+    of the systems just like we do for claims."* The count already existed —
+    buried inside `needs_met`'s refusal string, as text — and could not be
+    acted on from where it was read. Here it is a row per kind with the queue
+    it lives in, on the card you were already looking at (design rule 1).
+
+    Two states, drawn differently on purpose. Something WAITING is work with
+    an owner: amber, the colour this console uses for waiting-on-a-person.
+    Something BLOCKING stops the system and is red, with the reason it cannot
+    simply be waived when that is true — a person about to force it deserves
+    to know which kind of missing they are looking at before they do.
+    """
+    try:
+        rows = systems.awaiting(row.tenant, row.key)
+    except Exception:                                            # noqa: BLE001
+        return ""
+    if not rows:
+        return ""
+    out = []
+    for r in rows:
+        href = (f"/admin/ui?tab=content&amp;sub={_esc(r['sub'])}"
+                f"&amp;tenant={_esc(row.tenant)}"
+                + (f"&amp;key={_esc(key)}" if key else "") + "#proposals")
+        if r["blocks"]:
+            label = (f"{r['label']}: nothing on file &mdash; this stops the "
+                     f"system")
+            if not r["overridable"]:
+                label += f". Cannot be overridden &mdash; {r['why_not']}"
+            cls = "off"
+        elif r["waiting"]:
+            label = (f"{r['waiting']} {r['label']} waiting for your review")
+            cls = "gap"
+        else:
+            label = f"no {r['label']} on file yet"
+            cls = ""
+        tag = ("stops it" if r["blocks"]
+               else ("waiting" if r["waiting"] else "empty"))
+        out.append(f'<li><span class="chip {cls}">{tag}</span> {label} '
+                   f'<a href="{href}">decide &rarr;</a></li>')
+    return ('<ul class="bl" style="margin:6px 0 0">' + "".join(out) + "</ul>")
+
+
 def _system_card(key: str, row, c: dict | None = None) -> str:
     """One COMPACT board row (spec §8).
 
@@ -2102,6 +2147,7 @@ def _system_card(key: str, row, c: dict | None = None) -> str:
         {_system_toggle(key, row, r)}
       </div>
       <div class="mut">{_esc(systems.spec(row.key)["does"])}</div>
+      {_awaiting_strip(key, row)}
       {_work_strip(key, row, c)}
       <div class="row">
         <a class="btn" href="{_sysview_url(key, row)}">Workflow &rarr;</a>

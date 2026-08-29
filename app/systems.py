@@ -1683,6 +1683,107 @@ def take_plan(run_id: str, tenant: str, *, system_id: str,
 # moment it scrolls out of the window.
 # ---------------------------------------------------------------------------
 
+#: Where each declared need is reviewed, and whether a person may knowingly
+#: proceed without it.
+#:
+#: `sub` is the Review tab that holds the queue, so a system can send somebody
+#: to the exact list rather than to "Review" — the difference between a fix
+#: instruction and a control (design rule 1).
+#:
+#: `overridable` is the harder half, and NOT every need gets it. A ban list is
+#: the one thing whose absence makes the validator unable to refuse ANYTHING:
+#: overriding it does not mean "proceed with less", it means "publish with no
+#: check at all", which is the absence-read-as-permission failure this codebase
+#: keeps closing. A missing claim makes an output THINNER; a missing ban list
+#: makes every output UNVERIFIED. Different kinds of missing, different rights.
+NEEDS = {
+    "claim":         dict(label="claims", sub="claims", overridable=True),
+    "audience":      dict(label="audiences", sub="other", overridable=True),
+    "objection":     dict(label="objections", sub="other", overridable=True),
+    "entity":        dict(label="products", sub="other", overridable=True),
+    "asset":         dict(label="pictures", sub="pictures", overridable=True),
+    "tone":          dict(label="brand voice", sub="other", overridable=True),
+    "positioning":   dict(label="positioning", sub="other", overridable=True),
+    "next_steps":    dict(label="what to ask for", sub="other", overridable=True),
+    "banned_claims": dict(label="the ban list", sub="other", overridable=False,
+                          why_not="without it the validator cannot refuse "
+                                  "anything, so the draft is not checked — "
+                                  "that is not proceeding with less, it is "
+                                  "proceeding with no check"),
+}
+
+
+def awaiting(tenant: str, key: str) -> list[dict]:
+    """What THIS system needs that is sitting in somebody's review queue.
+
+    Owner, 2026-08-29: *"there should be a way to navigate to approvals inside
+    of the systems just like we do for claims … We would also need the blocks
+    in place if the system requires an approval for something."*
+
+    DERIVED FROM `kb_needs`, which every system already declares, so a system
+    added next month reports the right queues without anybody listing them
+    again.
+
+    TWO DIFFERENT QUESTIONS, and the first version answered only one. `waiting`
+    is "is there work in a queue this system would use" — true of an account
+    with forty approved claims and three proposed ones. `blocks` is "does this
+    system refuse without any at all", which is a fact about the SYSTEM and
+    not about the field: the same missing claim stops one pipeline and merely
+    thins another. Reporting only the second meant the commonest case — a
+    proposed claim beside plenty of approved ones — showed nothing at all.
+    """
+    from . import kb as kbmod
+    spec = CATALOG.get(key) or {}
+    needs = tuple(spec.get("kb_needs") or ())
+    if not needs:
+        return []
+
+    pending = kbmod.pending_counts(tenant)
+    try:
+        missing = {m.split(" (")[0].strip()
+                   for m in kbmod.needs_met(tenant, needs)}
+    except Exception:                                            # noqa: BLE001
+        missing = set()
+    blocking = set(_constitutive_for(key))
+
+    out = []
+    for field in needs:
+        n = int(pending.get(field, 0) or 0)
+        absent = field in missing
+        if not n and not absent:
+            continue            # nothing waiting and nothing missing
+        meta = NEEDS.get(field, {"label": field, "sub": "other",
+                                 "overridable": True})
+        out.append({
+            "need": field, "label": meta["label"], "waiting": n,
+            "sub": meta["sub"],
+            "blocks": absent and field in blocking,
+            "overridable": bool(meta.get("overridable", True)),
+            "why_not": meta.get("why_not", ""),
+            "state": ("waiting for review" if n else "nobody has told us yet")})
+    # What stops the system first, then what is merely waiting.
+    out.sort(key=lambda r: (not r["blocks"], -r["waiting"]))
+    return out
+
+
+def _constitutive_for(key: str) -> tuple:
+    """Which of a system's needs actually stop it, read from the SKILL.
+
+    Asked of the skill rather than re-declared here, because the skill is what
+    enforces it — a second list would be a second opinion, and the two would
+    disagree the first time one changed.
+    """
+    try:
+        from . import skill as skmod
+        skmod.registered()          # loads the pack if it is not loaded yet
+        for sk in skmod.REGISTRY.values():
+            if getattr(sk, "system_key", "") == key:
+                return tuple(getattr(sk, "constitutive", ()) or ())
+    except Exception:                                            # noqa: BLE001
+        return ()
+    return ()
+
+
 def thread_key(tenant: str, key: str) -> str:
     return f"system:{tenant}:{key}"
 

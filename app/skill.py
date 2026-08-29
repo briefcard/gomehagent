@@ -733,6 +733,12 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
                 "blocked_on": pre["blocked_on"], "items": [], "notes": [],
                 "coverage": {}, "run_id": logged}
 
+    #: Accepted by EVERY skill, so it is taken out before the per-skill check
+    #: rather than declared nine times. A skill that had to list it would be a
+    #: skill that could forget to, and the one it forgot would be the one
+    #: somebody needed to waive at two in the morning.
+    override = str(params.pop("override_needs", "") or "").strip()
+
     unknown = [p for p in params if p not in sk.params]
     if unknown:
         # Refuse rather than ignore. A silently dropped parameter is the
@@ -787,6 +793,36 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     # The one gate left that is about knowledge, and it is per skill rather
     # than a global bar — see `constitutive`.
     absent = kb.needs_met(tenant, sk.constitutive) if sk.constitutive else []
+    # THE OVERRIDE, and what it may not reach. Owner, 2026-08-29: a system
+    # that requires an approval must block on it "OR approval override".
+    #
+    # A REASON, NOT A FLAG. `override_needs=1` is turning the check off;
+    # `override_needs="the ban list is being rebuilt, this is an internal
+    # draft"` is a decision somebody signed. Empty is refused, because an
+    # override nobody can be asked about later is indistinguishable from a bug.
+    #
+    # AND NOT EVERY NEED YIELDS TO IT. A missing claim makes an output
+    # THINNER; a missing ban list makes every output UNVERIFIED, because the
+    # validator then has nothing to refuse against. Those are different kinds
+    # of missing and they do not get the same rights — `systems.NEEDS` says
+    # which is which and why, in one place both this gate and the console read.
+    if absent and override:
+        from . import systems as _sysm
+        hard = [a for a in absent
+                if not (_sysm.NEEDS.get(a.split(" (")[0].strip(), {})
+                        .get("overridable", True))]
+        if hard:
+            absent = [f"{a} — CANNOT be overridden: "
+                      + (_sysm.NEEDS.get(a.split(" (")[0].strip(), {})
+                         .get("why_not", "")) for a in hard]
+        else:
+            # Proceeds, and says so everywhere the run is read: a note, the
+            # `thin` list the assurance ledger keeps, and the run row itself.
+            # A draft produced under an override must never be mistaken for
+            # one produced under the gate.
+            thin.append(f"OVERRIDDEN: ran without {', '.join(absent)} — "
+                        f"{override}")
+            absent = []
     if absent:
         why = [f"{sk.key} cannot say anything true without: " + ", ".join(absent)]
         systems.finish_run(run_id, "blocked", blocked_on="; ".join(why))

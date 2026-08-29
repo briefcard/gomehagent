@@ -1502,6 +1502,35 @@ def next_step_for(tenant: str, stage: str) -> dict:
 #: One place that knows how to test a single named KB requirement. `completeness`
 #: answers "may we generate from this account at all"; this answers "may THIS
 #: system run", which is a different and usually much smaller question.
+def pending_counts(tenant: str) -> dict:
+    """How many of each kind are sitting in a review queue.
+
+    Extracted so `needs_met` and `systems.awaiting` count the same thing. They
+    ask DIFFERENT questions of it — one is "does this account have any at
+    all", the other is "is there work waiting on this kind" — and an account
+    with forty approved claims and three proposed ones answers no to the first
+    and yes to the second. Two counts of the same rows would eventually
+    disagree, and the disagreement would show up as a queue somebody was never
+    sent to.
+    """
+    try:
+        return {
+            "claim": len(pending_claims(tenant)),
+            "audience": len([a for a in audiences(tenant, include_proposed=True)
+                             if (a.review or "") == prov.PROPOSED]),
+            "objection": len([o for o in objections(tenant,
+                                                    include_proposed=True,
+                                                    any_entity=True)
+                              if (o.review or "") == prov.PROPOSED]),
+            "entity": len([e for e in entities(tenant, available_only=False,
+                                               include_proposed=True)
+                           if (e.review or "") == prov.PROPOSED]),
+            "asset": len(proposed_assets(tenant)),
+        }
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
 def needs_met(tenant: str, fields: tuple[str, ...]) -> list[str]:
     """Which of the named KB requirements this account does not meet.
 
@@ -1535,17 +1564,7 @@ def needs_met(tenant: str, fields: tuple[str, ...]) -> list[str]:
         "objection": bool(objections(tenant)),
         "entity": bool(entities(tenant, available_only=False)),
     }
-    waiting = {
-        "claim": len(pending_claims(tenant)),
-        "audience": len([a for a in audiences(tenant, include_proposed=True)
-                         if (a.review or "") == prov.PROPOSED]),
-        "objection": len([o for o in objections(tenant, include_proposed=True,
-                                                any_entity=True)
-                          if (o.review or "") == prov.PROPOSED]),
-        "entity": len([e for e in entities(tenant, available_only=False,
-                                           include_proposed=True)
-                       if (e.review or "") == prov.PROPOSED]),
-    }
+    waiting = pending_counts(tenant)
     missing = []
     for f in fields:
         if have.get(f, True):
