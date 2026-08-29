@@ -3331,13 +3331,63 @@ _BRAND_CSS = """<style>
 </style>"""
 
 
+#: What a preview iframe is allowed to do. Everything is still denied —
+#: no scripts, no forms, no same-origin — EXCEPT opening a link the reader
+#: clicked. `allow-popups` alone would open the new tab still carrying every
+#: sandbox flag, so the destination would load scriptless in an opaque origin
+#: and look broken; escaping the sandbox is what makes it an ordinary tab.
+#: Nothing in the frame can trigger it on its own, because scripts stay off.
+PREVIEW_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"
+
+_BASE_TAG = '<base target="_blank">'
+_HEAD_OPEN = _re.compile(r"<head\b[^>]*>", _re.I)
+_HTML_OPEN = _re.compile(r"<html\b[^>]*>", _re.I)
+_DOCTYPE = _re.compile(r"<!doctype[^>]*>", _re.I)
+
+
+def _preview_html(body: str) -> str:
+    """The artifact, with links defaulted to a new tab and NOTHING else changed.
+
+    Owner, 2026-08-29: links in the email preview navigated the iframe, so
+    clicking one replaced the email with whatever it pointed at and the only
+    way back was to reload the workroom.
+
+    ONE TAG, and the email's own markup is untouched: `<base target>` sets the
+    default browsing context for every link in the document, so no `<a>` has
+    to be rewritten. Only `target` is set, never `href` — a `<base href>`
+    would re-resolve every relative URL in the email and quietly change what
+    the links point at.
+
+    WHERE it goes is the whole care. Prepending it would put content before
+    the doctype and drop the document into quirks mode, which changes the box
+    model and how tables lay out — on the one surface whose entire job is
+    showing what will really land in the inbox. So: inside `<head>` if there
+    is one, else immediately after `<html>` or the doctype, and only for a
+    bare fragment is it prepended. A document that already declares a `<base>`
+    is left alone; it has chosen.
+    """
+    html_ = str(body or "")
+    if not html_.strip() or "<base" in html_.lower():
+        return html_
+    m = _HEAD_OPEN.search(html_)
+    if m:
+        return html_[:m.end()] + _BASE_TAG + html_[m.end():]
+    for pat in (_HTML_OPEN, _DOCTYPE):
+        m = pat.search(html_)
+        if m:
+            return (html_[:m.end()] + "<head>" + _BASE_TAG + "</head>"
+                    + html_[m.end():])
+    return _BASE_TAG + html_
+
+
 def _theme_preview(theme: dict) -> str:
     """The sample email through one theme, sandboxed. A swatch table asks the
     owner to imagine the email; this shows it."""
     from . import brand_theme, email_render
     doc = email_render.render(theme, brand_theme.PREVIEW_BLOCKS,
                               preheader="Theme preview")
-    return f'<iframe sandbox="" srcdoc="{_esc(doc)}" class="bt-frame"></iframe>'
+    return (f'<iframe sandbox="{PREVIEW_SANDBOX}" '
+            f'srcdoc="{_esc(_preview_html(doc))}" class="bt-frame"></iframe>')
 
 
 def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
@@ -5035,7 +5085,8 @@ def _ship_preview(pl: dict) -> str:
             pass
     if art is not None and (art.body or "").strip():
         return (f'<details><summary>preview — rendered'
-                f'</summary><iframe sandbox="" srcdoc="{_esc(art.body)}" '
+                f'</summary><iframe sandbox="{PREVIEW_SANDBOX}" '
+                f'srcdoc="{_esc(_preview_html(art.body))}" '
                 f'style="width:100%;height:380px;border:1px solid '
                 f'var(--rule);border-radius:6px;background:#fff"></iframe>'
                 f'</details>')
@@ -10489,7 +10540,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         # the batch JSON would invite hand-breaking the record.
         edit_card = ""
     elif is_email:
-        srcdoc = _esc(art.body or "")
+        srcdoc = _esc(_preview_html(art.body or ""))
         plain = _re.sub(r"<[^>]+>", " ", art.body or "")
         plain = _re.sub(r"\s+", " ", plain).strip()
         seg_note = (f'{_esc(esp_push.get("segment_key") or "—")}'
@@ -10504,10 +10555,10 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     <span class="chip nb">preheader</span> {_esc(esp_push.get("preheader") or "—")}
     <span class="chip nb">segment</span> {seg_note}
   </div>
-  <iframe sandbox="" srcdoc="{srcdoc}" style="width:100%;height:520px;
+  <iframe sandbox="{PREVIEW_SANDBOX}" srcdoc="{srcdoc}" style="width:100%;height:520px;
     border:1px solid var(--rule);border-radius:6px;background:#fff"></iframe>
   <details class="sec"><summary>Phone width (360px)</summary>
-    <iframe sandbox="" srcdoc="{srcdoc}" style="width:360px;max-width:100%;
+    <iframe sandbox="{PREVIEW_SANDBOX}" srcdoc="{srcdoc}" style="width:360px;max-width:100%;
       height:560px;border:1px solid var(--rule);border-radius:6px;
       background:#fff"></iframe></details>
   <details class="sec"><summary>Plain text</summary>
