@@ -774,27 +774,49 @@ def _run_ad_copy(ctx: Context) -> dict:
                  f"{str(ctx.params['funnel_stage'])!r} — the ones that exist "
                  f"are: " + ", ".join(funnel.STAGES)
                  + ". Running without one.")
-    if stage:
-        plan = funnel.inputs_for(
-            ctx.tenant, stage, claims=ctx.claims, objections=objections,
-            entities=ctx.bundle.get("entities"),
-            audiences=ctx.bundle.get("audiences"),
-            offer=str(ctx.bundle.get("offer") or ""))
-        ctx.bundle["funnel"] = plan
+    # THE BRIEF IS BUILT EITHER WAY. It used to be `if stage:` — so unless
+    # somebody passed the knob, the ad drafter got no situations, no
+    # objections-as-strategy, no audience vocabulary and no search phrases.
+    # The default run, which is the run that actually happens, read almost
+    # none of the data layer (owner, 2026-08-29: "how do we make sure to take
+    # advantage of our context / data layer … to generate the best result").
+    #
+    # A DERIVED STAGE BRIEFS BUT DOES NOT BIND. An explicit stage is a
+    # decision and narrows the angles with it; a derived one is an inference,
+    # so it supplies the knowledge and leaves the angle set alone. Anything
+    # that worked before therefore still produces the same variants — it just
+    # produces them knowing what this account knows.
+    chose = bool(stage)
+    if not stage:
+        # From what the batch already carries, not from a new knob (rule 4):
+        # an ad with an offer to state is asking, and asking is bottom-of-
+        # funnel behaviour whoever is reading.
+        stage = funnel.stage_from(asks=bool(str(ctx.bundle.get("offer") or "").strip()))
+    plan = funnel.inputs_for(
+        ctx.tenant, stage, claims=ctx.claims, objections=objections,
+        entities=ctx.bundle.get("entities"),
+        audiences=ctx.bundle.get("audiences"),
+        offer=str(ctx.bundle.get("offer") or ""))
+    ctx.bundle["funnel"] = plan
+    if chose:
         angles = funnel.angles_for_stage(stage, angles)
         ctx.note(f"funnel stage: {plan['label']} — the reader "
                  f"{plan['reader']}")
-        # WHAT IS MISSING, BY NAME. The owner's "if they are available, of
-        # course" is not permission to proceed quietly: a stage whose leading
-        # input is absent produces something plausible and wrong, and the run
-        # is the only place that can say so.
-        for n in plan.get("note") or []:
-            ctx.note(f"funnel (thin): {n}")
-        if plan.get("missing"):
-            # `Context.thin` is the list the assurance ledger reads as "what
-            # this run was working WITHOUT" — appending here puts a strategy
-            # gap on the same record as a knowledge gap, which is what it is.
-            ctx.thin.extend(f"funnel:{m}" for m in plan["missing"])
+    else:
+        ctx.note(f"funnel stage (derived, angles not narrowed): "
+                 f"{plan['label']} — the reader {plan['reader']}. "
+                 f"Pass funnel_stage to choose one and narrow the angles.")
+    # WHAT IS MISSING, BY NAME. The owner's "if they are available, of
+    # course" is not permission to proceed quietly: a stage whose leading
+    # input is absent produces something plausible and wrong, and the run is
+    # the only place that can say so.
+    for n in plan.get("note") or []:
+        ctx.note(f"funnel (thin): {n}")
+    if plan.get("missing"):
+        # `Context.thin` is the list the assurance ledger reads as "what this
+        # run was working WITHOUT" — appending here puts a strategy gap on the
+        # same record as a knowledge gap, which is what it is.
+        ctx.thin.extend(f"funnel:{m}" for m in plan["missing"])
 
     ctx.note("angles in play for this account: " + ", ".join(angles)
              + ("" if "gifting" in angles else

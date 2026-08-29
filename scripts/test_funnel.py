@@ -241,12 +241,68 @@ def main() -> int:
     ck("…and still runs rather than failing over a typo",
        r3["status"] == "produced", r3["status"])
 
-    print("\n— a run with no stage behaves exactly as it did before —")
+    print("\n— the whole audience row, not two fields of it —")
+    from app import funnel as fn, kb as _kb
+    _p = fn.inputs_for("baci", "consideration",
+                       audiences=_kb.audiences("baci"), entities=[])
+    _b = fn.brief(_p)
+    ck("the buyer's own vocabulary reaches the drafter",
+       "audience_vocabulary" in _p["have"]
+       and "THE WORDS THIS BUYER USES" in _b,
+       "KbAudience has carried `vocabulary` since the schema was written and "
+       "every generator read `name` and `pains`")
+    ck("…and what makes them act now",
+       "WHAT MAKES THIS BUYER ACT NOW" in _b or
+       "buying_trigger" not in _p["have"])
+
+    print("\n— search phrases are scoped to the reader —")
+    from app import keywords as _kw
+    _kw.upsert("baci", "what is melamine", volume=100)
+    _kw.upsert("baci", "buy melamine dinner plates", volume=100)
+    _bot = fn.inputs_for("baci", "bottom", entities=[])
+    _aw = fn.inputs_for("baci", "awareness", entities=[])
+    ck("a bottom-of-funnel brief prefers transactional language",
+       "buy melamine dinner plates" in (_bot["have"].get("keyword_stage_fit") or []),
+       str(_bot["have"].get("keyword_stage_fit")))
+    ck("…and an awareness brief prefers the question",
+       "what is melamine" in (_aw["have"].get("keyword_stage_fit") or []),
+       str(_aw["have"].get("keyword_stage_fit")))
+    ck("a stage with no matching phrase still gets the account's language",
+       bool(fn.inputs_for("baci", "interest", entities=[])["have"].get("keyword")),
+       "an empty block would read as 'no search data', which is a different "
+       "and untrue thing")
+
+    # THIS CONTRACT CHANGED DELIBERATELY, 2026-08-29. It used to read "a run
+    # with no stage behaves exactly as it did before" and asserted that no
+    # funnel note appeared — which was true and was the defect: without the
+    # knob NO plan was built, so the default run, the one that actually
+    # happens, got no situations, no objections-as-strategy, no audience
+    # vocabulary and no search phrases. Owner: "how do we make sure to take
+    # advantage of our context / data layer … to generate the best result."
+    #
+    # The half of the old promise worth keeping is asserted instead: a DERIVED
+    # stage briefs but does not BIND. It supplies the knowledge; it does not
+    # narrow the angle set, because an inference is not a decision.
+    print("\n— with no stage the brief is still built, and says it inferred —")
     r4 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
                    audience_key="hosts", variants=2)
-    ck("no stage, no funnel notes", not any("funnel stage" in n
-                                            for n in r4.get("notes") or []))
+    ck("the data layer reaches the drafter anyway",
+       any("funnel stage (derived" in n for n in r4.get("notes") or []),
+       "; ".join(r4.get("notes") or [])[:160])
+    ck("…and says it was inferred, not chosen",
+       any("angles not narrowed" in n for n in r4.get("notes") or []),
+       "a stage nobody chose must not read as one somebody did")
     ck("…and it still produces", r4["status"] == "produced")
+
+    angles_of = lambda r: {v.get("angle") for v in (r.get("variants") or [])}
+    r5 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=4)
+    r6 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=4, funnel_stage="bottom")
+    ck("an inference leaves the angle set alone",
+       len(angles_of(r5)) >= len(angles_of(r6)) or not angles_of(r6),
+       f"derived={sorted(x for x in angles_of(r5) if x)} "
+       f"chosen={sorted(x for x in angles_of(r6) if x)}")
 
     print()
     if _fail:

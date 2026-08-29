@@ -213,12 +213,50 @@ def inputs_for(tenant: str, stage: str, *, claims: list | None = None,
              for p in (_txt(a, "pains") or []) if p]
     if pains:
         have["audience_pains"] = pains
+    # THE REST OF THE AUDIENCE ROW, which nothing had ever read. `KbAudience`
+    # has carried `vocabulary`, `buying_trigger` and `decision_timeline` since
+    # the schema was written and every generator saw `name` and `pains`.
+    # Vocabulary is the most valuable of the three for copy — the words this
+    # buyer uses for the thing, gathered from real research — and a drafter
+    # writing in the brand's words instead of the buyer's is the commonest way
+    # good copy misses.
+    vocab = [v for a in (audiences or [])
+             for v in (_txt(a, "vocabulary") or []) if v]
+    if vocab:
+        have["audience_vocabulary"] = vocab
+    triggers = [t for t in (_txt(a, "buying_trigger") for a in (audiences or []))
+                if t]
+    if triggers:
+        have["buying_trigger"] = triggers
     try:
         kws = kwmod.targets(tenant)
     except Exception:                                            # noqa: BLE001
         kws = []
     if kws:
-        have["keyword"] = [getattr(k, "phrase", str(k)) for k in kws]
+        # SCOPED TO THE STAGE. Every phrase was handed to every stage, so a
+        # bottom-of-funnel ad was shown "what is omega-3" beside "buy omega-3
+        # softgels" and had no way to tell which reader it was for.
+        # `classify_intent` already sorts them and `_INTENT_STAGE` already
+        # maps intent to stage; this is the join, not a new taxonomy.
+        try:
+            brand = kwmod.brand_tokens_for(tenant)
+        except Exception:                                        # noqa: BLE001
+            brand = set()
+        fitted, every = [], []
+        for k in kws:
+            phrase = getattr(k, "phrase", str(k))
+            every.append(phrase)
+            try:
+                if stage_from_keyword(kwmod.classify_intent(phrase, brand)) == stage:
+                    fitted.append(phrase)
+            except Exception:                                    # noqa: BLE001
+                continue
+        # Fall back to all of them rather than to none: a stage with no
+        # matching phrase still writes better with the account's language
+        # than with ours, and an empty block would read as "no search data".
+        have["keyword"] = fitted or every
+        if fitted:
+            have["keyword_stage_fit"] = fitted
     if str(offer or "").strip():
         have["offer"] = [str(offer).strip()]
 
@@ -279,6 +317,7 @@ def brief(plan: dict) -> str:
                 out.append(f"- {nm}")
 
     supports = [k for k in ("claim_with_evidence", "keyword",
+                            "audience_vocabulary", "buying_trigger",
                             "audience_pains", "situation:problem")
                 if k in have and k not in plan.get("leads", [])]
     for kind in supports:
@@ -290,6 +329,13 @@ def brief(plan: dict) -> str:
         elif kind == "keyword":
             out.append("\n## THE READER'S OWN WORDS FOR THIS — prefer these "
                        "over ours\n" + ", ".join(str(x) for x in items[:8]))
+        elif kind == "audience_vocabulary":
+            out.append("\n## THE WORDS THIS BUYER USES — prefer them over "
+                       "ours wherever they fit\n"
+                       + ", ".join(str(x) for x in items[:12]))
+        elif kind == "buying_trigger":
+            out.append("\n## WHAT MAKES THIS BUYER ACT NOW\n"
+                       + "; ".join(str(x) for x in items[:4]))
         elif kind == "audience_pains":
             out.append("\n## WHAT THIS AUDIENCE FINDS HARD\n"
                        + "; ".join(str(x) for x in items[:5]))
