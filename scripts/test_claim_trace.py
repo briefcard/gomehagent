@@ -267,6 +267,49 @@ def main() -> int:
        "a field filled in by something that cannot know it is how "
        "'Eien Health Research' got under a real statement")
 
+    print("\n— once proposed, the card says so —")
+    from app import admin_ui as ui  # noqa: F811
+    from app import kb as _kbm  # noqa: F811
+    _s2 = "Our capsule shell dissolves in under 12 minutes."
+
+    class Prop:
+        tenant = "eien"; format = "cms_article"; system_key = "blog"
+        output_id = "P"; body = f"<p>{_s2}</p>"
+
+    _before = ui._grounding_card("eien", Prop(), key="s3cret")
+    ck("before: it offers to add the claim",
+       "claim_from_note" in _before and "awaiting your review" not in _before)
+    _kbm.add_claim("eien", _s2, "", [], proof_type="", status="pending",
+                   origin="agent", source="proposed from draft P")
+    _after = ui._grounding_card("eien", Prop(), key="s3cret")
+    ck("after: the card acknowledges the proposal",
+       "awaiting your review" in _after,
+       "without this the page reloads unchanged and the click reads as a "
+       "no-op — the owner asked for the acknowledgement")
+    ck("…and says nothing is using it yet",
+       "Nothing uses it until you approve it" in _after,
+       "'proposed' alone would read as handled, on a sentence that is still "
+       "unsupported in this draft")
+    ck("…stops offering to propose it twice",
+       "claim_from_note" not in _after)
+    ck("…and the link goes to that claim, not to the whole queue",
+       "sub=claims" in _after and "q=Our%20capsule" in _after
+       and "#proposals" in _after,
+       "the proposals list takes a q filter — landing on a page of "
+       "everything awaiting review is not 'directly'")
+    ck("…labelled as the decision it now is",
+       "approve this claim" in _after)
+
+    _hostile = type("H", (), {
+        "tenant": "eien", "format": "cms_article", "system_key": "blog",
+        "output_id": "H",
+        "body": "<p>Our #1 softgel has 1000 mg of EPA &amp; DHA per dose.</p>"})
+    _hc = ui._grounding_card("eien", _hostile(), key="s3cret")
+    ck("a sentence with # or & does not break its own link",
+       "%23" in _hc and "%26" in _hc,
+       "an unencoded # turns the rest of the query into a fragment and an "
+       "unencoded & splits the parameter")
+
     print("\n— nothing is inserted into the artifact —")
     import re as _re2
     from app import admin_ui as ui
@@ -306,7 +349,7 @@ def main() -> int:
        "that is the mixing the owner rejected")
 
     mk = _re2.findall(r'class="mk" data-note="(\d+)" data-state="(\w+)"', long_card)
-    nt = _re2.findall(r'class="gnote" data-note="(\d+)" data-state="(\w+)"', long_card)
+    nt = _re2.findall(r'class="gnote[^"]*" data-note="(\d+)" data-state="(\w+)"', long_card)
     ck("marker n and note n are the same n",
        bool(mk) and sorted(mk) == sorted(nt), f"markers={mk} notes={nt}")
 
@@ -369,7 +412,7 @@ def main() -> int:
     print("\n— and a judgement can be filed where it was formed —")
     ck("each note can be dropped from the redraft",
        long_card.count('name="level" value="draft"') == len(
-           _re2.findall(r'class="gnote" data-note=', long_card)))
+           _re2.findall(r'class="gnote[^"]*" data-note=', long_card)))
     ck("…and taught to the system for future drafts",
        long_card.count('name="level" value="system"') >= 1
        and "Never again" in long_card)

@@ -2371,6 +2371,14 @@ SABOTAGES = [
                "months when somebody asks",
     },
     {
+        "name": 'a_proposal_is_acknowledged_on_the_card',
+        "file": 'app/admin_ui.py',
+        "find": '    waiting = bool(note.get("proposed"))',
+        "replace": '    waiting = False  # SABOTAGE',
+        "suites": ['test_claim_trace.py'],
+        "why": 'pressing Add claim reloads a page that looks exactly the same — the note still says the sentence needs a claim, the button is still there, and the only way to learn it worked is to go hunting on Review, so it gets pressed twice or not believed',
+    },
+    {
         "name": 'a_preview_link_opens_a_tab',
         "file": 'app/admin_ui.py',
         "find": 'PREVIEW_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"',
@@ -2413,8 +2421,8 @@ SABOTAGES = [
     {
         "name": 'an_off_catalogue_steer_is_not_a_claim',
         "file": 'app/admin_ui.py',
-        "find": '    add = ("" if note["state"] in ("ok", "off") else',
-        "replace": '    add = ("" if note["state"] in ("ok",) else  # SABOTAGE',
+        "find": '    add = ("" if note["state"] in ("ok", "off") or note.get("proposed") else',
+        "replace": '    add = ("" if note["state"] in ("ok",) or note.get("proposed") else  # SABOTAGE',
         "suites": ['test_claim_trace.py'],
         "why": 'the panel offers to file \\u201cglucosamine remains the benchmark\\u201d as a claim about an account that has never sold it \\u2014 one mis-click away from approving the exact sentence the off-catalogue check exists to catch',
     },

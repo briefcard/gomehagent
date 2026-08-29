@@ -271,6 +271,10 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
   border-radius:4px;cursor:pointer;border:1px solid var(--rule);
   background:transparent;color:var(--ink2)}
 .nacts button:hover{border-color:var(--acc);color:var(--acc)}
+/* Already proposed: acknowledged in lavender, because a proposal is a thing
+   YOU now own — and still shown as unbacked, because it is. */
+.gnote.prop{border-color:var(--acc)}
+.gnote .prop{color:var(--acc)}
 /* The whole output at a glance, before a word of it is read. */
 .meter{display:flex;height:6px;border-radius:4px;overflow:hidden;gap:2px;margin:8px 0 10px}
 .meter i{display:block;height:100%}
@@ -9699,8 +9703,13 @@ _NOTE_ASK = {"ok": "open the claim", "gap": "approve a claim",
              "world": "attach a source", "off": "see what triggered this"}
 
 
+#: One import, named short, because the query-string helpers below
+#: read badly with the full path inline.
+from urllib.parse import quote as _quote  # noqa: E402
+
+
 def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
-               marks: set) -> list:
+               marks: set, proposed: dict | None = None) -> list:
     """Every annotated sentence as ONE record, read by three renderers.
 
     The marker, the hover tip and the panel entry are three views of the same
@@ -9709,6 +9718,8 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
     of cards in its own order and hoped card three sat beside sentence three.
     """
     from . import claim_trace
+    from . import provenance as _prov
+    proposed = proposed or {}
     out = []
     for sent in rep.get("sentences") or []:  # noqa: PLR1702
         if not sent.get("assertion"):
@@ -9739,6 +9750,8 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
             # wrong in fourteen places".
             "text": (claim.get("claim") or "") if state == "ok"
                     else sent["text"],
+            # Fills below; `_note_html` appends the proposed line so the
+            # wording lives in one place rather than in four branches.
             "meta": (
                 (f'evidence: {claim["evidence"]}<br>' if claim.get("evidence")
                  else "") + (f"used in {n} output{'' if n == 1 else 's'}"
@@ -9761,9 +9774,24 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
             "href": (f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;"
                      f"sub=claims&amp;q={_esc((claim.get('claim') or '')[:40])}"
                      if state == "ok" else
-                     f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;sub=claims"),
+                     # STRAIGHT TO THE DRAFT (owner, 2026-08-29). The proposals
+                     # list takes a `q` filter, so this lands on the one row
+                     # rather than on a page of everything awaiting review.
+                     f"/admin/ui?tab=content&amp;sub=claims&amp;"
+                     f"tenant={_esc(tenant)}&amp;"
+                     # PERCENT-encoded, then HTML-escaped. Escaping alone
+                     # leaves the raw sentence in a query string, so an "&"
+                     # splits the parameter and a "#" turns the rest into a
+                     # fragment — both ordinary in article prose.
+                     f"q={_esc(_quote(sent['text'][:60]))}#proposals"),
             "act": _NOTE_ASK[state],
             "sentence": sent["text"],
+            # ALREADY PROPOSED? Without this the card looks identical after
+            # you press Add claim — the page reloads, the note still says
+            # "needs a claim", and the only way to know it worked is to go
+            # looking on Review. The owner asked for the acknowledgement and
+            # they are right that its absence reads as a no-op.
+            "proposed": proposed.get(_prov.normalise(sent["text"]) or "\x00", ""),
         })
     return out
 
@@ -9858,7 +9886,7 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
     # something the account has never sold, and "glucosamine is the benchmark"
     # is not a claim anybody wants on file. If the account has started
     # carrying it, that begins in the catalogue, not here.
-    add = ("" if note["state"] in ("ok", "off") else
+    add = ("" if note["state"] in ("ok", "off") or note.get("proposed") else
            f'<form method="post" action="/admin/claim_from_note" class="nact">'
            f'<input type="hidden" name="key" value="{_esc(key)}">'
            f'<input type="hidden" name="output_id" value="{_esc(output_id)}">'
@@ -9881,12 +9909,20 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
 def _note_html(note: dict, key: str = "", output_id: str = "",
                syskey: str = "") -> str:
     """The same record, opened, in the panel."""
-    return (f'<li class="gnote" data-note="{note["n"]}" '
+    waiting = bool(note.get("proposed"))
+    # The acknowledgement, and it says what is and is not true: the claim
+    # exists, and nothing is using it. Stating only the first would read as
+    # "handled" on a sentence that is still unsupported in this draft.
+    flag = ('<span class="mt prop">Proposed &middot; awaiting your review. '
+            'Nothing uses it until you approve it.</span>' if waiting else "")
+    act = "approve this claim" if waiting else note["act"]
+    return (f'<li class="gnote{" prop" if waiting else ""}" '
+            f'data-note="{note["n"]}" '
             f'data-state="{note["state"]}"><span class="bdg">{note["n"]}</span>'
             f'<span><span class="lb">{_esc(note["label"])}</span>'
             f'<span class="tx">{_esc(note["text"])}</span>'
-            f'<span class="mt">{note["meta"]}</span>'
-            f'<a class="mt" href="{note["href"]}">{note["act"]} &rarr;</a>'
+            f'<span class="mt">{note["meta"]}</span>{flag}'
+            f'<a class="mt" href="{note["href"]}">{_esc(act)} &rarr;</a>'
             f'{_note_actions(note, key, output_id, syskey)}'
             f'</span></li>')
 
@@ -10086,7 +10122,8 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
     uses = claim_trace.usage_counts(tenant)
     vocab = claim_trace.vocabulary(tenant)
     marks = claim_trace.brand_marks(tenant)
-    notes = _notes_for(rep, uses, tenant, vocab, marks)
+    notes = _notes_for(rep, uses, tenant, vocab, marks,
+                       claim_trace.proposed_claims(tenant))
     states = {int(n["n"]): n["state"] for n in notes}
     pct = rep.get("coverage_pct")
     chip = ('<span class="chip">nothing to check</span>' if pct is None

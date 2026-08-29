@@ -499,6 +499,34 @@ def trend(tenant: str = "", days: int = 90) -> list:
     return out
 
 
+def proposed_claims(tenant: str) -> dict:
+    """Sentences this account has already proposed as claims, awaiting review.
+
+    ONE query, like `usage_counts`, because the alternative is a lookup per
+    note on a page that can carry thirty of them.
+
+    Keyed by `provenance.normalise` — the same comparable form the knowledge
+    base uses to decide two claims are the same claim. Matching raw strings
+    would show "Add claim" again on a sentence already proposed, because the
+    stored row and the annotated sentence differ by a trailing full stop.
+    """
+    from . import db
+    from . import provenance as prov
+    out: dict = {}
+    try:
+        with db.SessionLocal() as s:
+            rows = (s.query(db.KbClaim.id, db.KbClaim.claim)
+                    .filter(db.KbClaim.tenant == tenant,
+                            db.KbClaim.review == prov.PROPOSED).all())
+        for cid, text in rows:
+            key = prov.normalise(text or "")
+            if key:
+                out[key] = cid
+    except Exception:                                            # noqa: BLE001
+        return {}
+    return out
+
+
 def usage_counts(tenant: str) -> dict:
     """{claim_id: how many outputs cite it}. ONE query, not one per claim.
 
