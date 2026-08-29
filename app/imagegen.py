@@ -94,6 +94,17 @@ def _post(path: str, *, json_body: dict | None = None,
             out.append(base64.b64decode(b64))
     if not out:
         return {"ok": False, "error": "the image API returned no image data"}
+    # CHARGED HERE, at the one seam every generation returns through, so a
+    # generator added next month cannot be added without it. Images are the
+    # most expensive single thing this system does — roughly two thousand
+    # text calls each — and were the one thing the spend report could not
+    # see, because generation went to OpenAI over raw HTTP and logged nothing.
+    try:
+        from . import usage
+        usage.log_image("image_edit" if "edits" in path else "image_generate",
+                        MODEL, len(out))
+    except Exception:                                            # noqa: BLE001
+        pass
     return {"ok": True, "images": out}
 
 

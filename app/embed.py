@@ -87,7 +87,21 @@ def _openai_embed(texts: list[str]) -> tuple[list[list[float]] | None, str]:
             timeout=30)
         if r.status_code != 200:
             return None, f"provider returned {r.status_code}: {r.text[:120]}"
-        data = sorted(r.json()["data"], key=lambda d: d["index"])
+        payload = r.json()
+        # ATTRIBUTED, like every Claude call. This runs on every tier-3
+        # resolve — one per inbound mail on the path that answers customers —
+        # and it recorded nothing, so a real recurring cost was missing from
+        # the spend report entirely. OpenAI reports `prompt_tokens`, which is
+        # why `log_usage` could not be used: it reads `input_tokens` off the
+        # response and would have logged a free call.
+        try:
+            from . import usage
+            usage.log_tokens(
+                "embed", config.EMBED_MODEL,
+                input_tokens=(payload.get("usage") or {}).get("prompt_tokens", 0))
+        except Exception:                                        # noqa: BLE001
+            pass
+        data = sorted(payload["data"], key=lambda d: d["index"])
         return [d["embedding"] for d in data], ""
     except Exception as exc:  # noqa: BLE001
         return None, f"{exc.__class__.__name__}: {str(exc)[:120]}"
