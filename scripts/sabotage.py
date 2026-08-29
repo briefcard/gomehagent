@@ -2345,6 +2345,43 @@ SABOTAGES = [
                "shipped in, past every gate, because nothing rendered the "
                "difference",
     },
+    {
+        "name": "a_mention_is_not_a_recommendation",
+        "file": "app/claim_trace.py",
+        "find": "    if not vocab or not any(m in low for m in _RECOMMENDS):\n        return []",
+        "replace": "    if not vocab:  # SABOTAGE\n        return []",
+        "suites": ["test_claim_trace.py"],
+        "why": "every sentence NAMING something outside the catalogue is "
+               "flagged, not only the ones recommending it — so a "
+               "competitor-comparison article, which the owner explicitly "
+               "wants and which must be able to name the shelf, lights up as "
+               "a defect end to end. The reviewer then learns to ignore the "
+               "marker, and it stops catching the case it exists for",
+    },
+    {
+        "name": "an_output_records_what_backed_it",
+        "file": "app/ledger.py",
+        "find": "        pct = claim_trace.coverage_of(tenant, body, claim_ids)",
+        "replace": "        pct = -1  # SABOTAGE",
+        "suites": ["test_claim_trace.py"],
+        "why": "nothing records how much of each output stood on a claim, so "
+               "the trend has no history to draw and the question 'is filling "
+               "in the knowledge base making the output better' becomes "
+               "unanswerable — not wrong, unanswerable, and only in six "
+               "months when somebody asks",
+    },
+    {
+        "name": "prose_is_not_scored_zero",
+        "file": "app/claim_trace.py",
+        "find": "    return -1 if pct is None else int(pct)",
+        "replace": "    return int(pct or 0)  # SABOTAGE",
+        "suites": ["test_claim_trace.py"],
+        "why": "an output that asserts nothing checkable is recorded as 0% "
+               "grounded rather than as not-applicable, so every short, "
+               "honest, claim-free asset drags the average down and the trend "
+               "measures how much prose was written rather than how well it "
+               "was grounded",
+    },
 ]
 
 

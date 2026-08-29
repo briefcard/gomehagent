@@ -54,7 +54,18 @@ def record(tenant: str, system_key: str, *, situation: str = "",
     the things that worked cannot tell you what stopped.
     """
     body = (body or "").strip()
+    # HOW MUCH OF THIS AN APPROVED CLAIM STOOD BEHIND, recorded here because
+    # this is the ONE writer every skill's output passes through — so an
+    # article, an ad and an email all get the number without any of them
+    # knowing about it. Never allowed to cost an output: a review reading that
+    # can break the thing it reads is not worth having.
+    try:
+        from . import claim_trace
+        pct = claim_trace.coverage_of(tenant, body, claim_ids)
+    except Exception:                                            # noqa: BLE001
+        pct = -1
     row = db.Output(
+        grounded_pct=pct,
         tenant=tenant, system_key=system_key, run_id=run_id,
         situation=situation, entity_key=entity_key, audience_key=audience_key,
         objection_id=objection_id, claim_ids=list(claim_ids or []),

@@ -168,6 +168,22 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .gr.ok>summary::-webkit-details-marker{display:none}
 .gr.no{border-left:2px solid var(--gap);padding-left:8px;
   display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+/* The whole output at a glance, before a word of it is read. */
+.meter{display:flex;height:6px;border-radius:4px;overflow:hidden;gap:2px;margin:8px 0 10px}
+.meter i{display:block;height:100%}
+.meter i.b{background:var(--ok)}
+.meter i.o{background:var(--gap)}
+.meter i.p{background:var(--rule)}
+/* Long-form drowns in inline popovers, so its claims move into a gutter
+   aligned to the text — the shape the owner asked for by pointing at Figma. */
+.gutter{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:18px}
+@media(max-width:820px){.gutter{grid-template-columns:1fr}}
+.gutter .rail{display:flex;flex-direction:column;gap:8px;font-size:.82rem}
+.railcard{border:1px solid var(--rule);border-left:3px solid var(--ok);
+  border-radius:6px;padding:8px 10px}
+.railcard.none{border-left-color:var(--gap)}
+.railcard .who{font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--mut);display:block;margin-bottom:3px}
 .mut{color:var(--mut);font-size:.86rem}
 .card{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px 18px;
 display:flex;flex-direction:column;gap:12px}
@@ -9405,24 +9421,80 @@ def _drafts_section(key: str, row) -> str:
 </div>"""
 
 
+def _claim_pop(c: dict, uses: dict, tenant: str) -> str:
+    """One claim, opened. `uses` is `claim_trace.usage_counts` — read ONCE by
+    the caller, because a per-claim query here is the N+1 on the page that
+    exists to explain the account to you.
+
+    The usage count is the point of this popover as much as the claim text is:
+    "used in 9 outputs" turns "this claim looks wrong" into "this claim is
+    wrong in nine places", which is the difference between noticing something
+    and fixing what caused it.
+    """
+    n = int(uses.get(c.get("id") or "", 0) or 0)
+    return (f'<div class="pop"><b>{_esc(c["claim"])}</b>'
+            + (f'<span class="when">{_esc(c["evidence"])}</span>'
+               if c.get("evidence") else "")
+            + (f'<span class="when">used in {n} output'
+               f'{"" if n == 1 else "s"}</span>' if n else "")
+            + (f'<div class="row"><a href="/admin/ui?tab=kb&amp;tenant='
+               f'{_esc(tenant)}&amp;sub=claims&amp;q={_esc(c["claim"][:40])}">'
+               f'open the claim &rarr;</a></div>' if c.get("id") else "")
+            + "</div>")
+
+
+def _sentence_html(sent: dict, uses: dict, tenant: str, vocab: set) -> str:
+    """One annotated sentence, in the vocabulary the whole console shares.
+
+    Three states (design rule 2). A backed sentence UNDERLINES and opens to
+    its claim; an unbacked assertion carries an amber rail and says what is
+    missing; prose is left alone, because marking every line is how the lines
+    that matter stop being read.
+    """
+    from . import claim_trace
+    txt = _esc(sent["text"])
+    if sent["backed"]:
+        return (f'<details class="gr ok"><summary>{txt}</summary>'
+                + "".join(_claim_pop(c, uses, tenant) for c in sent["claims"])
+                + "</details>")
+    if not sent["assertion"]:
+        return f'<div class="gr">{txt}</div>'
+    # A DIFFERENT PROBLEM FROM "no claim covers this", and the one that made
+    # the Eien article wrong rather than merely thin: it RECOMMENDED a product
+    # category the account has nothing in. Mentioning is allowed on purpose —
+    # a competitor comparison has to be able to name the shelf — so only the
+    # steer is called out, with the words, so the reader can judge which it is.
+    off = claim_trace.off_catalogue(sent["text"], vocab)
+    tag = "nothing on file says this"
+    if off:
+        tag += (" &middot; recommends something this account has never "
+                "mentioned: " + _esc(", ".join(off)))
+    return (f'<div class="gr no"><span>{txt}</span>'
+            f'<span class="when">{tag}</span></div>')
+
+
 def _grounding_card(tenant: str, art) -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
     The owner's framing was Figma's comments over a design: the text as it is,
     annotated, and a marker you open to see what stands behind it. This is
-    that, for every kind of artifact — an article, an ad, an email — because
-    the failure it exists to catch is the same in all three: an output that
-    passed every gate while asserting things nobody approved.
+    that, for every kind of artifact — because the failure it exists to catch
+    is the same in all of them: an output that passed every gate while
+    asserting things nobody approved.
+
+    ONE VOCABULARY, THREE SHAPES. The annotation means the same thing
+    everywhere; how it is laid out follows the asset, because the assets are
+    not the same shape. An ad is short enough to annotate inline. An article
+    would drown in twenty popovers, so its claims move into a gutter beside
+    the paragraph they belong to. An email is assembled from BLOCKS rather
+    than written as one flow, so the block is its unit and the mark runs down
+    the edge — which keeps the rendered email readable as an email, the whole
+    point of previewing it.
 
     THE ANNOTATION IS OVER THE PLAIN TEXT, not the stored HTML. Re-marking the
     original markup would mean editing tags the CMS owns, and a review aid
-    that can corrupt the thing it reviews is not worth having. The reader sees
-    the sentences; the preview above is still the real artifact.
-
-    Three states, not two (design rule 2): backed · asserts-and-unbacked ·
-    prose. Flattening the last two is what would make this cry wolf — most
-    good writing is connective tissue that needs no citation, and marking it
-    all as ungrounded is how a real 0% gets skimmed past.
+    that can corrupt the thing it reviews is not worth having. The preview
+    above is still the real artifact.
     """
     from . import claim_trace
     body = str(getattr(art, "body", "") or "")
@@ -9430,55 +9502,63 @@ def _grounding_card(tenant: str, art) -> str:
         return ""
     fmt = str(getattr(art, "format", "") or "")
     if fmt == "ad_batch":
-        # The board renders its own variants; annotating the raw JSON would
-        # mark up field names.
         try:
             import json as _json
-            body = " ".join(str(v.get("text") or "")
-                            for v in (_json.loads(body) or {}).get("variants", []))
+            body = "\n".join(str(v.get("text") or "")
+                              for v in (_json.loads(body) or {}).get("variants", []))
         except Exception:                                        # noqa: BLE001
             return ""
     claims = kb.claims(tenant)
     rep = claim_trace.annotate(body, claims)
     if not rep.get("total"):
         return ""
+    uses = claim_trace.usage_counts(tenant)
+    vocab = claim_trace.vocabulary(tenant)
     pct = rep.get("coverage_pct")
     chip = ('<span class="chip">nothing to check</span>' if pct is None
             else f'<span class="chip {"on" if pct >= 80 else "off"}">'
                  f'{pct}% grounded</span>')
-    rows = ""
-    for sent in rep["sentences"]:
-        txt = _esc(sent["text"])
-        if sent["backed"]:
-            inner = "".join(
-                f'<div class="msg"><div><b>{_esc(c["claim"])}</b>'
-                + (f'<div class="when">{_esc(c["evidence"])}</div>'
-                   if c["evidence"] else "")
-                + (f'<div class="row"><a href="/admin/ui?tab=kb&amp;tenant='
-                   f'{_esc(tenant)}&amp;sub=claims&amp;q={_esc(c["claim"][:40])}">'
-                   f'open the claim &rarr;</a></div>' if c["id"] else "")
-                + "</div></div>" for c in sent["claims"])
-            rows += (f'<details class="gr ok"><summary>{txt}</summary>'
-                     f'{inner}</details>')
-        elif sent["assertion"]:
-            # THE ONES THAT MATTER. It asserts something and nothing on file
-            # says so — the state the Eien article was in from end to end.
-            rows += (f'<div class="gr no"><span>{txt}</span>'
-                     f'<span class="when">nothing on file says this</span>'
-                     f'</div>')
-        else:
-            rows += f'<div class="gr">{txt}</div>'
+
+    # THE BAR: the whole output at a glance, before any sentence is read.
+    backed = sum(1 for s_ in rep["sentences"] if s_["backed"])
+    openn = len(rep.get("unbacked_assertions") or [])
+    plain = rep["total"] - backed - openn
+    meter = (f'<div class="meter">'
+             + (f'<i class="b" style="flex:{backed}"></i>' if backed else "")
+             + (f'<i class="o" style="flex:{openn}"></i>' if openn else "")
+             + (f'<i class="p" style="flex:{plain}"></i>' if plain else "")
+             + "</div>")
+
+    rows = "".join(_sentence_html(s_, uses, tenant, vocab)
+                   for s_ in rep["sentences"])
+    # THE GUTTER, for anything long enough that inline popovers would bury the
+    # prose. The claims sit beside the paragraph they belong to instead.
+    long_form = rep["total"] >= 8
+    if long_form:
+        rail = "".join(
+            f'<div class="railcard{"" if s_["backed"] else " none"}">'
+            f'<span class="who">{"claim" if s_["backed"] else "no claim"}'
+            f'</span>'
+            + (_esc(s_["claims"][0]["claim"]) if s_["backed"]
+               else _esc(s_["text"][:90]))
+            + "</div>"
+            for s_ in rep["sentences"] if s_["assertion"])
+        rows = (f'<div class="gutter"><div>{rows}</div>'
+                f'<div class="rail">{rail}</div></div>')
+
     return f"""
 <div class="anchor" id="grounding"></div>
 <div class="card">
   <div class="head"><h3>What here is confirmed by a claim</h3>{chip}</div>
+  {meter}
   <p class="mut">{_esc(claim_trace.summary(rep))}</p>
   <p class="when">Underlined sentences open to the approved claim behind
   them. A sentence marked <b>nothing on file says this</b> asserts something
   no claim covers &mdash; the fix is usually to correct or add the CLAIM and
-  regenerate, not to ban a word. Sentences that assert nothing are left
+  regenerate, not to ban a word, because banning it would also stop the
+  competitor comparisons you may want. Sentences that assert nothing are left
   plain.</p>
-  <div class="thread">{rows}</div>
+  {rows}
 </div>"""
 
 

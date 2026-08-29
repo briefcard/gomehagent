@@ -224,3 +224,155 @@ def summary(report: dict) -> str:
     return (f"{pct}% of the {n} factual sentences here trace to an approved "
             f"claim. {left} assert something with nothing on file behind it "
             f"— correct or add the claim, then regenerate.")
+
+
+# ---------------------------------------------------------------------------
+# What the knowledge base has never heard of
+# ---------------------------------------------------------------------------
+
+#: Language that RECOMMENDS or RANKS rather than merely describing. The Eien
+#: article's damage was not that it mentioned glucosamine — the owner wants
+#: competitor-deficit articles, which must be able to name what the brand does
+#: not sell. It was that it RECOMMENDED it: "remain the benchmark for
+#: structural joint support". Mentioning is fine; steering the reader to a
+#: thing this account has nothing in, with nothing on file about it, is not.
+_RECOMMENDS = (
+    "benchmark", "look for", "worth including", "worth noting",
+    "choose", "opt for", "recommend", "the right", "best option",
+    "most studied", "go-to", "gold standard", "should take", "should use",
+    "worth adding", "the standard",
+)
+
+
+def vocabulary(tenant: str) -> set:
+    """Every content word this account's knowledge base actually contains.
+
+    Claims, entity names and descriptions, objections and their answers, and
+    situation tags. One read of what the account knows, so "never heard of"
+    means never heard of ANYWHERE rather than merely absent from the claims.
+    """
+    from . import kb as kbm
+    words: set = set()
+    try:
+        for c in kbm.claims(tenant):
+            words |= _tokens(getattr(c, "claim", "") or "")
+            words |= _tokens(getattr(c, "evidence", "") or "")
+        for e in kbm.entities(tenant, available_only=False):
+            words |= _tokens(getattr(e, "name", "") or "")
+            words |= _tokens(getattr(e, "description", "") or "")
+        for o in kbm.objections(tenant):
+            words |= _tokens(getattr(o, "objection", "") or "")
+            words |= _tokens(getattr(o, "response", "") or "")
+        for s_ in kbm.situation_rows(tenant):
+            words |= _tokens(getattr(s_, "tag", "") or "")
+            words |= _tokens(getattr(s_, "description", "") or "")
+    except Exception:                                            # noqa: BLE001
+        return set()
+    return words
+
+
+def off_catalogue(sentence: str, vocab: set) -> list:
+    """Words this sentence recommends that the account has never mentioned.
+
+    `[]` unless the sentence is RECOMMENDING. A mention is allowed on purpose:
+    an article comparing this brand with what else is on the shelf has to be
+    able to name the shelf. Only the steer is flagged, and it is flagged with
+    the actual words so the reader can see whether it is a competitor
+    comparison (fine) or a recommendation of something nobody sells (not).
+    """
+    low = f" {str(sentence or '').lower()} "
+    if not vocab or not any(m in low for m in _RECOMMENDS):
+        return []
+    # The trigger words are not findings. "benchmark" appearing in the list
+    # of things we have never heard of is noise that makes the real entries
+    # harder to see.
+    triggers = set()
+    for m in _RECOMMENDS:
+        triggers |= _tokens(m)
+    unknown = [w for w in _tokens(sentence)
+               if w not in vocab and w not in triggers and len(w) > 4]
+    return sorted(set(unknown))[:4]
+
+
+# ---------------------------------------------------------------------------
+# The number, over time
+# ---------------------------------------------------------------------------
+
+def coverage_of(tenant: str, body: str, claim_ids: list | None = None) -> int:
+    """The one number, for `ledger.record` to store on every output.
+
+    `-1` when the output asserts nothing checkable — NOT 0, because "nothing
+    here needed a claim" and "nothing here has one" are different facts and
+    averaging them together is how a trend lies. Readers filter `>= 0`.
+    """
+    from . import kb as kbm
+    try:
+        ids = set(str(c) for c in (claim_ids or []) if c)
+        claims = [c for c in kbm.claims(tenant)
+                  if not ids or str(getattr(c, "id", "")) in ids]
+        rep = annotate(body, claims)
+    except Exception:                                            # noqa: BLE001
+        return -1
+    pct = rep.get("coverage_pct")
+    return -1 if pct is None else int(pct)
+
+
+def trend(tenant: str = "", days: int = 90) -> list:
+    """Average grounding by system, and the direction it is moving.
+
+    The reason the number is stored per output rather than recomputed: a
+    recomputation reads TODAY's knowledge base, so an article written when the
+    account had four claims would be scored against the forty it has now, and
+    the trend would flatten itself every time somebody authored a claim. The
+    stored number is what was true when it was written.
+    """
+    import datetime as dt
+
+    from . import db
+    since = db.utcnow() - dt.timedelta(days=max(1, int(days or 1)))
+    with db.SessionLocal() as s:
+        q = (s.query(db.Output)
+             .filter(db.Output.created_at >= since,
+                     db.Output.grounded_pct >= 0))
+        if tenant:
+            q = q.filter(db.Output.tenant == tenant)
+        rows = q.order_by(db.Output.created_at.asc()).all()
+        rows = [(r.system_key or "(none)", int(r.grounded_pct or 0),
+                 db.as_utc(r.created_at)) for r in rows]
+
+    by: dict = {}
+    for key, pct, when in rows:
+        by.setdefault(key, []).append((when, pct))
+    out = []
+    for key, pairs in sorted(by.items()):
+        vals = [p for _w, p in pairs]
+        half = max(1, len(vals) // 2)
+        earlier, later = vals[:half], vals[half:] or vals[:half]
+        out.append({
+            "system": key, "outputs": len(vals),
+            "average": round(sum(vals) / len(vals)),
+            "was": round(sum(earlier) / len(earlier)),
+            "now": round(sum(later) / len(later)),
+            # The sparkline in the mockup: one point per output, oldest first.
+            "series": vals[-24:],
+        })
+    return out
+
+
+def usage_counts(tenant: str) -> dict:
+    """{claim_id: how many outputs cite it}. ONE query, not one per claim.
+
+    "Used in 9 outputs" is what turns "this claim looks wrong" into "this
+    claim is wrong in nine places", which is the difference between noticing
+    something and fixing the cause of it.
+    """
+    from collections import Counter
+
+    from . import db
+    n: Counter = Counter()
+    with db.SessionLocal() as s:
+        for (ids,) in s.query(db.Output.claim_ids).filter(
+                db.Output.tenant == tenant).all():
+            for cid in (ids or []):
+                n[str(cid)] += 1
+    return dict(n)

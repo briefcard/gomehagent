@@ -359,6 +359,19 @@ class Output(Base):
     audience_key = Column(String, default="", index=True)
     objection_id = Column(String, default="", index=True)
     claim_ids = Column(JSON, default=list)
+    #: How much of this output an approved claim actually stood behind, as a
+    #: percentage of its factual sentences — computed by `claim_trace` at the
+    #: moment it was written and STORED, never recomputed.
+    #:
+    #: Stored because recomputing reads TODAY's knowledge base: an article
+    #: written when the account had four claims would be re-scored against the
+    #: forty it has now, and the trend would flatten itself every time
+    #: somebody authored a claim. This records what was true at the time.
+    #:
+    #: -1 means the output asserted nothing checkable — NOT zero. "Nothing
+    #: here needed a claim" and "nothing here has one" are different facts,
+    #: and averaging them together is how a trend lies. Readers filter >= 0.
+    grounded_pct = Column(Integer, default=-1, index=True)
     media_ids = Column(JSON, default=list)
     #: Which LIVE lookups fed this output — `["shopify_inventory", …]`.
     #:
