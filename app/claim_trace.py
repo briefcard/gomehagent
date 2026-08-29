@@ -326,6 +326,84 @@ def vocabulary(tenant: str) -> set:
     return words
 
 
+#: Words that mean the speaker — matched CASE-SENSITIVELY in running text,
+#: plus their sentence-initial capitals. Lowercasing first looked harmless and
+#: was not: "third-party tested in a US facility" matched the pronoun `us` and
+#: the country code was read as the brand. Pronouns are lowercase mid-sentence;
+#: US, UK and EU are not.
+_FIRST_PERSON = ("we", "we're", "we've", "our", "ours", "us", "ourselves")
+_PRONOUN = re.compile(
+    r"(?:^|(?<=[\s(\"']))(?:" + "|".join(_FIRST_PERSON) + r")(?=[\s,.;:!?)\"']|$)")
+_PRONOUN_START = re.compile(
+    r"^(?:" + "|".join(w.capitalize() for w in _FIRST_PERSON) + r")\b")
+
+#: Words too generic to identify anybody. A tenant called "Miami Event Spaces"
+#: must not claim every sentence containing "event" as a statement about
+#: itself — that would quietly reclassify most of a venue's copy as
+#: brand claims and ask for approvals nobody owes.
+_GENERIC_NAME = {
+    "the", "and", "co", "inc", "llc", "ltd", "group", "brand", "company",
+    "health", "beauty", "home", "shop", "store", "studio", "design", "designs",
+    "event", "events", "spaces", "space", "usa", "us", "global", "world",
+    "international", "solutions", "services", "products", "supply", "supplies",
+}
+
+
+def brand_marks(tenant: str) -> set:
+    """The PHRASES that mean "this account" — its name, and its catalogue.
+
+    Phrases, not tokens, and that is the whole care in this function. Tokenise
+    "Eien Health" and the word `health` alone starts marking every sentence
+    about health as a statement about the brand; tokenise "Zodiac Vibe cup"
+    and `cup` does the same. A phrase says what a token cannot: this sentence
+    named US, not our subject matter.
+
+    Derived entirely from data every account already has, so it costs nothing
+    per client and grows on its own as a catalogue is filled. Its emptiness is
+    a real state and the caller must handle it — see `about_us`.
+    """
+    from . import kb as kbm
+    from . import tenants as tn
+    out: set = set()
+    try:
+        row = tn.get(tenant)
+        name = str(getattr(row, "name", "") or "").strip().lower()
+        if name:
+            out.add(name)
+            # …and the distinctive half of it on its own, because people write
+            # "Eien" far more often than "Eien Health".
+            for w in name.replace("-", " ").split():
+                if len(w) >= 4 and w not in _GENERIC_NAME:
+                    out.add(w)
+        for e in kbm.entities(tenant, available_only=False):
+            n = str(getattr(e, "name", "") or "").strip().lower()
+            if len(n) >= 4:
+                out.add(n)
+    except Exception:                                            # noqa: BLE001
+        return set()
+    return out
+
+
+def about_us(sentence: str, marks: set) -> bool:
+    """Would this sentence still be true if the account did not exist?
+
+    The owner's test, 2026-08-29, after a knee-pain article had every cited
+    fact about the CONDITION reported as an unbacked brand claim: *"this isn't
+    technically a claim because we're not claiming anything that the company
+    does, has, is, or is associated with."* Right — and the reading had only
+    one question for two different kinds of sentence.
+
+    False here does NOT mean the sentence is free. It means it needs a source
+    rather than an owner's approval. Two evidences, one for each kind of
+    statement; neither is "nothing".
+    """
+    raw = str(sentence or "").strip()
+    if _PRONOUN.search(raw) or _PRONOUN_START.match(raw):
+        return True
+    low = f" {raw.lower()} "
+    return any(m in low for m in (marks or ()))
+
+
 def off_catalogue(sentence: str, vocab: set) -> list:
     """Words this sentence recommends that the account has never mentioned.
 

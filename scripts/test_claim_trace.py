@@ -231,6 +231,7 @@ def main() -> int:
                 "You stood up from your desk.</p>"
                 "<p>Roughly one in four adults over 50 reports knee pain. "
                 "The kettle had boiled twice.</p>"
+                "<p>Our softgel dissolves in under 20 minutes.</p>"
                 "<p>Every batch is third-party tested in a US facility.</p>")
 
     class Short:
@@ -270,6 +271,44 @@ def main() -> int:
        'class="meter"' in long_card and 'class="meter"' in short_card)
     ck("the panel is filterable by state",
        'data-f="gap"' in long_card and 'data-f="ok"' in long_card)
+
+    print("\n— a fact about the world is not a claim about the company —")
+    marks = claim_trace.brand_marks("eien")
+    ck("the account's own name and catalogue are the marks",
+       "eien" in marks, sorted(marks))
+    ck("a general fact is about the world",
+       not claim_trace.about_us(
+           "Roughly one in four adults over 50 reports knee pain.", marks))
+    ck("…and the surface says so rather than calling it unbacked",
+       'data-state="world"' in long_card and
+       "no approval is owed" in long_card,
+       "the owner's article had every cited fact about the CONDITION "
+       "reported as an unfounded company claim")
+    ck("a first-person assertion is still about the company",
+       claim_trace.about_us("Our softgel dissolves in 20 minutes.", marks)
+       and 'data-f="gap"' in long_card)
+    ck("a country code is not a pronoun",
+       not claim_trace.about_us("Tested in a US facility by a third party.",
+                                set()),
+       "lowercasing first made 'a US facility' match the pronoun 'us'")
+    ck("a generic word in the account name marks nothing",
+       "health" not in marks,
+       "every sentence about health would have become a claim about Eien")
+
+    print("\n— and a judgement can be filed where it was formed —")
+    ck("each note can be dropped from the redraft",
+       long_card.count('name="level" value="draft"') == len(
+           _re2.findall(r'class="gnote" data-note=', long_card)))
+    ck("…and taught to the system for future drafts",
+       long_card.count('name="level" value="system"') >= 1
+       and "Never again" in long_card)
+    ck("no note offers to ban the phrase",
+       'value="rule"' not in long_card,
+       "banning 'glucosamine' would also stop the competitor comparisons "
+       "the owner explicitly wants — the lesson is the behaviour, not the noun")
+    ck("the standing guidance quotes what provoked it",
+       "It happened here" in long_card,
+       "guidance nobody can trace back to a draft is a slogan")
 
     print()
     if _fail:

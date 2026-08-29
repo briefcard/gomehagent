@@ -244,6 +244,21 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .gnote .tx{font-size:.85rem;line-height:1.5;display:block}
 .gnote .mt{font-size:.74rem;color:var(--mut);line-height:1.45;display:block;
   margin-top:4px}
+/* A statement about the world is NOT a fault, so it must not wear a fault's
+   colour. Grey — present, numbered, actionable, quiet. */
+.mk[data-state=world]{color:var(--mut);border-color:var(--mut);border-style:dashed}
+.s.lit[data-state=world]{text-decoration-color:var(--mut)}
+.gnote[data-state=world] .bdg{color:var(--mut);border-color:var(--mut);
+  border-style:dashed}
+.gnote[data-state=world] .lb{color:var(--mut)}
+.meter i.w{background:var(--mut)}
+/* File the judgement where you formed it. Two buttons, no form to scroll to. */
+.nacts{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.nacts form{margin:0}
+.nacts button{font-family:var(--mono);font-size:.62rem;padding:.34em .55em;
+  border-radius:4px;cursor:pointer;border:1px solid var(--rule);
+  background:transparent;color:var(--ink2)}
+.nacts button:hover{border-color:var(--acc);color:var(--acc)}
 /* The whole output at a glance, before a word of it is read. */
 .meter{display:flex;height:6px;border-radius:4px;overflow:hidden;gap:2px;margin:8px 0 10px}
 .meter i{display:block;height:100%}
@@ -9563,10 +9578,22 @@ if(d.fonts&&d.fonts.ready)d.fonts.ready.then(layout);setTimeout(layout,400);})()
 #: Label and state, in one place. A note's state decides its colour, its
 #: marker, its filter bucket and its wording, and three of those used to be
 #: decided separately.
-_NOTE_LABEL = {"ok": "Backed", "gap": "Needs a claim", "off": "Off catalogue"}
+_NOTE_LABEL = {"ok": "Backed", "gap": "Needs a claim",
+               "world": "About the world", "off": "Off catalogue"}
+
+#: What each state ASKS FOR, which is the thing the old surface got wrong: it
+#: had one question — "is there an approved claim behind this?" — for two
+#: different kinds of sentence. A statement about the account needs the
+#: owner's approval. A statement about the world needs a source, and the
+#: owner's decision (2026-08-29) is that a source is OFFERED, not required:
+#: "realistically it'll be hard to pinpoint it if it's generated so we dont
+#: need to require it but we can add the option."
+_NOTE_ASK = {"ok": "open the claim", "gap": "approve a claim",
+             "world": "attach a source", "off": "see what triggered this"}
 
 
-def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set) -> list:
+def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
+               marks: set) -> list:
     """Every annotated sentence as ONE record, read by three renderers.
 
     The marker, the hover tip and the panel entry are three views of the same
@@ -9576,12 +9603,23 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set) -> list:
     """
     from . import claim_trace
     out = []
-    for sent in rep.get("sentences") or []:
+    for sent in rep.get("sentences") or []:  # noqa: PLR1702
         if not sent.get("assertion"):
             continue
         off = [] if sent["backed"] else claim_trace.off_catalogue(
             sent["text"], vocab)
-        state = "ok" if sent["backed"] else ("off" if off else "gap")
+        # ORDER MATTERS. Backed wins first — a sentence a claim matched is a
+        # brand claim BY DEMONSTRATION, whatever its grammar looks like.
+        # Then the off-catalogue steer, which is the loud one. Only then does
+        # the subject decide which evidence the rest are short of.
+        if sent["backed"]:
+            state = "ok"
+        elif off:
+            state = "off"
+        elif claim_trace.about_us(sent["text"], marks):
+            state = "gap"
+        else:
+            state = "world"
         claim = (sent["claims"] or [{}])[0] if sent["backed"] else {}
         cid = str(claim.get("id") or "")
         n = int(uses.get(cid, 0) or 0) if cid else 0
@@ -9602,13 +9640,23 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set) -> list:
                 "nothing on file says this, and it recommends something this "
                 "account has never mentioned: " + ", ".join(off)
                 if state == "off" else
+                # NOT A FAULT, AND IT MUST NOT READ AS ONE. This says what the
+                # sentence is and what could strengthen it — a statement about
+                # the world, which the account is still publishing under its
+                # own name, so a source is worth having even where one is not
+                # demanded.
+                "a statement about the world, not about this account &mdash; "
+                "no approval is owed. A source is optional and worth adding "
+                "if you have one."
+                if state == "world" else
                 "nothing on file says this — approve a claim carrying the "
                 "source, or cut it"),
             "href": (f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;"
                      f"sub=claims&amp;q={_esc((claim.get('claim') or '')[:40])}"
                      if state == "ok" else
                      f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;sub=claims"),
-            "act": "open the claim" if state == "ok" else "approve a claim",
+            "act": _NOTE_ASK[state],
+            "sentence": sent["text"],
         })
     return out
 
@@ -9624,7 +9672,80 @@ def _marker_html(note: dict) -> str:
             f'<i>{_esc(meta[:130])}</i></span></button>')
 
 
-def _note_html(note: dict) -> str:
+#: The lesson a state teaches, phrased as the BEHAVIOUR rather than the
+#: words. The owner's own correction is the reason: banning "glucosamine"
+#: would also kill the competitor-deficit articles he wants, so the standing
+#: guidance has to describe the move, not blacklist the noun. `%s` is the
+#: sentence, quoted so a person reading the guidance later can see what
+#: provoked it.
+_TEACH = {
+    "off": ("Do not recommend, benchmark or steer readers toward a category "
+            "this account does not sell. Naming one in a comparison is fine; "
+            "endorsing it is not. It happened here: \u201c%s\u201d"),
+    "gap": ("Do not assert things about this account that no approved claim "
+            "covers. If the claim is not on file, leave the point out. It "
+            "happened here: \u201c%s\u201d"),
+    "world": ("When stating a general fact, keep it to what the research "
+              "actually shows and do not turn it into a claim about this "
+              "account's products. It happened here: \u201c%s\u201d"),
+    "ok": ("Check this claim before leaning on it again: \u201c%s\u201d"),
+}
+
+
+def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
+    """FILE THE JUDGEMENT WHERE YOU FORMED IT (design rule 1).
+
+    Owner, 2026-08-29: *"i dont have a mechanism to indicate that this should
+    not be in a redraft and should be avoided in future drafts."* The
+    machinery existed and the reach did not — `/admin/feedback_add` already
+    routes each level to its real channel, but the only way in was a free-text
+    form at the bottom of the page, so acting on a note meant scrolling away
+    from it and retyping the sentence you were looking at.
+
+    Two buttons, because the owner named two different things:
+
+      Drop from redraft   draft-level. Stays open on the artifact and is
+                          consumed by the next redraft — this draft only.
+      Never again         system-level. Written into the system's standing
+                          guidance at filing time and injected into every
+                          future draft it writes.
+
+    Neither is rule-level, and that is deliberate. Rule-level bans a phrase
+    for ever, which is exactly wrong for the case that prompted this: a ban on
+    "glucosamine" would stop the competitor comparisons the owner explicitly
+    wants. The lesson is the behaviour, not the noun.
+    """
+    if not output_id:
+        return ""
+    sent = note.get("sentence") or note.get("text") or ""
+    teach = _TEACH.get(note["state"], _TEACH["gap"]) % sent[:150]
+    drop = f"Leave this out of the redraft: \u201c{sent[:150]}\u201d"
+
+    def form(level: str, note_text: str, label: str, title: str) -> str:
+        return (
+            f'<form method="post" action="/admin/feedback_add" class="nact">'
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="output_id" value="{_esc(output_id)}">'
+            f'<input type="hidden" name="system_key" value="{_esc(syskey)}">'
+            f'<input type="hidden" name="part" value="body">'
+            f'<input type="hidden" name="category" value="factual">'
+            f'<input type="hidden" name="level" value="{level}">'
+            f'<input type="hidden" name="note" value="{_esc(note_text)}">'
+            f'<button type="submit" title="{_esc(title)}">{label}</button>'
+            f'</form>')
+
+    return ('<span class="nacts">'
+            + form("draft", drop, "Drop from redraft",
+                   "Files it against this draft — the next redraft consumes "
+                   "it and leaves the sentence out")
+            + form("system", teach, "Never again",
+                   "Writes standing guidance for this system, injected into "
+                   "every future draft it writes")
+            + '</span>')
+
+
+def _note_html(note: dict, key: str = "", output_id: str = "",
+               syskey: str = "") -> str:
     """The same record, opened, in the panel."""
     return (f'<li class="gnote" data-note="{note["n"]}" '
             f'data-state="{note["state"]}"><span class="bdg">{note["n"]}</span>'
@@ -9632,6 +9753,7 @@ def _note_html(note: dict) -> str:
             f'<span class="tx">{_esc(note["text"])}</span>'
             f'<span class="mt">{note["meta"]}</span>'
             f'<a class="mt" href="{note["href"]}">{note["act"]} &rarr;</a>'
+            f'{_note_actions(note, key, output_id, syskey)}'
             f'</span></li>')
 
 
@@ -9771,7 +9893,7 @@ def _grounding_trend(tenant: str, days: int) -> str:
             'you approve one.</p>')
 
 
-def _grounding_card(tenant: str, art) -> str:
+def _grounding_card(tenant: str, art, key: str = "") -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
     The owner's framing was Figma's comments over a design: the text as it is,
@@ -9819,7 +9941,8 @@ def _grounding_card(tenant: str, art) -> str:
         return ""
     uses = claim_trace.usage_counts(tenant)
     vocab = claim_trace.vocabulary(tenant)
-    notes = _notes_for(rep, uses, tenant, vocab)
+    marks = claim_trace.brand_marks(tenant)
+    notes = _notes_for(rep, uses, tenant, vocab, marks)
     states = {int(n["n"]): n["state"] for n in notes}
     pct = rep.get("coverage_pct")
     chip = ('<span class="chip">nothing to check</span>' if pct is None
@@ -9832,20 +9955,24 @@ def _grounding_card(tenant: str, art) -> str:
     backed = sum(1 for n in notes if n["state"] == "ok")
     offs = sum(1 for n in notes if n["state"] == "off")
     openn = sum(1 for n in notes if n["state"] == "gap")
+    world = sum(1 for n in notes if n["state"] == "world")
     plainn = rep["total"] - len(notes)
     meter = ('<div class="meter">'
              + (f'<i class="b" style="flex:{backed}"></i>' if backed else "")
              + (f'<i class="o" style="flex:{openn}"></i>' if openn else "")
              + (f'<i class="x" style="flex:{offs}"></i>' if offs else "")
+             + (f'<i class="w" style="flex:{world}"></i>' if world else "")
              + (f'<i class="p" style="flex:{plainn}"></i>' if plainn else "")
              + "</div>")
 
-    counts = {"all": len(notes), "gap": openn, "off": offs, "ok": backed}
+    counts = {"all": len(notes), "gap": openn, "off": offs,
+              "world": world, "ok": backed}
     filters = '<div class="gfilt">' + "".join(
         f'<button type="button" class="{"on" if k == "all" else ""}" '
         f'data-f="{k}">{lbl} {counts[k]}</button>'
         for k, lbl in (("all", "All"), ("gap", "Needs a claim"),
-                       ("off", "Off catalogue"), ("ok", "Backed"))
+                       ("off", "Off catalogue"), ("world", "About the world"),
+                       ("ok", "Backed"))
         if counts[k] or k == "all") + "</div>"
 
     return f"""
@@ -9867,7 +9994,9 @@ def _grounding_card(tenant: str, art) -> str:
       {_reading_html(plain, rep, states, claim_trace.headings(body))}
     </div></div>
     <div class="gpanel">{filters}
-      <ul class="gnotes">{"".join(_note_html(n) for n in notes)
+      <ul class="gnotes">{"".join(
+        _note_html(n, key, str(getattr(art, "output_id", "") or ""),
+                   str(getattr(art, "system_key", "") or "")) for n in notes)
         or '<li class="gnote"><span></span><span class="mt">This output '
            'asserts nothing checkable, so there is nothing to trace.</span></li>'}</ul>
     </div>
@@ -10471,7 +10600,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
 </div>
 {f'<div class="card"><h3>Structural flags</h3><ul class="bl">{flag_html}</ul></div>' if flag_html else ""}
 {preview_card}
-{_grounding_card(tenant, art)}
+{_grounding_card(tenant, art, key)}
 {edit_card}
 <div class="anchor" id="feedback"></div>
 <div class="card">
