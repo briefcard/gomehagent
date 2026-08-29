@@ -39,7 +39,14 @@ from . import db
 # avoid, found in the file itself.
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
-             "kb_embeddings", "harvested_pages", "kb_assets"}
+             "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs"}
+# `media_blobs` is KNOWLEDGE because it is the same thing as `kb_assets` split
+# across two tables: the row holds the URL, this holds the bytes behind it.
+# Classified in the change that adds it, which is the whole lesson of the two
+# comments below — and here the cost of getting it wrong runs both ways. Reset
+# the assets without the blobs and every generated picture is bytes nothing
+# points at, for ever. Reset the blobs without the assets and the library is
+# full of rows whose images 404 the first time somebody tries to use one.
 # `kb_assets` was added with the creative library and classified nowhere, so the
 # unclassified report named it for weeks and a knowledge reset left an account's
 # entire picture library behind while reporting success — the `kb_brand` /

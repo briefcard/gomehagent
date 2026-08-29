@@ -2,7 +2,8 @@
 import datetime as dt
 import uuid
 
-from sqlalchemy import (JSON, Column, DateTime, Float, Integer, String, Text,
+from sqlalchemy import (JSON, Column, DateTime, Float, Integer, LargeBinary,
+                        String, Text,
                         UniqueConstraint, create_engine)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -655,6 +656,39 @@ class ChatMessage(Base):
     thread = Column(String, default="admin", index=True)
     role = Column(String, nullable=False)  # user | assistant
     content = Column(Text, nullable=False)
+
+
+class MediaBlob(Base):
+    """Bytes we generated, so they can have a URL.
+
+    `KbAsset` stores a URL, because every asset until now came from somewhere
+    that already hosted it — Shopify's CDN, Canva, Drive, a crawled page.
+    Generation produces BYTES, and there was nowhere to put them, which is the
+    single reason the image engine could never reach a system.
+
+    THIS IS A HANDOFF, NOT A CDN. Both downstream consumers copy the image
+    from a URL at publish time — Shopify fetches `image.src` into its own
+    files, and `omnisend._rehost_images` uploads by URL — so the app serves
+    each of these bytes about once and then the client's own platform owns the
+    copy that people actually load. That is what makes serving them ourselves
+    reasonable rather than a promise to be a CDN for ever.
+
+    `sha` is the whole point of storing it: the same generation asked for
+    twice is one row, and an image already filed cannot be filed again under a
+    second id and quietly counted twice in "which creative worked".
+    """
+
+    __tablename__ = "media_blobs"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    mime = Column(String, default="image/png")
+    sha = Column(String, default="", index=True)
+    bytes_ = Column("bytes", LargeBinary)
+    #: Where it came from, for the same reason every other row carries it: an
+    #: image nobody can trace back to the prompt that made it cannot be judged.
+    origin = Column(String, default="generated")
 
 
 class Memory(Base):

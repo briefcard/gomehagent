@@ -304,6 +304,33 @@ def _active_tenant(chat_id: str) -> str:
         return ""
 
 
+@app.get("/media/{blob_id}")
+def media(blob_id: str):
+    """Serve a stored image. PUBLIC, and it has to be.
+
+    Shopify fetches an article's `image.src` into its own files and an ESP
+    uploads by URL; neither holds our admin key, so this cannot sit behind
+    one. What protects it is that the id is a uuid nobody can enumerate, that
+    it serves only what was stored through `media.put`, and that the content
+    is by definition something about to be published.
+
+    Cached hard: the bytes at an id never change — a different image is a
+    different sha and therefore a different id — so a fetcher that comes back
+    should not be asking us again.
+    """
+    from fastapi.responses import Response
+
+    from . import media as _media
+    blob, mime = _media.get(blob_id)
+    if not blob:
+        return Response(status_code=404, content=b"", media_type="text/plain")
+    return Response(content=blob, media_type=mime, headers={
+        "Cache-Control": "public, max-age=31536000, immutable",
+        # It is an image, and nothing here should ever be interpreted as
+        # anything else by whatever fetches it.
+        "X-Content-Type-Options": "nosniff"})
+
+
 @app.get("/health")
 def health(key: str = Depends(admin_key)) -> dict:
     """Liveness, and WHICH BUILD is answering.

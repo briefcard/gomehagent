@@ -140,6 +140,182 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
 _DRIVE_IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 
 
+#: What a generated image is filed as. `owned` because the client
+#: commissioned it and the model's output is theirs to publish; `generated` as
+#: the origin so it is never mistaken for a photograph somebody took.
+GENERATED_RIGHTS = "owned"
+GENERATED_ORIGIN = "generated"
+
+
+def brief_for(tenant: str, *, entity_key: str = "", claim: str = "",
+              situation: str = "", audience_key: str = "") -> dict:
+    """The prompt, built from what this account knows.
+
+    Owner's standing rule: every build starts by asking what the data layer
+    contributes. For an image the answer is unusually direct — a typed prompt
+    produces the interchangeable stock look the owner has been complaining
+    about since the first email, and each of these is a fact nobody has to
+    invent:
+
+      the ENTITY      what is in frame, and its own description
+      the CLAIM       what the picture must not contradict — a photograph
+                      arguing something the copy cannot say is worse than no
+                      photograph
+      the SITUATION   the setting, in the account's own words
+      the BRAND THEME the palette, so the frame belongs to this brand rather
+                      than to whatever the model finds pretty this week
+      the AUDIENCE    who is meant to see themselves in it
+
+    Returns `{prompt, palette, entity, thin}`. `thin` names what was missing,
+    because a brief built from three of five inputs is a weaker brief and the
+    run is the only place that can say so.
+    """
+    from . import kb as kbmod
+    parts, thin = [], []
+
+    ent = None
+    if entity_key:
+        try:
+            ent = next((e for e in kbmod.entities(tenant, available_only=False)
+                        if getattr(e, "key", "") == entity_key), None)
+        except Exception:                                        # noqa: BLE001
+            ent = None
+    if ent is not None:
+        parts.append(f"The subject is {ent.name}"
+                     + (f" — {str(ent.description or '')[:200]}"
+                        if ent.description else "") + ".")
+    elif entity_key:
+        thin.append(f"no catalogue entry for {entity_key!r}, so the frame has "
+                    f"nothing to be OF")
+
+    if claim:
+        parts.append(f"The picture must be consistent with this, which the "
+                     f"copy beside it says: “{claim[:180]}”. Show nothing "
+                     f"that would contradict it.")
+    else:
+        thin.append("no claim, so nothing constrains what the picture implies")
+
+    if situation:
+        parts.append(f"The moment is: {situation[:160]}.")
+
+    palette = []
+    try:
+        b = kbmod.brand(tenant)
+        theme = (getattr(b, "theme", None) or {}) if b else {}
+        colours = theme.get("colors") or theme.get("colours") or {}
+        palette = [v for v in colours.values()
+                   if isinstance(v, str) and v.startswith("#")][:4]
+    except Exception:                                            # noqa: BLE001
+        palette = []
+    if palette:
+        parts.append("Use this brand palette: " + ", ".join(palette) + ".")
+    else:
+        thin.append("no brand theme colours on file, so the palette is the "
+                    "model's taste rather than the brand's")
+
+    if audience_key:
+        try:
+            a = next((x for x in kbmod.audiences(tenant)
+                      if getattr(x, "key", "") == audience_key), None)
+        except Exception:                                        # noqa: BLE001
+            a = None
+        if a is not None and (a.pains or []):
+            parts.append(f"It is for {a.name}, who care about: "
+                         + "; ".join(list(a.pains)[:3]) + ".")
+
+    parts.append("Photographic, natural light, no text of any kind in the "
+                 "image, no logos, nothing that reads as an advertisement.")
+    return {"prompt": " ".join(parts), "palette": palette,
+            "entity": getattr(ent, "key", ""), "thin": thin}
+
+
+def generate(tenant: str, *, entity_key: str = "", claim: str = "",
+             situation: str = "", audience_key: str = "",
+             shape: str = "landscape", prompt: str = "") -> dict:
+    """Make one image and FILE IT, so something can attach it.
+
+    This is the seam. `imagegen` has had exactly one caller — the manual
+    endpoint that returns a PNG and files nothing — so no generated image has
+    ever become a `KbAsset` and nothing downstream could reach one. The
+    attaching machinery already exists on both the email and the article side
+    and needs no changes; it only ever needed an asset id to exist.
+
+    IT PROPOSES. `review=proposed`, the same as a claim, and for the same
+    reason written larger: a generated photograph of a product asserts more
+    than a sentence about it does. We spent this week making sure a model
+    cannot author its own evidence, and a picture is evidence.
+
+    Uses the product's OWN pixels when the account has a photograph of it —
+    `place_product` masks them, so what comes back is the real product in a
+    generated setting rather than the model's idea of the product.
+    """
+    from . import imagegen, kb as kbmod, media
+
+    brief = brief_for(tenant, entity_key=entity_key, claim=claim,
+                      situation=situation, audience_key=audience_key)
+    text = prompt.strip() or brief["prompt"]
+
+    # The product's own photograph, when there is one to protect.
+    source, source_id = b"", ""
+    if entity_key:
+        try:
+            rows = [a for a in kbmod.assets(tenant, publishable_only=True)
+                    if getattr(a, "entity_key", "") == entity_key
+                    and (a.url or "")]
+            if rows:
+                import httpx
+                got = httpx.get(rows[0].url, timeout=60, follow_redirects=True)
+                if got.status_code < 400:
+                    source, source_id = got.content, rows[0].id
+        except Exception:                                        # noqa: BLE001
+            source, source_id = b"", ""
+
+    if source:
+        res = imagegen.place_product(source, text, shape=shape, n=1)
+        best = (res.get("candidates") or [{}])[0] if res.get("ok") else {}
+        blob = best.get("image") or b""
+        basis = "product masked — its pixels are the real ones"
+    else:
+        res = imagegen.plate(text, shape=shape, n=1)
+        blob = (res.get("images") or [b""])[0] if res.get("ok") else b""
+        basis = "generated scenery — no product in frame"
+        if entity_key:
+            brief["thin"].append(
+                f"no usable photograph of {entity_key!r} on file, so the "
+                f"frame is scenery and the product is not in it")
+
+    if not res.get("ok") or not blob:
+        return {"ok": False, "error": res.get("error", "generation failed"),
+                "thin": brief["thin"]}
+
+    put = media.put(tenant, blob, mime="image/png",
+                    origin=GENERATED_ORIGIN)
+    if not put["ok"]:
+        return {"ok": False, "error": put["error"], "thin": brief["thin"]}
+
+    said = kbmod.add_asset(
+        tenant, put["url"], rights=GENERATED_RIGHTS,
+        title=(f"Generated: {entity_key or situation or 'scene'}")[:120],
+        kind="image", subject=entity_key or "", source="generated",
+        prompt=text[:2000], entity_key=entity_key,
+        derived_from=[source_id] if source_id else [],
+        origin=GENERATED_ORIGIN)
+
+    asset_id = ""
+    try:
+        rows = [a for a in kbmod.assets(tenant, publishable_only=False)
+                if (a.url or "") == put["url"]]
+        asset_id = rows[0].id if rows else ""
+    except Exception:                                            # noqa: BLE001
+        asset_id = ""
+
+    return {"ok": True, "url": put["url"], "asset_id": asset_id,
+            "reused": put["reused"], "basis": basis, "said": said,
+            "prompt": text, "thin": brief["thin"],
+            "review": "proposed — it cannot be used until somebody approves "
+                      "it on Review · Pictures"}
+
+
 def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:
     """File the client's own Drive photographs into the pictures queue.
 
