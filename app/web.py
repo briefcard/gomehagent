@@ -5210,13 +5210,26 @@ def system_promote(key: str = Depends(admin_key), id: str = ""):
 
 
 @app.get("/admin/system_note")
-def system_note(key: str = Depends(admin_key), id: str = "", text: str = "", drop: str = ""):
+def system_note(key: str = Depends(admin_key), id: str = "", text: str = "",
+                drop: str = "", back: str = ""):
     """Add or archive a piece of standing guidance for one system."""
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
     from . import systems
     if drop:
         systems.drop_note(drop)
+        # BACK WHERE THE BUTTON WAS. The claim margin can now teach the
+        # account, so the undo is pressed from the workroom — and returning
+        # to the Systems tab from there loses the artifact the reader was
+        # reviewing (design rule 3).
+        if back:
+            return RedirectResponse(
+                f"/admin/work/{quote(back)}?key={quote(key)}"
+                f"&ok={quote('removed — it will not be injected again')}", 303)
         return _back_to_systems(key)
     row = systems.get(id)
     if not row:

@@ -10078,6 +10078,57 @@ def _grounding_trend(tenant: str, days: int) -> str:
             'you approve one.</p>')
 
 
+def _learned_fold(key: str, tenant: str, syskey: str, output_id: str) -> str:
+    """What this account and this system have been taught — and a way to undo it.
+
+    Was a <pre> of the assembled prompt block: readable, and completely inert.
+    Pressing "Never again" is easy and permanent, so the surface that shows
+    the consequence has to be the surface that can reverse it (design rule 1)
+    — otherwise the only correction for an over-eager lesson is to go and find
+    it on another tab, which in practice means it stays.
+
+    It shows the RECORD, quoted provocation included, because a person
+    deciding whether to keep a rule needs to see what caused it. The prompt
+    gets `instruction_of` instead. Two readers, two forms, one row.
+    """
+    from . import systems as _sys
+    scopes = [("this account", _sys.ACCOUNT)] + (
+        [("this system", syskey)] if syskey else [])
+    blocks = []
+    for label, scope in scopes:
+        rows = _sys.notes(tenant, scope, limit=0)
+        if not rows:
+            continue
+        shown = 0
+        items = []
+        for r in rows:
+            shown += 1
+            n = _sys._times(r.topic or "")
+            over = shown > _sys.GUIDANCE_MAX
+            items.append(
+                f'<li class="{"mut" if over else ""}">'
+                f'{_esc(_sys.instruction_of(r.content))}'
+                + (f' <span class="chip">given {n}x</span>' if n > 1 else "")
+                + (' <span class="chip">not injected</span>' if over else "")
+                + f' <a class="when" href="/admin/system_note?key={_esc(key)}'
+                f'&amp;drop={_esc(r.id)}&amp;back={_esc(output_id)}">remove</a>'
+                + "</li>")
+        blocks.append(
+            f'<h4 style="font-size:.82rem;margin:10px 0 4px">Taught to '
+            f'{label} <span class="when">({len(rows)})</span></h4>'
+            f'<ul class="bl">{"".join(items)}</ul>')
+    if not blocks:
+        return ""
+    return ('<details class="sec"><summary>What this account and system have '
+            'learned from you</summary>'
+            '<p class="mut">Only the most-reinforced '
+            f'{_sys.GUIDANCE_MAX} of each reach a prompt. A repeated lesson '
+            'outranks a recent one, and a page of prohibitions writes timid '
+            'copy &mdash; which is why the cap exists and why it says what it '
+            'is holding back.</p>'
+            + "".join(blocks) + "</details>")
+
+
 def _grounding_card(tenant: str, art, key: str = "") -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
@@ -10836,7 +10887,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
 </div>
 {redraft_card}
 {plan_fold}
-{f'<details class="sec"><summary>What this system has learned from you</summary><pre class="msg" style="white-space:pre-wrap">{_esc(learned)}</pre></details>' if learned else ""}
+{_learned_fold(key, tenant, syskey, output_id)}
 <details class="sec"><summary>Versions — v1 is the frozen draft ({1 + len(versions)})</summary>
   <div class="thread">{vs_rows}</div>{dsum}
 </details>"""

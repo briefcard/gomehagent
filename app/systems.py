@@ -24,6 +24,7 @@ This module makes it answerable. Three things live here:
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from . import db, kb, tenants
 
@@ -1705,31 +1706,96 @@ def account_key(tenant: str) -> str:
     return f"system:{tenant}:{ACCOUNT}"
 
 
+#: How many lessons ride a prompt. Small on purpose. Guidance competes for
+#: the drafter's attention with the craft brief, the funnel brief and the
+#: claims — and a wall of prohibitions is precisely how copy goes timid,
+#: which is the complaint this whole layer exists to answer. Twenty-five
+#: accumulated "do not"s do not make a draft safer, they make it vaguer.
+GUIDANCE_MAX = 8
+
+
 def note(tenant: str, key: str, text: str) -> str:
     """Durable guidance for one system. Injected into its drafting prompt.
 
     This is the soft channel. Anything that must ALWAYS hold belongs in
     `promote_rule` instead — see the docstring there.
+
+    REPEATING A LESSON REINFORCES IT, it does not duplicate it. Pressing
+    "Never again" on two sentences that provoke the same correction used to
+    store the correction twice and inject it twice, which spends tokens to
+    say one thing louder in the worst possible way. The second filing bumps
+    the first instead, and the count is what ranks the block: a lesson given
+    five times outranks one given yesterday.
     """
     text = (text or "").strip()
     if not text:
         return "Nothing to note."
     scope = thread_key(tenant, key)
     stamp = db.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    # `provenance.normalise` is the KB's own comparable form — the same
+    # function that decides two claims are the same claim. Using it here
+    # means "same lesson" means the same thing everywhere.
+    from . import provenance as prov
+    want = prov.normalise(instruction_of(text))
     with db.SessionLocal() as s:
+        rows = (s.query(db.Memory)
+                .filter(db.Memory.scope == scope,
+                        db.Memory.status == "active").all())
+        for r in rows:
+            if prov.normalise(instruction_of(r.content or "")) == want:
+                n = _times(r.topic or "") + 1
+                r.topic = f"{key} · {stamp} · x{n}"
+                s.commit()
+                return (f"Already standing guidance on {tenant}/{key} — "
+                        f"reinforced ({n} times).")
         s.add(db.Memory(topic=f"{key} · {stamp}", content=text, scope=scope))
         s.commit()
     return f"Noted on {tenant}/{key}."
 
 
+def _times(topic: str) -> int:
+    """How often this lesson has been given. Encoded in `topic` rather than a
+    new column: `Memory` is shared by several threads and a migration to carry
+    one counter is a poor trade against a suffix that reads fine to a human."""
+    m = re.search(r"·\s*x(\d+)\s*$", topic or "")
+    return int(m.group(1)) if m else 1
+
+
+#: Everything from "It happened here:" onwards is the sentence that PROVOKED
+#: the lesson. It belongs in the record, where a person deciding whether to
+#: keep the rule needs to see what caused it. It does not belong in the
+#: prompt: it is the least generalisable part of the instruction, it is
+#: quoted prose the drafter may echo, and at ~90 characters a lesson it was
+#: half the token cost of the whole block.
+_PROVOCATION = re.compile(r"\s*It happened here:.*$", re.S)
+
+#: `[workroom · body]` says WHERE a lesson was filed. That is bookkeeping for
+#: the person auditing it, not instruction for the drafter, and it was riding
+#: into every prompt.
+_FILED_FROM = re.compile(r"^\s*\[[^\]]{0,40}\]\s*")
+
+
+def instruction_of(text: str) -> str:
+    """The part of a lesson the drafter needs — the rule, without the example."""
+    return _FILED_FROM.sub("", _PROVOCATION.sub("", str(text or ""))).strip()
+
+
 def notes(tenant: str, key: str, limit: int = 25) -> list[db.Memory]:
+    """Standing guidance, most-reinforced first.
+
+    RANKED, not merely recent. The old order was `created_at desc` with a
+    limit, so the twenty-sixth lesson pushed out the first — silently, and the
+    one it pushed out could be the one given five times. A lesson repeated is
+    a lesson somebody meant; recency only breaks the tie.
+    """
     with db.SessionLocal() as s:
         rows = (s.query(db.Memory)
                 .filter(db.Memory.scope == thread_key(tenant, key),
                         db.Memory.status == "active")
-                .order_by(db.Memory.created_at.desc()).limit(limit).all())
+                .order_by(db.Memory.created_at.desc()).all())
         s.expunge_all()
-        return rows
+    rows.sort(key=lambda r: -_times(r.topic or ""))
+    return rows[:limit] if limit else rows
 
 
 def drop_note(note_id: str) -> str:
@@ -1750,12 +1816,9 @@ def feedback_block(tenant: str, key: str) -> str:
     THIS pipeline — and mixing them makes a lesson from one system quietly
     change the output of another.
     """
-    rows = notes(tenant, key)
-    if not rows:
-        return ""
-    lines = [f"- {r.content} ({r.created_at:%b %d})" for r in rows]
-    return ("\n\nSTANDING GUIDANCE for this system (corrections you were given; "
-            "treat as current instruction):\n" + "\n".join(lines))
+    return _render(tenant, key,
+                   "STANDING GUIDANCE for this system (corrections you were "
+                   "given; treat as current instruction)")
 
 
 def edit_lesson_rows(tenant: str, key: str = "", limit: int = 20) -> list[dict]:
@@ -1862,13 +1925,36 @@ def account_block(tenant: str) -> str:
     this pipeline" will apply one as the other, and the first time that shows
     is in an ad written to a rule somebody wrote about a blog post.
     """
-    rows = notes(tenant, ACCOUNT)
+    return _render(tenant, ACCOUNT,
+                   "STANDING GUIDANCE for this ACCOUNT, whatever you are "
+                   "writing (corrections you were given; treat as current "
+                   "instruction)")
+
+
+def _render(tenant: str, key: str, heading: str) -> str:
+    """One writer for both blocks, so they cannot drift in shape.
+
+    Two things it does that the hand-rolled versions did not: it injects the
+    INSTRUCTION rather than the whole record — the quoted sentence that
+    provoked a lesson is for the person reviewing it, not for the drafter
+    about to echo it — and if the cap holds anything back it SAYS SO. A cap
+    that discards in silence is how a rule the owner believes is standing
+    quietly stops being injected, which is the defect this codebase keeps
+    paying for and which I had just rebuilt.
+    """
+    rows = notes(tenant, key, limit=GUIDANCE_MAX)
     if not rows:
         return ""
-    lines = [f"- {r.content} ({r.created_at:%b %d})" for r in rows]
-    return ("\n\nSTANDING GUIDANCE for this ACCOUNT, whatever you are "
-            "writing (corrections you were given; treat as current "
-            "instruction):\n" + "\n".join(lines))
+    held = max(0, len(notes(tenant, key, limit=0)) - len(rows))
+    lines = []
+    for r in rows:
+        n = _times(r.topic or "")
+        lines.append(f"- {instruction_of(r.content)}"
+                     + (f" (given {n} times)" if n > 1 else ""))
+    tail = (f"\n({held} older correction(s) are on file and NOT shown here — "
+            f"they were not repeated, and a prompt full of prohibitions "
+            f"writes timid copy.)" if held else "")
+    return f"\n\n{heading}:\n" + "\n".join(lines) + tail
 
 
 def guidance_block(tenant: str, key: str) -> str:

@@ -214,6 +214,52 @@ def main() -> int:
     check("an account with no account-lesson gets no empty heading",
           systems.account_block("nobody") == "")
 
+    # GUIDANCE MUST CONVERGE, NOT ACCUMULATE. Account scope multiplies one
+    # thread across every system, so the failure mode is not a missing lesson,
+    # it is a prompt full of prohibitions — which is exactly how copy goes
+    # timid, the complaint this whole layer exists to answer.
+    lesson = ("Do not recommend a category this account does not sell. "
+              "It happened here: \u201cGlucosamine remains the benchmark.\u201d")
+    _n0 = len(systems.notes("agency", systems.ACCOUNT, limit=0))
+    for i in range(12):
+        systems.note("agency", systems.ACCOUNT,
+                     f"[workroom · body] " + lesson.replace(
+                         "benchmark", f"benchmark {i}"))
+    rows = systems.notes("agency", systems.ACCOUNT, limit=0)
+    check("the same lesson on twelve sentences is stored once",
+          len(rows) - _n0 == 1, f"{_n0} -> {len(rows)} rows")
+    mine = [r for r in rows if "Do not recommend" in (r.content or "")]
+    check("…and the repetition is kept as strength, not as copies",
+          len(mine) == 1 and systems._times(mine[0].topic) == 12,
+          str([r.topic for r in mine]))
+
+    blk = systems.account_block("agency")
+    check("the prompt gets the instruction, not the provocation",
+          "It happened here" not in blk and "Do not recommend" in blk,
+          "the quoted sentence is the least generalisable part of a lesson "
+          "and the drafter may simply echo it")
+    check("…nor the bookkeeping about where it was filed",
+          "[workroom" not in blk)
+    check("…and it says how often it was given",
+          "given 12 times" in blk)
+
+    for i in range(10):
+        systems.note("agency", systems.ACCOUNT, f"Distinct lesson {i}.")
+    big = systems.account_block("agency")
+    check("only the cap reaches the prompt",
+          big.count("\n- ") == systems.GUIDANCE_MAX,
+          f'{big.count(chr(10) + "- ")} lines')
+    check("…and the reinforced one survives the cap",
+          "Do not recommend" in big,
+          "ordering by recency alone would drop the lesson given twelve "
+          "times in favour of one given once yesterday")
+    check("…and what is held back is SAID, never dropped in silence",
+          "NOT shown here" in big,
+          "a rule the owner believes is standing, quietly not injected, is "
+          "the defect this codebase keeps paying for")
+    check("the block stays small enough to be read",
+          len(big) < 1400, f"{len(big)} chars")
+
     before = set(kb.banned_claims("agency"))
     systems.promote_rule("agency", "handcrafted")
     after = set(kb.banned_claims("agency"))
