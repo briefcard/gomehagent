@@ -190,6 +190,30 @@ def main() -> int:
     check("and not into another system's",
           "Lead with the number" not in systems.feedback_block("agency", "reports"))
 
+    # THE SCOPE BETWEEN "this pipeline" and "ban the phrase for ever".
+    # Owner, 2026-08-29: the claim margin's "Never again" files lessons about
+    # what an ACCOUNT sells and may assert, and filed system-scoped they
+    # taught the blog while every other system went on repeating them.
+    systems.note("agency", systems.ACCOUNT,
+                 "Never recommend a category this account does not sell.")
+    g_own = systems.guidance_block("agency", "lead_responder")
+    g_other = systems.guidance_block("agency", "reports")
+    check("an account lesson reaches the system that was open",
+          "Never recommend a category" in g_own)
+    check("…and every other system too — that is the whole point",
+          "Never recommend a category" in g_other,
+          "filed against one pipeline it teaches one pipeline")
+    check("…without dragging that system's own lessons across",
+          "Lead with the number" not in g_other,
+          "'shorter lines' is about one pipeline and has no business "
+          "reaching another")
+    check("…and it is labelled as account-wide, not as the system's own",
+          "for this ACCOUNT" in g_other and "for this system" not in g_other,
+          "a drafter that cannot tell 'true of the brand everywhere' from "
+          "'true of this pipeline' will apply one as the other")
+    check("an account with no account-lesson gets no empty heading",
+          systems.account_block("nobody") == "")
+
     before = set(kb.banned_claims("agency"))
     systems.promote_rule("agency", "handcrafted")
     after = set(kb.banned_claims("agency"))

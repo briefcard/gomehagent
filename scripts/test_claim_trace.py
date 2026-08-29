@@ -413,9 +413,14 @@ def main() -> int:
     ck("each note can be dropped from the redraft",
        long_card.count('name="level" value="draft"') == len(
            _re2.findall(r'class="gnote[^"]*" data-note=', long_card)))
-    ck("…and taught to the system for future drafts",
-       long_card.count('name="level" value="system"') >= 1
+    ck("…and taught for future drafts",
+       long_card.count('name="level" value="account"') >= 1
        and "Never again" in long_card)
+    ck("the lesson is taught to the ACCOUNT, not to whichever system is open",
+       'name="level" value="account"' in long_card
+       and 'name="level" value="system"' not in long_card,
+       "what this account sells is not a fact about the blog — filed "
+       "system-scoped it leaves five other systems to repeat it")
     ck("no note offers to ban the phrase",
        'value="rule"' not in long_card,
        "banning 'glucosamine' would also stop the competitor comparisons "

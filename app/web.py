@@ -3309,7 +3309,19 @@ async def feedback_add(request: Request, key: str = Depends(admin_key)):
     syskey = syskey or (art.system_key or "")
     from . import systems as _sys
     status, applied_at = "open", None
-    if level == "system":
+    if level == "account":
+        # THE SCOPE THAT WAS MISSING. "Never recommend a category this account
+        # does not sell" is a fact about the account, and filed system-scoped
+        # it taught the blog while the ad, the email and the service desk went
+        # on making the same mistake. Between "this system" and "ban the
+        # phrase for ever", which was the only account-wide lever and is the
+        # wrong tool: a ban on "glucosamine" would also stop the competitor
+        # comparisons the owner explicitly wants.
+        _sys.note(tenant, _sys.ACCOUNT, f"[workroom · {part}] {note}")
+        status, applied_at = "applied", db.utcnow()
+        said = ("filed for the whole account — injected into every future "
+                "draft, whichever system writes it")
+    elif level == "system":
         if not syskey:
             return back(err="this artifact names no system to teach — file "
                             "it against the draft, or make it a rule")

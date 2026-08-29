@@ -9900,9 +9900,14 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
             + form("draft", drop, "Drop from redraft",
                    "Files it against this draft — the next redraft consumes "
                    "it and leaves the sentence out")
-            + form("system", teach, "Never again",
-                   "Writes standing guidance for this system, injected into "
-                   "every future draft it writes")
+            # ACCOUNT LEVEL, not system. Every lesson in `_TEACH` is a fact
+            # about the account — what it sells, what it may assert — so
+            # filing it against the blog would leave the ad and the email to
+            # repeat it. Craft lessons ("shorter lines") still go to the
+            # system, through the form at the bottom of the page.
+            + form("account", teach, "Never again",
+                   "Writes standing guidance for the whole account, injected "
+                   "into every future draft whichever system writes it")
             + '</span>')
 
 
@@ -10819,7 +10824,9 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
       <label class="pick"><input type="radio" name="level" value="draft" checked>
         fix this draft <span class="when">— stays open, rides the next redraft</span></label>
       <label class="pick"><input type="radio" name="level" value="system">
-        teach this system <span class="when">— standing guidance, injected into every future draft</span></label>
+        teach this system <span class="when">— standing guidance, injected into every future draft IT writes</span></label>
+      <label class="pick"><input type="radio" name="level" value="account">
+        teach the account <span class="when">— injected into every future draft, whichever system writes it</span></label>
       <label class="pick"><input type="radio" name="level" value="rule">
         make it a rule <span class="when">— the validator blocks it forever</span></label>
       <button type="submit" class="sec">File it</button>

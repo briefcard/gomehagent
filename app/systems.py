@@ -1686,6 +1686,25 @@ def thread_key(tenant: str, key: str) -> str:
     return f"system:{tenant}:{key}"
 
 
+#: The key an ACCOUNT-WIDE lesson is filed under. Owner, 2026-08-29, on the
+#: claim margin's "Never again": the two lessons it files — never recommend a
+#: category this account does not sell, never assert what no approved claim
+#: covers — are facts about the ACCOUNT, not about the blog. Filed
+#: system-scoped they taught the blog and left the ad, the email, the service
+#: desk and the catalogue to make the same mistake.
+#:
+#: Not a new table. `Memory.scope` already separates threads, so an account
+#: lesson is a thread every system reads in addition to its own. The only
+#: rule that matters: it is ADDITIVE. A system's own guidance is never
+#: replaced by the account's, because "shorter lines" is about the blog and
+#: has no business reaching the ad drafter.
+ACCOUNT = "*"
+
+
+def account_key(tenant: str) -> str:
+    return f"system:{tenant}:{ACCOUNT}"
+
+
 def note(tenant: str, key: str, text: str) -> str:
     """Durable guidance for one system. Injected into its drafting prompt.
 
@@ -1834,19 +1853,40 @@ def edit_lessons(tenant: str, key: str, limit: int = 5) -> str:
             "time it belongs in the rules, not here):\n" + "\n".join(lines))
 
 
+def account_block(tenant: str) -> str:
+    """What holds for this ACCOUNT, whichever system is writing.
+
+    Rendered separately from the system's own guidance and labelled as such,
+    for the same reason `feedback_block` and `edit_lessons` are kept apart: a
+    drafter that cannot tell "true of this brand everywhere" from "true of
+    this pipeline" will apply one as the other, and the first time that shows
+    is in an ad written to a rule somebody wrote about a blog post.
+    """
+    rows = notes(tenant, ACCOUNT)
+    if not rows:
+        return ""
+    lines = [f"- {r.content} ({r.created_at:%b %d})" for r in rows]
+    return ("\n\nSTANDING GUIDANCE for this ACCOUNT, whatever you are "
+            "writing (corrections you were given; treat as current "
+            "instruction):\n" + "\n".join(lines))
+
+
 def guidance_block(tenant: str, key: str) -> str:
     """Everything this pipeline has been taught, for injection at drafting.
 
-    The two halves answer to different authorities and are kept apart in the
-    text for that reason: `feedback_block` is what somebody TOLD this system,
-    `edit_lessons` is what somebody DID to its output. A correction that was
-    stated is a stronger signal than one inferred from a diff, and collapsing
-    them would hide which is which from the only reader that matters.
+    Three halves now, and they answer to different authorities, which is why
+    they are kept apart in the text: `account_block` is what holds for the
+    brand wherever it writes, `feedback_block` is what somebody told THIS
+    system, `edit_lessons` is what somebody DID to its output. A correction
+    that was stated is a stronger signal than one inferred from a diff, and
+    collapsing them would hide which is which from the only reader that
+    matters.
     """
     if not tenant or not key:
         return ""
     try:
-        return feedback_block(tenant, key) + edit_lessons(tenant, key)
+        return (account_block(tenant) + feedback_block(tenant, key)
+                + edit_lessons(tenant, key))
     except Exception:                                            # noqa: BLE001
         return ""       # guidance that cannot be read must not lose the draft
 
