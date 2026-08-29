@@ -671,6 +671,17 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
     # of the owner's 2026-08-29 correction: they are strategy, not grounding.
     if bundle.get("funnel"):
         parts.append(funnel.brief(bundle["funnel"]))
+    # WHAT THIS BATCH IS TESTING, above the angle, because the angle is one
+    # way of expressing it. Without this a batch of five variants is five
+    # drafts; with it they are five expressions of one idea, which is what
+    # makes the batch a test and the result readable.
+    if str(bundle.get("positioning") or "").strip():
+        parts.append(
+            "\n## THE POSITIONING THIS BATCH IS TESTING\n"
+            + str(bundle["positioning"]).strip()
+            + "\nEvery variant must be an expression of THIS idea. Variants "
+              "that argue different things cannot be compared, and a batch "
+              "that tests nothing teaches nothing.")
     parts.append(f"\n## Angle\n{_angle_brief(angle)}")
     # The offer, once, exactly as it will be stated everywhere else, plus
     # where it has to land. `ad_craft` measures both after the fact.
@@ -786,6 +797,31 @@ def _run_ad_copy(ctx: Context) -> dict:
     # so it supplies the knowledge and leaves the angle set alone. Anything
     # that worked before therefore still produces the same variants — it just
     # produces them knowing what this account knows.
+    # THE POSITIONING UNDER TEST. Given, it rides the bundle into the brief
+    # and is recorded on every row of the batch so "which positioning did
+    # better" is one GROUP BY. Absent, the run SUGGESTS the ones this
+    # account's own data supports rather than silently testing nothing —
+    # act where you report, and the run is the only place that knows.
+    positioning = str(ctx.params.get("positioning") or "").strip()
+    if positioning:
+        ctx.bundle["positioning"] = positioning
+        ctx.note(f"testing: {positioning}")
+    else:
+        try:
+            _sug = funnel.proposals(ctx.tenant, limit=3)
+        except Exception:                                        # noqa: BLE001
+            _sug = {"proposals": [], "gaps": []}
+        for _p in _sug.get("proposals") or []:
+            ctx.note(f"worth testing ({_p['stage']}, {_p['audience']}): "
+                     f"{_p['positioning']} — {_p['why']}"
+                     + (f" [already tested {_p['tested']}x]"
+                        if _p["tested"] else ""))
+        for _g in _sug.get("gaps") or []:
+            ctx.note(f"positioning (thin): {_g}")
+        if _sug.get("proposals"):
+            ctx.note("this batch tests no stated positioning — pass "
+                     "positioning=… to make it a test rather than five drafts")
+
     chose = bool(stage)
     if not stage:
         # From what the batch already carries, not from a new knob (rule 4):
@@ -918,6 +954,11 @@ def _run_ad_copy(ctx: Context) -> dict:
         item = ctx.emit(
             text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
             audience_key=audience_key, angle=angle, fmt="ad_copy",
+            # ON EVERY VARIANT, not on the batch. The batch is not a row —
+            # the variants are — so recording the hypothesis once somewhere
+            # else would mean joining through the run to answer the only
+            # question worth asking of it.
+            positioning=positioning,
             commitment=_commit,
             parts=lambda _t, _c=claim: coherence.parts(
                 text=_t,
@@ -1006,8 +1047,16 @@ register(Skill(
     params=("entity_key", "audience_key", "variants", "utterance",
             "revision_notes", "into_batch", "offer", "deadline",
             # awareness | interest | consideration | bottom — see app/funnel.py.
-            # Optional: without it the run behaves exactly as before.
-            "funnel_stage"),
+            # Optional: without it the stage is DERIVED, which briefs the
+            # drafter with this account's own knowledge but does not narrow
+            # the angles. Naming one is a decision and binds both.
+            "funnel_stage",
+            # THE HYPOTHESIS this batch tests, in one sentence. Optional, and
+            # the run suggests ones the data supports when it is absent —
+            # `funnel.proposals` builds them from the account's own claims,
+            # objections and situations. Recorded on every row of the batch,
+            # so "which positioning did better" is one GROUP BY.
+            "positioning"),
     writes=False,
     produces="draft",
     run=_run_ad_copy))

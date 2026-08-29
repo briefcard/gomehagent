@@ -241,6 +241,70 @@ def main() -> int:
     ck("…and still runs rather than failing over a typo",
        r3["status"] == "produced", r3["status"])
 
+    print("\n— a batch tests one idea, or says it is testing none —")
+    r7 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=2,
+                   positioning="Certified food-safe, not price, is the reason")
+    ck("the stated hypothesis is noted",
+       any(n.startswith("testing:") for n in r7.get("notes") or []),
+       "; ".join(r7.get("notes") or [])[:140])
+    with db.SessionLocal() as _s:
+        _rows = [o for o in _s.query(db.Output)
+                 .filter(db.Output.positioning != "").all()]
+    ck("…and recorded on EVERY variant, not once per batch",
+       len(_rows) >= 2 and {o.positioning for o in _rows} ==
+       {"Certified food-safe, not price, is the reason"},
+       f"{len(_rows)} rows: {sorted({o.positioning for o in _rows})}",)
+
+    r8 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=2)
+    ck("with none stated the run suggests ones the data supports",
+       any("worth testing" in n for n in r8.get("notes") or []),
+       "; ".join(n for n in (r8.get("notes") or []) if "worth" in n)[:160])
+    ck("…and says the batch is testing nothing",
+       any("tests no stated positioning" in n for n in r8.get("notes") or []),
+       "five drafts that argue different things cannot be compared")
+
+    print("\n— every suggestion is derived, and the gaps are named —")
+    from app import funnel as _fn
+    _g = _fn.proposals("baci", limit=4)
+    ck("proposals carry the triple",
+       all({"audience", "stage", "positioning"} <= set(p) for p in _g["proposals"]),
+       str(_g["proposals"][:1]))
+    ck("…and say why the data supports each",
+       all(p.get("why") for p in _g["proposals"]))
+    ck("…and how often it has already been tested",
+       all("tested" in p for p in _g["proposals"]),
+       "a positioning run four times is a repetition, not a suggestion")
+    # DERIVED FROM THE STATE, not pinned to one gap: earlier tests in this
+    # file add objections to baci, so asserting a fixed gap would pass or
+    # fail on the order the checks happen to run in.
+    _kinds = {getattr(r, "kind", "") for r in kb.situation_rows("baci")}
+    _expect = []
+    if not kb.objections("baci"):
+        _expect.append("no objections on file")
+    if "problem" not in _kinds:
+        _expect.append("no situation is filed as a `problem`")
+    ck("every gap it names is genuinely missing",
+       all(any(e in g for g in _g["gaps"]) for e in _expect),
+       f"expected {_expect}, got {_g['gaps']}")
+    ck("…and nothing present is reported as missing",
+       not (kb.objections("baci")
+            and any("no objections" in g for g in _g["gaps"])),
+       "a gap that is not a gap trains people to ignore the list")
+
+    # THE GAP LOGIC ITSELF, on an account that genuinely lacks the sources —
+    # by the time the checks above run, baci has been given both, so they
+    # exercise the correspondence and not the naming.
+    _bare = funnel.proposals("nobody-at-all", limit=3)
+    ck("an account with nothing on file gets no invented proposals",
+       _bare["proposals"] == [],
+       "a suggestion built from nothing is the one thing this must not do")
+    ck("…and is told what to fill in first",
+       any("no objections on file" in g for g in _bare["gaps"])
+       and any("no audiences" in g for g in _bare["gaps"]),
+       str(_bare["gaps"]))
+
     print("\n— the whole audience row, not two fields of it —")
     from app import funnel as fn, kb as _kb
     _p = fn.inputs_for("baci", "consideration",

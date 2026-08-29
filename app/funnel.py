@@ -355,6 +355,143 @@ def brief(plan: dict) -> str:
     return "\n".join(out)
 
 
+def _gist(text: str, n: int = 64) -> str:
+    """A phrase short enough to sit in a sentence, cut on a word."""
+    t = " ".join(str(text or "").split())
+    if len(t) <= n:
+        return t.rstrip(".")
+    return t[:n].rsplit(" ", 1)[0].rstrip(",;:") + "\u2026"
+
+
+def _said(sit) -> str:
+    """A situation as a person would say it. The DESCRIPTION when there is
+    one — a bare tag like `collector` is a database key, and a positioning
+    somebody cannot act on is not a suggestion."""
+    tag = str(getattr(sit, "tag", "") or "")
+    desc = str(getattr(sit, "description", "") or "").strip()
+    return f"\u201c{_gist(desc or tag, 60)}\u201d" + (f" ({tag})" if desc else "")
+
+
+def proposals(tenant: str, *, limit: int = 6) -> dict:
+    """Which ads are worth making, built from what this account already knows.
+
+    Owner, 2026-08-29: "we should be able to suggest and create ads that based
+    on the audience, part of the funnel and specific positioning we are
+    testing." This is the suggesting half. Each proposal is the triple —
+    audience, stage, positioning — plus WHY the data supports it and how many
+    batches have already tested it.
+
+    EVERY POSITIONING IS DERIVED, never invented. A proposal pairs one thing
+    the account may assert with one reason it matters to this reader, and both
+    halves come from rows somebody approved:
+
+        consideration   a claim carrying evidence, against an objection
+                        real customers raised
+        awareness       a `problem` situation, opened on directly
+        interest        a `who_they_are` situation, and what is sold to them
+        bottom          the offer, against the objection standing in its way
+
+    A model asked to invent a positioning writes a plausible one; the whole
+    value of the data layer is that these are the account's own. When a source
+    is missing the proposal is not offered — an empty list is an honest answer
+    and the caller says what is needed to fill it.
+
+    The sentence is deterministic, so two runs proposing the same pairing
+    produce the same string and `tested` can count them by grouping on it.
+    """
+    from . import db
+    from . import kb as kbmod
+
+    def _rows(fn, *a, **k):
+        try:
+            return list(fn(*a, **k)) or []
+        except Exception:                                        # noqa: BLE001
+            return []
+
+    claims = _rows(kbmod.claims, tenant)
+    objections = _rows(kbmod.objections, tenant)
+    audiences = _rows(kbmod.audiences, tenant)
+    sits = _rows(kbmod.situation_rows, tenant)
+    by_kind: dict = {}
+    for r in sits:
+        by_kind.setdefault(str(getattr(r, "kind", "") or "problem"), []).append(r)
+
+    proved = [c for c in claims if str(getattr(c, "evidence", "") or "").strip()]
+    # An account with no audiences still gets proposals — addressed to
+    # "anyone", named as such. Silently producing none because one table is
+    # empty is how a feature looks broken when it is merely thin.
+    readers = audiences or [None]
+
+    out: list[dict] = []
+    for aud in readers:
+        who = (getattr(aud, "name", "") or getattr(aud, "key", "")
+               or "no audience on file")
+        akey = getattr(aud, "key", "") or ""
+        for obj, clm in zip(objections[:3], proved[:3]):
+            out.append({
+                "audience": who, "audience_key": akey, "stage": "consideration",
+                "positioning": (f"{_gist(getattr(clm, 'claim', ''))} \u2014 "
+                                f"against \u201c"
+                                f"{_gist(getattr(obj, 'objection', ''), 48)}"
+                                f"\u201d"),
+                "why": ("a claim that carries its evidence, answering a "
+                        "hesitation real customers raised"),
+                "leads": ["objection", "claim_with_evidence"]})
+        for sit in by_kind.get("problem", [])[:2]:
+            out.append({
+                "audience": who, "audience_key": akey, "stage": "awareness",
+                "positioning": f"open on {_said(sit)}",
+                "why": "a situation this account has on file, opened on directly",
+                "leads": ["situation:problem"]})
+        for sit in by_kind.get("who_they_are", [])[:1]:
+            out.append({
+                "audience": who, "audience_key": akey, "stage": "interest",
+                "positioning": f"speak to {_said(sit)}",
+                "why": "who this reader already is, before any ask",
+                "leads": ["situation:who_they_are"]})
+
+    # HOW OFTEN EACH HAS BEEN TESTED. A proposal already run four times is not
+    # a suggestion, it is a repetition — so the untested ones sort first and
+    # the count is shown either way.
+    seen: dict = {}
+    try:
+        with db.SessionLocal() as s:
+            for (pos,) in (s.query(db.Output.positioning)
+                           .filter(db.Output.tenant == tenant,
+                                   db.Output.positioning != "").all()):
+                seen[pos] = seen.get(pos, 0) + 1
+    except Exception:                                            # noqa: BLE001
+        seen = {}
+    for p in out:
+        p["tested"] = seen.get(p["positioning"], 0)
+
+    out.sort(key=lambda p: (p["tested"], -len(p["leads"])))
+
+    # WHAT WOULD UNLOCK BETTER ONES. An empty or weak list is a fact about
+    # the knowledge base, not about the accountthe strongest positioning
+    # available — a proof-carrying claim set against a hesitation real
+    # customers raised — needs objections, and neither seeded account has a
+    # single one. Returning proposals without saying that makes a thin answer
+    # look like a complete one.
+    gaps = []
+    if not objections:
+        gaps.append("no objections on file — the strongest ad there is sets "
+                    "a proven claim against a real hesitation, and that "
+                    "pairing cannot be proposed without them")
+    if not proved:
+        gaps.append("no claim carries its evidence, so nothing can be "
+                    "proposed that is worth believing")
+    if not by_kind.get("problem"):
+        gaps.append("no situation is filed as a `problem`, so there is "
+                    "nothing to open an awareness ad on")
+    if not audiences:
+        gaps.append("no audiences on file — every proposal below is "
+                    "addressed to anyone, which is nobody")
+
+    return {"proposals": out[:max(1, int(limit or 6))], "gaps": gaps,
+            "counted": len(out)}
+
+
 def angles_for_stage(stage: str, available: tuple = ()) -> tuple:
     """The angles that make sense at this stage, narrowed to the ones this
     account may use at all (`ad_craft.angles_for`).

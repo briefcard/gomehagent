@@ -372,6 +372,23 @@ class Output(Base):
     #: here needed a claim" and "nothing here has one" are different facts,
     #: and averaging them together is how a trend lies. Readers filter >= 0.
     grounded_pct = Column(Integer, default=-1, index=True)
+    #: THE HYPOTHESIS THIS BATCH IS TESTING, in one sentence.
+    #:
+    #: Owner, 2026-08-29: ads should be created "based on the audience, part
+    #: of the funnel and specific positioning we are testing". Without this a
+    #: batch of five variants is five drafts; with it the batch is a test of
+    #: one idea and the variants are its expressions, which is the difference
+    #: between running ads and learning something.
+    #:
+    #: NOT folded into `theme`, which campaign_email already writes as
+    #: "{intent}|{format}" — a third meaning on one column is how a column
+    #: stops answering any of its questions. Indexed because the only reason
+    #: to store it is to group by it.
+    #:
+    #: Stored, never recomputed, for the same reason as `grounded_pct`: it is
+    #: what was being tested at the time, and re-deriving it later from
+    #: today's knowledge base would rewrite history to agree with the present.
+    positioning = Column(Text, default="", index=True)
     media_ids = Column(JSON, default=list)
     #: Which LIVE lookups fed this output — `["shopify_inventory", …]`.
     #:
