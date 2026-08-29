@@ -2745,12 +2745,7 @@ def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
     t = tenants.get(tenant)
     if not t:
         return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
-    with db.SessionLocal() as s:
-        row = s.get(db.Tenant, tenant)
-        cms = dict(row.cms or {})
-        cms["blog_id"] = blog_id
-        row.cms = cms
-        s.commit()
+    tenants.set_blog(tenant, blog_id)
     return _plan_back(tenant, key,
                       msg=f"articles for {tenant} will publish into blog {blog_id}")
 

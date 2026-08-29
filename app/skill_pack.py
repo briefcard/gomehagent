@@ -3652,7 +3652,7 @@ def _meta_description(keyword: str, body_html: str) -> str:
 
 
 def _run_blog_article(ctx: Context) -> dict:
-    from . import keywords as kw_mod, seo_tools, sites, tenants
+    from . import creative, keywords as kw_mod, seo_tools, sites, tenants
 
     keyword = str(ctx.params.get("keyword") or "").strip()
     if not keyword:
@@ -3804,9 +3804,29 @@ def _run_blog_article(ctx: Context) -> dict:
         ctx.note(f"the title does not carry {keyword!r} — it reads well but "
                  f"the target phrase is only in the body. Reword it in the "
                  f"workroom if the ranking matters more than the click")
+    # THE FEATURED IMAGE. An article published with none is not a smaller
+    # version of the same post — it is the one that looks broken on the blog
+    # index and in every share card. The blog attached no media at all, and
+    # `shopify_seo.create_article` sent no image field, so the gap was open at
+    # BOTH ends; this closes the drafting one.
+    #
+    # SELECTS an approved photograph, never generates. `imagegen` has exactly
+    # one caller — the manual `/admin/creative` endpoint, which returns a PNG
+    # and files nothing — so there is no generated asset for anything to
+    # attach yet. Named here rather than left implicit because the absence is
+    # the interesting part.
+    _hero = creative.hero_for_campaign(
+        ctx.tenant, entity_keys=[entity_key] if entity_key else [], title=title)
+    _hero_id = str(_hero.get("asset_id") or "") if _hero.get("image") else ""
+    if not _hero_id:
+        ctx.note("no approved image fits this article, so it will publish "
+                 "without one — " + str(_hero.get("why") or "nothing on the "
+                 "shelf matched"))
+
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",
              fmt="cms_article",
+             media_ids=[_hero_id] if _hero_id else [],
              meta={"title": title,
                    "seo_title": _seo_title(keyword, title),
                    "seo_description": _meta_description(keyword, body),
@@ -3855,10 +3875,28 @@ def _run_blog_article(ctx: Context) -> dict:
             f"paste it in from its review page, then record the live URL "
             f"there.")
     elif profile.get("platform") != "wordpress" and not blog_id:
+        # NOTHING TO GUESS IS NOT A CHOICE. A store with exactly one blog was
+        # being refused by a rule written for stores with several, so the
+        # commonest account drafted articles that could never be queued until
+        # somebody found the picker on another tab. Resolve it, RECORD it —
+        # an auto-chosen destination the owner cannot see is worse than the
+        # question — and only ask when there is a real ambiguity.
+        try:
+            blog_id = sites.backend(profile).sole_blog_id(profile) or ""
+        except Exception:                                        # noqa: BLE001
+            blog_id = ""
+        if blog_id:
+            tenants.set_blog(ctx.tenant, blog_id)
+            ctx.note(f"this store has one blog ({blog_id}); articles will "
+                     f"publish into it. Change it on the Plan tab.")
+
+    if not can_push:
+        pass
+    elif profile.get("platform") != "wordpress" and not blog_id:
         publish["detail"] = (
-            f"NOT queued — no blog_id set for {ctx.tenant}. A Shopify store "
-            f"can hold several blogs and guessing one writes to the wrong "
-            f"place. Pick one on the console's Plan tab, then re-run.")
+            f"NOT queued — no blog_id set for {ctx.tenant}. This store holds "
+            f"more than one blog and guessing writes to the wrong place. "
+            f"Pick one on the console&#39;s Plan tab, then re-run.")
     else:
         said = seo_tools._propose("propose_article", {
             "blog_id": blog_id, "title": title, "body_html": body,

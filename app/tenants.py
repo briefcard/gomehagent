@@ -165,6 +165,28 @@ def source_label(key: str, url: str) -> str:
     return _norm(url)
 
 
+def set_blog(key: str, blog_id: str) -> str:
+    """Where this account's articles publish. One writer, two callers.
+
+    The route the picker posts to and the drafting run that resolves an
+    unambiguous store both need to record this, and two copies of a
+    dictionary-merge onto a JSON column is exactly how one of them ends up
+    writing a different key.
+    """
+    blog_id = str(blog_id or "").strip()
+    if not blog_id:
+        return "No blog id given."
+    with db.SessionLocal() as s:
+        row = s.get(db.Tenant, key)
+        if row is None:
+            return f"unknown account {key!r}"
+        cms = dict(row.cms or {})
+        cms["blog_id"] = blog_id
+        row.cms = cms
+        s.commit()
+    return blog_id
+
+
 def set_website(key: str, url: str) -> dict:
     """The canonical writer for the identity source.
 

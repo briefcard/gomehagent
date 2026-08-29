@@ -481,7 +481,41 @@ def _fields_from_artifact(output_id: str, payload_fields: dict) -> dict:
     for k in ("title", "seo_title", "seo_description"):
         if str(meta.get(k, "") or "").strip():
             out[k] = meta[k]
+    if (img := _article_image_for(output_id)):
+        out["image"] = img
     return out
+
+
+def _article_image_for(output_id: str) -> dict:
+    """The featured image for a published article, joined from what carried it.
+
+    THE RIGHTS CHECK IS THE POINT. `ledger.publish` refuses an output whose
+    attached asset is reference-only, and it is the last place that can be
+    caught — but the SEO arm does not go through `ledger.publish`, it goes
+    through this executor. Without the same check here, a comp image marked
+    reference-only would have been the one place it could still reach a public
+    page. Same rule, same function, second door.
+    """
+    if not output_id:
+        return {}
+    try:
+        from . import kb
+        with db.SessionLocal() as s:
+            row = (s.query(db.Output)
+                   .filter(db.Output.id == output_id).first())
+            ids = list((row.media_ids or []) if row is not None else [])
+        for aid in ids:
+            ok, _why = kb.may_publish(aid)
+            if not ok:
+                continue
+            with db.SessionLocal() as s:
+                a = s.get(db.KbAsset, aid)
+                if a is not None and (a.url or "").strip():
+                    return {"src": a.url.strip(),
+                            "alt": (a.title or a.subject or "").strip()}
+    except Exception:                                            # noqa: BLE001
+        return {}
+    return {}
 
 
 def _published(res: str) -> bool:

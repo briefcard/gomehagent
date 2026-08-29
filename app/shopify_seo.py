@@ -250,6 +250,30 @@ def list_blogs(profile: dict) -> str:
                       for b in blogs)
 
 
+def sole_blog_id(profile: dict) -> str:
+    """The store's blog id WHEN THERE IS ONLY ONE, else "".
+
+    "A store can hold several blogs and guessing writes to the wrong place" is
+    the right rule and it was applied one step too widely: it also refused the
+    case where there is nothing to guess. Shopify creates exactly one blog
+    ("News") by default and most stores never add a second, so the commonest
+    account in the system was drafting articles that could never be queued
+    until somebody found a picker on another tab — which is what the owner hit
+    on Eien Health.
+
+    Silent on failure and silent on ambiguity. Two blogs still means ASK; an
+    unreachable store still means ask. This only removes the step that was
+    never a choice.
+    """
+    try:
+        if _ok(profile):
+            return ""
+        blogs = _get(_store(profile), "blogs.json").get("blogs", [])
+    except Exception:                                            # noqa: BLE001
+        return ""
+    return str(blogs[0].get("id") or "") if len(blogs) == 1 else ""
+
+
 def list_articles(profile: dict, blog_id, limit: int = 20) -> str:
     """What is already published, so a revision starts from the real text."""
     if (why := _ok(profile)):
@@ -294,6 +318,31 @@ def get_article(profile: dict, blog_id, article_id) -> str:
     }, indent=2)
 
 
+def _article_image(fields: dict) -> dict:
+    """`{"src": …, "alt": …}` for Shopify, or {} when there is nothing to send.
+
+    Accepts either a prepared dict or a bare URL, because the two callers that
+    have an image reach it differently — the approval executor joins it from
+    the output's media, and an agent passing `image="https://…"` by hand is
+    the obvious way somebody will try it first.
+
+    ALT TEXT IS NOT OPTIONAL HERE. A featured image with no alt is an
+    accessibility failure on a public page and a wasted ranking signal on the
+    one surface built for ranking, so the title is the fallback rather than an
+    empty string.
+    """
+    img = fields.get("image")
+    if isinstance(img, str):
+        img = {"src": img.strip()} if img.strip() else None
+    if not isinstance(img, dict):
+        return {}
+    src = str(img.get("src") or img.get("url") or "").strip()
+    if not src:
+        return {}
+    return {"src": src,
+            "alt": str(img.get("alt") or fields.get("title") or "").strip()}
+
+
 def create_article(profile: dict, blog_id, fields: dict) -> str:
     """Write a NEW article. Unpublished unless `published` is explicitly true.
 
@@ -317,6 +366,15 @@ def create_article(profile: dict, blog_id, fields: dict) -> str:
     for k in ("handle", "author", "tags", "summary_html"):
         if fields.get(k):
             art[k] = fields[k]
+    # THE FEATURED IMAGE, which this call never sent. Shopify shows it on the
+    # blog index, in the article header and in every share card, so an article
+    # published without one is not a smaller version of the same post — it is
+    # the one that looks broken beside the rest of the blog. `image` was
+    # simply absent from the field list; the owner reported it as "we cannot
+    # push with images", and he was right at both ends: nothing sent one and
+    # nothing attached one (see `skill_pack._run_blog_article`).
+    if img := _article_image(fields):
+        art["image"] = img
     mfs = _seo_metafields(fields)
     if mfs:
         art["metafields"] = mfs
@@ -360,6 +418,10 @@ def update_article(profile: dict, blog_id, article_id, fields: dict) -> str:
               "summary_html", "published"):
         if fields.get(k) is not None:
             art[k] = fields[k]
+    # Partial stays partial: an image is set only when one was given, so a
+    # revision that says nothing about the image leaves the live one alone.
+    if img := _article_image(fields):
+        art["image"] = img
     mfs = _seo_metafields(fields)
     if mfs:
         art["metafields"] = mfs

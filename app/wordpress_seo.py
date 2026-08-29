@@ -239,6 +239,14 @@ def get_article(profile: dict, blog_id=None, article_id=None) -> str:
     }, indent=2)
 
 
+def sole_blog_id(profile: dict) -> str:
+    """WordPress has one blog by definition, so there is never anything to
+    pick. Present so callers can ask the question of any backend rather than
+    branching on the platform name — the same duck-typing the rest of this
+    module holds to."""
+    return "wordpress"
+
+
 def create_article(profile: dict, blog_id=None, fields: dict | None = None) -> str:
     """Write a NEW post. DRAFT unless `published` is explicitly true.
 
