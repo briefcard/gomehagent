@@ -244,6 +244,18 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .gnote .tx{font-size:.85rem;line-height:1.5;display:block}
 .gnote .mt{font-size:.74rem;color:var(--mut);line-height:1.45;display:block;
   margin-top:4px}
+/* The live lane renders the artifact's own HTML. It is CONTAINED rather than
+   restyled — an article brings its own headings and lists and should keep
+   them, but it must not push the console sideways or set its own colours. */
+.gread .live{max-width:64ch}
+.gread .live img,.gread .live table,.gread .live pre{max-width:100%}
+.gread .live table{display:block;overflow-x:auto}
+.gread .live a{color:var(--acc)}
+/* Painted through the Highlight API, so the markup underneath is untouched.
+   Browsers without it show markers and panel and never paint — the safe way
+   to fail. */
+::highlight(cm-lit){background:var(--accs);text-decoration:underline;
+  text-decoration-color:var(--acc);text-underline-offset:3px}
 /* A statement about the world is NOT a fault, so it must not wear a fault's
    colour. Grey — present, numbered, actionable, quiet. */
 .mk[data-state=world]{color:var(--mut);border-color:var(--mut);border-style:dashed}
@@ -9534,26 +9546,70 @@ def _drafts_section(key: str, row) -> str:
 #: in, which is the one that bites (Hanken Grotesk loads async and every line
 #: shifts). If it never runs at all the markers stack in document order and
 #: the panel still works, because the artifact was never touched.
-_MARGIN_JS = """
+_MARGIN_JS = r"""
 <script>
 (function(){if(window.__cm)return;window.__cm=1;var d=document,sel=null;
+/* LOCATE EACH SENTENCE IN UNTOUCHED HTML. The artifact's own markup is
+   rendered verbatim, so there is no span to measure — a DOM Range needs
+   none. Walk the text nodes once, build the same whitespace-collapsed string
+   `claim_trace.plain_text` produced, keep a map back to (node, offset), and
+   every sentence becomes a Range. Ranges give a rect for the marker and a
+   CSS Highlight for the hover, and neither touches the markup the CMS owns.
+   That was the standing objection to annotating the real body. */
+var RANGES={};
+function locate(){var live=d.querySelector('.live');if(!live)return;
+var notes;try{notes=JSON.parse(live.dataset.notes||'[]')}catch(e){return}
+var w=d.createTreeWalker(live,NodeFilter.SHOW_TEXT,{acceptNode:function(n){
+var p=n.parentNode,t=p&&p.nodeName;
+return (t==='SCRIPT'||t==='STYLE')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;}});
+var flat='',map=[],n;
+while((n=w.nextNode())){var raw=n.data;
+for(var i=0;i<raw.length;i++){var ch=raw[i];
+if(/\s/.test(ch)){if(flat.slice(-1)===' ')continue;ch=' ';}
+flat+=ch;map.push([n,i]);}}
+var cursor=0;
+notes.forEach(function(o){
+var want=String(o.t||'').replace(/\s+/g,' ').trim();if(!want)return;
+var at=flat.indexOf(want,cursor);
+if(at<0)at=flat.indexOf(want);      // out of order beats not at all
+if(at<0||!map[at]||!map[at+want.length-1])return;
+cursor=at+want.length;
+var r=d.createRange();
+r.setStart(map[at][0],map[at][1]);
+r.setEnd(map[at+want.length-1][0],map[at+want.length-1][1]+1);
+RANGES[o.n]=r;});}
+
+/* The highlight, when the browser has the API. Without it the markers and
+   the panel still work — the artifact simply never gets painted, which is
+   the safe direction to fail in. */
+function paint(n){if(!(window.CSS&&CSS.highlights))return;
+CSS.highlights.clear();
+if(n===null||!RANGES[n])return;
+try{CSS.highlights.set('cm-lit',new Highlight(RANGES[n]))}catch(e){}}
+
 function layout(){Array.prototype.forEach.call(d.querySelectorAll('.gwrap'),
 function(w){var g=w.querySelector('.gut'),r=w.querySelector('.gread');
 if(!g||!r)return;var base=g.getBoundingClientRect().top,floor=-999;
+var seen=[];
 Array.prototype.forEach.call(r.querySelectorAll('.s[data-note]'),function(x){
-var m=g.querySelector('.mk[data-note="'+x.dataset.note+'"]');if(!m)return;
-var b=x.getClientRects()[0];if(!b)return;var t=b.top-base;
+seen.push([x.dataset.note,x.getClientRects()[0]]);});
+Object.keys(RANGES).forEach(function(k){
+seen.push([k,RANGES[k].getClientRects()[0]]);});
+seen.sort(function(a,b){return (a[1]?a[1].top:0)-(b[1]?b[1].top:0);});
+seen.forEach(function(pair){
+var m=g.querySelector('.mk[data-note="'+pair[0]+'"]');if(!m||!pair[1])return;
+var t=pair[1].top-base;
 if(t<floor)t=floor;floor=t+22;m.style.top=Math.max(0,t)+'px';});
 g.style.minHeight=r.offsetHeight+'px';});}
 function pick(n){['mk','s','gnote'].forEach(function(c){
 Array.prototype.forEach.call(d.querySelectorAll('.'+c+'[data-note]'),function(e){
 e.classList.toggle('sel',n!==null&&e.dataset.note===n);});});
 Array.prototype.forEach.call(d.querySelectorAll('.s[data-note]'),function(e){
-e.classList.toggle('lit',n!==null&&e.dataset.note===n);});sel=n;}
+e.classList.toggle('lit',n!==null&&e.dataset.note===n);});paint(n);sel=n;}
 Array.prototype.forEach.call(d.querySelectorAll('.mk[data-note]'),function(m){
 var n=m.dataset.note,x=d.querySelector('.s[data-note="'+n+'"]');
-m.addEventListener('mouseenter',function(){if(x&&sel!==n)x.classList.add('lit');});
-m.addEventListener('mouseleave',function(){if(x&&sel!==n)x.classList.remove('lit');});
+m.addEventListener('mouseenter',function(){if(sel!==n){if(x)x.classList.add('lit');paint(n);}});
+m.addEventListener('mouseleave',function(){if(sel!==n){if(x)x.classList.remove('lit');paint(sel);}});
 m.addEventListener('click',function(e){e.preventDefault();pick(sel===n?null:n);
 if(sel){var o=d.querySelector('.gnote[data-note="'+sel+'"]');
 if(o)o.scrollIntoView({block:'nearest'});}});});
@@ -9571,7 +9627,7 @@ o.classList.toggle('hide',!(k==='all'||o.dataset.state===k));});
 Array.prototype.forEach.call(d.querySelectorAll('.mk'),function(m){
 m.classList.toggle('dim',!(k==='all'||m.dataset.state===k));});pick(null);});
 d.addEventListener('keydown',function(e){if(e.key==='Escape')pick(null);});
-addEventListener('resize',layout);layout();
+addEventListener('resize',layout);locate();layout();
 if(d.fonts&&d.fonts.ready)d.fonts.ready.then(layout);setTimeout(layout,400);})();
 </script>"""
 
@@ -9734,7 +9790,34 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
             f'<button type="submit" title="{_esc(title)}">{label}</button>'
             f'</form>')
 
+    # THE ADDITIVE ONE. Owner, 2026-08-29: *"We need one other option called
+    # 'Add Claim' which will give us the opportunity to add claims when ChatGPT
+    # brings us valuable researched content about our products."* Every action
+    # until now was subtractive — drop it, never do it again — and a draft that
+    # says something TRUE and unrecorded was a loss.
+    #
+    # IT PROPOSES, IT NEVER APPROVES, and that is the whole care in it. A
+    # one-click path from "a model wrote this" to "an approved claim every
+    # future draft may assert" would launder the model's own guesses into the
+    # evidence layer and quietly invert what claims are for. `status="pending"`
+    # makes the row `review=proposed`, and `kb.claims()` filters on
+    # `review == APPROVED`, so nothing can select it until a person decides.
+    #
+    # Not offered on an off-catalogue steer: the sentence there RECOMMENDS
+    # something the account has never sold, and "glucosamine is the benchmark"
+    # is not a claim anybody wants on file. If the account has started
+    # carrying it, that begins in the catalogue, not here.
+    add = ("" if note["state"] in ("ok", "off") else
+           f'<form method="post" action="/admin/claim_from_note" class="nact">'
+           f'<input type="hidden" name="key" value="{_esc(key)}">'
+           f'<input type="hidden" name="output_id" value="{_esc(output_id)}">'
+           f'<input type="hidden" name="sentence" value="{_esc(sent[:600])}">'
+           f'<button type="submit" title="Files it as a PROPOSED claim — it '
+           f'is not usable until you approve it on Review, where you add the '
+           f'evidence and the source">Add claim</button></form>')
+
     return ('<span class="nacts">'
+            + add
             + form("draft", drop, "Drop from redraft",
                    "Files it against this draft — the next redraft consumes "
                    "it and leaves the sentence out")
@@ -9755,6 +9838,16 @@ def _note_html(note: dict, key: str = "", output_id: str = "",
             f'<a class="mt" href="{note["href"]}">{note["act"]} &rarr;</a>'
             f'{_note_actions(note, key, output_id, syskey)}'
             f'</span></li>')
+
+
+#: An email body announces itself: a full document, or the table scaffolding
+#: no article has. Sniffed rather than trusted to `format`, because the same
+#: card renders whatever lands in the workroom and a mislabelled row must not
+#: dump an email's own stylesheet into the console.
+def _looks_like_email(body: str) -> bool:
+    low = str(body or "")[:4000].lower()
+    return ("<!doctype" in low or "<html" in low or "<body" in low
+            or "<style" in low or low.count("<table") >= 2)
 
 
 def _esc_strip(html_: str) -> str:
@@ -9975,6 +10068,27 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
                        ("ok", "Backed"))
         if counts[k] or k == "all") + "</div>"
 
+    # THE ARTIFACT ITSELF, WHERE IT CAN BE. An article's body is HTML the CMS
+    # will publish verbatim; rendering it here rather than a plain-text
+    # paraphrase means this card IS the preview instead of sitting beside one.
+    # Nothing is inserted into it — not even the sentence spans. The script
+    # locates each sentence with a DOM Range, which needs no wrapper at all,
+    # and highlights it through the Highlight API so the markup the CMS owns is
+    # never touched. That was the objection to annotating the real body, and a
+    # Range answers it.
+    #
+    # Not for email (its HTML carries its own styles and belongs in the
+    # sandboxed iframe above, which is why that preview stays) and not for an
+    # ad batch (already flattened from JSON).
+    live = fmt not in ("ad_batch",) and not _looks_like_email(body)
+    if live:
+        _payload = json.dumps([{"n": n["n"], "s": n["state"],
+                                "t": n["sentence"]} for n in notes])
+        reading = (f'<div class="live" data-notes="{_esc(_payload)}">'
+                   f'{body}</div>')
+    else:
+        reading = _reading_html(plain, rep, states, claim_trace.headings(body))
+
     return f"""
 <div class="anchor" id="grounding"></div>
 <div class="card">
@@ -9990,9 +10104,7 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
   also stop the competitor comparisons you may want.</p>
   <div class="gwrap">
     <div class="gut">{"".join(_marker_html(n) for n in notes)}</div>
-    <div class="gread"><div class="body">
-      {_reading_html(plain, rep, states, claim_trace.headings(body))}
-    </div></div>
+    <div class="gread"><div class="body">{reading}</div></div>
     <div class="gpanel">{filters}
       <ul class="gnotes">{"".join(
         _note_html(n, key, str(getattr(art, "output_id", "") or ""),
@@ -10424,13 +10536,12 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
   </form>
 </div>""" if ap else "")
     else:
-        preview_card = f"""
-<div class="card">
-  <h3>Preview</h3>
-  <div style="border:1px solid var(--rule);padding:18px 22px;border-radius:6px;background:#fff;color:#15171d">
-  {art.body or ""}</div>
-  {src_link}
-</div>"""
+        # NO SEPARATE PREVIEW CARD. It rendered `art.body` on a white ground
+        # and the claim margin below rendered the same article again — "now it
+        # reads as a double Preview section" (owner, 2026-08-29). The margin
+        # renders the REAL HTML now, so it is the preview, and a second copy
+        # of the same words is just a second copy.
+        preview_card = ""
         edit_card = f"""
 <div class="card">
   <h3>Edit</h3>

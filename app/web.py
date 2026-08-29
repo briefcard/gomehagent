@@ -3333,6 +3333,61 @@ async def feedback_add(request: Request, key: str = Depends(admin_key)):
     return back(ok=said)
 
 
+@app.post("/admin/claim_from_note")
+async def claim_from_note(request: Request, key: str = Depends(admin_key)):
+    """Turn a sentence in a draft into a PROPOSED claim.
+
+    Owner, 2026-08-29: *"We need one other option called 'Add Claim' which
+    will give us the opportunity to add claims when ChatGPT brings us valuable
+    researched content about our products."* Until now every action on a note
+    was subtractive, so a draft that said something true and unrecorded was a
+    loss — the sentence got dropped and the knowledge with it.
+
+    IT PROPOSES. It does not approve, and no argument makes that safe to
+    change: this is a path from text a model wrote to a row the validator
+    lets every future draft assert, and if it landed approved the model would
+    be authoring its own evidence. `status="pending"` maps to
+    `review=proposed`, `kb.claims()` selects only `review == APPROVED`, so the
+    row is inert until a person decides on it.
+
+    Evidence, proof type and attribution are left EMPTY on purpose. This
+    endpoint knows the sentence and nothing else, and a field filled in by
+    something that cannot know it is the exact defect `attributed_to` was
+    added for — a drafter asked for a credit line invented "Eien Health
+    Research" and put it under a real statement in a live email.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    sentence = " ".join(str(form.get("sentence") or "").split())[:600]
+
+    def back(ok: str = "", err: str = ""):
+        # #grounding, not #feedback: the reader was looking at the claim
+        # margin and should land back on it (design rule 3).
+        arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}#grounding",
+            303)
+
+    if not sentence:
+        return back(err="nothing to propose — the note carried no sentence")
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return back(err="no artifact with that id")
+    from . import kb as kbm
+    got = kbm.add_claim(
+        art.tenant or "", sentence, "", [], proof_type="", status="pending",
+        origin="agent", source=f"proposed from draft {output_id}")
+    if got and got.lower().startswith(("unknown", "needs")):
+        return back(err=got[:280])
+    return back(ok="Proposed — it is NOT usable until you approve it. Add the "
+                   "evidence and the source on Review \u00b7 Claims.")
+
+
 @app.get("/admin/feedback_drop")
 def feedback_drop(key: str = Depends(admin_key), id: str = "",
                   output_id: str = ""):

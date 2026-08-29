@@ -31,6 +31,13 @@ from app import claim_trace, db, kb, kb_seed, tenants, validator  # noqa: E402
 _fail: list[str] = []
 
 
+def _esc_q(t: str) -> str:
+    """The sentence as it appears inside the JSON payload."""
+    import json as _j
+    return _j.dumps(t)[1:-1].replace('&', '&amp;').replace(
+        '"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 def ck(label: str, cond, detail: str = "") -> None:
     print(f"[{'  ok  ' if cond else ' FAIL '}] {label}"
           + (f"  — {detail}" if detail else ""))
@@ -219,6 +226,47 @@ def main() -> int:
        "defect, authored by me")
     ck("…with the systems it grouped", "seo" in page and "spark" in page)
 
+    print("\n— a proposal, never an approval —")
+    # THROUGH THE ROUTE, not around it. The first version called add_claim
+    # directly and so asserted a property of add_claim; the endpoint could
+    # have been changed to write an approved row and the suite would have
+    # stayed green. Caught by sabotage, not by reading.
+    from fastapi.testclient import TestClient
+
+    from app import kb as _kbm, ledger as _ldg, provenance as _prov
+    from app.web import app as _app
+    _sentence = "Omega-3 is studied for joint comfort in adults."
+    _art = _ldg.record("eien", "blog", claim_ids=[], format="cms_article",
+                       body=_sentence)
+    # The workroom reads the BODY table, not the ledger row — the route looks
+    # the artifact up the same way the page does.
+    with db.SessionLocal() as _s:
+        _s.add(db.ArtifactBody(tenant="eien", output_id=_art.id,
+                               system_key="blog", format="cms_article",
+                               body=f"<p>{_sentence}</p>"))
+        _s.commit()
+    _c = TestClient(_app)
+    _r = _c.post("/admin/claim_from_note?key=s3cret", follow_redirects=False,
+                 data={"key": "s3cret", "output_id": _art.id,
+                       "sentence": _sentence})
+    ck("…and does not report success on a failure",
+       "err=" not in _r.headers.get("location", ""),
+       _r.headers.get("location", ""))
+    ck("the route accepts the note", _r.status_code == 303, str(_r.status_code))
+    with db.SessionLocal() as _s:
+        _row = (_s.query(db.KbClaim)
+                .filter(db.KbClaim.source ==
+                        f"proposed from draft {_art.id}").one())
+    ck("a claim added from a note lands PROPOSED",
+       _row.review == _prov.PROPOSED,
+       "approving it in one click would let the model author its own evidence")
+    ck("…and no generator can select it",
+       all("joint comfort" not in c.claim for c in _kbm.claims("eien")))
+    ck("…with evidence and proof type left empty for a person",
+       not (_row.evidence or "") and not (_row.proof_type or ""),
+       "a field filled in by something that cannot know it is how "
+       "'Eien Health Research' got under a real statement")
+
     print("\n— nothing is inserted into the artifact —")
     import re as _re2
     from app import admin_ui as ui
@@ -258,15 +306,38 @@ def main() -> int:
        "that is the mixing the owner rejected")
 
     mk = _re2.findall(r'class="mk" data-note="(\d+)" data-state="(\w+)"', long_card)
-    sp = _re2.findall(r'class="s" data-note="(\d+)" data-state="(\w+)"', long_card)
     nt = _re2.findall(r'class="gnote" data-note="(\d+)" data-state="(\w+)"', long_card)
-    ck("marker n, sentence n and note n are the same n",
-       bool(mk) and sorted(mk) == sorted(sp) == sorted(nt),
-       f"markers={mk} spans={sp} notes={nt}")
+    ck("marker n and note n are the same n",
+       bool(mk) and sorted(mk) == sorted(nt), f"markers={mk} notes={nt}")
 
-    ck("the author's paragraphs survive into the reading",
-       read.count("<p>") >= 2 and "<h4>" in read,
-       "a heading glued to the next paragraph was scored as one sentence")
+    # THE CARD IS THE PREVIEW NOW. An article's body is rendered byte-for-byte
+    # and the sentences are located with DOM Ranges, so not even a wrapper
+    # span goes in — the second Preview card was deleted on the strength of
+    # this, and if it ever stops holding the owner is reading a paraphrase.
+    ck("an article's own HTML is emitted verbatim",
+       Long.body in long_card,
+       "a paraphrase in place of the preview is how the double started")
+    ck("…with nothing inserted into it, not even a wrapper",
+       read.count('class="s"') == 0 and 'data-notes=' in read)
+    # SCOPED TO THE PAYLOAD, not to the card. The first version looked for
+    # the sentence anywhere in `long_card` and found it in the panel note, so
+    # emptying data-notes entirely left the suite green — the walker would
+    # have had nothing to locate and nothing said so. Caught by sabotage.
+    _payload = long_card.split('data-notes="', 1)[1].split('"', 1)[0]
+    ck("…and every note rides in the payload the walker reads",
+       len(mk) > 0 and all(f"&quot;n&quot;: &quot;{n}&quot;" in _payload
+                           for n, _ in mk),
+       "a marker whose sentence is not in the payload stacks at the top of "
+       "the gutter pointing at nothing, and the Preview card is gone")
+    ck("…carrying the sentence itself, not just the number",
+       "Glucosamine remains the benchmark" in _payload.replace("&quot;", '"'),
+       _payload[:120])
+
+    # The span path still exists for what cannot be rendered live.
+    short_read = short_card.split('class="gread"', 1)[1].split('class="gpanel"', 1)[0]
+    ck("a flattened ad batch still gets wrapped sentences",
+       'class="s"' in short_read and 'data-notes=' not in short_read,
+       "its body is JSON — there is no artifact HTML to render")
     ck("both formats carry the at-a-glance bar",
        'class="meter"' in long_card and 'class="meter"' in short_card)
     ck("the panel is filterable by state",
@@ -306,6 +377,15 @@ def main() -> int:
        'value="rule"' not in long_card,
        "banning 'glucosamine' would also stop the competitor comparisons "
        "the owner explicitly wants — the lesson is the behaviour, not the noun")
+    ck("a note can propose the sentence as a claim",
+       long_card.count('action="/admin/claim_from_note"') >= 1)
+    ck("…but never on an off-catalogue steer",
+       long_card.split('data-state="off"', 1)[1].split("</li>", 1)[0]
+       .count("claim_from_note") == 0,
+       "\u201cglucosamine is the benchmark\u201d is not a claim to file")
+    ck("…nor on one that already has a claim",
+       long_card.split('data-state="ok"', 1)[1].split("</li>", 1)[0]
+       .count("claim_from_note") == 0)
     ck("the standing guidance quotes what provoked it",
        "It happened here" in long_card,
        "guidance nobody can trace back to a draft is a slogan")
