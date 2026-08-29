@@ -389,6 +389,15 @@ class Output(Base):
     #: what was being tested at the time, and re-deriving it later from
     #: today's knowledge base would rewrite history to agree with the present.
     positioning = Column(Text, default="", index=True)
+    #: WHICH READER THIS WAS FOR. The owner named three axes for an ad —
+    #: audience, part of the funnel, positioning — and two of them were
+    #: already columns. Without this one no report can answer whether the
+    #: consideration-stage work outperforms the awareness work, which is the
+    #: question that decides where the next month goes.
+    #:
+    #: Recorded whether the stage was chosen or derived, because a report that
+    #: only counts the runs where somebody passed a knob measures the knob.
+    funnel_stage = Column(String, default="", index=True)
     media_ids = Column(JSON, default=list)
     #: Which LIVE lookups fed this output — `["shopify_inventory", …]`.
     #:

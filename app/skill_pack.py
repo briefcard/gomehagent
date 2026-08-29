@@ -958,7 +958,7 @@ def _run_ad_copy(ctx: Context) -> dict:
             # the variants are — so recording the hypothesis once somewhere
             # else would mean joining through the run to answer the only
             # question worth asking of it.
-            positioning=positioning,
+            positioning=positioning, funnel_stage=stage,
             commitment=_commit,
             parts=lambda _t, _c=claim: coherence.parts(
                 text=_t,

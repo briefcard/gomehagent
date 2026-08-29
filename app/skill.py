@@ -263,7 +263,7 @@ class Context:
              conversation_id: str = "", require_citation: bool | None = None,
              redraft=None, meta: "dict | callable | None" = None,
              lookups: list | None = None, shape=None, theme: str = "",
-             positioning: str = "",
+             positioning: str = "", funnel_stage: str = "",
              media_ids: "list | callable | None" = None,
              commitment: dict | None = None,
              parts: "dict | callable | None" = None) -> dict:
@@ -457,7 +457,7 @@ class Context:
             # What this output was TESTING, on every row of the batch, so the
             # question "which positioning did better" is one GROUP BY rather
             # than a join through the run.
-            positioning=positioning,
+            positioning=positioning, funnel_stage=funnel_stage,
             conversation_id=conversation_id, run_id=self.run_id)
 
         # Every attempt is filed as a CHECK, not just the ones that produced

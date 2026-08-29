@@ -10078,6 +10078,74 @@ def _grounding_trend(tenant: str, days: int) -> str:
             'you approve one.</p>')
 
 
+#: Which dimensions lead the "is it working" card. All six are computed;
+#: these three are shown first because they are the three the owner named as
+#: what an ad IS — audience, part of the funnel, and the positioning under
+#: test. The rest fold, so the card answers the question before it offers to
+#: be explored.
+_WORKING_LEAD = ("positioning", "audience", "funnel_stage")
+
+
+def _working_card(tenant: str) -> str:
+    """Is it working — asked of the data layer, not of a click count.
+
+    Owner, 2026-08-29: *"make sure we leverage this data correctly when
+    evaluating the success on the plan tab and in the reports system."* The
+    same `results.by` the future report will call, so the two cannot drift
+    into disagreeing about one number — which is the failure this codebase
+    has already paid for twice.
+
+    IT RENDERS NOTHING WHEN THERE IS NOTHING. A scoreboard of empty tables is
+    a page that trains people to stop looking; the absence is stated once, in
+    a sentence that says what would fill it.
+    """
+    from . import results as _res
+    board = _res.scoreboard(tenant)
+    lead = board.get("positioning") or {}
+    if not any((board.get(d) or {}).get("groups") for d in _res.DIMENSIONS):
+        return ('<div class="card"><h3>Is it working?</h3>'
+                '<p class="mut">No ad has been matched to a live one yet, so '
+                'there are no results to group. Ads are joined to the '
+                'platform by their own copy &mdash; nothing is pushed and no '
+                'budget moves &mdash; so this fills in once the copy written '
+                'here is running.</p></div>')
+
+    head = _res.headline(tenant)
+
+    def _table(dim: str) -> str:
+        got = board.get(dim) or {}
+        rows = got.get("groups") or []
+        if not rows:
+            return ""
+        body = "".join(
+            f'<tr><td>{_esc(g["key"][:70])}</td>'
+            f'<td class="num">{g["variants"]}</td>'
+            f'<td class="num">{g["measured"] or ""}</td>'
+            f'<td class="num">{g["ctr_pct"] if g["ctr_pct"] is not None else "&mdash;"}</td>'
+            f'<td class="num">{g["grounded_pct"] if g["grounded_pct"] is not None else "&mdash;"}</td>'
+            f'</tr>' for g in rows[:8])
+        return (f'<h4 style="font-size:.82rem;margin:12px 0 4px">By '
+                f'{_esc(dim.replace("_", " "))}</h4>'
+                f'<div class="tblwrap"><table class="tbl"><tr>'
+                f'<th>{_esc(dim.replace("_", " "))}</th><th class="num">drafted</th>'
+                f'<th class="num">measured</th><th class="num">CTR %</th>'
+                f'<th class="num">grounded %</th></tr>{body}</table></div>')
+
+    rest = "".join(_table(d) for d in _res.DIMENSIONS if d not in _WORKING_LEAD)
+    return (
+        '<div class="card"><h3>Is it working?</h3>'
+        + (f'<p><strong>{_esc(head)}</strong></p>' if head else "")
+        + f'<p class="mut">{_esc(lead.get("note") or "")}</p>'
+        + "".join(_table(d) for d in _WORKING_LEAD)
+        + (f'<details class="sec"><summary>The other dimensions</summary>'
+           f'{rest}</details>' if rest else "")
+        + '<p class="when">Grouped by the things the knowledge base is made '
+          'of, because &ldquo;clicks were up&rdquo; is a fact about a month '
+          'and says nothing about what to write next. A row with drafts but '
+          'no measurements has not performed badly &mdash; it has not '
+          'performed, and it is never averaged in as a zero.</p></div>')
+
+
 def _learned_fold(key: str, tenant: str, syskey: str, output_id: str) -> str:
     """What this account and this system have been taught — and a way to undo it.
 
@@ -11136,6 +11204,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
       {note}
       <div class="cards">{chips}</div>
       {downstream_html}
+      {_working_card(tenant)}
       {_plan_window(key, tenant, days)}
       {strip}
       {rooms[sub]()}
