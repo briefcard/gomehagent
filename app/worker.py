@@ -738,6 +738,20 @@ def segments_sweep() -> None:
             log.exception("segments sweep failed for %s", t.key)
 
 
+def media_sweep() -> None:
+    """Drop the bytes behind pictures nobody approved.
+
+    Runs for every account, and says something only when it did something —
+    a nightly line reporting zero is how a log stops being read.
+    """
+    from . import media, tenants
+    for t in tenants.all_tenants():
+        got = media.sweep()
+        if any(got[k] for k in ("dropped_rejected", "expired_unreviewed",
+                                "dropped_orphan")):
+            log.info("picture retention %s: %s", t.key, got)
+
+
 def moments_sweep() -> None:
     """Hourly: notice what has gone quiet, and retire what has gone stale.
 
@@ -1117,6 +1131,11 @@ def main() -> None:
     # hour, because a window is measured in hours and a daily pass would serve
     # a one-hour moment a day late — which is to say, never.
     sched.add_job(_safe(moments_sweep, "moments sweep"), "interval", hours=1)
+    # A retention policy nothing runs is a comment. Daily and quiet: it keeps
+    # the bytes behind APPROVED pictures and drops the rest, which on a normal
+    # day is nothing at all.
+    sched.add_job(_safe(media_sweep, "picture retention"), "cron",
+                  hour=3, minute=40)
     # After the tick, so today's results are on the rows before tomorrow's
     # planner reads them.
     sched.add_job(_safe(performance_sweep, "performance sweep"), "cron",

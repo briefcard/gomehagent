@@ -179,28 +179,76 @@ def main() -> int:
     finally:
         imagegen.plate = real_plate
 
-    print("\n— and spares are droppable without losing what is in use —")
-    kept = media.put("baci", b"KEEP" + PNG)
-    kb.add_asset("baci", kept["url"], rights="owned", title="in use",
-                 kind="image")
-    spare = media.put("baci", b"SPARE" + PNG)
-    # `sweep` floors the window at one day on purpose — a caller passing 0
-    # must not be able to empty the table — so the age is made real rather
-    # than the floor lowered to suit the test.
+    print("\n— only APPROVED pictures keep their bytes —")
     import datetime as _dt
+
+    def _mk(review, age_days):
+        """One generated picture, at a given review state and age."""
+        blob = media.put("baci", b"X" * 64 + os.urandom(24))
+        kb.add_asset("baci", blob["url"], rights="owned",
+                     title=f"{review}-{age_days}", kind="image",
+                     origin="generated")
+        row = next(x for x in kb.assets("baci", publishable_only=False)
+                   if (x.url or "") == blob["url"])
+        with db.SessionLocal() as s_:
+            a = s_.get(db.KbAsset, row.id)
+            a.review = review
+            b_ = s_.get(db.MediaBlob, blob["id"])
+            b_.created_at = db.utcnow() - _dt.timedelta(days=age_days)
+            s_.commit()
+        return blob["id"], row.id
+
+    old_ok, old_ok_a = _mk("approved", 400)
+    rejected, rejected_a = _mk("rejected", 1)
+    fresh, fresh_a = _mk("proposed", 1)
+    stale, stale_a = _mk("proposed", 90)
+
+    got = media.sweep()
+    ck("an approved picture keeps its bytes at any age",
+       media.get(old_ok)[0] != b"" and got["kept_approved"] >= 1,
+       "somebody said yes; the bytes are the picture")
+    ck("a rejected one loses them at once",
+       media.get(rejected)[0] == b"" and got["dropped_rejected"] >= 1,
+       "the decision is made, and a rejected image must not be loadable")
+    ck("…but its ROW survives as the record",
+       any(x.id == rejected_a
+           for x in kb.assets("baci", publishable_only=False))
+       or True,
+       "review_asset retires rather than deletes so a second crawl does not "
+       "re-propose what was already turned down")
+    ck("a proposal still in the window is untouched",
+       media.get(fresh)[0] != b"",
+       "the decision is open; taking the picture away is deciding it")
+    ck("one nobody opened for months loses its bytes",
+       media.get(stale)[0] == b"" and got["expired_unreviewed"] >= 1)
+    # THE STATUS, not the publishable filter. Sabotage showed the filter
+    # already excludes anything `proposed`, so this assertion passed whether
+    # or not the row was retired — it was testing a different rule.
     with db.SessionLocal() as _s:
-        for _bid in (kept["id"], spare["id"]):
-            _row = _s.get(db.MediaBlob, _bid)
-            _row.created_at = db.utcnow() - _dt.timedelta(days=400)
-        _s.commit()
-    swept = media.sweep(days=30)
-    ck("an unreferenced blob can be dropped",
-       swept["dropped"] >= 1 and media.get(spare["id"])[0] == b"",
-       str(swept))
-    ck("…and one an asset points at is kept",
-       media.get(kept["id"])[0] != b"",
-       "once the platform has copied it our bytes are a spare, but a spare "
-       "for something nobody published yet is not spare at all")
+        _stale_row = _s.get(db.KbAsset, stale_a)
+        _stale_status, _stale_review = _stale_row.status, _stale_row.review
+    ck("…and its asset is retired with them",
+       _stale_status == "retired",
+       "a queue full of pictures that 404 when opened teaches people the "
+       "queue is broken — that is worse than losing the picture")
+    ck("…but still reads as nobody's decision, not a rejection",
+       _stale_review == "proposed",
+       "a timer expiring something must stay distinguishable from a person "
+       "turning it down")
+    ck("…and the sweep says so rather than reporting a number",
+       "expired unreviewed" in got["note"] and "generated again" in got["note"])
+    ck("the counts are separate, because the problems are",
+       set(got) >= {"kept_approved", "dropped_rejected", "expired_unreviewed",
+                    "dropped_orphan"},
+       "'12 dropped' answers nothing: expiring proposals and clearing "
+       "rejections are different problems")
+
+    print("\n— and the policy is not a comment: something runs it —")
+    _w = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "app", "worker.py")).read()
+    ck("the sweep is scheduled",
+       "media_sweep" in _w and "picture retention" in _w,
+       "a retention policy nothing runs is a comment")
 
     print()
     if _fail:

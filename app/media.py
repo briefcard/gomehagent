@@ -92,26 +92,89 @@ def get(blob_id: str) -> tuple[bytes, str]:
         return bytes(row.bytes_ or b""), str(row.mime or "image/png")
 
 
-def sweep(days: int = 120) -> dict:
-    """Drop blobs nothing points at any more.
+#: How long an unreviewed picture keeps its bytes. Long enough that a queue
+#: looked at weekly never loses anything somebody meant to keep; short enough
+#: that a generator left running does not fill a database with images nobody
+#: ever opened.
+UNREVIEWED_DAYS = 14
 
-    The handoff makes this safe and eventually necessary: once Shopify or the
-    ESP has copied an image, our bytes are a spare, and a table of spares grows
-    for ever. Only rows NO asset still references are dropped, so an asset
-    somebody has not published yet keeps its bytes however old they are.
+#: And how long bytes nothing points at survive. Only reachable if an asset row
+#: was deleted outright, which nothing does today — kept as a floor rather than
+#: a promise that it cannot happen.
+ORPHAN_DAYS = 30
+
+
+def sweep(*, unreviewed_days: int = UNREVIEWED_DAYS,
+          orphan_days: int = ORPHAN_DAYS) -> dict:
+    """Keep the bytes behind APPROVED pictures. Nothing else earns storage.
+
+    Owner, 2026-08-29: *"lets make sure we are only storing long term the
+    images that have been approved. no need to store / reference unapproved
+    assets."*
+
+    Four cases, and the difference between them is who decided and when:
+
+      APPROVED    kept, at any age. Somebody said yes; the bytes are the
+                  picture.
+      REJECTED    dropped now. The decision is made, and a rejected image must
+                  not be loadable — the ROW stays, because `review_asset`
+                  retires rather than deletes so a second crawl does not
+                  re-propose what was already turned down, and the row is that
+                  memory. It just no longer has megabytes attached.
+      PROPOSED    kept while the decision is still open, dropped after
+                  `unreviewed_days`, and the ASSET IS RETIRED WITH IT. Dropping
+                  bytes under a live row is the worse failure: a queue full of
+                  pictures that 404 when opened teaches people the queue is
+                  broken. Retired with `review` left at `proposed`, so a timer's
+                  decision stays distinguishable from a person's.
+      ORPHAN      no asset points at it at all; dropped after `orphan_days`.
+
+    Reports each count separately, because "12 dropped" answers nothing: an
+    account whose proposals are expiring unreviewed has a different problem
+    from one clearing rejections.
     """
     import datetime as dt
-    cutoff = db.utcnow() - dt.timedelta(days=max(1, int(days or 1)))
+
+    from . import provenance as prov
+    now = db.utcnow()
+    stale = now - dt.timedelta(days=max(1, int(unreviewed_days or 1)))
+    orphan_cut = now - dt.timedelta(days=max(1, int(orphan_days or 1)))
+
+    out = {"kept_approved": 0, "dropped_rejected": 0, "expired_unreviewed": 0,
+           "dropped_orphan": 0}
     with db.SessionLocal() as s:
-        referenced = {u for (u,) in s.query(db.KbAsset.url).all() if u}
-        old = (s.query(db.MediaBlob)
-               .filter(db.MediaBlob.created_at < cutoff).all())
-        dropped = 0
-        for row in old:
-            if url_for(row.id, row.mime or "image/png") in referenced:
+        by_url = {}
+        for a in s.query(db.KbAsset).all():
+            if a.url:
+                by_url.setdefault(a.url, a)
+
+        for row in s.query(db.MediaBlob).all():
+            # `as_utc` because SQLite hands back naive datetimes and Postgres
+            # does not — comparing the two raises, and it would raise in the
+            # nightly job rather than in a test.
+            made = db.as_utc(row.created_at) if row.created_at else None
+            asset = by_url.get(url_for(row.id, row.mime or "image/png"))
+            if asset is None:
+                if made and made < orphan_cut:
+                    s.delete(row)
+                    out["dropped_orphan"] += 1
                 continue
-            s.delete(row)
-            dropped += 1
-        if dropped:
-            s.commit()
-    return {"dropped": dropped, "kept_referenced": len(referenced)}
+            review = str(asset.review or "")
+            if review == prov.APPROVED:
+                out["kept_approved"] += 1
+                continue
+            if review == prov.REJECTED:
+                s.delete(row)
+                out["dropped_rejected"] += 1
+                continue
+            # Proposed, or anything that never got a review state.
+            if made and made < stale:
+                s.delete(row)
+                asset.status = "retired"
+                out["expired_unreviewed"] += 1
+        s.commit()
+    out["note"] = (
+        f"{out['expired_unreviewed']} picture(s) expired unreviewed — nobody "
+        f"opened them in {unreviewed_days} days, and they can be generated "
+        f"again" if out["expired_unreviewed"] else "")
+    return out
