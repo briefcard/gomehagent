@@ -191,6 +191,33 @@ def main() -> int:
     ck("claim usage is one query, not one per claim",
        claim_trace.usage_counts("eien").get(cid2, 0) >= 3,
        str(claim_trace.usage_counts("eien")))
+    ck("…and refuses to draw a direction off two outputs",
+       blog and blog["moved"] is None,
+       "None, not 0 — 0 reads as 'no change', which is a finding")
+
+    print("\n— a direction, once there is enough to draw one —")
+    # Eight grounded outputs: four unsupported, then four supported. The
+    # window has to be able to SAY it improved, or the floor above is not a
+    # floor, it is a mute button.
+    for _ in range(claim_trace.MIN_FOR_DIRECTION):
+        ledger.record("eien", "seo", claim_ids=[cid2], format="cms_article",
+                      body="Glucosamine rebuilds cartilage and is most studied.")
+    for _ in range(claim_trace.MIN_FOR_DIRECTION):
+        ledger.record("eien", "seo", claim_ids=[cid2], format="cms_article",
+                      body="Every batch is third-party tested in a US facility.")
+    seo = next((x for x in claim_trace.trend("eien", 90)
+                if x["system"] == "seo"), None)
+    ck("with enough on each side it reports the movement",
+       seo and seo["moved"] == 100, str(seo))
+
+    print("\n— and the trend is RENDERED where the page asks the question —")
+    from app import admin_ui as _ui
+    page = _ui.render_assurance("", tenant="eien", days=90)
+    ck("the assurance page carries the grounding trend",
+       "How much of it stands on an approved claim" in page,
+       "trend() sat with no reader for a day — that is the unpiped-unit "
+       "defect, authored by me")
+    ck("…with the systems it grouped", "seo" in page and "spark" in page)
 
     print("\n— the shape follows the asset —")
     from app import admin_ui as ui

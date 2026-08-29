@@ -2371,6 +2371,29 @@ SABOTAGES = [
                "months when somebody asks",
     },
     {
+        "name": "a_direction_needs_enough_outputs",
+        "file": "app/claim_trace.py",
+        "find": "        enough = min(len(earlier), len(later)) >= MIN_FOR_DIRECTION",
+        "replace": "        enough = True  # SABOTAGE",
+        "suites": ["test_claim_trace.py"],
+        "why": "the assurance page draws an arrow and a points figure off one "
+               "output against two, on the one page whose entire job is to be "
+               "believed — and a direction is the number here most likely to "
+               "be repeated to a client",
+    },
+    {
+        "name": "the_trend_is_rendered_where_it_is_asked",
+        "file": "app/admin_ui.py",
+        "find": "      {_grounding_trend(scope, days)}",
+        "replace": "      <!-- SABOTAGE -->",
+        "suites": ["test_claim_trace.py"],
+        "why": "grounding coverage is recorded on every output and shown "
+               "nowhere, so the owner's own question — is the output "
+               "improving as the knowledge base fills — has an answer in the "
+               "database that no surface renders. A unit with no piping, "
+               "which is the backlog this console keeps paying down",
+    },
+    {
         "name": "prose_is_not_scored_zero",
         "file": "app/claim_trace.py",
         "find": "    return -1 if pct is None else int(pct)",

@@ -174,6 +174,10 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .meter i.b{background:var(--ok)}
 .meter i.o{background:var(--gap)}
 .meter i.p{background:var(--rule)}
+/* One bar per output, oldest first — the shape of the run, next to the
+   average that flattens it. No library: a strict CSP and a dozen divs. */
+.spark{display:inline-flex;align-items:flex-end;gap:1px;height:22px;min-width:40px}
+.spark i{display:block;width:4px;border-radius:1px;background:var(--acc)}
 /* Long-form drowns in inline popovers, so its claims move into a gutter
    aligned to the text — the shape the owner asked for by pointing at Figma. */
 .gutter{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:18px}
@@ -7937,6 +7941,22 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
        'rules</span></div>'}
     </div>"""
 
+    # AND SO IS GROUNDING COVERAGE — same reason, one line down from the
+    # precedent. `Output.grounded_pct` is written by `ledger.record`, which
+    # every skill's output passes through whether or not a validator ever saw
+    # it. An account with a hundred outputs and no validator events would have
+    # had the whole measurement swallowed by the empty state below, on the one
+    # page that exists to answer "is this getting better". Caught by
+    # test_claim_trace, not by reading.
+    ground_card = f"""
+    <details class="conns">
+      <summary>How much of it stands on an approved claim</summary>
+      <p class="mut">The share of each output&#39;s ASSERTIONS that trace back
+      to a claim you approved &mdash; per system, oldest run first. This is
+      what should move as the knowledge base fills.</p>
+      {_grounding_trend(scope, days)}
+    </details>"""
+
     if not rep["events"]:
         body = (_every_note(every, "Checks recorded across every account.")
                 + windows
@@ -7945,7 +7965,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
                 f'days.</strong><br>That is not the same as '
                 f'nothing being wrong — it means no draft passed through a '
                 f'validator, so this page has no evidence either way.</div>'
-                + comp_card)
+                + ground_card + comp_card)
         return _shell(key, "assurance", "Assurance", body=body, tenant=tenant,
                       suffix=f"&amp;days={days}")
 
@@ -8115,12 +8135,18 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
       </table></div>
     </details>
 
+    {ground_card}
+
     <details class="conns"><summary>Is it improving the output?</summary>
       <p>{ed_line}</p>
-      <p class="mut">Catches and repairs prove the layer is doing something a
-      model alone would not. They do not prove the drafts are better — that is
-      a comparison, and it needs either the edit history above or a run of
-      <code>scripts/ab_context.py</code>, which has never been run.</p>
+      <p class="mut">Coverage above is the narrow answer: more of what we
+      assert can be traced to something you approved. It does not prove the
+      drafts READ better — an output can be fully grounded and dull. Neither
+      do catches and repairs, which show only that the layer is doing
+      something a model alone would not. That comparison needs either the edit
+      history above or a run of <code>scripts/ab_context.py</code>, which has
+      never been run.</p>
+
     </details>
 
     <details class="conns"><summary>What runs were missing</summary>
@@ -9471,6 +9497,81 @@ def _sentence_html(sent: dict, uses: dict, tenant: str, vocab: set) -> str:
                 "mentioned: " + _esc(", ".join(off)))
     return (f'<div class="gr no"><span>{txt}</span>'
             f'<span class="when">{tag}</span></div>')
+
+
+def _grounding_trend(tenant: str, days: int) -> str:
+    """Is more of what we assert traceable to something the owner approved?
+
+    Owner, 2026-08-29: *"This will help us understand if output is improving
+    as we continue building the knowledge-base if the score improves on
+    average as we create more assets."* This is that number, and it lands
+    inside the one section on this page that had been saying, since it was
+    built, that the question could not be answered here. `claim_trace.trend`
+    existed for a day with no reader — a unit with no piping, which is the
+    exact backlog the owner made me COMPUTE rather than survey. Closing my own
+    instance of it.
+
+    It is narrower than "better" and it says so. Coverage does not measure
+    whether a draft is worth reading — an article can be fully grounded and
+    dull. It measures whether what the draft ASSERTS can be traced to a claim,
+    which is what the knowledge base is for, so it is the thing that should
+    move as the knowledge base fills.
+
+    Three states on the direction, and the third carries the weight: under
+    `MIN_FOR_DIRECTION` outputs a side, no arrow is drawn at all. The average
+    still renders, because "these three averaged 40%" is a fact.
+    """
+    from . import claim_trace
+    rows = claim_trace.trend(tenant, days)
+    if not rows:
+        return ('<p class="mut">Nothing in this window asserted anything '
+                'checkable, so there is no coverage to average. That is not a '
+                'score of zero &mdash; an output that states no fact needs no '
+                'claim, and is not counted here at all.</p>')
+
+    body = []
+    for r in rows:
+        # `max(4, v)` so a 0% run is still a visible floor rather than a gap
+        # in the row that reads as missing data.
+        spark = "".join(f'<i style="height:{max(4, v)}%" title="{v}%"></i>'
+                        for v in r["series"])
+        moved = r["moved"]
+        if moved is None:
+            arrow = (f'<span class="mut">too few to say &mdash; needs '
+                     f'{claim_trace.MIN_FOR_DIRECTION} each side</span>')
+        elif moved > 0:
+            arrow = (f'<span style="color:var(--ok)">+{moved} pts</span> '
+                     f'<span class="mut">{r["was"]}% &rarr; {r["now"]}%</span>')
+        elif moved < 0:
+            arrow = (f'<span style="color:var(--err)">{moved} pts</span> '
+                     f'<span class="mut">{r["was"]}% &rarr; {r["now"]}%</span>')
+        else:
+            arrow = '<span class="mut">flat</span>'
+        body.append(f'<tr><td>{_esc(r["system"])}</td>'
+                    f'<td class="num">{r["outputs"]}</td>'
+                    f'<td class="num">{r["average"]}%</td>'
+                    f'<td>{arrow}</td>'
+                    f'<td><span class="spark">{spark}</span></td></tr>')
+
+    # Pooling this one across accounts is misleading in a way pooling CATCHES
+    # is not: a catch is a catch whoever it happened to, but coverage tracks
+    # the size of the knowledge base as much as the drafter.
+    pooled = ('<p class="mut">Pooled across accounts, this mixes knowledge '
+              'bases of very different sizes &mdash; an account with forty '
+              'claims can ground a page an account with four cannot. Pick a '
+              'client for a number that means one thing.</p>'
+              if not tenant else "")
+
+    return (pooled + '<div class="tblwrap"><table class="tbl">'
+            '<tr><th>system</th><th class="num">outputs</th>'
+            '<th class="num">average</th><th>direction</th>'
+            '<th>each output, oldest first</th></tr>'
+            + "".join(body) + '</table></div>'
+            '<p class="mut">Measured over the sentences that ASSERT something, '
+            'and stored at the moment each output was written. Recomputing it '
+            'against today&#39;s knowledge base would re-score an old article '
+            'against claims approved since, and flatten this trend every time '
+            'you approve one.</p>')
 
 
 def _grounding_card(tenant: str, art) -> str:

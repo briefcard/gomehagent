@@ -59,6 +59,15 @@ MIN_SHARED = 2
 #: sentence brushing past a short claim is not carrying it.
 CLAIM_COVERAGE = 0.5
 
+#: Outputs needed on EACH side of a window before `trend` will say which way
+#: grounding moved. The assurance page's own rule, applied to the number most
+#: likely to be quoted at somebody: a dashboard that leads with a rate
+#: computed from four events teaches people to believe rates computed from
+#: four events. Under this, `moved` is None — the average still renders,
+#: because "these three averaged 40%" is a fact, while a direction drawn from
+#: one output against two is noise wearing an arrow.
+MIN_FOR_DIRECTION = 4
+
 #: A CLAIM WITH A NUMBER IN IT IS ABOUT THAT NUMBER. Caught on the first real
 #: article this was run against: "Each serving contains 1000mg of omega-3
 #: fatty acids" was credited as the support for "Omega-3 fatty acids are
@@ -348,11 +357,18 @@ def trend(tenant: str = "", days: int = 90) -> list:
         vals = [p for _w, p in pairs]
         half = max(1, len(vals) // 2)
         earlier, later = vals[:half], vals[half:] or vals[:half]
+        was = round(sum(earlier) / len(earlier))
+        now = round(sum(later) / len(later))
+        # `moved` is None, not 0, when the window is too thin to say — the
+        # same three-state shape `coverage_pct` uses for "asserted nothing".
+        # Zero would read as "no change", which is a finding; this is the
+        # absence of one.
+        enough = min(len(earlier), len(later)) >= MIN_FOR_DIRECTION
         out.append({
             "system": key, "outputs": len(vals),
             "average": round(sum(vals) / len(vals)),
-            "was": round(sum(earlier) / len(earlier)),
-            "now": round(sum(later) / len(later)),
+            "was": was, "now": now,
+            "moved": (now - was) if enough else None,
             # The sparkline in the mockup: one point per output, oldest first.
             "series": vals[-24:],
         })
