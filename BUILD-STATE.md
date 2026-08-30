@@ -16,7 +16,7 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** everything below is pushed and deployed at `817eeff` (149 routes, skills:5), confirmed serving on /health — the segment-upkeep batch included (draft-to-segment binding, the remembered-id map, the Segments card, the Monday sweep, full Omnisend paging, and the absent-count fix whose first cut this file claimed before the diff contained it; the pin now rides the real path). That includes the full system-workflows build (phases 1–3 plus segment upkeep). Still dormant in production: no plan-capable system is live anywhere, so the planner runs for nobody — it starts the day `campaign_email` goes live for an account (the owner's recorded steps: segments apply, deriver on Eien, go-live), and from that day the queue fills, the tick consumes, and Omnisend drafts land with no further code. Watch the first live round-trip. That includes the tenant-boundary + webhook-hardening batch, the read-only `/admin/esp_probe`, the campaign engine (`esp.py`, `email_render.py`, `segments.py`, the `campaign_email` skill — DEPLOYED BUT DORMANT: registered, not wired to any route or agent tool yet), and the BRAND-THEME deriver with its review surface as the console's own Brand tab (`brand_theme.py`, `/admin/ui?tab=brand` — live and usable; the campaign skill reads the approved theme). A docs-only commit may sit above this — `/health` is the authority, and this line is the last CODE commit watched onto the service.
+**Live:** `ea420b7`, confirmed on `/health` (which reports the commit — use it, never infer what is running). 128 suites green, 281 sabotage anchors, 3 known-stale carried. See the section directly below for what the last two threads added; the dated sections further down are HISTORY and were not rewritten by this pass.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 
@@ -24,6 +24,56 @@ never for state.
 The first live Omnisend round-trip landed, real plans have run, and the owner
 has pressed Run-now on a real campaign. The "DEPLOYED BUT DORMANT" phrasing is
 stale text this file's own header warns about; the pipeline is live for Eien.
+
+## Where the build is now (2026-08-30, `ea420b7`, live)
+
+**The creative seam is finished and wired.** It was the biggest hole: a
+`/creative` endpoint that returned a PNG to a terminal and filed nothing, and
+three systems each about to grow their own rule for choosing a picture.
+
+- `creative.pick` — ONE ladder for the email hero, the article image and the
+  ad frame. Product-led: proven → photograph → brand-wide. Topic-led: proven →
+  about-the-subject → **nothing** (an exclusion, not a ranking). It never
+  generates; it selects or hands back the brief.
+- `creative.batch` — the ad carousel. angle × lever × moment × framing, walked
+  with mixed-radix carry. `product_led`/`detail` composite the client's REAL
+  photograph onto a generated scene via `compose.product_on_scene`; with no
+  photograph those framings are dropped and SAID. See SYSTEMS-REFERENCE §2b.
+- The review surface — a set is one card with every frame, per-frame keep and
+  reject-the-set, and the set leaves the flat crawler queue.
+- `hosting.py` — ours → editable on Canva → the client's own CMS. Stage is
+  DERIVED. Approval hands the picture over and drops our bytes; a refusal
+  keeps it and says which of the three reasons applies.
+- `needs_art_direction` is consumed: the variant board's amber chip is now a
+  **Make frames** button reading the output ROW.
+
+**What this closed, structurally.** `compose.product_on_scene`,
+`canva.editable_from_image`, `canva.harvest` and `kb.proven_assets` all
+existed and had no caller from a review path. The recurring diagnosis this
+codebase keeps writing down — *a rich declaration exists and the new code
+reads one field of it* — was the whole shape of the gap.
+
+**What is still blocked, and on whom.**
+
+1. **Canva has never met the live API.** `scripts/verify_canva.py <tenant>
+   [--design]` against the live `DATABASE_URL` is the check; it needs the
+   owner because it makes real calls in a real workspace. Until it runs, step
+   4 of RUNBOOK §7b is unproven.
+2. **Shopify hosting needs `write_files`.** Files has no REST route and the
+   GraphQL one is outside the nine scopes every store granted before
+   2026-08-30. The scope is now requested and Connections says "not granted"
+   on the stores that lack it; each needs ONE re-connect. WordPress needs
+   nothing.
+3. **Nothing has hosted a real picture yet.** Both backends are covered
+   offline; neither has met a live media library.
+
+**Owner decisions still open** (raised, not yet answered): `off_catalogue`'s
+rejection hole — naming something in an objection to reject it makes it
+"known" for ever, and a "we don't carry this" set is a KB schema decision;
+`is_assertion` misses spelled numbers ("dissolves in under twenty minutes" is
+invisible), which is a noise trade-off; guidance never expires though claims
+do; and GBP is still blocked on which listings are controlled.
+
 
 ## Strategy — the reader, the planner, and the result (2026-08-24, UNCOMMITTED)
 

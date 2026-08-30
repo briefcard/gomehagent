@@ -1,6 +1,6 @@
 # Systems Reference
 
-Derived from the code at `b67533b` (2026-08-27) — `systems.CATALOG`,
+Derived from the code at `ea420b7` (2026-08-30) — `systems.CATALOG`,
 `skill.REGISTRY`, `planner.PLANNERS`, a schema walk, and a route dump — not
 from memory or older documents. Every claim carries a file anchor so its own
 staleness is checkable. Written for whoever designs surfaces over this
@@ -118,16 +118,108 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
 
 ### ad_creative
 - Requires ads OR commerce. Skill `ad_copy` (entity_key*, audience_key*,
-  variants 1–5) — copy only, every variant flagged needs_art_direction;
-  degrades to a composed placeholder with `basis` saying so. Reachable via
-  skill_run/agent only (no planner, tick declares it but plans are filed by
-  hand). Natural next input: keyword intent/volume (join exists, unconsumed).
+  variants 1–5). Degrades to a composed placeholder with `basis` saying so.
+  Reachable via skill_run/agent only (no planner; the tick declares it but
+  plans are filed by hand). Natural next input: keyword intent/volume (join
+  exists, unconsumed).
+- **`needs_art_direction` is now CONSUMED** (2026-08-30). Every variant has
+  carried the flag since the drafter was written and the variant board drew
+  it as an amber chip — a need stated beside no way to meet it. The board now
+  carries **Make frames** (8/16/24) per variant → `POST /admin/ad_frames` →
+  `creative.batch` off the request. It reads the OUTPUT ROW, not the board
+  JSON, so frames are generated against the same positioning, audience and
+  claim that `results` later attributes performance to.
 
 ### reorder_engine & reports
 - Declared, no generator yet (runs file `not_built` honestly). reorder:
   commerce+esp, cohort replenishment. reports: any of
   analytics/ads/commerce; the weekly client number, `business_model`
   decides its vocabulary (`metrics.OUTCOMES`).
+
+---
+
+## 2b. The creative seam — one ladder, one carousel, three stages
+
+Added 2026-08-29/30. Every system that needs a picture goes through the same
+two calls, and a picture's whole life is three named stages.
+
+**Choosing one: `creative.pick`** (`creative.py`). ONE ladder, three systems —
+the email hero, the article image and the ad frame were each about to grow
+their own selection rule. It never generates (generation is minutes and lands
+`proposed`); it selects, or hands back the brief and says make one elsewhere.
+
+| the piece is about | the ladder |
+|---|---|
+| a product (`entity`, or an explicit `entity_key`) | proven for that product → a photograph of it → brand-wide |
+| a topic (`situation`, `topic`, an audience) | proven about the subject → a picture about the subject → **NOTHING** |
+
+That last rung is an EXCLUSION, not a ranking. An article about knee pain with
+a photograph of a bottle is not a slightly worse article, and ordering would
+have let it through exactly when it matters — when nothing better exists.
+
+**Making many: `creative.batch`** — the ad carousel. Owner, 2026-08-30: *"each
+ad will need a carousel of images - potentially up to 20-30 variations."*
+
+- **A grid, not a loop.** angle × lever × moment × framing. `ANGLES` and
+  `VALUE_LEVERS` are `ad_craft`'s own (borrowed, never re-declared);
+  `MOMENTS` (before/during/after) and `FRAMINGS` (person_led / product_led /
+  detail / context) are properties of a photograph and live in `creative.py`.
+- **The walk carries** (mixed radix). `i % len` on every axis reads as
+  diagonal and is not: 4×4×3×4 has period TWELVE, so the "24 frames" button
+  would have produced twelve approaches twice with `identity` welded to
+  `dream_outcome` for ever. See DEFECTS §2.88.
+- **The framing decides the ROUTE.** `imagegen.plate` appends "scenery only,
+  nothing that could be the wrong product", because a generated pitcher is not
+  this client's pitcher. So `product_led`/`detail` generate the SCENE and
+  composite the client's real photograph via `compose.product_on_scene` —
+  which had been able to do this since it was written and had never had a
+  caller. With no photograph those framings are **dropped and said** in
+  `held_back`, never swapped for a generated stand-in.
+- **Cost:** N prompts × `PER_PROMPT` (2) images. `plates=12` → 24 frames in 12
+  calls, about a dollar. Thirty separate generations would be $1.50, a quarter
+  of an hour, and thirty photographs of the same table.
+- **A repeat is not a variation.** `media.put` is content-addressed and
+  `add_asset` dedupes on URL, so identical frames would fold into one row
+  answering to two cells. Counted as `repeats` and said in the note.
+
+**Reviewing them: one card, every frame** (`admin_ui._batch_cards`, Review ·
+Pictures). Owner: *"I'd like to see everyone and then we can reject the ones
+we dont like or the whole batch."* Each frame shows the angle/framing it was
+generated along and `creative.assess`'s own read — **advice, never a filter**
+(the same conclusion `imagegen.similarity` reached: a measurement that can
+veto will veto good work). Per-frame keep, **Reject the set** (which reads the
+set, not whatever boxes are ticked), and the set's frames LEAVE the flat
+crawler queue so one decision never has two buttons.
+
+**Where a picture lives: `hosting.py`** — three stages, DERIVED from the row
+by `hosting.stage()`, never stored twice.
+
+| stage | meaning |
+|---|---|
+| `ours` | our `media` blob store holds the bytes; unreviewed ones expire after 14 days |
+| `editable` | a Canva design exists (`KbAsset.canva_design_id`), so type and layout can be changed |
+| `hosted` | the client's own CMS serves it; `KbAsset.url` is THEIR url and `hosted` records where |
+
+- **Canva is on demand, per frame** (`hosting.to_canva` → the long-existing
+  `canva.editable_from_image`; the finished design returns via
+  `canva.harvest`). Thirty designs up front is twenty-eight canvases nobody
+  opens and a client folder unusable within a week.
+- **Approval hands it over** (`hosting.publish`, background label `hosting`).
+  Refuses anything unapproved — a draft in a client's media library is a draft
+  their staff will find and use. The crops travel with the frame **or nothing
+  moves**. Then our bytes go: `media.py` calls itself "a handoff, not a CDN",
+  and approved pictures were the one case where that was not true.
+- **A refusal keeps the picture.** No CMS, an upload the platform rejects —
+  the bytes stay and the row is not rewritten. `media.sweep` now separates
+  "kept because approved" from `unhosted` ("kept because nothing would take
+  it"); they shared one number, so a broken connection read as normal.
+- **Placements** (4:5, 9:16) are cut by `creative.placements` **on approval**,
+  and recorded ON the frame rather than filed as assets — a 9:16 crop as its
+  own row would be selectable by `pick` as an email hero.
+
+**Backends:** `sites.backend(profile).put_image(profile, blob, filename=, alt=)`.
+`wordpress_seo` needs nothing new (the app password already authenticates).
+`shopify_seo` needs **`write_files`** — see §4.
 
 ---
 
@@ -146,6 +238,7 @@ writer per table that matters:**
 | approvals | approvals.py | what waits on a person; kind travels into every digest card |
 | digest_acks | digest.py | what the owner has already dealt with in the briefing — fingerprinted, so a changed item comes back |
 | tool_calls | toolcalls.py | every provider round trip per account — Semrush included (one shared key, attributed) |
+| media_blobs | media.py | bytes we are holding, content-addressed; a HANDOFF, not a CDN — approved pictures leave for the client's CMS, unreviewed ones expire in 14 days |
 
 Reset groups: knowledge / operations / access (`reset.py`); every new table
 classifies in the change that adds it — `test_reset` fails the build otherwise.
@@ -174,11 +267,11 @@ unsent — frees the thread in `replies.owner`; the other two do not).
 | provider | grants | notes |
 |---|---|---|
 | google | inbox, analytics | **per-account** (owner, 2026-08-26): each tenant its own consent; alias falls back to `t.key`, never the agency. GSC needs `webmasters.readonly` — live 403 until re-consent. Env-group Google grants inbox ONLY |
-| shopify | commerce, cms | cms gated on `write_content` scope actually granted; env stores may use `{domain, client_id, client_secret}` (client_credentials grant) — a registry, not a secret |
+| shopify | commerce, cms | cms gated on `write_content` actually granted. **Hosting an approved image needs `write_files`** (Files has no REST route; the GraphQL one is outside the nine scopes every store granted before 2026-08-30) — asked for now, and Connections says "not granted: write_files" until the store re-connects once. `write_products` would work and is refused on purpose: it would put an advertisement on the storefront product page. Env stores may use `{domain, client_id, client_secret}` (client_credentials grant) — a registry, not a secret |
 | wordpress | cms | app-password; inline JSON-LD |
 | omnisend / klaviyo / constant_contact | esp | |
 | meta_ads | ads | | 
-| canva | design | agency token currently revoked — reconnect |
+| canva | design | the EDITABLE stage of a picture's life (`hosting.to_canva`). **`app/canva.py` has never met the live API** — every path says so in its own docstring. `scripts/verify_canva.py <tenant> [--design]` is the live check (which credential resolved, per-client folder created/reused/written back); it needs the live `DATABASE_URL` and is not a suite. Agency token was revoked — reconnect |
 | semrush | (global) | ONE key, all accounts, read-only — cannot pollute the Semrush account; per-account attribution via tool_calls; market per account (`analytics.semrush_db`, default us, advisory when unset) |
 
 Onboarding is product-only: `/admin/tenant_add` → `/connect/<token>` →
@@ -199,6 +292,8 @@ the WEBSITE and the only identity source — landing pages
 - correlate (nightly 20:10, after readings at 20:05) narrates rows already
   written; sweep approvals are decisions only — "executed" is claimed only
   for kinds with an executor arm
+- ad_copy's `needs_art_direction` → `creative.batch` → the pictures queue →
+  approval → `creative.placements` + `hosting.publish` (closed 2026-08-30)
 - Unconsumed joins, ready: article↔keyword recheck pass; intent/volume →
   ad briefs; cluster link obligations
 

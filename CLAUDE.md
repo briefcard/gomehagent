@@ -3,6 +3,30 @@
 This file orients any new Claude Code / Cowork session on this repo so it can
 continue the build without re-deriving context. Read it first.
 
+## Current state (2026-08-30, `ea420b7`, live)
+
+**Read `BUILD-STATE.md` §"Where the build is now" first** — it is the state of
+record and `/health` is the authority on what is deployed. `SYSTEMS-REFERENCE.md`
+is the per-system spec and the right doc for any console or per-system work;
+`RUNBOOK.md` §7b is the operational loop for ad creative.
+
+The creative seam is finished: `creative.pick` (one ladder, three systems),
+`creative.batch` (the ad carousel), the batch review surface, and `hosting.py`
+(a picture's three stages: ours → editable on Canva → the client's own CMS).
+Blocked on the owner: the live Canva check (`scripts/verify_canva.py`), and one
+re-connect per Shopify store to grant `write_files`.
+
+STANDING RULES, unchanged and load-bearing: every push goes through
+`scripts/ship.sh`; every fix ships with its sabotage guard; every console fact
+ships with its control. Two more earned since:
+
+- **Turn the claim into a check.** A claim about EVERY instance must be
+  computed from the source (an AST walk, a schema walk), never surveyed.
+- **Read the data layer first.** Every build starts by naming what SEO /
+  claims / objections / situations / audiences contribute, WHICH generator
+  receives it, and WHICH gate enforces it. A rule that reaches no validator is
+  a rule that does not exist.
+
 ## Next initiative (2026-08-26)
 **`INITIATIVE-solidify.md`** — hardening after a day of found-by-owner
 defects. §1 is the error accounting, §2 the audited facts (five-agent audit,
@@ -96,6 +120,23 @@ forwarded files). Built on the Claude API. State in Postgres.
   client (overview, top keywords, competitors, keyword/related/questions metrics,
   opportunity finder) + the snapshot/progress self-analysis loop + the Shopify
   propose_* implementation tools + dispatch.
+- `creative.py` — the ONE picture ladder (`pick`), the image brief
+  (`brief_for`), the self-assessment (`assess`), single generation
+  (`generate`), the ad carousel (`batch`, `axes`) and placement cutting
+  (`placements`). Never generates from `pick` — see SYSTEMS-REFERENCE §2b.
+- `media.py` — bytes get a URL. Content-addressed, public and unguessable (the
+  fetchers are Shopify and an ESP, neither of which holds our admin key). **A
+  handoff, not a CDN**: `sweep` drops rejected now, expires unreviewed at 14
+  days, and counts approved-but-unhosted separately.
+- `hosting.py` — where a picture LIVES: `stage()` (ours | editable | hosted,
+  derived), `to_canva()`, `publish()`, `publish_all()`. Approval gates the
+  hand-off; a refusal keeps the picture.
+- `compose.py` — real compositing (product cutout on colour or on a generated
+  plate, with a contact shadow) and `crop_placements` for re-cutting a
+  finished frame to 4:5 / 9:16.
+- `results.py` — "did it work", grouped by the data layer's OWN dimensions
+  (positioning, audience, funnel_stage, angle, entity, claim). An unmeasured
+  row is never averaged as a zero.
 - `sites.py` — **multi-client/multi-platform layer for the SEO role**: site
   profiles (primary from SEO_* + `SEO_SITES_JSON`), `backend()` resolver
   (shopify_seo | wordpress_seo), shared structured-snippet builders (faq_html /

@@ -3062,3 +3062,85 @@ Worth stating as the general rule: **the within-artifact contract stops one
 email contradicting itself; only the data layer can stop two emails
 contradicting each other.** An aesthetic that lives in one text field cannot be
 scoped, and anything that cannot be scoped will eventually be generalised.
+
+### 2.88 A "diagonal" walk with a period of twelve — 2026-08-30
+
+`creative.axes` builds the grid an ad carousel varies along: angle × lever ×
+moment × framing. The first cut indexed each axis with `i % len(axis)` and the
+comment above it said "walked diagonally rather than nested, so the first four
+entries differ on EVERY axis instead of sharing an angle."
+
+The first four do. The next twenty do not. With four angles, four levers,
+three moments and four framings, `i % len` on every axis has period
+**LCM(4,4,3,4) = 12** — so the "24 frames" button on the variant board would
+have produced twelve approaches generated twice, and `identity` would have
+been welded to `dream_outcome` in every set for ever. The one thing the grid
+existed to prevent — "thirty variations" that are four ideas and twenty-six
+restatements — is what it would have produced, while reading as though it did
+the opposite.
+
+Found by a test asserting thirty distinct combinations in thirty cells. It was
+not found by reading the code, and the misleading comment is why: the claim in
+the comment was true of the sample anybody would check by eye.
+
+**Fixed** with mixed-radix carry (`lever` takes `i // la`, `moment` takes
+`i // (la*ll)`, and so on), plus `+ i` on every digit so no two consecutive
+cells differ in one axis only. Guarded by `a_set_does_not_repeat_itself`.
+
+*Pattern: a property demonstrated at the size you inspect is not a property.
+The assertion must be made at the size the product uses — the test now asserts
+at 24 because 24 is the number on the button.*
+
+### 2.89 A control inside the label it acts on — 2026-08-30
+
+Each frame in a review set is a `<label class="pic">` wrapping a checkbox and
+the image, so clicking anywhere selects the frame. "Edit in Canva" was added
+inside that label.
+
+A button inside a `<label>` activates the label too. Clicking "edit in Canva"
+would have opened Canva **and silently ticked the frame** — and the next
+"Reject selected" would then have taken it. A destructive side effect on a
+non-destructive control, invisible in the markup, and invisible to a test that
+asks whether the button is present.
+
+**Fixed** by making the control a sibling of the label (`.frame` wraps
+`<label class="pic">` + `.framebar`).
+
+Worth its own entry because of how the guard failed. The first sabotage moved
+`{edit}` back inside the label and left the empty `<div class="framebar">`
+standing after it; the test asserted `</label>` came before `framebar` and
+stayed green. The assertion had to be about the BUTTON's position, not the bar
+it usually sits in.
+
+*Pattern: assert on the thing that moves, not on the container it moved out of.*
+
+### 2.90 A scope added to a flow reached no existing connection — 2026-08-30
+
+`write_files` was added to the Shopify flow so an approved ad frame can live in
+the client's own Files. `oauth.store_oauth` writes `missing_scopes` onto the
+credential row **once, at connect time**, comparing what was granted against
+what we asked for THEN. Connections replayed that list.
+
+So the nine stores connected before 2026-08-30 had `missing_scopes: []` and
+would have kept it for ever. The console would have shown them fully
+connected, and the first anybody heard of the gap would have been an opaque
+Shopify access error on an upload, weeks later, with nothing anywhere naming
+the scope or the fix.
+
+Two things were wrong and only one was mine. The narrow one: `put_image`
+returned a bespoke `needs_scope` key that no surface rendered — caught by
+`test_control_piping`, which sweeps for warning-shaped keys computed by a
+producer and mentioned in no UI file. That key is gone; the refusal sentence
+already names both the scope and the fix.
+
+The general one: **adding a scope to a flow has to reach the console by
+itself.** `credentials._dark(row, provider)` now recomputes the dark half of a
+grant against the scopes the flow asks for TODAY, unioned with whatever was
+recorded at connect time. A credential that recorded no scopes at all (env, a
+pasted api_key) still says nothing — "we cannot tell" must never render as
+"they refused". Guarded by `a_scope_added_later_reaches_the_console`, asserted
+against the rendered Connections panel rather than the helper.
+
+*Pattern: a fact captured at one moment and replayed for ever is a fact that
+goes stale silently. If a declaration can change, the reader must recompute
+against the declaration, not against a copy taken when it was first read.*

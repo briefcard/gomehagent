@@ -530,11 +530,16 @@ Console: `/admin/ui` — Accounts, Systems, Knowledge.
 
 Read this before promising anything.
 
-**No system produces output.** The generator, validator and send path are not
-built. `systems.start_run` and `finish_run` have no callers outside their test
-script. You can install a system, complete its contract and wire every
-capability — and nothing will run it. Every run count on the Systems tab is
-structurally zero. This is the next slice.
+**~~No system produces output.~~ STALE — corrected 2026-08-30.** This
+paragraph described the state before the generator existed and was left
+standing for a week after it stopped being true, which is exactly the failure
+this file warns about elsewhere. Systems do produce output: `Context.emit` is
+the only exit, three gates run on every artifact, `campaign_email` has done
+live Omnisend round-trips for Eien, and run counts on the Systems tab are
+real. `BUILD-STATE.md` and `/health` are the authority on what is live.
+`reorder_engine` and `reports` are still declared with no generator, and they
+say `not_built` honestly when run — that is the remaining truth in this
+paragraph.
 
 **Do not give a client bot access.** `user_add` exists and ops commands are
 correctly scoped (a client pinned to one account is refused another), but
@@ -581,6 +586,60 @@ not a bug.
 
 ---
 
+## 7b. Making and approving ad creative
+
+The whole loop, in the order you would actually do it.
+
+1. **Write the copy.** Run `ad_copy` for the account (skill_run, or the admin
+   agent). Every variant lands on the variant board at `/admin/work/<anchor>`
+   with an amber "needs art direction" chip.
+2. **Make the frames.** On the variant you want, choose 8 / 16 / 24 and press
+   **Make frames**. It runs off the request (an image call and a review per
+   cell — two to three minutes for eight). The page does not refresh itself;
+   the state appears under Review · Pictures as "Ad frames — running", and as
+   "failed" with the reason if it fails. It will not silently look like it is
+   still going.
+3. **Review the set.** Review · Pictures draws the set as ONE card above the
+   crawler's queue: every frame, labelled with the angle and framing it was
+   generated along, with the model's own read beside it. That read is advice —
+   a frame it disliked is still yours to keep. Per-frame **Keep**, or **Reject
+   the set** if the brief was wrong.
+4. **Optionally edit one in Canva.** "edit in Canva" per frame hands the
+   picture over with the type and layout editable; the picture itself is
+   fixed. Nothing is published. Bring the finished design back with
+   `canva.harvest`.
+5. **Keep what works.** Approving cuts the 4:5 and 9:16 placements there and
+   then, and starts the hand-off to the client's own CMS in the background.
+
+**When the hand-off does not happen**, the reason is one of three and each has
+its own fix:
+
+| what you see | why | fix |
+|---|---|---|
+| "no CMS connected" | `Tenant.domain` has no connected platform | connect a store or site at `/connect/<token>` |
+| "not granted: write_files" on Connections | the store was connected before 2026-08-30, when we started asking | re-connect that store once |
+| `media.sweep` reports `unhosted` | approved pictures nobody would take | one of the two above |
+
+Nothing is lost while any of that is true — a refusal KEEPS the picture with
+us and the row is never rewritten. `media.sweep` counts them separately from
+ordinary approvals precisely so a broken connection stops reading as normal.
+
+**Canva has never met the live API.** Every path in `app/canva.py` says so in
+its own docstring. Before relying on step 4, run the live check — it needs the
+live database and makes real calls, and prints no secrets:
+
+```bash
+DATABASE_URL='...' python3 scripts/verify_canva.py <tenant>
+DATABASE_URL='...' python3 scripts/verify_canva.py <tenant> --design
+```
+
+It answers the two questions that matter: whether a per-client folder is
+created and REUSED (never duplicated) and written back to the tenant, and
+whether a client's own Canva takes precedence over the agency's
+(`source=client` vs `source=agency`).
+
+---
+
 ## 8. Verifying a deploy
 
 ```bash
@@ -589,20 +648,27 @@ curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/seed_
 curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/tenant_scope?report_only=1"
 ```
 
-Offline suites, none of which touch the network:
+Offline suites, none of which touch the network. The hand-kept list that used
+to live here named twenty of them and went stale the moment the twenty-first
+was written — use the runner, which globs:
 
 ```bash
-python3 scripts/test_selection.py && python3 scripts/test_systems.py && \
-python3 scripts/test_kb.py && python3 scripts/test_intake.py && \
-python3 scripts/test_kb_ui.py && python3 scripts/test_tenant_scope.py && \
-python3 scripts/test_migration.py && python3 scripts/test_console_auth.py && \
-python3 scripts/test_credentials.py && \
-python3 scripts/test_tenant_isolation.py && \
-python3 scripts/test_worker_systems.py && python3 scripts/test_catalog_sync.py && \
-python3 scripts/test_compliance.py && python3 scripts/test_harvest.py && \
-python3 scripts/test_provenance.py && python3 scripts/test_extract.py && \
-python3 scripts/test_email_harvest.py && python3 scripts/test_sources.py && \
-python3 scripts/test_oauth.py && python3 scripts/test_brief.py --demo
+./scripts/test_all.sh
+```
+
+128 suites, about two minutes, run in parallel. One suite by name:
+
+```bash
+./scripts/test_all.sh hosting
+```
+
+And the guards themselves — every entry disables one guard, runs the suites
+that claim to cover it, and expects them to FAIL. `caught` is the only good
+outcome; `MISSED` means the test around it is decoration and `STALE` means the
+code it patched has moved:
+
+```bash
+python3 scripts/sabotage.py
 ```
 
 Still outstanding from the tenant migration — the Postgres constraint regrade
