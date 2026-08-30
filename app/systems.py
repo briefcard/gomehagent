@@ -131,6 +131,14 @@ CATALOG = {
                 # is behind it, so the real thing is a field.
                 dict(key="deadline", label="Real deadline or limit (optional)",
                      required=False),
+                # THE ACTUAL OFFER, worded as it will appear. Same standing as
+                # the deadline it sits beside, and for the same reason: a
+                # generator inventing a discount is the failure in this layer
+                # that costs real money, so it is a field a person fills and
+                # never a thing a model decides. Blank means there is no offer
+                # — and then the funnel brief says so rather than inviting one.
+                dict(key="offer", label="The offer, worded exactly (optional)",
+                     required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
                 # `draft_into_esp` is NOT a plan field. Producing the draft in

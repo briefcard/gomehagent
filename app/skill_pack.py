@@ -729,11 +729,10 @@ def _run_ad_copy(ctx: Context) -> dict:
              "until those land, art direction is a human's job.")
 
     objections = ctx.bundle.get("objections") or []
-    # Onto the bundle, because `draft_ad` reads the bundle and the params live
-    # on the context. Same route `revision_notes` already takes.
-    for _k in ("offer", "deadline"):
-        if str(ctx.params.get(_k) or "").strip():
-            ctx.bundle[_k] = str(ctx.params[_k]).strip()
+    # `offer` and `deadline` are already on the bundle — `skill.run` puts every
+    # OWNER_INPUT parameter there for every skill. This used to be a private
+    # two-line hop here, which is why `campaign_email` could read a parameter
+    # it had never declared and get nothing for a fortnight.
     by_basis: dict[str, int] = {}
     degraded_note = ""
     #: The variant board's rows (3.4): what each KEPT variant is, in the
@@ -1398,7 +1397,7 @@ def _craft_review(ctx, copy: dict, blocks: list, craft: dict) -> list[dict]:
     """
     from . import email_craft
     intent = str(craft.get("intent") or "")
-    deadline = str(ctx.params.get("deadline") or "").strip()
+    deadline = str(ctx.bundle.get("deadline") or "").strip()
     return email_craft.review(
         subject=copy.get("subject", ""), preheader=copy.get("preheader", ""),
         body=_blocks_text(blocks), intent=intent,
@@ -1487,7 +1486,7 @@ def _campaign_craft(ctx, seg: dict) -> dict:
         objections=ctx.bundle.get("objections"),
         entities=ctx.bundle.get("entities"),
         audiences=ctx.bundle.get("audiences"),
-        offer=str(ctx.params.get("offer") or ""))
+        offer=str(ctx.bundle.get("offer") or ""))
     for n in plan.get("note") or []:
         ctx.note(f"funnel (thin): {n}")
     if plan.get("missing"):
@@ -1497,7 +1496,7 @@ def _campaign_craft(ctx, seg: dict) -> dict:
 
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
             "funnel": plan,
-            "deadline": str(ctx.params.get("deadline") or "").strip(),
+            "deadline": str(ctx.bundle.get("deadline") or "").strip(),
             # A redraft's marching orders — set by the workroom's
             # Request-changes path, empty on a fresh draft. Rides `craft`
             # rather than a new drafter argument so every suite's stub
@@ -3322,9 +3321,18 @@ register(Skill(
     system_key="campaign_email",
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
+    # `offer` and `deadline` are OWNER_INPUT — `skill.run` puts them on the
+    # bundle for every skill. `offer` was READ by `_campaign_craft` and never
+    # declared here, so `run` refused the parameter at the door and every
+    # bottom-of-funnel send reported an offer gap that nothing could close.
+    #
+    # `audience_key` is gone: nothing in this skill or in the runner ever read
+    # it, so a caller setting it was silently ignored. The segment already
+    # decides who is written to, and a second vocabulary for a decision
+    # already made is the defect design rule 4 exists to stop.
     params=("revision_notes",
             "segment", "goal", "subject", "intent", "deadline", "entity_key",
-            "audience_key", "utterance", "draft_visual"),
+            "offer", "utterance", "draft_visual"),
     writes=True,
     produces="draft",
     run=_run_campaign_email))

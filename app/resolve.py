@@ -315,6 +315,27 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     bundle["situations"] = situations
     bundle["objections"] = objections
 
+    # WHO IS READING, in their own words. `KbAudience` carries pains,
+    # vocabulary and buying triggers, `funnel.inputs_for` reads all three off
+    # `bundle["audiences"]` — and nothing ever put them there. Unlike claims
+    # and objections the funnel has no fallback fetch for audiences, so the
+    # value was `None` in every drafting system this platform has: the ad, the
+    # email and the article all wrote in the brand's words because the buyer's
+    # were never handed over. It failed silently, too — an absent audience is
+    # not in `thin`, so the run said nothing and the account looked like one
+    # with no audiences on file.
+    #
+    # Tier 2, beside the objections: one query, and it situates rather than
+    # deepens. `kb.audiences` already filters to approved.
+    bundle["audiences"] = ([
+        {"key": a.key, "name": a.name, "pains": list(a.pains or []),
+         "vocabulary": list(a.vocabulary or []),
+         "buying_trigger": a.buying_trigger or "",
+         "decision_timeline": a.decision_timeline or ""}
+        for a in kb.audiences(tenant)] if tier >= 2 else [])
+    if tier >= 2:
+        searched.append("audiences")
+
     # Approved proof, whether or not an objection matched. A direct consumer
     # of this bundle got claims only as a by-product of objection support,
     # which meant the account with no objection on file handed over rules and
@@ -549,6 +570,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         "skipped": skipped,
         "counts": {
             "objections": len(objections),
+            "audiences": len(bundle.get("audiences") or []),
             "support_claims": len(support),
             "entities": len(entities),
             "open_commitments": len(convo.get("open_commitments", [])),

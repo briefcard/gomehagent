@@ -319,6 +319,70 @@ def main() -> int:
        "WHAT MAKES THIS BUYER ACT NOW" in _b or
        "buying_trigger" not in _p["have"])
 
+    # ...AND IT ARRIVES BY THE REAL ROUTE. The two checks above hand
+    # `audiences` straight to `inputs_for`, which proves the funnel can read
+    # an audience and NOT that any drafter is ever given one. `resolve` never
+    # wrote `bundle["audiences"]`, and `inputs_for` — unlike claims and
+    # objections — has no fallback fetch, so the live value was `None` in the
+    # ad, the email and the article alike while this section stayed green.
+    # Asserted on the BUNDLE, which is what the drafters actually read.
+    from app import resolve as _rs
+    _bundle = _rs.resolve("baci", system="campaign_email", tier=3)
+    _auds = _bundle.get("audiences") or []
+    ck("the bundle CARRIES the audience — the route the drafter reads",
+       bool(_auds) and any(a.get("vocabulary") for a in _auds),
+       f"bundle keys: {sorted(_bundle)[:12]}")
+    _live = fn.inputs_for("baci", "consideration",
+                          audiences=_bundle.get("audiences"), entities=[])
+    ck("  so the live path has the buyer's words, not just the hand-fed one",
+       "audience_vocabulary" in _live["have"], str(sorted(_live["have"])))
+
+    print("\n— the owner's own input reaches the drafter —")
+    # `offer` and `deadline` are OWNER_INPUT: a person fills them so that a
+    # generator never invents a discount or a deadline. That is defeated
+    # entirely if the field a person filled does not arrive, which is what
+    # happened to `campaign_email` — it READ `offer` and never declared it, so
+    # `run` refused the parameter and every bottom-of-funnel send reported a
+    # gap nothing could close. Asserted through `skill.run`, the surface.
+    _saw = {}
+    _real_ad = skill_pack.draft_ad
+    skill_pack.draft_ad = lambda bundle, claim, angle, objections: (
+        _saw.update(offer=bundle.get("offer"),
+                    deadline=bundle.get("deadline"),
+                    audiences=bundle.get("audiences")) or ("Plate.", "model"))
+    skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1,
+              offer="15% off through Sunday", deadline="Sunday 11pm")
+    skill_pack.draft_ad = _real_ad
+    ck("an offer typed by the owner reaches the ad drafter",
+       _saw.get("offer") == "15% off through Sunday", str(_saw.get("offer")))
+    ck("  and so does the deadline behind any urgency",
+       _saw.get("deadline") == "Sunday 11pm", str(_saw.get("deadline")))
+    ck("  and the ad drafter is given the audience too",
+       bool(_saw.get("audiences")), str(bool(_saw.get("audiences"))))
+
+    _crow = systems.find("baci", "campaign_email") or \
+        systems.create("baci", "campaign_email")
+    with db.SessionLocal() as _s:
+        _s.get(db.System, _crow.id).status = "live"
+        _s.commit()
+    _saw2 = {}
+    _real_c = skill_pack.draft_campaign
+    skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
+        _saw2.update(offer=bundle.get("offer"),
+                     have=sorted((craft or {}).get("funnel", {}).get("have", {})))
+        or ({"subject": "S", "preheader": "p", "body_html": "<p>x</p>",
+             "claim_ids": [], "cta_label": "Shop",
+             "cta_url": "https://x/s"}, "model", ""))
+    _r = skill.run("campaign_email", "baci", segment="reorder_due",
+                   intent="offer", offer="15% off through Sunday")
+    skill_pack.draft_campaign = _real_c
+    ck("the campaign accepts an offer instead of refusing the parameter",
+       _r["status"] == "produced", str(_r.get("blocked_on")))
+    ck("  the offer reaches the email drafter",
+       _saw2.get("offer") == "15% off through Sunday", str(_saw2.get("offer")))
+    ck("  and the bottom-of-funnel brief stops reporting a gap it cannot close",
+       "offer" in (_saw2.get("have") or []), str(_saw2.get("have")))
+
     print("\n— search phrases are scoped to the reader —")
     from app import keywords as _kw
     _kw.upsert("baci", "what is melamine", volume=100)

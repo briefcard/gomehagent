@@ -87,6 +87,14 @@ class Skill:
     run: Callable = None            # (Context) -> dict
 
 
+#: Parameters that are the OWNER'S INSTRUCTION for this run rather than
+#: knowledge, and that the drafters therefore read off the bundle. A generator
+#: inventing a discount or a deadline is the one failure in this layer that
+#: costs real money, so both are fields a person fills, never things a model
+#: decides — and the whole point is defeated if the field a person filled does
+#: not arrive. See the hop in `run`.
+OWNER_INPUT = ("offer", "deadline")
+
 REGISTRY: dict[str, Skill] = {}
 
 _PACK_LOADED = False
@@ -784,6 +792,23 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
                         utterance=str(params.get("utterance") or ""),
                         contact_id=str(params.get("contact_id") or ""),
                         entity_key=str(params.get("entity_key") or ""))
+
+    # OWNER INPUT, ONTO THE BUNDLE — one route, here, for every skill.
+    #
+    # `resolve` builds the bundle from the DATA LAYER; these are this run's
+    # instruction, and the drafters read the bundle. `ad_copy` grew a private
+    # two-line hop for exactly this while `campaign_email` read the params
+    # directly and never declared the parameter, so the same fact arrived by
+    # two routes, one of which was a dead end, and a third skill would have
+    # invented a fourth. Doing it once here is what stops that.
+    #
+    # Only what the skill DECLARES, so this can never smuggle in a parameter
+    # `run` would otherwise have refused, and only non-blank values, so an
+    # absent offer stays absent rather than becoming an empty string that
+    # reads as "there is one".
+    for _k in OWNER_INPUT:
+        if _k in sk.params and str(params.get(_k) or "").strip():
+            bundle[_k] = str(params[_k]).strip()
 
     coverage = bundle.get("coverage") or {}
 

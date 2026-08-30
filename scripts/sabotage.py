@@ -844,6 +844,31 @@ SABOTAGES = [
                "silently, exactly the production incident of 2026-08-21",
     },
     {
+        "name": "the_buyers_own_words_reach_the_drafter",
+        "file": "app/resolve.py",
+        "find": '    bundle["audiences"] = ([',
+        "replace": '    bundle["audiences"] = []; _unused = ([  # SABOTAGE',
+        "suites": ["test_funnel.py"],
+        "why": "no drafter is ever given the audience — the ad, the email and "
+               "the article all write in the brand's words because the "
+               "buyer's pains, vocabulary and buying triggers never reach "
+               "them. It fails SILENTLY: `inputs_for` has no fallback fetch "
+               "for audiences, so the value is None and nothing reports a gap",
+    },
+    {
+        "name": "owner_input_reaches_the_bundle",
+        "file": "app/skill.py",
+        "find": ('        if _k in sk.params and str(params.get(_k) or "").strip():\n'
+                 '            bundle[_k] = str(params[_k]).strip()'),
+        "replace": ('        if False:  # SABOTAGE\n'
+                    '            bundle[_k] = str(params[_k]).strip()'),
+        "suites": ["test_funnel.py"],
+        "why": "the offer and the deadline a PERSON typed never reach the "
+               "drafter, which is the whole reason they are fields rather "
+               "than things a model decides — so the copy is written with no "
+               "offer in it, or the drafter is left free to invent one",
+    },
+    {
         "name": "a_lost_draft_files_its_gap",
         "file": "app/skill.py",
         "find": '                        [{"basis": "unknown", "key": entity_key,',
