@@ -3723,7 +3723,8 @@ def _meta_description(keyword: str, body_html: str) -> str:
 
 
 def _run_blog_article(ctx: Context) -> dict:
-    from . import creative, keywords as kw_mod, seo_tools, sites, tenants
+    from . import (coherence, creative, keywords as kw_mod, seo_tools,
+                   sites, tenants)
 
     keyword = str(ctx.params.get("keyword") or "").strip()
     if not keyword:
@@ -3886,13 +3887,29 @@ def _run_blog_article(ctx: Context) -> dict:
     # and files nothing — so there is no generated asset for anything to
     # attach yet. Named here rather than left implicit because the absence is
     # the interesting part.
-    _hero = creative.hero_for_campaign(
-        ctx.tenant, entity_keys=[entity_key] if entity_key else [], title=title)
-    _hero_id = str(_hero.get("asset_id") or "") if _hero.get("image") else ""
-    if not _hero_id:
-        ctx.note("no approved image fits this article, so it will publish "
-                 "without one — " + str(_hero.get("why") or "nothing on the "
-                 "shelf matched"))
+    # THE SHARED LADDER, not this system's own rule. `hero_for_campaign` was
+    # written for a campaign and orders by entity scope, so an article about a
+    # SITUATION — knee pain, say — fell to the brand-wide rung and took a
+    # product photograph. `creative.pick` reads what the piece is about and,
+    # on the topic side of the ladder, refuses a product shot outright rather
+    # than ranking it last: it is the wrong picture, not a lesser one.
+    _about = coherence.commit(
+        "entity" if entity_key else "topic", entity_key or kw_mod.slug(keyword),
+        label=title or keyword)
+    _hero = creative.pick(
+        ctx.tenant, commitment=_about, fmt="article_hero",
+        entity_key=entity_key, prominent=title,
+        claim=(ctx.bundle.get("claims") or [{}])[0].get("claim", ""))
+    _hero_id = str(_hero.get("asset_id") or "")
+    if _hero_id:
+        ctx.note(f"picture: {_hero['rung']} — {_hero['why']}")
+    else:
+        # NAMED AS A REQUEST, not as a shrug. This is the queue the generator
+        # drains, and a note nobody can act on was the state this replaced.
+        ctx.note(f"no picture: {_hero['why']}. A brief is ready for one about "
+                 f"“{_hero['subject']}” — generate it from the workroom, or "
+                 f"the nightly sweep will.")
+        ctx.thin.append(f"image:{_hero['subject'] or 'no subject declared'}")
 
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",

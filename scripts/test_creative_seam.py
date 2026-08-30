@@ -146,6 +146,66 @@ def main() -> int:
        {"prompt", "subject", "criteria", "shape", "fmt"} <= set(brief),
        "parsing the subject back out of English is not a foundation")
 
+    print("\n— one ladder, and the topic side refuses a product shot —")
+    def _approve(t, url, title, entity="", subject=""):
+        kb.add_asset(t, url, rights="owned", title=title, kind="image",
+                     entity_key=entity, subject=subject)
+        r = next(a for a in kb.assets(t, publishable_only=False)
+                 if (a.url or "") == url)
+        kb.review_asset(r.id, approve=True, by="test", rights="owned")
+        return r.id
+
+    _prod = _approve("eien", "https://x/softgel.png", "Omega-3 softgel",
+                     entity="omega-3")
+    # A BRAND-WIDE shot with no entity key — the realistic lifestyle photo
+    # every account has. Without one in the pool the exclusion below could not
+    # be tested: there was nothing for the ladder to wrongly fall back TO, and
+    # sabotage said so.
+    _wide = _approve("eien", "https://x/lifestyle.png", "Brand lifestyle shot")
+    _got = creative.pick("eien", commitment=knee, fmt="article_hero")
+    ck("a topic-led piece will NOT take a product photograph",
+       _got["should_generate"] and _got["asset_id"] == "",
+       "an article about knee pain with a photograph of a bottle is not a "
+       "slightly worse article — ordering would let it through exactly when "
+       "it matters, which is when nothing better exists")
+    ck("…and says a product shot is the WRONG picture, not a lesser one",
+       "wrong picture" in _got["why"])
+    ck("…and hands back the brief to make the right one",
+       _got["brief"]["subject"] == "knee pain that flares after sitting")
+
+    _knee = _approve("eien", "https://x/knee.png", "Knee pain after sitting",
+                     subject="knee pain that flares after sitting")
+    _got2 = creative.pick("eien", commitment=knee, fmt="article_hero")
+    ck("once an on-subject picture exists it is taken",
+       _got2["asset_id"] == _knee and _got2["rung"] == "about_the_subject")
+
+    _ent = coherence.commit("entity", "omega-3", label="Omega-3 softgel")
+    _got3 = creative.pick("eien", commitment=_ent, entity_key="omega-3",
+                          fmt="ad_frame")
+    ck("a product-led piece takes the real photograph of the product",
+       _got3["asset_id"] == _prod and _got3["rung"] == "photograph",
+       "a real photograph beats anything generated")
+
+    # COMPUTED FROM THE SOURCE, not from a docstring. The claim is about the
+    # DRAFTING RUN, and reading `pick.__doc__` proved nothing about it —
+    # sabotage put a `generate` call straight into the blog skill and the
+    # suite stayed green.
+    import ast as _ast
+    _sp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "app", "skill_pack.py")
+    _src = open(_sp).read()
+    _tree = _ast.parse(_src)
+    _blog = next(f for f in _ast.walk(_tree)
+                 if isinstance(f, _ast.FunctionDef) and f.name == "_run_blog_article")
+    _body = _ast.get_source_segment(_src, _blog) or ""
+    ck("the drafting run selects and never generates",
+       "creative.pick(" in _body and "creative.generate(" not in _body,
+       "generation is three minutes and about two thousand text calls, and "
+       "lands `proposed` — a draft that did it inline would block to produce "
+       "something it is not allowed to attach")
+    ck("…and asks, when nothing fits",
+       _got["should_generate"] is True)
+
     print("\n— the seam: generation files a PROPOSED asset —")
     real_plate = imagegen.plate
     try:

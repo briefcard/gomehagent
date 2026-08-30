@@ -405,6 +405,126 @@ def assess(blob: bytes, brief: dict, tenant: str = "") -> dict:
             "fix": str(data.get("fix") or ""), "why": ""}
 
 
+#: Commitment kinds whose artifact is ABOUT A THING in the catalogue. The
+#: ladder is different on either side of this line, and not by ranking — a
+#: product photograph on a topic-led piece is not a worse choice, it is the
+#: wrong picture, which is the whole of the knee-pain complaint.
+PRODUCT_LED = ("entity",)
+
+
+def _tokens(text: str) -> set:
+    from . import provenance as prov
+    return {w for w in prov.normalise(text).split() if len(w) > 3}
+
+
+def _about(asset, subject: str) -> bool:
+    """Is this picture about that subject? Token overlap, deliberately loose.
+
+    Generated assets carry the subject they were made for; crawled ones carry
+    an entity or nothing. Exact matching would find almost nothing, and the
+    cost of a loose match here is one picture a person rejects — against a
+    ladder that never finds anything and generates every time.
+    """
+    want = _tokens(subject)
+    if not want:
+        return False
+    have = _tokens(f"{asset.subject or ''} {asset.title or ''}")
+    return len(want & have) >= min(2, len(want))
+
+
+def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero",
+         entity_key: str = "", audience_key: str = "", claim: str = "",
+         prominent: str = "", positioning: str = "", channel: str = "") -> dict:
+    """The best picture this account already has for this piece, or the brief
+    to make one.
+
+    ONE LADDER, THREE SYSTEMS. The email hero, the article image and the ad
+    frame were each going to grow their own selection rule, and three rules
+    for one question is how the answer starts depending on which page you are
+    on.
+
+    IT DOES NOT GENERATE, and that is the load-bearing decision. Generation
+    takes up to three minutes, costs about two thousand text calls, and lands
+    `proposed` — so a draft that generated inline would block for minutes to
+    produce something that draft is not allowed to attach. `pick` is cheap and
+    synchronous: it selects, or it hands back the brief and says generate this
+    somewhere else.
+
+    THE RUNGS, and which ladder is used depends on what the piece is about:
+
+      product-led   proven for that product · a photograph of it · brand-wide
+      topic-led     proven about the subject · a picture about the subject
+                    · NEVER a product shot
+
+    That last one is an exclusion rather than a ranking. An article about knee
+    pain with a photograph of a bottle is not a slightly worse article, and
+    ordering would have let it through the moment nothing better existed —
+    which is exactly when it matters.
+    """
+    from . import kb as kbmod
+    kind = str((commitment or {}).get("kind") or "")
+    ent = entity_key or str((commitment or {}).get("key") or "")
+    product_led = bool(entity_key) or kind in PRODUCT_LED
+    brief = brief_for(tenant, commitment=commitment, fmt=fmt,
+                      prominent=prominent, entity_key=ent if product_led else "",
+                      claim=claim, audience_key=audience_key,
+                      positioning=positioning)
+    subject = brief["subject"]
+
+    def _out(row, rung, why):
+        return {"ok": True, "asset_id": row.id, "url": row.url or "",
+                "rung": rung, "why": why, "should_generate": False,
+                "brief": brief, "subject": subject}
+
+    try:
+        pool = list(kbmod.assets(tenant, publishable_only=True))
+    except Exception:                                            # noqa: BLE001
+        pool = []
+    heroes = [r for r in pool
+              if (r.subject or "") != kbmod.LOGO and (r.url or "")]
+    try:
+        proven = [r for r in kbmod.proven_assets(tenant, channel=channel,
+                                                 metric="ctr" if channel else "")
+                  if (r.url or "")]
+    except Exception:                                            # noqa: BLE001
+        proven = []
+
+    if product_led:
+        for r in proven:
+            if (r.entity_key or "") == ent and ent:
+                return _out(r, "proven", "it has carried this product before "
+                                         "and the result was recorded")
+        for r in heroes:
+            if (r.entity_key or "") == ent and ent:
+                return _out(r, "photograph",
+                            "a real photograph of the thing being sold, which "
+                            "beats anything generated")
+        for r in heroes:
+            if not (r.entity_key or ""):
+                return _out(r, "brand_wide",
+                            "no photograph of this product, so a brand-wide "
+                            "one — weaker, and worth replacing")
+    else:
+        for r in proven:
+            if _about(r, subject):
+                return _out(r, "proven", "it has carried this subject before")
+        for r in heroes:
+            if _about(r, subject):
+                return _out(r, "about_the_subject",
+                            "an approved picture about what this piece is "
+                            "about")
+        # AND NOTHING ELSE. The brand-wide rung does not exist on this side of
+        # the ladder: brand-wide, for an account that sells things, means a
+        # product shot.
+
+    return {"ok": False, "asset_id": "", "url": "", "rung": "none",
+            "why": ("nothing approved fits this piece" + (
+                "" if product_led else
+                " — and a product photograph would be the wrong picture, not "
+                "a lesser one")),
+            "should_generate": True, "brief": brief, "subject": subject}
+
+
 def _render(tenant: str, text: str, shape: str, source: bytes) -> tuple:
     """One image, using the product's own pixels when there are any to protect."""
     from . import imagegen
