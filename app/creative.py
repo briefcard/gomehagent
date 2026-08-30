@@ -147,30 +147,105 @@ GENERATED_RIGHTS = "owned"
 GENERATED_ORIGIN = "generated"
 
 
-def brief_for(tenant: str, *, entity_key: str = "", claim: str = "",
-              situation: str = "", audience_key: str = "") -> dict:
-    """The prompt, built from what this account knows.
+#: WHAT THE PICTURE IS FOR, per format. Not sizes — jobs.
+#:
+#: Owner, 2026-08-29: *"if it's an email about knee pain - it should probably
+#: have something to do with that … For Ads this is ESPECIALLY important.
+#: Every ad we generate will live or die by its creative."* The first version
+#: of this brief built one prompt from the account's standing knowledge, so an
+#: Eien email about knee pain would have produced a photograph of a softgel:
+#: on-brand, and about nothing the reader opened the email for.
+#:
+#: The three do different work and a prompt that does not say so gets the
+#: average of the three, which is a stock photograph.
+FORMATS = {
+    "email_hero": dict(
+        shape="landscape",
+        job="An invitation. The reader has just opened this; the picture has "
+            "to make the subject feel like theirs before they read a word. "
+            "Show the PERSON'S SITUATION rather than the product — a product "
+            "shot at the top of an email is a catalogue page, and it is "
+            "skipped.",
+        extra=("on_subject", "audience_fit")),
+    "article_hero": dict(
+        shape="landscape",
+        job="An editorial illustration of what the article is about. It sits "
+            "under a headline in a search result and on a blog index, so it "
+            "must read as journalism rather than as an advertisement. No "
+            "packshot, no staged selling.",
+        extra=("on_subject",)),
+    "ad_frame": dict(
+        shape="square",
+        job="AN ARGUMENT, not a decoration. It has to stop a thumb and land "
+            "one idea before anybody reads the copy beside it. It must argue "
+            "the SAME idea the copy argues — a frame that says something else "
+            "splits the ad in two and neither half lands.",
+        extra=("on_subject", "audience_fit", "stops_the_scroll",
+               "lands_the_positioning")),
+}
 
-    Owner's standing rule: every build starts by asking what the data layer
-    contributes. For an image the answer is unusually direct — a typed prompt
-    produces the interchangeable stock look the owner has been complaining
-    about since the first email, and each of these is a fact nobody has to
-    invent:
+#: What the finished image is checked against. The spine holds for every
+#: format; `FORMATS[...]["extra"]` adds what that format lives or dies by.
+#:
+#: `no_text` is here because it is the commonest practical failure of an image
+#: model and the one a person notices last — words baked into a picture cannot
+#: be edited, translated or corrected, and they survive into every placement.
+CRITERIA = {
+    "on_subject": "Does the picture depict what this piece is ABOUT? "
+                  "Not the brand, not the product for its own sake — the "
+                  "subject named below.",
+    "claim_safe": "Does it show anything that would contradict, or imply "
+                  "more than, the claim quoted below?",
+    "no_text": "Is there any text, lettering, watermark or logo in the "
+               "image? Any at all counts as a failure.",
+    "audience_fit": "Would the audience described below recognise "
+                    "themselves, or the moment they are in?",
+    "craft": "Does it look like a photograph somebody was paid to take, or "
+             "like generic stock?",
+    "stops_the_scroll": "In one glance and at thumbnail size, is there a "
+                        "reason to stop?",
+    "lands_the_positioning": "Does it argue the specific idea below, rather "
+                             "than being pleasant and unrelated?",
+}
 
-      the ENTITY      what is in frame, and its own description
-      the CLAIM       what the picture must not contradict — a photograph
-                      arguing something the copy cannot say is worse than no
-                      photograph
-      the SITUATION   the setting, in the account's own words
-      the BRAND THEME the palette, so the frame belongs to this brand rather
-                      than to whatever the model finds pretty this week
-      the AUDIENCE    who is meant to see themselves in it
 
-    Returns `{prompt, palette, entity, thin}`. `thin` names what was missing,
-    because a brief built from three of five inputs is a weaker brief and the
-    run is the only place that can say so.
+def _subject_of(commitment: dict | None, situation: str, entity_label: str,
+                prominent: str) -> str:
+    """What this piece is ABOUT, in the words the artifact already committed to.
+
+    `coherence.commit` has carried this since it was written — its `KINDS`
+    include `topic` ("one subject a piece of content is about") and
+    `situation` ("one question or circumstance a person is in"), declared
+    BEFORE anything is selected and checked at emit. The first image brief
+    read `entity_key` and nothing else, which is one of the six kinds; for an
+    article about knee pain the commitment is a situation and there is no
+    entity at all, so the picture had nothing to be of.
+    """
+    c = commitment or {}
+    label = str(c.get("label") or "").strip()
+    if label and c.get("kind") in ("topic", "situation", "audience", "period"):
+        return label
+    for candidate in (situation, label, entity_label, prominent):
+        if str(candidate or "").strip():
+            return str(candidate).strip()
+    return ""
+
+
+def brief_for(tenant: str, *, commitment: dict | None = None,
+              fmt: str = "email_hero", prominent: str = "",
+              entity_key: str = "", claim: str = "", situation: str = "",
+              audience_key: str = "", positioning: str = "") -> dict:
+    """Everything the picture has to do, and everything it will be judged on.
+
+    STRUCTURED, not a prompt string. A video renderer needs the same subject,
+    the same constraints and the same criteria, and would otherwise have to
+    parse them back out of English — so the prompt is one field of this rather
+    than the whole of it.
+
+    Returns `{prompt, subject, criteria, palette, shape, fmt, thin}`.
     """
     from . import kb as kbmod
+    spec = FORMATS.get(fmt) or FORMATS["email_hero"]
     parts, thin = [], []
 
     ent = None
@@ -180,23 +255,53 @@ def brief_for(tenant: str, *, entity_key: str = "", claim: str = "",
                         if getattr(e, "key", "") == entity_key), None)
         except Exception:                                        # noqa: BLE001
             ent = None
+
+    subject = _subject_of(commitment, situation,
+                          getattr(ent, "name", "") if ent else "", prominent)
+    if subject:
+        parts.append(f"WHAT THIS PICTURE IS ABOUT: {subject}. Everything else "
+                     f"below is a constraint on how to show THAT.")
+    else:
+        thin.append("nothing says what this piece is about, so the picture "
+                    "can only be generically on-brand — which is the "
+                    "stock-photograph failure")
+
+    parts.append(f"WHAT IT IS FOR: {spec['job']}")
+
+    if prominent:
+        parts.append(f"It sits beside these words, and must not repeat them "
+                     f"literally: “{prominent[:160]}”")
     if ent is not None:
-        parts.append(f"The subject is {ent.name}"
-                     + (f" — {str(ent.description or '')[:200]}"
+        parts.append(f"If a product appears it is {ent.name}"
+                     + (f" — {str(ent.description or '')[:160]}"
                         if ent.description else "") + ".")
-    elif entity_key:
-        thin.append(f"no catalogue entry for {entity_key!r}, so the frame has "
-                    f"nothing to be OF")
+    if positioning:
+        parts.append(f"THE IDEA THIS MUST ARGUE: {positioning[:200]}")
+    elif fmt == "ad_frame":
+        thin.append("no positioning given, so the frame has no idea to argue "
+                    "and can only be decorative — which is how an ad dies")
 
     if claim:
-        parts.append(f"The picture must be consistent with this, which the "
-                     f"copy beside it says: “{claim[:180]}”. Show nothing "
-                     f"that would contradict it.")
+        parts.append(f"It must be consistent with this, which the copy says: "
+                     f"“{claim[:180]}”. Show nothing that would contradict it "
+                     f"or imply more than it says.")
     else:
         thin.append("no claim, so nothing constrains what the picture implies")
 
-    if situation:
-        parts.append(f"The moment is: {situation[:160]}.")
+    aud = None
+    if audience_key:
+        try:
+            aud = next((x for x in kbmod.audiences(tenant)
+                        if getattr(x, "key", "") == audience_key), None)
+        except Exception:                                        # noqa: BLE001
+            aud = None
+    if aud is not None:
+        parts.append(f"WHO IT IS FOR: {aud.name}"
+                     + (f", who care about: " + "; ".join(list(aud.pains)[:3])
+                        if (aud.pains or []) else "") + ".")
+    else:
+        thin.append("no audience, so nobody in particular is meant to see "
+                    "themselves in it")
 
     palette = []
     try:
@@ -208,60 +313,144 @@ def brief_for(tenant: str, *, entity_key: str = "", claim: str = "",
     except Exception:                                            # noqa: BLE001
         palette = []
     if palette:
-        parts.append("Use this brand palette: " + ", ".join(palette) + ".")
+        parts.append("Brand palette: " + ", ".join(palette) + ".")
     else:
         thin.append("no brand theme colours on file, so the palette is the "
                     "model's taste rather than the brand's")
 
-    if audience_key:
-        try:
-            a = next((x for x in kbmod.audiences(tenant)
-                      if getattr(x, "key", "") == audience_key), None)
-        except Exception:                                        # noqa: BLE001
-            a = None
-        if a is not None and (a.pains or []):
-            parts.append(f"It is for {a.name}, who care about: "
-                         + "; ".join(list(a.pains)[:3]) + ".")
+    parts.append("Photographic and real. NO text, lettering, watermark or "
+                 "logo of any kind. Nothing that reads as a stock photograph.")
 
-    parts.append("Photographic, natural light, no text of any kind in the "
-                 "image, no logos, nothing that reads as an advertisement.")
-    return {"prompt": " ".join(parts), "palette": palette,
-            "entity": getattr(ent, "key", ""), "thin": thin}
+    names = ("on_subject", "claim_safe", "no_text", "craft") + tuple(
+        k for k in spec["extra"] if k not in ("on_subject",))
+    return {"prompt": " ".join(parts), "subject": subject, "fmt": fmt,
+            "shape": spec["shape"], "palette": palette, "thin": thin,
+            "criteria": [{"key": k, "ask": CRITERIA[k]} for k in dict.fromkeys(names)],
+            "claim": claim, "positioning": positioning,
+            "audience": getattr(aud, "name", "") if aud else ""}
 
 
-def generate(tenant: str, *, entity_key: str = "", claim: str = "",
-             situation: str = "", audience_key: str = "",
-             shape: str = "landscape", prompt: str = "") -> dict:
-    """Make one image and FILE IT, so something can attach it.
+_ASSESS = """You are reviewing one generated image before a person is asked to
+approve it. You are not being asked whether it is pretty.
 
-    This is the seam. `imagegen` has had exactly one caller — the manual
-    endpoint that returns a PNG and files nothing — so no generated image has
-    ever become a `KbAsset` and nothing downstream could reach one. The
-    attaching machinery already exists on both the email and the article side
-    and needs no changes; it only ever needed an asset id to exist.
+WHAT IT WAS SUPPOSED TO DO
+{job}
 
-    IT PROPOSES. `review=proposed`, the same as a claim, and for the same
-    reason written larger: a generated photograph of a product asserts more
-    than a sentence about it does. We spent this week making sure a model
-    cannot author its own evidence, and a picture is evidence.
+THE SUBJECT IT MUST DEPICT: {subject}
+{claim_line}{positioning_line}{audience_line}
 
-    Uses the product's OWN pixels when the account has a photograph of it —
-    `place_product` masks them, so what comes back is the real product in a
-    generated setting rather than the model's idea of the product.
+Answer each question about the image, honestly and without flattery. A picture
+that is technically fine and about the wrong thing FAILS — that is the whole
+reason this check exists.
+
+{questions}
+
+Respond with JSON only:
+{{"verdicts": [{{"key": "<the key>", "pass": true|false,
+                "why": "<one short sentence, concrete>"}}],
+  "overall": "<one sentence: is this usable, and if not what is wrong>",
+  "fix": "<if it fails, ONE instruction that would fix it next time>"}}"""
+
+
+def assess(blob: bytes, brief: dict, tenant: str = "") -> dict:
+    """Ask a model whether the picture did the job the brief set it.
+
+    NOT A GATE, and that is on purpose — the same conclusion `imagegen`
+    already reached about `similarity`, for the same reason: a measurement
+    that can veto will veto good work, and the cost of a false refusal here is
+    a person doing by hand what the system was built to do. What it produces
+    is a verdict attached to the asset, so whoever approves it is told what to
+    look at rather than being handed a picture and a shrug.
+
+    It IS allowed to trigger one regeneration, which is the same shape as the
+    copy path's `redraft(previous, failures)` — draft, check, repair once,
+    keep the better of the two.
     """
-    from . import imagegen, kb as kbmod, media
+    if not blob:
+        return {"ok": False, "why": "nothing to assess"}
+    import base64 as _b64
+    import json as _json
 
-    brief = brief_for(tenant, entity_key=entity_key, claim=claim,
-                      situation=situation, audience_key=audience_key)
+    from . import llm
+    q = "\n".join(f"- {c['key']}: {c['ask']}" for c in brief.get("criteria") or [])
+    text = _ASSESS.format(
+        job=FORMATS.get(brief.get("fmt") or "", FORMATS["email_hero"])["job"],
+        subject=brief.get("subject") or "(nothing was declared — say so)",
+        claim_line=(f"THE CLAIM IT MUST NOT CONTRADICT: {brief['claim']}\n"
+                    if brief.get("claim") else ""),
+        positioning_line=(f"THE IDEA IT MUST ARGUE: {brief['positioning']}\n"
+                          if brief.get("positioning") else ""),
+        audience_line=(f"WHO IT IS FOR: {brief['audience']}\n"
+                       if brief.get("audience") else ""),
+        questions=q)
+    reply = llm.ask("creative_review", [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                     "data": _b64.standard_b64encode(blob).decode()}},
+        {"type": "text", "text": text}], tenant=tenant, max_tokens=700)
+    if not getattr(reply, "ok", False):
+        # A review that could not run is NOT a pass. Said, and carried.
+        return {"ok": False, "why": getattr(reply, "degraded", "")
+                or getattr(reply, "error", "the review could not run"),
+                "verdicts": [], "failed": [], "overall": "", "fix": ""}
+    raw = (reply.text or "").strip()
+    try:
+        data = _json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    except Exception:                                            # noqa: BLE001
+        return {"ok": False, "why": "the review did not answer in JSON",
+                "verdicts": [], "failed": [], "overall": "", "fix": ""}
+    verdicts = [v for v in (data.get("verdicts") or []) if isinstance(v, dict)]
+    failed = [str(v.get("key") or "") for v in verdicts if not v.get("pass")]
+    return {"ok": True, "verdicts": verdicts, "failed": failed,
+            "overall": str(data.get("overall") or ""),
+            "fix": str(data.get("fix") or ""), "why": ""}
+
+
+def _render(tenant: str, text: str, shape: str, source: bytes) -> tuple:
+    """One image, using the product's own pixels when there are any to protect."""
+    from . import imagegen
+    if source:
+        res = imagegen.place_product(source, text, shape=shape, n=1)
+        best = (res.get("candidates") or [{}])[0] if res.get("ok") else {}
+        return res, best.get("image") or b"", \
+            "product masked — its pixels are the real ones"
+    res = imagegen.plate(text, shape=shape, n=1)
+    return res, ((res.get("images") or [b""])[0] if res.get("ok") else b""), \
+        "generated scenery — no product in frame"
+
+
+def generate(tenant: str, *, commitment: dict | None = None,
+             fmt: str = "email_hero", prominent: str = "",
+             entity_key: str = "", claim: str = "", situation: str = "",
+             audience_key: str = "", positioning: str = "",
+             prompt: str = "", review: bool = True) -> dict:
+    """Make one image, check it did the job, and FILE IT so something can use it.
+
+    DRAFT, CHECK, REPAIR ONCE — the same shape the copy path already runs,
+    deliberately, because it is the shape that works there and a second
+    vocabulary for the same idea is how two halves of a system drift. The
+    check is `assess`, which is a REVIEWER and not a gate: a failing image is
+    still filed, still proposed, and carries its verdict so the person
+    approving it is told what to look at instead of being handed a picture and
+    a shrug.
+
+    The repair is attempted once and kept only if the verdict improved. A
+    second attempt that fails differently is not progress, and swapping the
+    image because the newest one is newest is how a repair loop makes things
+    worse quietly.
+    """
+    from . import kb as kbmod, media
+
+    brief = brief_for(tenant, commitment=commitment, fmt=fmt,
+                      prominent=prominent, entity_key=entity_key, claim=claim,
+                      situation=situation, audience_key=audience_key,
+                      positioning=positioning)
     text = prompt.strip() or brief["prompt"]
 
-    # The product's own photograph, when there is one to protect.
     source, source_id = b"", ""
     if entity_key:
         try:
             rows = [a for a in kbmod.assets(tenant, publishable_only=True)
-                    if getattr(a, "entity_key", "") == entity_key
-                    and (a.url or "")]
+                    if getattr(a, "entity_key", "") == entity_key and (a.url or "")]
             if rows:
                 import httpx
                 got = httpx.get(rows[0].url, timeout=60, follow_redirects=True)
@@ -269,34 +458,40 @@ def generate(tenant: str, *, entity_key: str = "", claim: str = "",
                     source, source_id = got.content, rows[0].id
         except Exception:                                        # noqa: BLE001
             source, source_id = b"", ""
+    if entity_key and not source:
+        brief["thin"].append(
+            f"no usable photograph of {entity_key!r} on file, so the frame is "
+            f"scenery and the product is not in it")
 
-    if source:
-        res = imagegen.place_product(source, text, shape=shape, n=1)
-        best = (res.get("candidates") or [{}])[0] if res.get("ok") else {}
-        blob = best.get("image") or b""
-        basis = "product masked — its pixels are the real ones"
-    else:
-        res = imagegen.plate(text, shape=shape, n=1)
-        blob = (res.get("images") or [b""])[0] if res.get("ok") else b""
-        basis = "generated scenery — no product in frame"
-        if entity_key:
-            brief["thin"].append(
-                f"no usable photograph of {entity_key!r} on file, so the "
-                f"frame is scenery and the product is not in it")
-
+    res, blob, basis = _render(tenant, text, brief["shape"], source)
     if not res.get("ok") or not blob:
         return {"ok": False, "error": res.get("error", "generation failed"),
                 "thin": brief["thin"]}
 
-    put = media.put(tenant, blob, mime="image/png",
-                    origin=GENERATED_ORIGIN)
+    verdict = assess(blob, brief, tenant) if review else {
+        "ok": False, "why": "not reviewed", "failed": [], "verdicts": [],
+        "overall": "", "fix": ""}
+    attempts = 1
+
+    # ONE repair, on the reviewer's own instruction, kept only if it is better.
+    if verdict.get("ok") and verdict.get("failed") and verdict.get("fix"):
+        again_text = (text + "\n\nThe previous attempt was rejected for: "
+                      + ", ".join(verdict["failed"]) + ". " + verdict["fix"])
+        res2, blob2, basis2 = _render(tenant, again_text, brief["shape"], source)
+        if res2.get("ok") and blob2:
+            attempts = 2
+            v2 = assess(blob2, brief, tenant)
+            if v2.get("ok") and len(v2.get("failed") or []) < len(verdict["failed"]):
+                blob, verdict, basis, text = blob2, v2, basis2, again_text
+
+    put = media.put(tenant, blob, mime="image/png", origin=GENERATED_ORIGIN)
     if not put["ok"]:
         return {"ok": False, "error": put["error"], "thin": brief["thin"]}
 
     said = kbmod.add_asset(
         tenant, put["url"], rights=GENERATED_RIGHTS,
-        title=(f"Generated: {entity_key or situation or 'scene'}")[:120],
-        kind="image", subject=entity_key or "", source="generated",
+        title=(f"Generated: {brief['subject'] or fmt}")[:120],
+        kind="image", subject=brief["subject"][:200], source="generated",
         prompt=text[:2000], entity_key=entity_key,
         derived_from=[source_id] if source_id else [],
         origin=GENERATED_ORIGIN)
@@ -308,10 +503,19 @@ def generate(tenant: str, *, entity_key: str = "", claim: str = "",
         asset_id = rows[0].id if rows else ""
     except Exception:                                            # noqa: BLE001
         asset_id = ""
+    # THE VERDICT TRAVELS WITH THE PICTURE. Whoever approves it is the person
+    # who needs it, and a review that lives only in a return value is a review
+    # nobody reads.
+    if asset_id:
+        try:
+            kbmod.set_asset_assessment(asset_id, verdict)
+        except Exception:                                        # noqa: BLE001
+            pass
 
     return {"ok": True, "url": put["url"], "asset_id": asset_id,
             "reused": put["reused"], "basis": basis, "said": said,
-            "prompt": text, "thin": brief["thin"],
+            "prompt": text, "thin": brief["thin"], "subject": brief["subject"],
+            "attempts": attempts, "assessment": verdict,
             "review": "proposed — it cannot be used until somebody approves "
                       "it on Review · Pictures"}
 

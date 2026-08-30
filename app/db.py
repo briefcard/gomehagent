@@ -1407,6 +1407,16 @@ class _Provenance:
     # Every source that has asserted this same row, so collapsing a duplicate
     # keeps the corroboration instead of discarding it. [{origin, ref, seen}]
     also_seen = Column(JSON, default=list)
+    #: What the reviewer said about a GENERATED picture, before a person is
+    #: asked to approve it: per-criterion verdicts, one line each, and the
+    #: overall.
+    #:
+    #: On the asset because the person who needs it is the one approving, and
+    #: a review that lives only in a return value is a review nobody reads.
+    #: Empty for every picture nobody generated, which is correct — a crawled
+    #: photograph was not made to a brief and there is nothing to have judged
+    #: it against.
+    assessment = Column(JSON, default=dict)
 
 class KbBrand(Base):
     """One row per tenant: who they are, how they sound, what they may not say."""

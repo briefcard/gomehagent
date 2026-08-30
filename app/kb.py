@@ -2693,6 +2693,21 @@ def review_asset(asset_id: str, approve: bool, by: str = "owner",
             f"Approved as REFERENCE only (not usable in emails): {title[:60]}")
 
 
+def set_asset_assessment(asset_id: str, verdict: dict) -> str:
+    """Attach a generated picture's review to it. Never raises: a verdict that
+    cannot be filed must not lose the picture it was about."""
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbAsset, asset_id)
+            if row is None:
+                return "No such asset."
+            row.assessment = dict(verdict or {})
+            s.commit()
+        return "Recorded."
+    except Exception:                                            # noqa: BLE001
+        return "Not recorded."
+
+
 def may_publish(asset_id: str) -> tuple[bool, str]:
     """Whether this asset may go out, and if not, why not."""
     with db.SessionLocal() as s:

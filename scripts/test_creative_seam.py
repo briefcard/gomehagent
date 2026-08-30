@@ -88,31 +88,63 @@ def main() -> int:
     ck("an unknown id is a 404, not a stack trace",
        c.get("/media/nothing-like-this.png").status_code == 404)
 
-    print("\n— the prompt is built from the account, not typed —")
+    print("\n— the picture is about what the PIECE is about —")
+    from app import coherence
+    # The owner's case, exactly: an Eien email about knee pain. There is no
+    # entity — the commitment is a SITUATION — and the first version of this
+    # brief read `entity_key` and nothing else, so it would have produced a
+    # photograph of a softgel: on-brand, and about nothing the reader opened
+    # the email for.
+    knee = coherence.commit("situation", "knee-pain",
+                            label="knee pain that flares after sitting")
     brief = creative.brief_for(
-        "baci", entity_key="zodiac-vibe-cup",
-        claim="Every piece is dishwasher safe.",
-        situation="a long lunch that ran into the evening",
-        audience_key="hosts")
-    ck("it names the subject from the catalogue",
-       "Zodiac Vibe cup" in brief["prompt"])
-    ck("…and its own description, not ours",
-       "zodiac sign" in brief["prompt"].lower())
-    ck("…and constrains the picture with the claim",
-       "dishwasher safe" in brief["prompt"]
-       and "contradict" in brief["prompt"],
-       "a photograph arguing something the copy cannot say is worse than no "
-       "photograph")
-    ck("…and the moment", "long lunch" in brief["prompt"])
-    ck("no text or logos, ever",
-       "no text of any kind" in brief["prompt"])
-    ck("what is missing is NAMED, not silently dropped",
-       any("brand theme colours" in t for t in brief["thin"]),
-       "a brief built from three of five inputs is a weaker brief and the "
-       "run is the only place that can say so")
-    ck("a subject with no catalogue entry says so",
-       any("nothing to be OF" in t for t in
-           creative.brief_for("baci", entity_key="no-such-thing")["thin"]))
+        "eien", commitment=knee, fmt="email_hero",
+        prominent="Why your knees hurt after a long sit",
+        claim="Every batch is third-party tested in a US facility.")
+    ck("the subject leads, and it is the piece's own subject",
+       brief["subject"] == "knee pain that flares after sitting"
+       and brief["prompt"].startswith("WHAT THIS PICTURE IS ABOUT: knee pain"),
+       brief["prompt"][:90])
+    ck("…with no entity anywhere in the request",
+       "softgel" not in brief["prompt"].lower(),
+       "reading entity_key alone is why an email about knee pain would have "
+       "shown a bottle")
+    ck("the words beside it are given, and not to be repeated",
+       "long sit" in brief["prompt"] and "not repeat them" in brief["prompt"])
+    ck("the claim still constrains what it may imply",
+       "third-party tested" in brief["prompt"]
+       and "imply more than it says" in brief["prompt"])
+    ck("a piece that declared no subject says so",
+       any("what this piece is about" in t
+           for t in creative.brief_for("eien")["thin"]),
+       "generically on-brand IS the stock-photograph failure")
+
+    print("\n— and the three formats want three different pictures —")
+    of = {f: creative.brief_for("eien", commitment=knee, fmt=f,
+                                positioning="testing beats price")
+          for f in ("email_hero", "article_hero", "ad_frame")}
+    ck("an email hero is an invitation, not a packshot",
+       "invitation" in of["email_hero"]["prompt"]
+       and "skipped" in of["email_hero"]["prompt"])
+    ck("an article hero reads as journalism",
+       "journalism" in of["article_hero"]["prompt"])
+    ck("an ad frame is an ARGUMENT",
+       "AN ARGUMENT" in of["ad_frame"]["prompt"]
+       and "stop a thumb" in of["ad_frame"]["prompt"],
+       "every ad lives or dies by its creative")
+    ck("…and is judged on the two things an ad lives on",
+       {"stops_the_scroll", "lands_the_positioning"}
+       <= {c["key"] for c in of["ad_frame"]["criteria"]})
+    ck("…which an article is NOT judged on",
+       "stops_the_scroll" not in {c["key"] for c in of["article_hero"]["criteria"]},
+       "one list of criteria for three jobs is the average of three jobs")
+    ck("an ad with no idea to argue says so",
+       any("no positioning" in t for t in
+           creative.brief_for("eien", commitment=knee, fmt="ad_frame")["thin"]),
+       "a decorative ad frame is how an ad dies")
+    ck("the brief is STRUCTURED, so a video renderer can read it",
+       {"prompt", "subject", "criteria", "shape", "fmt"} <= set(brief),
+       "parsing the subject back out of English is not a foundation")
 
     print("\n— the seam: generation files a PROPOSED asset —")
     real_plate = imagegen.plate
@@ -178,6 +210,125 @@ def main() -> int:
            "half a seam is worse than none — an asset pointing at nothing")
     finally:
         imagegen.plate = real_plate
+
+    print("\n— the picture is reviewed, and a review that could not run is not a pass —")
+    from app import llm as _llm
+    _brief = creative.brief_for("baci", entity_key="zodiac-vibe-cup",
+                                claim="Dishwasher safe.", fmt="ad_frame",
+                                positioning="testing beats price")
+    _no_key = creative.assess(PNG, _brief, "baci")
+    ck("with no model reachable it reports a failure to review",
+       _no_key["ok"] is False and _no_key["why"],
+       "silence would read as approval, which is the one thing it must not "
+       "mean")
+    ck("nothing is assessed when there is nothing to assess",
+       creative.assess(b"", _brief)["ok"] is False)
+
+    class _Reply:
+        def __init__(self, text): self.ok, self.text = True, text
+    _real_ask = _llm.ask
+    try:
+        _seen = {}
+
+        def _ask(purpose, blocks, **k):
+            _seen["purpose"] = purpose
+            _seen["kinds"] = [b.get("type") for b in blocks]
+            _seen["text"] = next(b["text"] for b in blocks
+                                 if b.get("type") == "text")
+            return _Reply('{"verdicts":[{"key":"on_subject","pass":false,'
+                          '"why":"it shows a table, not the subject"},'
+                          '{"key":"no_text","pass":true,"why":"clean"}],'
+                          '"overall":"about the wrong thing",'
+                          '"fix":"show the moment, not the product"}')
+        _llm.ask = _ask
+        got = creative.assess(PNG, _brief, "baci")
+        ck("the image itself is sent, not a description of it",
+           _seen["kinds"][0] == "image")
+        ck("…and it is asked what the brief asked for",
+           "AN ARGUMENT" in _seen["text"]
+           and "stops_the_scroll" in _seen["text"],
+           "a fixed question list cannot tell whether THIS picture did THIS "
+           "job")
+        ck("…and told that pretty-but-wrong is a failure",
+           "technically fine and about the wrong thing FAILS" in _seen["text"])
+        ck("it is attributed like every other call",
+           _seen["purpose"] == "creative_review",
+           "a review nobody can see the cost of is a review that grows")
+        ck("failures come back named", got["failed"] == ["on_subject"])
+        ck("…with an instruction that could fix it",
+           "show the moment" in got["fix"])
+
+        print("\n— one repair, kept only if it is better —")
+        _n = {"i": 0}
+        _real_plate = imagegen.plate
+        try:
+            imagegen.plate = lambda p, **k: (_n.__setitem__("i", _n["i"] + 1)
+                                             or {"ok": True,
+                                                 "images": [PNG + bytes([_n["i"]])]})
+            _v = {"i": 0}
+
+            def _ask2(purpose, blocks, **k):
+                _v["i"] += 1
+                if _v["i"] == 1:
+                    return _Reply('{"verdicts":[{"key":"on_subject","pass":false,'
+                                  '"why":"wrong"}],"overall":"no","fix":"do X"}')
+                return _Reply('{"verdicts":[{"key":"on_subject","pass":true,'
+                              '"why":"right"}],"overall":"yes","fix":""}')
+            _llm.ask = _ask2
+            out = creative.generate("baci", situation="a long lunch",
+                                    fmt="email_hero")
+            ck("a failing picture is redrawn once", out["attempts"] == 2)
+            ck("…and the better one is kept",
+               out["assessment"]["failed"] == [],
+               "swapping because the newest is newest is how a repair loop "
+               "makes things worse quietly")
+            ck("…on the reviewer's own instruction",
+               "do X" in out["prompt"] and "rejected for" in out["prompt"])
+            ck("the verdict travels with the picture",
+               next(x for x in kb.assets("baci", publishable_only=False)
+                    if x.id == out["asset_id"]).assessment.get("overall") == "yes",
+               "a review that lives only in a return value is a review "
+               "nobody reads")
+
+            # A SECOND ATTEMPT THAT FAILS DIFFERENTLY IS NOT PROGRESS.
+            # Sabotage showed the earlier case could not tell: its repair
+            # passed, so "fewer failures" and "the newest one" agreed.
+            _n["i"] = 0
+            _w = {"i": 0}
+
+            def _ask3(purpose, blocks, **k):
+                _w["i"] += 1
+                key = "on_subject" if _w["i"] == 1 else "craft"
+                return _Reply('{"verdicts":[{"key":"%s","pass":false,'
+                              '"why":"no"}],"overall":"attempt %d",'
+                              '"fix":"do Y"}' % (key, _w["i"]))
+            _llm.ask = _ask3
+            sideways = creative.generate("baci", situation="a third lunch",
+                                         fmt="email_hero")
+            ck("a repair that fails differently is not kept",
+               sideways["assessment"]["failed"] == ["on_subject"]
+               and "attempt 1" in sideways["assessment"]["overall"],
+               f"kept {sideways['assessment']['overall']!r} — swapping "
+               f"because the newest is newest is how a repair loop makes "
+               f"things worse quietly")
+
+            _v["i"] = 5   # every verdict now fails
+            _llm.ask = lambda p, b, **k: _Reply(
+                '{"verdicts":[{"key":"on_subject","pass":false,"why":"no"}],'
+                '"overall":"still wrong","fix":"try again"}')
+            bad = creative.generate("baci", situation="another lunch",
+                                    fmt="email_hero")
+            ck("a picture that fails twice is still FILED, not thrown away",
+               bad["ok"] and bad["asset_id"],
+               "the check is a reviewer, not a gate — a false refusal costs "
+               "a person doing by hand what this was built to do")
+            ck("…carrying why, so the approver is told what to look at",
+               bad["assessment"]["failed"] == ["on_subject"]
+               and "still wrong" in bad["assessment"]["overall"])
+        finally:
+            imagegen.plate = _real_plate
+    finally:
+        _llm.ask = _real_ask
 
     print("\n— only APPROVED pictures keep their bytes —")
     import datetime as _dt
