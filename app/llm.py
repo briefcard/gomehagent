@@ -55,6 +55,14 @@ PURPOSE_MODEL: dict[str, str] = {
     "search_filter": "CLASSIFY_MODEL",
     "sweep": "SWEEP_MODEL",
     "seo": "SEO_MODEL",
+    # The picture reviewer. It was added without a row here and therefore fell
+    # through to CLAUDE_MODEL — which is the right model and was not a
+    # decision, exactly what the docstring below warns against. Named so the
+    # choice is visible and so it can be moved without editing code: judging
+    # whether an image is about the right thing is a vision job and the cheap
+    # classifier cannot do it, but a future model might do it better or for
+    # less.
+    "creative_review": "CREATIVE_REVIEW_MODEL",
 }
 
 

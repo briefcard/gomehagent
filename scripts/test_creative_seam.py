@@ -254,6 +254,12 @@ def main() -> int:
         ck("it is attributed like every other call",
            _seen["purpose"] == "creative_review",
            "a review nobody can see the cost of is a review that grows")
+        ck("…and its model is a CHOICE, not a fallthrough",
+           _llm.PURPOSE_MODEL.get("creative_review") == "CREATIVE_REVIEW_MODEL"
+           and _llm.model_for("creative_review"),
+           "`model_for`'s own docstring says a new purpose is a row here; "
+           "adding one without it picks the default by omission and cannot "
+           "be changed without a deploy")
         ck("failures come back named", got["failed"] == ["on_subject"])
         ck("…with an instruction that could fix it",
            "show the moment" in got["fix"])

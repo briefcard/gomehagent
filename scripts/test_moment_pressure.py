@@ -188,10 +188,31 @@ def main() -> int:
     # attach branch would fire and the cap would never be reached — which is
     # correct behaviour, and would make the assertion below vacuous.
     with db.SessionLocal() as s:
-        s.query(db.SystemRun).filter(db.SystemRun.ref == ref).first().stage = "brief"
+        _row = s.query(db.SystemRun).filter(db.SystemRun.ref == ref).first()
+        _row.stage = "brief"
+        # AND MOVED OUT OF THE REST WINDOW, WITHOUT LEAVING THE MONTH.
+        #
+        # Two gates can refuse this cohort — the monthly cap and the rest
+        # period — and this section is about the cap. The fixture left the
+        # consumed plan dated TODAY, so `_nearest_campaign` returned 0 and the
+        # rest gate answered first. Whether it did depended on the weekday the
+        # suite happened to run on: it passed all week and failed on a Sunday,
+        # which is the worst kind of red — a suite that fails on a particular
+        # day teaches people that red means "try again tomorrow".
+        #
+        # Ten days back is outside the six-day rest window and inside the
+        # month the cap counts, so the cap is the only gate left and the
+        # assertion below tests what it says it tests.
+        import datetime as _dt
+        _pre = ref.rsplit(":", 1)[0]
+        _row.ref = f"{_pre}:{(_dt.date.today() - _dt.timedelta(days=10))}"
         s.commit()
     ck("the fixture has no open plan for that cohort now",
        not any(":cart_abandoners:" in r for r in _plan_refs("baci")))
+    ck("…and the one it consumed is outside the rest window",
+       planner._nearest_campaign("baci", "cart_abandoners",
+                                 _dt.date.today()) > planner.rest_days_for(camp),
+       "otherwise the rest gate answers first and the cap is never reached")
     _carts("baci", 8, start=100)
     g = _seg("baci", "cart_abandoners")
     ck("the fixture really is over the floor again", g["ready"], str(g["people"]))
@@ -211,6 +232,21 @@ def main() -> int:
        planner.rest_days_for(camp) == 6, str(planner.rest_days_for(camp)))
     systems.set_cadence(camp.id, per_segment_monthly="4")
     camp = systems.get(camp.id)
+    # THIS SECTION'S OWN PRECONDITION, stated here rather than inherited.
+    # Section 5 moved the plan out of the rest window so the CAP was the only
+    # gate; this one is about the rest gate, so it moves it back in. Both used
+    # to rely on the same implicitly-today date, which is why one of them
+    # failed on a Sunday and neither said what it was assuming.
+    with db.SessionLocal() as s:
+        _row = s.query(db.SystemRun).filter(
+            db.SystemRun.ref.like("campaign:baci:cart_abandoners:%")).first()
+        _pre = _row.ref.rsplit(":", 1)[0]
+        _row.ref = f"{_pre}:{(_dt.date.today() - _dt.timedelta(days=2))}"
+        s.commit()
+    ck("the fixture is now INSIDE the rest window",
+       planner._nearest_campaign("baci", "cart_abandoners",
+                                 _dt.date.today()) < planner.rest_days_for(camp),
+       "otherwise there is nothing for the rest gate to refuse")
     out4 = planner.top_up(camp)
     ck("with the cap raised it is the REST period that now holds it back",
        out4.get("from_pressure") == 0

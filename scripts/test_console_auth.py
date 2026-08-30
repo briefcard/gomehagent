@@ -151,6 +151,33 @@ def main() -> int:
         ck("/health still open", r.status_code == 200 and r.json().get("ok"))
         ck("and sets no console cookie", "console" not in r.cookies)
 
+        # WHAT IT MAY SAY WITHOUT A KEY. The unauthenticated half is a
+        # heartbeat, not a roster — it used to name every Gmail alias and
+        # every redirect URI on a page that promises each client sees only
+        # their own workspace. The capability report names infrastructure, so
+        # it belongs on the other side of the key.
+        ck("no capability report without the key",
+           "capabilities" not in r.json(),
+           str(sorted(r.json())))
+        keyed = c.get("/health?key=s3cret-console").json()
+        cap = keyed.get("capabilities") or {}
+        ck("…and with the key it says what can actually run",
+           set(cap.get("can") or {}) >= {"generate_images",
+                                         "review_generated_images"},
+           "the owner had to ask what was connected and nothing could "
+           "answer him")
+        ck("…named as the JOB, not as the variable",
+           "OPENAI_API_KEY" not in str(cap.get("can")),
+           "'is OPENAI_API_KEY set' is not the question anybody has")
+        ck("…and never leaks a value",
+           all(isinstance(v, bool) for v in (cap.get("keys_present") or {}).values()),
+           "presence only — anything more is a credential leak wearing a "
+           "diagnostic's clothes")
+        ck("…and says creative needs two different providers",
+           "BOTH" in str(cap.get("note", "")),
+           "images generate on OpenAI and are reviewed on Anthropic; one key "
+           "missing fails quietly")
+
     # --- dependencies nothing in app/ imports by name ----------------------
     #
     # This exists because of a real outage. Starlette imports `python-multipart`

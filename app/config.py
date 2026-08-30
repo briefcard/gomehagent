@@ -158,6 +158,14 @@ CLASSIFY_MODEL = os.environ.get("CLASSIFY_MODEL", "claude-haiku-4-5-20251001")
 # route anything, it only puts words around numbers that were already computed.
 # Nothing it writes is sent anywhere — it lands in a digest a person reads.
 SWEEP_MODEL = os.environ.get("SWEEP_MODEL", "claude-haiku-4-5-20251001")
+
+# Judging a generated picture against the brief it was made to. Vision, and
+# not the cheap classifier: the question is "is this about the right thing",
+# which is the whole reason the check exists. Sonnet by default; overridable
+# because the frontier moves and this is the one call whose model choice
+# somebody will want to change without a deploy.
+CREATIVE_REVIEW_MODEL = os.environ.get("CREATIVE_REVIEW_MODEL",
+                                       "claude-sonnet-4-6")
 SWEEP_HOUR = int(os.environ.get("SWEEP_HOUR", "20"))
 BUCKET_BACKFILL_DAYS = int(os.environ.get("BUCKET_BACKFILL_DAYS", "30"))
 
