@@ -479,6 +479,18 @@ def main():
            str(it["needs"])[:110])
         ck("  the operator note points at the gap, not at a review queue",
            any("repair attempt" in n for n in r["notes"]), str(r["notes"])[-140:])
+        # ...AND IT WAS ACTUALLY FILED. Naming the gap on the item is a label;
+        # the knowledge task is the thing. This call passed no `basis`, which
+        # is the field `record_unknowns` filters on, so it wrote nothing at
+        # all and returned cleanly into an `except: pass` — for every skill,
+        # since the substrate was written. Asserted on the ROW, not on the
+        # return value, because the return was the thing that lied.
+        with db.SessionLocal() as _s:
+            _filed = [u.attribute for u in _s.query(db.KbUnknown)
+                      .filter(db.KbUnknown.tenant == "baci").all()]
+        ck("  and the gap is FILED as a knowledge task, not merely named",
+           any(n["needs"] in _filed for n in it["needs"]),
+           f"needs={[n['needs'] for n in it['needs']]} filed={_filed}")
     skill_pack.draft_ad = skill_pack._draft_ad_live
 
     print("\n--- every run is on the record, blocked ones included ---")

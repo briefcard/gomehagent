@@ -95,8 +95,8 @@ STAGES = {
 #: lands in front of a person deciding whether to run anything at all.
 _COST = {
     "situation:problem":
-        "no problem situations are on file, so an awareness ad has nothing "
-        "to open on but the product — which is an interest-stage ad wearing "
+        "no problem situations are on file, so awareness work has nothing "
+        "to open on but the product — which is interest-stage work wearing "
         "an awareness label",
     "situation:who_they_are":
         "no who-they-are situations are on file, so nothing says which "
@@ -111,13 +111,13 @@ _COST = {
     "claim_with_evidence":
         "no approved claim carries evidence, so the proof this stage turns "
         "on would be an assertion with nothing under it",
-    "entity": "nothing in the catalogue is named, so the ad cannot say what "
-              "it is about",
+    "entity": "nothing in the catalogue is named, so the copy cannot say "
+              "what it is about",
     "audience_pains": "no audience records a pain",
     "keyword": "no keyword targets are on file, so the copy uses our words "
                "for this rather than the reader's",
-    "offer": "no offer was given, so a bottom-of-funnel ad has nothing to "
-             "close on",
+    "offer": "no offer is on file, so a bottom-of-funnel send has nothing "
+             "to close on",
 }
 
 

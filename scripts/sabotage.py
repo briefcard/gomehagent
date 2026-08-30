@@ -844,6 +844,19 @@ SABOTAGES = [
                "silently, exactly the production incident of 2026-08-21",
     },
     {
+        "name": "a_lost_draft_files_its_gap",
+        "file": "app/skill.py",
+        "find": '                        [{"basis": "unknown", "key": entity_key,',
+        "replace": '                        [{"key": entity_key,  # SABOTAGE',
+        "suites": ["test_skill.py"],
+        "why": "a draft blocked by missing knowledge names the gap on screen "
+               "and files NOTHING — `record_unknowns` filters on `basis`, so "
+               "the call returns cleanly having written no row, for every "
+               "skill. The backlog that is supposed to collect what cost an "
+               "output stays permanently empty and nobody is ever asked to "
+               "close the gap",
+    },
+    {
         "name": "plan_segment_reference",
         "file": "app/systems.py",
         "find": "        why = fn(tenant, v)",

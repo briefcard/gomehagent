@@ -514,12 +514,24 @@ class Context:
         if not verdict["ok"]:
             needs = _knowledge_needed(verdict["failures"])
             if needs:
+                # `basis="unknown"` is what `record_unknowns` FILTERS ON, and
+                # this call never passed it — so the one mechanism that turns a
+                # lost draft into a knowledge task recorded NOTHING, on every
+                # skill, while returning cleanly into an `except: pass`. The
+                # `thin` call further down this file found and fixed exactly
+                # this and left the reason in a comment; the two calls had
+                # simply drifted. Asserting the COUNT rather than trusting the
+                # return is the §1 rule about bulk writes, applied here too.
                 try:
-                    kb.record_unknowns(
+                    filed = kb.record_unknowns(
                         self.tenant,
-                        [{"key": entity_key, "name": entity_key,
-                          "attribute": n["needs"]} for n in needs],
+                        [{"basis": "unknown", "key": entity_key,
+                          "name": entity_key, "attribute": n["needs"]}
+                         for n in needs],
                         asked_for=body[:300])
+                    if not filed:
+                        self.note("what would have unblocked this could not "
+                                  "be filed as a knowledge task")
                 except Exception:                                # noqa: BLE001
                     pass                    # never let bookkeeping lose output
             self.note(
