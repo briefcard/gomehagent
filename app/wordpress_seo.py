@@ -81,6 +81,51 @@ def _send(profile: dict, method: str, path: str, body: dict) -> dict:
     return r.json()
 
 
+def put_image(profile: dict, blob: bytes, *, filename: str,
+              alt: str = "") -> dict:
+    """Put a picture in the client's OWN media library and return their URL.
+
+    Owner, 2026-08-30: an approved frame belongs on the client's CMS, "so it's
+    accessible to us". This is the WordPress half, and it needs nothing new —
+    the application password already authenticates, and `upload_files` is a
+    capability of the user it belongs to rather than a scope we have to ask
+    for again.
+
+    NOT `_send`: the media endpoint takes the file as the BODY with a
+    `Content-Disposition` naming it, not JSON. A picture posted as JSON is
+    accepted and stored as a zero-byte attachment, which is worse than a
+    refusal because the URL works and the image does not.
+    """
+    why = _ok(profile)
+    if why:
+        return {"ok": False, "error": why}
+    if not blob:
+        return {"ok": False, "error": "no image to upload"}
+    name = (filename or "image.png").replace('"', "")
+    try:
+        r = httpx.post(f"{_api(profile)}/media", content=blob,
+                       auth=_auth(profile), timeout=60,
+                       headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                "Content-Type": "image/png"})
+        r.raise_for_status()
+        got = r.json()
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "error": f"WordPress refused the upload: "
+                                      f"{exc.__class__.__name__}"}
+    url = str(got.get("source_url") or "")
+    if not url:
+        return {"ok": False, "error": "WordPress stored it but returned no URL"}
+    # ALT TEXT IS ACCESSIBILITY, and it is one more call rather than a field on
+    # the upload. Failing it does not fail the upload: a picture with no alt
+    # text is a smaller problem than a picture that did not arrive.
+    if alt:
+        try:
+            _send(profile, "POST", f"media/{got.get('id')}", {"alt_text": alt})
+        except Exception:                                        # noqa: BLE001
+            pass
+    return {"ok": True, "url": url, "id": got.get("id"), "platform": "wordpress"}
+
+
 def _text(html: str) -> str:
     return re.sub(r"<[^>]+>", "", html or "").strip()
 

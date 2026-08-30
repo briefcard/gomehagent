@@ -335,6 +335,17 @@ button.sec{background:transparent;color:var(--acc)}
 .pictile .sec summary{font-size:.7rem}
 .picmeta{display:block;font-size:.68rem;color:var(--mut);padding:5px 7px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A frame's own controls sit BESIDE its label, never inside it: a button
+   inside a <label> activates the label too, so "edit in Canva" would tick the
+   frame's checkbox on the way past. */
+.frame{position:relative;display:flex;flex-direction:column;
+  border:1px solid var(--rule);border-radius:5px;overflow:hidden;
+  background:var(--panel)}
+.frame .pic{border:0;border-radius:0;background:none}
+.frame:has(input:checked){outline:2px solid var(--acc);outline-offset:-2px}
+.framebar{display:flex;gap:6px;align-items:center;padding:0 7px 6px;
+  font-size:.66rem}
+.framebar button{font-size:.66rem;padding:2px 6px}
 .inst{border:1px solid var(--rule);border-radius:5px;padding:11px 13px;
   margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
 .inst.ok{border-left:3px solid var(--ok)}
@@ -622,10 +633,17 @@ BG_LABELS = (("harvest", "Harvest"), ("scan", "Compliance scan"),
 #: is the same vocabulary, viewed by the tab that owns the action.
 BG_BRAND_LABELS = (("voice", "Voice derive"),)
 
+#: And the one Review's PICTURES section reports, through `_frames_run`. A
+#: third group for the same reason the second exists: making an ad's frames
+#: fills no queue Sources knows about, and its state belongs where the frames
+#: were promised to appear rather than in a fold about feeders.
+BG_PICTURE_LABELS = (("ad_frames", "Ad frames"),
+                     ("hosting", "Hand-off to the client's site"))
+
 #: Every label `_run_bg` may write under. `test_pointers` holds the writers to
 #: THIS, so a new background action must be named by the surface that reports
 #: it before it can be started at all.
-BG_ALL_LABELS = BG_LABELS + BG_BRAND_LABELS
+BG_ALL_LABELS = BG_LABELS + BG_BRAND_LABELS + BG_PICTURE_LABELS
 
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("brand", "Brand", "❖"),
@@ -5148,6 +5166,169 @@ def _ship_preview(pl: dict) -> str:
             'summary above is the whole decision</div>')
 
 
+
+
+def _hostmod():
+    """`hosting`, imported late. It reaches `sites`, which reaches the tenant
+    registry, and importing that at module scope makes this file's import
+    order matter to a page render."""
+    from . import hosting
+    return hosting
+
+
+def _frames_run(tenant: str) -> str:
+    """What the last "Make frames" run did — running, failed, or what it made.
+
+    Generation is off the request because it is minutes, and the whole lesson
+    of `_run_bg` is that a background action which failed looks exactly like
+    one still going: the banner promises pictures and none arrive. So the
+    state is READ where the pictures were promised to appear.
+    """
+    from .web import bg_status as _bgs
+    out = ""
+    # READ OFF THE REGISTRY. `BG_PICTURE_LABELS` is what says this section
+    # reports these actions, and a registry nothing reads is a declaration
+    # pretending to be wiring — which is the failure this codebase keeps
+    # finding in its own work.
+    for label, name in BG_PICTURE_LABELS:
+        got = _bgs(label, tenant) or {}
+        state = str(got.get("state") or "")
+        if not state:
+            continue
+        when = _esc(str(got.get("at") or "")[:16].replace("T", " "))
+        detail = _esc(str(got.get("detail") or "")[:300])
+        if state == "running":
+            chip, says = ("chip", f"{_esc(name)} &mdash; running"), (
+                f"started {when} &mdash; an image call and a review per cell, "
+                f"two to three minutes. The set appears below when it lands; "
+                f"this page does not refresh itself.")
+        elif state == "failed":
+            chip, says = ("chip off", f"{_esc(name)} &mdash; failed"), (
+                f"{when} &mdash; {detail}")
+        else:
+            chip, says = ("chip on", f"last {_esc(name).lower()} run"), (
+                f"{when} &mdash; {detail}")
+        out += (f'<div class="card"><div class="row">'
+                f'<span class="{chip[0]}">{chip[1]}</span>'
+                f'<span class="mut">{says}</span></div></div>')
+    return out
+
+
+def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
+    """Every generated set as its own card, and the queue with them removed.
+
+    Returns `(html, rest)`. `rest` is what is left for the flat picture queue,
+    because a frame drawn in both places is one decision with two buttons.
+
+    WHAT A CARD HAS TO SHOW, and why each part is there:
+
+      the whole grid      the owner asked to see every frame, so nothing is
+                          hidden behind "and 19 more"
+      what each frame IS  the angle and framing it was generated along. Thirty
+                          thumbnails with no labels is a mood board; the
+                          labels are what make it a test
+      its own review      `assess` already judged each frame against the brief.
+                          Shown as advice beside the picture, never as a filter
+                          — a measurement that can veto will veto good work
+      reject the set      one button, because a set built on a bad brief is one
+                          decision and clicking twenty-four checkboxes to say
+                          so is how people stop reviewing
+    """
+    from . import kb as kbm
+    try:
+        sets = kbm.batches(tenant)
+    except Exception:                                            # noqa: BLE001
+        return "", waiting
+    if not sets:
+        return "", waiting
+    in_sets = {f.id for g in sets for f in g["frames"]}
+    rest = [a for a in waiting if a.id not in in_sets]
+
+    html = ""
+    for g in sets:
+        fid = "b" + _esc(str(g["batch"])[:12])
+        cells = ""
+        for f in g["frames"]:
+            ass = f.assessment if isinstance(f.assessment, dict) else {}
+            failed = [str(x) for x in (ass.get("failed") or [])]
+            tags = [str(t) for t in (f.tags or [])][:2]
+            # WHERE THIS ONE IS IN ITS LIFE, from the one function that
+            # decides. A frame already open in Canva must not offer to be
+            # opened again, and the link to it is the useful thing at that
+            # point.
+            where = _hostmod().stage(f)
+            edit = (f'<a class="mut" target="_blank" rel="noopener" '
+                    f'href="https://www.canva.com/design/'
+                    f'{_esc(f.canva_design_id)}/edit">open in Canva &rarr;</a>'
+                    if where == "editable" else f"""
+            <form id="canva-{_esc(f.id)}" method="post"
+                  action="/admin/asset_canva">
+              <input type="hidden" name="key" value="{_esc(key)}">
+              <input type="hidden" name="tenant" value="{_esc(tenant)}">
+              <input type="hidden" name="asset_id" value="{_esc(f.id)}">
+              <button class="sec" title="Hand it to Canva so the type and
+                layout can be changed. The picture itself stays exactly as it
+                is, and nothing is published.">edit in Canva</button>
+            </form>""")
+            cells += f"""
+        <div class="frame">
+          <label class="pic">
+            <input type="checkbox" class="fr" name="asset_ids"
+                   value="{_esc(f.id)}" form="{fid}">
+            <img src="{_esc(f.url or '')}" loading="lazy" alt="">
+            <span class="picmeta">{_esc(' · '.join(tags))}
+              {('<b class="gapt">' + _esc(', '.join(failed)) + '</b>')
+               if failed else '<span class="okt">reads right</span>'}</span>
+          </label>
+          <div class="framebar">{edit}</div>
+        </div>"""
+        # THE COUNT IS SAID. A set where nineteen of twenty failed their own
+        # review is a brief problem, and that shows here or after somebody has
+        # opened twenty pictures.
+        html += f"""
+    <div class="anchor" id="set-{fid}"></div>
+    <div class="card">
+      <div class="head"><h2>Ad set{(' &middot; ' + _esc(g['subject'][:60]))
+                                   if g.get('subject') else ''}</h2>
+        <span class="mut">{g['made']} frames &middot; {g['clean']} read right
+        to the reviewer</span></div>
+      <p class="mut">One ad, approached {g['made']} ways &mdash; a different
+      angle, lever, moment and framing each time. <b>Keep the ones that
+      work.</b> The note under each frame is the model&#39;s own read of it
+      against the brief; it is advice, not a filter, and a frame it disliked
+      is still yours to keep.</p>
+      <form id="{fid}" method="post" action="/admin/assets_decide"></form>
+      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="{fid}">
+      <input type="hidden" name="batch" value="{_esc(g['batch'])}" form="{fid}">
+      <div class="bulkbar">
+        <label class="pick"><input type="checkbox" class="allfr"> select all
+          {g['made']}</label>
+        <span class="grow"></span>
+        <button form="{fid}" name="action" value="reject_batch" class="sec"
+          onclick="return confirm('Reject all {g['made']} frames in this set?')"
+          title="The whole set was the wrong idea">Reject the set</button>
+        <button form="{fid}" name="action" value="reject" class="sec">Reject
+          selected</button>
+        <button form="{fid}" name="action" value="approve"
+          title="Approving keeps the frame and cuts its other placements">Keep
+          selected</button>
+      </div>
+      <div class="picgrid">{cells}</div>
+    </div>"""
+
+    # Scoped to the card it is in. A page-wide selector would tick every set
+    # on the page, which is the reject-all nobody asked for.
+    html += """
+    <script>
+    document.querySelectorAll('.allfr').forEach(function(box) {
+      box.addEventListener('change', function(e) {
+        e.target.closest('.card').querySelectorAll('.fr')
+         .forEach(function(b) { b.checked = e.target.checked; });
+      });
+    });
+    </script>"""
+    return html, rest
+
 def render_content(key: str, tenant: str = "", started: str = "",
                    err: str = "", msg: str = "", cpage: int = 1,
                    sub: str = "", q: str = "", flt: str = "",
@@ -5257,6 +5438,16 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # to be as quick as the claim queue, thumbnails and all. Seeing them is the
     # whole job: nobody can judge a photograph from a CDN URL.
     waiting = kbm.proposed_assets(tenant)
+    # SETS FIRST, and taken OUT of the flat queue. Owner, 2026-08-30: *"I'd
+    # like to see everyone and then we can reject the ones we dont like or the
+    # whole batch."* Twenty-four frames of one ad scattered through a
+    # crawler's queue is the same picture told twice — once as a set and once
+    # as loose finds — and every fact belongs on the page once.
+    batch_html, waiting = _batch_cards(key, tenant, waiting)
+    # AND WHAT A RUN IS DOING RIGHT NOW. Generation is minutes long and off
+    # the request, so without this a failed run and a running one look
+    # identical: the banner promised pictures under Pictures and none came.
+    batch_html = _frames_run(tenant) + batch_html
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
     # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap
@@ -5335,7 +5526,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
         decision</span></div>
     </div>"""
 
-    assets_form = pics_html + f"""
+    assets_form = batch_html + pics_html + f"""
     <div class="card">
       <div class="head"><h2>Creative library</h2></div>
       <p class="mut">Photographs the creative pipeline may use.
@@ -10683,9 +10874,13 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                 basis = str(v.get("basis") or "")
                 chips = f'<span class="chip nb">{_esc(str(v.get("angle") or ""))}</span> '
                 if v.get("needs_art_direction"):
-                    # The flag nobody could see (spec §3c) — an amber chip
-                    # per variant instead of JSON in a run detail.
-                    chips += '<span class="chip off">needs art direction</span> '
+                    # The flag nobody could ACT on. It was JSON in a run
+                    # detail, then an amber chip — a need stated beside no way
+                    # to meet it, which is this console's own worst habit.
+                    # `creative.batch` is the way to meet it, so the chip
+                    # carries the button that runs it.
+                    chips += ('<span class="chip off">needs art direction'
+                              '</span> ')
                 if basis and basis != "model":
                     chips += (f'<span class="chip off" title="{_esc(basis)}">'
                               f'composed fallback — not ad copy</span> ')
@@ -10735,6 +10930,20 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         <button type="submit" class="sec">Drop</button>
         <span class="when">a judgement, not a delete — it stays here, greyed,
         until a regenerate replaces it</span>
+      </form>
+      <form method="post" action="/admin/ad_frames" class="row">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(str(v.get("output_id") or ""))}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <select name="plates">
+          <option value="4">8 frames</option>
+          <option value="8">16 frames</option>
+          <option value="12">24 frames</option>
+        </select>
+        <button type="submit" class="sec">Make frames</button>
+        <span class="when">the carousel for THIS variant — one angle, lever,
+        moment and framing each, built on its own positioning and claim. They
+        land under Pictures as one set to keep or reject.</span>
       </form>"""
                 vcards += (f'<div class="msg{" gone" if dropped else ""}">'
                            f'<div class="row"><b>Variant {n}</b> {chips}'

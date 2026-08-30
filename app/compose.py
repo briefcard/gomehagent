@@ -343,6 +343,42 @@ def composite_on_plate(product_png: bytes, plate_png: bytes, *, headline: str,
 # on purpose, and a thing to say over it.
 # ---------------------------------------------------------------------------
 
+def crop_placements(frame: bytes, *,
+                    formats: list[str] | None = None) -> dict:
+    """A FINISHED frame re-cut to the other placements. No product, no text.
+
+    Meta wants 1:1 and 4:5 in feed and 9:16 in stories. Everything above
+    builds a frame from parts; this one takes a frame that is already right —
+    product placed, shadow under it, headline set — and cuts it to the shapes
+    it also has to run in.
+
+    COVER, NEVER STRETCH, and centred: a laid table squashed into 9:16 stops
+    looking like a photograph of anything, which is the failure a hand-crop
+    makes too. A 9:16 cut of a square loses the sides, so anything that must
+    survive every placement belongs near the middle — that is a fact about
+    Meta, not about this function, and the brief says it.
+    """
+    from PIL import Image
+    if not frame:
+        return {"ok": False, "error": "no frame to cut"}
+    want = list(formats or ["1:1", "4:5", "9:16"])
+    for k in want:
+        if k not in SIZES:
+            return {"ok": False, "error": f"unknown format {k!r}"}
+    src = _load(frame).convert("RGB")
+    out = {}
+    for k in want:
+        W, H = SIZES[k]
+        r = max(W / src.width, H / src.height)
+        big = src.resize((max(1, int(src.width * r)), max(1, int(src.height * r))),
+                         Image.LANCZOS)
+        left, top = (big.width - W) // 2, (big.height - H) // 2
+        buf = io.BytesIO()
+        big.crop((left, top, left + W, top + H)).save(buf, format="PNG")
+        out[k] = buf.getvalue()
+    return {"ok": True, "images": out, "treatment": "recut"}
+
+
 def _quiet_band(img, bands: int = 6, avoid_bottom: float = 0.12) -> int:
     """Which horizontal band of the photograph is calmest, as an index.
 

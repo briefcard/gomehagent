@@ -88,6 +88,162 @@ def _ok(profile: dict) -> str | None:
     return None if cfg else refusal
 
 
+#: The scope Shopify requires to put a file in a store's Files. It is asked
+#: for in `oauth.FLOWS["shopify"]`, but a store connected BEFORE it was added
+#: granted nine scopes and not this one — and Shopify answers a call outside a
+#: token's grant with an access error, not an empty result. So it is named
+#: here and checked before the call, because "re-connect the store" and "the
+#: upload failed" are different sentences with different fixes.
+FILES_SCOPE = "write_files"
+
+
+def _granted(store: str):
+    """What this store's token actually grants, or None if nothing recorded it.
+
+    `credentials.granted_scopes` already draws the distinction that matters
+    and draws it once: a set is what the merchant approved, and None means the
+    credential arrived by a path that carried no scope information — an env
+    blob or a pasted key. NONE MUST NOT READ AS EMPTY. An empty grant means
+    "they approved nothing"; unrecorded means "we cannot tell", and refusing
+    on the second would break every store that was never connected by OAuth.
+    """
+    try:
+        from . import credentials
+        return credentials.granted_scopes(_tenant(store)).get("shopify")
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _graphql(store: str, query: str, variables: dict) -> dict:
+    """The Admin GraphQL endpoint. Files have no REST equivalent.
+
+    `userErrors` is checked as hard as the transport is: Shopify returns 200
+    with the failure inside the body, so a caller that only looks at the
+    status code reports success and files nothing.
+    """
+    r = httpx.post(f"{_base(store)}/graphql.json", headers=_headers(store),
+                   json={"query": query, "variables": variables}, timeout=60)
+    r.raise_for_status()
+    body = r.json()
+    if body.get("errors"):
+        return {"ok": False, "error": str(body["errors"])[:300]}
+    return {"ok": True, "data": body.get("data") or {}}
+
+
+_STAGED = """mutation($input:[StagedUploadInput!]!){
+  stagedUploadsCreate(input:$input){
+    stagedTargets{url resourceUrl parameters{name value}}
+    userErrors{message}}}"""
+
+_FILE_CREATE = """mutation($files:[FileCreateInput!]!){
+  fileCreate(files:$files){
+    files{id fileStatus alt ... on MediaImage{image{url}}}
+    userErrors{message}}}"""
+
+_FILE_READ = """query($id:ID!){ node(id:$id){ ... on MediaImage{
+  fileStatus image{url} } } }"""
+
+
+def put_image(profile: dict, blob: bytes, *, filename: str,
+              alt: str = "") -> dict:
+    """Put a picture in the store's own Files and return the store's URL.
+
+    Owner, 2026-08-30: an approved frame belongs on the client's CMS, "so it's
+    accessible to us". This is the Shopify half.
+
+    THREE STEPS, because Shopify does not accept bytes on the API: ask for a
+    staged upload target, POST the file to that target, then create the file
+    from the returned resource URL. Then poll, because `fileCreate` returns
+    `UPLOADED` and the CDN URL only exists once processing reaches `READY` —
+    returning early hands back an empty URL that looks like a bug elsewhere.
+
+    THE PRODUCT-IMAGE SHORTCUT IS REFUSED ON PURPOSE. `write_products` is
+    granted and would let an ad frame be attached to a product, which needs no
+    new consent and is wrong: it would appear on the storefront product page.
+    An advertisement is not product photography, and putting one there changes
+    what shoppers see.
+    """
+    # `_ok` FIRST, as everything else in this module does. Reading
+    # `profile["creds_key"]` before it turns a profile that is merely not
+    # connected into a KeyError, and a traceback is not a refusal anybody can
+    # act on.
+    why = _ok(profile)
+    if why:
+        return {"ok": False, "error": why}
+    if not blob:
+        return {"ok": False, "error": "no image to upload"}
+    store = _store(profile)
+    granted = _granted(store)
+    if granted is not None and FILES_SCOPE not in granted:
+        # NO MACHINE-READABLE FLAG. Nothing acts on one, and a warning key
+        # computed by a producer and rendered by no surface is a warning
+        # nobody sees — the console reports this properly on Connections,
+        # where the fix (re-connect) actually lives, by recomputing the dark
+        # half of a grant against the scopes the flow asks for today.
+        return {"ok": False, "error": (
+            f"this store granted {len(granted)} scopes and not "
+            f"{FILES_SCOPE!r}, so nothing may be put in its Files. It is asked "
+            f"for now — the store has to be re-connected once, at "
+            f"/connect/<token>, to grant it. Until then we keep the picture "
+            f"and it is still usable; it just is not theirs yet.")}
+
+    name = filename or "image.png"
+    got = _graphql(store, _STAGED, {"input": [{
+        "filename": name, "mimeType": "image/png", "resource": "FILE",
+        "httpMethod": "POST", "fileSize": str(len(blob))}]})
+    if not got["ok"]:
+        return got
+    targets = ((got["data"].get("stagedUploadsCreate") or {})
+               .get("stagedTargets") or [])
+    errs = ((got["data"].get("stagedUploadsCreate") or {})
+            .get("userErrors") or [])
+    if errs or not targets:
+        return {"ok": False, "error": (errs[0]["message"] if errs
+                                       else "Shopify offered no upload target")}
+    target = targets[0]
+    form = {p["name"]: p["value"] for p in (target.get("parameters") or [])}
+    try:
+        up = httpx.post(target["url"], data=form,
+                        files={"file": (name, blob, "image/png")}, timeout=120)
+        up.raise_for_status()
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "error": f"the staged upload failed: "
+                                      f"{exc.__class__.__name__}"}
+
+    made = _graphql(store, _FILE_CREATE, {"files": [{
+        "originalSource": target["resourceUrl"], "contentType": "IMAGE",
+        "alt": alt or name}]})
+    if not made["ok"]:
+        return made
+    fc = made["data"].get("fileCreate") or {}
+    if fc.get("userErrors"):
+        return {"ok": False, "error": fc["userErrors"][0]["message"]}
+    files = fc.get("files") or []
+    if not files:
+        return {"ok": False, "error": "Shopify created no file"}
+    fid = files[0].get("id") or ""
+    url = ((files[0].get("image") or {}).get("url")) or ""
+
+    import time as _time
+    for _ in range(10):
+        if url:
+            break
+        _time.sleep(1.5)
+        read = _graphql(store, _FILE_READ, {"id": fid})
+        if not read["ok"]:
+            return read
+        node = read["data"].get("node") or {}
+        if (node.get("fileStatus") or "") == "FAILED":
+            return {"ok": False, "error": "Shopify could not process the image"}
+        url = ((node.get("image") or {}).get("url")) or ""
+    if not url:
+        return {"ok": False, "error": (
+            "Shopify accepted the file and was still processing it after "
+            "several checks — it is in the store's Files; try again rather "
+            "than uploading a second copy"), "id": fid}
+    return {"ok": True, "url": url, "id": fid, "platform": "shopify"}
+
+
 def _seo_metafields(fields: dict) -> list:
     """SEO title/meta tags + JSON-LD (seo.structured_data) as a metafields array."""
     mfs = []

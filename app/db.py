@@ -1417,6 +1417,32 @@ class _Provenance:
     #: photograph was not made to a brief and there is nothing to have judged
     #: it against.
     assessment = Column(JSON, default=dict)
+    #: WHICH SET THIS FRAME BELONGS TO. An ad wants twenty or thirty
+    #: variations and the owner wants to see every one — thirty loose
+    #: proposals in a flat queue is the "queue nobody reads" failure by a
+    #: different route, so the review renders a batch as ONE card with a grid,
+    #: a reject-all, and per-frame keep. That needs a grouping key it can
+    #: query on, which is why this is a column and not a tag.
+    batch = Column(String, default="", index=True)
+
+    #: THE OTHER CROPS OF THIS SAME FRAME, cut once somebody kept it.
+    #: `{"4:5": url, "9:16": url}`. A property of the frame, not new assets:
+    #: filing a 9:16 crop as its own row would let `creative.pick` choose a
+    #: story cut as an email hero, and would put two more pictures in a queue
+    #: for a decision that has already been made.
+    placements = Column(JSON, default=dict)
+
+    #: WHO SERVES THIS PICTURE. `{}` while we do; once the client's own CMS
+    #: holds it, `{"platform": …, "id": …, "url": …, "at": …}` and `url` above
+    #: points at THEIR copy.
+    #:
+    #: Owner, 2026-08-30: *"then it can be hosted on shopify / wordpress /
+    #: another cms of the client's so it's accessible to us."* Our blob store
+    #: says of itself that it is "a handoff, not a CDN", and approved frames
+    #: were the one case where that was not true — they were kept for ever. A
+    #: hosted picture is the client's asset on the client's platform, which is
+    #: both where it belongs and the only copy that outlives us.
+    hosted = Column(JSON, default=dict)
 
 class KbBrand(Base):
     """One row per tenant: who they are, how they sound, what they may not say."""

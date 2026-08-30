@@ -640,6 +640,320 @@ def generate(tenant: str, *, commitment: dict | None = None,
                       "it on Review · Pictures"}
 
 
+#: The VISUAL axes. `ad_craft` already owns the copy axes — five angles and
+#: four value levers, from Piliero's concept diversity and Hormozi's value
+#: equation — and those decide what a frame ARGUES. These two decide what it
+#: SHOWS, and they are here rather than there because they are properties of a
+#: photograph and mean nothing to a sentence.
+#:
+#: The point of a grid rather than a loop: thirty re-rolls of one prompt are
+#: thirty photographs of the same table. Thirty combinations are thirty
+#: different arguments for the same positioning, which is what the owner asked
+#: for and what a carousel is for.
+MOMENTS = {
+    "before": "the moment BEFORE — the problem as it is actually lived, "
+              "without the product anywhere in frame",
+    "during": "the moment OF USE — hands, movement, the thing happening",
+    "after": "the moment AFTER — the calm on the other side of it",
+}
+
+FRAMINGS = {
+    "person_led": "a person is the subject; the product is incidental or "
+                  "absent",
+    "product_led": "the object is the subject, shot close and honestly",
+    "detail": "one detail, very close — texture, edge, finish",
+    "context": "wide, the whole setting, the product small within it",
+}
+
+#: How many images per distinct prompt. Two, because `imagegen` takes n up to
+#: four in ONE call and within-prompt variation is free diversity — while the
+#: real diversity has to come from the grid above, which needs a call each.
+PER_PROMPT = 2
+
+
+def axes(*, angles: tuple = (), levers: tuple = (), framings: tuple = (),
+         limit: int = 8) -> list:
+    """The grid, as a list of `{angle, lever, moment, framing}`.
+
+    Walked diagonally rather than nested, so the first four entries differ on
+    EVERY axis instead of sharing an angle and differing only in framing. A
+    nested loop is the reason a "20 variation" set usually contains four ideas
+    and sixteen restatements: the first axis barely moves.
+    """
+    from . import ad_craft
+    a = tuple(angles or ad_craft.UNIVERSAL_ANGLES)
+    lv = tuple(levers or tuple(ad_craft.VALUE_LEVERS))
+    mo = tuple(MOMENTS)
+    fr = tuple(framings or FRAMINGS)
+    if not fr:
+        return []
+    # MIXED RADIX, not four independent counters. `i % len` on every axis
+    # looks diagonal and is not: with four angles, four levers, three moments
+    # and four framings it has period TWELVE — so a set of twenty-four is
+    # twelve approaches generated twice, and `identity` is welded to
+    # `dream_outcome` for ever. Each axis therefore carries the CARRY from the
+    # ones before it, which is ordinary place-value counting; adding `i` on
+    # top keeps every axis moving at every step, so no two neighbouring frames
+    # differ in one thing only.
+    la, ll, lm, lf = len(a), len(lv), len(mo), len(fr)
+    out = []
+    for i in range(max(1, int(limit or 8))):
+        out.append({
+            "angle": a[i % la],
+            "lever": lv[(i + i // la) % ll],
+            "moment": mo[(i + i // (la * ll)) % lm],
+            "framing": fr[(i + i // (la * ll * lm)) % lf]})
+    return out
+
+
+def _axis_brief(cell: dict) -> str:
+    from . import ad_craft
+    return (f"\n\nTHIS FRAME'S APPROACH — one of several, and it must be "
+            f"visibly different from the others:\n"
+            f"- angle: {ad_craft.ANGLES.get(cell['angle'], {}).get('brief', cell['angle'])}\n"
+            f"- what it dramatises: {ad_craft.VALUE_LEVERS.get(cell['lever'], cell['lever'])}\n"
+            f"- moment: {MOMENTS.get(cell['moment'], '')}\n"
+            f"- framing: {FRAMINGS.get(cell['framing'], '')}")
+
+
+#: Framings that need the REAL product in the frame, and therefore cannot be
+#: generated. `imagegen.plate` appends `_PLATE_RULE` — scenery only, nothing
+#: that could be the wrong product — because a generated pitcher is not this
+#: client's pitcher, and Canva produced four ads with four invented ones the
+#: last time that was tried. So these framings generate the SCENE and
+#: composite the photograph onto it, which is what `compose.product_on_scene`
+#: has been able to do since it was written and has never been asked to.
+NEEDS_THE_PRODUCT = ("product_led", "detail")
+
+
+def batch(tenant: str, *, commitment: dict | None = None,
+          positioning: str = "", entity_key: str = "", audience_key: str = "",
+          claim: str = "", prominent: str = "", headline: str = "",
+          subline: str = "", fmt: str = "ad_frame",
+          plates: int = 4, review: bool = True) -> dict:
+    """A set of frames for one ad, filed together under one batch id.
+
+    Owner, 2026-08-30: *"each ad will need a carousel of images - potentially
+    up to 20-30 variations of different images with different ways of
+    approaching the same ad test."* Twenty-four of those is `plates=12`.
+
+    THIRTY VARIATIONS IS NOT THIRTY GENERATIONS. It is N points on the grid
+    above, each generated `PER_PROMPT` times in one call. Twelve prompts at two
+    images each is twenty-four frames in twelve calls, about a dollar; thirty
+    separate generations would be a dollar fifty, a quarter of an hour, and
+    thirty photographs of the same table.
+
+    TWO ROUTES, CHOSEN BY THE FRAMING, because "make a picture" is two
+    different jobs:
+
+      person_led, context   the generated scene IS the frame. Nothing in it
+                            claims to be a product, so nothing can be the
+                            wrong one.
+      product_led, detail   the generated scene is a PLATE, and the client's
+                            own photograph is composited onto it with a
+                            contact shadow. The product in the ad is then the
+                            product, as a matter of how the file was made
+                            rather than as something to check afterwards.
+
+    AND IF THERE IS NO PHOTOGRAPH, THOSE FRAMINGS ARE DROPPED AND SAID. Not
+    quietly swapped for a generated stand-in — that is the one failure this
+    whole route exists to prevent, and it would be invisible in the output.
+
+    EVERY FRAME IS FILED AND EVERY FRAME IS PROPOSED. The owner asked to see
+    all of them and reject individually or reject the set, so nothing here
+    infers approval from a sibling: the batch id exists so the review can draw
+    them as one card, not so they can share one decision.
+
+    Frames are cut at ONE shape. The other placements are cut on approval by
+    `placements`, because cutting 4:5 and 9:16 of a picture nobody kept is
+    exactly the storage the owner closed on 2026-08-29.
+    """
+    import uuid as _uuid
+
+    from . import kb as kbmod, media
+    batch_id = _uuid.uuid4().hex
+    base = brief_for(tenant, commitment=commitment, fmt=fmt,
+                     prominent=prominent, entity_key=entity_key, claim=claim,
+                     audience_key=audience_key, positioning=positioning)
+
+    # WHICH PHOTOGRAPH, asked once. `pick` is the one ladder every system
+    # uses, so the frame that carries the product carries the same one the
+    # email hero would have — and `rung` says why it was that one.
+    shot = pick(tenant, commitment=commitment, fmt=fmt, entity_key=entity_key,
+                audience_key=audience_key, claim=claim, prominent=prominent,
+                positioning=positioning)
+    product_id = (shot.get("asset_id") or "") if not shot.get("should_generate") \
+        and shot.get("rung") in ("proven", "photograph") else ""
+
+    framings = tuple(FRAMINGS) if product_id else tuple(
+        f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
+    dropped = [f for f in FRAMINGS if f not in framings]
+
+    frames, errors, repeats = [], [], 0
+    for cell in axes(framings=framings, limit=max(1, int(plates or 4))):
+        text = base["prompt"] + _axis_brief(cell)
+        res = _plates(text, base["shape"], PER_PROMPT)
+        if not res.get("ok"):
+            errors.append(f"{cell['angle']}/{cell['framing']}: "
+                          f"{res.get('error', 'generation failed')}")
+            continue
+        for blob in res.get("images") or []:
+            if not blob:
+                continue
+            if cell["framing"] in NEEDS_THE_PRODUCT:
+                made = _composite(tenant, product_id, blob, base["shape"],
+                                  headline=headline, subline=subline)
+                if not made.get("ok"):
+                    errors.append(f"{cell['framing']}: {made['error']}")
+                    continue
+                blob = made["image"]
+            filed = _file_frame(tenant, blob, base, cell, batch_id,
+                                entity_key=entity_key, prompt=text,
+                                review=review,
+                                product_id=product_id
+                                if cell["framing"] in NEEDS_THE_PRODUCT else "")
+            if filed.get("duplicate"):
+                repeats += 1
+                continue
+            if filed.get("error"):
+                errors.append(filed["error"])
+                continue
+            frames.append(filed["frame"])
+
+    clean = [f for f in frames if not f["failed"]]
+    return {"ok": bool(frames), "batch": batch_id, "frames": frames,
+            "made": len(frames), "clean": len(clean),
+            "subject": base["subject"], "thin": base["thin"],
+            "errors": errors, "product_asset": product_id,
+            "shape": base["shape"],
+            # SAID, not left to be counted. A set where nineteen of twenty
+            # frames failed their review is a set with a brief problem, and
+            # the number is the only place that shows before somebody opens
+            # twenty pictures.
+            "repeats": repeats,
+            "note": ((f"{len(clean)} of {len(frames)} passed review"
+                      + (f" — {repeats} came back identical to a picture "
+                         f"already on file and were not filed twice"
+                         if repeats else ""))
+                     if frames else "nothing was generated"),
+            "held_back": (
+                f"no usable photograph of this product, so "
+                f"{', '.join(dropped)} were not attempted — a generated "
+                f"product would not be this client's product"
+                if dropped else "")}
+
+
+def _composite(tenant: str, product_id: str, plate: bytes, shape: str, *,
+               headline: str, subline: str) -> dict:
+    """The photograph onto the plate, at the one shape this set is cut at."""
+    from . import compose
+    fmt = _PLACEMENT.get(shape, "1:1")
+    got = compose.product_on_scene(tenant, product_id, plate,
+                                   headline=headline, subline=subline,
+                                   formats=[fmt])
+    if not got.get("ok"):
+        return {"ok": False, "error": str(got.get("error") or "compositing failed")}
+    return {"ok": True, "image": got["images"][fmt]}
+
+
+#: `imagegen` names shapes; `compose` names Meta placements. One mapping, here,
+#: rather than each caller guessing — two vocabularies for one idea is how a
+#: story frame ends up cut square.
+_PLACEMENT = {"square": "1:1", "portrait": "4:5", "landscape": "1:1"}
+
+
+def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
+                batch_id: str, *, entity_key: str, prompt: str, review: bool,
+                product_id: str = "") -> dict:
+    """Store the bytes, judge them, and file the asset. One frame's whole life."""
+    from . import kb as kbmod, media
+    put = media.put(tenant, blob, mime="image/png", origin=GENERATED_ORIGIN)
+    if not put["ok"]:
+        return {"error": put["error"]}
+    # A PICTURE WE ALREADY HOLD IS NOT A NEW VARIATION. `media.put` is
+    # content-addressed and `add_asset` dedupes on the URL, so two identical
+    # frames become one row — and the set would then report a frame it does
+    # not have, with one asset answering to two cells of the grid. Counted and
+    # said instead: "24 asked for, 22 distinct" is a fact about the brief.
+    if put["reused"]:
+        return {"duplicate": True}
+    verdict = assess(blob, base, tenant) if review else {}
+    kbmod.add_asset(
+        tenant, put["url"], rights=GENERATED_RIGHTS,
+        title=f"{base['subject'] or 'ad'} · {cell['angle']}/{cell['framing']}"[:120],
+        kind="image", subject=base["subject"][:200], source="generated",
+        prompt=prompt[:2000], entity_key=entity_key,
+        origin=GENERATED_ORIGIN, batch=batch_id,
+        tags=[cell["angle"], cell["lever"], cell["moment"], cell["framing"]])
+    row = next((a for a in kbmod.assets(tenant, publishable_only=False)
+                if (a.url or "") == put["url"]), None)
+    if row is None:
+        return {"error": "the picture was stored but the asset did not file"}
+    if verdict:
+        try:
+            kbmod.set_asset_assessment(row.id, verdict)
+        except Exception:                                        # noqa: BLE001
+            pass
+    return {"frame": {"asset_id": row.id, "url": put["url"], "cell": cell,
+                      "reused": put["reused"], "product": product_id,
+                      "failed": list(verdict.get("failed") or []),
+                      "overall": verdict.get("overall", "")}}
+
+
+def placements(tenant: str, asset_id: str) -> dict:
+    """The other two crops, cut once somebody has KEPT the frame.
+
+    Meta wants 1:1 and 4:5 in feed and 9:16 in stories, and re-cropping an
+    export by hand is how the story version ends up with the headline off the
+    top. `compose` has cut all three since it was written and has never been
+    asked to.
+
+    CUT ON APPROVAL, not on generation. Owner, 2026-08-29: *"lets make sure we
+    are only storing long term the images that have been approved."* Three
+    crops of twenty-four proposals is seventy-two pictures nobody asked for;
+    three crops of the two that were kept is six.
+
+    THEY ARE NOT NEW ASSETS. They are recorded ON the frame, because a 9:16
+    crop filed as its own row would be selectable by `pick` as an email hero,
+    and would arrive in the review queue asking for a decision that was just
+    made about the picture it was cut from.
+    """
+    from . import compose, kb as kbmod, media, provenance as prov
+
+    row = next((a for a in kbmod.assets(tenant, publishable_only=False)
+                if a.id == asset_id), None)
+    if row is None:
+        return {"ok": False, "error": "no such picture"}
+    if str(row.review or "") != prov.APPROVED:
+        return {"ok": False, "error": (
+            "only an approved frame is cut for placement — this one is "
+            f"{row.review or 'unreviewed'}")}
+    blob, _mime = media.get(str(row.url or "").rsplit("/", 1)[-1])
+    if not blob:
+        return {"ok": False, "error": "the picture's bytes are gone"}
+
+    # The frame already carries the product if it ever did, so this cuts the
+    # FINISHED frame rather than re-running the composite — re-compositing
+    # would place the product a second time.
+    made = compose.crop_placements(blob, formats=["4:5", "9:16"])
+    if not made.get("ok"):
+        return {"ok": False, "error": str(made.get("error") or "cutting failed")}
+    cut = {}
+    for fmt, data in (made.get("images") or {}).items():
+        put = media.put(tenant, data, mime="image/png", origin=GENERATED_ORIGIN)
+        if not put["ok"]:
+            return {"ok": False, "error": put["error"]}
+        cut[fmt] = put["url"]
+    kbmod.set_asset_placements(row.id, cut)
+    return {"ok": True, "cut": cut,
+            "note": f"{len(cut)} placement(s) cut from an approved frame"}
+
+
+def _plates(text: str, shape: str, n: int) -> dict:
+    from . import imagegen
+    return imagegen.plate(text, shape=shape, n=max(1, min(4, int(n or 1))))
+
+
 def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:
     """File the client's own Drive photographs into the pictures queue.
 

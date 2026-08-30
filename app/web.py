@@ -5845,6 +5845,13 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", ""))
     ids = [str(i) for i in form.getlist("asset_ids") if str(i).strip()]
+    # REJECT THE SET reads the set, rather than trusting whatever boxes
+    # happened to be ticked. Owner, 2026-08-30: they wanted one button for
+    # "this whole idea was wrong", and a button that acts on a different list
+    # from the grid above it is the worst kind of control.
+    batch = str(form.get("batch", "")).strip()
+    if action == "reject_batch" and batch:
+        ids = [r.id for r in kbm.batch_assets(tenant, batch)]
     if not ids:
         return _back_to_content(tenant, msg="no pictures were selected")
     # Three outcomes, not two. Approving a picture for USE is a statement
@@ -5855,12 +5862,134 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     approve = action in ("approve", "approve_use", "approve_reference")
     rights = ("owned" if action in ("approve", "approve_use")
               else "reference" if action == "approve_reference" else "")
+    cuts = 0
     for aid in ids:
         kbm.review_asset(aid, approve=approve, rights=rights)
+        # KEEPING A FRAME CUTS ITS PLACEMENTS, here, because this is where the
+        # decision is made. Only frames from a generated set: a crawled
+        # photograph has no ad placements to cut, and cutting one would be
+        # inventing a crop of somebody's product shot.
+        if rights == "owned":
+            try:
+                row = next((a for a in kbm.assets(tenant, publishable_only=False)
+                            if a.id == aid), None)
+                if row is not None and (row.batch or ""):
+                    from . import creative as _cr
+                    cuts += 1 if _cr.placements(tenant, aid).get("ok") else 0
+            except Exception:                                    # noqa: BLE001
+                pass
+    # AND THEY BECOME THE CLIENT'S. Owner, 2026-08-30: an approved picture
+    # belongs on the client's own CMS "so it's accessible to us". Off the
+    # request because it is an upload per picture and per crop; reported by
+    # the same strip that reports a frame run, so a failure to hand off is not
+    # invisible.
+    if rights == "owned":
+        from . import hosting as _hosting
+        _run_bg("hosting", _hosting.publish_all, tenant)
     verb = ("approved for use" if rights == "owned"
             else "kept as reference" if approve else "rejected")
-    return _back_to_content(tenant, msg=f"{verb}: {len(ids)} picture(s)",
-                            anchor="pics")
+    if action == "reject_batch":
+        verb = "rejected the whole set"
+    return _back_to_content(
+        tenant, msg=f"{verb}: {len(ids)} picture(s)"
+        + (f" — feed and story crops cut for {cuts}" if cuts else ""),
+        anchor="pics")
+
+
+@app.post("/admin/ad_frames", response_class=HTMLResponse)
+async def ad_frames(request: Request, key: str = Depends(admin_key)):
+    """Make the carousel for one ad variant.
+
+    THE CHIP BECOMES A BUTTON. Every ad variant has carried
+    `needs_art_direction: True` since the drafter was written, and the variant
+    board has drawn it as an amber chip — a statement of a need, next to no
+    way to meet it. This is the meeting of it, in the place that reports it.
+
+    IT READS THE OUTPUT ROW, not the board JSON. The row is what `results`
+    measures and what `meta_ads.match` joins to, so the frames are generated
+    against the same positioning, audience and claim that the performance will
+    later be attributed to. Reading the board instead would let the two drift,
+    and "which creative worked" is the question this whole path exists for.
+
+    OFF THE REQUEST, because it is four image calls and a review each — two to
+    three minutes. A GET that blocks that long is indistinguishable from a
+    broken button, which is the lesson `_run_bg` already carries.
+    """
+    from . import creative as cr, kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    output_id = str(form.get("output_id", "")).strip()
+    tenant = str(form.get("tenant", ""))
+    plates = max(1, min(12, int(str(form.get("plates", "4")) or 4)))
+    with db.SessionLocal() as s:
+        row = s.get(db.Output, output_id)
+        if row is None:
+            return _back_to_content(tenant, msg="no such ad variant")
+        tenant = row.tenant or tenant
+        claim_ids = list(row.claim_ids or [])
+        args = dict(entity_key=row.entity_key or "",
+                    audience_key=row.audience_key or "",
+                    positioning=row.positioning or "",
+                    headline=_first_line(row.body or ""))
+    # THE CLAIM AS TEXT. `brief_for` puts it in the prompt as the thing the
+    # picture must not contradict, and a claim id in a prompt is a string of
+    # hex to a generator.
+    claim = ""
+    if claim_ids:
+        got = [c for c in kbm.claims(tenant, entity_key=args["entity_key"] or None)
+               if c.id == claim_ids[0]]
+        claim = str(getattr(got[0], "claim", "") or "") if got else ""
+    _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates, **args)
+    return _back_to_content(
+        tenant, msg=(f"making {plates * cr.PER_PROMPT} frames — they appear "
+                     f"under Pictures as one set when they land"),
+        anchor="pics")
+
+
+def _first_line(body: str) -> str:
+    """The ad's own opening line, for any frame that sets type on the image.
+
+    Not a summary and not the subject: if words go on a frame they should be
+    the words the ad actually says, or the picture and the post argue two
+    different things.
+    """
+    for line in str(body or "").splitlines():
+        t = line.strip().lstrip("#").strip()
+        if t:
+            return t[:90]
+    return ""
+
+
+@app.post("/admin/asset_canva", response_class=HTMLResponse)
+async def asset_canva(request: Request, key: str = Depends(admin_key)):
+    """Open one frame in Canva, so its type and layout can be changed.
+
+    Owner, 2026-08-30: a frame *"should be on canva until edited & approved or
+    just approved"*. Both exits are real, which is why this is a button rather
+    than a step: a frame that is right as it stands goes straight to approve,
+    and one that needs the headline moved goes through Canva first and comes
+    back through `canva.harvest`.
+
+    ON DEMAND, and per frame. A set is up to thirty variations of which two
+    get kept — thirty designs made up front is twenty-eight canvases nobody
+    opens and a client folder unusable within a week.
+    """
+    from . import hosting as _hosting
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    aid = str(form.get("asset_id", "")).strip()
+    got = _hosting.to_canva(tenant, aid)
+    if not got.get("ok"):
+        return _back_to_content(tenant, msg=f"Canva: {got.get('error', '')}"[:200],
+                                anchor="pics")
+    return _back_to_content(
+        tenant, anchor="pics",
+        msg=("already open in Canva" if got.get("reused")
+             else "opened in Canva — edit it there, then run Harvest to bring "
+                  "the finished version back"))
 
 
 @app.post("/admin/asset_add", response_class=HTMLResponse)

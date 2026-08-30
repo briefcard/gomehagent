@@ -2569,7 +2569,7 @@ def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
               prompt: str = "", tags: list[str] | None = None,
               entity_key: str = "", canva_design_id: str = "",
               thumbnail_url: str = "", derived_from: list[str] | None = None,
-              origin: str = "human") -> str:
+              origin: str = "human", batch: str = "") -> str:
     """File one asset. `rights` is required and has no safe guess.
 
     Refusing rather than defaulting is the point: a caller that has not decided
@@ -2595,7 +2595,7 @@ def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
             kind=kind, subject=subject or "", source=source, prompt=prompt,
             tags=list(tags or []), entity_key=entity_key or "",
             canva_design_id=canva_design_id, thumbnail_url=thumbnail_url,
-            derived_from=list(derived_from or []),
+            derived_from=list(derived_from or []), batch=batch or "",
             origin=origin, review=prov.APPROVED if prov.lands_approved(origin)
             else prov.PROPOSED)
         s.add(row)
@@ -2653,6 +2653,47 @@ def proposed_assets(tenant: str) -> list[db.KbAsset]:
         return rows
 
 
+def batches(tenant: str) -> list[dict]:
+    """Proposed frames grouped by the SET they were generated as.
+
+    An ad wants twenty or thirty variations and the owner wants to see every
+    one. Thirty loose proposals in a flat queue is the queue-nobody-reads
+    failure by a different route — so the review draws a set as ONE card with
+    a grid, a reject-all and a per-frame keep, and this is what it reads.
+
+    Grouped here rather than in the page, because the reports system will want
+    the same grouping and two places counting one set is how they come to
+    disagree.
+    """
+    out: dict = {}
+    for r in proposed_assets(tenant):
+        if not (r.batch or ""):
+            continue
+        g = out.setdefault(r.batch, {"batch": r.batch, "frames": [],
+                                     "subject": "", "at": None})
+        g["frames"].append(r)
+        g["subject"] = g["subject"] or str(r.subject or "")
+        if r.created_at and (g["at"] is None or r.created_at > g["at"]):
+            g["at"] = r.created_at
+    for g in out.values():
+        g["made"] = len(g["frames"])
+        # A frame that failed its own review is still SHOWN — the assessment
+        # advises the person deciding, it does not decide. Counting them is
+        # what tells a set with a brief problem from a set with one bad frame.
+        g["clean"] = sum(1 for f in g["frames"]
+                         if not ((f.assessment or {}).get("failed")))
+    return sorted(out.values(), key=lambda g: (g["at"] or db.utcnow()),
+                  reverse=True)
+
+
+def batch_assets(tenant: str, batch: str) -> list[db.KbAsset]:
+    """Every proposed frame in one set. The reject-all reads this, so that
+    button can never act on a different list from the grid above it."""
+    if not str(batch or "").strip():
+        return []
+    return [r for r in proposed_assets(tenant) if (r.batch or "") == batch]
+
+
 def review_asset(asset_id: str, approve: bool, by: str = "owner",
                  rights: str = "") -> str:
     """Approve or reject one picture — and, on approval, settle its RIGHTS.
@@ -2702,6 +2743,41 @@ def set_asset_assessment(asset_id: str, verdict: dict) -> str:
             if row is None:
                 return "No such asset."
             row.assessment = dict(verdict or {})
+            s.commit()
+        return "Recorded."
+    except Exception:                                            # noqa: BLE001
+        return "Not recorded."
+
+
+def set_asset_placements(asset_id: str, cut: dict) -> str:
+    """Record a frame's other crops on the frame itself. One writer."""
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbAsset, asset_id)
+            if row is None:
+                return "No such asset."
+            row.placements = dict(cut or {})
+            s.commit()
+        return "Recorded."
+    except Exception:                                            # noqa: BLE001
+        return "Not recorded."
+
+
+def set_asset_hosted(asset_id: str, where: dict, url: str = "") -> str:
+    """Record that the client's own platform now serves this picture.
+
+    Rewrites `url` at the same time and in the same transaction, because the
+    two are one fact: a row saying it is hosted while still pointing at our
+    blob is a row that will 404 the moment the sweep runs.
+    """
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbAsset, asset_id)
+            if row is None:
+                return "No such asset."
+            row.hosted = dict(where or {})
+            if url:
+                row.url = url
             s.commit()
         return "Recorded."
     except Exception:                                            # noqa: BLE001

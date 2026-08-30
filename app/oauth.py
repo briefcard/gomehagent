@@ -161,6 +161,9 @@ SCOPE_WORDS = {
     "read_themes": "read your theme",
     "write_themes": "add a structured-data snippet to your theme "
                     "(reversible from Shopify's theme history)",
+    "read_files": "read the images in your Files",
+    "write_files": "save approved images to your Files, so the artwork we "
+                   "make for you is yours and lives on your own store",
 }
 
 
@@ -273,7 +276,14 @@ FLOWS: dict[str, dict] = {
         scopes=["read_products", "write_products",
                 "read_orders", "read_inventory", "read_customers",
                 "read_content", "write_content",
-                "read_themes", "write_themes"],
+                "read_themes", "write_themes",
+                # Added 2026-08-30 so an approved ad frame can live in the
+                # store's own Files rather than on our blob store for ever.
+                # A store connected before this granted nine and not eleven;
+                # `shopify_seo.put_image` checks what was actually granted and
+                # asks for a re-connect by name rather than failing as though
+                # the upload broke.
+                "read_files", "write_files"],
         extra={},
         client=_shopify_client,
         env="SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET",

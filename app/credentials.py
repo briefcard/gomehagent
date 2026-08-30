@@ -504,7 +504,17 @@ def status(tenant: str) -> list[dict]:
             state, detail = "connected", f"by {row.granted_by or 'the client'}"
             # A partial grant is a connection with a dark half, and the only
             # place that can ever be said is here — the token itself works.
-            for scope in (row.meta or {}).get("missing_scopes") or []:
+            #
+            # RECOMPUTED, not just replayed. `missing_scopes` is written once,
+            # at connect time, against what we asked for THEN — so a scope
+            # added to a flow afterwards is missing on every existing
+            # connection and reported on none of them. That is how
+            # `write_files` would have gone: added 2026-08-30 so approved
+            # artwork can live in the client's own Files, absent from all nine
+            # stores connected before it, and invisible until an upload failed
+            # with an access error. Adding a scope must reach the console by
+            # itself.
+            for scope in _dark(row, key):
                 detail += f" · not granted: {scope.rsplit('/', 1)[-1]}"
         elif row and row.status == "failed":
             state, detail = "failed", (row.last_error or "")[:120]
@@ -1339,6 +1349,26 @@ def needed_for(tenant: str) -> list[str]:
     # system needing `analytics` is served by a Google sign-in, whose nominal
     # capability is `inbox`.
     return [k for k in PROVIDERS if set(GRANTS.get(k, ())) & caps]
+
+
+def _dark(row, provider: str) -> list:
+    """Which half of this connection is dark, now — asked of today's flow.
+
+    The union of what was recorded missing at connect time and what the flow
+    has come to ask for since. Silent when the provider recorded no grant at
+    all: an api_key or env credential carries no scope list, and "we cannot
+    tell" must never render as "they refused".
+    """
+    from . import oauth
+    was = [str(x) for x in ((row.meta or {}).get("missing_scopes") or [])]
+    want = list((oauth.FLOWS.get(provider) or {}).get("scopes") or [])
+    have = (row.scopes or "").replace(",", " ").split()
+    now = oauth._missing_scopes(want, have) if (want and have) else []
+    out = list(was)
+    for s_ in now:
+        if s_ not in out:
+            out.append(s_)
+    return out
 
 
 def granted_scopes(tenant: str) -> dict[str, set[str] | None]:

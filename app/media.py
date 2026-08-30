@@ -114,8 +114,14 @@ def sweep(*, unreviewed_days: int = UNREVIEWED_DAYS,
 
     Four cases, and the difference between them is who decided and when:
 
-      APPROVED    kept, at any age. Somebody said yes; the bytes are the
-                  picture.
+      APPROVED    kept while we are the only copy — and COUNTED SEPARATELY
+                  from the moment the client's own site holds it. Owner,
+                  2026-08-30: an approved picture belongs on the client's CMS,
+                  and once `hosting.publish` has moved it there this store has
+                  no business keeping a second copy. So "kept because somebody
+                  said yes" and "kept because nowhere else would take it" stop
+                  looking alike: the second is a connection that needs fixing,
+                  and it read as normal for as long as they shared a number.
       REJECTED    dropped now. The decision is made, and a rejected image must
                   not be loadable — the ROW stays, because `review_asset`
                   retires rather than deletes so a second crawl does not
@@ -141,7 +147,7 @@ def sweep(*, unreviewed_days: int = UNREVIEWED_DAYS,
     orphan_cut = now - dt.timedelta(days=max(1, int(orphan_days or 1)))
 
     out = {"kept_approved": 0, "dropped_rejected": 0, "expired_unreviewed": 0,
-           "dropped_orphan": 0}
+           "dropped_orphan": 0, "unhosted": 0}
     with db.SessionLocal() as s:
         by_url = {}
         for a in s.query(db.KbAsset).all():
@@ -162,6 +168,8 @@ def sweep(*, unreviewed_days: int = UNREVIEWED_DAYS,
             review = str(asset.review or "")
             if review == prov.APPROVED:
                 out["kept_approved"] += 1
+                if not (asset.hosted or {}).get("url"):
+                    out["unhosted"] += 1
                 continue
             if review == prov.REJECTED:
                 s.delete(row)
@@ -173,8 +181,14 @@ def sweep(*, unreviewed_days: int = UNREVIEWED_DAYS,
                 asset.status = "retired"
                 out["expired_unreviewed"] += 1
         s.commit()
-    out["note"] = (
-        f"{out['expired_unreviewed']} picture(s) expired unreviewed — nobody "
-        f"opened them in {unreviewed_days} days, and they can be generated "
-        f"again" if out["expired_unreviewed"] else "")
+    notes = []
+    if out["expired_unreviewed"]:
+        notes.append(f"{out['expired_unreviewed']} picture(s) expired "
+                     f"unreviewed — nobody opened them in {unreviewed_days} "
+                     f"days, and they can be generated again")
+    if out["unhosted"]:
+        notes.append(f"{out['unhosted']} approved picture(s) are still ours "
+                     f"because no client site would take them — connect a CMS, "
+                     f"or re-connect a Shopify store to grant write_files")
+    out["note"] = " · ".join(notes)
     return out
