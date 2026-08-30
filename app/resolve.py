@@ -40,7 +40,11 @@ would be a false assurance.
 """
 from __future__ import annotations
 
-from . import conversation as cv, kb, tenants
+import logging
+
+from . import bundle as _pkg, conversation as cv, kb, tenants
+
+log = logging.getLogger(__name__)
 
 #: Tier names, in the order they are built. A caller asks for a depth, not a
 #: list — asking for tier 3 without tier 1 is not a thing anyone wants.
@@ -583,4 +587,19 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         "account_ready": comp.get("ready", False),
         "account_missing": comp.get("missing", []),
     }
+    # THE PACKAGE AGAINST WHAT IT PROMISED. `bundle.PARTS` declares every part
+    # this layer hands over; this checks the thing actually built against it.
+    #
+    # Reported, never a veto — the rule this whole module runs on. But
+    # reported LOUDLY, because the failure it catches is the one that hides:
+    # `audiences` was read by every drafter's funnel brief and supplied by
+    # nobody for the life of the codebase, and the only reason it took two
+    # years to find is that nothing ever compared what was carried against
+    # what was expected.
+    _absent = _pkg.verify(bundle)
+    if _absent:
+        bundle["coverage"]["promised_but_absent"] = _absent
+        log.error("resolve(%s): the package is missing declared part(s): %s "
+                  "— a consumer reading one of these gets None and no gap "
+                  "note", tenant, ", ".join(_absent))
     return bundle

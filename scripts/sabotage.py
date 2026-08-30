@@ -844,6 +844,27 @@ SABOTAGES = [
                "silently, exactly the production incident of 2026-08-21",
     },
     {
+        "name": "the_package_is_checked_against_its_promise",
+        "file": "app/bundle.py",
+        "find": "    return [k for k in promised(tier) if k not in b]",
+        "replace": "    return []  # SABOTAGE",
+        "suites": ["test_bundle_contract.py"],
+        "why": "the one check that compares a built package against what it "
+               "declared goes quiet — a part that stops being supplied is "
+               "carried as None into every drafter, exactly as `audiences` "
+               "was for the life of the codebase, and nothing notices again",
+    },
+    {
+        "name": "a_consumer_cannot_read_an_undeclared_part",
+        "file": "app/bundle.py",
+        "find": "    undeclared = {k: sorted(v) for k, v in seen.items() if k not in PARTS}",
+        "replace": "    undeclared = {}  # SABOTAGE",
+        "suites": ["test_bundle_contract.py"],
+        "why": "a generator may read a part of the brand package that nothing "
+               "promises to supply, and the contract will report it clean — "
+               "which is how a read with no writer reaches production",
+    },
+    {
         "name": "the_buyers_own_words_reach_the_drafter",
         "file": "app/resolve.py",
         "find": '    bundle["audiences"] = ([',
