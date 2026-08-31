@@ -164,7 +164,15 @@ CATALOG = {
             ),
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
-            measure="generated HTML vs the ESP draft at launch")),
+            # WHAT IS ACTUALLY MEASURED. This said "generated HTML vs the ESP
+            # draft at launch", which cannot be taken: `omnisend.campaign()`
+            # returns status, name, sent_at and segment ids and no content. A
+            # declared measure with no producer left the Measured section
+            # structurally empty and honest-sounding. What we CAN see is what
+            # the owner changed in the workroom before approving — the same
+            # question, did a human have to touch it, asked where the answer
+            # actually is.
+            measure="our first draft vs what you approved")),
     "moment_email": dict(
         name="Moments (windows worth writing into)",
         does="Watches for windows opening — a cart gone cold, an enquiry gone "

@@ -104,3 +104,32 @@ def record(approval, generated: str, sent: str) -> dict:
     except Exception:                                            # noqa: BLE001
         pass          # measuring quality must never block a send
     return d
+
+
+def record_run(run_id: str, generated: str, sent: str) -> dict:
+    """File the delta against a RUN that may have no approval behind it.
+
+    `record` reaches the run THROUGH an approval, which is right for mail —
+    every reply there is queued for a person. A campaign on the `shadow` or
+    `auto` rung has no approval at all, and on those rungs the delta is still
+    the number the Measured section is built from: what we first produced
+    against what actually went. Requiring an approval to measure would mean
+    the systems being trusted MOST are the ones nobody can check.
+    """
+    from . import db
+
+    d = delta(generated, sent)
+    if not d.get("measured") or not run_id:
+        return d
+    try:
+        with db.SessionLocal() as s:
+            run = s.get(db.SystemRun, run_id)
+            if run is not None and not run.edit_diff:
+                run.edit_diff = d["sample"] or ("sent unchanged"
+                                                if d["as_is"] else "")
+                run.decision = run.decision or ("approved" if d["as_is"]
+                                                else "edited")
+                s.commit()
+    except Exception:                                            # noqa: BLE001
+        pass          # measuring quality must never block a send
+    return d

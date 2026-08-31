@@ -858,6 +858,29 @@ SABOTAGES = [
                "the moment you could make it",
     },
     {
+        "name": "a_campaign_send_is_measured",
+        "file": "app/skill_pack.py",
+        "find": "            _edits.record_run(run_id, _was, _now)",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_campaign_measured.py"],
+        "why": "the Measured section for campaigns goes back to being "
+               "structurally empty — the system declares that it moves the "
+               "share of sends nobody had to touch, and nothing anywhere "
+               "records whether a person touched one",
+    },
+    {
+        "name": "the_edit_sample_is_readable",
+        "file": "app/skill_pack.py",
+        "find": ('            _was, _now = (_ct.plain_text(art.draft_body or ""),\n'
+                 '                          _ct.plain_text(art.body or ""))'),
+        "replace": '            _was, _now = (art.draft_body or ""), (art.body or "")  # SABOTAGE',
+        "suites": ["test_campaign_measured.py"],
+        "why": "the Measured list shows a doctype and a wall of table tags "
+               "instead of the sentence somebody changed — `edits.delta` is a "
+               "line diff and an email body is one long line of HTML, so the "
+               "number is right and the evidence beside it is unreadable",
+    },
+    {
         "name": "mail_is_grounded_as_the_system_that_owns_it",
         "file": "app/grounding.py",
         "find": "        system = _rep.route(bucket)",

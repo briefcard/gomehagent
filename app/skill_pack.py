@@ -3014,6 +3014,7 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
         out = s.get(db.Output, output_id)
         push = {}
         latest_status = ""
+        approval_id = ""
         held_defects: list = []
         run_decision = ""
         run_id = art.run_id if art is not None else ""
@@ -3022,6 +3023,7 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
                     .filter(db.Approval.run_id == run_id)
                     .order_by(db.Approval.created_at.desc()).all())
             latest_status = aprs[0].status if aprs else ""
+            approval_id = aprs[0].id if aprs else ""
             for apr in aprs:
                 got = (apr.payload or {}).get("esp_push")
                 if got:
@@ -3091,6 +3093,43 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
         landed_note = (f"draft created, but recording it failed "
                        f"({exc.__class__.__name__}) — the ledger still says "
                        f"held-for-review")
+    # WHAT A PERSON HAD TO CHANGE, measured at the moment it leaves.
+    #
+    # `SystemRun.edit_diff` is the number the Measured section is built from —
+    # "the share of sends nobody had to touch" — and for a campaign it had no
+    # producer at all: `edits.record` has two call sites and both are Gmail, so
+    # a campaign approval (kind="skill_output") never reached either. The tab
+    # has been structurally empty for this system since it was written.
+    #
+    # The comparison is `draft_body` against `body`: what we first produced
+    # against what the owner approved after the workroom's edits. The declared
+    # measure used to be "generated HTML vs the ESP draft at launch", which
+    # cannot be taken — `omnisend.campaign()` returns status, name, sent_at and
+    # segment ids, and no content. Measuring what we can actually see beats
+    # declaring a measure nobody can compute, and this is the better number
+    # anyway: it is exactly "did a human have to touch it".
+    # Against the RUN, not the approval: a campaign on the shadow or auto rung
+    # has no approval behind it, and requiring one to measure would leave the
+    # systems trusted most as the ones nobody can check. The approval is still
+    # updated when there is one, so "what happened to this draft" is answerable
+    # from either end.
+    if (art.draft_body or "").strip():
+        try:
+            from . import claim_trace as _ct
+            from . import edits as _edits
+            # OVER THE READABLE TEXT, not the markup. `edits.delta` is a line
+            # diff, and an email body is one long line of HTML — so the sample
+            # on the Measured list was the doctype and a wall of table tags,
+            # which tells a reader nothing about what a person changed. The
+            # question is "did a human have to touch the WORDS".
+            _was, _now = (_ct.plain_text(art.draft_body or ""),
+                          _ct.plain_text(art.body or ""))
+            _edits.record_run(run_id, _was, _now)
+            if approval_id:
+                _edits.record(approval_id, _was, _now)
+        except Exception:                                        # noqa: BLE001
+            pass    # measurement must never fail a push that already happened
+
     if push.get("hero_asset_id"):
         # The photograph actually reached a drafted campaign — the explicit
         # act the creative library's `uses` counter exists for.
