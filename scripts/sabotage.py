@@ -904,6 +904,29 @@ SABOTAGES = [
                "persona",
     },
     {
+        "name": "the_workroom_says_why_it_cannot_push",
+        "file": "app/admin_ui.py",
+        "find": '            elif _rung in ("shadow", "auto"):',
+        "replace": "            elif False:  # SABOTAGE",
+        "suites": ["test_workroom_email.py"],
+        "why": "the commonest reason a campaign cannot be sent — the system "
+               "sitting on the rung it was installed at — is invisible. Four "
+               "unrelated states collapse into one grey sentence that names "
+               "none of them and tells the owner to redraft, which fixes "
+               "three of the four never",
+    },
+    {
+        "name": "a_withdrawn_approval_prints_its_reason",
+        "file": "app/admin_ui.py",
+        "find": "            elif _withdrawn:",
+        "replace": "            elif False:  # SABOTAGE",
+        "suites": ["test_workroom_email.py"],
+        "why": "`withdrawn_because` is recorded on the approval and shown "
+               "nowhere, so an email held for a missing CAN-SPAM address reads "
+               "identically to one nobody has approved yet — and the page "
+               "advises a redraft, which cannot clear account data",
+    },
+    {
         "name": "a_redraft_carries_the_reader",
         "file": "app/skill_pack.py",
         "find": '            "audience_key": (overrides.get("audience_key")',

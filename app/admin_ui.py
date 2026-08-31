@@ -10846,7 +10846,32 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     # — under review-before-push, NOTHING sits in a client's platform until
     # the approval here says so.
     is_email = (art.format or "") == "campaign_email"
+    # THE RECIPE, FROM THE APPROVAL FIRST. `attach_esp_push` runs BEFORE
+    # `withdraw`, so a withdrawn approval still carries the recipe — including
+    # anything the owner changed with `campaign_meta_save`. Reading the
+    # artifact's copy first would silently discard that edit.
     esp_push = ((ap.payload or {}).get("esp_push") or {}) if ap else {}
+    # WHY THERE IS NO APPROVAL. Four unrelated mechanisms suppress it and they
+    # all used to collapse into one grey sentence that named none of them —
+    # and prescribed "a clean redraft re-queues one", which is false for three
+    # of the four. These two reads are what let the page say which.
+    _rung, _withdrawn = "", ""
+    if art.format == "campaign_email":
+        with db.SessionLocal() as _s:
+            if not esp_push:
+                _last = (_s.query(db.Approval)
+                         .filter(db.Approval.run_id == (art.run_id or ""))
+                         .order_by(db.Approval.created_at.desc()).first())
+                if _last is not None:
+                    esp_push = dict((_last.payload or {}).get("esp_push") or {})
+                    if (_last.status or "") == "withdrawn":
+                        _withdrawn = str((_last.payload or {})
+                                         .get("withdrawn_because") or "")
+            _sysrow = (_s.query(db.System)
+                       .filter(db.System.tenant == tenant,
+                               db.System.key == "campaign_email").first())
+            _rung = (_sysrow.autonomy or "shadow") if _sysrow else ""
+        esp_push = esp_push or dict(getattr(art, "push", None) or {})
     dest = getattr(out, "destination", "") or ""
     pushed = ":campaign/" in dest
     superseded_by = (dest.split("superseded:", 1)[1]
@@ -10983,12 +11008,51 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                       f'yours, in the platform; the launch-time edit delta is '
                       f'measured.</div>')
         else:
-            why = ""
+            # SAY WHICH STATE THIS IS. Every branch below is read from
+            # something already persisted; none of it is inferred.
             if run is not None and (run.decision or "") == "denied":
-                why = "denied — it will not be pushed"
-            decide = (f'<div class="note">Held in our store — no pending '
-                      f'approval{" (" + why + ")" if why else ""}. A clean '
-                      f'redraft re-queues one.</div>'
+                body_txt = ('<b>Denied.</b> It will not be pushed. A clean '
+                            'redraft re-queues an approval.')
+            elif _rung in ("shadow", "auto"):
+                # The commonest and the most silent. `autonomy` defaults to
+                # `shadow` and `systems.create` never sets it, so a system that
+                # was installed and never promoted sits here — and `auto`
+                # returns `cleared`, which nothing in the codebase consumes, so
+                # it cannot push either. Only the two middle rungs can.
+                body_txt = (
+                    f'<b>Nothing is queued for approval at the '
+                    f'<code>{_esc(_rung)}</code> rung.</b> '
+                    + ('Shadow runs and records; it sends nothing, by design.'
+                       if _rung == "shadow" else
+                       'On <code>auto</code> this system queues no approval '
+                       'and no push path consumes the result, so a campaign '
+                       'stops here.')
+                    + f' To send to {_esc(prov)}, move it to '
+                      f'<code>approve_all</code> on '
+                      f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems'
+                      f'&amp;tenant={_esc(tenant)}&amp;system=campaign_email'
+                      f'">the campaign system</a>.')
+            elif _withdrawn:
+                _perm = any(w in _withdrawn.lower() for w in
+                            ("can-spam", "address", "merge tags",
+                             "personalization"))
+                body_txt = (
+                    '<b>The approval was withdrawn — this email is not fit to '
+                    'push as it stands.</b><br>'
+                    + f'<span class="when">{_esc(_withdrawn[:400])}</span>'
+                    + ('<br>A redraft cannot clear that — it is account data, '
+                       'not wording. Fix it on Connections or the brand '
+                       'theme, then run again.' if _perm else
+                       '<br>A clean redraft re-queues the approval.'))
+            elif run is not None and (run.blocked_on or []):
+                body_txt = ('<b>Held with defects.</b><ul class="bl">'
+                            + "".join(f'<li>{_esc(str(x))}</li>'
+                                      for x in (run.blocked_on or [])[:6])
+                            + '</ul>A clean redraft re-queues the approval.')
+            else:
+                body_txt = ('Held in our store — no pending approval. A clean '
+                            'redraft re-queues one.')
+            decide = (f'<div class="note">{body_txt}</div>'
                       + (f'<form class="row" method="get" '
                          f'action="/admin/esp_push">'
                          f'<input type="hidden" name="key" value="{_esc(key)}">'
