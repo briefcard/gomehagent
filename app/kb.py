@@ -1565,6 +1565,48 @@ def pending_counts(tenant: str) -> dict:
         return {}
 
 
+#: HOW EACH DECLARED `kb_needs` TOKEN IS ANSWERED. One table, because the
+#: tokens are DECLARED in `systems.CATALOG` and ANSWERED here, and until
+#: 2026-08-31 nothing joined the two lists.
+#:
+#: What that cost: `asset` was added to `campaign_email`'s `kb_needs` in the
+#: walk that found the drafter had been eating the approved asset library all
+#: along. It never gained an answer here, and the lookup defaulted to satisfied
+#: — `have.get(f, True)` — so on `baci`, an account with ZERO assets of any
+#: kind, the install screen drew `asset` with a green tick, `systems.ready`
+#: counted it met, and `awaiting` could report a picture waiting for review but
+#: never a library that was empty. The one token the walk had just added was
+#: the one token that could not be seen.
+#:
+#: An unknown token now says so instead (see `needs_met`), and
+#: `test_catalog_vocabulary.py` computes the declared vocabulary from CATALOG
+#: and every skill's `constitutive` and fails if any of it lands here
+#: unanswered — so the next token is joined in the commit that declares it.
+#:
+#: `positioning` is answered and declared by no system today. Supply without
+#: demand is harmless — it is a real brand field a system may yet declare —
+#: whereas demand without supply is the defect above, so only that direction
+#: is enforced.
+#:
+#: Each value is a thunk, called only for the tokens actually asked about.
+#: `content_compliance` declares one token and was answering four catalogue
+#: queries to get it, ten systems over on every board render.
+KB_SUPPLIERS = {
+    "tone":          lambda t, b: bool((b.voice or {}).get("tone")),
+    "banned_claims": lambda t, b: bool(b.banned_claims),
+    "next_steps":    lambda t, b: bool(b.next_steps),
+    "positioning":   lambda t, b: bool(b.positioning),
+    "claim":         lambda t, b: bool(claims(t)),
+    "audience":      lambda t, b: bool(audiences(t)),
+    "objection":     lambda t, b: bool(objections(t)),
+    "entity":        lambda t, b: bool(entities(t, available_only=False)),
+    # Publishable by default — approved, and ours to use. The same bar
+    # `claims()` applies: a proposal is not something a generator may reach
+    # for, and a reference image is not something we may publish.
+    "asset":         lambda t, b: bool(assets(t)),
+}
+
+
 def needs_met(tenant: str, fields: tuple[str, ...]) -> list[str]:
     """Which of the named KB requirements this account does not meet.
 
@@ -1588,23 +1630,30 @@ def needs_met(tenant: str, fields: tuple[str, ...]) -> list[str]:
     b = brand(tenant)
     if not b:
         return ["kb_brand row"]
-    have = {
-        "tone": bool((b.voice or {}).get("tone")),
-        "banned_claims": bool(b.banned_claims),
-        "next_steps": bool(b.next_steps),
-        "positioning": bool(b.positioning),
-        "claim": bool(claims(tenant)),
-        "audience": bool(audiences(tenant)),
-        "objection": bool(objections(tenant)),
-        "entity": bool(entities(tenant, available_only=False)),
-    }
-    waiting = pending_counts(tenant)
+    waiting = None
     missing = []
     for f in fields:
-        if have.get(f, True):
+        answer = KB_SUPPLIERS.get(f)
+        if answer is None:
+            # NOT an account gap, and it must not read as one. Nobody can go
+            # and write this: the token is DECLARED and no check for it was
+            # ever built. Reporting a bare `f` would send somebody off to
+            # author something that may already exist; reporting nothing —
+            # which is what `have.get(f, True)` did — reports success.
+            # `test_catalog_vocabulary.py` makes this branch unreachable from
+            # CATALOG; it is what being wrong looks like if it ever is reached.
+            missing.append(f"{f} (no readiness check exists for this — a code "
+                           f"defect, not something to write)")
+            continue
+        if answer(tenant, b):
             continue
         # Same distinction completeness() draws: nobody has told us yet, versus
         # somebody has and it is sitting in a queue. Different fixes.
+        #
+        # Asked on the first miss, not up front: `pending_counts` is five
+        # queries and an account that meets everything needs none of them.
+        if waiting is None:
+            waiting = pending_counts(tenant)
         n = waiting.get(f, 0)
         missing.append(f"{f} ({n} waiting for review)" if n else f)
     return missing

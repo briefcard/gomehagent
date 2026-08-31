@@ -940,18 +940,19 @@ SABOTAGES = [
     },
     {
         "name": "the_ledger_notices_a_defect_being_fixed",
-        "file": "app/kb.py",
-        "find": "        if have.get(f, True):",
-        "replace": "        if have.get(f, False):  # SABOTAGE (this is the FIX)",
+        "file": "app/skill.py",
+        "find": '    if autonomy == "auto":\n        return "cleared"',
+        "replace": '    if autonomy == "auto":\n        return "cleared" if disposition != "cleared" else "cleared"  # SABOTAGE (this is the FIX)',
         "suites": ["test_open_defects.py"],
         "why": "the open-defect ledger is the one suite that must fail on GOOD "
                "news. It hands the next thread the code facts this thread "
                "found, and a handoff that stays green after the defect is gone "
-               "rots exactly the way SYSTEMS-REFERENCE.md did — it still "
-               "describes a kb_needs list that has since gained three tokens, "
-               "and nothing ever said so. This mutant APPLIES the real fix; if "
-               "the ledger stays green, it is a document pretending to be a "
-               "test, and the entry it carries will outlive the defect.",
+               "rots exactly the way SYSTEMS-REFERENCE.md did. This mutant "
+               "makes a production module BRANCH on \"cleared\", which is the "
+               "condition entry 5 measures; if the ledger stays green after "
+               "that, it is a document pretending to be a test and every entry "
+               "it carries will outlive its defect. Re-pointed 2026-08-31: it "
+               "used to apply the kb.py fix, and that defect is now closed.",
     },
     {
         "name": "retrieval_matches_the_conversation",
@@ -3628,6 +3629,31 @@ SABOTAGES = [
                "including the guard on the open-defect ledger, whose entire "
                "purpose is to fail on good news. A guard that cannot fail is "
                "worse than no guard: it is counted",
+    },
+    {
+        "name": "a_declared_need_reaches_an_answer",
+        "file": "app/kb.py",
+        "find": '    "asset":         lambda t, b: bool(assets(t)),',
+        "replace": '    # SABOTAGE — the asset supplier removed',
+        "suites": ["test_catalog_vocabulary.py"],
+        "why": "`asset` goes back to being declared in systems.CATALOG and "
+               "answered nowhere, so kb.needs_met cannot see it and the "
+               "install screen draws a green tick for pictures on an account "
+               "with none. This is the exact state the campaign_email walk "
+               "shipped: the one token it had just added was the one token "
+               "that could not be reported",
+    },
+    {
+        "name": "an_unanswerable_need_is_not_reported_met",
+        "file": "app/kb.py",
+        "find": "        answer = KB_SUPPLIERS.get(f)\n        if answer is None:",
+        "replace": "        answer = KB_SUPPLIERS.get(f) or (lambda t, b: True)  # SABOTAGE\n        if False:",
+        "suites": ["test_catalog_vocabulary.py"],
+        "why": "an unrecognised kb_needs token is silently SATISFIED again — "
+               "`have.get(f, True)` in its original form. A system can then "
+               "declare a need no readiness check can ever see, report ready "
+               "on it, and go live: absence read as permission, on the surface "
+               "whose whole job is to say what is absent",
     },
 ]
 

@@ -202,9 +202,11 @@ input again"; read it before adding a system.
    answers "what did they ask before" and never "how did we answer". The
    agentic `email_history_search` tool can reach sent mail, but that is a tool
    the model may call — not context the prompt is assembled from.
-2. **Three surfaces that report success wrongly** — `kb.py`'s `have.get(f,
-   True)` silently *satisfies* an unknown `kb_needs` token; `dossier.SCOPES`
-   has drifted from `systems.CATALOG`; `SYSTEMS-REFERENCE.md` is stale.
+2. **Two surfaces that report success wrongly** — `dossier.SCOPES` has
+   drifted from `systems.CATALOG`; `SYSTEMS-REFERENCE.md` is stale. (The
+   third, `kb.py`'s `have.get(f, True)`, is closed: the declared `kb_needs`
+   vocabulary now has to reach an answer, computed from CATALOG in
+   `scripts/test_catalog_vocabulary.py`.)
 3. **The input register** — as the JOIN computed from the declaration surfaces,
    **not a fourteenth place to state things.** Do 2 before 3: the register
    would faithfully report a vocabulary that currently cannot be trusted.

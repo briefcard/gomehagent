@@ -58,16 +58,6 @@ def main():
         "worker.py now indexes a sent reply — response patterns are assembled context",
     )
 
-    # 2a — an unknown kb_needs token reports SATISFIED.
-    #      `have.get(f, True)` means a token nobody supplies is silently met,
-    #      so a system can declare a need that no readiness check can ever see.
-    kb_src = (ROOT / "app" / "kb.py").read_text()
-    still_broken(
-        "kb.py: an unrecognised kb_needs token defaults to satisfied",
-        "have.get(f, True)" in kb_src,
-        "the default is now False (or explicit) — unknown tokens surface as gaps",
-    )
-
     # 2b — dossier.SCOPES has drifted from systems.CATALOG.
     scopes, catalog = set(dossier.SCOPES), set(systems.CATALOG)
     orphan_scopes = sorted(s for s in scopes - catalog if s)
@@ -143,7 +133,7 @@ def main():
     print(
         "\n"
         + (
-            f"all {6} defects still open — ledger is accurate"
+            f"all {5} defects still open — ledger is accurate"
             if not _fail
             else f"{len(_fail)} entry(s) are STALE:\n  - " + "\n  - ".join(_fail)
         )
