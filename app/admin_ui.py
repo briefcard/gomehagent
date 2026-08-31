@@ -11177,8 +11177,12 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     # control belongs (design rule 1). Backfilling instead would drop an
     # unread queue on somebody in one transaction; this way a person decides
     # the ones they actually want, one at a time, from the page they are on.
+    # An ad batch reads its own decisions off the VARIANTS (`ad_apr`), not off
+    # `ap`, so `ap` alone is the wrong test for "has a decision" there.
+    _has_decision = bool(ap) or (is_ads and (ad_apr["pending"] or ad_apr["ready"]
+                                             or ad_apr["denied"]))
     if (not published and not superseded_by and (art.body or "").strip()
-            and not ap and not (is_ads and ad_apr["pending"])):
+            and not _has_decision):
         decide += f"""
         <form class="row" method="post"
               action="/admin/queue_approval?key={_esc(key)}"

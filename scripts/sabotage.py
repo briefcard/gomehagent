@@ -3762,6 +3762,19 @@ SABOTAGES = [
                "the page itself re-rendering in its pushed state. Design rule "
                "3: a decision never costs the reader their place",
     },
+    {
+        "name": "a_batch_is_queued_the_way_its_board_reads",
+        "file": "app/web.py",
+        "find": '    if (art.format or "") == "ad_batch":',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_queue_approval.py"],
+        "why": "queueing an ad batch files ONE approval against the batch id, "
+               "and the board counts only approvals carrying a VARIANT id — "
+               "so the row satisfies `_article_bundle`, hides the button that "
+               "made it, and is counted and decidable by nothing. An approval "
+               "no surface can act on is worse than none: the queue says "
+               "there is work waiting and no page will ever clear it",
+    },
 ]
 
 

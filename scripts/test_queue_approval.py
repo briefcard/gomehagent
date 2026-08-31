@@ -167,6 +167,28 @@ def main() -> int:
        or "/admin/ship_decide" not in page3,
        "a decided artifact must stop offering the decision")
 
+    print("\n— an ad batch is queued the way its board READS: per variant —")
+    import json as _json
+    batch = {"variants": [{"output_id": "v-one", "headline": "A"},
+                          {"output_id": "v-two", "headline": "B"}]}
+    oid3, _ = _stranded("baci", body=_json.dumps(batch))
+    with db.SessionLocal() as s_:
+        _a = (s_.query(db.ArtifactBody)
+              .filter(db.ArtifactBody.output_id == oid3).first())
+        _a.format = "ad_batch"
+        s_.commit()
+    c.post(f"/admin/queue_approval?key={KEY}", data={"output_id": oid3},
+           follow_redirects=False)
+    # The board counts approvals whose payload output_id is a VARIANT's, and
+    # `/admin/ad_batch_decide` resolves those. One approval carrying the BATCH
+    # id would satisfy `_article_bundle`, hide this button, and be counted by
+    # nothing — an approval no surface can decide.
+    ck("no approval is filed against the batch itself", not _pending(oid3),
+       "a batch-level row is decidable by nothing on that page")
+    ck("  one is filed against each variant",
+       len(_pending("v-one")) == 1 and len(_pending("v-two")) == 1,
+       f'v-one={len(_pending("v-one"))}, v-two={len(_pending("v-two"))}')
+
     print("\n— and it is behind the admin key —")
     # The console serves its sign-in page rather than a JSON error to an
     # unauthenticated browser, so the property worth asserting is the effect,

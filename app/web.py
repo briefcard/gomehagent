@@ -3380,6 +3380,34 @@ async def queue_approval(request: Request, key: str = Depends(admin_key)):
         if getattr(_s, "system_key", "") == (art.system_key or ""):
             skill_key = _k
             break
+    # AN AD BATCH IS DECIDED PER VARIANT, so it must be QUEUED per variant.
+    # The board counts approvals whose payload `output_id` is one of the
+    # VARIANTS', and `/admin/ad_batch_decide` resolves those — kept approved,
+    # dropped denied, in one gesture. One approval carrying the BATCH id would
+    # satisfy `_article_bundle`, vanish this button, and be counted by
+    # nothing: an approval no surface can decide. Queue what the board reads.
+    if (art.format or "") == "ad_batch":
+        import json as _json
+        try:
+            variants = (_json.loads(art.body or "") or {}).get("variants") or []
+        except Exception:                                        # noqa: BLE001
+            variants = []
+        vids = [str(v.get("output_id") or "") for v in variants
+                if str(v.get("output_id") or "")]
+        if not vids:
+            return _back("this batch record names no variants, so there is "
+                         "nothing to decide")
+        for vid in vids:
+            _appr.request_approval(
+                "skill_output",
+                f"ad variant for {art.tenant}", notify=False,
+                payload={"tenant": art.tenant or "", "skill": skill_key,
+                         "output_id": vid},
+                run_id=art.run_id or "",
+                system_id=sysrow.id if sysrow else "")
+        return _back(f"queued — {len(vids)} variant(s) waiting; approve the "
+                     f"batch or send it back, on this page", ok=True)
+
     payload = {"tenant": art.tenant or "", "skill": skill_key,
                "output_id": output_id, "body": (art.body or "")[:2000]}
     push = dict(getattr(art, "push", None) or {})
