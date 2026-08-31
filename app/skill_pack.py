@@ -3252,7 +3252,7 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
 
 
 def redraft_artifact(tenant: str, output_id: str, note: str = "",
-                     overrides: dict | None = None) -> dict:
+                     overrides: dict | None = None, part: str = "") -> dict:
     """Request changes: redraft one held artifact, consuming its feedback.
 
     The workroom's loop, closed. Open draft-level FeedbackItems (plus the
@@ -3293,9 +3293,35 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
                          "through the revision path, not a redraft of the "
                          "draft it came from"}
 
-    lines = [f"[{f.part} · {f.category or 'general'}] {f.note}" for f in fb]
+    # THE TYPED NOTE IS FILED, NOT WHISPERED.
+    #
+    # It used to be appended to the digest and never persisted: it never
+    # appeared in the thread, could not be reinforced, and was destroyed on
+    # every refused click — which is exactly what happened throughout the
+    # redraft outage this week. `feedback_add`'s own principle is that a
+    # feedback store nothing reads is a complaint box; the inverse is what
+    # this did — a judgement nothing stores is a shout.
+    #
+    # Filing BEFORE running is the point rather than a side effect: a redraft
+    # that then refuses leaves the note filed and open, so nothing typed is
+    # ever lost to a refusal.
+    #
+    # Inside `redraft_artifact` rather than in the route, so a direct caller
+    # behaves identically to a click.
     if (note or "").strip():
-        lines.append(str(note).strip())
+        with db.SessionLocal() as s:
+            s.add(db.FeedbackItem(
+                tenant=tenant, output_id=output_id,
+                part=str(part or "overall"), category="",
+                note=str(note).strip(), level="draft", status="open"))
+            s.commit()
+            fb = (s.query(db.FeedbackItem)
+                  .filter(db.FeedbackItem.output_id == output_id,
+                          db.FeedbackItem.level == "draft",
+                          db.FeedbackItem.status == "open").all())
+            s.expunge_all()
+
+    lines = [f"[{f.part} · {f.category or 'general'}] {f.note}" for f in fb]
     if not lines:
         return {"ok": False,
                 "error": "nothing to redraft from — file feedback or type a "

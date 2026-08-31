@@ -1046,6 +1046,60 @@ def main():
        _bad.get("ok") is False and "audience_key" in str(_bad.get("error")),
        str(_bad.get("error"))[:120])
 
+    print("\n— the typed note is FILED, not whispered —")
+    # It used to be appended to the digest and never persisted: never in the
+    # thread, never reinforceable, and destroyed on every refused click — which
+    # is what happened all through the redraft outage. `feedback_add`'s own
+    # principle is that a store nothing reads is a complaint box; this was the
+    # inverse — a judgement nothing stores is a shout. It also made the flash
+    # lie: a note-only redraft reported "0 feedback item(s) consumed".
+    _r2 = skill.run("campaign_email", "eien", segment="reorder_due",
+                    audience_key="core_hostess", goal="z")
+    _oid2 = (_r2.get("items") or [{}])[0].get("output_id", "")
+    _saw3: dict = {}
+    _keep3 = skill_pack.draft_campaign
+
+    def _cap3(bundle, seg, goal, craft=None):
+        _saw3["notes"] = (craft or {}).get("revision_notes", "")
+        return _keep3(bundle, seg, goal, craft)
+    skill_pack.draft_campaign = _cap3
+    _rd2 = skill_pack.redraft_artifact("eien", _oid2, part="body",
+                                       note="Lead with the shipping line.")
+    skill_pack.draft_campaign = _keep3
+    ck("a note-only redraft reports what it actually consumed",
+       _rd2.get("consumed") == 1, str(_rd2.get("consumed")))
+    ck("  and the note reaches the drafter with the SAME structure a filed "
+       "item carries",
+       "[body · general] Lead with the shipping line." in (_saw3.get("notes") or ""),
+       "the same sentence must not arrive structured or naked depending on "
+       "which box it landed in")
+    with db.SessionLocal() as _s:
+        _rows = (_s.query(db.FeedbackItem)
+                 .filter(db.FeedbackItem.output_id == _oid2).all())
+        _states = [(f.part, f.status) for f in _rows]
+    ck("  it is in the thread, and closed once applied",
+       _states == [("body", "applied")], str(_states))
+
+    # AND IT SURVIVES A REFUSAL — the behaviour that would have preserved the
+    # owner's notes throughout the outage. Filed BEFORE the run, deliberately.
+    _r3 = skill.run("campaign_email", "eien", segment="reorder_due",
+                    audience_key="core_hostess", goal="w")
+    _oid3 = (_r3.get("items") or [{}])[0].get("output_id", "")
+    with db.SessionLocal() as _s:
+        _a3 = (_s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == _oid3).first())
+        _a3.meta = {}
+        _s.commit()
+    _rd3 = skill_pack.redraft_artifact("eien", _oid3, part="body",
+                                       note="Do not lose this thought.")
+    with db.SessionLocal() as _s:
+        _kept = [(f.note[:25], f.status) for f in
+                 _s.query(db.FeedbackItem)
+                 .filter(db.FeedbackItem.output_id == _oid3).all()]
+    ck("a note typed at a redraft that REFUSES is not lost",
+       _rd3.get("ok") is False and _kept == [("Do not lose this thought.", "open")],
+       str(_kept))
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + "; ".join(_fail)))
     return 1 if _fail else 0

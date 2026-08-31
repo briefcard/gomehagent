@@ -3290,7 +3290,14 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
             f"&err={quote('no artifact with that id')}", 303)
     from . import skill_pack as _sp
     got = _sp.redraft_artifact(art.tenant or "", output_id, note=note,
-                               overrides=overrides)
+                               overrides=overrides,
+                               # WHICH PART the note is about, so a typed
+                               # judgement is filed with the same structure a
+                               # filed one carries — the drafter reads that
+                               # prefix, and the same sentence should not
+                               # arrive structured or naked depending on which
+                               # box it landed in.
+                               part=str(form.get("part") or "overall"))
     if got.get("ok"):
         if str(got.get("output_id")) == output_id:
             # The ad board regenerates IN PLACE — same page, kept variants

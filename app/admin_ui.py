@@ -11447,6 +11447,11 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     <input type="hidden" name="output_id" value="{_esc(output_id)}">
     <label style="display:block;margin:6px 0">What must change<br>
     <textarea name="note" rows="3" placeholder="{_esc(_rc_ph)}"></textarea></label>
+    <div class="row">
+      <select name="part" style="width:auto">{part_opts}</select>
+      <span class="when">this note is FILED as feedback on this draft, then
+      consumed — it survives a refusal and shows in the thread below</span>
+    </div>
     <details class="sec"><summary>Adjust the plan for this redraft</summary>
       <div class="planfields">{ov_fields}</div>
     </details>
@@ -11502,15 +11507,18 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     </div>
     <div class="row" style="margin-top:6px">
       <label class="pick"><input type="radio" name="level" value="draft" checked>
-        fix this draft <span class="when">— stays open, rides the next redraft</span></label>
+        this draft <span class="when">— rides the next redraft, then closes</span></label>
       <label class="pick"><input type="radio" name="level" value="system">
-        teach this system <span class="when">— standing guidance, injected into every future draft IT writes</span></label>
+        this system <span class="when">— standing guidance in every future draft IT writes</span></label>
       <label class="pick"><input type="radio" name="level" value="account">
-        teach the account <span class="when">— injected into every future draft, whichever system writes it</span></label>
+        this account <span class="when">— standing guidance in every future draft, whichever system writes it</span></label>
       <label class="pick"><input type="radio" name="level" value="rule">
-        make it a rule <span class="when">— the validator blocks it forever</span></label>
+        always, enforced <span class="when">— <b>the validator refuses it</b>, not a nudge</span></label>
       <button type="submit" class="sec">File it</button>
     </div>
+    <p class="when">How long should this hold? The first three are things we
+    TELL the writer — a nudge it usually follows. The last is a thing the
+    validator REFUSES — it always blocks. That is the whole difference.</p>
   </form>
   <div class="thread">{open_fb}</div>
 </div>

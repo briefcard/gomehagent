@@ -939,6 +939,19 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "a_typed_note_is_filed_before_it_is_used",
+        "file": "app/skill_pack.py",
+        "find": "    if (note or \"\").strip():\n        with db.SessionLocal() as s:\n            s.add(db.FeedbackItem(",
+        "replace": "    if False:  # SABOTAGE\n        with db.SessionLocal() as s:\n            s.add(db.FeedbackItem(",
+        "suites": ["test_campaign_variety.py"],
+        "why": "the judgement typed at Request changes is never stored — it "
+               "never reaches the thread, cannot be reinforced, and is "
+               "DESTROYED on every refused click, which is exactly what "
+               "happened to the owner's notes during the redraft outage. It "
+               "also makes the flash lie: a note-only redraft reports '0 "
+               "feedback item(s) consumed' while having consumed one",
+    },
+    {
         "name": "a_redraft_carries_the_reader",
         "file": "app/skill_pack.py",
         "find": '            "audience_key": (overrides.get("audience_key")',
