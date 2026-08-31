@@ -90,6 +90,14 @@ PARTS: dict[str, dict] = {
                            "buying triggers. Read by `funnel.inputs_for` for "
                            "every drafter, and supplied by nobody until "
                            "2026-08-30"),
+    # THINS, not SITUATIONAL, and the distinction is load-bearing: this key is
+    # written unconditionally, so marking it situational would exclude it from
+    # `promised()` and hide it from `verify()` for ever — the exact way
+    # `audiences` stayed missing.
+    "audience": dict(tier=2, absent=THINS, supplies="resolve.resolve",
+                     what="the ONE reader this piece of mass marketing is "
+                          "written for. Empty for one-to-one work, which has "
+                          "an actual person instead of a persona"),
     "claims": dict(tier=2, absent=THINS, supplies="resolve.resolve",
                    what="approved proof, the only thing a draft may assert"),
     "contested_positioning": dict(tier=2, absent=THINS, supplies="resolve.resolve",

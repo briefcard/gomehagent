@@ -377,6 +377,35 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     if tier >= 2:
         searched.append("audiences")
 
+    # THE ONE READER THIS WORK IS FOR — singular, and separate from the roster.
+    #
+    # `bundle["audiences"]` is the whole cast, and it has exactly one
+    # legitimate consumer: `funnel.proposals`, which SUGGESTS which ads are
+    # worth making and whose whole product is the cross-product of personas.
+    # Every DRAFTER was reading the same roster and `funnel.inputs_for` was
+    # concatenating it — so a Baci email was briefed that its reader wants a
+    # gift that feels chosen, already owns plenty, AND wants the look cheaply.
+    # Three real buyers merged into one contradictory instruction.
+    #
+    # Mass marketing speaks to a segment, so it must speak to ONE of them. A
+    # one-to-one reply has an actual person and needs none of this, which is
+    # why this is empty rather than guessed when nobody named a reader.
+    bundle["audience"] = {}
+    if tier >= 2 and audience_key:
+        _match = [a for a in (bundle.get("audiences") or [])
+                  if a.get("key") == audience_key]
+        if _match:
+            bundle["audience"] = _match[0]
+        else:
+            # NAMED AND NOT FOUND is a different fact from nobody naming one,
+            # and it is the more urgent: somebody chose a reader that this
+            # account does not have approved.
+            gaps.append({
+                "missing": f"the audience {audience_key!r}",
+                "means": "it was named but is not an approved persona for "
+                         "this account, so the work has no reader",
+                "fix": "pick one that exists, or approve that persona"})
+
     # Approved proof, whether or not an objection matched. A direct consumer
     # of this bundle got claims only as a by-product of objection support,
     # which meant the account with no objection on file handed over rules and

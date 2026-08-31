@@ -858,6 +858,30 @@ SABOTAGES = [
                "the moment you could make it",
     },
     {
+        "name": "one_reader_never_a_blend",
+        "file": "app/funnel.py",
+        "find": "    _aud = [audience] if audience else []",
+        "replace": ("    from . import kb as _kbz  # SABOTAGE\n"
+                    "    _aud = _kbz.audiences(tenant)"),
+        "suites": ["test_funnel.py"],
+        "why": "every drafter is briefed with EVERY persona at once — on Baci "
+               "that the reader wants a gift that feels chosen, already owns "
+               "plenty, AND wants the look cheaply. Three real buyers merged "
+               "into one contradictory instruction, which is not a fuller "
+               "brief but an incoherent one",
+    },
+    {
+        "name": "work_says_when_it_has_no_reader",
+        "file": "app/skill_pack.py",
+        "find": '    if ctx.bundle.get("audience"):\n        return',
+        "replace": '    if True:  # SABOTAGE\n        return',
+        "suites": ["test_assurance_tab.py", "test_funnel.py"],
+        "why": "a campaign or article written for nobody in particular says so "
+               "nowhere — not in the run notes and not on Assurance — so the "
+               "one decision that would fix it (name the reader on the plan) "
+               "is invisible, and generic copy reads as intentional",
+    },
+    {
         "name": "objections_reach_work_that_asks_no_question",
         "file": "app/resolve.py",
         "find": "    if tier >= 2 and not objections and not utterance:",

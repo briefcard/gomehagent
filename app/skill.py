@@ -791,7 +791,12 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     bundle = rs.resolve(tenant, system=sk.system_key, tier=sk.tier,
                         utterance=str(params.get("utterance") or ""),
                         contact_id=str(params.get("contact_id") or ""),
-                        entity_key=str(params.get("entity_key") or ""))
+                        entity_key=str(params.get("entity_key") or ""),
+                        # WHO THIS IS FOR. `resolve` has accepted and used
+                        # `audience_key` since it was written; nothing ever
+                        # passed it from here, so the one parameter that names
+                        # the reader stopped at the skill boundary.
+                        audience_key=str(params.get("audience_key") or ""))
 
     # OWNER INPUT, ONTO THE BUNDLE — one route, here, for every skill.
     #

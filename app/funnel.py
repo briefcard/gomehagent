@@ -137,7 +137,7 @@ def normalise(stage: str) -> str:
 
 def inputs_for(tenant: str, stage: str, *, claims: list | None = None,
                objections: list | None = None, entities: list | None = None,
-               audiences: list | None = None, offer: str = "") -> dict:
+               audience: dict | None = None, offer: str = "") -> dict:
     """What this account can actually say at this stage, and what it cannot.
 
     Reads the knowledge base, and takes the run's already-resolved bundle
@@ -209,8 +209,17 @@ def inputs_for(tenant: str, stage: str, *, claims: list | None = None,
             have["claim_with_evidence"] = withev
     if entities:
         have["entity"] = list(entities)
-    pains = [p for a in (audiences or [])
-             for p in (_txt(a, "pains") or []) if p]
+    # ONE READER, NEVER A BLEND.
+    #
+    # This took `audiences` — the whole roster — and concatenated every
+    # persona's pains, vocabulary and triggers into one brief. On Baci that
+    # briefed the drafter that its reader wants a gift that feels chosen,
+    # already owns plenty, and wants the look at a reachable price: three real
+    # buyers merged into one contradictory instruction. That is not clutter,
+    # it is incoherence, and it is the same failure `coherence.commit` exists
+    # to stop for the subject — applied to the reader.
+    _aud = [audience] if audience else []
+    pains = [p for a in _aud for p in (_txt(a, "pains") or []) if p]
     if pains:
         have["audience_pains"] = pains
     # THE REST OF THE AUDIENCE ROW, which nothing had ever read. `KbAudience`
@@ -220,12 +229,10 @@ def inputs_for(tenant: str, stage: str, *, claims: list | None = None,
     # buyer uses for the thing, gathered from real research — and a drafter
     # writing in the brand's words instead of the buyer's is the commonest way
     # good copy misses.
-    vocab = [v for a in (audiences or [])
-             for v in (_txt(a, "vocabulary") or []) if v]
+    vocab = [v for a in _aud for v in (_txt(a, "vocabulary") or []) if v]
     if vocab:
         have["audience_vocabulary"] = vocab
-    triggers = [t for t in (_txt(a, "buying_trigger") for a in (audiences or []))
-                if t]
+    triggers = [t for t in (_txt(a, "buying_trigger") for a in _aud) if t]
     if triggers:
         have["buying_trigger"] = triggers
     try:

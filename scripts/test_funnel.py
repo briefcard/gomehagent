@@ -307,8 +307,9 @@ def main() -> int:
 
     print("\n— the whole audience row, not two fields of it —")
     from app import funnel as fn, kb as _kb
+    # ONE of them — the roster is no longer what a drafter briefs from.
     _p = fn.inputs_for("baci", "consideration",
-                       audiences=_kb.audiences("baci"), entities=[])
+                       audience=_kb.audiences("baci")[0], entities=[])
     _b = fn.brief(_p)
     ck("the buyer's own vocabulary reaches the drafter",
        "audience_vocabulary" in _p["have"]
@@ -333,9 +334,51 @@ def main() -> int:
        bool(_auds) and any(a.get("vocabulary") for a in _auds),
        f"bundle keys: {sorted(_bundle)[:12]}")
     _live = fn.inputs_for("baci", "consideration",
-                          audiences=_bundle.get("audiences"), entities=[])
+                          audience=(_bundle.get("audiences") or [None])[0],
+                          entities=[])
     ck("  so the live path has the buyer's words, not just the hand-fed one",
        "audience_vocabulary" in _live["have"], str(sorted(_live["have"])))
+
+    print("\n— one reader, never a blend —")
+    # `inputs_for` took the whole ROSTER and concatenated it. On Baci that
+    # briefed the drafter that its reader wants a gift that feels chosen,
+    # already owns plenty, AND wants the look at a reachable price — three real
+    # buyers merged into one contradictory instruction. Not clutter:
+    # incoherence, and the same failure `coherence.commit` stops for the
+    # subject, applied to the reader.
+    from app import resolve as _rs3
+    _kb.add_audience("baci", "core_hostess", "The host",
+                     ["mismatched sets that say nothing"],
+                     ["tablescape", "place setting"],
+                     buying_trigger="a dinner party booked")
+    _kb.add_audience("baci", "price_led", "Price led", ["wants it cheap"],
+                     ["deal", "bundle"], buying_trigger="a sale")
+    _named = _rs3.resolve("baci", system="campaign_email", tier=3,
+                          audience_key="core_hostess")
+    ck("the package commits to ONE reader",
+       (_named.get("audience") or {}).get("key") == "core_hostess",
+       str(_named.get("audience"))[:80])
+    _pl = fn.inputs_for("baci", "consideration",
+                        audience=_named.get("audience"), entities=[])
+    _v = _pl["have"].get("audience_vocabulary") or []
+    ck("  and the brief carries that reader's words",
+       "tablescape" in _v, str(_v))
+    ck("  and NOT the other persona's",
+       "deal" not in _v,
+       "two buyers in one brief is a contradictory instruction, not a fuller one")
+
+    _none = _rs3.resolve("baci", system="campaign_email", tier=3)
+    ck("naming nobody commits to nobody", not _none.get("audience"),
+       "guessing a reader is worse than saying there is none")
+    ck("  and the roster survives for the one thing that needs it",
+       len(_none.get("audiences") or []) >= 2,
+       "funnel.proposals is the cross-product of personas by design")
+    _bad = _rs3.resolve("baci", system="campaign_email", tier=3,
+                        audience_key="nobody-by-that-name")
+    ck("a reader that names nobody is a NAMED gap, not silence",
+       any("nobody-by-that-name" in g.get("missing", "")
+           for g in _bad.get("gaps") or []),
+       "somebody chose a persona this account does not have approved")
 
     print("\n— work that asks no question still gets the hesitations —")
     # `_situated` returns early with ([], [], []) when there is no utterance,
@@ -375,7 +418,8 @@ def main() -> int:
     skill_pack.draft_ad = lambda bundle, claim, angle, objections: (
         _saw.update(offer=bundle.get("offer"),
                     deadline=bundle.get("deadline"),
-                    audiences=bundle.get("audiences")) or ("Plate.", "model"))
+                    audiences=bundle.get("audiences"),
+                    audience=bundle.get("audience")) or ("Plate.", "model"))
     skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1,
               offer="15% off through Sunday", deadline="Sunday 11pm")
     skill_pack.draft_ad = _real_ad
@@ -408,6 +452,20 @@ def main() -> int:
        _saw2.get("offer") == "15% off through Sunday", str(_saw2.get("offer")))
     ck("  and the bottom-of-funnel brief stops reporting a gap it cannot close",
        "offer" in (_saw2.get("have") or []), str(_saw2.get("have")))
+    # ...AND IT SAYS IT HAS NO READER, in the notes AND on the key Assurance
+    # groups by. That run named no audience, and two approved personas are on
+    # file — so the fix is a decision on the plan, not authoring work, and the
+    # two must not collapse into one gap.
+    ck("a piece written for nobody in particular SAYS so",
+       any("no reader was chosen" in n for n in _r.get("notes") or []),
+       str([n for n in _r.get("notes") or [] if "reader" in n])[:120])
+    _thin = " ".join(_r.get("thin") or [])
+    ck("  under a key Assurance can group by, per system",
+       "reader:not-chosen" in _thin, str(_r.get("thin")))
+    ck("  and NOT as though no persona had ever been authored",
+       "reader:none-on-file" not in _thin,
+       "'nobody wrote one' and 'three exist and none was picked' are "
+       "different gaps with different fixes and different owners")
 
     print("\n— search phrases are scoped to the reader —")
     from app import keywords as _kw

@@ -702,6 +702,34 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
 draft_ad = _draft_ad_live
 
 
+def _reader_gap(ctx) -> None:
+    """Say — on the run and on Assurance — that this work has no reader.
+
+    TWO DIFFERENT GAPS, and collapsing them is the thing this codebase keeps
+    paying for. "Nobody has written a persona" is work for the owner in the
+    knowledge base. "Three are approved and this send named none of them" is a
+    decision missing from the plan. Same symptom, different fix, different
+    person — so they get different keys and Assurance can separate them.
+
+    Mass marketing only, which is why this lives in the drafters rather than
+    in `resolve`: a one-to-one reply has an actual person on the other end and
+    needs no persona at all.
+    """
+    if ctx.bundle.get("audience"):
+        return
+    roster = len(ctx.bundle.get("audiences") or [])
+    if roster:
+        ctx.thin.append("reader:not-chosen")
+        ctx.note(f"no reader was chosen for this piece — {roster} approved "
+                 f"persona(s) are on file and none was named, so it is written "
+                 f"for everybody and therefore for nobody in particular")
+    else:
+        ctx.thin.append("reader:none-on-file")
+        ctx.note("no buyer persona is on file for this account, so nothing "
+                 "can say whose words to write in — authoring one is what "
+                 "turns this from generic copy into copy for somebody")
+
+
 def _run_ad_copy(ctx: Context) -> dict:
     entity_key = str(ctx.params.get("entity_key") or "")
     audience_key = str(ctx.params.get("audience_key") or "")
@@ -827,10 +855,11 @@ def _run_ad_copy(ctx: Context) -> dict:
         # an ad with an offer to state is asking, and asking is bottom-of-
         # funnel behaviour whoever is reading.
         stage = funnel.stage_from(asks=bool(str(ctx.bundle.get("offer") or "").strip()))
+    _reader_gap(ctx)
     plan = funnel.inputs_for(
         ctx.tenant, stage, claims=ctx.claims, objections=objections,
         entities=ctx.bundle.get("entities"),
-        audiences=ctx.bundle.get("audiences"),
+        audience=ctx.bundle.get("audience"),
         offer=str(ctx.bundle.get("offer") or ""))
     ctx.bundle["funnel"] = plan
     if chose:
@@ -1481,11 +1510,12 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     # stage, which is the owner's 2026-08-29 correction applied to email.
     stage = funnel.stage_from(
         warmth=warmth, asks=bool(CAMPAIGN_INTENTS.get(intent, {}).get("asks")))
+    _reader_gap(ctx)
     plan = funnel.inputs_for(
         ctx.tenant, stage, claims=ctx.claims,
         objections=ctx.bundle.get("objections"),
         entities=ctx.bundle.get("entities"),
-        audiences=ctx.bundle.get("audiences"),
+        audience=ctx.bundle.get("audience"),
         offer=str(ctx.bundle.get("offer") or ""))
     for n in plan.get("note") or []:
         ctx.note(f"funnel (thin): {n}")
@@ -3422,6 +3452,12 @@ register(Skill(
     # already made is the defect design rule 4 exists to stop.
     params=("revision_notes",
             "segment", "goal", "subject", "intent", "deadline", "entity_key",
+            # WHO IT IS WRITTEN FOR — back, and wired this time. Removing it
+            # (ec58e7a) reasoned that "the segment already decides who is
+            # written to". That conflated two different facts: the segment is
+            # who RECEIVES the send, the audience is who it is WRITTEN FOR,
+            # and one `reorder_due` list contains all three Baci personas.
+            "audience_key",
             "offer", "utterance", "draft_visual"),
     writes=True,
     produces="draft",
@@ -3871,11 +3907,12 @@ def _run_blog_article(ctx: Context) -> dict:
     _intent = (getattr(row, "intent", "") if row is not None else "") \
         or kw_mod.classify_intent(keyword, kw_mod.brand_tokens_for(ctx.tenant))
     _stage = funnel.stage_from_keyword(_intent)
+    _reader_gap(ctx)
     _plan = funnel.inputs_for(
         ctx.tenant, _stage, claims=ctx.claims,
         objections=ctx.bundle.get("objections"),
         entities=ctx.bundle.get("entities"),
-        audiences=ctx.bundle.get("audiences"))
+        audience=ctx.bundle.get("audience"))
     ctx.bundle["funnel"] = _plan
     ctx.note(f"funnel stage: {_plan['label']} — '{keyword}' is a "
              f"{_intent} search")
@@ -4158,6 +4195,9 @@ register(Skill(
     # ban list is not a thinner article, it is an unchecked one.
     constitutive=("banned_claims",),
     params=("keyword", "role", "cluster", "angle", "entity_key", "utterance",
+            # An article is one-to-many, so it has a reader in the same sense
+            # a campaign does — and it briefs from the same funnel.
+            "audience_key",
             "revision_notes"),
     writes=True,
     produces="draft",
