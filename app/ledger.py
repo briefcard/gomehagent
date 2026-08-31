@@ -194,6 +194,37 @@ def delivered(tenant: str, output_id: str, destination: str) -> bool:
 NOT_A_SEND = ("blocked", "superseded", "repaired")
 
 
+#: When `Output.audience_key` became authoritative for campaigns.
+#:
+#: `angle` carried the segment on every campaign row written before
+#: `audience_key` was passed, so `sends_to` reads BOTH — and its own comment
+#: says "until the old rows age out of every window". Nothing ended it, so a
+#: compat read written as temporary was permanent by default, which is how a
+#: column ends up meaning two things for ever.
+#:
+#: This gives the sentence a date. The marker is stamped once, the first time
+#: anything asks; a window that begins after it cannot contain a pre-change row,
+#: so the fallback leg is dropped for that window and kept for older ones.
+#: Nothing is rewritten and no history is lost — the read simply stops widening
+#: itself once widening cannot find anything.
+_AUDIENCE_KEY_MARKER = "audience_key_authoritative_since"
+
+
+def _audience_key_since() -> dt.datetime:
+    """The boundary date, stamped once and read thereafter."""
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, _AUDIENCE_KEY_MARKER)
+        if row is None:
+            row = db.Setting(key=_AUDIENCE_KEY_MARKER,
+                             value=db.utcnow().isoformat())
+            s.add(row)
+            s.commit()
+        try:
+            return db.as_utc(dt.datetime.fromisoformat(row.value))
+        except (TypeError, ValueError):
+            return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+
 def audiences_written_to(tenant: str, *, days: int = 90,
                          fmt: str = "campaign_email") -> list[str]:
     """Every cohort this account has actually sent to in the window.
@@ -241,8 +272,12 @@ def sends_to(tenant: str, audience_key: str, *, days: int = 90,
                 .filter(db.tenant_filter(db.Output, tenant),
                         db.Output.format == fmt,
                         db.Output.created_at >= since,
-                        or_(db.Output.audience_key == audience_key,
-                            db.Output.angle == audience_key),
+                        # The fallback leg, only while it can still match
+                        # something. See `_AUDIENCE_KEY_MARKER`.
+                        (db.Output.audience_key == audience_key
+                         if since >= _audience_key_since() else
+                         or_(db.Output.audience_key == audience_key,
+                             db.Output.angle == audience_key)),
                         db.Output.status.notin_(NOT_A_SEND))
                 .order_by(db.Output.created_at.asc()).all())
         out, prev = [], None

@@ -892,6 +892,18 @@ SABOTAGES = [
                "which makes the pile bigger and the output no better",
     },
     {
+        "name": "the_angle_fallback_ends",
+        "file": "app/ledger.py",
+        "find": "                        (db.Output.audience_key == audience_key\n                         if since >= _audience_key_since() else",
+        "replace": "                        (or_(db.Output.audience_key == audience_key)\n                         if False else  # SABOTAGE",
+        "suites": ["test_strategy_ledger.py"],
+        "why": "the compatibility read that exists only for rows written "
+               "before `audience_key` was passed never ends — a column keeps "
+               "meaning two things for ever, and every strategy read silently "
+               "matches segments against a field that is supposed to hold a "
+               "persona",
+    },
+    {
         "name": "one_to_many_work_names_its_reader",
         "file": "app/skill.py",
         "find": "    if sk.requires:",
@@ -1575,8 +1587,12 @@ SABOTAGES = [
     {
         "name": "strategy_read_spans_the_column_change",
         "file": "app/ledger.py",
-        "find": "                        or_(db.Output.audience_key == audience_key,\n                            db.Output.angle == audience_key),",
-        "replace": "                        db.Output.audience_key == audience_key,  # SABOTAGE",
+        # RE-POINTED 2026-08-31: the two-column read gained an end condition
+        # (`_AUDIENCE_KEY_MARKER`), so the `or_` moved inside a conditional.
+        # What this guard covers is unchanged — a window that SPANS the
+        # boundary must still read both columns.
+        "find": "                         or_(db.Output.audience_key == audience_key,\n                             db.Output.angle == audience_key)),",
+        "replace": "                         db.Output.audience_key == audience_key),  # SABOTAGE",
         "suites": ["test_strategy_ledger.py"],
         "why": "every campaign written before `audience_key` was passed drops "
                "out of the window — the brand reads as having no history at "

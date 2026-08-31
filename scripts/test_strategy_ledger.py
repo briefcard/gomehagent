@@ -352,6 +352,34 @@ def main():
        all((o.media_ids or []) == [] for o in all4 if o.status == "repaired"),
        str([(o.status, o.media_ids) for o in all4]))
 
+    print("\n— the angle fallback has an end, not just a promise —")
+    # `sends_to` matched `audience_key == X OR angle == X` because `angle`
+    # carried the segment on every campaign row written before `audience_key`
+    # was passed. Its own comment said "until the old rows age out of every
+    # window" — and nothing ended it, so a read written as temporary was
+    # permanent by default, which is how a column comes to mean two things
+    # for ever. The boundary is a dated marker now.
+    import datetime as _dt
+    with db.SessionLocal() as _s:
+        _s.merge(db.Setting(key=ledger._AUDIENCE_KEY_MARKER,
+                            value=(db.utcnow() - _dt.timedelta(days=365))
+                            .isoformat()))
+        _s.commit()
+    _old = ledger.record("fallback", "campaign_email", format="campaign_email",
+                         status="sent", body="pre-change", angle="reorder_due")
+    _new = ledger.record("fallback", "campaign_email", format="campaign_email",
+                         status="sent", body="post-change",
+                         audience_key="reorder_due")
+    _settled = ledger.sends_to("fallback", "reorder_due", days=7)
+    ck("a window inside the settled era stops widening itself",
+       [r["output_id"] for r in _settled] == [_new.id],
+       "the angle-only row is pre-boundary and cannot be in this window")
+    _spanning = ledger.sends_to("fallback", "reorder_due", days=400)
+    ck("  and a window that spans the boundary still reads both",
+       len(_spanning) == 2,
+       "nothing is rewritten and no history is lost — the read simply stops "
+       "widening once widening cannot find anything")
+
     print("\n" + ("FAILURES: " + ", ".join(_fail) if _fail else "all good"))
     return 1 if _fail else 0
 
