@@ -11317,6 +11317,16 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                                   esp_push.get("segment_key")
                                   or getattr(out, "audience_key", "") or "",
                                   tenant=tenant)
+                # WHO IT IS WRITTEN FOR — on the page, because the redraft
+                # requires it now and a draft made before it was recorded has
+                # nothing to read it back from. Without this control such a
+                # draft could never be redrafted from the workroom again.
+                + _plan_field_input({"key": "audience_key",
+                                     "kind": "audience",
+                                     "label": "Written for"},
+                                    (getattr(art, "meta", None) or {})
+                                    .get("audience_key") or "",
+                                    tenant=tenant)
                 + _plan_field_input({"key": "entity_key", "kind": "entity",
                                      "label": "Featured entity"},
                                     getattr(out, "entity_key", "") or "",

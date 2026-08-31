@@ -904,6 +904,29 @@ SABOTAGES = [
                "persona",
     },
     {
+        "name": "a_redraft_carries_the_reader",
+        "file": "app/skill_pack.py",
+        "find": '            "audience_key": (overrides.get("audience_key")',
+        "replace": '            "audience_key": ("",  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "Request changes stops redrafting on every account that has a "
+               "persona — `campaign_email` requires a reader and this caller "
+               "rebuilds the call without one, so the click is refused before "
+               "the bundle resolves, the owner's notes never reach the "
+               "drafter, and the feedback stays open with the page unchanged",
+    },
+    {
+        "name": "a_refused_redraft_names_its_cause",
+        "file": "app/skill_pack.py",
+        "find": '                         + (("; ".join(r.get("blocked_on") or [])',
+        "replace": '                         + (("" and "".join(r.get("blocked_on") or [])  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "a refused redraft reports the bare word 'blocked' and throws "
+               "away `blocked_on`, the one field naming which parameter or "
+               "rule stopped it — a dead end for whoever has to fix it, and "
+               "the reason this class of bug took a manual test to find",
+    },
+    {
         "name": "one_to_many_work_names_its_reader",
         "file": "app/skill.py",
         "find": "    if sk.requires:",

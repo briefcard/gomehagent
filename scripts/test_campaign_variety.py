@@ -937,6 +937,61 @@ def main():
     ck("the angle field is optional", not _goal_field.get("required"),
        str(_goal_field))
 
+    print("\n— Request changes still works on an account that HAS a persona —")
+    # THE REGRESSION THIS PINS. c4f72cc made `audience_key` required on
+    # campaign_email, and its own commit message claimed the workroom redraft
+    # was covered. It was not: `redraft_artifact` rebuilt the call without the
+    # field, so on any account with an approved persona every Request-changes
+    # click was refused before the bundle was even resolved — the notes never
+    # reached the drafter, the feedback stayed open, and the owner was told
+    # only "blocked".
+    #
+    # On its OWN account deliberately: the block above runs on a persona-less
+    # `baci`, which is precisely the state the regression does not bite in, so
+    # testing it there would prove nothing.
+    _seed("eien")
+    kb.add_audience("eien", "core_hostess", "The host",
+                    ["mismatched sets"], ["tablescape"])
+    _r0 = skill.run("campaign_email", "eien", segment="reorder_due",
+                    audience_key="core_hostess", goal="x")
+    _oid0 = (_r0.get("items") or [{}])[0].get("output_id", "")
+    ck("a draft records WHO it was written for",
+       ((_r0.get("items") or [{}])[0].get("meta") or {})
+       .get("audience_key") == "core_hostess",
+       "there is nowhere else to read it back from — Output.audience_key "
+       "carries the SEGMENT for a campaign")
+    _saw: dict = {}
+    _keep = skill_pack.draft_campaign
+
+    def _cap(bundle, seg, goal, craft=None):
+        _saw["notes"] = (craft or {}).get("revision_notes", "")
+        return _keep(bundle, seg, goal, craft)
+    skill_pack.draft_campaign = _cap
+    _rd = skill_pack.redraft_artifact("eien", _oid0,
+                                      note="Make the opening warmer.")
+    skill_pack.draft_campaign = _keep
+    ck("Request changes redrafts instead of refusing",
+       _rd.get("ok") is True, str(_rd.get("error"))[:110])
+    ck("  and the owner's note reaches the drafter",
+       "Make the opening warmer" in (_saw.get("notes") or ""),
+       repr(_saw.get("notes"))[:90])
+
+    # ...AND WHEN A REDRAFT IS GENUINELY REFUSED, IT SAYS WHY. The message
+    # threw `blocked_on` away, so the one field naming the cause was lost and
+    # every refusal read as the bare word "blocked".
+    _r1 = skill.run("campaign_email", "eien", segment="reorder_due",
+                    audience_key="core_hostess", goal="y")
+    _oid1 = (_r1.get("items") or [{}])[0].get("output_id", "")
+    with db.SessionLocal() as _s:
+        _a = (_s.query(db.ArtifactBody)
+              .filter(db.ArtifactBody.output_id == _oid1).first())
+        _a.meta = {}                       # a draft from before the reader was recorded
+        _s.commit()
+    _bad = skill_pack.redraft_artifact("eien", _oid1, note="try again")
+    ck("a refused redraft NAMES what stopped it",
+       _bad.get("ok") is False and "audience_key" in str(_bad.get("error")),
+       str(_bad.get("error"))[:120])
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + "; ".join(_fail)))
     return 1 if _fail else 0

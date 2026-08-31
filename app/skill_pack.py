@@ -2828,6 +2828,12 @@ def _run_campaign_email(ctx: Context) -> dict:
                       "subject": state["copy"].get("subject", ""),
                       "preheader": state["copy"].get("preheader", ""),
                       "html": state["html"], "segment": seg["key"],
+                      # WHO IT WAS WRITTEN FOR, on the artifact. The redraft
+                      # rebuilds the call from this meta, and `audience_key` is
+                      # required now — without it here there is nowhere to read
+                      # the reader back from, because `Output.audience_key`
+                      # carries the SEGMENT for a campaign.
+                      "audience_key": str(ctx.params.get("audience_key") or ""),
                       "basis": basis, "intent": craft.get("intent", ""),
                       "format": craft.get("format", ""),
                       "shape": [b.get("type", "?") for b in state["blocks"]],
@@ -3265,6 +3271,18 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
                          or brief.get("deadline", "") or ""),
             "goal": overrides.get("goal") or brief.get("goal", "") or "",
             "subject": overrides.get("subject") or brief.get("subject", ""),
+            # WHO IT IS WRITTEN FOR. `campaign_email` requires this now
+            # (c4f72cc), and this caller never supplied it — so on any account
+            # with an approved persona every Request-changes click was refused
+            # before the bundle was even resolved. The commit that added the
+            # requirement claimed this door was covered. It was not.
+            #
+            # NEVER from `out.audience_key`: that column carries the SEGMENT
+            # for a campaign, which is why line 3257 already uses it as the
+            # segment fallback. The artifact's meta is where the reader is.
+            "audience_key": (overrides.get("audience_key")
+                             or (getattr(art, "meta", None) or {})
+                             .get("audience_key") or ""),
             "revision_notes": digest}
         skill_key = "campaign_email"
     elif fmt == "cms_article" or kw is not None:
@@ -3296,10 +3314,16 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
     new_item = next((i for i in (r.get("items") or [])
                      if i.get("output_id")), None)
     if new_item is None:
+        # NAME THE REFUSAL. `blocked_on` is the one field that says which
+        # parameter or rule stopped it, and this threw it away — so a redraft
+        # refused for a missing reader read only as the bare word "blocked",
+        # which is a dead end for whoever has to fix it. `_regenerate_ad_batch`
+        # already reports it this way.
         return {"ok": False,
                 "error": "the redraft produced nothing — "
-                         + str(r.get("summary")
-                               or r.get("status") or "unknown")[:200]}
+                         + (("; ".join(r.get("blocked_on") or [])
+                             or str(r.get("summary")
+                                    or r.get("status") or "unknown"))[:200])}
     new_oid = new_item["output_id"]
 
     # SUPERSEDE, never duplicate: one intent keeps one live row. The old
