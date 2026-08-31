@@ -1756,7 +1756,7 @@ def _rung(current: str) -> str:
     at = systems.AUTONOMY.index(current if current in systems.AUTONOMY else "shadow")
     steps = "".join(
         f'<span class="step {"at" if i == at else ("done" if i < at else "")}">'
-        f'{r.replace("_", " ")}</span>'
+        f'{_esc(systems.autonomy_label(r))}</span>'
         for i, r in enumerate(systems.AUTONOMY))
     return (f'<div class="rung">{steps}</div>'
             f'<div class="mut">{_esc(systems.AUTONOMY_MEANING.get(current, ""))}</div>')
@@ -2159,7 +2159,7 @@ def _system_card(key: str, row, c: dict | None = None) -> str:
       <div class="head">
         <h3>{_esc(row.name)}</h3>
         <code>{_esc(row.key)}</code>
-        <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+        <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(systems.autonomy_label(row.autonomy or 'shadow'))}</span>
         {_gate_chip(key, row, r)}
         <span class="grow"></span>
         {_system_toggle(key, row, r)}
@@ -2843,9 +2843,21 @@ def _settings_section(key: str, row) -> str:
     nxt = systems.can_promote(row)
     if nxt["can"]:
         promo = (f'<a href="/admin/system_promote?key={_esc(key)}&amp;id={_esc(row.id)}">'
-                 f'<button type="button">Promote to {_esc(nxt["target"].replace("_", " "))}</button></a>')
+                 f'<button type="button">Promote to '
+                 f'{_esc(systems.autonomy_label(nxt["target"]))}</button></a>')
+        # THIN KNOWLEDGE CAVEATS THE PROMOTION, IT DOES NOT VETO IT. Said at
+        # the moment of the decision, because the next rung up is where a
+        # person taps every output — which is exactly where thin output gets
+        # noticed rather than hidden.
+        if nxt.get("caveat"):
+            promo += (f'<div class="what">It will produce THINLY until you '
+                      f'fill these: {_esc(nxt["caveat"])} — that is a caveat, '
+                      f'not a blocker, and the next rung is where somebody '
+                      f'reads every draft.</div>')
     elif nxt["target"]:
-        promo = f'<span class="mut">Next rung ({_esc(nxt["target"].replace("_", " "))}): {_esc(nxt["why"])}</span>'
+        promo = (f'<span class="mut">Next rung '
+                 f'({_esc(systems.autonomy_label(nxt["target"]))}): '
+                 f'{_esc(nxt["why"])}</span>')
     else:
         promo = '<span class="mut">Top of the ladder.</span>'
     # THE LADDER GOES DOWN TOO. The nightly sweep has always advised "work
@@ -2988,7 +3000,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     <code>{_esc(row.key)}</code>
     <span class="chips">
       <span class="chip {'on' if row.status == 'live' else 'off'}">{_esc(row.status)}</span>
-      <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(row.autonomy)}</span>
+      <span class="chip {'on' if row.autonomy == 'auto' else 'off'}">{_esc(systems.autonomy_label(row.autonomy or 'shadow'))}</span>
     </span>
     <span class="grow"></span>
     {_system_toggle(key, row, gate)}
@@ -11020,9 +11032,10 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                 # returns `cleared`, which nothing in the codebase consumes, so
                 # it cannot push either. Only the two middle rungs can.
                 body_txt = (
-                    f'<b>Nothing is queued for approval at the '
-                    f'<code>{_esc(_rung)}</code> rung.</b> '
-                    + ('Shadow runs and records; it sends nothing, by design.'
+                    f'<b>Nothing is queued for approval in the '
+                    f'{_esc(systems.autonomy_label(_rung))} rung.</b> '
+                    + ('The learning phase runs and records; it sends '
+                       'nothing, by design.'
                        if _rung == "shadow" else
                        'On <code>auto</code> this system queues no approval '
                        'and no push path consumes the result, so a campaign '

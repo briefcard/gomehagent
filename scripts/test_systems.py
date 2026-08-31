@@ -142,8 +142,38 @@ def main() -> int:
     check("starts in shadow", lead.autonomy == "shadow")
 
     p = systems.promote(lead.id)
-    check("shadow -> approve_all needs only readiness",
+    check("the learning phase -> approve_all needs only readiness",
           p.get("autonomy") == "approve_all", str(p)[:80])
+
+    # THIN KNOWLEDGE CAVEATS A PROMOTION, IT DOES NOT VETO ONE.
+    # `can_promote` refused on `ready`, which is False whenever any kb_need is
+    # unfilled — so a system whose connections were wired and which was
+    # producing perfectly well could not leave the learning phase. That is a
+    # block on the strength of absent data, which this platform does not do,
+    # and it is backwards on safety: the next rung up is where a person taps
+    # EVERY output, so holding a system down does not protect anyone from thin
+    # knowledge, it just means nothing is ever read.
+    # `ironside`'s knowledge base is untouched by this suite, so it is
+    # genuinely thin — and `blog` declares `requires=()` deliberately, so its
+    # connections can never be what is blocking. That isolates the question to
+    # knowledge, which is the whole point of the check.
+    systems.find("ironside", "blog") or systems.create("ironside", "blog")
+    _thin = systems.find("ironside", "blog")
+    systems.update(_thin.id, status="live")
+    _thin = systems.find("ironside", "blog")
+    _rt = systems.ready(_thin)
+    check("the fixture system is genuinely thin but able to produce",
+          bool(_rt["thin"]) and _rt["can_produce"] and not _rt["ready"],
+          str(_rt["blockers"])[:80])
+    _cp = systems.can_promote(_thin)
+    check("thin knowledge no longer blocks leaving the learning phase",
+          _cp["can"] is True, str(_cp.get("why"))[:90])
+    check("  …and the thinness is carried as a named caveat",
+          bool(_cp.get("caveat")), str(_cp.get("caveat"))[:80])
+
+    check("the rung has a name a person would use",
+          systems.autonomy_label("shadow") == "Learning phase",
+          "`shadow` stays the stored value — a label is not worth a migration")
 
     lead = systems.find("agency", "lead_responder")
     verdict = systems.can_promote(lead)

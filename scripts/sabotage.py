@@ -939,6 +939,19 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "thin_knowledge_does_not_block_promotion",
+        "file": "app/systems.py",
+        "find": '    if not r["can_produce"]:\n        return {"can": False, "target": target,\n                "why": "cannot produce at all: " + "; ".join(r["impossible"])}',
+        "replace": '    if not r["ready"]:  # SABOTAGE\n        return {"can": False, "target": target,\n                "why": "not ready: " + "; ".join(r["blockers"])}',
+        "suites": ["test_systems.py"],
+        "why": "a system whose connections are wired and which is producing "
+               "perfectly well cannot leave the learning phase until every "
+               "kb_need is filled — a block on the strength of absent data, "
+               "which this platform does not do. It is backwards on safety "
+               "too: the next rung up is where a person taps EVERY output, so "
+               "holding a system down means the thin drafts are never read",
+    },
+    {
         "name": "a_typed_note_is_filed_before_it_is_used",
         "file": "app/skill_pack.py",
         "find": "    if (note or \"\").strip():\n        with db.SessionLocal() as s:\n            s.add(db.FeedbackItem(",

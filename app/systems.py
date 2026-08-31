@@ -35,6 +35,28 @@ STATUSES = ("designed", "live", "paused", "retired")
 # index is the rung, and promotion may only ever move up by one.
 AUTONOMY = ("shadow", "approve_all", "approve_exceptions", "auto")
 
+#: What each rung is CALLED to a person. `shadow` is the stored value and does
+#: not change — renaming a column to improve a label is how a migration gets
+#: written for a sentence. Owner, 2026-08-31: "We can call it the 'Learning
+#: Phase' instead of Shadow." It reads as a stage a system moves THROUGH,
+#: which is what it is, rather than as a mode it was put in.
+AUTONOMY_LABEL = {
+    "shadow": "Learning phase",
+    # Owner, 2026-08-31: "It doesn't have to be 'Approve All' it should still
+    # be 'Manual Approval' during the learning phase." What the rung DOES is
+    # unchanged — every output waits for a tap — but "approve all" reads like
+    # a bulk action you take, and this reads like the mode you are in.
+    "approve_all": "Manual approval",
+    "approve_exceptions": "Approve exceptions",
+    "auto": "Automatic",
+}
+
+
+def autonomy_label(rung: str) -> str:
+    """The human name for a rung. Unknown values render as themselves."""
+    return AUTONOMY_LABEL.get(str(rung or ""), str(rung or ""))
+
+
 AUTONOMY_MEANING = {
     "shadow": "Runs and records, sends nothing. You compare against what you'd have done.",
     "approve_all": "Every output waits for your tap before it leaves.",
@@ -700,9 +722,27 @@ def can_promote(system: db.System) -> dict:
     target = AUTONOMY[i + 1]
 
     r = ready(system)
-    if not r["ready"]:
+    # WHAT MAY VETO A PROMOTION, AND WHAT MAY ONLY CAVEAT IT.
+    #
+    # This refused on `ready`, which is False whenever the knowledge base is
+    # THIN — so a system whose connections were wired and which was producing
+    # perfectly well could not leave the learning phase until every kb_need
+    # was filled. That is a block on the strength of absent data, which is the
+    # one thing this platform does not do (bundle.py:24, the owner's own
+    # standing rule) and the owner has now said so twice.
+    #
+    # It is also unsafe in the wrong direction: the next rung up is
+    # `approve_all`, where a human taps EVERY output. Holding a system in the
+    # learning phase does not protect anybody from thin knowledge — it just
+    # means nothing is ever reviewed, so the thinness is never noticed and the
+    # run history that earns the rungs above never accumulates.
+    #
+    # Connections still veto: a system that cannot produce at all has nothing
+    # to be trusted with. Thin knowledge rides along as a caveat the surface
+    # states at the moment of promotion.
+    if not r["can_produce"]:
         return {"can": False, "target": target,
-                "why": "not ready: " + "; ".join(r["blockers"])}
+                "why": "cannot produce at all: " + "; ".join(r["impossible"])}
 
     # The contract gates the UNATTENDED rung and nothing else.
     #
@@ -725,9 +765,11 @@ def can_promote(system: db.System) -> dict:
                             "contract has to be answered first — still blank: "
                             + ", ".join(gaps))}
 
+    caveat = ("; ".join(r["thin"]) if r["thin"] else "")
+
     gate = GATES.get(target)
-    if not gate:  # shadow -> approve_all needs readiness only; nothing has run yet
-        return {"can": True, "target": target, "why": ""}
+    if not gate:  # learning -> approve_all: nothing has run yet to judge
+        return {"can": True, "target": target, "why": "", "caveat": caveat}
 
     st = stats(system.id)
     if st["decided"] < gate["min_runs"]:
