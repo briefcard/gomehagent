@@ -939,6 +939,40 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "retrieval_matches_the_conversation",
+        "file": "app/grounding.py",
+        "find": "    if thread:\n        out += f\"\\n{thread[:THREAD_UTTERANCE_CHARS]}\"",
+        "replace": "    if False:  # SABOTAGE\n        out += f\"\\n{thread[:THREAD_UTTERANCE_CHARS]}\"",
+        "suites": ["test_grounding.py"],
+        "why": "every lookup the mail path makes — situations, objections, "
+               "claims, the archive search, the guidance scope — is keyed on "
+               "the newest message alone again, so a five-message negotiation "
+               "retrieves against its last short reply and the reply is "
+               "grounded in the wrong half of the conversation",
+    },
+    {
+        "name": "the_archive_passage_reaches_the_prompt",
+        "file": "app/grounding.py",
+        "find": '            if h.get("excerpt"):',
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_grounding.py"],
+        "why": "the mail path shows a subject line where it has the matched "
+               "passage in hand — `archive._passage` exists for no other "
+               "purpose, and the other drafter in this codebase renders it. "
+               "The path that answers real customers gets the least of it",
+    },
+    {
+        "name": "the_newest_message_is_not_its_own_context",
+        "file": "app/gmail_client.py",
+        "find": "    msgs = [m for m in thread.get(\"messages\", [])\n            if not exclude_id or m.get(\"id\") != exclude_id]",
+        "replace": '    msgs = list(thread.get("messages", []))  # SABOTAGE',
+        "suites": ["test_grounding.py"],
+        "why": "every threaded prompt carries the message being acted on "
+               "twice — once under 'NEWEST MESSAGE (the one to act on)' and "
+               "again at the end of the thread history — which spends context "
+               "and reads as emphasis the sender never gave it",
+    },
+    {
         "name": "owner_input_has_one_definition",
         "file": "app/skill.py",
         "find": "OWNER_INPUT = _pkg.OWNER_INPUT",

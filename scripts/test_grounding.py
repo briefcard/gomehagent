@@ -176,6 +176,68 @@ def main() -> int:
     ck("  and grounding is measured",
        rep["grounding"]["measured"] > 0)
 
+    print("\n— retrieval matches the CONVERSATION, not the newest line —")
+    # Everything the mail path looks up is keyed on `utterance_from`: the
+    # situation tags, the objections, the claims, the archive search and the
+    # guidance scope. It was the subject plus the first 700 characters of the
+    # newest message alone, while the thread sat on the same dict, fetched, and
+    # consulted by nothing — so on a five-message negotiation the retrieval ran
+    # against the last "sounds good, and one more thing —".
+    _e = {"subject": "Re: the Aqua order",
+          "body": "sounds good, and one more thing —",
+          "thread_context": "--- From: buyer ---\nWe need 200 covers for a "
+                            "September wedding, and the venue only allows "
+                            "acrylic."}
+    _u = grounding.utterance_from(_e)
+    ck("the retrieval key carries the earlier thread",
+       "September wedding" in _u,
+       "the thread was on the dict the whole time and reached nothing")
+    ck("  and the newest message still LEADS",
+       _u.index("one more thing") < _u.index("September"),
+       "it is what we are answering; the rest informs it")
+    ck("  a thread-less mail is unchanged",
+       grounding.utterance_from({"subject": "s", "body": "b"}) == "s\nb")
+
+    print("\n— the archive passage is shown, not its subject line —")
+    # `archive._passage` exists for no other purpose than returning the part
+    # that matched rather than the title page, and `render` printed the subject.
+    # `responder._draft` renders the same excerpt at 400 characters.
+    _b = {"rules": {"block": "", "banned_claims": ["x"], "positioning": "p",
+                    "voice_tone": []},
+          "correspondence": [{"subject": "Wedding covers", "from": "buyer@x",
+                              "excerpt": "we settled on acrylic because the "
+                                         "venue bans glass"}]}
+    _r = grounding.render(_b)
+    ck("the matched passage reaches the prompt",
+       "venue bans glass" in _r,
+       "it was fetched, hydrated, and dropped at the renderer")
+    ck("  and the subject still identifies it",
+       "Wedding covers" in _r, "the passage replaces nothing")
+
+    print("\n— the newest message is not its own context —")
+    from app import gmail_client as _gc
+
+    class _Svc:
+        def users(self): return self
+        def threads(self): return self
+        def get(self, **kw): return self
+        def execute(self):
+            return {"messages": [
+                {"id": "m1", "payload": {"headers": [], "body": {}}},
+                {"id": "m2", "payload": {"headers": [], "body": {}}}]}
+    _was = _gc.service_for
+    _gc.service_for = lambda alias: _Svc()
+    try:
+        _all = _gc.get_thread_context("a", "t")
+        _minus = _gc.get_thread_context("a", "t", exclude_id="m2")
+        ck("without an exclusion both messages render",
+           _all.count("--- ") == 2, str(_all.count("--- ")))
+        ck("  and the one being acted on is dropped when named",
+           _minus.count("--- ") == 1,
+           "it is printed above under its own heading; twice is twice")
+    finally:
+        _gc.service_for = _was
+
     print("\n— the learning loop: guidance reaches the prompt —")
     systems.create("baci", grounding.SYSTEM_KEY, "Inbox triage")
     systems.note("baci", grounding.SYSTEM_KEY,

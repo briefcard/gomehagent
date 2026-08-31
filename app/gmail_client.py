@@ -150,12 +150,23 @@ def fetch_unanswered(alias: str, days: int = 14, max_threads: int = 50) -> list[
     return out
 
 
-def get_thread_context(alias: str, thread_id: str, limit: int = 5) -> str:
-    """Last few messages of a thread, formatted for the triage prompt."""
+def get_thread_context(alias: str, thread_id: str, limit: int = 5,
+                       exclude_id: str = "") -> str:
+    """The messages BEFORE this one, formatted for the triage prompt.
+
+    `exclude_id` drops the message being acted on. Without it the newest mail
+    was printed twice in every threaded prompt — once under "NEWEST MESSAGE
+    (the one to act on)" and again at the end of "EARLIER MESSAGES IN THIS
+    THREAD", because the slice took the last `limit` messages and the newest is
+    one of them. Excluded by ID rather than by position, so a thread that
+    advanced between fetch and triage still drops the right one.
+    """
     svc = service_for(alias)
     thread = svc.users().threads().get(userId="me", id=thread_id, format="full").execute()
+    msgs = [m for m in thread.get("messages", [])
+            if not exclude_id or m.get("id") != exclude_id]
     parts = []
-    for msg in thread.get("messages", [])[-limit:]:
+    for msg in msgs[-limit:]:
         headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
         parts.append(
             f"--- {headers.get('date', '?')} | From: {headers.get('from', '?')} ---\n"

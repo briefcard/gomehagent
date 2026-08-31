@@ -258,7 +258,11 @@ def process_emails(alias: str, emails: list[dict], new_approvals: list[str],
             continue
         try:
             email["thread_context"] = gmail_client.get_thread_context(
-                alias, email["threadId"], config.THREAD_CONTEXT_MESSAGES
+                alias, email["threadId"], config.THREAD_CONTEXT_MESSAGES,
+                # The message being acted on is printed above the thread under
+                # its own heading; including it again made every threaded
+                # prompt carry it twice.
+                exclude_id=email.get("id", ""),
             )
         except Exception:  # noqa: BLE001 — context is best-effort
             email["thread_context"] = ""

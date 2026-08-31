@@ -59,11 +59,35 @@ NO_REPLY_BUCKETS = ("notifications", "promo", "sales_orders")
 UTTERANCE_CHARS = 700
 
 
+#: How much of the EARLIER thread joins the retrieval key. Smaller than the
+#: newest message's own budget, deliberately: the newest message is what we are
+#: answering and must stay the loudest signal, but a reply that only ever
+#: matched the newest fragment retrieved against "sounds good, and one more
+#: thing —" on a five-message negotiation.
+THREAD_UTTERANCE_CHARS = 500
+
+
 def utterance_from(email: dict) -> str:
-    """What to match this mail against."""
+    """What to match this mail against — the CONVERSATION, not one line of it.
+
+    Everything the mail path looks up is keyed on this string: the situation
+    tags, the objections, the claims, the archive search over prior
+    correspondence, and the guidance scope. It used to be the subject plus the
+    first 700 characters of the newest message alone, while the thread sat on
+    the same dict, fetched, and consulted by nothing.
+
+    So on a long exchange the retrieval ran against the last short reply. The
+    newest message still LEADS — it is what we are answering, and the owner's
+    rule is that the current thread comes first — but what came before it is
+    part of the question being asked.
+    """
     subject = (email.get("subject") or "").strip()
     body = (email.get("body") or "").strip()
-    return f"{subject}\n{body[:UTTERANCE_CHARS]}".strip()
+    thread = (email.get("thread_context") or "").strip()
+    out = f"{subject}\n{body[:UTTERANCE_CHARS]}".strip()
+    if thread:
+        out += f"\n{thread[:THREAD_UTTERANCE_CHARS]}"
+    return out.strip()
 
 
 def for_mail(tenant: str, email: dict, bucket: str = "") -> dict:
@@ -222,6 +246,15 @@ def render(bundle: dict) -> str:
                 continue
             parts.append(f'- thread: {h.get("subject", "")}'
                          + (f' — from {h["from"]}' if h.get("from") else ""))
+            # THE MATCHED PASSAGE, which was fetched and thrown away.
+            # `archive._passage` exists for no other purpose than returning the
+            # part that matched rather than the title page, and this printed
+            # the subject line. `responder._draft` — the other drafter in this
+            # codebase — renders the same excerpt at 400 characters. The path
+            # that answers real customers every morning had it in hand and
+            # showed a subject.
+            if h.get("excerpt"):
+                parts.append(f'    "{str(h["excerpt"])[:400]}"')
             for d in (h.get("attachments") or [])[:3]:
                 parts.append(f'    · attached: {d.get("filename", "")}')
 
