@@ -4172,6 +4172,27 @@ def _run_blog_article(ctx: Context) -> dict:
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",
              fmt="cms_article",
+             # WHAT THIS ARTICLE IS ABOUT, handed to the gate.
+             #
+             # `_about` was built above and went only to `creative.pick`, so an
+             # article was the one draft in this pack whose commitment never
+             # reached `emit` — and `Context.emit` runs the coherence axis only
+             # `if commitment is None: return []`. So ZERO coherence rules ran
+             # on any article ever written: the check that asks "is this about
+             # the thing it said it was about" was built, wired to five of six
+             # emit sites, and silently skipped on the sixth.
+             commitment=_about,
+             parts=lambda text: coherence.parts(
+                 text=text, prominent=title,
+                 images=([{"url": _hero.get("url", ""),
+                           "alt": _hero.get("alt", ""),
+                           "subject_key": entity_key or "",
+                           "basis": _hero.get("basis", "")}]
+                         if _hero_id else []),
+                 items=[], claims=[
+                     {"claim_id": c["claim_id"], "text": c["claim"],
+                      "scope": c.get("scope", "brand-wide")}
+                     for c in (ctx.bundle.get("claims") or [])[:12]]),
              media_ids=[_hero_id] if _hero_id else [],
              meta={"title": title,
                    "seo_title": _seo_title(keyword, title),

@@ -939,6 +939,33 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "an_article_is_checked_for_coherence",
+        "file": "app/skill_pack.py",
+        "find": "             commitment=_about,",
+        "replace": "             # SABOTAGE",
+        "suites": ["test_skill_conformance.py"],
+        "why": "articles run ZERO coherence rules — `Context.emit` runs that "
+               "axis only when a commitment is passed, so an article whose "
+               "hero photograph and prose are about different things reports "
+               "clean. Built, wired to five of six emit sites, skipped on the "
+               "sixth, and nothing said so",
+    },
+    {
+        "name": "a_new_skill_cannot_ship_half_wired",
+        "file": "scripts/test_skill_conformance.py",
+        # ANCHORED ON THE SELF-CHECK, not on the per-skill assertion: neutering
+        # that assertion is invisible by construction (a disabled check passes
+        # exactly like a working one), which the harness reported as MISSED.
+        # The walk proving it can SEE a violation is the thing worth guarding.
+        "find": '            if any(kw.arg == "commitment" for kw in x.keywords):\n                _w += 1',
+        "replace": '            if True:  # SABOTAGE\n                _w += 1',
+        "suites": ["test_skill_conformance.py"],
+        "why": "the conformance walk stops measuring the one obligation it "
+               "exists for, so the next skill can build a commitment, never "
+               "hand it to the gate, and ship — which is precisely how "
+               "blog_article shipped and stayed shipped",
+    },
+    {
         "name": "thin_knowledge_does_not_block_promotion",
         "file": "app/systems.py",
         "find": '    if not r["can_produce"]:\n        return {"can": False, "target": target,\n                "why": "cannot produce at all: " + "; ".join(r["impossible"])}',
