@@ -117,7 +117,18 @@ def main() -> int:
 
     print("\n— and now the page offers the pair, not the queue button —")
     page2 = _page(oid)
-    ck("Approve is there", "Approve" in page2 and "/decide/" in page2)
+    # DECIDED IN PLACE, not handed off to the email mechanism. The bar used
+    # to link to `/decide/<signed-token>`, which renders a bare `<h2>` on an
+    # unstyled page with no way back — the owner's "a page that confirms its
+    # been sent with no UI", 2026-08-31.
+    ck("Approve is there", "Approve" in page2
+       and "/admin/ship_decide" in page2)
+    ck("  and it decides in place rather than leaving the console",
+       "/decide/" not in page2,
+       "the signed links stay the EMAIL mechanism; a console page posts")
+    ck("  and it lands back on this artifact",
+       f'name="back_work" value="{oid}"' in page2,
+       "design rule 3: a decision never costs the reader their place")
     ck("  Redraft is beside it", "#redraft" in page2)
     ck("  and it stops offering to queue what is already queued",
        "Put it in front of me" not in page2,
@@ -135,6 +146,26 @@ def main() -> int:
     ck("nothing to approve is said, not queued",
        "err=" in r2.headers.get("location", "") and not _pending(oid2),
        r2.headers.get("location", ""))
+
+    print("\n— ONE press: decide, and land back here, styled —")
+    ap_id = _pending(oid)[0].id
+    r4 = c.post(f"/admin/ship_decide?key={KEY}",
+                data={"tenant": "baci", "approval_id": ap_id,
+                      "back_work": oid, "verdict": "approved"},
+                follow_redirects=False)
+    ck("one press decides it", r4.status_code == 303 and not _pending(oid),
+       f"{r4.status_code}, {len(_pending(oid))} still pending")
+    loc = r4.headers.get("location", "")
+    ck("  and lands back on the artifact, not on a bare page",
+       loc.startswith(f"/admin/work/{oid}") and "ok=" in loc, loc[:110])
+    page3 = c.get(loc).text
+    ck("  which renders the confirmation as UI",
+       'class="flash"' in page3 or 'class="ok"' in page3,
+       "the owner's complaint was an unstyled <h2> with no way back")
+    ck("  and there is no second Approve to press",
+       "Approve" not in page3.split("Waiting on you")[0]
+       or "/admin/ship_decide" not in page3,
+       "a decided artifact must stop offering the decision")
 
     print("\n— and it is behind the admin key —")
     # The console serves its sign-in page rather than a JSON error to an

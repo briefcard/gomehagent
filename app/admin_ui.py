@@ -369,6 +369,11 @@ button.sec{background:transparent;color:var(--acc)}
    Deny and a review link, all the same size, on the page whose entire job is
    to get one decision out of a person. */
 .btn.go{font-size:.92rem;padding:8px 18px;border-radius:5px}
+/* A real action that is not one of the two you take most. A button, because
+   it POSTs like the others — drawn as a link, because Discard competing with
+   Approve for attention is how a draft gets thrown away by mistake. */
+.lnk{background:none;border:0;padding:0;font:inherit;font-size:.72rem;
+  color:var(--mut);text-decoration:underline;cursor:pointer}
 /* --- the frame: sidebar, client switcher, page ---------------------------
    Same shape as the client portal on purpose. Switching between the two
    should not mean learning a second layout, and the account is chosen once
@@ -10815,6 +10820,31 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
 </div>{_MARGIN_JS}"""
 
 
+def _decide_form(key: str, tenant: str, ap_id: str, output_id: str,
+                 verdict: str, label: str, cls: str = "btn go") -> str:
+    """One decision, made where it is read, landing back where it was made.
+
+    The workroom used to link to `/decide/<signed-token>` for this — the EMAIL
+    mechanism, which is unauthenticated by signature on purpose, renders a
+    bare `<h2>` on a blank page, and offers no way back to the thing you were
+    reading. `_waiting_section` was rebuilt to end exactly that a fortnight
+    before this, and the workroom kept it: the page where a person actually
+    reads the draft had the worst version of the highest-stakes control.
+
+    Same executor either way (`approvals.apply_decision`), so the decision is
+    identical whichever surface makes it. Only the way back differs, and this
+    one keeps the reader's place (design rule 3).
+    """
+    return f"""
+    <form method="post" action="/admin/ship_decide?key={_esc(key)}" class="inl">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="approval_id" value="{_esc(ap_id)}">
+      <input type="hidden" name="back_work" value="{_esc(output_id)}">
+      <input type="hidden" name="verdict" value="{verdict}">
+      <button class="{cls}" type="submit">{label}</button>
+    </form>"""
+
+
 def render_workroom(key: str, output_id: str, art, kw, ap,
                     ok: str = "", err: str = "") -> str:
     """One artifact's home: preview, edit, feedback, history — the work loop.
@@ -11015,18 +11045,18 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     elif is_email:
         prov = esp_push.get("provider") or "the ESP"
         if ap:
-            from . import approvals
-            approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
-            deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
-            decide = (f'<div class="row"><a class="btn go" href="{approve}">'
-                      f'Approve — pushes the draft to {_esc(prov)}, '
-                      f'launch-ready</a> '
-                      f'<a class="btn sec" href="#redraft">Send back &mdash; '
+            decide = ('<div class="row">'
+                      + _decide_form(key, tenant, ap.id, output_id, "approved",
+                                     f"Approve &mdash; pushes the draft to "
+                                     f"{_esc(prov)}, launch-ready")
+                      + f'<a class="btn sec" href="#redraft">Send back &mdash; '
                       f'redraft</a> <span class="when">Nothing reaches '
                       f'{_esc(prov)} until you approve. Review and adjust '
                       f'here; launch there.</span>'
                       f'<span class="grow"></span>'
-                      f'<a class="when" href="{deny}">discard</a></div>')
+                      + _decide_form(key, tenant, ap.id, output_id, "denied",
+                                     "discard", "lnk")
+                      + '</div>')
         elif pushed:
             decide = (f'<div class="ok">In {_esc(dest.split(":")[1])} as a '
                       f'draft — campaign '
@@ -11104,9 +11134,6 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           <button type="submit" class="sec">It&rsquo;s live here</button>
         </form>"""
         if ap is not None:
-            from . import approvals
-            approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
-            deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
             # WHAT APPROVING ACTUALLY DOES, per kind. `seo_new_article` has an
             # executor arm that creates the post; `skill_output` has none — it
             # records the decision. Both reach this page now that the default
@@ -11122,12 +11149,15 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                               "There is nowhere to push this automatically, so "
                               "approving records your decision. Paste it and "
                               "tell me where it landed:")
-            decide = (f'<div class="row"><a class="btn go" href="{approve}">'
-                      f'{says}</a> '
-                      f'<a class="btn sec" href="#redraft">Send back &mdash; '
+            decide = ('<div class="row">'
+                      + _decide_form(key, tenant, ap.id, output_id,
+                                     "approved", says)
+                      + f'<a class="btn sec" href="#redraft">Send back &mdash; '
                       f'redraft</a> <span class="when">{note}</span>'
                       f'<span class="grow"></span>'
-                      f'<a class="when" href="{deny}">discard</a></div>')
+                      + _decide_form(key, tenant, ap.id, output_id, "denied",
+                                     "discard", "lnk")
+                      + '</div>')
             if ap.kind != "seo_new_article":
                 decide += _mark_live
         elif published:

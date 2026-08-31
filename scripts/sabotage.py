@@ -3736,6 +3736,32 @@ SABOTAGES = [
                "that ends it, which is design rule 1 broken on the surface "
                "the rule was written for",
     },
+    {
+        "name": "a_decision_is_made_where_it_is_read",
+        "file": "app/admin_ui.py",
+        "find": '    <form method="post" action="/admin/ship_decide?key={_esc(key)}" class="inl">',
+        "replace": '    <form method="get" action="/decide/x" class="inl">  <!-- SABOTAGE -->',
+        "suites": ["test_queue_approval.py"],
+        "why": "the workroom hands the highest-stakes control back to the "
+               "EMAIL mechanism: `/decide/<signed-token>` is unauthenticated "
+               "by design, renders a bare <h2> on a blank page, and offers no "
+               "way back to the draft you were reading. The ship queue was "
+               "rebuilt to end exactly that a fortnight earlier and the "
+               "workroom kept it, which is what the owner hit on 2026-08-31 — "
+               "'a page that confirms its been sent with no UI'",
+    },
+    {
+        "name": "deciding_never_costs_you_your_place",
+        "file": "app/web.py",
+        "find": "    back_work = str(form.get(\"back_work\") or \"\")\n    if back_work:",
+        "replace": "    back_work = \"\"  # SABOTAGE\n    if back_work:",
+        "suites": ["test_queue_approval.py"],
+        "why": "approving from the workroom throws the reader out to the "
+               "Review tab instead of back to the artifact they were reading, "
+               "so the confirmation is a sentence somewhere else rather than "
+               "the page itself re-rendering in its pushed state. Design rule "
+               "3: a decision never costs the reader their place",
+    },
 ]
 
 

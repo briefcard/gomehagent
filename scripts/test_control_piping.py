@@ -139,7 +139,13 @@ def _controls() -> dict[str, set[str]]:
             if not act:
                 continue
             meth = "POST" if re.search(r"method=['\"]?post", attrs, re.I) else "GET"
-            out[act.group(1).strip()].add(meth)
+            # A CONTROL IS ITS PATH. A query string on the action is an
+            # ARGUMENT to the same route — `/admin/ship_decide?key={...}`
+            # carries the credential for a POST, because `admin_key` binds
+            # `key` from the query and never from a form body. Counting it as
+            # a separate control reported an unpiped route that has been
+            # piped and covered since it was written.
+            out[act.group(1).strip().split("?")[0]].add(meth)
         for m in re.finditer(r"_act\(\s*[a-z_0-9]+\s*,\s*['\"]([^'\"]+)['\"]", text):
             out[m.group(1)].add("GET")
     return dict(out)

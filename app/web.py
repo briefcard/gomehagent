@@ -5580,6 +5580,26 @@ async def ship_decide(request: Request, key: str = Depends(admin_key)):
     # the same either way; only the way back differs, and sending someone to
     # Review after they decided on the workflow page would cost them their
     # place (design rule 3).
+    # Deciding from the WORKROOM returns to the workroom. Owner, 2026-08-31:
+    # *"I press an approve button, then I have to press approve again then I
+    # go to a page that confirms its been sent with no UI. It should not do
+    # that. It should just redirect me to the email system with a UI
+    # confirmation."* The workroom's own bar linked to `/decide/<token>` —
+    # the EMAIL mechanism — which is an unauthenticated, unstyled `<h2>` and
+    # no way back. That is the defect the ship queue was rebuilt to end a
+    # fortnight ago, still living on the page where a person actually reads
+    # the draft. Landing back here is also the useful destination: the page
+    # re-renders in its pushed state ("In omnisend as a draft — campaign …"),
+    # so the confirmation is the surface itself and not a sentence about it.
+    back_work = str(form.get("back_work") or "")
+    if back_work:
+        from urllib.parse import quote
+
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(
+            f"/admin/work/{quote(back_work)}?key={quote(key)}"
+            f"&ok={quote(str(said)[:400])}", 303)
+
     sys_key = str(form.get("back_system") or "")
     if sys_key:
         from urllib.parse import quote
