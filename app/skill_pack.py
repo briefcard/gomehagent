@@ -2128,13 +2128,15 @@ BACKGROUND_OFFERED = 2
 #:   no_ban_list         nothing was checked at all, so "clean" is unfounded
 #:   unbacked_urgency    a deadline nobody can point at — a lie, at scale
 #:   unfit_entity_named  recommends something a customer cannot buy
+#:   unapproved_offer    a discount nobody signed off, at list scale
 WITHHOLD_FROM_ESP = frozenset({
-    "banned_claim", "no_ban_list", "unbacked_urgency", "unfit_entity_named"})
+    "banned_claim", "no_ban_list", "unbacked_urgency", "unfit_entity_named",
+    "unapproved_offer"})
 
 
 def _run_campaign_email(ctx: Context) -> dict:
     from . import (creative, email_craft, email_render, esp, fitness,
-                   ledger, links)
+                   ledger, links, offers)
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
@@ -2307,6 +2309,37 @@ def _run_campaign_email(ctx: Context) -> dict:
         ctx.note("no approved claim is in scope, so this email has no credibility "
                  "from the data layer — it can still be written, but authoring a "
                  "claim or two for this brand is what makes it persuasive.")
+
+    # NO OFFER SET? USE THE ONE THIS BRAND ACTUALLY RUNS.
+    #
+    # A person fills the offer field so that no generator ever invents a
+    # discount. But on an account that has been promoting for years, a blank
+    # field does not mean there is no offer — it means nobody has typed the
+    # history back in. `offers.applicable` ranks what this brand has ALREADY
+    # SENT, so an existing brand starts with a shelf instead of a blank.
+    #
+    # A PROPOSED offer is still used, and the email is then HELD. That is the
+    # same shape as an off-catalogue steer: the thing appears, it is named,
+    # and it cannot ship until a person decides — which is a better offer to
+    # the owner than a blank field they have to guess at, and safer than a
+    # drafter left free to invent one.
+    derived_offer: dict = {}
+    if not str(ctx.bundle.get("offer") or "").strip():
+        _got = offers.applicable(
+            ctx.tenant, segment=seg["key"],
+            entity_keys=[e.get("key", "") for e in ents])
+        if _got.get("ok"):
+            ctx.bundle["offer"] = _got["offer"]
+            if _got["usable"]:
+                ctx.note(f"no offer was set, so the one this brand runs is "
+                         f"used: \u201c{_got['offer'][:90]}\u201d — "
+                         f"{_got['why']}")
+            else:
+                derived_offer = _got
+                ctx.note(f"no offer was set, so a PROPOSED offer was used: "
+                         f"\u201c{_got['offer'][:90]}\u201d ({_got['why']}). "
+                         f"It is not approved, so this email cannot be "
+                         f"published until you approve that offer.")
 
     # WHAT KIND of email this is, HOW it should look, and what the last few
     # sends to this list already did. Without these three the drafter is asked
@@ -2772,6 +2805,24 @@ def _run_campaign_email(ctx: Context) -> dict:
         hard.append({"severity": "block", "rule": "dead_link", "detail": _why,
                      "fix": "give it the real destination — a send is spent "
                             "whether or not the link worked"})
+
+    # A DERIVED OFFER NOBODY APPROVED, AND THE COPY ACTUALLY STATES IT.
+    #
+    # Checked against the words rather than assumed from the parameter, for
+    # the same reason `named_unfit` reads the copy: a drafter handed an offer
+    # it chose not to mention must not hold the send over one. `offer_position`
+    # is the check `ad_craft` already uses to find an offer in a body, so the
+    # question "is it in there" has one answer in this codebase, not two.
+    if derived_offer and ad_craft.offer_position(
+            to_check, derived_offer["offer"]) >= 0:
+        hard.append({
+            "severity": "block", "rule": "unapproved_offer",
+            "detail": (f"this email states an offer that is proposed and not "
+                       f"approved: \u201c{derived_offer['offer'][:110]}\u201d"),
+            "fix": ("approve that offer on Review, or set the real one on the "
+                    "plan — an unapproved discount going out over the "
+                    "client's sending domain is the one mistake here that "
+                    "costs money")})
 
     _all_ents = _kb.entities(ctx.tenant, available_only=False)
     _named = fitness.named_unfit(_model, to_check, _all_ents)

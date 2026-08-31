@@ -4455,6 +4455,53 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
     return {"result": res}
 
 
+@app.get("/admin/entity_review")
+def entity_review(key: str = Depends(admin_key), entity_id: str = "",
+                  approve: str = "yes", tenant: str = "", ui: str = ""):
+    """Approve or reject a proposed entity — a product, a space, an OFFER.
+
+    THE OTHER END OF A LINK THAT HAD NONE. `add_entity` could always file a
+    proposal, `entities()` always hid one from every generator, and the
+    systems board always rendered "products: N waiting for your review" with a
+    `decide` link beside it — pointing at a queue nothing could drain. A fact
+    reported with no control is this console's first design rule broken, and
+    it stopped mattering in the abstract the moment a derived OFFER started
+    holding an email until somebody could approve one.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    res = kbm.review_entity(entity_id, approve == "yes")
+    if ui:
+        return _back_to_content(tenant, anchor="proposals")
+    return {"result": res}
+
+
+@app.get("/admin/offers_harvest")
+def offers_harvest(key: str = Depends(admin_key), tenant: str = "",
+                   apply: str = "", ui: str = ""):
+    """Propose offers from what this account has ALREADY SENT.
+
+    The bootstrap for an existing brand: the offer field is blank on day one
+    and the history that would fill it is sitting in the archive. Dry-run
+    unless `apply` is set, like every sweep here that can write — filing
+    fifteen rows the first time somebody presses a button is a surprise.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "tenant is required — name the client explicitly"}
+    from . import offers as _of
+    got = _of.harvest(tenant, apply=bool(apply))
+    if ui:
+        msg = (f"{got['filed']} offer(s) filed for review from "
+               f"{got['sends_read']} past send(s)" if got.get("applied")
+               else f"{len(got['proposals'])} offer(s) found in "
+                    f"{got['sends_read']} past send(s) — nothing written yet")
+        return _back_to_content(tenant, msg=msg, anchor="proposals")
+    return got
+
+
 @app.get("/admin/kb")
 def kb_json(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """The whole knowledge base for one account, as data."""

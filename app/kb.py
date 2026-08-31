@@ -2204,6 +2204,49 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
             else f"Rejected.\n{text}")
 
 
+def review_entity(entity_id: str, approve: bool, by: str = "owner") -> str:
+    """Approve or reject a proposed entity — a product, a space, an OFFER.
+
+    THIS DID NOT EXIST. `add_entity` has always been able to file
+    `review=PROPOSED`, `entities()` has always excluded those from every
+    generator, `pending_counts` has always counted them and the systems board
+    has always rendered "products: N waiting for your review" with a
+    `decide →` link beside it. There was nothing on the other end of that
+    link: no function anywhere moved a KbEntity to APPROVED. A queue that can
+    be filled and never drained is a fact reported with no control beside it,
+    which is the defect this console's first design rule exists to stop — and
+    it is load-bearing now, because a derived OFFER is proposed exactly this
+    way and an email is held until somebody can approve one.
+
+    Accepts an id or a key, because the surfaces that need this have the key
+    and the queue has the id, and making the caller convert would put the
+    lookup in two places.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbEntity, entity_id)
+        if row is None:
+            row = (s.query(db.KbEntity)
+                   .filter(db.KbEntity.key == entity_id).first())
+        if row is None:
+            return "No such entity."
+        if approve:
+            row.review, row.status = prov.APPROVED, "active"
+            row.approved_by, row.approved_at = by, db.utcnow()
+            # Approving IS the act of saying this is still what we sell, which
+            # is what `verified_at` records — same reasoning as a claim.
+            row.verified_at = db.utcnow()
+        else:
+            # RETIRED, NEVER DELETED. A rejected offer is a decision worth
+            # keeping: it stops the harvester proposing the same line from the
+            # same archive on every sweep for ever.
+            row.review, row.status = prov.REJECTED, "retired"
+        s.commit()
+        name, kind = row.name, row.type
+    return (f"Approved — {kind} '{name}' is now usable." if approve
+            else f"Rejected — {kind} '{name}' is retired and will not be "
+                 f"proposed again.")
+
+
 def update_claim(claim_id: str, claim: str = None, evidence: str = None,
                  tags: list[str] | None = None, proof_type: str = None,
                  source: str = None, strength: str = None,

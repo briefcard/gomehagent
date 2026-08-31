@@ -844,6 +844,60 @@ SABOTAGES = [
                "silently, exactly the production incident of 2026-08-21",
     },
     {
+        "name": "an_unapproved_offer_never_ships",
+        "file": "app/skill_pack.py",
+        "find": ('    if derived_offer and ad_craft.offer_position(\n'
+                 '            to_check, derived_offer["offer"]) >= 0:'),
+        "replace": ('    if False and ad_craft.offer_position(  # SABOTAGE\n'
+                    '            to_check, derived_offer["offer"]) >= 0:'),
+        "suites": ["test_offers.py"],
+        "why": "a discount NOBODY APPROVED — derived from an old send and "
+               "never signed off — is drafted into the client's ESP and is "
+               "one click from their whole list, over their own sending "
+               "domain. The single most expensive mistake this layer can make",
+    },
+    {
+        "name": "an_offer_is_held_only_when_the_copy_states_it",
+        "file": "app/skill_pack.py",
+        "find": ('    if derived_offer and ad_craft.offer_position(\n'
+                 '            to_check, derived_offer["offer"]) >= 0:'),
+        "replace": "    if derived_offer:  # SABOTAGE",
+        "suites": ["test_offers.py"],
+        "why": "every send is held over an offer it never mentions — the "
+               "block is read from the parameter instead of from the words, "
+               "so a story email that was handed a proposal it chose not to "
+               "use cannot be published either",
+    },
+    {
+        "name": "a_harvested_offer_is_only_proposed",
+        "file": "app/offers.py",
+        "find": '                origin="harvest", review=prov.PROPOSED)',
+        "replace": '                origin="harvest", review=prov.APPROVED)  # SABOTAGE',
+        "suites": ["test_offers.py"],
+        "why": "the bootstrap APPROVES what it read out of the archive, so a "
+               "promotion that ran once two years ago becomes a live offer "
+               "every future send may state — a machine authoring its own "
+               "permission, which is the whole thing the review queue exists "
+               "to prevent",
+    },
+    {
+        "name": "a_proposed_entity_can_be_decided",
+        "file": "app/kb.py",
+        "find": ('        if approve:\n'
+                 '            row.review, row.status = prov.APPROVED, "active"\n'
+                 '            row.approved_by, row.approved_at = by, db.utcnow()\n'
+                 '            # Approving IS the act of saying this is still what we sell, which'),
+        "replace": ('        if False:  # SABOTAGE\n'
+                    '            row.review, row.status = prov.APPROVED, "active"\n'
+                    '            row.approved_by, row.approved_at = by, db.utcnow()\n'
+                    '            # Approving IS the act of saying this is still what we sell, which'),
+        "suites": ["test_offers.py"],
+        "why": "a proposed entity cannot be approved by anything, so the "
+               "queue the systems board points at with a `decide` link can be "
+               "filled and never drained — and an email held over an "
+               "unapproved offer stays held for ever",
+    },
+    {
         "name": "the_package_is_checked_against_its_promise",
         "file": "app/bundle.py",
         "find": "    return [k for k in promised(tier) if k not in b]",
