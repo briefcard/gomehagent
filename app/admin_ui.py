@@ -8265,6 +8265,27 @@ def _scan_rows(key: str, rows) -> str:
     return out or '<p class="mut">No accounts yet.</p>'
 
 
+def _thin_cell(e: dict) -> str:
+    """WHAT THIS SYSTEM WAS DRAFTING WITHOUT, for the per-system table.
+
+    The account-wide list further down answers "is anything missing". This
+    answers "WHICH SYSTEM is running blind", which is the one you can act on:
+    a campaign writing with no objections and an article writing with all of
+    them were one number account-wide and nothing separated them.
+
+    It is also where a gap that is WRONG shows itself. A system reporting it
+    ran without something the account has already authored is a bug in the
+    SUPPLY, not a job for the owner — the campaign path reported
+    `funnel:objection` on an account with eight approved objections until
+    resolve started handing them over.
+    """
+    if not e.get("thin_runs"):
+        return '<span class="mut">nothing missing</span>'
+    gaps = "".join(f'<code>{_esc(k)}</code> {n} ' for k, n in e.get("top_thin") or [])
+    return (gaps + f'<span class="mut"> · on {e["thin_runs"]} of '
+                   f'{e["checks"]} run(s)</span>')
+
+
 def render_assurance(key: str, tenant: str = "", days: int = 30,
                      system: str = "", rule: str = "", started: str = "",
                      page: int = 1) -> str:
@@ -8391,8 +8412,9 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
         f'<td class="num">{e["blocked"] or ""}</td>'
         f'<td class="num">{e["repaired"] or ""}</td>'
         f'<td>{"".join(f"<code>{_esc(k)}</code> {n} " for k, n in e["top_rules"])}</td>'
+        f'<td>{_thin_cell(e)}</td>'
         f'</tr>' for e in assurance.by_system(scope, days)) or \
-        '<tr><td colspan="6" class="mut">nothing checked in this window</td></tr>'
+        '<tr><td colspan="7" class="mut">nothing checked in this window</td></tr>'
 
     # THE CATCHES THEMSELVES. The page could say "14 caught" and never show one
     # of them — the draft was on the Output row the event already points at and
@@ -8484,14 +8506,19 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
       <p class="when"><strong>{rep['caught_total']}</strong> total.</p>
 
       <h3 style="font-size:.9rem;margin:16px 0 6px">Which system</h3>
-      <!-- Six columns will not fit a phone, and without the wrapper the
+      <p class="mut">What each system CAUGHT, and what it was drafting
+      WITHOUT. The second is the one that catches a gap in the data layer
+      itself: a system reporting it ran without something the account has
+      already authored is a fault in the supply, not work for you.</p>
+      <!-- Seven columns will not fit a phone, and without the wrapper the
            table pushed the whole PAGE 147px wide so every card scrolled
            sideways with it. `.tblwrap` again — the Plan tab's answer, the
            same one the Brand tab needed this morning. Measured at 375px. -->
       <div class="tblwrap"><table class="tbl"><tr><th>system</th>
         <th class="num">checks</th>
         <th class="num">caught</th><th class="num">blocked</th>
-        <th class="num">repaired</th><th>most often</th></tr>
+        <th class="num">repaired</th><th>most often</th>
+        <th>drafting without</th></tr>
       {sysrows}</table></div>
 
       <h3 style="font-size:.9rem;margin:16px 0 6px">The drafts themselves</h3>

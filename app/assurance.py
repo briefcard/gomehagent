@@ -237,8 +237,19 @@ def by_system(tenant: str = "", days: int = 30) -> list[dict]:
     for r in _rows(tenant, days):
         k = r.system_key or "(none)"
         e = per.setdefault(k, {"system": k, "checks": 0, "catches": 0,
-                               "blocked": 0, "repaired": 0, "rules": {}})
+                               "blocked": 0, "repaired": 0, "rules": {},
+                               "thin": {}, "thin_runs": 0})
         e["checks"] += 1
+        # WHAT THIS SYSTEM RAN WITHOUT. `thin` is on every row and `report()`
+        # already counts it — account-wide, top ten. That answers "is anything
+        # missing here" and never "WHICH SYSTEM is drafting blind", which is
+        # the question that matters: a campaign writing with no objections and
+        # an article writing with all of them are one number account-wide, and
+        # nothing separated them. `system_key` was on the row the whole time.
+        if r.thin:
+            e["thin_runs"] += 1
+            for gap in r.thin:
+                e["thin"][gap] = e["thin"].get(gap, 0) + 1
         if r.caught:
             e["catches"] += 1
             for rule in r.caught:
@@ -250,5 +261,6 @@ def by_system(tenant: str = "", days: int = 30) -> list[dict]:
     out = list(per.values())
     for e in out:
         e["top_rules"] = sorted(e["rules"].items(), key=lambda kv: -kv[1])[:4]
+        e["top_thin"] = sorted(e["thin"].items(), key=lambda kv: -kv[1])[:4]
     out.sort(key=lambda e: (-e["blocked"], -e["catches"], e["system"]))
     return out

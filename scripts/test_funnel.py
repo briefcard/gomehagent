@@ -337,6 +337,32 @@ def main() -> int:
     ck("  so the live path has the buyer's words, not just the hand-fed one",
        "audience_vocabulary" in _live["have"], str(sorted(_live["have"])))
 
+    print("\n— work that asks no question still gets the hesitations —")
+    # `_situated` returns early with ([], [], []) when there is no utterance,
+    # which is EVERY generative system. Right for ranking, wrong for supply:
+    # `bundle["objections"]` was [] on every campaign, article and ad. And [] is
+    # not None, so it defeated `inputs_for`'s fallback and the run reported
+    # "no approved objections are on file" — on an account that had eight. That
+    # sentence reached the owner twice: in the notes, and on the Assurance tab
+    # as `funnel:objection`, telling them to author what they already had.
+    from app import resolve as _rs2
+    for _i in range(8):
+        _kb.add_objection("baci", f"Is it worth it {_i}?", f"Yes, {_i}.",
+                          origin="human")
+    _n_file = len(_kb.objections("baci"))
+    _b = _rs2.resolve("baci", system="campaign_email", tier=3)
+    ck("the account has objections on file", _n_file >= 8, str(_n_file))
+    ck("a campaign bundle carries them", bool(_b.get("objections")),
+       "no utterance is not the same as no hesitations")
+    ck("  marked unranked, because there is no question to rank against",
+       all("unranked" in (o.get("relevance") or "")
+           for o in _b["objections"]), str(_b["objections"][:1])[:120])
+    _p = fn.inputs_for("baci", "consideration",
+                       objections=_b.get("objections"), entities=[])
+    ck("  so the funnel stops reporting a gap the account has filled",
+       "objection" not in (_p.get("missing") or []),
+       "the run denied what was on file, and Assurance repeated it")
+
     print("\n— the owner's own input reaches the drafter —")
     # `offer` and `deadline` are OWNER_INPUT: a person fills them so that a
     # generator never invents a discount or a deadline. That is defeated

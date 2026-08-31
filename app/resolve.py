@@ -319,6 +319,41 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         skipped.append({"what": "situated", "why": "tier 1 requested"})
 
     bundle["situations"] = situations
+
+    # OBJECTIONS FOR WORK THAT ASKS NO QUESTION.
+    #
+    # `_situated` returns early with `([], [], [])` when there is no utterance,
+    # which is EVERY generative system — a campaign, an article, an ad. That is
+    # right for RANKING (there is no question to rank against) and wrong for
+    # SUPPLY: the account's approved hesitations are exactly what a
+    # bottom-of-funnel email should answer, and they never arrived.
+    #
+    # Worse than absent, it read as denial. `funnel.inputs_for` only falls back
+    # when `objections is None`, so an empty list defeated the fallback and the
+    # run reported "no approved objections are on file" — on an account with
+    # eight. That sentence reaches the owner twice: in the run notes, and on the
+    # Assurance tab as `funnel:objection`, where it sends them to author
+    # knowledge they already have. A gap report that is wrong is worse than no
+    # gap report, because it is acted on.
+    #
+    # Unranked and said so, the same shape `_situated` already uses when it
+    # cannot place an utterance: hand over what the account has, marked, and
+    # let the consumer judge. Scoped by entity when one is named, because a
+    # hesitation about one product is not a fact about another.
+    if tier >= 2 and not objections and not utterance:
+        rows = kb.objections(tenant, audience_key=audience_key,
+                             entity_key=entity_key or None)[:limit]
+        objections = [{
+            "objection_id": o.id, "objection": o.objection,
+            "response": o.response,
+            "situations": list(o.situations or []),
+            "entity_key": o.entity_key or "",
+            "relevance": "unranked — this work asks no question to rank against",
+            "support": [],
+        } for o in rows]
+        if objections:
+            searched.append("objections")
+
     bundle["objections"] = objections
 
     # WHO IS READING, in their own words. `KbAudience` carries pains,

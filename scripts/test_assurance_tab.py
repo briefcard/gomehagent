@@ -116,6 +116,32 @@ def main() -> int:
        "Scan now" in page1)
 
     print()
+    print("\n— WHICH system ran blind, not just that something did —")
+    # `thin` has been on every assurance row since the column was added, and
+    # `report()` counts it ACCOUNT-WIDE, top ten. That answers "is anything
+    # missing" and never "which system is drafting without it" — a campaign
+    # writing with no objections and an article writing with all of them were
+    # one number and nothing separated them. `system_key` was on the row.
+    assurance.record("baci", source="skill", checked=["banned_claims"],
+                     caught=[], verdict="passed", system_key="campaign_email",
+                     thin=["funnel:situation:doubt"])
+    rows = {e["system"]: e for e in assurance.by_system("baci", 30)}
+    ce = rows.get("campaign_email", {})
+    ck("by_system carries what a system was drafting without",
+       ce.get("thin_runs", 0) >= 1 and ce.get("top_thin"),
+       str(ce.get("top_thin")))
+    ck("  and separates it from the systems that were not thin",
+       rows.get("blog", {}).get("thin_runs", 0) == 0,
+       "an account-wide count cannot tell these two apart")
+    page = admin_ui.render_assurance("s3cret", "baci")
+    ck("the tab renders the column", "drafting without" in page)
+    ck("  with the gap named against its system",
+       "funnel:situation:doubt" in page, "the number is useless without it")
+    ck("  and says a clean system is clean, not blank",
+       "nothing missing" in page,
+       "blank reads as unmeasured; those are different facts")
+
+
     if _fail:
         print(f"{len(_fail)} FAILED:")
         for f in _fail:

@@ -858,6 +858,34 @@ SABOTAGES = [
                "the moment you could make it",
     },
     {
+        "name": "objections_reach_work_that_asks_no_question",
+        "file": "app/resolve.py",
+        "find": "    if tier >= 2 and not objections and not utterance:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_funnel.py"],
+        "why": "every campaign, article and ad drafts with NO objections — and "
+               "worse, says so: an empty list defeats the funnel's fallback, so "
+               "the run reports 'no approved objections are on file' on an "
+               "account with eight, and the Assurance tab repeats it as "
+               "`funnel:objection`, sending the owner to author knowledge they "
+               "already have",
+    },
+    {
+        "name": "assurance_says_which_system_ran_blind",
+        "file": "app/assurance.py",
+        "find": ('        if r.thin:\n'
+                 '            e["thin_runs"] += 1'),
+        "replace": ('        if False:  # SABOTAGE\n'
+                    '            e["thin_runs"] += 1'),
+        "suites": ["test_assurance_tab.py"],
+        "why": "the page whose whole job is to be believed can say something "
+               "was missing and never WHICH SYSTEM was drafting without it — a "
+               "campaign writing with no objections and an article writing with "
+               "all of them collapse into one account-wide number, which is the "
+               "blind spot every silent-supply defect in this codebase has "
+               "lived in",
+    },
+    {
         "name": "claims_rotate_so_every_one_is_reachable",
         "file": "app/kb.py",
         "find": "            out.sort(key=lambda r: last.get(r.id, never))",
