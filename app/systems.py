@@ -113,6 +113,13 @@ CATALOG = {
             plan_fields=(
                 dict(key="segment", label="Audience segment", required=True,
                      kind="segment"),
+                # WHO IT IS WRITTEN FOR — a different decision from the
+                # segment above, which is who RECEIVES it. One `reorder_due`
+                # list holds every persona this brand has, so the plan asks
+                # both. Required, because one-to-many work written for
+                # everybody is written for nobody in particular.
+                dict(key="audience_key", label="Written for", required=True,
+                     kind="audience"),
                 # THE ANGLE IS DIRECTION, AND IT IS OPTIONAL. It was
                 # required, which forced a person to invent a concept for
                 # every send before anything could run — and the one thing a
@@ -305,7 +312,13 @@ CATALOG = {
             skill="ad_copy",
             plan_fields=(
                 dict(key="entity_key", label="Entity", required=True),
-                dict(key="audience_key", label="Audience", required=True),
+                # A REFERENCE, not free text. This was `required=True` with
+                # no `kind`, so `_check_plan_refs` fell straight through and
+                # any string at all satisfied it — a plan could name a persona
+                # this account has never approved and the run would draft for
+                # nobody.
+                dict(key="audience_key", label="Written for", required=True,
+                     kind="audience"),
                 dict(key="variants", label="Variants (1–5)", required=False),
             ),
             artifact="proposal_rows",
@@ -1337,10 +1350,37 @@ def _entity_key_check(tenant: str, value: str) -> str:
                             " (it is empty — run the catalogue sync first)"))
 
 
+def _audience_key_check(tenant: str, value: str) -> str:
+    """'' when the value names an APPROVED persona; the named refusal otherwise.
+
+    Built on `kb.audiences()` — the LIST accessor — and that is the whole care
+    in it. The obvious backing, `kb.audience(tenant, key)`, has no approval
+    filter: it returns whatever row exists, proposed or approved. Wired that
+    way the plan would pass its reference check, the run would satisfy the
+    reader requirement, and the drafter would still get nothing — because
+    `bundle["audience"]` is matched against the approved roster and
+    `creative.py` resolves personas the same way. A brand-new silent
+    divergence, manufactured at the moment the check was added.
+
+    Same shape as segments and entities: a plan's reference into the knowledge
+    base is never free text.
+    """
+    rows = kb.audiences(tenant)
+    keys = [a.key for a in rows]
+    if value in keys:
+        return ""
+    sample = ", ".join(keys[:8]) + (", …" if len(keys) > 8 else "")
+    return (f"unknown audience {value!r} — pick one this account has approved"
+            + (f" ({sample})" if keys else
+               " (none are on file — a campaign written for everybody is "
+               "written for nobody; add one on the Knowledge tab)"))
+
+
 def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
     """Reference-kind plan fields must point at something real. Blank stays
     allowed — completeness owns 'required'; this owns 'genuine'."""
-    checks = {"segment": _segment_key_check, "entity": _entity_key_check}
+    checks = {"segment": _segment_key_check, "entity": _entity_key_check,
+              "audience": _audience_key_check}
     for f in workflow(key)["plan_fields"]:
         v = str(values.get(f["key"], "") or "").strip()
         if not v:

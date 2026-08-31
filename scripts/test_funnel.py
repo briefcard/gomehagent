@@ -420,7 +420,9 @@ def main() -> int:
                     deadline=bundle.get("deadline"),
                     audiences=bundle.get("audiences"),
                     audience=bundle.get("audience")) or ("Plate.", "model"))
+    # NAMES ITS READER — one-to-many work does now, on every caller.
     skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1,
+              audience_key=_kb.audiences("baci")[0].key,
               offer="15% off through Sunday", deadline="Sunday 11pm")
     skill_pack.draft_ad = _real_ad
     ck("an offer typed by the owner reaches the ad drafter",
@@ -444,6 +446,7 @@ def main() -> int:
              "claim_ids": [], "cta_label": "Shop",
              "cta_url": "https://x/s"}, "model", ""))
     _r = skill.run("campaign_email", "baci", segment="reorder_due",
+                   audience_key=_kb.audiences("baci")[0].key,
                    intent="offer", offer="15% off through Sunday")
     skill_pack.draft_campaign = _real_c
     ck("the campaign accepts an offer instead of refusing the parameter",
@@ -452,18 +455,38 @@ def main() -> int:
        _saw2.get("offer") == "15% off through Sunday", str(_saw2.get("offer")))
     ck("  and the bottom-of-funnel brief stops reporting a gap it cannot close",
        "offer" in (_saw2.get("have") or []), str(_saw2.get("have")))
-    # ...AND IT SAYS IT HAS NO READER, in the notes AND on the key Assurance
-    # groups by. That run named no audience, and two approved personas are on
-    # file — so the fix is a decision on the plan, not authoring work, and the
-    # two must not collapse into one gap.
-    ck("a piece written for nobody in particular SAYS so",
-       any("no reader was chosen" in n for n in _r.get("notes") or []),
-       str([n for n in _r.get("notes") or [] if "reader" in n])[:120])
-    _thin = " ".join(_r.get("thin") or [])
-    ck("  under a key Assurance can group by, per system",
-       "reader:not-chosen" in _thin, str(_r.get("thin")))
-    ck("  and NOT as though no persona had ever been authored",
-       "reader:none-on-file" not in _thin,
+    # ONE-TO-MANY WORK IS REFUSED WITHOUT A READER — on every caller, not just
+    # the plan path. This account has approved personas, so naming none is a
+    # decision somebody skipped rather than knowledge nobody has written.
+    _no_reader = skill.run("campaign_email", "baci", segment="reorder_due",
+                           intent="offer")
+    ck("a campaign that names no reader is refused",
+       _no_reader["status"] == "blocked", str(_no_reader.get("status")))
+    ck("  and the refusal names the field",
+       any("audience_key" in b for b in _no_reader.get("blocked_on") or []),
+       str(_no_reader.get("blocked_on")))
+
+    # ...BUT AN ACCOUNT WITH NONE ON FILE STILL RUNS, thinly and saying so.
+    # Refusing there would stop work on the strength of an absence, which this
+    # layer does not do — and the two gaps stay separate keys because one is a
+    # decision and the other is authoring.
+    # `eien` is seeded as a real account and this suite authors no persona
+    # for it — the state a brand is in before anybody has written one down.
+    _kb.ensure_brand("eien", "Eien")
+    _kb.set_brand("eien", positioning="p", tone="warm")
+    _kb.add_banned("eien", "nope")
+    ck("  (the fixture account genuinely has no persona)",
+       not _kb.audiences("eien"), str(_kb.audiences("eien")))
+    _nr = systems.find("eien", "campaign_email") or \
+        systems.create("eien", "campaign_email")
+    with db.SessionLocal() as _s:
+        _s.get(db.System, _nr.id).status = "live"
+        _s.commit()
+    _r2 = skill.run("campaign_email", "eien", segment="reorder_due")
+    ck("an account with NO persona on file still produces",
+       _r2["status"] != "blocked", str(_r2.get("blocked_on")))
+    ck("  and says which kind of gap it is",
+       "reader:none-on-file" in " ".join(_r2.get("thin") or []),
        "'nobody wrote one' and 'three exist and none was picked' are "
        "different gaps with different fixes and different owners")
 

@@ -379,6 +379,21 @@ def main() -> int:
           "one past the form's select",
           "unknown segment 'nope'" in (systems.save_plan(
               out["run_id"], {"segment": "nope"}).get("error") or ""))
+    # WHO IT IS WRITTEN FOR is a reference in exactly the same sense. This was
+    # `required=True` with no `kind` on ad_creative, so `_check_plan_refs` fell
+    # straight through and any string satisfied it: a plan could name a persona
+    # the account had never approved, and the run would draft for nobody while
+    # every gate reported clean.
+    check("the READER is a reference too — an unapproved persona is refused",
+          "unknown audience 'nobody-by-that-name'" in (systems.save_plan(
+              out["run_id"],
+              {"audience_key": "nobody-by-that-name"}).get("error") or ""))
+    from app import kb as _kbp
+    _kbp.add_audience("baci", "core_hostess", "The core buyer", ["a pain"],
+                      ["a word"])
+    check("  …and a persona the account HAS approved is accepted",
+          systems.save_plan(out["run_id"],
+                            {"audience_key": "core_hostess"}).get("ok") is True)
     check("the featured ENTITY is a reference too — empty catalogue named",
           "unknown entity 'ghost-product'" in (systems.save_plan(
               out["run_id"], {"entity_key": "ghost-product"}).get("error") or "")

@@ -370,8 +370,8 @@ def main():
 
     # -- degraded: no API key in this session, which is the real offline case
     skill_pack.draft_ad = _draft_ad_live_unavailable
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate",
-                  audience_key="hosts", variants=2)
+    r = skill.run("ad_copy", "baci", audience_key="hosts",
+                  entity_key="aqua-plate", variants=2)
     ck("with no model, it still produces something grounded",
        r["status"] == "produced", r["status"])
     ck("  and every variant admits it was composed, not written",
@@ -383,8 +383,8 @@ def main():
     # -- the model path
     skill_pack.draft_ad = _fake_model("Set a table people photograph.\n\n"
                                       "Designed in Milan, made to be used.")
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate",
-                  audience_key="hosts", variants=2)
+    r = skill.run("ad_copy", "baci", audience_key="hosts",
+                  entity_key="aqua-plate", variants=2)
     ck("with a model, the model's words are what get filed",
        all(i["meta"]["basis"] == "model" for i in r["items"]),
        str([i["meta"]["basis"] for i in r["items"]]))
@@ -396,7 +396,7 @@ def main():
     # -- the one that matters: the model is not trusted
     skill_pack.draft_ad = _fake_model("Every piece is hand-decorated by our "
                                       "artisans and made in Italy.")
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="aqua-plate", variants=1)
     ck("a model that breaks the ban list is BLOCKED, not softened",
        r["items"] and r["items"][0]["status"] == "blocked",
        str(r["items"][0]["failures"] if r["items"] else "nothing emitted"))
@@ -432,7 +432,7 @@ def main():
         return "Every piece is hand-decorated by our artisans.", ""
 
     skill_pack.draft_ad = _self_correcting
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="aqua-plate", variants=1)
     it = r["items"][0]
     ck("a banned draft is repaired rather than left for someone to rewrite",
        it["ok"] and it["repairs"] == 1, f"ok={it['ok']} repairs={it['repairs']}")
@@ -454,7 +454,7 @@ def main():
         return f"Truly hand-decorated, version {_n['i']}.", ""
 
     skill_pack.draft_ad = _never_learns
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="aqua-plate", variants=1)
     it = r["items"][0]
     ck("a draft that cannot be fixed is still blocked", it["status"] == "blocked")
     ck("  and it gives up after MAX_REPAIRS, not forever",
@@ -463,13 +463,13 @@ def main():
     # A drafter that returns the same string is not repairing; spending the
     # remaining attempt on it buys latency and API spend, not a better answer.
     skill_pack.draft_ad = _fake_model("Truly hand-decorated, made in Italy.")
-    r = skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1)
+    r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="aqua-plate", variants=1)
     ck("an unchanged redraft stops the loop immediately",
        r["items"][0]["repairs"] == 1, str(r["items"][0]["repairs"]))
 
     # An unfixable-by-wording failure names the knowledge instead.
     skill_pack.draft_ad = _fake_model("A plate we have no proof about at all.")
-    r = skill.run("ad_copy", "baci", entity_key="ghost-sku", variants=1)
+    r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="ghost-sku", variants=1)
     if r["items"]:
         it = r["items"][0]
         ck("when no rewrite can work, it names the MISSING KNOWLEDGE",

@@ -892,6 +892,51 @@ SABOTAGES = [
                "which makes the pile bigger and the output no better",
     },
     {
+        "name": "one_to_many_work_names_its_reader",
+        "file": "app/skill.py",
+        "find": "    if sk.requires:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_funnel.py"],
+        "why": "a campaign or an ad runs without naming who it is written "
+               "for, from every door except the plan form — the agent tool, "
+               "the HTTP route, the worker tick and the workroom redraft all "
+               "reach run() and the one gate that knew a reader was required "
+               "covered none of them",
+    },
+    {
+        "name": "a_reader_is_only_required_when_one_exists",
+        "file": "app/skill_pack.py",
+        "find": "        return bool(_k.audiences(tenant))",
+        "replace": "        return True  # SABOTAGE",
+        "suites": ["test_funnel.py"],
+        "why": "an account that has authored no persona yet is REFUSED "
+               "instead of running thinly — work stops on the strength of an "
+               "absence, which is the one thing this layer does not do, and a "
+               "new client can produce nothing until somebody writes a "
+               "persona down",
+    },
+    {
+        "name": "a_planner_proposes_complete_work",
+        "file": "app/planner.py",
+        "find": '                          "audience_key": _reader_for(sysrow, seg["key"])},',
+        "replace": '                          "audience_key": ""},  # SABOTAGE',
+        "suites": ["test_workflow_ui.py"],
+        "why": "every proposed campaign arrives missing its reader, so the "
+               "queue fills with work that cannot run until a human opens each "
+               "one — a planner that files incomplete work is a nag, which is "
+               "the whole thing proposing exists to remove",
+    },
+    {
+        "name": "a_named_persona_is_one_that_exists",
+        "file": "app/systems.py",
+        "find": '              "audience": _audience_key_check}',
+        "replace": "              }  # SABOTAGE",
+        "suites": ["test_plans.py", "test_workflow_ui.py"],
+        "why": "a plan may name a persona this account has never approved — "
+               "free text where every other reference field is checked — and "
+               "the run then drafts for nobody while every gate reports clean",
+    },
+    {
         "name": "one_reader_never_a_blend",
         "file": "app/funnel.py",
         "find": "    _aud = [audience] if audience else []",

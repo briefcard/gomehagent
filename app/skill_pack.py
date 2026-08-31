@@ -702,6 +702,22 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
 draft_ad = _draft_ad_live
 
 
+def _has_a_reader_to_pick(tenant: str) -> bool:
+    """Can this account name a reader at all?
+
+    The requirement binds only when the choice EXISTS. An account with no
+    approved persona on file still runs — thinly, and `_reader_gap` says so —
+    because refusing there would stop work on the strength of an absence,
+    which this layer does not do. An account WITH personas that named none is
+    a decision somebody skipped, and that is what gets refused.
+    """
+    try:
+        from . import kb as _k
+        return bool(_k.audiences(tenant))
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
 def _reader_gap(ctx) -> None:
     """Say — on the run and on Assurance — that this work has no reader.
 
@@ -1087,6 +1103,9 @@ register(Skill(
             "positioning"),
     writes=False,
     produces="draft",
+    # An ad is one-to-many in the same sense a campaign is.
+    requires=("audience_key",),
+    requires_when=_has_a_reader_to_pick,
     run=_run_ad_copy))
 
 
@@ -3461,6 +3480,12 @@ register(Skill(
             "offer", "utterance", "draft_visual"),
     writes=True,
     produces="draft",
+    # ONE-TO-MANY WORK NAMES ITS READER. Owner, 2026-08-31: "Audience only
+    # applies in plural to segments in mass marketing." A campaign goes to a
+    # list, so it is written for one persona on that list — and the choice is
+    # only refused when the account has personas to choose from.
+    requires=("audience_key",),
+    requires_when=_has_a_reader_to_pick,
     run=_run_campaign_email))
 
 

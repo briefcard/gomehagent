@@ -82,6 +82,24 @@ class Skill:
     # a no.
     constitutive: tuple = ()        # kb fields whose absence makes output false
     params: tuple = ()              # accepted inputs; anything else is refused
+    # Parameters this work CANNOT be done without — checked on every caller,
+    # not just the plan path.
+    #
+    # `params` is an accept-list with no notion of required, so the one gate
+    # that already knew a reader was mandatory (`plan_fields[].required`, via
+    # `plan_complete`) covered the console and nothing else: the agent tool,
+    # the raw HTTP route, the worker tick and the workroom redraft all reach
+    # `run()` without it. A guard covering one of five doors is not a guard.
+    #
+    # THE BAR IS "A CHOICE THAT EXISTS AND WAS NOT MADE", not "data is
+    # missing". `requires_when` names a predicate: the requirement binds only
+    # when the account can actually satisfy it. An account with no personas on
+    # file still runs — thinly, saying so — because refusing there would stop
+    # work on the strength of an absence, which is the rule this layer is
+    # built on. An account WITH personas that named none is a decision
+    # somebody skipped, and that is what this refuses.
+    requires: tuple = ()
+    requires_when: Callable = None   # (tenant) -> bool; None means always
     writes: bool = False            # does it mutate anything outside the ledger
     produces: str = "report"        # report | draft | proposal
     run: Callable = None            # (Context) -> dict
@@ -787,6 +805,31 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     else:
         run_id = systems.start_run(pre["system_id"], tenant, trigger=trigger,
                                    ref=ref or key)
+
+    # WHAT THIS WORK CANNOT BE DONE WITHOUT. After the plan merge on purpose:
+    # a plan legitimately carrying the field would otherwise be refused before
+    # its values were read. `take_plan` drops blank fields, so a required field
+    # left empty on a plan arrives here as absent, which is correct.
+    if sk.requires:
+        _binds = True
+        if sk.requires_when:
+            try:
+                _binds = bool(sk.requires_when(tenant))
+            except Exception:                                    # noqa: BLE001
+                _binds = False      # a predicate that cannot run must not stop work
+        if _binds:
+            _absent_p = [r for r in sk.requires
+                         if not str(params.get(r) or "").strip()]
+            if _absent_p:
+                systems.finish_run(run_id, "blocked",
+                                   blocked_on="; ".join(_absent_p))
+                return {
+                    "skill": key, "tenant": tenant, "status": "blocked",
+                    "blocked_on": [
+                        f"{p} is required for this work and was not given"
+                        for p in _absent_p],
+                    "items": [], "notes": [], "coverage": {}, "thin": [],
+                    "run_id": run_id}
 
     bundle = rs.resolve(tenant, system=sk.system_key, tier=sk.tier,
                         utterance=str(params.get("utterance") or ""),

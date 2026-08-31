@@ -147,6 +147,44 @@ def _existing_by_month(sysrow, prefix: str) -> dict[str, int]:
     return out
 
 
+def _reader_for(sysrow, segment: str) -> str:
+    """Which persona the next campaign to this cohort should be written for.
+
+    A PLANNER THAT FILES INCOMPLETE WORK IS A NAG. `audience_key` became a
+    required plan field the moment one-to-many work had to name its reader,
+    and a proposal that arrives missing it puts the decision back on the owner
+    for every send — which is exactly what proposing is supposed to remove.
+
+    So it proposes one, and the owner overrides it on the plan like any other
+    field. Least recently proposed to this cohort, never "the first one":
+    ordering by the roster would write to the same persona for ever and the
+    other two would never be spoken to.
+
+    Read from the PLANS rather than from the ledger on purpose.
+    `Output.audience_key` still carries the SEGMENT for campaigns — the two
+    vocabularies the audit found in one column — so reading persona history
+    from it would rank on the wrong thing entirely.
+    """
+    from . import kb
+    people = [a.key for a in kb.audiences(sysrow.tenant)]
+    if not people:
+        return ""                # nothing to choose; the run says so instead
+    seen: dict[str, str] = {}
+    with db.SessionLocal() as s:
+        rows = (s.query(db.SystemRun.brief, db.SystemRun.created_at)
+                .filter(db.SystemRun.system_id == sysrow.id).all())
+    for brief, at in rows:
+        plan = ((brief or {}).get("plan") or {})
+        if plan.get("segment") != segment:
+            continue
+        who = str(plan.get("audience_key") or "")
+        when = db.as_utc(at).isoformat()
+        if who and when > seen.get(who, ""):
+            seen[who] = when
+    # Never proposed to this cohort sorts first, then longest ago.
+    return sorted(people, key=lambda k: (k in seen, seen.get(k, "")))[0]
+
+
 def campaign_rollout(sysrow) -> dict:
     """Propose the next campaigns. Two paths into ONE queue.
 
@@ -199,7 +237,8 @@ def campaign_rollout(sysrow) -> dict:
                 out = systems.open_plan(
                     sysrow.tenant, sysrow.key, ref=prefix + d.isoformat(),
                     plan={"segment": seg["key"],
-                          "goal": seg.get("angle", "")},
+                          "goal": seg.get("angle", ""),
+                          "audience_key": _reader_for(sysrow, seg["key"])},
                     planned_for=d.isoformat(), trigger="planner")
                 if out.get("error"):
                     refusals.append(out["error"])
@@ -402,7 +441,9 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
             continue
 
         ref = f"campaign:{sysrow.tenant}:{seg}:" + slot.isoformat()
-        plan = {"segment": seg}
+        # A pressure plan is a campaign like any other, so it names its reader
+        # too — an incomplete proposal is a nag whichever path filed it.
+        plan = {"segment": seg, "audience_key": _reader_for(sysrow, seg)}
         if g["top_entity"] and _known_entity(sysrow.tenant, g["top_entity"]):
             # What most of them have in common, handed over as the featured
             # entity. The drafter still owns the copy; this is the subject.

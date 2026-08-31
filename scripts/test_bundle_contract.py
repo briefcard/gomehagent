@@ -136,7 +136,9 @@ def main() -> int:
         {"subject": "S", "preheader": "p", "body_html": "<p>x</p>",
          "claim_ids": [], "cta_label": "Shop", "cta_url": "https://x/s"},
         "model", "")
-    r = _sk.run("campaign_email", t, segment="reorder_due")
+    kb.add_audience(t, "core", "Core buyer", ["a pain"], ["a word"])
+    r = _sk.run("campaign_email", t, segment="reorder_due",
+                audience_key="core")
     _rs.resolve = _real
     _thin = " ".join(r.get("thin") or [])
     ck("a missing declared part lands on the run's gaps",

@@ -2249,6 +2249,44 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         return (f'<div class="f"><label>{label}</label>{req}'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
                 f'</div>')
+    if f.get("kind") == "audience":
+        # WHO IT IS WRITTEN FOR — a reference into this account's approved
+        # personas, never free text, for the same reason segment and entity
+        # are: a key matching nothing slides through to a drafter that then
+        # writes for nobody in particular, and nothing downstream can tell
+        # that from a real choice.
+        #
+        # NOT the same question as `segment`, which is who RECEIVES the send.
+        # One `reorder_due` list contains every persona this brand has, so the
+        # two are different decisions and the plan asks both.
+        #
+        # Approved only, because `kb.audiences` filters there — a proposed
+        # persona reaching a drafter is indistinguishable from a fact once it
+        # is in a draft.
+        cur = str(value or "").strip()
+        rows = sorted(kb.audiences(tenant), key=lambda a: (a.name or "").lower())
+        opts = [f'<option value=""{"" if cur else " selected"}>— choose who '
+                f'this is written for —</option>']
+        seen = False
+        for a in rows:
+            seen = seen or a.key == cur
+            _p = (a.pains or [])
+            hint = f" · {_esc(str(_p[0])[:44])}" if _p else ""
+            opts.append(f'<option value="{_esc(a.key)}"'
+                        f'{" selected" if a.key == cur else ""}>'
+                        f'{_esc(a.name or a.key)}{hint}</option>')
+        if cur and not seen:
+            opts.append(f'<option value="{_esc(cur)}" selected>{_esc(cur)} '
+                        f'(unknown persona)</option>')
+        note = ("" if rows else
+                '<div class="what">no buyer persona is on file — a campaign '
+                'written for everybody is written for nobody. '
+                f'<a href="/admin/ui?tab=kb&amp;sub=audiences'
+                f'&amp;tenant={_esc(tenant)}">Add one on the Knowledge '
+                'tab</a> first.</div>')
+        return (f'<div class="f"><label>{label}</label>{req}{note}'
+                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
+                f'</div>')
     if f.get("kind") == "entity":
         # Same rule as segments: a reference into the catalogue, never free
         # text. Options are this account's real entities, in-stock first;
@@ -4426,6 +4464,58 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
 
     banned = (b.banned_claims or []) if b else []
 
+    # WHO THIS BRAND IS TALKING TO — stated as a requirement, not as one more
+    # row count.
+    #
+    # A buyer persona is not another kind of knowledge beside claims and
+    # objections. It is the thing every other piece is SELECTED FOR: the
+    # funnel briefs from its pains and its own words, and one-to-many work —
+    # a campaign, an ad, an article — is written for exactly one of them.
+    # Nothing on this page said so, so the surface holding them read like a
+    # list nobody had a reason to fill.
+    #
+    # One-to-many only, deliberately: a reply has an actual person on the
+    # other end and needs no persona at all.
+    _auds = kb.audiences(tenant)
+    if _auds:
+        _who = "".join(
+            f'<div class="msg"><div><b>{_esc(a.name or a.key)}</b>'
+            + (f'<span class="mut"> — {_esc(str((a.pains or [""])[0])[:90])}</span>'
+               if a.pains else "")
+            + '</div>'
+            + (f'<div class="when">their words: '
+               f'{_esc(", ".join(list(a.vocabulary or [])[:6]))}</div>'
+               if a.vocabulary else
+               '<div class="when">no vocabulary on file — the drafter writes '
+               'in the brand&rsquo;s words instead of this buyer&rsquo;s</div>')
+            + '</div>' for a in _auds[:4])
+        who_card = (f'<div class="card"><div class="head">'
+                    f'<h2>Who this brand writes to</h2>'
+                    f'<span class="chip on">{len(_auds)}</span></div>'
+                    f'<p class="mut">Every campaign, ad and article is written '
+                    f'for exactly ONE of these &mdash; their pains and their '
+                    f'own words are what the drafter is briefed from. A send '
+                    f'naming no persona is written for everybody, and '
+                    f'therefore for nobody in particular.</p>'
+                    f'<div class="thread">{_who}</div>'
+                    f'<div class="row"><a class="btn sec" '
+                    f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;'
+                    f'sub=audiences&amp;tenant={_esc(tenant)}">'
+                    f'Manage who we write to &rarr;</a></div></div>')
+    else:
+        who_card = (f'<div class="card"><div class="head">'
+                    f'<h2>Who this brand writes to</h2>'
+                    f'<span class="chip off">none yet</span></div>'
+                    f'<div class="note"><strong>No buyer persona is on '
+                    f'file.</strong> Every campaign, ad and article is written '
+                    f'for exactly one of these, so until there is one, '
+                    f'one-to-many work is written for everybody &mdash; which '
+                    f'is nobody in particular.</div>'
+                    f'<div class="row"><a class="btn" '
+                    f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;'
+                    f'sub=audiences&amp;tenant={_esc(tenant)}">'
+                    f'Add the first one &rarr;</a></div></div>')
+
     # --- claims, split by whether they can actually be used ------------------
     inv = kb.claim_inventory(tenant)
 
@@ -4715,6 +4805,8 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
 
 {review_banner}
 {ask}
+
+{who_card}
 
 <div class="card">
   <div class="head"><h2>Claims — the proof drafts may cite</h2>

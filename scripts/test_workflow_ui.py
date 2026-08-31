@@ -65,6 +65,7 @@ def _view(c, tenant: str, extra: str = "") -> str:
 
 
 def main() -> int:
+    from app import kb as _kbw
     db.init_db()
     tenants.seed()
 
@@ -366,6 +367,21 @@ def main() -> int:
     ck("…and the hand-fill form is still there for whoever wants it",
        "plan_new" in _empty)
 
+    # A CAMPAIGN NAMES ITS READER. An account that has authored no persona
+    # cannot have a COMPLETE campaign plan proposed for it, and the proposal
+    # says which field is missing rather than pretending — the honest state,
+    # pinned on its own account so it cannot be confused with the cap logic
+    # (a skipped plan still counts against the month, deliberately).
+    ck("a campaign plan with no reader NAMES the gap rather than running",
+       "Written for" in _sys.plan_complete(
+           {"plan": {"segment": "reorder_due"}, "planned_for": "2099-01-01"},
+           "campaign_email")["missing"],
+       "an account that has authored no persona cannot have a complete "
+       "campaign plan, and saying which field is missing is the honest state")
+
+    _kbw.add_audience("baci", "core_hostess", "Women 35–44 — the core buyer",
+                      ["generic tableware that says nothing about her"],
+                      ["set", "gift", "hosting"])
     c.get("/admin/plan_propose?key=s3cret&tenant=baci&system=campaign_email")
     _full = c.get(_u).text
     ck("once there are plans, proposing again is a cadence decision and "
