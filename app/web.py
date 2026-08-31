@@ -4764,7 +4764,12 @@ def brand_markdown(request: Request, auth: str = Depends(read_key),
     validator enforces on the way out — so what a drafter was told and what it
     will be held to cannot drift apart.
 
-    `?system=service_desk|creative|campaign_email|lead_responder` narrows it.
+    `?system=<any key in systems.CATALOG>` narrows it to the sections that
+    system declared it needs — derived, so this docstring cannot name a scope
+    that is not a system. It used to: `creative` was listed here for a
+    fortnight after the generator it was written for entered the catalogue as
+    `ad_creative`, and asking for either returned the whole document.
+
     Sections run stable-first so the prompt cache actually hits; the volatile
     catalogue is last for the same reason.
     """

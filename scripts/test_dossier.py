@@ -119,14 +119,22 @@ def main() -> int:
 
         print("\n— a system gets only what it needs —")
         desk = dossier.build("baci", "service_desk")
-        art = dossier.build("baci", "creative")
+        # `creative` until 2026-08-31. It was never a system: the scope was
+        # written the day before `ad_creative` was declared and the two were
+        # never reconciled, so the narrow scope was unreachable by the only
+        # name a caller has and the whole document came back stamped with the
+        # system it had not been scoped to.
+        art = dossier.build("baci", "ad_creative")
         ck("the desk gets objections", "Answers already approved" in desk["markdown"])
-        ck("the creative scope drops them",
+        ck("the ad scope drops them",
            "Answers already approved" not in art["markdown"],
            "a section nobody reads pushed something useful out of the window")
         ck("but both keep the hard rules",
            "handmade" in desk["markdown"] and "handmade" in art["markdown"],
            "the rules are the one section no scope may drop")
+        ck("a key that is not a system is refused, not fallen back on",
+           "not a system" in (dossier.build("baci", "creative").get("error") or ""),
+           "a fallback that succeeds is the hardest kind of wrong to see")
 
         print("\n— it says whether it still belongs in a prompt —")
         ck("size is reported", doc["approx_tokens"] > 0, str(doc["approx_tokens"]))

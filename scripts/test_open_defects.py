@@ -39,7 +39,7 @@ def still_broken(what, cond, fixed_msg):
 
 
 def main():
-    from app import dossier, systems  # noqa: E402
+    from app import systems  # noqa: E402
 
     print("\nopen defects — each PASSES while still broken\n")
 
@@ -56,17 +56,6 @@ def main():
         "the correspondence archive indexes inbound mail only",
         not indexes_our_reply,
         "worker.py now indexes a sent reply — response patterns are assembled context",
-    )
-
-    # 2b — dossier.SCOPES has drifted from systems.CATALOG.
-    scopes, catalog = set(dossier.SCOPES), set(systems.CATALOG)
-    orphan_scopes = sorted(s for s in scopes - catalog if s)
-    uncovered = sorted(catalog - scopes)
-    still_broken(
-        f"dossier.SCOPES drift: {len(orphan_scopes)} orphan key(s) {orphan_scopes}, "
-        f"{len(uncovered)} system(s) with no scope",
-        bool(orphan_scopes or uncovered),
-        "SCOPES is derived from CATALOG, so drift is impossible",
     )
 
     # 2c — SYSTEMS-REFERENCE.md is stale: it names fewer kb_needs for
@@ -123,7 +112,7 @@ def main():
         (getattr(s, "system", None) or getattr(s, "system_key", None))
         for s in skill.REGISTRY.values()
     }
-    unskilled = sorted(k for k in catalog if k not in skilled)
+    unskilled = sorted(k for k in systems.CATALOG if k not in skilled)
     still_broken(
         f"{len(unskilled)} CATALOG system(s) have no skill: {unskilled}",
         bool(unskilled),
@@ -133,7 +122,7 @@ def main():
     print(
         "\n"
         + (
-            f"all {5} defects still open — ledger is accurate"
+            f"all {4} defects still open — ledger is accurate"
             if not _fail
             else f"{len(_fail)} entry(s) are STALE:\n  - " + "\n  - ".join(_fail)
         )

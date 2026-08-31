@@ -36,23 +36,83 @@ import hashlib
 
 from . import kb, tenants
 
-#: What each system actually needs. A service desk has no use for the
-#: catalogue's every SKU and a creative generator has little use for objection
-#: handling — and a section nobody reads is a section that pushed something
-#: useful out of the context window.
-SCOPES: dict[str, tuple[str, ...]] = {
-    # `lookups` sits before `catalogue` because the DECLARATION is stable —
-    # which tool, which parameters — even though what it returns is not. The
-    # volatile thing is the answer, and the answer is deliberately not here.
-    "": ("identity", "rules", "situations", "objections", "claims", "lookups",
-         "catalogue", "gaps"),
-    "service_desk": ("identity", "rules", "situations", "objections", "claims",
-                     "lookups", "gaps"),
-    "lead_responder": ("identity", "rules", "situations", "objections",
-                       "claims", "gaps"),
-    "creative": ("identity", "rules", "claims", "catalogue", "gaps"),
-    "campaign_email": ("identity", "rules", "claims", "catalogue", "gaps"),
-}
+#: Every section there is, in the order they must appear. Stable first, so the
+#: prompt cache hits on a prefix; `lookups` before `catalogue` because the
+#: DECLARATION is stable — which tool, which parameters — even though what it
+#: returns is not. The volatile thing is the answer, and the answer is
+#: deliberately not here.
+#:
+#: A scope FILTERS this tuple rather than listing its own order, so no scope
+#: can reorder the document and cost every account its cache.
+ORDER = ("identity", "rules", "situations", "objections", "claims", "lookups",
+         "catalogue", "gaps")
+
+
+def _sections_for(key: str) -> tuple[str, ...]:
+    """Which sections a system gets — DERIVED from what it declared it needs.
+
+    This was five hand-written lists, and it drifted exactly the way a second
+    copy of a fact always does. `creative` was written on 2026-08-16 for a
+    generator that entered `systems.CATALOG` the next day as `ad_creative`, and
+    the two were never reconciled: the narrow scope became unreachable by the
+    system's real name, `SCOPES.get(system, SCOPES[""])` quietly handed back
+    the whole document, and `build` went on stamping `"system": "ad_creative"`
+    on it. Seven of the ten systems had no scope at all and none of them said
+    so — a fallback that succeeds is the hardest kind of wrong to see.
+
+    So it is computed, from declarations that already exist and are already
+    enforced elsewhere:
+
+      · `claim` in `kb_needs`     -> the claims it may lean on
+      · `objection` in `kb_needs` -> the answers already approved
+      · `entity` in `kb_needs`    -> the catalogue
+      · a `gmail_draft` artifact  -> situations, and the live lookups hanging
+        off them. Those are facts about INBOUND CONVERSATION: what people
+        actually ask, and which of those questions this document must refuse
+        to answer from memory.
+
+    identity, rules and gaps are unconditional — who this is, what may never
+    be said, and what is not established. No system opts out of those.
+
+    The derivation reproduces the author's own `creative` scope for
+    `ad_creative` exactly, which is the evidence it is the rule that was in
+    their head. Where it DISAGREES with the old lists it agrees with the
+    system's own declaration instead: `service_desk` declares it needs
+    `entity` and now gets the catalogue; `campaign_email` declares `objection`
+    and now gets the objections its drafter was already being fed through
+    `funnel.inputs_for`. A disagreement between two hand-written lists is not
+    a preference to preserve — it is the drift, and the declaration wins.
+    """
+    from . import systems
+    sp = systems.CATALOG.get(key) or {}
+    needs = set(sp.get("kb_needs") or ())
+    mail = (sp.get("workflow") or {}).get("artifact") == "gmail_draft"
+    want = {
+        "identity": True, "rules": True, "gaps": True,
+        "situations": mail, "lookups": mail,
+        "objections": "objection" in needs,
+        "claims": "claim" in needs,
+        "catalogue": "entity" in needs,
+    }
+    return tuple(s for s in ORDER if want[s])
+
+
+def _scopes() -> dict[str, tuple[str, ...]]:
+    """One entry per system, plus `""` for the whole document.
+
+    Built over `systems.CATALOG` rather than beside it, so a system added next
+    month has a scope the moment it is declared and an entry for something
+    that is not a system cannot be written at all.
+    """
+    from . import systems
+    out = {"": ORDER}
+    out.update({k: _sections_for(k) for k in systems.CATALOG})
+    return out
+
+
+#: What each system actually needs. A section nobody reads is a section that
+#: pushed something useful out of the context window.
+SCOPES: dict[str, tuple[str, ...]] = _scopes()
 
 #: Rough, and honest about being rough. Enough to tell a caller whether this
 #: still belongs in a prompt or whether it is time to call `resolve()` instead.
@@ -199,7 +259,13 @@ def build(tenant: str, system: str = "") -> dict:
     if not t:
         return {"error": f"unknown account {tenant!r}"}
     b = kb.brand(tenant)
-    wanted = SCOPES.get(system, SCOPES[""])
+    if system and system not in SCOPES:
+        # NOT a silent fallback. `?system=creative` returned the whole document
+        # stamped `"system": "creative"` and nothing anywhere said the scope
+        # had not been applied — which is how the orphan survived a fortnight.
+        return {"error": f"{system!r} is not a system. Try one of: "
+                         + ", ".join(sorted(k for k in SCOPES if k))}
+    wanted = SCOPES[system]
 
     parts: list[str] = []
     for name in wanted:

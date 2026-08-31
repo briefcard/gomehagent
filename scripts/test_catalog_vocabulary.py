@@ -28,6 +28,14 @@ WHAT IS ASSERTED:
     met, so the branch is honest even if this suite is ever bypassed.
   · Every `sub` a need points at is a Review tab that exists — a "decide -->"
     link into a queue with no page is a fact reported with no control.
+  · `dossier.SCOPES` has one entry per system and no entry that is not one.
+    `creative` was a scope for a generator that entered CATALOG the next day
+    as `ad_creative`; the narrow scope became unreachable by the only name a
+    caller has, `SCOPES.get(system, SCOPES[""])` handed back the whole
+    document, and `build` stamped the system it had not scoped to onto it.
+  · Each scope agrees with what its system DECLARED — claims where `claim` is
+    declared, objections where `objection` is, the catalogue where `entity`
+    is — in both directions, so the derivation cannot quietly stop deriving.
 
 Only demand-without-supply fails. A supplier with no declaration (today:
 `positioning`) is a real brand field a system may yet declare, and answering
@@ -46,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from app import db, kb, skill, systems  # noqa: E402
+from app import db, dossier, kb, skill, systems  # noqa: E402
 import app.skill_pack  # noqa: F401,E402  (registers the skills)
 
 _fail = []
@@ -116,6 +124,41 @@ def main() -> int:
     ck("every need points at a Review tab that exists", not missing_sub,
        ", ".join(missing_sub) or ", ".join(subs))
 
+    # --- dossier.SCOPES: one entry per system, and none that is not one -----
+    scopes, catalog = set(dossier.SCOPES), set(systems.CATALOG)
+    orphans = sorted(s for s in scopes - catalog if s)
+    uncovered = sorted(catalog - scopes)
+    ck("no scope is keyed to something that is not a system", not orphans,
+       ", ".join(orphans) or "an orphan scope is unreachable by the only name "
+       "a caller has, and the fallback succeeds silently")
+    ck("every system has a scope", not uncovered,
+       ", ".join(uncovered) or f"{len(catalog)} systems")
+
+    unknown_section = sorted({s for v in dossier.SCOPES.values() for s in v
+                              if s not in dossier.SECTIONS})
+    ck("every section a scope names is a section that exists",
+       not unknown_section, ", ".join(unknown_section) or
+       ", ".join(dossier.ORDER))
+
+    # The scope has to agree with the declaration BOTH ways. One direction
+    # alone lets the derivation quietly become a hand-written list again.
+    disagree = []
+    for key, sp in systems.CATALOG.items():
+        needs = set(sp.get("kb_needs") or ())
+        got = set(dossier.SCOPES[key])
+        for tok, section in (("claim", "claims"), ("objection", "objections"),
+                             ("entity", "catalogue")):
+            if (tok in needs) != (section in got):
+                disagree.append(f"{key}: declares {tok}={tok in needs} but "
+                                f"{section}={section in got}")
+    ck("each scope matches what its system declared it needs", not disagree,
+       "; ".join(disagree) or "claim/objection/entity, both directions")
+
+    ck("no scope may drop identity, rules or gaps",
+       all({"identity", "rules", "gaps"} <= set(v)
+           for v in dossier.SCOPES.values()),
+       "who this is, what may never be said, and what is not established")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
@@ -123,7 +166,8 @@ def main() -> int:
             print(f"  - {f}")
         return 1
     print(f"all checks passed — {len(declared)} declared token(s), "
-          f"{len(answered)} answered, {len(const)} constitutive")
+          f"{len(answered)} answered, {len(const)} constitutive, "
+          f"{len(catalog)} scope(s) derived")
     return 0
 
 

@@ -3655,6 +3655,32 @@ SABOTAGES = [
                "on it, and go live: absence read as permission, on the surface "
                "whose whole job is to say what is absent",
     },
+    {
+        "name": "a_scope_is_derived_not_written_beside",
+        "file": "app/dossier.py",
+        "find": "    out.update({k: _sections_for(k) for k in systems.CATALOG})",
+        "replace": '    out.update({"creative": ("identity", "rules", "claims", "catalogue", "gaps")})  # SABOTAGE',
+        "suites": ["test_catalog_vocabulary.py"],
+        "why": "SCOPES goes back to a hand-written list beside the catalogue "
+               "rather than over it, so it can name a scope that is not a "
+               "system and miss systems that are. That is how `creative` "
+               "outlived `ad_creative` by a fortnight: the narrow scope was "
+               "unreachable by the only name a caller has, and the fallback "
+               "handed back the whole document stamped with the system it had "
+               "not been scoped to",
+    },
+    {
+        "name": "an_unscoped_key_is_refused_not_fallen_back_on",
+        "file": "app/dossier.py",
+        "find": "    if system and system not in SCOPES:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_dossier.py"],
+        "why": "?system=anything silently returns the WHOLE document with "
+               "`system` stamped on it, so a caller narrowing to a scope that "
+               "does not exist is told it succeeded — the fallback-that-"
+               "succeeds shape, which is the hardest kind of wrong to see and "
+               "the reason this drift survived",
+    },
 ]
 
 
