@@ -78,7 +78,7 @@ running record, so update it in the thread that finishes one.
 | # | system | skill | status |
 |---|---|---|---|
 | 1 | `blog` | `blog_article` | not walked |
-| 2 | `campaign_email` | `campaign_email` | not walked |
+| 2 | `campaign_email` | `campaign_email` | **walked** 2026-08-31 — see §5 |
 | 3 | `ad_creative` | `ad_copy` | not walked |
 | 4 | `content_compliance` | — | not walked |
 | 5 | `catalog_compliance` | — | not walked |
@@ -126,3 +126,93 @@ than first: it changed most recently and the newest code is the least worn in.
   from the source (an AST walk, a schema walk), never surveyed by eye.
 - **Verify the deploy on `/health`**, which reports the commit. Never infer
   what is running.
+
+---
+
+## 5. What each walked system established
+
+One section per walked system. **Standing rules and traps go here; code facts
+go in `scripts/test_open_defects.py`,** which fails the moment a fact stops
+being true. Do not restate a code fact in prose — that is how
+`SYSTEMS-REFERENCE.md` went stale.
+
+### `campaign_email` — walked 2026-08-31 (commits `bef67d7`..`987b6d4`)
+
+**The one root cause behind every defect found.** An input read by one place
+and supplied by another, with nothing declaring the obligation. Every issue in
+this walk was an instance: `audiences` (read by every drafter, written by
+nobody), `offer` (read, undeclared), `audience_key` (declared, unread),
+`revision_notes` (declared supplier was fiction, three private hops),
+objections (returned `[]` for generative systems, so the run *denied* what was
+on file), `blog_article`'s commitment never reaching `emit` (zero coherence
+rules ever ran on an article), claim selection falling back to insertion order
+(the six oldest claims won forever).
+
+**Where it now lives.** `app/bundle.py` is the declared package: `PARTS` with
+tier, supplier, and absent-semantics; `verify()` at runtime; `audit()` static.
+`scripts/test_skill_conformance.py` computes the obligations from the registry
+by AST walk — declared↔read in both directions — so a new skill inherits the
+contract or fails the suite. That file is the answer to "how do I not miss an
+input again"; read it before adding a system.
+
+**The owner's standing rules** (stated in this walk; they bind every system):
+
+- **Claims are human-approved knowledge about entities, brands, policies, or
+  positioning.** Generators propose; they never populate. Do not turn model
+  output into claims — it defeats the approval process.
+- **Overwhelming is not conflicting.** Prefer a data layer full of quality,
+  well-associated context over a sparse one. World knowledge that does not
+  contradict an approved claim is not a problem to be gated.
+- **Audience is singular, and required for anything generated.** One audience
+  at a time, always — no piece of content is written without knowing who it
+  speaks to. *Audiences* plural applies only to segments in one-to-many
+  marketing (email campaigns, ads), never to individual correspondence.
+- **Segment ≠ audience.** Segment is who RECEIVES (the ESP cohort). Audience is
+  who it is WRITTEN FOR (the persona with pains, vocabulary, buying trigger).
+- **Entities, not products.** A product is one kind of entity; venues and
+  digital offerings are others. Never write product-shaped code or copy.
+- **Thin knowledge caveats a promotion, it never vetoes one.** Shadow is the
+  **Learning phase**, and manual approval is available inside it.
+- **A hero, not a monogamy rule.** One artifact may mention several entities;
+  it may not mix their positioning. Ads are exempt — that is what the
+  positioning input is for.
+- **Don't just do to do — assess the sense.**
+
+**Traps this walk fell into.** Each cost a cycle; do not repeat them:
+
+1. **Shipping a claim about "every instance" that was surveyed by eye.** Two
+   AST audits were wrong (a loop-variable subscript `ctx.bundle[_k] = ...` read
+   as absent; documented back-compat read as noise). Resolve loop variables,
+   and check `git log -S` before calling something accidental.
+2. **A guard that reports `MISSED` is decoration.** Two tests asserted on the
+   bundle when only the prompt had changed, and one passed against `None`
+   because preflight blocked the run. `python3 scripts/sabotage.py <name>` must
+   print `[ caught ]` or the fix is unproven.
+3. **Believing a commit message over the code.** `c4f72cc` claimed the workroom
+   redraft was covered; it was not, and every Request-changes click refused on
+   any account with a persona. Fixed in `c49477f`.
+4. **Nearly shipping a no-op.** Measure the current behaviour before writing
+   the fix — `resolve` already scoped claims by entity, so the "fix" changed
+   nothing. Reverted with the measurement written into the commit.
+
+**Open, in the order to take them** (all proven; see `test_open_defects.py`):
+
+1. **Index our replies.** `EmailLog.body_excerpt` stores inbound mail only; our
+   reply lives in an Approval payload and is never indexed. So the archive
+   answers "what did they ask before" and never "how did we answer". The
+   agentic `email_history_search` tool can reach sent mail, but that is a tool
+   the model may call — not context the prompt is assembled from.
+2. **Three surfaces that report success wrongly** — `kb.py`'s `have.get(f,
+   True)` silently *satisfies* an unknown `kb_needs` token; `dossier.SCOPES`
+   has drifted from `systems.CATALOG`; `SYSTEMS-REFERENCE.md` is stale.
+3. **The input register** — as the JOIN computed from the declaration surfaces,
+   **not a fourteenth place to state things.** Do 2 before 3: the register
+   would faithfully report a vocabulary that currently cannot be trusted.
+
+**Left deliberately unchanged, flagged not fixed:** the `auto` rung produces
+`"cleared"`, which nothing consumes — so it cannot actually push. Five CATALOG
+systems have no skill at all (`content_compliance`, `lead_responder`,
+`moment_email`, `reorder_engine`, `reports`), so no contract reaches them.
+
+**Open question the owner has not answered:** should `blog_article` require a
+reader? It is one-to-many, but its reader is defined by search intent.

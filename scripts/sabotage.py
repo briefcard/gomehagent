@@ -939,6 +939,21 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "the_ledger_notices_a_defect_being_fixed",
+        "file": "app/kb.py",
+        "find": "        if have.get(f, True):",
+        "replace": "        if have.get(f, False):  # SABOTAGE (this is the FIX)",
+        "suites": ["test_open_defects.py"],
+        "why": "the open-defect ledger is the one suite that must fail on GOOD "
+               "news. It hands the next thread the code facts this thread "
+               "found, and a handoff that stays green after the defect is gone "
+               "rots exactly the way SYSTEMS-REFERENCE.md did — it still "
+               "describes a kb_needs list that has since gained three tokens, "
+               "and nothing ever said so. This mutant APPLIES the real fix; if "
+               "the ledger stays green, it is a document pretending to be a "
+               "test, and the entry it carries will outlive the defect.",
+    },
+    {
         "name": "retrieval_matches_the_conversation",
         "file": "app/grounding.py",
         "find": "    if thread:\n        out += f\"\\n{thread[:THREAD_UTTERANCE_CHARS]}\"",
