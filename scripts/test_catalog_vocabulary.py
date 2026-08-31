@@ -36,6 +36,11 @@ WHAT IS ASSERTED:
   · Each scope agrees with what its system DECLARED — claims where `claim` is
     declared, objections where `objection` is, the catalogue where `entity`
     is — in both directions, so the derivation cannot quietly stop deriving.
+  · `SYSTEMS-REFERENCE.md` §2 is byte-identical to what
+    `scripts/gen_systems_reference.py` produces from the code RIGHT NOW. It
+    said `campaign_email` needed four tokens where CATALOG declared seven, and
+    it had been wrong since the walk that added the other three, because a
+    hand-written document has no way to notice that what it describes moved.
 
 Only demand-without-supply fails. A supplier with no declaration (today:
 `positioning`) is a real brand field a system may yet declare, and answering
@@ -45,6 +50,7 @@ Run: python3 scripts/test_catalog_vocabulary.py
 """
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 
@@ -158,6 +164,28 @@ def main() -> int:
        all({"identity", "rules", "gaps"} <= set(v)
            for v in dossier.SCOPES.values()),
        "who this is, what may never be said, and what is not established")
+
+    # --- the reference describes the code, so the code writes it -----------
+    gen = ROOT / "scripts" / "gen_systems_reference.py"
+    ck("the per-system reference has a generator", gen.exists(), gen.name)
+    out = subprocess.run([sys.executable, str(gen), "--check"],
+                         cwd=ROOT, capture_output=True, text=True)
+    ck("SYSTEMS-REFERENCE.md §2 is what the code says today",
+       out.returncode == 0,
+       (out.stdout + out.stderr).strip().splitlines()[-1]
+       if (out.stdout + out.stderr).strip() else "")
+
+    # The markers are the contract: prose outside, derived inside. Losing them
+    # turns the whole document back into something maintained by hand.
+    ref = (ROOT / "SYSTEMS-REFERENCE.md").read_text()
+    ck("the generated region is still delimited",
+       ref.count("<!-- BEGIN GENERATED") == 1
+       and ref.count("<!-- END GENERATED -->") == 1,
+       "judgement lives outside the markers and is not regenerated")
+    ck("the design rules the code cites are still in this document",
+       "## 6. Design rules" in ref and "## 6b." in ref,
+       "app/kb.py, test_ban_list.py, CLAUDE.md and WALKTHROUGH-PROMPT.md all "
+       "cite SYSTEMS-REFERENCE §6 by number")
 
     print()
     if _fail:

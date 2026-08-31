@@ -202,15 +202,16 @@ input again"; read it before adding a system.
    answers "what did they ask before" and never "how did we answer". The
    agentic `email_history_search` tool can reach sent mail, but that is a tool
    the model may call — not context the prompt is assembled from.
-2. **One surface that reports success wrongly** — `SYSTEMS-REFERENCE.md` is
-   stale. (The other two are closed, both into
-   `scripts/test_catalog_vocabulary.py`, which joins every list derived from
-   `systems.CATALOG` back to the declaration: the `kb_needs` vocabulary must
-   reach an answer in `kb.KB_SUPPLIERS`, and `dossier.SCOPES` is now computed
-   over CATALOG rather than written beside it.)
-3. **The input register** — as the JOIN computed from the declaration surfaces,
-   **not a fourteenth place to state things.** Do 2 before 3: the register
-   would faithfully report a vocabulary that currently cannot be trusted.
+2. **The input register** — as the JOIN computed from the declaration
+   surfaces, **not a fourteenth place to state things.** The three surfaces
+   that reported success wrongly are closed (`9826a7d`..HEAD, 2026-08-31)
+   and the vocabulary can now be trusted, which was the precondition:
+   `scripts/test_catalog_vocabulary.py` joins every list derived from
+   `systems.CATALOG` back to the declaration — the `kb_needs` vocabulary must
+   reach an answer in `kb.KB_SUPPLIERS`, `dossier.SCOPES` is computed over
+   CATALOG rather than written beside it, and `SYSTEMS-REFERENCE.md` §2 is
+   written by `scripts/gen_systems_reference.py` and byte-compared. Start
+   there: that suite is the register's first three columns already.
 
 **Left deliberately unchanged, flagged not fixed:** the `auto` rung produces
 `"cleared"`, which nothing consumes — so it cannot actually push. Five CATALOG

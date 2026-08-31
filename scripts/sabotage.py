@@ -3681,6 +3681,19 @@ SABOTAGES = [
                "succeeds shape, which is the hardest kind of wrong to see and "
                "the reason this drift survived",
     },
+    {
+        "name": "the_reference_is_written_by_the_code",
+        "file": "app/systems.py",
+        "find": '        kb_needs=("tone", "banned_claims", "entity", "claim",\n                  "objection", "audience", "asset"),',
+        "replace": '        kb_needs=("tone", "banned_claims", "entity", "claim",\n                  "objection", "audience"),  # SABOTAGE',
+        "suites": ["test_catalog_vocabulary.py"],
+        "why": "the declaration moves and SYSTEMS-REFERENCE.md does not, which "
+               "is exactly what happened: the document named four of "
+               "campaign_email's seven kb_needs tokens for as long as the "
+               "extra three existed and nothing said so. A reference that "
+               "describes the code has to be written BY the code, and "
+               "byte-compared, or it is a summary somebody will trust",
+    },
 ]
 
 

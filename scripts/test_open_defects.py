@@ -1,11 +1,13 @@
 """The open defects, as assertions that PASS while they are still broken.
 
-A handoff written in prose rots. `SYSTEMS-REFERENCE.md` is the proof: it still
-describes a `kb_needs` list that gained three tokens, and nothing told anyone.
-So the code facts a thread hands to the next thread live HERE, not in a
-document — every entry asserts the defect is still present, and the moment
-someone fixes it this suite FAILS and says which paragraph of
-`WALKTHROUGH-PROMPT.md` §5 to delete.
+A handoff written in prose rots. `SYSTEMS-REFERENCE.md` was the proof: it
+described a `kb_needs` list that had gained three tokens and nothing told
+anyone — fixed 2026-08-31 by generating the half that describes the code and
+byte-comparing it, which is the same move as this file one level up. The code
+facts a thread hands to the next thread live HERE, not in a document: every
+entry asserts the defect is still present, and the moment someone fixes it
+this suite FAILS and says which paragraph of `WALKTHROUGH-PROMPT.md` §5 to
+delete.
 
 That inversion is the point. A test that goes red on GOOD news cannot rot
 quietly: the fix cannot land without the ledger being updated in the same
@@ -58,34 +60,6 @@ def main():
         "worker.py now indexes a sent reply — response patterns are assembled context",
     )
 
-    # 2c — SYSTEMS-REFERENCE.md is stale: it names fewer kb_needs for
-    #      campaign_email than the code declares.
-    # Scanned against campaign_email's OWN "KB:" line. Searching the whole
-    # 31KB document finds "tone" and "claim" somewhere on every page and
-    # reports the doc current when its own line lists four of seven.
-    ref = (ROOT / "SYSTEMS-REFERENCE.md").read_text()
-    declared = set(systems.CATALOG["campaign_email"].get("kb_needs") or ())
-    _kb_line = ""
-    _lines = ref.splitlines()
-    for _i, _ln in enumerate(_lines):
-        if _ln.strip().rstrip(":").endswith("campaign_email") and _ln.startswith("#"):
-            for _next in _lines[_i + 1 : _i + 25]:
-                if _next.startswith("#"):
-                    break
-                _m = re.search(r"KB:([^\n.]*)", _next)
-                if _m:
-                    _kb_line = _m.group(1)
-                    break
-            break
-    assert _kb_line, "could not locate campaign_email's KB line — fix this check, not the doc"
-    missing_from_doc = sorted(t for t in declared if t not in _kb_line)
-    still_broken(
-        f"SYSTEMS-REFERENCE.md omits {len(missing_from_doc)} declared kb_needs "
-        f"token(s) for campaign_email: {missing_from_doc}",
-        bool(missing_from_doc),
-        "the reference is regenerated from CATALOG rather than hand-written",
-    )
-
     # 3 — the `auto` rung cannot actually push.
     #     It produces "cleared", and nothing consumes that word.
     # The bare word appears in seven modules for unrelated reasons (digest
@@ -122,7 +96,7 @@ def main():
     print(
         "\n"
         + (
-            f"all {4} defects still open — ledger is accurate"
+            f"all {3} defects still open — ledger is accurate"
             if not _fail
             else f"{len(_fail)} entry(s) are STALE:\n  - " + "\n  - ".join(_fail)
         )

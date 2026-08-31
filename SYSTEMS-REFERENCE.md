@@ -1,11 +1,17 @@
 # Systems Reference
 
-Derived from the code at `ea420b7` (2026-08-30) — `systems.CATALOG`,
-`skill.REGISTRY`, `planner.PLANNERS`, a schema walk, and a route dump — not
-from memory or older documents. Every claim carries a file anchor so its own
-staleness is checkable. Written for whoever designs surfaces over this
-platform: the variables listed per system are the ones a UI must expose,
-because they are the ones the code actually reads.
+**§2 is GENERATED** by `scripts/gen_systems_reference.py` from
+`systems.CATALOG`, `skill.REGISTRY`, `planner.PLANNERS` and `dossier.SCOPES`,
+and `test_catalog_vocabulary.py` byte-compares it — so it cannot drift from
+the code without the suite going red in the commit that moved it. It used to
+say "derived from the code at `ea420b7`", by hand, and by 2026-08-31 it named
+four of `campaign_email`'s seven `kb_needs` tokens. A document that describes
+the code is a build artifact; hand-maintaining one is hand-maintaining a
+compiled binary.
+
+Everything OUTSIDE the generated markers is judgement no walk produces — the
+design rules §6 paid for in defects, the integration notes, the cross-system
+joins — and stays hand-written, here, on purpose.
 
 ---
 
@@ -45,35 +51,189 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
 
 ---
 
-## 2. The ten systems
+<!-- BEGIN GENERATED: the ten systems — scripts/gen_systems_reference.py -->
 
-### blog — the content spine's producer
-- **Requires nothing to run** (`systems.py`): writing needs no store;
-  publishing degrades with the reason and the copy is kept whole. KB:
-  tone, banned_claims, audience, claim — `banned_claims` is *constitutive*
-  for the skill (no ban list → no draft, no model call).
-- **Skill** `blog_article` — params `keyword, role, cluster, angle,
-  entity_key, utterance`. Angle auto-rotates through `ARTICLE_ANGLES`
-  (7 moves; intent narrows, cluster history picks — eight supports under one
-  pillar get eight different articles, `skill_pack.py`); an angle named on
-  the plan wins. A direct-run keyword joins the map first (`source=
-  "direct_run"`), so the board always lists it.
-- **Planner** `blog_rollout` — pillar files AHEAD of its support, never
-  instead of it. Cadence knobs: `horizon_days` 45 (cap 90),
-  `articles_monthly` 4 (cap 30) — `planner.py`.
-- **Plan fields (the plan UI):** `keyword*`, role (pillar|support), cluster,
-  angle, entity_key.
+## 2. The 10 systems
+
+**Generated — do not edit between the markers.** Every line below is read out of `systems.CATALOG`, `skill.REGISTRY`, `planner.PLANNERS` and `dossier.SCOPES` by `scripts/gen_systems_reference.py`. The prose sections around it are judgement and stay hand-written.
+
+### `ad_creative` — Ad creative
+
+Drafts grounded ad copy from approved claims against an audience and an entity. Copy only — imagery waits on the media layer.
+
+- **Connections:** at least one of `ads`, `commerce`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`, `entity`
+- **Skill** `ad_copy` — produces `draft`, tier 3, writes=False
+  - parameters: `entity_key`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
+  - constitutive (no draft without it): none
+- **Planner:** none — plans are filed by hand or by another system
+- **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `variants`
+- **Unit:** one ad batch for one audience × entity
+- **Artifact:** proposal_rows
+- **Ship:** marks the batch ready — no ad-platform write is wired, and the surface says so
+- **Measure:** asset outcomes per channel (fed by hand until the output→ad-id join exists)
+- **Brand-document scope:** identity, rules, claims, catalogue, gaps
+
+### `blog` — Blog / content
+
+Writes grounded articles against the keyword map, and publishes them where there is somewhere to publish to.
+
+- **Connections:** —
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`
+- **Skill** `blog_article` — produces `draft`, tier 3, writes=True
+  - parameters: `keyword`, `role`, `cluster`, `angle`, `entity_key`, `utterance`, `audience_key`, `revision_notes`
+  - constitutive (no draft without it): `banned_claims`
+- **Planner:** `blog_rollout`
+- **Cadence knobs:** `articles_monthly`=4, `horizon_days`=45
+- **Plan fields** (the plan UI; `*` required): `keyword`*, `role` (choice, pillar|support), `cluster`, `angle`, `entity_key` (entity)
+- **Unit:** one article against one keyword
+- **Artifact:** cms_article
+- **Ship:** publishes the draft article, behind seo_guard
+- **Measure:** draft-vs-published delta; position change in `keywords.progress`, against a control
+- **Brand-document scope:** identity, rules, claims, gaps
+
+### `campaign_email` — Campaign email
+
+Builds and schedules campaign sends from the catalogue and calendar.
+
+- **Connections:** `esp`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `entity`, `claim`, `objection`, `audience`, `asset`
+- **Skill** `campaign_email` — produces `draft`, tier 3, writes=True
+  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `audience_key`, `offer`, `utterance`, `draft_visual`
+  - constitutive (no draft without it): none
+- **Planner:** `campaign_rollout`
+- **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
+- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `deadline`, `offer`, `draft_visual` (flag)
+- **Unit:** a campaign email to one segment
+- **Artifact:** esp_campaign
+- **Ship:** marks it launch-ready — launching stays human, in the ESP
+- **Measure:** our first draft vs what you approved
+- **Brand-document scope:** identity, rules, objections, claims, catalogue, gaps
+
+### `catalog_compliance` — Catalogue compliance
+
+Checks product copy and SEO metadata in the store against the brand's own banned claims, and proposes compliant replacements.
+
+- **Connections:** `commerce`
+- **Knowledge (`kb_needs`):** `banned_claims`
+- **Skill** `catalog_compliance` — produces `report`, tier 1, writes=False
+  - parameters: `site`, `limit`
+  - constitutive (no draft without it): `banned_claims`
+- **Planner:** none — plans are filed by hand or by another system
+- **Brand-document scope:** identity, rules, gaps
+
+### `content_compliance` — Website content compliance
+
+Checks the live site against the brand's own banned claims and reports the pages that break them.
+
+- **Connections:** —
+- **Knowledge (`kb_needs`):** `banned_claims`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Brand-document scope:** identity, rules, gaps
+
+### `lead_responder` — Lead responder
+
+Answers an inbound enquiry with a grounded, approved draft.
+
+- **Connections:** `inbox`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `objection`, `claim`, `next_steps`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one thread's reply
+- **Artifact:** gmail_draft
+- **Ship:** approving sends the draft itself
+- **Measure:** edits.py delta; sent-as-is rate
+- **Brand-document scope:** identity, rules, situations, objections, claims, lookups, gaps
+
+### `moment_email` — Moments (windows worth writing into)
+
+Watches for windows opening — a cart gone cold, an enquiry gone quiet — and lets what it finds decide which cohort the campaign planner writes to next, and when.
+
+- **Connections:** at least one of `commerce`, `inbox`
+- **Knowledge (`kb_needs`):** —  ·  `needs_kb=False`, so readiness falls back to `kb.completeness`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** a window noticed, and the cohort it argues for
+- **Artifact:** none — it proposes nothing and sends nothing
+- **Ship:** informs the campaign planner; the campaign system does the sending, under its own switch and its own rung
+- **Measure:** moments consumed into a plan vs moments that expired unserved
+- **Brand-document scope:** identity, rules, gaps
+
+### `reorder_engine` — Reorder engine
+
+Triggers replenishment prompts off purchase cadence.
+
+- **Connections:** `commerce`, `esp`
+- **Knowledge (`kb_needs`):** `entity`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one replenishment prompt per cohort
+- **Artifact:** esp_campaign
+- **Ship:** marks it launch-ready — launching stays human
+- **Measure:** provider stats, once `reports` exists
+- **Brand-document scope:** identity, rules, catalogue, gaps
+
+### `reports` — Reports
+
+The weekly number, assembled from whatever is connected.
+
+- **Connections:** at least one of `analytics`, `ads`, `commerce`
+- **Knowledge (`kb_needs`):** —  ·  `needs_kb=False`, so readiness falls back to `kb.completeness`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** the weekly number, one report
+- **Artifact:** report_document
+- **Ship:** sends it to the client, on approval
+- **Measure:** none — the report IS the measurement
+- **Brand-document scope:** identity, rules, gaps
+
+### `service_desk` — Service desk
+
+Handles routine inbound support with a drafted, checked reply.
+
+- **Connections:** `inbox`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `objection`, `entity`
+- **Skill** `inbound_reply` — produces `draft`, tier 3, writes=False
+  - parameters: `utterance`, `contact_id`, `entity_key`, `facts`, `draft_with_model`, `thread_id`
+  - constitutive (no draft without it): none
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one thread's reply
+- **Artifact:** gmail_draft
+- **Ship:** approving sends the draft itself
+- **Measure:** edits.py delta; sent-as-is rate
+- **Brand-document scope:** identity, rules, situations, objections, lookups, catalogue, gaps
+<!-- END GENERATED -->
+
+## 2a. What the declarations do not carry
+
+Everything above §2's markers is read out of `systems.CATALOG` and is true by
+construction. These are the per-system facts that live in the BODY of a module
+rather than in its declaration, so no walk produces them — kept here, by hand,
+because they were the half of the old §2 worth keeping and they are what the
+generated block cannot say.
+
+**blog** — Angle auto-rotates through `ARTICLE_ANGLES` (7 moves; intent
+narrows, cluster history picks — eight supports under one pillar get eight
+different articles, `skill_pack.py`); an angle named on the plan wins. A
+direct-run keyword joins the map first (`source="direct_run"`), so the board
+always lists it. The planner files a pillar AHEAD of its support, never
+instead of it. Requiring nothing is deliberate (owner, 2026-08-26): publishing
+degrades with the reason and the copy is kept whole at
+`/admin/artifact/<output_id>?raw=1`, which IS the workflow on a platform with
+no write API.
+
 - **Keyword-map variables** (`db.KeywordTarget`): tier/intent/volume/
-  difficulty (computed, never typed; difficulty nullable — unknown ≠ 0),
+  difficulty (computed, never typed; difficulty nullable — unknown is not 0),
   cluster_key+role, status candidate→planned→published→won (settled from
   readings BOTH directions, `WON_POSITION=3.0`), priority+priority_parts
-  (arguable arithmetic), **`owner_priority` ∈ '', pinned, muted** — a
-  separate sort key, never a score bonus; muted = not proposed at all.
+  (arguable arithmetic), **`owner_priority` in '', pinned, muted** — a separate
+  sort key, never a score bonus; muted = not proposed at all.
 - **Loops:** readings nightly 20:05 (`sync_all` → settle → re-score); map
   top-up Mondays 20:25 (`harvest_all`, skips accounts fresher than 7 days,
-  never auto-harvests an empty map); progress on demand (tracked vs
-  CONTROL, 14-day attribution embargo, goal never invented). Five harvest
-  sources (gsc/own/gap/related/questions) — exclude_terms bind ALL five.
+  never auto-harvests an empty map); progress on demand (tracked vs CONTROL,
+  14-day attribution embargo, goal never invented). Five harvest sources
+  (gsc/own/gap/related/questions) — exclude_terms bind ALL five.
 - **Surfaces:** Plan tab (readiness chips → board: writing-next with `why`
   arithmetic, moved, opportunities by tier, in-flight with draft/live links,
   muted fold with lessons + accept buttons) · `/admin/article/{output_id}`
@@ -83,58 +243,51 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
   `keywords.mark_published` → target_url, published_at, status,
   `ledger.publish`, draft-vs-published delta onto the run (`edits.delta`).
 
-### campaign_email
-- Requires `esp`. KB: tone, banned_claims, entity, claim.
-- Skill `campaign_email` — params segment*, goal, subject, intent
-  (story|education|proof|offer), deadline (the SOURCE of any urgency — blank
-  forbids urgency in copy), entity_key, draft_visual. Anti-repeat by FORM:
-  the drafter is shown the last sends' shapes/subjects/openings
-  (`_craft_brief`).
-- Planner `campaign_rollout` — calendar for high-value segments + live
-  pressure (moments) for common ones, one `campaign:` ref space. Knobs:
-  horizon 21 (cap 90), per_segment_monthly 1 (cap 8), segment_rest_days 6
-  (cap 60).
-- Artifact `esp_campaign`; launching stays human in the ESP.
+**campaign_email** — Anti-repeat by FORM: the drafter is shown the last sends'
+shapes, subjects and openings (`_craft_brief`). The planner writes a calendar
+for high-value segments and reads live pressure (moments) for common ones, in
+one `campaign:` ref space. `draft_into_esp` is deliberately NOT a plan field:
+producing the draft in the client's ESP is what this system IS, and the real
+choice sits one level up on the autonomy ladder.
 
-### moment_email — a watcher, deliberately skill-less
-- Watches carts/enquiries; **proposes nothing and sends nothing** — it
-  informs `campaign_rollout`'s pressure path. No plan fields, no queue of
-  its own. Any moments UI is read-only + "which cohort it argues for".
+**moment_email** — Watches carts and enquiries; **proposes nothing and sends
+nothing**. It informs `campaign_rollout`'s pressure path. Filing one plan per
+PERSON was the first cut and was wrong: `esp_id_for` targets a whole segment,
+so two cold carts would have been two identical sends to the entire list. Any
+moments UI is read-only plus "which cohort it argues for".
 
-### service_desk & lead_responder — mail-owned
-- Require `inbox`. Driven by `triage.py` off inbound mail, NOT the tick
-  (`externally_driven`); `inbound_reply` exists in the registry but real
-  mail bypasses it — a known wiring decision, not an accident. Measure:
-  `edits.py` delta at Gmail send; sent-as-is rate feeds promotion.
+**service_desk & lead_responder** — Driven by `triage.py` off inbound mail,
+NOT the tick (`externally_driven`); `inbound_reply` exists in the registry but
+real mail bypasses it — a known wiring decision, not an accident. Measure:
+`edits.py` delta at Gmail send; sent-as-is rate feeds promotion. NOTE
+(2026-08-31): `service_desk` does not declare `claim` in its `kb_needs`, which
+is why the derived brand-document scope gives it no claims section. A system
+that drafts customer replies and never declared it needs approved proof is a
+question for its walk.
 
-### catalog_compliance & content_compliance
-- catalog: requires `commerce`; skills `catalog_compliance` (tier 1 report,
-  weekly Monday 04:30 sweep) and `catalog_seo_rewrite` (tier 2 proposals).
-  content: requires nothing (the site is public); crawls every source
-  `tenants.content_sources` returns — `Tenant.domain` plus the
-  facts-only landing pages — and each finding names the site it is on.
-  Both constitutive on `banned_claims` — an empty ban list refuses rather
-  than reporting CLEAN. Findings live on **Assurance**.
+**catalog_compliance & content_compliance** — catalog runs `catalog_compliance`
+(tier 1 report, weekly Monday 04:30 sweep) and `catalog_seo_rewrite` (tier 2
+proposals). content crawls every source `tenants.content_sources` returns —
+`Tenant.domain` plus the facts-only landing pages — and each finding names the
+site it is on; `<head>` is stripped before matching, which is why catalogue SEO
+metadata needs its own system. Both constitutive on `banned_claims` — an empty
+ban list refuses rather than reporting CLEAN. Findings live on **Assurance**.
 
-### ad_creative
-- Requires ads OR commerce. Skill `ad_copy` (entity_key*, audience_key*,
-  variants 1–5). Degrades to a composed placeholder with `basis` saying so.
-  Reachable via skill_run/agent only (no planner; the tick declares it but
-  plans are filed by hand). Natural next input: keyword intent/volume (join
-  exists, unconsumed).
-- **`needs_art_direction` is now CONSUMED** (2026-08-30). Every variant has
-  carried the flag since the drafter was written and the variant board drew
-  it as an amber chip — a need stated beside no way to meet it. The board now
-  carries **Make frames** (8/16/24) per variant → `POST /admin/ad_frames` →
-  `creative.batch` off the request. It reads the OUTPUT ROW, not the board
-  JSON, so frames are generated against the same positioning, audience and
-  claim that `results` later attributes performance to.
+**ad_creative** — Degrades to a composed placeholder with `basis` saying so.
+Reachable via skill_run/agent only (the tick declares it but plans are filed by
+hand). **`needs_art_direction` is CONSUMED** (2026-08-30): the variant board
+carries **Make frames** (8/16/24) per variant → `POST /admin/ad_frames` →
+`creative.batch` off the request, reading the OUTPUT ROW rather than the board
+JSON, so frames are generated against the same positioning, audience and claim
+that `results` later attributes performance to. Natural next input: keyword
+intent/volume (join exists, unconsumed).
 
-### reorder_engine & reports
-- Declared, no generator yet (runs file `not_built` honestly). reorder:
-  commerce+esp, cohort replenishment. reports: any of
-  analytics/ads/commerce; the weekly client number, `business_model`
-  decides its vocabulary (`metrics.OUTCOMES`).
+**reorder_engine & reports** — Declared, no generator yet; runs file
+`not_built` honestly. reports: `business_model` decides its vocabulary
+(`metrics.OUTCOMES`).
+
+---
+
 
 ---
 
