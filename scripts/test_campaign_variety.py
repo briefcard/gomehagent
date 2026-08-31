@@ -937,6 +937,60 @@ def main():
     ck("the angle field is optional", not _goal_field.get("required"),
        str(_goal_field))
 
+    print("\n— one email, one argument: the hero owns the positioning —")
+    # Owner, 2026-08-31: "It doesn't have to be one-email one-product. It just
+    # needs to not mix up positioning between them."
+    #
+    # Proof was scoped to EVERY featured product, so six offered products meant
+    # six products' worth of "your only credibility, cite by id" — and a
+    # drafter handed that reasonably built a case for each. The email showed
+    # several things and argued several things, which is the mix.
+    _seed("coverings")
+    kb.add_audience("coverings", "spec", "The specifier", ["m"], ["slab"])
+    for _k, _n in (("aqua-jug", "Aqua Jug"), ("milano-plate", "Milano Plate"),
+                   ("firenze-bowl", "Firenze Bowl")):
+        kb.add_entity("coverings", "product", _k, _n, price="40")
+        kb.add_claim("coverings", f"{_n} is why people choose us.",
+                     f"spec {_k}", ["quality"], entity_key=_k,
+                     origin="human", status="active")
+    # ASSERTED ON THE PROMPT, because the prompt is what changed. Asserting on
+    # the bundle passed with the fix reverted — both guards reported MISSED,
+    # which is the harness catching a check that was watching the wrong thing.
+    _saw2: dict = {}
+    _real_llm = skill_pack.llm.ask if hasattr(skill_pack, "llm") else None
+
+    from app import config as _cfg, llm as _llm
+    _key_was, _cfg.ANTHROPIC_API_KEY = _cfg.ANTHROPIC_API_KEY, "test-key"
+    _ask_was = _llm.ask
+
+    def _capture_prompt(purpose, prompt, **kw):
+        _saw2["prompt"] = prompt
+        raise RuntimeError("stop after the prompt is built")
+    _llm.ask = _capture_prompt
+    # Point the seam back at the LIVE builder — the suite replaces it globally,
+    # and the prompt is what this check is about.
+    _seam_was = skill_pack.draft_campaign
+    skill_pack.draft_campaign = skill_pack._draft_campaign_live
+    try:
+        skill.run("campaign_email", "coverings", segment="reorder_due",
+                  audience_key="spec", entity_key="milano-plate")
+    except Exception:
+        pass
+    skill_pack.draft_campaign = _seam_was
+    _llm.ask, _cfg.ANTHROPIC_API_KEY = _ask_was, _key_was
+    _pr = _saw2.get("prompt") or ""
+    ck("companions are still offered — this is not a one-entity rule",
+       _pr.count("[milano-plate]") and _pr.count("[aqua-jug]"),
+       "an email may show several; it may not argue several")
+    ck("  exactly one of them is marked HERO", _pr.count("- HERO ") == 1,
+       str([l for l in _pr.splitlines() if l.startswith("- ")])[:140])
+    ck("  and it is the one the plan named",
+       "- HERO [milano-plate]" in _pr,
+       "the plan is the reviewed instruction")
+    ck("the drafter is told the hero owns the positioning",
+       "one email argues one thing" in _pr,
+       "without it, which entity the email is FOR is inferred from list order")
+
     print("\n— Request changes still works on an account that HAS a persona —")
     # THE REGRESSION THIS PINS. c4f72cc made `audience_key` required on
     # campaign_email, and its own commit message claimed the workroom redraft

@@ -1678,8 +1678,16 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                          "cards rendered under your copy will be exactly the "
                          "ones you pick):")
             for e in ents[:6]:
-                parts.append(f"- [{e.get('key', '')}] {e.get('name', '')}: "
-                             f"{e.get('description', '')}"[:220])
+                parts.append(("- HERO " if e.get("hero") else "- ")
+                             + f"[{e.get('key', '')}] {e.get('name', '')}: "
+                               f"{e.get('description', '')}"[:220])
+            if any(e.get("hero") for e in ents):
+                parts.append(
+                    "The HERO is what this email argues for. Its positioning "
+                    "is the email's positioning. You may show the others as "
+                    "companions — a complement, a pairing, a second option — "
+                    "but do NOT make a second case for them: one email argues "
+                    "one thing.")
         objs = bundle.get("objections") or []
         if objs:
             parts.append("\n## Hesitations you may answer:")
@@ -2304,8 +2312,44 @@ def _run_campaign_email(ctx: Context) -> dict:
     # reasonably worked it in — a different product, a different audience, a
     # different positioning, in the middle of somebody else's story (owner,
     # 2026-08-22). The scope was on every claim and nothing read it.
+    # THE HERO ENTITY — the one thing this email ARGUES FOR, decided before a
+    # word is written.
+    #
+    # Owner, 2026-08-31: "It doesn't have to be one-email one-product. It just
+    # needs to not mix up positioning between them. Maybe a hero product is a
+    # better description." And: "this is going to be used for entities —
+    # products is just a type of entity. It could be venues, digital
+    # offerings, etc." So: hero ENTITY, and nothing here says product.
+    #
+    # An email may legitimately show several. What it may not do is argue
+    # several positionings at once, and it was: the drafter was handed up to
+    # six entities as a flat list, with nothing saying which one the email is
+    # for, so it reasonably made a case for each and the email had no line.
+    #
+    # The hero is the plan's entity when the owner set one — the reviewed
+    # instruction — and otherwise the catalogue's first offered row, which is
+    # already ranked. Companions may still be shown; they simply do not bring
+    # an argument of their own.
+    _hero = str(ctx.params.get("entity_key") or "").strip() or next(
+        (e.get("key", "") for e in ents if e.get("key")), "")
+    # NOT narrowed here, and the measurement is why: `resolve` already scopes
+    # claims by entity (`kb.claims` filters `entity_key.in_(["", None, key,
+    # *ancestors])`), so a companion's proof CANNOT reach this bundle — with no
+    # entity named the bundle carries brand-wide claims only. Re-filtering
+    # against the hero would be a no-op dressed as a guarantee.
     _feat = {e.get("key", "") for e in ents if e.get("key")}
     _own = [c for c in ctx.claims if (c.get("scope") or "brand-wide") in _feat]
+    if _hero:
+        # Marked on the entity the drafter sees, so the prompt can say which
+        # one carries the argument rather than leaving it to be inferred from
+        # the order.
+        for _e in ents:
+            _e["hero"] = (_e.get("key") == _hero)
+        _hero_name = next((e.get("name", "") for e in ents
+                           if e.get("key") == _hero), _hero)
+        ctx.note(f"hero: {_hero_name} — the positioning is its own; anything "
+                 f"else shown is a companion and brings no argument of its "
+                 f"own")
     # BACKGROUND IS BUDGETED, NOT FREE. Brand-wide claims used to pass this
     # filter unconditionally — the rule below read "brand-wide OR in scope" —
     # so every credential the company owns arrived with the same standing as
@@ -2493,6 +2537,10 @@ def _run_campaign_email(ctx: Context) -> dict:
             # everything featured is legitimate proof — but a group is not a
             # thing that may appear on a product card, which is why it lands
             # here and not in `also`.
+            # A group's claim is true of its members, so the ancestor chain
+            # of everything featured is legitimate proof — but a group is not
+            # a thing that may appear on a card, which is why it lands here
+            # and not in `also`.
             proof_scopes=[_subject] + _also + [
                 a for k in [_subject] + _also
                 for a in _kb.ancestors(ctx.tenant, k)])

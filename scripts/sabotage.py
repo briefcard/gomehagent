@@ -904,6 +904,18 @@ SABOTAGES = [
                "persona",
     },
     {
+        "name": "the_hero_is_named_to_the_drafter",
+        "file": "app/skill_pack.py",
+        "find": '                parts.append(("- HERO " if e.get("hero") else "- ")',
+        "replace": '                parts.append(("- " if e.get("hero") else "- ")  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "the drafter is shown several entities with nothing marking "
+               "which one carries the argument, so which one the email is FOR "
+               "is left to be inferred from list order — and it reasonably "
+               "makes a case for each, which is the mixed positioning the "
+               "owner found by reading the sends",
+    },
+    {
         "name": "the_workroom_says_why_it_cannot_push",
         "file": "app/admin_ui.py",
         "find": '            elif _rung in ("shadow", "auto"):',
