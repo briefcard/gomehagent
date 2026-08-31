@@ -399,6 +399,33 @@ def used_recently(tenant: str, claim_id: str, entity_key: str = "",
         return rows[:limit]
 
 
+def claims_last_used(tenant: str) -> dict:
+    """{claim_id: when it last went out}. ONE query, like `usage_counts`.
+
+    The rotation signal. Selection ranks on relevance first, and a GENERATIVE
+    system — a campaign, an article, an ad — has no question to be relevant
+    to: nothing is detected, so every claim scores the same overlap, the same
+    depth and the same strength, and a stable sort then breaks the tie on
+    insertion order. The six offered are the six OLDEST rows on file, for
+    ever, and the fortieth claim an account authors can never be reached.
+
+    That is the failure mode of a data layer that only ever grows: adding good
+    proof stops changing anything, and nothing says so.
+    """
+    out: dict = {}
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Output.claim_ids, db.Output.created_at)
+                .filter(db.tenant_filter(db.Output, tenant),
+                        db.Output.status.notin_(NOT_A_SEND)).all())
+    for ids, at in rows:
+        when = db.as_utc(at)
+        for cid in (ids or []):
+            cid = str(cid)
+            if cid and (cid not in out or when > out[cid]):
+                out[cid] = when
+    return out
+
+
 def is_repeat(tenant: str, claim_ids: list[str], entity_key: str = "",
               within_days: int = 30) -> dict:
     """The check a validator makes: would this say the same thing again."""

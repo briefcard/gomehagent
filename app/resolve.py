@@ -280,6 +280,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # with that belongs to whatever is reading, which is smarter than a list
     # of missing rows.
     gaps: list[dict] = []
+    _claims_pool = _claims_flat = 0
     if not rules["banned_claims"]:
         blocked.append("brand.banned_claims — the validator has nothing to "
                        "check output against, so nothing can be sent safely")
@@ -352,6 +353,17 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     if tier >= 2:
         rows = kb.claims(tenant, situations=situations.get("detected") or None,
                          entity_key=entity_key or None, limit=limit * 2)
+        # HOW MUCH WAS HELD BACK, and how much of the pile can never be
+        # narrowed. A claim with no situation tag and no entity is brand-wide
+        # proof: selectable whenever nobody asks for a situation, which for a
+        # campaign or an article is always. Those are the rows that compete
+        # with each other on every single draft, so the ratio between them and
+        # what actually gets offered IS the clutter, and it belongs on the
+        # receipt rather than in somebody's head.
+        _pool = kb.claims(tenant, entity_key=entity_key or None)
+        _claims_pool = len(_pool)
+        _claims_flat = sum(1 for c in _pool
+                           if not (c.situations or []) and not c.entity_key)
         bundle["claims"] = [
             {"claim": c.claim, "evidence": c.evidence or "", "claim_id": c.id,
              "situations": sorted(c.situations or []),
@@ -546,6 +558,27 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
 
     # --- the receipt ----------------------------------------------------
     comp = kb.completeness(tenant)
+    # SAY WHEN THE PILE IS THE PROBLEM.
+    #
+    # The rule is the honest one and needs no tuned threshold: MORE untagged
+    # brand-wide claims than can ever be offered at once means some of them
+    # are permanently competing for the same slots. Under that, everything on
+    # file can be shown and there is nothing to report.
+    #
+    # Not a refusal. Authoring more proof is not the fix and neither is
+    # deleting any — tagging or scoping what is already written is, because
+    # that is what lets selection narrow instead of rotate.
+    _offered_n = len(bundle.get("claims") or [])
+    if _claims_flat and _offered_n and _claims_flat > _offered_n:
+        gaps.append({
+            "missing": "situation tags or an entity on most approved claims",
+            "means": (f"{_claims_flat} of {_claims_pool} claims are brand-wide "
+                      f"and untagged, so nothing can narrow them and they "
+                      f"compete on every draft — only {_offered_n} can be "
+                      f"offered at a time, so selection rotates rather than "
+                      f"choosing"),
+            "fix": "tag or scope what is on file; authoring more will not help"})
+
     bundle["blocked_on"] = blocked
     bundle["gaps"] = gaps
     # How much support this bundle actually carries, so a reader can calibrate
@@ -577,6 +610,10 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             "objections": len(objections),
             "audiences": len(bundle.get("audiences") or []),
             "support_claims": len(support),
+            # The clutter, as two numbers a person can act on.
+            "claims_offered": len(bundle.get("claims") or []),
+            "claims_selectable": _claims_pool,
+            "claims_unnarrowable": _claims_flat,
             "entities": len(entities),
             "open_commitments": len(convo.get("open_commitments", [])),
         },

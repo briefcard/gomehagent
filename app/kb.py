@@ -194,7 +194,41 @@ def claims(tenant: str, situations: list[str] | None = None,
         scored.sort(key=lambda t: (t[0], t[1], t[2]))
         out = [t[-1] for t in scored]
         s.expunge_all()
-        return out[:limit] if limit else out
+
+    # ...AND THEN ROTATION, which is the fourth key and the one that decides
+    # everything for a GENERATIVE system.
+    #
+    # A campaign, an article or an ad has no question to be relevant to:
+    # nothing is detected, so `overlap` is 0 for every row, `depth` is equal
+    # across the brand-wide ones and `strength` defaults to "strong". All
+    # three keys tie, `sort` is stable, and the tie therefore breaks on
+    # insertion order — so the claims offered are the OLDEST rows on file,
+    # for ever. Measured on a fresh account with ten claims and a limit of
+    # six: numbers 01 to 06, every single time. The seventh claim an account
+    # authors can never be reached, however good it is.
+    #
+    # That is the failure mode of a knowledge base that only grows. Adding
+    # proof stops changing anything, the best-researched claim is usually the
+    # newest and therefore the most permanently invisible, and nothing says
+    # so — which is exactly how a data layer becomes clutter instead of
+    # context.
+    #
+    # Least-recently-used, never "first one unused": the same correction
+    # `_campaign_craft` already applies to intent rotation, for the same
+    # reason. Once every claim has been used, "first unused" finds none and
+    # falls back to the head of the list — which is insertion order again.
+    #
+    # Only when it can matter: no situation to rank on, and more rows than
+    # the caller will take. Otherwise this costs a scan for nothing.
+    if not want and limit and len(out) > limit:
+        try:
+            from . import ledger as _led
+            last = _led.claims_last_used(tenant)
+            never = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+            out.sort(key=lambda r: last.get(r.id, never))
+        except Exception:                                        # noqa: BLE001
+            pass        # rotation is an improvement, never a dependency
+    return out[:limit] if limit else out
 
 
 def claim_inventory(tenant: str) -> dict[str, list[db.KbClaim]]:

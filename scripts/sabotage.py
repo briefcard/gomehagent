@@ -858,6 +858,30 @@ SABOTAGES = [
                "the moment you could make it",
     },
     {
+        "name": "claims_rotate_so_every_one_is_reachable",
+        "file": "app/kb.py",
+        "find": "            out.sort(key=lambda r: last.get(r.id, never))",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_claim_rotation.py"],
+        "why": "a campaign, an article and an ad have no question to rank on, "
+               "so every ranking key ties and a stable sort falls back to "
+               "insertion order — the SIX OLDEST claims are offered for ever "
+               "and the seventh an account authors can never be reached. "
+               "Adding good proof stops changing anything and nothing says so",
+    },
+    {
+        "name": "the_receipt_says_what_cannot_be_narrowed",
+        "file": "app/resolve.py",
+        "find": "    if _claims_flat and _offered_n and _claims_flat > _offered_n:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_claim_rotation.py"],
+        "why": "an account whose proof is all brand-wide and untagged is "
+               "never told — selection can only rotate, every draft competes "
+               "with the same undifferentiated pile, and the owner's "
+               "reasonable response is to author MORE claims, which makes it "
+               "worse",
+    },
+    {
         "name": "a_campaign_send_is_measured",
         "file": "app/skill_pack.py",
         "find": "            _edits.record_run(run_id, _was, _now)",
