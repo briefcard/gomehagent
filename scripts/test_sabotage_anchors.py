@@ -63,6 +63,24 @@ def entries() -> list[dict]:
     return []
 
 
+def _run_suite_src() -> str:
+    """`sabotage.run_suite`'s BODY, as source — the docstring stripped.
+
+    Stripped because the docstring explains the string-matching this replaced,
+    and a check that reads the explanation as if it were the code would fail on
+    the commit that fixed it. What is asserted is what RUNS.
+    """
+    tree = ast.parse((ROOT / "scripts" / "sabotage.py").read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "run_suite":
+            body = [n for n in node.body
+                    if not (isinstance(n, ast.Expr)
+                            and isinstance(n.value, ast.Constant)
+                            and isinstance(n.value.value, str))]
+            return "\n".join(ast.unparse(n) for n in body)
+    return ""
+
+
 def main() -> int:
     rows = entries()
     ck("the sabotage list parses and is populated", len(rows) > 100, str(len(rows)))
@@ -99,6 +117,31 @@ def main() -> int:
     ck("every entry names at least one suite",
        all(e.get("suites") for e in rows),
        "an entry with no suite can never be caught or missed")
+
+    # THE SUITE HAS TO EXIST. `test_blog.py` and `test_campaign.py` were named
+    # by three guards and neither file was in the tree. A suite that cannot be
+    # run cannot pass, and `sabotage.py` scored "did not pass" as "the mutation
+    # was caught" — so those three printed `[ caught ]` no matter what the
+    # mutation did. Removing the phantoms revealed all three as MISSED: the
+    # behaviours were never guarded at all. Cheapest possible check, and it
+    # runs in the full suite rather than in a sweep nobody has time for.
+    phantom = sorted({s for e in rows for s in (e.get("suites") or [])
+                      if not (ROOT / "scripts" / s).exists()})
+    ck("every suite a guard names exists", not phantom,
+       ", ".join(phantom) or "a guard pointing at a missing suite reports "
+       "[ caught ] unconditionally, which is worse than no guard")
+
+    # HOW A GUARD IS JUDGED. `run_suite` read two strings out of stdout, which
+    # is SYSTEMS-REFERENCE §6's string-matching-instead-of-state-checking rule
+    # broken inside the harness that proves the rules are kept: eight suites
+    # print neither string, so 42 of 324 guards could never fail. `test_all.sh`
+    # has judged the same suites by exit code all along.
+    rs = _run_suite_src()
+    ck("a guard is judged by the suite's EXIT CODE", "returncode" in rs,
+       "run_suite must read the exit status")
+    ck("a guard is not judged by matching text in stdout",
+       "stdout" not in rs and "all checks passed" not in rs,
+       "a suite whose success line does not match reports [ caught ] forever")
 
     print()
     if _fail:

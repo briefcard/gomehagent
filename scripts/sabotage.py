@@ -2971,7 +2971,7 @@ SABOTAGES = [
         "file": "app/skill_pack.py",
         "find": "    if craft.get(\"funnel\"):\n        out.append(funnel.brief(craft[\"funnel\"]))",
         "replace": "    if False:  # SABOTAGE\n        pass",
-        "suites": ["test_campaign.py", "test_funnel.py"],
+        "suites": ["test_funnel.py"],
         "why": "the campaign drafter stops being shown the account's own "
                "objections and situations, so 'answer their doubt' goes back "
                "to being a category rather than an instruction — and the "
@@ -2989,7 +2989,7 @@ SABOTAGES = [
                 "        parts.append(funnel.brief(bundle[\"funnel\"]))\n"
                 "    if angle:",
         "replace": "    if False:  # SABOTAGE\n        pass\n    if angle:",
-        "suites": ["test_blog.py", "test_funnel.py"],
+        "suites": ["test_funnel.py"],
         "why": "an article for 'best X vs Y' stops being briefed as writing "
                "for somebody comparing alternatives, so a comparison search "
                "gets an explainer — the right words about the wrong reader. "
@@ -3001,7 +3001,7 @@ SABOTAGES = [
         "file": "app/skill_pack.py",
         "find": "    title = _h1_of(body)",
         "replace": "    title = keyword[:1].upper() + keyword[1:]  # SABOTAGE",
-        "suites": ["test_blog.py", "test_seo_head.py"],
+        "suites": ["test_seo_head.py"],
         "why": "the article's Title and <title> tag go back to being the "
                "capitalised SEARCH QUERY — 'Buy acrylic dinnerware' — while "
                "the H1 the drafter was asked for is written into the body and "
@@ -3609,15 +3609,67 @@ SABOTAGES = [
                "measures how much prose was written rather than how well it "
                "was grounded",
     },
+    {
+        "name": "a_guard_is_judged_by_the_exit_code",
+        "file": "scripts/sabotage.py",
+        # SPLIT ON PURPOSE, and the only entry that needs to be. This is the
+        # one guard whose `file` is this file, so an anchor written whole would
+        # appear twice — once in `run_suite`, once here — and both this harness
+        # and `test_sabotage_anchors.py` count occurrences to decide whether an
+        # anchor is unambiguous. Adjacent literals are one string to Python and
+        # two to `str.count`.
+        "find": "    return p.return" "code == 0",
+        "replace": "    out = p.stdout + p.stderr  # SABOTAGE\n    return \"all checks pas" "sed\" in out or \"all green\" in out",
+        "suites": ["test_sabotage_anchors.py"],
+        "why": "the harness goes back to reading two strings out of stdout to "
+               "decide whether a suite passed, so the eight suites that print "
+               "neither can never be seen to pass and the 42 guards naming one "
+               "print [ caught ] whether the mutation did anything or not — "
+               "including the guard on the open-defect ledger, whose entire "
+               "purpose is to fail on good news. A guard that cannot fail is "
+               "worse than no guard: it is counted",
+    },
 ]
 
 
+#: Answered once per suite, not once per guard: 324 guards name 83 suites.
+_BASELINE: dict[str, bool] = {}
+
+
 def run_suite(name: str) -> bool:
-    """True if the suite PASSED."""
+    """True if the suite PASSED, judged by its EXIT CODE.
+
+    This read two strings out of stdout — "all checks passed" or "all green" —
+    which is `SYSTEMS-REFERENCE` §6's string-matching-instead-of-state-checking
+    rule, broken by the file whose whole job is to prove the rules are kept.
+
+    Eight suites print neither. `test_open_defects.py` ends "all 6 defects
+    still open"; `test_render_smoke.py`, `test_moments.py`, `test_strategy.py`
+    and three more end on lines of their own; two named suites do not exist at
+    all any more. So `run_suite` could never see any of them pass, `noticed`
+    was non-empty no matter what the mutation did, and **42 of 324 guards
+    printed `[ caught ]` unconditionally** — including the one guarding the
+    open-defect ledger, the suite whose entire purpose is to fail on good news.
+
+    `test_all.sh` has judged these same 135 suites by exit code since it was
+    written, and it is green, so the exit codes are the contract already.
+    """
     p = subprocess.run([sys.executable, f"scripts/{name}"], cwd=ROOT,
                        capture_output=True, text=True, timeout=600)
-    out = p.stdout + p.stderr
-    return "all checks passed" in out or "all green" in out
+    return p.returncode == 0
+
+
+def baseline(name: str) -> bool:
+    """Does this suite pass on the UNMUTATED tree?
+
+    Without this, "the suite failed after the mutation" is not evidence: a
+    suite that was already failing — or that cannot be run at all — fails
+    afterwards too. `[ caught ]` has to be earned against a green baseline or
+    it is the same decoration as `MISSED`, pointing the other way.
+    """
+    if name not in _BASELINE:
+        _BASELINE[name] = run_suite(name)
+    return _BASELINE[name]
 
 
 def main(only: str = "") -> int:
@@ -3627,10 +3679,24 @@ def main(only: str = "") -> int:
               + ", ".join(s["name"] for s in SABOTAGES))
         return 2
 
-    undetected, stale = [], []
+    undetected, stale, unproven = [], [], []
     for s in entries:
         path = ROOT / s["file"]
+        if not path.exists():
+            print(f"[UNPROVEN] {s['name']:24} — {s['file']} does not exist")
+            unproven.append(s["name"])
+            continue
         original = path.read_text()
+
+        # The baseline FIRST: a suite that is red (or absent) before the
+        # mutation cannot testify about it afterwards.
+        red = [n for n in s["suites"] if not baseline(n)]
+        if red:
+            print(f"[UNPROVEN] {s['name']:24} — {', '.join(red)} does not pass "
+                  f"before the mutation, so failing after it proves nothing")
+            print(f"            claimed to guard: {s['why']}")
+            unproven.append(s["name"])
+            continue
 
         if original.count(s["find"]) != 1:
             # Not a pass and not a failure: the thing this claims to test has
@@ -3670,7 +3736,11 @@ def main(only: str = "") -> int:
             undetected.append(s["name"])
 
     print()
-    if undetected or stale:
+    if undetected or stale or unproven:
+        if unproven:
+            print(f"{len(unproven)} guard(s) UNPROVEN: " + ", ".join(unproven))
+            print("Their suite does not pass before the mutation, so the "
+                  "[ caught ] they used to print was unconditional.")
         if undetected:
             print(f"{len(undetected)} guard(s) NOT covered by their suites: "
                   + ", ".join(undetected))
@@ -3679,7 +3749,8 @@ def main(only: str = "") -> int:
             print(f"{len(stale)} sabotage(s) STALE: " + ", ".join(stale))
             print("The code moved. Re-point them or the coverage is imaginary.")
         return 1
-    print(f"all {len(entries)} guards are genuinely tested")
+    print(f"all {len(entries)} guards are genuinely tested "
+          f"(each against a green baseline)")
     return 0
 
 
