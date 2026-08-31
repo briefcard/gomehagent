@@ -92,7 +92,15 @@ CATALOG = {
         name="Campaign email",
         does="Builds and schedules campaign sends from the catalogue and calendar.",
         requires=("esp",), requires_any=(), needs_kb=True,
-        kb_needs=("tone", "banned_claims", "entity", "claim"),
+        # WHAT THE DRAFTER ACTUALLY EATS. `objection`, `audience` and `asset`
+        # were missing, and `kb_needs` is what `awaiting()` loops over — so a
+        # pending objection showed on the lead responder and was invisible
+        # here, while `_campaign_craft` fed objections and audiences to the
+        # drafter through `funnel.inputs_for` on every single send and the
+        # hero came from the approved asset library. The run reported all
+        # three as thin and the surface with the button on it said nothing.
+        kb_needs=("tone", "banned_claims", "entity", "claim",
+                  "objection", "audience", "asset"),
         # The workflow declaration — see `workflow()`. `plan_fields` may only
         # name parameters the consuming skill declares TODAY; the suite pins
         # that, so growing the plan (subject line, planned hero) and teaching
@@ -2066,7 +2074,7 @@ def _render(tenant: str, key: str, heading: str) -> str:
     return f"\n\n{heading}:\n" + "\n".join(lines) + tail
 
 
-def guidance_block(tenant: str, key: str) -> str:
+def guidance_block(tenant: str, key: str, also: tuple = ()) -> str:
     """Everything this pipeline has been taught, for injection at drafting.
 
     Three halves now, and they answer to different authorities, which is why
@@ -2080,8 +2088,20 @@ def guidance_block(tenant: str, key: str) -> str:
     if not tenant or not key:
         return ""
     try:
-        return (account_block(tenant) + feedback_block(tenant, key)
-                + edit_lessons(tenant, key))
+        out = (account_block(tenant) + feedback_block(tenant, key)
+               + edit_lessons(tenant, key))
+        # ADDITIVE SCOPES, the way `account_block` already is.
+        #
+        # One inbox is worked by three systems: the general path and the two
+        # that claim a kind of mail. A reply to an enquiry is drafted BY the
+        # inbox path ON BEHALF OF the lead responder, so both authorities
+        # apply — and choosing one would silently drop whichever the owner
+        # happened to type into. `account_block` established the shape: a
+        # thread a system reads IN ADDITION to its own, never instead of it.
+        for extra in also:
+            if extra and extra != key:
+                out += feedback_block(tenant, extra) + edit_lessons(tenant, extra)
+        return out
     except Exception:                                            # noqa: BLE001
         return ""       # guidance that cannot be read must not lose the draft
 

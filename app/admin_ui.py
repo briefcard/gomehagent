@@ -2956,6 +2956,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     {_system_toggle(key, row, gate)}
   </div>
   {ship_note}
+  {_awaiting_strip(key, row)}
   {_work_strip(key, row, counts)}
   {gate_note}
 </div>

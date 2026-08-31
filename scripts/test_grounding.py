@@ -194,6 +194,45 @@ def main() -> int:
     ck("  and a bundle with no system carries no guidance",
        not nosys["rules"]["guidance"])
 
+    # ...AND THE MAIL PATH IS SCOPED TO THE SYSTEM THAT OWNS THE REPLY.
+    # Everything above resolves with a system key by hand, so it proves the
+    # bundle CAN carry guidance and never that the path which drafts real
+    # customer mail every morning is given any. `for_mail` resolved under
+    # `inbox_triage` — not a key in `systems.CATALOG` — so guidance typed on
+    # the Lead responder or Service desk page looked up a system that does
+    # not exist and reached nothing. Asserted through `for_mail`, the surface.
+    systems.create("baci", "lead_responder")
+    systems.create("baci", "service_desk")
+    systems.note("baci", "lead_responder", "Name the shipping window.")
+    systems.note("baci", "service_desk", "Give the order number back to them.")
+    _lead = grounding.for_mail("baci", email, bucket="sales_leads")
+    _desk = grounding.for_mail("baci", email, bucket="order_issue")
+    ck("an enquiry is grounded as the LEAD RESPONDER",
+       _lead.get("system_key") == "lead_responder", str(_lead.get("system_key")))
+    ck("  and gets the guidance somebody typed for it",
+       "shipping window" in _lead["bundle"]["rules"]["block"],
+       "the owner's correction reached the draft")
+    ck("an order problem is grounded as the SERVICE DESK",
+       _desk.get("system_key") == "service_desk", str(_desk.get("system_key")))
+    ck("  and the two do not share a lesson",
+       "shipping window" not in _desk["bundle"]["rules"]["block"]
+       and "order number" in _desk["bundle"]["rules"]["block"],
+       "one inbox, two systems, two sets of standing instructions")
+    _un = grounding.for_mail("baci", email, bucket="")
+    ck("  unrouted mail still falls back to the general path",
+       _un.get("system_key") == grounding.SYSTEM_KEY,
+       "a system that has not claimed a kind of mail must not start "
+       "answering it because somebody added a row")
+    # ADDITIVE, NOT SWAPPED. `inbox_triage` renders its own page on the
+    # Systems board, so guidance typed there is a real instruction for the
+    # whole inbox. Scoping the bundle to the owning system INSTEAD would have
+    # silently stopped reading it — trading one dropped thread for another.
+    ck("  and the general inbox thread is carried TOO, not replaced",
+       "finds you well" in _lead["bundle"]["rules"]["block"]
+       and "finds you well" in _desk["bundle"]["rules"]["block"],
+       "a reply is drafted BY the inbox path ON BEHALF OF a system; both "
+       "authorities apply")
+
     print("\n— the learning loop: what a human changed comes back —")
     sysrow = systems.find("baci", grounding.SYSTEM_KEY)
     run = systems.start_run(sysrow.id, "baci", trigger="inbound_email")

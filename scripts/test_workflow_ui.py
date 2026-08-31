@@ -408,6 +408,21 @@ def main() -> int:
        "tenant=agency" in loc and "system=not_a_system" in loc, loc[:90])
     ck("…and says what went wrong", "err=" in loc, loc[:90])
 
+    # LANDS LAST: filing a proposal changes what the Review tab renders, and
+    # the assertions above read that tab.
+    print("\n— a system says what it is waiting on, where you work it —")
+    # `_awaiting_strip` had exactly ONE call site — the board CARD — so the
+    # fact was on the page you scan and absent from the page you act on. A
+    # fact reported with no control beside it is design rule 1 broken; this
+    # is the same fact WITH the queue link, where the work happens.
+    from app import kb as _kb
+    _kb.add_objection("agency", "Too expensive", "It lasts.", origin="crawl")
+    _wait = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
+                  "&system=lead_responder").text
+    ck("the system's own page says what it is waiting on",
+       "waiting for your review" in _wait and "decide" in _wait,
+       "it was only ever on the board card")
+
     print()
     if _failures:
         print(f"{len(_failures)} FAILED: {_failures}")

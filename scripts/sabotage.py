@@ -615,7 +615,9 @@ SABOTAGES = [
     {
         "name": "guidance_reaches_prompt",
         "file": "app/resolve.py",
-        "find": "        guidance = _sys.guidance_block(tenant, system)",
+        # RE-POINTED 2026-08-30: `guidance_also` threads the additive
+        # scopes through, so the call gained an argument.
+        "find": "        guidance = _sys.guidance_block(tenant, system, also=guidance_also)",
         "replace": '        guidance = ""  # SABOTAGE',
         "suites": ["test_grounding.py"],
         "why": "corrections written on the Systems card never reach a draft — "
@@ -842,6 +844,44 @@ SABOTAGES = [
                "the web process answers Run now with 'no skill keyed "
                "campaign_email' and the Monday catalog sweep refuses "
                "silently, exactly the production incident of 2026-08-21",
+    },
+    {
+        "name": "a_system_says_what_it_is_waiting_on",
+        "file": "app/admin_ui.py",
+        "find": "  {_awaiting_strip(key, row)}\n  {_work_strip(key, row, counts)}",
+        "replace": "  {_work_strip(key, row, counts)}",
+        "suites": ["test_workflow_ui.py"],
+        "why": "the page you actually work a system on never says that "
+               "knowledge it needs is sitting in a review queue — the fact "
+               "lives only on the board card you scanned past, so the "
+               "decision that would unblock the next draft is invisible at "
+               "the moment you could make it",
+    },
+    {
+        "name": "mail_is_grounded_as_the_system_that_owns_it",
+        "file": "app/grounding.py",
+        "find": "        system = _rep.route(bucket)",
+        "replace": "        system = SYSTEM_KEY  # SABOTAGE",
+        "suites": ["test_grounding.py"],
+        "why": "every reply is grounded under `inbox_triage`, which is not a "
+               "key in systems.CATALOG at all — so standing guidance typed on "
+               "the Lead responder or Service desk page looks up a system "
+               "that does not exist and reaches nothing. The owner corrects "
+               "the two systems that answer real customer mail every morning "
+               "and the correction never arrives",
+    },
+    {
+        "name": "guidance_scopes_are_additive",
+        "file": "app/systems.py",
+        "find": ('        for extra in also:\n'
+                 '            if extra and extra != key:\n'
+                 '                out += feedback_block(tenant, extra) + edit_lessons(tenant, extra)'),
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_grounding.py"],
+        "why": "scoping a reply to the system that owns it silently DROPS the "
+               "general inbox thread — guidance typed on the Inbox triage "
+               "page, which has its own board page, stops reaching any routed "
+               "mail. One dropped instruction traded for another",
     },
     {
         "name": "an_unapproved_offer_never_ships",
@@ -2999,8 +3039,12 @@ SABOTAGES = [
     {
         "name": 'an_account_lesson_reaches_every_system',
         "file": 'app/systems.py',
-        "find": '        return (account_block(tenant) + feedback_block(tenant, key)',
-        "replace": '        return (feedback_block(tenant, key)  # SABOTAGE',
+        # RE-POINTED 2026-08-30: `guidance_block` gained additive scopes
+        # (`also=`) so a mail reply carries both the inbox thread and the
+        # thread of the system that owns it, and the single `return` became an
+        # accumulator. The guard is unchanged in what it covers.
+        "find": '        out = (account_block(tenant) + feedback_block(tenant, key)',
+        "replace": '        out = (feedback_block(tenant, key)  # SABOTAGE',
         "suites": ['test_systems.py'],
         "why": "a lesson filed for the whole account is written down and read by nobody, so 'Never again' silently means 'never again in this one pipeline' and the ad repeats the mistake the blog was corrected for",
     },

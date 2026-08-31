@@ -134,7 +134,7 @@ def readiness(tenant: str) -> dict:
     }
 
 
-def _rules(tenant: str, system: str = "") -> dict:
+def _rules(tenant: str, system: str = "", guidance_also: tuple = ()) -> dict:
     """Tier 1. Identity and the constraints that must never be violated.
 
     Two shapes on purpose. `block` is the prose already written for injection —
@@ -165,7 +165,7 @@ def _rules(tenant: str, system: str = "") -> dict:
     guidance = ""
     if system:
         from . import systems as _sys
-        guidance = _sys.guidance_block(tenant, system)
+        guidance = _sys.guidance_block(tenant, system, also=guidance_also)
     return {
         "block": block + guidance,
         "guidance": guidance,
@@ -249,6 +249,7 @@ def _situated(tenant: str, utterance: str, entity_key: str,
 
 def resolve(tenant: str, system: str = "", utterance: str = "",
             contact_id: str = "", entity_key: str = "", audience_key: str = "",
+            guidance_also: tuple = (),
             requirements: dict | None = None, tier: int = 3,
             limit: int = 3) -> dict:
     """The one contract every system and skill calls.
@@ -267,7 +268,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     searched, skipped, blocked = [], [], []
 
     # --- tier 1 ---------------------------------------------------------
-    rules = _rules(tenant, system)
+    rules = _rules(tenant, system, guidance_also=tuple(guidance_also or ()))
     searched.append("rules")
     if rules["guidance"]:
         searched.append("guidance")

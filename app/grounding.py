@@ -89,9 +89,34 @@ def for_mail(tenant: str, email: dict, bucket: str = "") -> dict:
         out["skipped"] = f"{bucket} needs no reply, so no bundle was resolved"
         return out
     try:
+        from . import replies as _rep
         from . import resolve as rs
-        bundle = rs.resolve(tenant, system=SYSTEM_KEY,
-                            utterance=utterance_from(email), tier=3)
+        # SCOPED TO THE SYSTEM THAT OWNS THIS REPLY, not to the path that
+        # found it.
+        #
+        # Every bundle carries `rules.guidance` — what this pipeline has been
+        # taught, scoped to the system, because a lesson learned answering
+        # support mail must not quietly change how the ad copy reads. This
+        # path resolved under `inbox_triage`, which is not a key in
+        # `systems.CATALOG` at all, so `guidance_block` looked up a system
+        # that does not exist and returned "". The owner could type standing
+        # guidance on the Lead responder or Service desk page — the two
+        # systems that answer real customer mail every morning — and it
+        # reached nothing.
+        #
+        # `replies.route` already answers "which system owns a reply to this
+        # kind of mail" and is what decides who may reply at all, so the
+        # bundle is scoped by the same answer rather than a second one.
+        # ADDITIVE, never instead of. `inbox_triage` renders its own page on
+        # the Systems board, so guidance typed there is a real instruction for
+        # the whole inbox and swapping the scope would have silently stopped
+        # reading it. Both threads are carried: what was said to the inbox,
+        # and what was said to the system that owns this kind of mail.
+        system = _rep.route(bucket)
+        bundle = rs.resolve(tenant, system=system,
+                            utterance=utterance_from(email), tier=3,
+                            guidance_also=(SYSTEM_KEY,))
+        out["system_key"] = system
     except Exception as exc:                                     # noqa: BLE001
         out["error"] = f"{exc.__class__.__name__}: {str(exc)[:160]}"
         out["thin"] = [f"the knowledge base could not be read ({out['error']})"]
