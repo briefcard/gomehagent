@@ -44,6 +44,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import bundle as _pkg
 from . import (assurance, coherence, kb, ledger, resolve as rs, systems,
                tenants, validator)
 
@@ -111,7 +112,9 @@ class Skill:
 #: costs real money, so both are fields a person fills, never things a model
 #: decides — and the whole point is defeated if the field a person filled does
 #: not arrive. See the hop in `run`.
-OWNER_INPUT = ("offer", "deadline")
+#: DERIVED, never restated — see `bundle.OWNER_INPUT`, which owns it because
+#: that module imports nothing from the app.
+OWNER_INPUT = _pkg.OWNER_INPUT
 
 REGISTRY: dict[str, Skill] = {}
 

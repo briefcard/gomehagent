@@ -939,6 +939,34 @@ SABOTAGES = [
                "advises a redraft, which cannot clear account data",
     },
     {
+        "name": "owner_input_has_one_definition",
+        "file": "app/skill.py",
+        "find": "OWNER_INPUT = _pkg.OWNER_INPUT",
+        "replace": 'OWNER_INPUT = ("offer", "deadline")  # SABOTAGE',
+        "suites": ["test_skill_conformance.py"],
+        "why": "the tuple is restated instead of derived, so the two copies "
+               "drift the moment a third owner input is added — one side hops "
+               "it onto the bundle and the other does not declare it as a "
+               "package part, which is exactly how `revision_notes` ended up "
+               "with a declared supplier that never wrote it",
+    },
+    {
+        "name": "the_owner_input_hop_carries_them_all",
+        "file": "app/bundle.py",
+        "find": 'OWNER_INPUT = ("offer", "deadline", "revision_notes")',
+        "replace": 'OWNER_INPUT = ("offer", "deadline")  # SABOTAGE',
+        # test_funnel is what actually detects it — it asserts the digest on
+        # the bundle the drafter receives. The conformance suite only checks
+        # that each member is a declared PART, which stays true when a member
+        # is removed. Naming the wrong suite is how an entry reports MISSED
+        # while the mutant is genuinely caught elsewhere.
+        "suites": ["test_funnel.py"],
+        "why": "`revision_notes` falls out of the one route again, so the "
+               "redraft digest reaches no drafter unless each one grows its "
+               "own private hop back — three of them had, which is the "
+               "duplication the single route was built to end",
+    },
+    {
         "name": "an_article_is_checked_for_coherence",
         "file": "app/skill_pack.py",
         "find": "             commitment=_about,",

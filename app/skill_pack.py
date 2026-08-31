@@ -750,13 +750,10 @@ def _run_ad_copy(ctx: Context) -> dict:
     entity_key = str(ctx.params.get("entity_key") or "")
     audience_key = str(ctx.params.get("audience_key") or "")
     want = max(1, min(5, int(ctx.params.get("variants") or 3)))
-    if str(ctx.params.get("revision_notes") or "").strip():
-        # The variant board's regenerate (UI overhaul 3.4): the owner's
-        # digest rides the bundle so `draft_ad` puts it FIRST in the brief.
-        # The composed fallback ignores it — a deterministic composer has
-        # nothing to address a note with — and `basis` already names which
-        # path wrote each variant, so that degradation stays on the record.
-        ctx.bundle["revision_notes"] = str(ctx.params["revision_notes"]).strip()
+    # `revision_notes` is on the bundle already — `skill.run` hops every
+    # OWNER_INPUT parameter there for every skill. This was a private
+    # three-line copy, one of three, for the parameter whose declared supplier
+    # in `bundle.PARTS` was `skill.run` all along.
 
     if not ctx.claims:
         ctx.note("no approved claim is in scope, so there is nothing to "
@@ -4083,9 +4080,6 @@ def _run_blog_article(ctx: Context) -> dict:
     avoid = _recent_articles(ctx.tenant)
     # A redraft's marching orders ride the bundle into the prompt — set by
     # the workroom's Request-changes path, absent on a fresh draft.
-    if str(ctx.params.get("revision_notes") or "").strip():
-        ctx.bundle["revision_notes"] = str(
-            ctx.params["revision_notes"]).strip()
     angle_why = "set on the plan"
     if not angle:
         angle, angle_why = _pick_angle(

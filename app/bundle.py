@@ -58,7 +58,21 @@ import pathlib
 #: layer that costs real money, so both are fields somebody fills — and that is
 #: defeated entirely if the field a person filled does not arrive. It did not,
 #: for `campaign_email`, for exactly as long as the parameter went undeclared.
-OWNER_INPUT = ("offer", "deadline")
+#: DEFINED HERE, ONCE. `skill.py` held a verbatim second copy — two
+#: module-level constants with the same literal and near-identical comments,
+#: neither importing the other, nothing pinning them equal. Adding a third
+#: owner input to one would have left the other silently unaware: the exact
+#: duplication this module exists to make impossible, reproduced inside it one
+#: day after it was written.
+#:
+#: It lives on THIS side because `bundle` imports nothing from the app, so
+#: `skill` can derive from it while the reverse closes a cycle.
+#:
+#: `revision_notes` belongs here too. Its absence is why three skills grew a
+#: private params-to-bundle hop apiece — the very thing `run`'s comment says a
+#: fourth skill would do — while `PARTS` declared `supplies="skill.run"` for a
+#: key `run` never wrote.
+OWNER_INPUT = ("offer", "deadline", "revision_notes")
 
 #: `absent` vocabulary — what it MEANS that a part is not here.
 THINS = "thins"          # the work is worse, and worth doing anyway

@@ -432,6 +432,23 @@ def main() -> int:
     ck("  and the ad drafter is given the audience too",
        bool(_saw.get("audiences")), str(bool(_saw.get("audiences"))))
 
+    # ...AND SO DOES THE REDRAFT DIGEST. `revision_notes` is an OWNER_INPUT:
+    # `bundle.PARTS` declared `supplies="skill.run"` for it while `run` wrote
+    # only offer and deadline, so the declared supplier was fiction and three
+    # skills each grew a private params-to-bundle hop instead. Asserted on the
+    # bundle the drafter actually receives.
+    _saw.clear()
+    skill_pack.draft_ad = lambda bundle, claim, angle, objections: (
+        _saw.update(notes=bundle.get("revision_notes")) or ("Plate.", "model"))
+    skill.run("ad_copy", "baci", entity_key="aqua-plate", variants=1,
+              audience_key=_kb.audiences("baci")[0].key,
+              revision_notes="Lead with the guarantee.")
+    skill_pack.draft_ad = _real_ad
+    ck("the redraft digest reaches the drafter by the SAME one route",
+       _saw.get("notes") == "Lead with the guarantee.",
+       "three skills had a private hop for this; the route is the route")
+
+
     _crow = systems.find("baci", "campaign_email") or \
         systems.create("baci", "campaign_email")
     with db.SessionLocal() as _s:

@@ -174,6 +174,31 @@ def main() -> int:
            sk.requires_when is not None,
            "an account that has authored no persona must still produce")
 
+    print("\n— one vocabulary, one definition —")
+    # The owner, 2026-08-31: "I hope you do not have duplicates / reworking of
+    # the same inputs inside the system." There were two `OWNER_INPUT` tuples —
+    # `bundle.py` and `skill.py`, same literal, near-identical comments,
+    # neither importing the other and nothing pinning them equal. Adding a
+    # third owner input to one would have left the other silently unaware.
+    from app import bundle as _pkg
+    ck("OWNER_INPUT has exactly one definition",
+       skill.OWNER_INPUT is _pkg.OWNER_INPUT,
+       "derived, not restated — a second copy is the drift this suite exists "
+       "to prevent")
+    ck("  and every member of it is a declared package part",
+       all(k in _pkg.PARTS for k in _pkg.OWNER_INPUT),
+       str([k for k in _pkg.OWNER_INPUT if k not in _pkg.PARTS]))
+    # ...AND THE HOP ACTUALLY CARRIES THEM. `PARTS` declared `revision_notes`
+    # as `supplies="skill.run"` while `run` wrote only offer and deadline, so
+    # the declared supplier was fiction and three skills quietly supplied it
+    # with a private hop apiece.
+    _src = (pathlib.Path(__file__).resolve().parent.parent
+            / "app" / "skill_pack.py").read_text()
+    ck("no skill keeps a private params-to-bundle hop",
+       'ctx.bundle["revision_notes"] =' not in _src,
+       "the one route in `skill.run` is the route, or a fourth skill invents "
+       "a fifth")
+
     print("\n— every skill binds to a real system —")
     for k, sk in sorted(skill.REGISTRY.items()):
         ck(f"  {k} names a system in the catalogue",
