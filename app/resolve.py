@@ -46,6 +46,12 @@ from . import bundle as _pkg, conversation as cv, kb, tenants
 
 log = logging.getLogger(__name__)
 
+#: How many of each situated thing a bundle carries. Named because it is the
+#: WINDOW a generative run sees — claims are fetched at `limit * 2` — and
+#: "is the untagged pile bigger than the window" is the question that decides
+#: whether selection can choose or can only rotate.
+DEFAULT_LIMIT = 3
+
 #: Tier names, in the order they are built. A caller asks for a depth, not a
 #: list — asking for tier 3 without tier 1 is not a thing anyone wants.
 TIERS = ("rules", "situated", "deep")
@@ -251,7 +257,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             contact_id: str = "", entity_key: str = "", audience_key: str = "",
             guidance_also: tuple = (),
             requirements: dict | None = None, tier: int = 3,
-            limit: int = 3) -> dict:
+            limit: int = DEFAULT_LIMIT) -> dict:
     """The one contract every system and skill calls.
 
     Returns a bundle plus a coverage receipt. Read `blocked_on` before reading

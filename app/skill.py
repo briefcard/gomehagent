@@ -828,6 +828,16 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
     # is carried three ways: a note the caller can read, `thin` on the result,
     # and a knowledge task filed where the operator already works.
     thin = list(bundle.get("blocked_on") or []) + list(pre.get("thin") or [])
+    # A DECLARED PART THAT DID NOT ARRIVE IS A BUG, AND IT TRAVELS THE SAME PIPE.
+    #
+    # `bundle.verify` compares the built package against what `PARTS` promised
+    # and `resolve` logs the shortfall — to the LOG, which nobody reads. It is
+    # the highest-signal thing this layer can say (the `audiences` defect is
+    # exactly this, undetected for the life of the codebase), so it rides
+    # `thin` like every other gap and lands on Assurance beside them, per
+    # system. No new column, no second pipe: the one that already works.
+    for _absent in (coverage.get("promised_but_absent") or []):
+        thin.append(f"package:{_absent} — declared and not supplied")
     missing = [p for p in sk.needs if not _dig(bundle, p)]
     if missing:
         thin.append("nothing on file at: " + ", ".join(missing))

@@ -858,6 +858,29 @@ SABOTAGES = [
                "the moment you could make it",
     },
     {
+        "name": "a_missing_declared_part_is_reported",
+        "file": "app/skill.py",
+        "find": '    for _absent in (coverage.get("promised_but_absent") or []):',
+        "replace": "    for _absent in ():  # SABOTAGE",
+        "suites": ["test_bundle_contract.py"],
+        "why": "a part the package DECLARED and did not supply is written to "
+               "the log and nowhere else — which is how `audiences` was read "
+               "by every drafter and supplied by nobody for the life of the "
+               "codebase. The one signal that catches that class of defect "
+               "never reaches the operator",
+    },
+    {
+        "name": "assurance_says_when_selection_can_only_rotate",
+        "file": "app/assurance.py",
+        "find": '        "rotating": len(flat) > offered,',
+        "replace": '        "rotating": False,  # SABOTAGE',
+        "suites": ["test_assurance_tab.py"],
+        "why": "an account whose proof is all brand-wide and untagged is never "
+               "told that selection can only rotate through it — so the "
+               "reasonable response to thin copy is to author MORE claims, "
+               "which makes the pile bigger and the output no better",
+    },
+    {
         "name": "one_reader_never_a_blend",
         "file": "app/funnel.py",
         "find": "    _aud = [audience] if audience else []",

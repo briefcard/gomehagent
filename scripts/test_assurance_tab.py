@@ -116,6 +116,45 @@ def main() -> int:
        "Scan now" in page1)
 
     print()
+    print("\n— can the knowledge be navigated, or only rotated through —")
+    # Volume is not usefulness. An untagged brand-wide claim is selectable
+    # whenever nobody asks for a situation — which for a campaign or an
+    # article is always — so once there are more of those than fit the window,
+    # selection can only ROTATE. The owner must not be left to infer that;
+    # authoring MORE proof is the natural response to thin copy and the one
+    # that makes it worse.
+    from app import kb as _kbn
+    _kbn.ensure_brand("navtest", "Nav")
+    _kbn.set_brand("navtest", positioning="p", tone="warm")
+    _kbn.add_banned("navtest", "nope")
+    for i in range(20):
+        _kbn.add_claim("navtest", f"Untagged claim {i:02d}.", f"ev {i}", [],
+                       origin="human", status="active")
+    n = assurance.navigability("navtest")
+    ck("navigability counts what can never be narrowed",
+       n["claims_unnarrowable"] == 20 and n["claims_offered"] == 6, str(n))
+    ck("  and says selection is rotating", n["rotating"] is True, str(n))
+    page = admin_ui.render_assurance("s3cret", "navtest")
+    ck("it renders on an account with NO checks recorded",
+       "Can it be navigated" in page,
+       "the accounts most likely to need this are the ones that have "
+       "authored plenty and produced little")
+    ck("  and names the fix as tagging, not authoring",
+       "authoring more will not help" in page and "Tag them" in page,
+       "a number with no control is a number you cannot act on")
+
+    _kbn.add_situation("navtest", "gifting", patterns=[["gift"]],
+                       description="a gift", origin="seed")
+    for c in _kbn.claims("navtest"):
+        _kbn.update_claim(c.id, tags=["gifting"])
+    ck("tagging what is on file flips it",
+       assurance.navigability("navtest")["rotating"] is False,
+       "the number has to be able to move, or it is decoration")
+    ck("  and the card says so rather than going quiet",
+       "chooses rather than rotates" in
+       admin_ui.render_assurance("s3cret", "navtest"),
+       "silence reads as unmeasured")
+
     print("\n— WHICH system ran blind, not just that something did —")
     # `thin` has been on every assurance row since the column was added, and
     # `report()` counts it ACCOUNT-WIDE, top ten. That answers "is anything

@@ -25,6 +25,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import bundle as pkg, db, kb, resolve, tenants  # noqa: E402
 
+# Offline: capabilities are credential-backed, so they are stubbed at the
+# boundary the way every other suite does it. Without this the campaign skill
+# is refused at preflight, which returns no `thin` at all — and a check
+# reading None would pass for the wrong reason.
+_ALL = {c: True for c in tenants.CAPABILITIES}
+tenants.capabilities = lambda k: dict(_ALL) if tenants.get(k) else \
+    {c: False for c in tenants.CAPABILITIES}
+
 _fail = []
 
 
@@ -104,6 +112,38 @@ def main() -> int:
     ck("audit CATCHES a consumer reading an undeclared part",
        "a_part_nobody_declares" in rogue["undeclared"],
        str(rogue["undeclared"]))
+
+    print("\n— a declared part that did not arrive reaches the operator —")
+    # `verify` catches it and `resolve` logs it — to the log, which nobody
+    # reads. It is the highest-signal thing this layer can say: the `audiences`
+    # defect IS this, undetected for the life of the codebase. So it rides
+    # `thin`, the pipe that already carries every other gap to Assurance, per
+    # system. Asserted through skill.run, because a pipe is only real end to end.
+    from app import resolve as _rs, skill as _sk, skill_pack as _sp, systems as _sy
+    _row = _sy.find(t, "campaign_email") or _sy.create(t, "campaign_email")
+    with db.SessionLocal() as _s:
+        _s.get(db.System, _row.id).status = "live"
+        _s.commit()
+    _real = _rs.resolve
+
+    def _starved(*a, **kw):
+        b = _real(*a, **kw)
+        b.pop("audiences", None)            # a part PARTS promises, gone
+        b["coverage"]["promised_but_absent"] = pkg.verify(b)
+        return b
+    _rs.resolve = _starved
+    _sp.draft_campaign = lambda b, seg, goal, craft=None: (
+        {"subject": "S", "preheader": "p", "body_html": "<p>x</p>",
+         "claim_ids": [], "cta_label": "Shop", "cta_url": "https://x/s"},
+        "model", "")
+    r = _sk.run("campaign_email", t, segment="reorder_due")
+    _rs.resolve = _real
+    _thin = " ".join(r.get("thin") or [])
+    ck("a missing declared part lands on the run's gaps",
+       "package:audiences" in _thin, str(r.get("thin")))
+    ck("  named as a supply fault, not as work for the owner",
+       "declared and not supplied" in _thin,
+       "a part nobody supplied is a bug; a part nobody authored is a task")
 
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED:\n  - " + "\n  - ".join(_fail)))

@@ -8265,6 +8265,59 @@ def _scan_rows(key: str, rows) -> str:
     return out or '<p class="mut">No accounts yet.</p>'
 
 
+def _navigability_card(key: str, tenant: str) -> str:
+    """Can the knowledge be NAVIGATED, or only rotated through?
+
+    The third question on this page, beside "did it run" and "did it help".
+    A knowledge base that only grows stops changing the output: an untagged
+    brand-wide claim is selectable whenever nobody asks for a situation —
+    which for a campaign or an article is always — so once there are more of
+    those than fit the window, selection can only ROTATE.
+
+    The number the owner must not be left to infer: authoring MORE proof is
+    the natural response to thin copy and the one that makes this worse. So
+    the card says the fix, and links to the queue where the fix happens.
+    """
+    from . import assurance
+    if not tenant or tenant == "*":
+        return ""
+    n = assurance.navigability(tenant)
+    if not n:
+        return ('<div class="card"><h3>Can it be navigated</h3>'
+                '<p class="mut">This account&rsquo;s knowledge could not be '
+                'read, so nothing here would be true.</p></div>')
+    _kb = (f'/admin/ui?key={_esc(key)}&amp;tab=kb&amp;tenant={_esc(tenant)}')
+    if n["rotating"]:
+        verdict = (f'<div class="note"><strong>Selection is rotating, not '
+                   f'choosing.</strong> {n["claims_unnarrowable"]} of '
+                   f'{n["claims"]} approved claims are brand-wide and '
+                   f'untagged, and only {n["claims_offered"]} can be offered '
+                   f'at a time &mdash; so which proof reaches a draft is a '
+                   f'rota rather than a decision. Tagging or scoping what is '
+                   f'already on file is the fix; <b>authoring more will not '
+                   f'help</b>. <a href="{_kb}">Tag them &rarr;</a></div>')
+    else:
+        verdict = ('<div class="ok">Everything on file can reach a draft &mdash; '
+                   'the untagged pile is smaller than the window, so selection '
+                   'chooses rather than rotates.</div>')
+    def _stat(label, v, warn=False):
+        return (f'<div><span class="stat" style="font-size:1.1rem">{v}</span>'
+                f'<div class="when">{label}</div></div>')
+    return f"""
+    <div class="card"><div class="anchor" id="navigable"></div>
+      <div class="head"><h3>Can it be navigated</h3>
+        <span class="mut">volume is not the same as usefulness</span></div>
+      <div class="row" style="gap:22px;margin:8px 0">
+        {_stat("approved claims", n["claims"])}
+        {_stat("offered per draft", n["claims_offered"])}
+        {_stat("cannot be narrowed", n["claims_unnarrowable"])}
+        {_stat("buyer personas", n["audiences"])}
+        {_stat("objections", n["objections"])}
+      </div>
+      {verdict}
+    </div>"""
+
+
 def _thin_cell(e: dict) -> str:
     """WHAT THIS SYSTEM WAS DRAFTING WITHOUT, for the per-system table.
 
@@ -8364,6 +8417,14 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
       {_grounding_trend(scope, days)}
     </details>"""
 
+    # AND SO IS NAVIGABILITY — the same precedent as `ground_card` one block
+    # up, for the same reason. Whether the knowledge can be CHOSEN from or only
+    # rotated through is a fact about the account's data, not about whether a
+    # validator happened to run this fortnight. Swallowing it in the empty
+    # state would hide it from exactly the accounts most likely to have it:
+    # the ones that have authored plenty and produced little.
+    nav_card = _navigability_card(key, tenant)
+
     if not rep["events"]:
         body = (_every_note(every, "Checks recorded across every account.")
                 + windows
@@ -8372,7 +8433,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
                 f'days.</strong><br>That is not the same as '
                 f'nothing being wrong — it means no draft passed through a '
                 f'validator, so this page has no evidence either way.</div>'
-                + ground_card + comp_card)
+                + nav_card + ground_card + comp_card)
         return _shell(key, "assurance", "Assurance", body=body, tenant=tenant,
                       suffix=f"&amp;days={days}")
 
@@ -8495,6 +8556,8 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
                  "Pick a client to see only theirs.")}
     {windows}
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
+
+    {nav_card}
 
     <details class="conns"><summary>What was caught{caught_n}</summary>
       <p class="mut">Each of these is a phrase the model wrote and

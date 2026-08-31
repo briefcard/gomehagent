@@ -225,6 +225,51 @@ def catches(tenant: str = "", days: int = 30, limit: int = 50,
     return out
 
 
+def navigability(tenant: str) -> dict:
+    """Can this account's knowledge be NAVIGATED, or only rotated through?
+
+    The third question, beside "did it run" and "did it help". A data layer
+    that only grows stops changing the output, and nothing about a count of
+    rows says whether the count is helping.
+
+    What decides it is ASSOCIATION, not volume. A claim with no situation tag
+    and no entity is brand-wide proof — selectable whenever nobody asks for a
+    situation, which for a campaign or an article is always. Those rows
+    compete with each other on every single draft, so once there are more of
+    them than can be offered at once, selection can only ROTATE. Authoring
+    more is the natural response to thin output and the one that makes it
+    worse; tagging what is already there is the fix.
+
+    Computed live rather than stored: it is a fact about the account right
+    now, not about a run that happened. Empty dict when the account cannot be
+    read, because a health panel that invents zeros is worse than one that
+    says it could not look.
+    """
+    from . import kb, resolve as _rs
+    try:
+        claims = kb.claims(tenant)
+        flat = [c for c in claims
+                if not (c.situations or []) and not c.entity_key]
+        auds = kb.audiences(tenant)
+        objs = kb.objections(tenant)
+    except Exception:                                            # noqa: BLE001
+        return {}
+    # The window a generative run actually gets — `resolve` asks for limit * 2
+    # with the default limit, which is what a campaign or an article sees.
+    offered = min(len(claims), _rs.DEFAULT_LIMIT * 2)
+    return {
+        "claims": len(claims),
+        "claims_offered": offered,
+        "claims_unnarrowable": len(flat),
+        # The one number that matters: is the untagged pile bigger than the
+        # window? Under that everything on file can be shown and there is
+        # nothing to report.
+        "rotating": len(flat) > offered,
+        "audiences": len(auds),
+        "objections": len(objs),
+    }
+
+
 def by_system(tenant: str = "", days: int = 30) -> list[dict]:
     """Checks and catches per system, worst first.
 
