@@ -225,6 +225,59 @@ def catches(tenant: str = "", days: int = 30, limit: int = 50,
     return out
 
 
+def thin_runs(tenant: str = "", days: int = 30, limit: int = 50,
+              system_key: str = "", gap: str = "") -> list[dict]:
+    """The individual runs that drafted WITHOUT something, and what they made.
+
+    `catches()` answers "open the number" for everything the layer STOPPED —
+    and it filters on `r.caught`, so it can only ever show runs that failed a
+    rule. A run that drafted with no reader, no objections and no buyer
+    vocabulary, and then passed every gate cleanly, is invisible to it.
+
+    Those are precisely the runs worth opening. Nothing was caught because
+    nothing was wrong with the WORDS; what was wrong is that the work was done
+    on a thinner brief than the account could have supplied, and the output is
+    quietly worse in a way no rule can name. A per-system count with no way
+    into the runs behind it is a number taken on faith, which is the thing
+    this page exists not to ask for.
+
+    Same shape as `catches` deliberately — the drilled view renders both.
+    """
+    rows = [r for r in _rows(tenant, days) if r.thin]
+    if system_key:
+        rows = [r for r in rows if (r.system_key or "") == system_key]
+    if gap:
+        rows = [r for r in rows if gap in (r.thin or [])]
+    rows = rows[:limit]
+
+    ids = {r.output_id for r in rows if r.output_id}
+    bodies: dict = {}
+    if ids:
+        with db.SessionLocal() as s:
+            for o in s.query(db.Output).filter(db.Output.id.in_(ids)).all():
+                bodies[o.id] = {"body": (o.body or "")[:400],
+                                "status": o.status or "",
+                                "format": o.format or ""}
+    out = []
+    for r in rows:
+        got = bodies.get(r.output_id or "", {})
+        out.append({
+            "when": db.as_utc(r.created_at).date().isoformat(),
+            "at": r.created_at,
+            "tenant": r.tenant, "where": r.source, "system": r.system_key,
+            "gaps": list(r.thin or []), "verdict": r.verdict,
+            "run_id": r.run_id, "output_id": r.output_id or "",
+            # WHETHER IT WAS CAUGHT TOO. A run can be both thin and blocked,
+            # and reading a thin run as clean would be the same conflation
+            # this module keeps apart everywhere else.
+            "also_caught": list(r.caught or []),
+            "body": got.get("body", ""),
+            "status": got.get("status", ""),
+            "format": got.get("format", ""),
+        })
+    return out
+
+
 def navigability(tenant: str) -> dict:
     """Can this account's knowledge be NAVIGATED, or only rotated through?
 

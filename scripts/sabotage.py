@@ -870,6 +870,17 @@ SABOTAGES = [
                "never reaches the operator",
     },
     {
+        "name": "a_thin_run_can_be_opened",
+        "file": "app/assurance.py",
+        "find": "    rows = [r for r in _rows(tenant, days) if r.thin]",
+        "replace": "    rows = []  # SABOTAGE",
+        "suites": ["test_assurance_tab.py"],
+        "why": "the per-system gap counts become numbers you cannot open — "
+               "`catches()` filters on r.caught, so a run that drafted with no "
+               "reader and then passed every rule is unreachable from the page "
+               "whose whole job is not to be taken on faith",
+    },
+    {
         "name": "assurance_says_when_selection_can_only_rotate",
         "file": "app/assurance.py",
         "find": '        "rotating": len(flat) > offered,',

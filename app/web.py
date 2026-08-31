@@ -2226,6 +2226,11 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             link_key, tenant, days=max(1, min(days, 365)),
             system=request.query_params.get("system", ""),
             rule=request.query_params.get("rule", ""),
+            # WHAT A RUN WAS DRAFTING WITHOUT — the other half of the
+            # drill-down. `rule` opens what the layer CAUGHT; `gap` opens the
+            # runs that passed every rule on a thinner brief than the account
+            # could have supplied, which no rule can name.
+            gap=request.query_params.get("gap", ""),
             started=request.query_params.get("started", ""),
             # `page` is the step-4 name; `cpage` was the old one and still
             # resolves, because URLs never break (fluidity rule 3).

@@ -116,6 +116,36 @@ def main() -> int:
        "Scan now" in page1)
 
     print()
+    print("\n— every gap number OPENS the runs behind it —")
+    # `catches()` filters on `r.caught`, so the existing drill-down could only
+    # ever reach runs that failed a RULE. A run that drafted with no reader and
+    # no objections and then passed every gate cleanly was unreachable — and
+    # those are the runs most worth opening: nothing is wrong with the words,
+    # the brief was thinner than the account could have supplied.
+    from app import ledger as _led
+    _o = _led.record("baci", "campaign_email", format="campaign_email",
+                     status="draft", body="Written for nobody in particular.")
+    assurance.record("baci", source="skill", checked=["banned_claims"],
+                     caught=[], verdict="passed", system_key="campaign_email",
+                     output_id=_o.id, thin=["reader:not-chosen"])
+    _runs = assurance.thin_runs("baci", 30, gap="reader:not-chosen")
+    ck("thin_runs reaches a run that caught nothing", len(_runs) >= 1,
+       "catches() cannot: it filters on r.caught")
+    _page = admin_ui.render_assurance("s3cret", "baci")
+    ck("the per-system gap is a link, not a dead number",
+       "gap=reader:not-chosen" in _page, "a number you cannot open is faith")
+    _d = admin_ui.render_assurance("s3cret", "baci", gap="reader:not-chosen")
+    ck("  and it opens the runs behind it",
+       "Runs that drafted without" in _d and "nobody in particular" in _d,
+       "the draft itself, not just a count")
+    ck("  saying plainly that nothing was caught",
+       "passed every rule" in _d,
+       "a thin run reading as a caught one would be the same conflation "
+       "this module keeps apart everywhere else")
+    ck("  with a way through to the artifact",
+       "open what it produced" in _d,
+       "400 characters you cannot act on is half a control")
+
     print("\n— can the knowledge be navigated, or only rotated through —")
     # Volume is not usefulness. An untagged brand-wide claim is selectable
     # whenever nobody asks for a situation — which for a campaign or an

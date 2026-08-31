@@ -8318,7 +8318,7 @@ def _navigability_card(key: str, tenant: str) -> str:
     </div>"""
 
 
-def _thin_cell(e: dict) -> str:
+def _thin_cell(e: dict, drill=None) -> str:
     """WHAT THIS SYSTEM WAS DRAFTING WITHOUT, for the per-system table.
 
     The account-wide list further down answers "is anything missing". This
@@ -8334,14 +8334,18 @@ def _thin_cell(e: dict) -> str:
     """
     if not e.get("thin_runs"):
         return '<span class="mut">nothing missing</span>'
-    gaps = "".join(f'<code>{_esc(k)}</code> {n} ' for k, n in e.get("top_thin") or [])
+    gaps = "".join(
+        (f'<a href="{drill(system_=e["system"], gap_=k)}">'
+         f'<code>{_esc(k)}</code></a> {n} ' if drill else
+         f'<code>{_esc(k)}</code> {n} ')
+        for k, n in e.get("top_thin") or [])
     return (gaps + f'<span class="mut"> · on {e["thin_runs"]} of '
                    f'{e["checks"]} run(s)</span>')
 
 
 def render_assurance(key: str, tenant: str = "", days: int = 30,
                      system: str = "", rule: str = "", started: str = "",
-                     page: int = 1) -> str:
+                     page: int = 1, gap: str = "") -> str:
     """What the layer checked, what it caught, and what cannot be measured yet.
 
     Ordered by how much each number can be trusted: catches first because they
@@ -8441,12 +8445,14 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # accepts `system_key` and `rule` filters; the first version of this page
     # passed neither, so the drill-down existed in the model layer and was
     # reachable from nowhere.
-    def _drill(system_: str = "", rule_: str = "") -> str:
+    def _drill(system_: str = "", rule_: str = "", gap_: str = "") -> str:
         bits = ["tab=assurance", f"tenant={_esc(tenant)}", f"days={days}"]
         if system_:
             bits.append(f"system={_esc(system_)}")
         if rule_:
             bits.append(f"rule={_esc(rule_)}")
+        if gap_:
+            bits.append(f"gap={_esc(gap_)}")
         if key:
             bits.append(f"key={_esc(key)}")
         return "/admin/ui?" + "&amp;".join(bits)
@@ -8473,7 +8479,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
         f'<td class="num">{e["blocked"] or ""}</td>'
         f'<td class="num">{e["repaired"] or ""}</td>'
         f'<td>{"".join(f"<code>{_esc(k)}</code> {n} " for k, n in e["top_rules"])}</td>'
-        f'<td>{_thin_cell(e)}</td>'
+        f'<td>{_thin_cell(e, _drill)}</td>'
         f'</tr>' for e in assurance.by_system(scope, days)) or \
         '<tr><td colspan="7" class="mut">nothing checked in this window</td></tr>'
 
@@ -8502,6 +8508,41 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # than an open one — the whole page exists to show that the layer caught
     # something, so the number stays readable without opening anything.
     caught_n = (f" &mdash; {len(all_catches)}" if all_catches else "")
+    # THE RUNS BEHIND A GAP. Same shape as the catch cards below, because it
+    # answers the same question about a different kind of event: open the
+    # number. A run can be thin AND blocked, so what was also caught is shown
+    # rather than letting a thin run read as clean.
+    gap_cards = ""
+    if gap:
+        _tr = assurance.thin_runs(scope, days, limit=100,
+                                  system_key=system, gap=gap)
+        gap_cards = "".join(
+            '<div class="msg">'
+            f'<div class="when">{_esc(c["when"])} · '
+            f'{_esc(c["system"] or "—")} · {_esc(c["where"])}'
+            + (f' · {_esc(c["tenant"])}' if every else "") + '</div>'
+            + '<div>' + "".join(f'<code>{_esc(g)}</code> ' for g in c["gaps"])
+            + (f'<span class="chip off">also caught: '
+               f'{_esc(", ".join(c["also_caught"]))}</span>'
+               if c["also_caught"] else
+               '<span class="chip on">passed every rule</span>')
+            + '</div>'
+            + (f'<div class="msg esc">{_esc(c["body"])}</div>'
+               if c["body"] else
+               '<div class="when">no draft was filed for this run</div>')
+            + (f'<div><a href="/admin/work/{_esc(c["output_id"])}'
+               f'?key={_esc(key)}">open what it produced &rarr;</a></div>'
+               if c.get("output_id") else "")
+            + '</div>' for c in _tr) or \
+            ('<p class="mut">No run in this window carried that gap.</p>')
+        gap_cards = (f'<div class="card"><div class="head">'
+                     f'<h3>Runs that drafted without '
+                     f'<code>{_esc(gap)}</code></h3>'
+                     f'<span class="mut">nothing was caught — the brief was '
+                     f'thinner than it needed to be</span></div>'
+                     f'<p class="mut"><a href="{_drill()}">show everything '
+                     f'&rarr;</a></p>{gap_cards}</div>')
+
     narrowed = ""
     if system or rule:
         what = " · ".join(x for x in (system, rule) if x)
@@ -8546,8 +8587,15 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
                if ed["edited_rate"] is not None else
                f'<span class="mut">{_esc(ed["note"])}</span>')
 
+    # EVERY NUMBER ON THIS PAGE OPENS. `catches()` filters on `r.caught`, so
+    # the existing drill-down can only reach runs that failed a RULE — a run
+    # that drafted with no reader and no objections and then passed every gate
+    # cleanly was unreachable from here. Those are the runs most worth opening:
+    # nothing was wrong with the words, the brief was just thinner than the
+    # account could have supplied.
     thin_rows = "".join(
-        f'<tr><td>{_esc(t)}</td><td class="num">{n}</td></tr>'
+        f'<tr><td><a href="{_drill(gap_=t)}">{_esc(t)}</a></td>'
+        f'<td class="num">{n}</td></tr>'
         for t, n in rep["thin"].items()) or \
         '<tr><td colspan="2" class="mut">every run had what it needed</td></tr>'
 
@@ -8558,6 +8606,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     <p class="mut">Last {days} days · {rep['events']} checks recorded.</p>
 
     {nav_card}
+    {gap_cards}
 
     <details class="conns"><summary>What was caught{caught_n}</summary>
       <p class="mut">Each of these is a phrase the model wrote and
