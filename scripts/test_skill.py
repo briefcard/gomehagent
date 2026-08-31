@@ -271,8 +271,14 @@ def main():
        r["items"][0]["disposition"])
     contract(row, autonomy="shadow")
     r = skill.run("_fine", "baci")
-    ck("`shadow` records and does not release",
-       r["items"][0]["disposition"] == "recorded")
+    # `shadow` used to file `recorded`, and `emit` queues an approval only on
+    # `needs_approval` — so the DEFAULT rung, the one every unpromoted system
+    # sits on, drafted things nobody could decide. Owner's rule, twice stated:
+    # shadow is the Learning phase and manual approval is available inside it.
+    # Nothing releases by itself there; a human still has to tap.
+    ck("`shadow` asks rather than filing away unaskable",
+       r["items"][0]["disposition"] == "needs_approval",
+       r["items"][0]["disposition"])
     contract(row, autonomy="approve_all")
     r = skill.run("_fine", "baci")
     ck("`approve_all` asks", r["items"][0]["disposition"] == "needs_approval")

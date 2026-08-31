@@ -313,15 +313,23 @@ def main():
        "reroll" in r6.headers.get("location", ""),
        r6.headers.get("location", ""))
 
-    print("\n--- 7 · a rung that asks no approval still gets a board ---")
+    print("\n--- 7 · the default rung gets a board AND a decision ---")
     contract(systems.find("baci", "ad_creative"), autonomy="shadow")
     r7 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
                    audience_key="hosts", variants=1)
     a2 = r7["items"][0]["output_id"]
     page = c.get(f"/admin/work/{a2}?key={KEY}").text
-    ck("the shadow-rung board says no approval was asked",
-       "No approval was asked" in page
-       and "no ad-platform write is wired" in page.lower())
+    # Shadow used to file `recorded`, which queued nothing — so the board on
+    # the DEFAULT rung explained that no approval had been asked instead of
+    # offering one. Owner, 2026-08-31: a drafted thing offers Approve or
+    # Redraft, and this system is not exempt.
+    ck("the shadow-rung board offers a decision, not an explanation",
+       "No approval was asked" not in page,
+       "shadow is the default; a draft nobody can decide is the commonest "
+       "state this platform had")
+    ck("  and it is still honest about what approving does",
+       "no ad-platform write is wired" in page.lower(),
+       "approving marks the batch ready — that is its whole declared ship")
 
     print()
     if _fail:

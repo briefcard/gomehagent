@@ -149,9 +149,30 @@ def main() -> int:
        f'value="{(art_b.meta or {}).get("seo_title")}"' in page_i,
        "state before instructions")
 
-    # Decide it, so the "no pending approval" state is real.
+    # ONE ARTIFACT, ONE PENDING DECISION. `emit` files a generic
+    # `skill_output` approval and `blog_article` then files the
+    # `seo_new_article` one that actually publishes — both carrying this
+    # output_id. Two rows for one thing means the workroom offers whichever
+    # it read first, and half of those approve into nothing.
+    with db.SessionLocal() as _s:
+        _same = [a for a in _s.query(db.Approval)
+                 .filter(db.Approval.status == "pending").all()
+                 if (a.payload or {}).get("output_id") == oid_b]
+    ck("one artifact carries exactly one pending decision", len(_same) == 1,
+       ", ".join(sorted(a.kind for a in _same)) or "none")
+    ck("  and it is the kind with an executor arm",
+       bool(_same) and _same[0].kind == "seo_new_article",
+       _same[0].kind if _same else "none")
+
+    # Decide it, so the "no pending approval" state is real. EVERY pending
+    # one, not just the one this test made: since 2026-08-31 the run queues
+    # its own at the default rung, so approving `ap2` alone leaves a second
+    # pending row and the state under test never arrives.
     with db.SessionLocal() as s_:
-        s_.get(db.Approval, ap2.id).status = "approved"
+        for _a in (s_.query(db.Approval)
+                   .filter(db.Approval.status == "pending").all()):
+            if _a.id == ap2.id or (_a.payload or {}).get("output_id") == oid_b:
+                _a.status = "approved"
         s_.commit()
     art_d, _kw, ap_d = web._article_bundle(oid_b)
     ck("with no pending approval there is nothing to fall back on",

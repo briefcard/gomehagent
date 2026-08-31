@@ -363,6 +363,12 @@ button.sec{background:transparent;color:var(--acc)}
   border:1px solid var(--acc);background:var(--acc);color:var(--acc-ink);text-decoration:none}
 .btn.sec{background:transparent;color:var(--ink);border-color:var(--rule)}
 .btn.danger{background:transparent;color:var(--err);border-color:var(--err)}
+/* The one action a page is FOR. Owner, 2026-08-31: "Please make the approve
+   button very clear." A primary drawn at the same weight as the two links
+   beside it is not a primary, and this console had exactly that: Approve,
+   Deny and a review link, all the same size, on the page whose entire job is
+   to get one decision out of a person. */
+.btn.go{font-size:.92rem;padding:8px 18px;border-radius:5px}
 /* --- the frame: sidebar, client switcher, page ---------------------------
    Same shape as the client portal on purpose. Switching between the two
    should not mean learning a second layout, and the account is chosen once
@@ -10936,20 +10942,25 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     # --- the lifecycle, as chips: where this artifact IS ------------------
     def _chip(label: str, on: bool) -> str:
         return f'<span class="chip {"on" if on else "nb"}">{label}</span>'
+    # TWO TRANSITIONS, NOT FOUR. Owner, 2026-08-31: *"if something is drafted
+    # why does it need in-review, pending approval, then approved? It should
+    # go from Drafted to Approved."* They were right, and the extra two chips
+    # were not even stages: `in review` lit on `bool(versions)`, so editing a
+    # draft once moved it along a ladder it was never on, and `awaiting
+    # approval` is not a state of the ARTIFACT — it is the absence of a
+    # decision on it, which "approved" already says by being unlit.
+    _decided = (run is not None and (run.decision or "") == "approved")
     if is_ads:
         # A batch's last chip is READY, not published — its declared ship
         # marks it ready and a person carries it to the platform; claiming
         # "published" would claim a write that does not exist.
+        _ready = ad_apr["pending"] == 0 and ad_apr["ready"] > 0
         steps = (_chip("drafted", True)
-                 + _chip("in review", bool(versions))
-                 + _chip("awaiting approval", ad_apr["pending"] > 0)
-                 + _chip("ready", ad_apr["pending"] == 0
-                         and ad_apr["ready"] > 0))
+                 + _chip("approved", _ready or _decided)
+                 + _chip("ready", _ready))
     else:
         steps = (_chip("drafted", True)
-                 + _chip("in review", (art.state or "") == "in_review"
-                         or bool(versions))
-                 + _chip("awaiting approval", bool(ap))
+                 + _chip("approved", _decided or published)
                  + _chip("published", published))
     measured = ""
     if run is not None and getattr(run, "edit_diff", None):
@@ -11007,12 +11018,15 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             from . import approvals
             approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
             deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
-            decide = (f'<div class="row"><a class="btn" href="{approve}">'
+            decide = (f'<div class="row"><a class="btn go" href="{approve}">'
                       f'Approve — pushes the draft to {_esc(prov)}, '
-                      f'launch-ready</a> <a class="btn danger" href="{deny}">'
-                      f'Deny</a> <span class="when">Nothing reaches '
+                      f'launch-ready</a> '
+                      f'<a class="btn sec" href="#redraft">Send back &mdash; '
+                      f'redraft</a> <span class="when">Nothing reaches '
                       f'{_esc(prov)} until you approve. Review and adjust '
-                      f'here; launch there.</span></div>')
+                      f'here; launch there.</span>'
+                      f'<span class="grow"></span>'
+                      f'<a class="when" href="{deny}">discard</a></div>')
         elif pushed:
             decide = (f'<div class="ok">In {_esc(dest.split(":")[1])} as a '
                       f'draft — campaign '
@@ -11025,26 +11039,22 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             if run is not None and (run.decision or "") == "denied":
                 body_txt = ('<b>Denied.</b> It will not be pushed. A clean '
                             'redraft re-queues an approval.')
-            elif _rung in ("shadow", "auto"):
-                # The commonest and the most silent. `autonomy` defaults to
-                # `shadow` and `systems.create` never sets it, so a system that
-                # was installed and never promoted sits here — and `auto`
-                # returns `cleared`, which nothing in the codebase consumes, so
-                # it cannot push either. Only the two middle rungs can.
+            elif _rung == "auto":
+                # The one rung that genuinely queues nothing, and it still
+                # cannot push: `_disposition` returns `cleared` and no
+                # production module branches on that word. Shadow used to be
+                # in here beside it — "the commonest and the most silent",
+                # because shadow is the DEFAULT — and as of 2026-08-31 it
+                # queues like every other rung below `auto`.
                 body_txt = (
-                    f'<b>Nothing is queued for approval in the '
-                    f'{_esc(systems.autonomy_label(_rung))} rung.</b> '
-                    + ('The learning phase runs and records; it sends '
-                       'nothing, by design.'
-                       if _rung == "shadow" else
-                       'On <code>auto</code> this system queues no approval '
-                       'and no push path consumes the result, so a campaign '
-                       'stops here.')
-                    + f' To send to {_esc(prov)}, move it to '
-                      f'<code>approve_all</code> on '
-                      f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems'
-                      f'&amp;tenant={_esc(tenant)}&amp;system=campaign_email'
-                      f'">the campaign system</a>.')
+                    f'<b>Nothing is queued for approval on '
+                    f'<code>auto</code>.</b> This system asks for no approval '
+                    f'at that rung and no push path consumes the result, so a '
+                    f'campaign stops here. To send to {_esc(prov)}, move it '
+                    f'down a rung on '
+                    f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems'
+                    f'&amp;tenant={_esc(tenant)}&amp;system=campaign_email'
+                    f'">the campaign system</a>.')
             elif _withdrawn:
                 _perm = any(w in _withdrawn.lower() for w in
                             ("can-spam", "address", "merge tags",
@@ -11078,29 +11088,75 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                          if (art.body or "").strip()
                          and run is not None
                          and (run.decision or "") == "approved" else ""))
-    elif ap:
-        from . import approvals
-        approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
-        deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
-        decide = (f'<div class="row"><a class="btn" href="{approve}">Approve '
-                  f'&amp; publish</a> <a class="btn danger" href="{deny}">'
-                  f'Deny</a> <span class="when">Approving publishes THIS text '
-                  f'— saving below updates what ships.</span></div>')
-    elif published:
-        live = (f' — <a href="{_esc(kw.target_url)}">live page</a>'
-                if kw and kw.target_url else "")
-        decide = f'<div class="ok">Published{live}.</div>'
     else:
-        decide = f"""
+        # WHERE IT GOES LIVE, when we cannot put it there. Squarespace has no
+        # content write API, so the workflow IS paste-then-record — not a
+        # lesser version of publishing. Factored out because it belongs beside
+        # a reviewed-but-unpushable draft as much as beside an undecided one.
+        _mark_live = f"""
         <form class="row" method="get" action="/admin/article_published">
           <input type="hidden" name="key" value="{_esc(key)}">
           <input type="hidden" name="output_id" value="{_esc(output_id)}">
-          <b>No CMS to push to.</b>
           <span class="when">Copy the source, paste it into the platform by
           hand, then record where it went live so the measurement loop can
           see it:</span>
           <input name="url" size="42" placeholder="https://…/blogs/…">
           <button type="submit" class="sec">It&rsquo;s live here</button>
+        </form>"""
+        if ap is not None:
+            from . import approvals
+            approve = "/decide/" + approvals._signer.dumps([ap.id, "approved"])
+            deny = "/decide/" + approvals._signer.dumps([ap.id, "denied"])
+            # WHAT APPROVING ACTUALLY DOES, per kind. `seo_new_article` has an
+            # executor arm that creates the post; `skill_output` has none — it
+            # records the decision. Both reach this page now that the default
+            # rung queues, and one button saying "Approve & publish" over both
+            # would promise a write that does not exist on a platform with no
+            # write API.
+            if ap.kind == "seo_new_article":
+                says, note = ("Approve &amp; publish",
+                              "Approving publishes THIS text — saving below "
+                              "updates what ships.")
+            else:
+                says, note = ("Approve &mdash; marks it reviewed",
+                              "There is nowhere to push this automatically, so "
+                              "approving records your decision. Paste it and "
+                              "tell me where it landed:")
+            decide = (f'<div class="row"><a class="btn go" href="{approve}">'
+                      f'{says}</a> '
+                      f'<a class="btn sec" href="#redraft">Send back &mdash; '
+                      f'redraft</a> <span class="when">{note}</span>'
+                      f'<span class="grow"></span>'
+                      f'<a class="when" href="{deny}">discard</a></div>')
+            if ap.kind != "seo_new_article":
+                decide += _mark_live
+        elif published:
+            live = (f' — <a href="{_esc(kw.target_url)}">live page</a>'
+                    if kw and kw.target_url else "")
+            decide = f'<div class="ok">Published{live}.</div>'
+        else:
+            decide = ('<div class="row"><b>No CMS to push to.</b></div>'
+                      + _mark_live)
+
+    # THE CONTROL THAT WAS MISSING, on the surface that reports its absence.
+    #
+    # `_disposition` now queues at every rung but `auto`, so a NEW draft
+    # arrives decidable. This is the half that reaches backward: every draft
+    # already in the store was filed when the default rung queued nothing, and
+    # a page that explains why there is no button is a fix instruction where a
+    # control belongs (design rule 1). Backfilling instead would drop an
+    # unread queue on somebody in one transaction; this way a person decides
+    # the ones they actually want, one at a time, from the page they are on.
+    if (not published and not superseded_by and (art.body or "").strip()
+            and not ap and not (is_ads and ad_apr["pending"])):
+        decide += f"""
+        <form class="row" method="post"
+              action="/admin/queue_approval?key={_esc(key)}"
+              style="margin-top:8px">
+          <input type="hidden" name="output_id" value="{_esc(output_id)}">
+          <button class="btn go" type="submit">Put it in front of me</button>
+          <span class="when">queues this draft for a decision — then it is
+          Approve or send it back, here</span>
         </form>"""
 
     if superseded_by:
@@ -11453,7 +11509,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             _rc_ph = ("e.g. two products max, and lead with the "
                       "free-shipping line")
         redraft_card = f"""
-<div class="card">
+<div class="card"><div class="anchor" id="redraft"></div>
   <h3>{_rc_title}</h3>
   <form method="post" action="/admin/work_redraft">
     <input type="hidden" name="key" value="{_esc(key)}">

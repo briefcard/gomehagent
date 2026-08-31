@@ -608,9 +608,26 @@ def _disposition(autonomy: str, valid: bool, writes: bool) -> str:
         # A write is the exception, always. Reading and reporting at this rung
         # goes through; changing a live store does not.
         return "needs_approval" if writes else "cleared"
-    if autonomy == "approve_all":
-        return "needs_approval"
-    return "recorded"          # shadow: it happened, it does not leave
+    # approve_all AND shadow, and that is the change of 2026-08-31.
+    #
+    # Shadow returned "recorded" — it happened, it does not leave — and `emit`
+    # queues an approval ONLY on `needs_approval` (this file, ~line 523). So
+    # the LEARNING rung produced drafts that nobody could ever approve. Shadow
+    # is also the DEFAULT: `db.System.autonomy` defaults to it and
+    # `systems.create` never sets anything else, so every system a client
+    # installs and does not promote sits there. In practice the commonest
+    # state of this platform was a finished draft with no decision on it, and
+    # a workroom whose only offer was an explanation of which rung to move to
+    # in order to get one. `admin_ui` had already written that down —
+    # "the commonest and the most silent" — beside the sentence explaining it.
+    #
+    # The owner's rule, stated in the campaign_email walk and again on
+    # 2026-08-31: shadow is the Learning phase and MANUAL APPROVAL IS
+    # AVAILABLE INSIDE IT. "Sends nothing" always meant "sends nothing BY
+    # ITSELF", which is exactly what a queued approval preserves — a human
+    # taps, or nothing happens. A drafted thing now offers the same two
+    # decisions at every rung but `auto`: approve it, or send it back.
+    return "needs_approval"
 
 
 # ---------------------------------------------------------------------------

@@ -84,27 +84,37 @@ def main() -> int:
          "body_html": "<p>Something quiet about the table.</p>",
          "cta_label": "Shop", "cta_url": "https://x/s"}, "model", "")
 
-    print("— the shadow rung: the default, and the silent one —")
+    print("— the shadow rung: the DEFAULT, and now a decidable one —")
     _seed("baci")
     oid, _ = _draft("baci")
     page = _page(oid)
-    ck("it names the rung rather than saying nothing",
-       "shadow" in page and "Nothing is queued for approval" in page,
-       "`autonomy` defaults to shadow and `systems.create` never sets it")
-    ck("  and says what to do about it, with the link",
-       "approve_all" in page and "system=campaign_email" in page,
-       "a fix instruction with no control is design rule 1 broken")
-    ck("  and can finally name the platform",
+    # Until 2026-08-31 shadow's disposition was `recorded`, `emit` queued an
+    # approval only on `needs_approval`, and shadow is what every unpromoted
+    # system sits on — so the commonest state of this platform was a finished
+    # draft nobody could decide, on a page that explained which rung to move
+    # to in order to get a button.
+    ck("a draft on the default rung offers the decision",
+       "Approve" in page and "pushes the draft to" in page,
+       "shadow queued nothing, so the page had no button to draw")
+    ck("  with the other half of the pair beside it",
+       "redraft" in page.lower(),
+       "owner 2026-08-31: either Approve or Redraft, nothing between")
+    ck("  and it can name the platform",
        "omnisend" in page,
        "the recipe is on the artifact even when no approval exists — the page "
        "could not previously say the word")
 
-    print("\n— the auto rung cannot push either, and says so —")
+    print("\n— the auto rung cannot push, and is now the only stop —")
     _row = systems.find("baci", "campaign_email")
     systems.update(_row.id, autonomy="auto")
+    oid_auto, _ = _draft("baci")
+    _pa = _page(oid_auto)
     ck("auto is named as a stop, not as a send",
-       "auto" in _page(oid) and "stops here" in _page(oid),
+       "auto" in _pa and "stops here" in _pa,
        "_disposition returns `cleared`, which nothing consumes")
+    ck("  and even there the draft can be put in front of a person",
+       "queue_approval" in _pa,
+       "a page that reports an absence carries the control that ends it")
 
     print("\n— a withdrawn approval prints the reason it recorded —")
     systems.update(_row.id, autonomy="approve_all")

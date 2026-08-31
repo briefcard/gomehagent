@@ -918,14 +918,16 @@ SABOTAGES = [
     {
         "name": "the_workroom_says_why_it_cannot_push",
         "file": "app/admin_ui.py",
-        "find": '            elif _rung in ("shadow", "auto"):',
+        "find": '            elif _rung == "auto":',
         "replace": "            elif False:  # SABOTAGE",
         "suites": ["test_workroom_email.py"],
-        "why": "the commonest reason a campaign cannot be sent — the system "
-               "sitting on the rung it was installed at — is invisible. Four "
-               "unrelated states collapse into one grey sentence that names "
-               "none of them and tells the owner to redraft, which fixes "
-               "three of the four never",
+        "why": "the reason a campaign cannot be sent goes back to being "
+               "invisible: `auto` queues no approval and nothing consumes "
+               "what it emits, so the page falls through to a grey sentence "
+               "naming none of it. Re-pointed 2026-08-31, when `shadow` "
+               "stopped being the other half of this branch — it queues like "
+               "every rung below `auto` now, so `auto` is the only genuine "
+               "stop left and this is the only place that says so",
     },
     {
         "name": "a_withdrawn_approval_prints_its_reason",
@@ -3693,6 +3695,46 @@ SABOTAGES = [
                "extra three existed and nothing said so. A reference that "
                "describes the code has to be written BY the code, and "
                "byte-compared, or it is a summary somebody will trust",
+    },
+    {
+        "name": "the_default_rung_can_be_decided",
+        "file": "app/skill.py",
+        "find": "    # approve_all AND shadow, and that is the change of 2026-08-31.",
+        "replace": '    if autonomy == "shadow":\n        return "recorded"  # SABOTAGE',
+        "suites": ["test_skill.py", "test_workroom_email.py"],
+        "why": "shadow goes back to filing `recorded`, and `emit` queues an "
+               "approval only on `needs_approval` — so the DEFAULT rung, the "
+               "one every system a client installs and never promotes sits "
+               "on, drafts things nobody can approve. That was the commonest "
+               "state of this platform: a finished draft, and a page whose "
+               "only offer was an explanation of which rung to move to in "
+               "order to get a button",
+    },
+    {
+        "name": "one_artifact_one_pending_decision",
+        "file": "app/approvals.py",
+        "find": "        if _oid and kind != \"skill_output\":",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_article_review.py"],
+        "why": "an article carries BOTH the generic `skill_output` approval "
+               "emit files and the `seo_new_article` one that actually "
+               "publishes, so the workroom offers whichever it reads first — "
+               "and half the time 'Approve & publish' is bound to the row "
+               "with no executor arm, which approves into nothing. Two "
+               "pending rows for one artifact is also exactly the bulk the "
+               "owner asked to be rid of",
+    },
+    {
+        "name": "a_draft_with_no_decision_can_get_one",
+        "file": "app/admin_ui.py",
+        "find": '          <button class="btn go" type="submit">Put it in front of me</button>',
+        "replace": '          <!-- SABOTAGE -->',
+        "suites": ["test_queue_approval.py"],
+        "why": "every draft filed before the default rung started queuing is "
+               "stranded: real, finished, and with no way to decide it short "
+               "of a redraft. The page reports the absence and offers nothing "
+               "that ends it, which is design rule 1 broken on the surface "
+               "the rule was written for",
     },
 ]
 

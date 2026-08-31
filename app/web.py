@@ -2856,13 +2856,22 @@ def _article_bundle(output_id: str):
         # Articles AND campaigns: the workroom is every artifact's home, and
         # a campaign's approval (kind=skill_output) carries the esp_push the
         # review edits write into.
-        for row in (s.query(db.Approval)
-                    .filter(db.Approval.kind.in_(("seo_new_article",
-                                                  "skill_output")),
-                            db.Approval.status == "pending").all()):
-            if (row.payload or {}).get("output_id") == output_id:
-                ap = row
-                break
+        #
+        # KIND-SPECIFIC WINS. `request_approval` supersedes the generic row
+        # when a specific one is filed, so there should only ever be one — but
+        # pairs written before that rule stay in the database, and picking the
+        # wrong one of a pair means the button says "Approve & publish" over
+        # an approval with no executor arm. Ordering here is not a second
+        # opinion, it is the read side of the same rule.
+        _cands = [row for row in
+                  (s.query(db.Approval)
+                   .filter(db.Approval.kind.in_(("seo_new_article",
+                                                 "skill_output")),
+                           db.Approval.status == "pending").all())
+                  if (row.payload or {}).get("output_id") == output_id]
+        _cands.sort(key=lambda r: r.kind == "skill_output")
+        if _cands:
+            ap = _cands[0]
         s.expunge_all()
     return art, kw, ap
 
@@ -3317,6 +3326,72 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
         f"/admin/work/{quote(output_id)}?key={quote(key)}"
         f"&err={quote('redraft refused: ' + str(got.get('error', ''))[:220])}",
         303)
+
+
+@app.post("/admin/queue_approval")
+async def queue_approval(request: Request, key: str = Depends(admin_key)):
+    """Put an existing draft in front of a person — the missing control.
+
+    Until 2026-08-31 an approval was queued only when the run's disposition
+    was `needs_approval`, and the DEFAULT rung (`shadow`) produced `recorded`.
+    So a system installed and never promoted drafted things nobody could
+    decide, and the workroom's answer was a sentence telling the owner which
+    rung to move the system to — a fix instruction where a control belongs
+    (design rule 1).
+
+    `_disposition` now queues at every rung but `auto`, which fixes it going
+    forward. This is the half that reaches BACKWARD: every draft already
+    sitting in the store was filed under the old rule and has no approval to
+    tap. Rather than backfill — which would drop an unread queue on somebody
+    in one transaction — the draft carries its own button, and a person
+    decides the ones they actually want.
+
+    The ESP recipe rides along: `ArtifactBody.push` is the machine's stash,
+    written by the run that rendered the HTML precisely so a campaign reviewed
+    outside the approval flow can still be pushed. Without it a late-queued
+    campaign approval would approve into nothing.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+
+    def _back(msg: str, ok: bool = False) -> RedirectResponse:
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&{'ok' if ok else 'err'}={quote(msg)}", 303)
+
+    art, _kw, existing = _article_bundle(output_id)
+    if art is None:
+        return _back("no artifact with that id")
+    if existing is not None:
+        return _back("already waiting on you — the buttons are on this page",
+                     ok=True)
+    if not (art.body or "").strip():
+        return _back("there is nothing in this draft to approve")
+
+    from . import approvals as _appr, skill as _sk, systems as _sys
+    sysrow = _sys.find(art.tenant or "", art.system_key or "")
+    skill_key = ""
+    for _k, _s in _sk.REGISTRY.items():
+        if getattr(_s, "system_key", "") == (art.system_key or ""):
+            skill_key = _k
+            break
+    payload = {"tenant": art.tenant or "", "skill": skill_key,
+               "output_id": output_id, "body": (art.body or "")[:2000]}
+    push = dict(getattr(art, "push", None) or {})
+    if push:
+        payload["esp_push"] = push
+    _appr.request_approval(
+        "skill_output",
+        f"{art.system_key or 'draft'} for {art.tenant}: "
+        f"{(art.body or '')[:80]}",
+        payload, notify=False, run_id=art.run_id or "",
+        system_id=sysrow.id if sysrow else "")
+    return _back("queued — approve or send it back, on this page", ok=True)
 
 
 @app.get("/admin/esp_push")

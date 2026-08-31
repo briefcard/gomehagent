@@ -117,12 +117,14 @@ def main() -> int:
     ck("it is measured", bool(d2), "unmeasured and as-is are different facts")
     ck("  as approved, not edited", dec2 == "approved", dec2)
 
-    print("\n— measured WITHOUT an approval behind it —")
-    # The shadow and auto rungs queue nothing. Requiring an approval to
-    # measure would leave the systems trusted most as the ones nobody checks.
+    print("\n— measured WITHOUT an approval DECIDED behind it —")
+    # `auto` queues nothing, and since 2026-08-31 `shadow` queues but nobody
+    # has to answer. Requiring a DECISION to measure would leave the systems
+    # trusted most as the ones nobody checks.
     with db.SessionLocal() as s:
-        n = s.query(db.Approval).count()
-    ck("no approval was ever queued on this rung", n == 0, str(n))
+        decided = (s.query(db.Approval)
+                   .filter(db.Approval.status != "pending").count())
+    ck("nothing on this rung was ever decided", decided == 0, str(decided))
     ck("  and the delta was still recorded", bool(_diff(run_id)[0]))
 
     print("\n— and the section renders the number —")

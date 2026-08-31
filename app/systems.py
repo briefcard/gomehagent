@@ -58,7 +58,7 @@ def autonomy_label(rung: str) -> str:
 
 
 AUTONOMY_MEANING = {
-    "shadow": "Runs and records, sends nothing. You compare against what you'd have done.",
+    "shadow": "Runs and records. Nothing leaves by itself — every draft waits for your tap, and you compare against what you'd have done.",
     "approve_all": "Every output waits for your tap before it leaves.",
     "approve_exceptions": "Routine output sends itself; anything the rules flag waits for you.",
     "auto": "Sends without asking. Alerts on anomaly. Kill criteria are armed.",

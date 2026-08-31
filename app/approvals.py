@@ -32,6 +32,33 @@ def request_approval(kind: str, summary: str, payload: dict, notify: bool = True
                          run_id=run_id, system_id=system_id,
                          channel="whatsapp" if config.WHATSAPP_ENABLED else "email")
         s.add(ap)
+        # ONE ARTIFACT, ONE PENDING DECISION.
+        #
+        # `emit` queues a generic `skill_output` approval for anything it
+        # drafts. A skill may then queue its OWN, kind-specific one — an
+        # article's `seo_new_article`, which actually publishes — and both
+        # carry the same `output_id`. Two rows for one thing is how the
+        # workroom ends up offering "Approve & publish" bound to whichever
+        # `_article_bundle` happened to read first, one of which publishes
+        # nothing.
+        #
+        # It only became reachable on 2026-08-31, when the DEFAULT rung
+        # started queuing at all. Owner, the same day: *"if something is
+        # drafted why does it need in-review, pending approval, then approved?
+        # It should go from Drafted to Approved."* A second pending row for
+        # the same artifact is that bulk, exactly.
+        #
+        # The specific kind wins because it is the one with an executor arm.
+        _oid = str((payload or {}).get("output_id") or "")
+        if _oid and kind != "skill_output":
+            for _gen in (s.query(db.Approval)
+                         .filter(db.Approval.kind == "skill_output",
+                                 db.Approval.status == "pending").all()):
+                if str((_gen.payload or {}).get("output_id") or "") == _oid:
+                    _gen.status = "superseded"
+                    _gen.decided_at = db.utcnow()
+                    _gen.payload = {**(_gen.payload or {}),
+                                    "superseded_by_kind": kind}
         s.commit()
         ap_id = ap.id
 
