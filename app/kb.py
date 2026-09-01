@@ -2038,6 +2038,41 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     # is two facts, and collapsing them would attach one product's copy to
     # another.
     fp = prov.fingerprint(claim, entity_key)
+
+    # ALREADY SETTLED AS BACKGROUND — so it goes there, not into the queue.
+    #
+    # Owner, 2026-08-31: *"it doesnt have to skip but it can pass it directly
+    # into background if it's background information."* A harvester restating
+    # something a person has already filed as "true, and NOT proof" is not
+    # proposing a claim; it is corroborating a decision that has been made.
+    # Filing it as a proposal asks the same question a second time and offers
+    # the answer the person already rejected.
+    #
+    # PROPOSALS ONLY, and that is the whole safety of it. An APPROVED add — a
+    # human in the console, a seed — is a person saying "this is a claim", and
+    # a similarity score does not get to overrule that. And nothing new is
+    # written to the knowledge base either way: the match is against a row
+    # that already exists and already carries a human's approval, so this
+    # records a second source on it rather than populating anything. The
+    # standing rule holds — generators propose, they never populate.
+    if review != prov.APPROVED:
+        _bg = _settled_as_background(tenant, claim, entity_key)
+        if _bg is not None:
+            with db.SessionLocal() as s:
+                row = s.get(db.KbContext, _bg["id"])
+                if row is not None:
+                    seen = list(row.also_seen or [])
+                    if not any(e.get("ref") == (source or "") and
+                               e.get("origin") == origin for e in seen):
+                        seen.append({"origin": origin, "ref": source or "",
+                                     "seen": db.utcnow().isoformat()})
+                        row.also_seen = seen
+                        s.commit()
+            return (f"Filed as background, not proposed as a claim — "
+                    f"{_bg['score']} match with something already on file that "
+                    f"way:\n{_bg['text']}\nRecorded that {origin} says it too. "
+                    f"Retire that background if this really is provable.")
+
     with db.SessionLocal() as s:
         # The same fact arriving from a second source is corroboration, not a
         # second claim. Before this, a re-run of the seed or the harvester
@@ -2916,6 +2951,38 @@ def similar(tenant: str, text: str, *, entity_key: str = "",
 #: retrieve": a pair that merely bears on the same topic is not a duplicate,
 #: and a report that says it is trains people to ignore the report.
 OVERLAP_SCORE = 0.90
+
+
+def _settled_as_background(tenant: str, text: str,
+                           entity_key: str = "") -> dict | None:
+    """The background row this text restates, if a person already filed one.
+
+    Same scope only: the same sentence about a different entity is a different
+    statement, which is why the entity is in every fingerprint here and why
+    `overlaps` drops cross-scope pairs. Diverting one into the other's row
+    would attach one product's note to another.
+
+    Costs the one query embedding a proposal was going to spend on `ensure`
+    anyway. Returns None on any failure — a harvester must not lose a
+    candidate because the index was unreachable.
+    """
+    try:
+        from . import embed
+        want = entity_key or ""
+        live = {c.id: c for c in contexts(tenant)
+                if (c.entity_key or "") == want}
+        if not live:
+            return None
+        hits, _why, _ = embed.search(tenant, "context", text, limit=4,
+                                     min_score=OVERLAP_SCORE)
+        for h in hits:
+            row = live.get(h["row_id"])
+            if row is not None:
+                return {"id": row.id, "text": row.text,
+                        "score": round(h["score"], 3)}
+    except Exception:                                            # noqa: BLE001
+        return None
+    return None
 
 
 def overlaps(tenant: str, min_score: float | None = None,

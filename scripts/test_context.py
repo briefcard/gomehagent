@@ -308,13 +308,64 @@ def main() -> int:
     # paraphrase around 0.70 where text-embedding-3 puts it above 0.90, so the
     # constant is tuned to the embedder in use — the surfaces are unchanged.
     kb.OVERLAP_SCORE = 0.65
-    kb.add_claim("baci", "Trade buyers raise lead time questions first.",
+    # THE OTHER ORDER. A proposal that arrives AFTER the background is routed
+    # into it and never reaches this queue (asserted below). What the flag is
+    # for is the case routing cannot catch: a proposal already sitting here
+    # when somebody files the background, which is every proposal filed before
+    # this existed.
+    kb.add_claim("baci", "Packaging colour is what people notice on arrival.",
                  "", [], status="pending")
+    kb.add_context("baci", "Packaging colour is the thing people notice "
+                           "on arrival.")
     q = c.get(f"/admin/ui?key={KEY}&tab=content&sub=claims&tenant=baci").text
     ck("a proposal restating existing background is flagged there",
        "Already on file as background" in q,
        "approving it promotes to citable proof a sentence somebody "
        "deliberately filed as not being that")
+
+    print("\n— a harvested restatement goes to background, not to the queue —")
+    kb.add_context("baci", "Warm light is unkind to the whole aqua range.",
+                   entity_key="aqua")
+    n_pend = len(kb.pending_claims("baci"))
+    said = kb.add_claim("baci", "Warm light is unkind to the aqua range.",
+                        "", [], status="pending", origin="crawl",
+                        source="https://example/page", entity_key="aqua")
+    ck("the proposal is not filed as a claim",
+       len(kb.pending_claims("baci")) == n_pend, said.splitlines()[0][:70])
+    ck("  it is routed to the background already on file",
+       "Filed as background" in said)
+    _row = [x for x in kb.contexts("baci", entity_key="aqua")
+            if "Warm light" in x.text][0]
+    ck("  and the source is recorded ON that row",
+       any(e.get("ref") == "https://example/page"
+           for e in (_row.also_seen or [])),
+       str(_row.also_seen)[:110])
+    ck("  and nothing new was written to the knowledge base",
+       len([x for x in kb.contexts("baci") if "Warm light" in x.text]) == 1,
+       "the match is against a row a human already approved — this records a "
+       "second source on it, it does not populate anything")
+
+    print("\n— but a person saying 'this IS a claim' is not overruled —")
+    # Counted with the entity named: `claims(tenant)` alone is BRAND-WIDE by
+    # design ("a fact only true of one product must not turn up in a
+    # newsletter about something else"), so a claim about `aqua` is invisible
+    # to it — and counting the wrong population would have read as the
+    # diversion firing.
+    n_cl = len(kb.claims("baci", entity_key="aqua"))
+    kb.add_claim("baci", "Warm light is unkind to the aqua range.",
+                 "lab test", [], origin="human", entity_key="aqua")
+    ck("an APPROVED add is never diverted by a similarity score",
+       len(kb.claims("baci", entity_key="aqua")) == n_cl + 1,
+       "generators propose and never populate; the converse is that a "
+       "person's decision outranks a number")
+
+    print("\n— and scope still separates them —")
+    n2 = len(kb.pending_claims("baci"))
+    kb.add_claim("baci", "Warm light is unkind to the aqua range.", "", [],
+                 status="pending", origin="crawl", entity_key="vera")
+    ck("the same words about another entity are still proposed",
+       len(kb.pending_claims("baci")) == n2 + 1,
+       "diverting it would attach one product's note to another")
 
     print("\n— the Background card shows the pairs, with a way out —")
     bg = c.get(f"/admin/ui?key={KEY}&tab=content&sub=context&tenant=baci").text

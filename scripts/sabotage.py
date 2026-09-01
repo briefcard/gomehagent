@@ -4035,6 +4035,31 @@ SABOTAGES = [
                "approving it promotes to citable proof the exact sentence "
                "somebody filed as not being that",
     },
+    {
+        "name": "a_settled_question_is_not_asked_again",
+        "file": "app/kb.py",
+        "find": "        _bg = _settled_as_background(tenant, claim, entity_key)",
+        "replace": "        _bg = None  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "a harvester restating something a person already filed as "
+               "'true, and NOT proof' goes back into the claim queue as a "
+               "proposal — asking the same question a second time and "
+               "offering the answer the person already rejected. Every "
+               "re-crawl asks it again",
+    },
+    {
+        "name": "a_person_outranks_a_similarity_score",
+        "file": "app/kb.py",
+        "find": "    if review != prov.APPROVED:\n        _bg = _settled_as_background",
+        "replace": "    if True:  # SABOTAGE\n        _bg = _settled_as_background",
+        "suites": ["test_context.py"],
+        "why": "an APPROVED add — a human in the console, a seed — is "
+               "diverted into background by a similarity score, so a person "
+               "saying 'this IS a claim' is overruled by a number. The "
+               "standing rule runs the other way: generators propose and "
+               "never populate, and the converse is that a decision outranks "
+               "a measurement",
+    },
 ]
 
 
