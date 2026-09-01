@@ -4145,9 +4145,22 @@ def _run_blog_article(ctx: Context) -> dict:
     # product photograph. `creative.pick` reads what the piece is about and,
     # on the topic side of the ladder, refuses a product shot outright rather
     # than ranking it last: it is the wrong picture, not a lesser one.
+    # WHOSE FACTS THIS PIECE MAY CITE. `proof_scopes` is coherence's own
+    # field for it — "which entity keys' claims are legitimately ABOUT this
+    # subject" — and it was never passed here, so a TOPIC commitment declared
+    # no scope and `coherence.review` fell back to the topic slug, which is
+    # not an entity key. An article about a location could therefore cite
+    # nothing about its venues without the gate reading it as proof borrowed
+    # from elsewhere.
+    from . import systems as _sysm
+    _also = [k for k in _sysm.entity_list(ctx.params.get("entity_keys") or "")
+             if k != entity_key]
+    _scopes = [k for k in ([entity_key] if entity_key else []) + _also if k]
     _about = coherence.commit(
         "entity" if entity_key else "topic", entity_key or kw_mod.slug(keyword),
-        label=title or keyword)
+        label=title or keyword,
+        also=[k for k in _also if k != entity_key],
+        proof_scopes=_scopes or None)
     _hero = creative.pick(
         ctx.tenant, commitment=_about, fmt="article_hero",
         entity_key=entity_key, prominent=title,
@@ -4332,7 +4345,11 @@ register(Skill(
     # public page under the client's own domain; drafting one against an empty
     # ban list is not a thinner article, it is an unchecked one.
     constitutive=("banned_claims",),
-    params=("keyword", "role", "cluster", "angle", "entity_key", "utterance",
+    params=("keyword", "role", "cluster", "angle", "entity_key",
+            # THE REST OF WHAT THE PIECE IS ABOUT. `entity_key` is the hero;
+            # this is everything else it may cite, for the article whose
+            # subject is a place rather than a thing.
+            "entity_keys", "utterance",
             # An article is one-to-many, so it has a reader in the same sense
             # a campaign does — and it briefs from the same funnel.
             "audience_key",

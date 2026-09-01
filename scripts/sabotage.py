@@ -1132,8 +1132,8 @@ SABOTAGES = [
     {
         "name": "a_named_persona_is_one_that_exists",
         "file": "app/systems.py",
-        "find": '              "audience": _audience_key_check}',
-        "replace": "              }  # SABOTAGE",
+        "find": '              "audience": _audience_key_check,',
+        "replace": "              # SABOTAGE\n              \"_x\": None,",
         "suites": ["test_plans.py", "test_workflow_ui.py"],
         "why": "a plan may name a persona this account has never approved — "
                "free text where every other reference field is checked — and "
@@ -4233,6 +4233,52 @@ SABOTAGES = [
                "time, so a draft naming two entities would carry each brand "
                "claim twice and the coverage percentage would be computed "
                "over a list that double-counts its own contents",
+    },
+    {
+        "name": "a_piece_about_a_place_may_cite_what_is_in_it",
+        "file": "app/kb.py",
+        "find": "        wanted = [k for k in ([entity_key] if entity_key else [])\n                  + list(entity_keys or []) if k]",
+        "replace": "        wanted = [entity_key] if entity_key else []  # SABOTAGE",
+        "suites": ["test_entity_scope.py"],
+        "why": "an article about a LOCATION goes back to seeing brand-wide "
+               "claims only, so the venues that are the evidence for "
+               "'several distinct spaces in one place' are invisible and the "
+               "account's best claim is the one it cannot prove",
+    },
+    {
+        "name": "specificity_is_scored_against_the_nearest_subject",
+        "file": "app/kb.py",
+        "find": "            depth = max((scope_depth(k, r.entity_key, chain) for k in wanted),\n                        default=scope_depth(None, r.entity_key, chain))",
+        "replace": "            depth = scope_depth(wanted[0] if wanted else None, r.entity_key, chain)  # SABOTAGE",
+        "suites": ["test_entity_scope.py"],
+        "why": "with several subjects in scope, every claim is scored against "
+               "the FIRST of them — so the Atrium's own facts rank as a "
+               "distant relative of the Glassbox and sort below brand-wide "
+               "ones, in the article whose whole point is the venues",
+    },
+    {
+        "name": "several_subjects_reach_the_drafter",
+        "file": "app/skill.py",
+        "find": "                        entity_keys=_sysm.entity_list(\n                            params.get(\"entity_keys\") or \"\"),",
+        "replace": "                        entity_keys=[],  # SABOTAGE",
+        "suites": ["test_blog_skill.py", "test_entity_scope.py"],
+        "why": "the plan can say a piece is about several spaces and the run "
+               "drops it on the way to `resolve`, so the field is a "
+               "decoration and the drafter is handed the same narrow pool it "
+               "always had — the shape this repo keeps closing: declared "
+               "here, read nowhere",
+    },
+    {
+        "name": "a_several_entity_field_is_a_reference",
+        "file": "app/systems.py",
+        "find": '              "entity_list": _entity_list_check}',
+        "replace": '              }  # SABOTAGE',
+        "suites": ["test_entity_scope.py"],
+        "why": "a venue nobody approved passes the plan check and reads "
+               "downstream as no scope at all, so a typo silently narrows an "
+               "article back to brand-wide proof — which is exactly how "
+               "`audience_key` accepted a persona this account had never "
+               "approved for a fortnight",
     },
 ]
 

@@ -129,14 +129,33 @@ def banned_claims(tenant: str) -> list[str]:
 
 
 def claims(tenant: str, situations: list[str] | None = None,
-           limit: int = 0, entity_key: str | None = None) -> list[db.KbClaim]:
+           limit: int = 0, entity_key: str | None = None,
+           entity_keys: list[str] | None = None) -> list[db.KbClaim]:
     """Active, unexpired claims, ranked by how well they fit the situation.
 
-    Scoped by entity, and the default is the safe one. With no `entity_key`
-    you get only what is true of the BRAND — a fact that is only true of one
-    product ("generous 32 cm footprint") must not turn up in a newsletter about
-    something else. Name an entity and you get the brand's claims plus that
-    entity's, which is what writing about a product actually needs.
+    Scoped by SUBJECT, and the default is the safe one. With no entity named
+    you get only what is true of the BRAND.
+
+    `entity_keys` is the plural, and it exists because a piece is not always
+    about one thing. Owner, 2026-08-31, on an article covering several venues
+    in one location: *"this article about 'Corporate Events in Miami' hit
+    several different entities in a single space as a value proposition… we
+    definitely want to have more than one entity in this article."* They are
+    right, and the single string could not say it: an article about the
+    LOCATION saw brand-wide claims only, so the venues that are the evidence
+    for "several distinct spaces in one place" were invisible to the drafter.
+
+    THE OLD RULE WAS A TRUTH RULE ENFORCED BY RETRIEVAL, and that was the
+    mistake. It said a fact only true of one product must not turn up in a
+    newsletter about something else. The real constraint is narrower: a fact
+    about one thing must not be ASSERTED OF another — which is
+    `coherence.proof_belongs_to_subject`, a gate that already exists and is
+    already guarded. Hiding the facts was retrieval doing a job it cannot do
+    (it cannot tell citation from attribution) at the cost of a job it can.
+
+    So widening the scope is safe BECAUSE the gate checks attribution, and the
+    caller says which entities are in scope — `coherence.commit(...
+    proof_scopes=…)` is where that decision is already recorded.
 
     Ranking is SPECIFICITY first, strength second. Sorting on strength alone
     ties every "strong" claim and breaks on insertion order — which had a
@@ -157,10 +176,23 @@ def claims(tenant: str, situations: list[str] | None = None,
         # A group's claims come through too. "Every Aqua pitcher is acrylic"
         # is filed once against the collection and is true of each member, so
         # asking about one pitcher must reach it.
-        chain = ancestors(tenant, entity_key) if entity_key else []
-        if entity_key:
+        # One vocabulary for both forms: the singular is a one-item list, so
+        # there is no second code path to keep in step with the first.
+        wanted = [k for k in ([entity_key] if entity_key else [])
+                  + list(entity_keys or []) if k]
+        seen_w: list[str] = []
+        for k in wanted:
+            if k not in seen_w:
+                seen_w.append(k)
+        wanted = seen_w
+        chain: list[str] = []
+        for k in wanted:
+            for a in ancestors(tenant, k):
+                if a not in chain:
+                    chain.append(a)
+        if wanted:
             q = q.filter(db.KbClaim.entity_key.in_(
-                ["", None, entity_key, *chain]))
+                ["", None, *wanted, *chain]))
         else:
             q = q.filter(db.KbClaim.entity_key.in_(["", None]))
         rows = q.all()
@@ -189,7 +221,13 @@ def claims(tenant: str, situations: list[str] | None = None,
             # insertion order, so a product-specific claim and a brand-wide one
             # answering the same question came back in whatever order the rows
             # happened to be in.
-            depth = scope_depth(entity_key, r.entity_key, chain)
+            # SPECIFICITY AGAINST THE NEAREST SUBJECT IN SCOPE. With several
+            # in scope, scoring against one of them would rank a claim about
+            # the Atrium as if it were a distant relative of the Glassbox —
+            # every venue's own facts would sort below brand-wide ones in an
+            # article whose whole point is the venues.
+            depth = max((scope_depth(k, r.entity_key, chain) for k in wanted),
+                        default=scope_depth(None, r.entity_key, chain))
             scored.append((-overlap, -depth,
                            0 if r.strength == "strong" else 1, r))
         scored.sort(key=lambda t: (t[0], t[1], t[2]))

@@ -254,7 +254,8 @@ def _situated(tenant: str, utterance: str, entity_key: str,
 
 
 def resolve(tenant: str, system: str = "", utterance: str = "",
-            contact_id: str = "", entity_key: str = "", audience_key: str = "",
+            contact_id: str = "", entity_key: str = "",
+            entity_keys: list | None = None, audience_key: str = "",
             guidance_also: tuple = (),
             requirements: dict | None = None, tier: int = 3,
             limit: int = DEFAULT_LIMIT) -> dict:
@@ -421,8 +422,14 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # "generous 32 cm footprint" is not a fact about a different product, and
     # labelling it would not make it one.
     if tier >= 2:
+        # THE SCOPE IS COMPUTED ONCE, above the two selections that read it —
+        # `rows` is what the drafter is handed and `_pool` is what the receipt
+        # measures it against, and scoping them differently would report a
+        # narrowing that did not happen.
+        _scope = [k for k in ([entity_key] if entity_key else [])
+                  + list(entity_keys or []) if k]
         rows = kb.claims(tenant, situations=situations.get("detected") or None,
-                         entity_key=entity_key or None, limit=limit * 2)
+                         entity_keys=_scope or None, limit=limit * 2)
         # HOW MUCH WAS HELD BACK, and how much of the pile can never be
         # narrowed. A claim with no situation tag and no entity is brand-wide
         # proof: selectable whenever nobody asks for a situation, which for a
@@ -430,7 +437,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         # with each other on every single draft, so the ratio between them and
         # what actually gets offered IS the clutter, and it belongs on the
         # receipt rather than in somebody's head.
-        _pool = kb.claims(tenant, entity_key=entity_key or None)
+        _pool = kb.claims(tenant, entity_keys=_scope or None)
         _claims_pool = len(_pool)
         _claims_flat = sum(1 for c in _pool
                            if not (c.situations or []) and not c.entity_key)

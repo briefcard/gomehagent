@@ -851,10 +851,19 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
                     "items": [], "notes": [], "coverage": {}, "thin": [],
                     "run_id": run_id}
 
+    from . import systems as _sysm
     bundle = rs.resolve(tenant, system=sk.system_key, tier=sk.tier,
                         utterance=str(params.get("utterance") or ""),
                         contact_id=str(params.get("contact_id") or ""),
                         entity_key=str(params.get("entity_key") or ""),
+                        # AND THE REST OF WHAT THE PIECE IS ABOUT. A hero is
+                        # one thing; a piece about a location is about its
+                        # venues, and each venue's facts are the evidence for
+                        # the brand-level claim that there are several. Empty
+                        # for everything that names one subject, so nothing
+                        # moves for an ordinary run.
+                        entity_keys=_sysm.entity_list(
+                            params.get("entity_keys") or ""),
                         # WHO THIS IS FOR. `resolve` has accepted and used
                         # `audience_key` since it was written; nothing ever
                         # passed it from here, so the one parameter that names

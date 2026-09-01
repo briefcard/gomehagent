@@ -317,6 +317,15 @@ CATALOG = {
                 dict(key="angle", label="Angle (optional)", required=False),
                 dict(key="entity_key", label="Featured entity", required=False,
                      kind="entity"),
+                # THE PIECE THAT IS ABOUT A PLACE, NOT A THING. Owner,
+                # 2026-08-31, on an article covering several venues at one
+                # location: *"we definitely want to have more than one entity
+                # in this article."* `entity_key` is the HERO — the one whose
+                # positioning governs, which is the standing rule — and this
+                # is the rest of what the piece may cite. Blank means the hero
+                # alone, so nothing changes for an article about one thing.
+                dict(key="entity_keys", label="Also about (comma-separated)",
+                     required=False, kind="entity_list"),
             ),
             artifact="cms_article",
             ship="publishes the draft article, behind seo_guard",
@@ -1481,11 +1490,39 @@ def _audience_key_check(tenant: str, value: str) -> str:
                "written for nobody; add one on the Knowledge tab)"))
 
 
+def entity_list(value) -> list[str]:
+    """A plan's several-entity field, as keys. One reader, so the form, the
+    validator and the run cannot disagree about what the owner typed."""
+    if isinstance(value, (list, tuple)):
+        parts = [str(v) for v in value]
+    else:
+        parts = str(value or "").replace("\n", ",").split(",")
+    out: list[str] = []
+    for k in (p.strip() for p in parts):
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
+def _entity_list_check(tenant: str, value: str) -> str:
+    for k in entity_list(value):
+        why = _entity_key_check(tenant, k)
+        if why:
+            return why
+    return ""
+
+
 def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
     """Reference-kind plan fields must point at something real. Blank stays
     allowed — completeness owns 'required'; this owns 'genuine'."""
     checks = {"segment": _segment_key_check, "entity": _entity_key_check,
-              "audience": _audience_key_check}
+              "audience": _audience_key_check,
+              # SEVERAL, EACH CHECKED. A piece about a location is about its
+              # venues, and the list has to be as real as the single one —
+              # `_check_plan_refs` falling through on an unknown kind is
+              # exactly how `audience_key` accepted a persona nobody had
+              # approved for a fortnight.
+              "entity_list": _entity_list_check}
     for f in workflow(key)["plan_fields"]:
         v = str(values.get(f["key"], "") or "").strip()
         if not v:

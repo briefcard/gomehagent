@@ -81,11 +81,11 @@ Writes grounded articles against the keyword map, and publishes them where there
 - **Connections:** —
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`
 - **Skill** `blog_article` — produces `draft`, tier 3, writes=True
-  - parameters: `keyword`, `role`, `cluster`, `angle`, `entity_key`, `utterance`, `audience_key`, `revision_notes`
+  - parameters: `keyword`, `role`, `cluster`, `angle`, `entity_key`, `entity_keys`, `utterance`, `audience_key`, `revision_notes`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `blog_rollout`
 - **Cadence knobs:** `articles_monthly`=4, `horizon_days`=45
-- **Plan fields** (the plan UI; `*` required): `keyword`*, `role` (choice, pillar|support), `cluster`, `angle`, `entity_key` (entity)
+- **Plan fields** (the plan UI; `*` required): `keyword`*, `role` (choice, pillar|support), `cluster`, `angle`, `entity_key` (entity), `entity_keys` (entity_list)
 - **Unit:** one article against one keyword
 - **Artifact:** cms_article
 - **Ship:** publishes the draft article, behind seo_guard
