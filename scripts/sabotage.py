@@ -4210,6 +4210,30 @@ SABOTAGES = [
                "'handmade' can be typed straight into an article by the "
                "control that exists to make articles more accurate",
     },
+    {
+        "name": "review_sees_the_claims_the_draft_was_written_with",
+        "file": "app/admin_ui.py",
+        "find": "    claims = _claims_for_review(tenant, art)",
+        "replace": "    claims = kb.claims(tenant)  # SABOTAGE",
+        "suites": ["test_claim_fix.py"],
+        "why": "the claim margin goes back to brand-wide claims only, so a "
+               "claim scoped to the thing the draft is ABOUT is invisible "
+               "and the sentence it backs still reads 'needs a claim' — "
+               "which is what the owner hit straight after filing one. The "
+               "margin judges a draft against a NARROWER set than `resolve` "
+               "gave the drafter, so the review disagrees with the write",
+    },
+    {
+        "name": "a_brand_claim_is_counted_once_per_draft",
+        "file": "app/admin_ui.py",
+        "find": "    return list(seen.values())",
+        "replace": "    return list(seen.values()) + list(seen.values())  # SABOTAGE",
+        "suites": ["test_claim_fix.py"],
+        "why": "`kb.claims(entity_key=…)` returns brand-wide claims EVERY "
+               "time, so a draft naming two entities would carry each brand "
+               "claim twice and the coverage percentage would be computed "
+               "over a list that double-counts its own contents",
+    },
 ]
 
 

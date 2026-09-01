@@ -10971,6 +10971,69 @@ def _learned_fold(key: str, tenant: str, syskey: str, output_id: str) -> str:
             + "".join(blocks) + "</details>")
 
 
+def _artifact_entities(art) -> list[str]:
+    """Which entities this artifact is ABOUT, from every place that records one.
+
+    `kb.claims(tenant)` is BRAND-WIDE by design — its docstring: "a fact that
+    is only true of one product must not turn up in a newsletter about
+    something else". Correct for selection, and wrong for REVIEW: the claim
+    margin was passing it, so a claim scoped to an entity was invisible and
+    the sentence it backed still read "needs a claim" (owner, 2026-08-31,
+    having just filed one).
+
+    That is the margin holding a draft to a NARROWER standard than the one it
+    was written under: `resolve` gives the drafter brand-wide plus the
+    entity's, and the review read only the first half.
+
+    Three sources because three writers record it, and no one of them is
+    present on every artifact: the ledger row is the decision, `meta` is what
+    the artifact IS, and an ad batch names its own at the top of its board.
+    """
+    import json as _json
+    out: list[str] = []
+
+    def _add(v):
+        v = str(v or "").strip()
+        if v and v not in out:
+            out.append(v)
+
+    _add((getattr(art, "meta", None) or {}).get("entity_key"))
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.Output, str(getattr(art, "output_id", "") or ""))
+            if row is not None:
+                _add(row.entity_key)
+    except Exception:                                            # noqa: BLE001
+        pass
+    if str(getattr(art, "format", "") or "") == "ad_batch":
+        try:
+            batch = _json.loads(str(getattr(art, "body", "") or "")) or {}
+            _add(batch.get("entity_key"))
+            for v in (batch.get("variants") or []):
+                _add(v.get("entity_key"))
+        except Exception:                                        # noqa: BLE001
+            pass
+    return out
+
+
+def _claims_for_review(tenant: str, art) -> list:
+    """The claims a draft may be JUDGED against: the ones it was written with.
+
+    Brand-wide plus every entity the artifact names. Unioned by id rather than
+    concatenated — `kb.claims(entity_key=…)` returns brand-wide each time, so
+    a two-entity artifact would otherwise carry every brand claim twice and
+    `annotate` would count them twice.
+    """
+    seen: dict = {}
+    ents = _artifact_entities(art)
+    for row in kb.claims(tenant):
+        seen[row.id] = row
+    for ent in ents:
+        for row in kb.claims(tenant, entity_key=ent):
+            seen[row.id] = row
+    return list(seen.values())
+
+
 def _grounding_card(tenant: str, art, key: str = "") -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
@@ -11012,7 +11075,7 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
                               for v in (_json.loads(body) or {}).get("variants", []))
         except Exception:                                        # noqa: BLE001
             return ""
-    claims = kb.claims(tenant)
+    claims = _claims_for_review(tenant, art)
     plain = claim_trace.plain_text(body)
     rep = claim_trace.annotate(body, claims)
     if not rep.get("total"):

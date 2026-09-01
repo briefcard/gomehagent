@@ -209,6 +209,83 @@ def main() -> int:
        "a path from text a model wrote to a row every draft may assert stays "
        "closed unless a person opens it")
 
+    print("\n— an ENTITY-scoped claim backs the sentence it was filed for —")
+    # Owner, 2026-08-31: *"when I add an entity to the claim, it still shows as
+    # 'needs a claim'."* `kb.claims(tenant)` is brand-wide by design — right
+    # for selection, wrong for REVIEW — so the margin judged a draft against a
+    # NARROWER set than `resolve` gave the drafter, and a claim scoped to the
+    # thing the draft is about was invisible to it.
+    import json as _json
+    kb.add_claim("baci", "Glassbox seats 180 for dinner.", "fire cert", [],
+                 entity_key="glassbox")
+    SENT = "Glassbox seats 180 for dinner."
+    cases = (
+        ("blog", "cms_article", f"<p>{SENT}</p>", {}, "entity on the ledger row"),
+        ("campaign_email", "email", f"<p>{SENT}</p>", {}, "same, for an email"),
+        ("ad_creative", "ad_batch",
+         _json.dumps({"entity_key": "glassbox",
+                      "variants": [{"text": SENT, "output_id": "v1"}]}),
+         {}, "an ad batch names its entity at the top of its board"),
+        ("blog", "cms_article", f"<p>{SENT}</p>",
+         {"entity_key": "glassbox"}, "entity only in ArtifactBody.meta"),
+    )
+    for syskey, fmt, body, meta, why in cases:
+        with db.SessionLocal() as s_:
+            o = db.Output(tenant="baci", system_key=syskey, format=fmt,
+                          status="recorded",
+                          entity_key="" if meta else "glassbox", body="x")
+            s_.add(o)
+            s_.commit()
+            a = db.ArtifactBody(tenant="baci", output_id=o.id,
+                                system_key=syskey, format=fmt, body=body,
+                                bytes=len(body), meta=dict(meta))
+            s_.add(a)
+            s_.commit()
+            a = s_.get(db.ArtifactBody, a.id)
+            s_.expunge(a)
+        ck(f"  {syskey:15s} — {why}",
+           "glassbox" in admin_ui._artifact_entities(a)
+           and any(c.entity_key == "glassbox"
+                   for c in admin_ui._claims_for_review("baci", a)),
+           str(admin_ui._artifact_entities(a)))
+        card = admin_ui._grounding_card("baci", a, KEY)
+        # THE POSITIVE SIGNAL. Asserting only that "needs a claim" is absent
+        # passes when the card renders EMPTY, which is what a broken margin
+        # does — the suite reported [ MISSED ] against exactly that on
+        # 2026-08-31. What is asserted is that the margin ran and found it
+        # backed.
+        ck("    the margin says it is grounded",
+           # `>` bounds it: "0% grounded" is a substring of "100% grounded",
+           # which is how this first read as a failure on a passing margin.
+           "% grounded" in card and ">0% grounded" not in card,
+           card[card.find("% grounded") - 4:card.find("% grounded") + 10]
+           if "% grounded" in card else "the card rendered nothing")
+        ck("    and does not read 'needs a claim'", "needs a claim" not in card)
+
+    print("\n— and a brand claim is not counted twice on a two-entity draft —")
+    kb.add_entity("baci", "product", "atrium", "Atrium")
+    kb.add_claim("baci", "Every room has step-free access.", "survey", [])
+    with db.SessionLocal() as s_:
+        o = db.Output(tenant="baci", system_key="blog", format="cms_article",
+                      status="recorded", entity_key="glassbox", body="x")
+        s_.add(o)
+        s_.commit()
+        a = db.ArtifactBody(tenant="baci", output_id=o.id, system_key="blog",
+                            format="cms_article", body=f"<p>{SENT}</p>",
+                            bytes=30, meta={"entity_key": "atrium"})
+        s_.add(a)
+        s_.commit()
+        a = s_.get(db.ArtifactBody, a.id)
+        s_.expunge(a)
+    rows = admin_ui._claims_for_review("baci", a)
+    ck("both entities are in scope",
+       set(admin_ui._artifact_entities(a)) == {"atrium", "glassbox"},
+       str(admin_ui._artifact_entities(a)))
+    ck("  and every claim appears once",
+       len(rows) == len({c.id for c in rows}),
+       "kb.claims(entity_key=…) returns brand-wide each time, so "
+       "concatenating would count every brand claim once per entity")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
