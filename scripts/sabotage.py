@@ -3863,6 +3863,31 @@ SABOTAGES = [
                "a fully built join reachable from nowhere, which is the exact "
                "shape the reachability register was written to find",
     },
+    {
+        "name": "a_retired_rung_never_breaks_a_button",
+        "file": "app/systems.py",
+        "find": '    return v if v in AUTONOMY else "shadow"',
+        "replace": "    return v  # SABOTAGE",
+        "suites": ["test_systems.py"],
+        "why": "a System row still holding `approve_all` — a skipped "
+               "migration, or a row written by an older process between a "
+               "deploy and that migration — reaches AUTONOMY.index() and "
+               "raises, so Down-a-rung 500s. The failure appears days after "
+               "the merge that caused it, on a button, with nothing "
+               "connecting the two",
+    },
+    {
+        "name": "a_retired_rung_word_still_posts",
+        "file": "app/systems.py",
+        "find": '            fields["autonomy"] = AUTONOMY_ALIASES.get(fields["autonomy"],',
+        "replace": '            pass  # SABOTAGE\n            _x = (AUTONOMY_ALIASES.get(fields["autonomy"],',
+        "suites": ["test_systems.py"],
+        "why": "a bookmarked rung form, an old digest link, or any client "
+               "still posting `approve_all` is refused with 'autonomy must be "
+               "one of' — a 400 on a word that was valid yesterday, which "
+               "reads to the owner as the console being broken rather than as "
+               "a rung having been renamed",
+    },
 ]
 
 

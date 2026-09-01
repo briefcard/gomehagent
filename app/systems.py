@@ -49,6 +49,22 @@ AUTONOMY = ("shadow", "approve_exceptions", "auto")
 #: Words that no longer name a rung, and what they mean now.
 AUTONOMY_ALIASES = {"approve_all": "shadow"}
 
+
+def rung(value) -> str:
+    """The rung a stored value MEANS. One reader, so a retired word is safe.
+
+    `db._migrate_rungs` moves `approve_all` rows onto `shadow` at startup, but
+    a migration that is skipped — or a row written by an older process between
+    a deploy and that migration — would otherwise reach `AUTONOMY.index()`,
+    which raises. `demote` did exactly that, unguarded, so a stale row turned
+    the Down-a-rung button into a 500 days after the merge that caused it.
+
+    Accepts a System row or a bare string.
+    """
+    v = getattr(value, "autonomy", value) or "shadow"
+    v = AUTONOMY_ALIASES.get(v, v)
+    return v if v in AUTONOMY else "shadow"
+
 #: What each rung is CALLED to a person. `shadow` is the stored value and does
 #: not change — renaming a column to improve a label is how a migration gets
 #: written for a sentence. Owner, 2026-08-31: "We can call it the 'Learning
@@ -756,10 +772,7 @@ def stats(system_id: str) -> dict:
 
 def can_promote(system: db.System) -> dict:
     """Is the next rung earned? Returns the target and why not, if not."""
-    try:
-        i = AUTONOMY.index(system.autonomy or "shadow")
-    except ValueError:
-        i = 0
+    i = AUTONOMY.index(rung(system))
     if i >= len(AUTONOMY) - 1:
         return {"can": False, "target": "", "why": "already fully autonomous"}
     target = AUTONOMY[i + 1]
@@ -858,7 +871,7 @@ def demote(system_id: str, reason: str = "") -> dict:
     sysrow = get(system_id)
     if not sysrow:
         return {"error": "unknown system"}
-    i = max(0, AUTONOMY.index(sysrow.autonomy or "shadow") - 1)
+    i = max(0, AUTONOMY.index(rung(sysrow)) - 1)
     out = update(system_id, autonomy=AUTONOMY[i])
     if reason:
         note(sysrow.tenant, sysrow.key, f"Demoted to {AUTONOMY[i]}: {reason}")

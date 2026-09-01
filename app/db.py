@@ -2383,10 +2383,18 @@ def init_db() -> None:
     try:
         _auto_migrate()
         _migrate_constraints()
-        _migrate_rungs()
     except Exception:  # noqa: BLE001 — never block startup on migration
         import logging
         logging.getLogger("db").exception("auto-migrate failed")
+    try:
+        # ITS OWN TRY, deliberately. Sharing the block above meant a failure
+        # in either of those skipped this one entirely and logged somebody
+        # else's name — and a row left on a rung the ladder no longer has is
+        # the kind of thing that surfaces as a 500 on a button, days later.
+        _migrate_rungs()
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("db").exception("rung migration failed")
     try:
         _backfill_provenance()
     except Exception:  # noqa: BLE001 — a failed backfill must not block boot

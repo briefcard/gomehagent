@@ -189,9 +189,48 @@ def main() -> int:
     check("the ladder carries no two rungs that behave alike",
           len(systems.AUTONOMY) == 3 and "approve_all" not in systems.AUTONOMY,
           str(systems.AUTONOMY))
-    check("  and the word it dropped still resolves",
-          systems.AUTONOMY_ALIASES.get("approve_all") == "shadow",
-          "a bookmarked form must not 400 on a word that used to be valid")
+    # THE ALIAS DOES A JOB, so the job is what is asserted. Reading the dict
+    # back only proves the dict; a bookmarked form or an old digest link posts
+    # the retired word to `update`, and that is the path that must not 400.
+    _al = systems.find("agency", "lead_responder")
+    _r = systems.update(_al.id, autonomy="approve_all")
+    check("  and posting the word it dropped still works",
+          _r.get("ok") is True and
+          systems.find("agency", "lead_responder").autonomy == "shadow",
+          str(_r)[:80])
+
+    # A ROW LEFT ON A RETIRED RUNG MUST NOT BREAK A BUTTON. `_migrate_rungs`
+    # moves them at startup, but a skipped migration — or a row written by an
+    # older process between a deploy and that migration — reached
+    # `AUTONOMY.index()`, which raises. `demote` did exactly that, unguarded,
+    # so the Down-a-rung control would have 500'd days after the merge.
+    _stale = systems.find("agency", "blog") or systems.create("agency", "blog")
+    with db.SessionLocal() as _s:
+        _s.get(db.System, _stale.id).autonomy = "approve_all"
+        _s.commit()
+    _stale = systems.find("agency", "blog")
+    check("a stale rung value reads as the rung that absorbed it",
+          systems.rung(_stale) == "shadow", _stale.autonomy)
+    check("  and demoting from it does not raise",
+          systems.demote(_stale.id).get("ok") is True,
+          "one reader for the rung, so a retired word is never indexed")
+    check("  and promoting from it aims at the right target",
+          systems.can_promote(systems.find("agency", "blog"))["target"]
+          == "approve_exceptions", "")
+
+    # A value that is neither a rung NOR a retired word. The alias table
+    # rescues `approve_all`; only the fallback rescues this, and a row can
+    # hold anything after a bad import, a hand-edited database or a client
+    # that posted before a deploy. Buttons must survive it.
+    with db.SessionLocal() as _s:
+        _s.get(db.System, _stale.id).autonomy = "wharrgarbl"
+        _s.commit()
+    _stale = systems.find("agency", "blog")
+    check("an unrecognised rung value reads as the safest rung",
+          systems.rung(_stale) == "shadow", str(_stale.autonomy))
+    check("  and it does not raise on the way down either",
+          systems.demote(_stale.id).get("ok") is True,
+          "AUTONOMY.index() on a value that is not in AUTONOMY is a 500")
 
     lead = systems.find("agency", "lead_responder")
     verdict = systems.can_promote(lead)

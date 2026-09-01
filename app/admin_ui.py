@@ -1764,7 +1764,7 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
 # ---------------------------------------------------------------------------
 
 def _rung(current: str) -> str:
-    at = systems.AUTONOMY.index(current if current in systems.AUTONOMY else "shadow")
+    at = systems.AUTONOMY.index(systems.rung(current))
     steps = "".join(
         f'<span class="step {"at" if i == at else ("done" if i < at else "")}">'
         f'{_esc(systems.autonomy_label(r))}</span>'
