@@ -274,6 +274,84 @@ def _named_in_strings() -> set:
     return out
 
 
+def _returned_keys(fn: ast.AST) -> list[str]:
+    """The dict keys a function RETURNS. Its output contract, when it has one.
+
+    This codebase returns dicts, not types — `{"ok": …, "error": …}` is the
+    shape almost everything speaks. A signature alone therefore says nothing
+    about what a caller gets, which is why `test_control_piping` already walks
+    returns to find warnings nothing renders. Same walk, kept here so the
+    register can state an output rather than shrug at one.
+    """
+    keys: set[str] = set()
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict):
+            for k in n.value.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    keys.add(k.value)
+    return sorted(keys)
+
+
+def _params(fn: ast.AST) -> list[str]:
+    """Parameter names, `?` marking the ones with a default."""
+    a = fn.args
+    req = [x.arg for x in a.posonlyargs] + [x.arg for x in a.args]
+    n_def = len(a.defaults)
+    out = [f"{x}?" if i >= len(req) - n_def else x for i, x in enumerate(req)]
+    if a.vararg:
+        out.append("*" + a.vararg.arg)
+    out += [f"{x.arg}?" for x in a.kwonlyargs]
+    if a.kwarg:
+        out.append("**" + a.kwarg.arg)
+    return out
+
+
+def function_map() -> list[dict]:
+    """Every public function: what goes IN, what comes OUT, what connects.
+
+    Owner, 2026-08-31: *"make sure we update the register in the process to
+    show the inputs outputs and connections of all the functions."*
+
+    Connections are computed from attribute calls (`mod.fn(...)`) across
+    `app/` and `scripts/`, which is how this codebase actually calls across
+    modules. Two honest limits, both already in UNCOVERED: a name resolved at
+    runtime reads as no connection, and a same-module call is not a connection
+    between modules — it is the module doing its job.
+    """
+    trees = {p.name: _tree(p) for p in APP}
+    # who calls what, by ATTRIBUTE name, with the caller's file
+    calls: dict[str, set] = collections.defaultdict(set)
+    for name, tree in list(trees.items()) + [(p.name, _tree(p)) for p in SCRIPTS]:
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+                calls[n.func.attr].add(name)
+    routes = {r["fn"]: f'{r["verb"]} {r["path"]}' for r in http_routes()}
+    out = []
+    for p in APP:
+        tree = trees[p.name]
+        for n in tree.body:
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if n.name.startswith("_"):
+                continue
+            ret = ast.unparse(n.returns) if n.returns else ""
+            callers = sorted(calls.get(n.name, set()) - {p.name})
+            callees = sorted({
+                c.func.attr for c in ast.walk(n)
+                if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                and isinstance(getattr(c.func, "value", None), ast.Name)})
+            out.append({
+                "module": p.name, "fn": n.name,
+                "params": _params(n),
+                "returns": ret,
+                "keys": _returned_keys(n),
+                "route": routes.get(n.name, ""),
+                "called_by": callers,
+                "calls": callees[:12],
+            })
+    return out
+
+
 def unreached_functions() -> list[dict]:
     """Public module-level functions nothing calls, names it, or routes to."""
     used = _attr_names(list(APP) + list(SCRIPTS))
@@ -391,7 +469,8 @@ def build() -> dict:
             "rungs": rungs, "ships": ships, "unreached": unreached,
             "tables": tables, "empty": sorted(empty),
             "duplicate": sorted(duplicate), "crossover": sorted(crossover),
-            "uncovered": list(UNCOVERED)}
+            "uncovered": list(UNCOVERED),
+            "functions": function_map()}
 
 
 DOC = ROOT / "REGISTER.md"
@@ -459,6 +538,35 @@ def markdown(reg: dict) -> str:
             L.append(f"| `{t['table']}` | "
                      f"`{owners.get(t['table'], '')}` | "
                      f"{', '.join(t['writers'])} |")
+    # --- inputs, outputs, connections, per function ------------------------
+    L += ["", "---", "",
+          "## Every public function: in, out, and what connects",
+          "",
+          "Owner, 2026-08-31: *\"show the inputs outputs and connections of "
+          "all the functions.\"* `in` is the signature, `?` marking a "
+          "parameter with a default. `out` is the return annotation where "
+          "there is one, otherwise the KEYS the function returns — this "
+          "codebase speaks dicts, so a signature alone says nothing about "
+          "what a caller gets. `from` is every other module that calls the "
+          "name; a function with **from nothing** is in the EMPTY list above.",
+          "",
+          "Two limits, both in Coverage: a name resolved at runtime reads as "
+          "no connection, and a call inside its own module is the module "
+          "doing its job rather than a connection between modules.", ""]
+    by_mod: dict = collections.defaultdict(list)
+    for f in reg["functions"]:
+        by_mod[f["module"]].append(f)
+    for mod in sorted(by_mod):
+        L += [f"### `{mod}`", ""]
+        for f in sorted(by_mod[mod], key=lambda x: x["fn"]):
+            out = f["returns"] or (", ".join(f["keys"][:6]) if f["keys"] else "—")
+            line = (f"- **`{f['fn']}`**({', '.join(f['params'])}) → `{out}`")
+            if f["route"]:
+                line += f"  ·  route `{f['route']}`"
+            line += ("  ·  from " + ", ".join(f"`{c}`" for c in f["called_by"])
+                     if f["called_by"] else "  ·  **from nothing**")
+            L.append(line)
+        L.append("")
     return "\n".join(L).rstrip() + "\n"
 
 

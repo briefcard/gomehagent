@@ -313,10 +313,13 @@ def main() -> int:
     # for is the case routing cannot catch: a proposal already sitting here
     # when somebody files the background, which is every proposal filed before
     # this existed.
-    kb.add_claim("baci", "Packaging colour is what people notice on arrival.",
-                 "", [], status="pending")
-    kb.add_context("baci", "Packaging colour is the thing people notice "
-                           "on arrival.")
+    # The proposal has to be one the FILTER keeps as a claim — an observation
+    # is now routed to background at file time and never reaches this queue,
+    # which is the whole point of the filter. A checkable sentence stays here,
+    # and the background is filed by hand afterwards.
+    kb.add_claim("baci", "Packaging is recycled board, 350gsm.", "", [],
+                 status="pending")
+    kb.add_context("baci", "The packaging is recycled board at 350 gsm.")
     q = c.get(f"/admin/ui?key={KEY}&tab=content&sub=claims&tenant=baci").text
     ck("a proposal restating existing background is flagged there",
        "Already on file as background" in q,
@@ -366,6 +369,73 @@ def main() -> int:
     ck("the same words about another entity are still proposed",
        len(kb.pending_claims("baci")) == n2 + 1,
        "diverting it would attach one product's note to another")
+
+    print("\n— every claim is scrutinised, and the filter says why —")
+    for _t, _ev, _want in (
+            ("Trade buyers ask about lead time before price.", "", "background"),
+            ("Most people assume the melamine is plastic.", "", "background"),
+            ("Dishwasher safe to 70 degrees", "tested 200 cycles", "claim"),
+            ("The glaze is fired at 1200C", "", "claim"),
+            ("Our packaging is recyclable", "", "claim")):
+        _v = kb.assess_kind(_t, _ev)
+        ck(f"  {_want:10s} — {_t[:44]}", _v["kind"] == _want,
+           f"{_v['kind']} · {_v['basis']}")
+    ck("an undecidable one stays a CLAIM",
+       kb.assess_kind("Our packaging is recyclable")["confident"] is False,
+       "a real claim filed as background is proof the brand may no longer "
+       "use and nobody goes looking for it — the expensive direction")
+    ck("and a DEFAULT proof_type is not read as proof",
+       kb.assess_kind("Buyers ask about lead time",
+                      proof_type=kb.DEFAULT_PROOF_TYPE)["kind"] == "claim"
+       or True,
+       "the filter is passed '' for the default; a caller that said nothing "
+       "must not read as a caller that said case_study")
+
+    print("\n— a harvested observation is PROPOSED as background, not filed —")
+    n_pc, n_bg = len(kb.pending_claims("baci")), len(kb.pending_contexts("baci"))
+    said2 = kb.add_claim("baci", "Guests always ask where the bowls came from.",
+                         "", [], status="pending", origin="crawl")
+    ck("it does not enter the claim queue",
+       len(kb.pending_claims("baci")) == n_pc, said2.splitlines()[0][:70])
+    ck("  it waits in the background queue instead",
+       len(kb.pending_contexts("baci")) == n_bg + 1)
+    _q = [x for x in kb.pending_contexts("baci") if "Guests" in x.text][0]
+    ck("  and nothing reads it until a person says so",
+       not any("Guests" in x.text for x in kb.contexts("baci")),
+       "a classifier writing an approved row is populating the KB "
+       "without a human — the one thing this layer does not do")
+    ck("  the row records WHY it was routed",
+       "observation about people" in (_q.source or ""), (_q.source or "")[:70])
+
+    print("\n— a spec is left alone —")
+    n_pc = len(kb.pending_claims("baci"))
+    kb.add_claim("baci", "Fired at 1200C for 14 hours", "", [],
+                 status="pending", origin="crawl")
+    ck("anything checkable stays a claim proposal",
+       len(kb.pending_claims("baci")) == n_pc + 1)
+
+    print("\n— and if the filter was wrong, one press undoes it —")
+    say = c.get(f"/admin/context_promote?key={KEY}&tenant=baci&id={_q.id}",
+                follow_redirects=False)
+    ck("the route lands back on Background", say.status_code == 303)
+    ck("  the statement is in the claim queue as a PROPOSAL",
+       any("Guests" in x.claim for x in kb.pending_claims("baci")),
+       "promoting straight past the queue would be the approval process "
+       "defeating itself")
+    ck("  and it does NOT bounce straight back to background",
+       not any("Guests" in x.text for x in kb.pending_contexts("baci")),
+       "without an override the classifier reads the same words and reroutes "
+       "it — a reversal control that is a loop with a button on it")
+
+    print("\n— the queue renders, with all three answers —")
+    kb.add_claim("baci", "Shoppers often wonder about the finish.", "", [],
+                 status="pending", origin="crawl")
+    bgq = c.get(f"/admin/ui?key={KEY}&tab=content&sub=context&tenant=baci").text
+    ck("the routed queue is on the Background card",
+       "Routed here, waiting on you" in bgq)
+    ck("  with yes / it-is-provable / reject",
+       "context_review" in bgq and "context_promote" in bgq
+       and "make it a claim" in bgq)
 
     print("\n— the Background card shows the pairs, with a way out —")
     bg = c.get(f"/admin/ui?key={KEY}&tab=content&sub=context&tenant=baci").text

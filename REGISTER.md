@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **210** (210 reached)
+- HTTP routes: **212** (212 reached)
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -157,3 +157,1437 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 | `ToolCall` | `toolcalls.py` | toolcalls.py |
 | `User` | `` | portal.py, tenants.py, web.py |
 | `WaMessage` | `` | telegram.py, whatsapp.py |
+
+---
+
+## Every public function: in, out, and what connects
+
+Owner, 2026-08-31: *"show the inputs outputs and connections of all the functions."* `in` is the signature, `?` marking a parameter with a default. `out` is the return annotation where there is one, otherwise the KEYS the function returns — this codebase speaks dicts, so a signature alone says nothing about what a caller gets. `from` is every other module that calls the name; a function with **from nothing** is in the EMPTY list above.
+
+Two limits, both in Coverage: a name resolved at runtime reads as no connection, and a call inside its own module is the module doing its job rather than a connection between modules.
+
+### `ad_craft.py`
+
+- **`angles_for`**(evidence?) → `tuple`  ·  from `skill_pack.py`, `test_ad_craft.py`
+- **`as_prompt`**(findings) → `str`  ·  from `skill_pack.py`
+- **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
+- **`levers_present`**(text, levers) → `list[str]`  ·  from `test_ad_craft.py`
+- **`offer_position`**(body, offer) → `int`  ·  from `skill_pack.py`, `test_ad_craft.py`
+- **`parse`**(raw) → `dict`  ·  from `bundle.py`, `register.py`, `skill_pack.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_skill_conformance.py`, `test_spend_complete.py`
+- **`review`**(body?, headline?, angle?, offer?, levers?, urgency_backed_by?, proof?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_positioning.py`
+- **`score`**(findings) → `dict`  ·  from `skill_pack.py`, `test_ad_craft.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keyword_progress.py`, `test_keywords.py`, `web.py`
+
+### `admin_ui.py`
+
+- **`approval_title`**(a, arts?) → `str`  ·  from `test_review_tab.py`
+- **`artifact_label`**(art) → `str`  ·  from `test_article_review.py`, `test_artifact_identity.py`
+- **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_grounding.py`, `web.py`
+- **`render_assurance`**(key, tenant?, days?, system?, rule?, started?, page?, gap?) → `str`  ·  from `test_assurance_tab.py`, `test_claim_trace.py`, `test_kb_ui.py`, `web.py`
+- **`render_brand`**(key, tenant?, msg?, err?, derive_voice?) → `str`  ·  from `test_ban_list.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_kb_ui.py`, `web.py`
+- **`render_connect`**(link, tenant, rows, msg?, err?) → `str`  ·  from `web.py`
+- **`render_content`**(key, tenant?, started?, err?, msg?, cpage?, sub?, q?, flt?, corigin?) → `str`  ·  from `test_brand_sources.py`, `test_creative_batch.py`, `test_draft_sync.py`, `test_kb_ui.py`, `test_provenance.py`, `test_review_tab.py`, `test_ship_section.py`, `web.py`
+- **`render_diagnostics`**(key, tenant?, days?, level?, system?, limit?, live?, view?) → `str`  ·  from `test_diagnostics_surface.py`, `web.py`
+- **`render_intake`**(link, tenant, step, done, total, waiting, saved?) → `str`  ·  from `web.py`
+- **`render_kb`**(key, tenant?, err?, msg?, sub?, q?, state?, page?) → `str`  ·  from `test_console_controls.py`, `test_kb_ui.py`, `web.py`
+- **`render_plan`**(key, tenant?, msg?, err?, pick?, days?, probe?, sub?) → `str`  ·  from `test_blog_readiness.py`, `test_console_controls.py`, `test_plan_tab.py`, `test_ship_section.py`, `web.py`
+- **`render_schema`**(key, tenant?, sub?, q?, state?, page?, msg?, err?) → `str`  ·  from `test_kb_ui.py`, `web.py`
+- **`render_systems`**(key, tenant?, msg?, err?, system?, ppage?, sub?, wf?) → `str`  ·  from `test_console_controls.py`, `web.py`
+- **`render_workroom`**(key, output_id, art, kw, ap, ok?, err?) → `str`  ·  from `test_queue_approval.py`, `test_workroom_email.py`, `web.py`
+- **`set_theme`**(value) → `None`  ·  from `web.py`
+
+### `approvals.py`
+
+- **`apply_decision`**(ap_id, decision) → `str`  ·  from `test_campaign_variety.py`, `test_draft_sync.py`, `test_systems.py`, `web.py`
+- **`attach_esp_push`**(run_id, push) → `int`  ·  from `skill_pack.py`
+- **`autonomy_stats`**(days?) → `dict`  ·  from `web.py`
+- **`decide`**(token) → `str`  ·  route `GET /decide/{token}`  ·  from `test_article_review.py`, `web.py`
+- **`decided_in_console`**(ap) → `bool`  ·  from `admin_ui.py`, `digest.py`, `web.py`
+- **`notify_pending`**(title?) → `int`  ·  from `command_agent.py`, `ops_jobs.py`, `skills.py`, `web.py`, `worker.py`
+- **`pending_count`**(tenant?) → `int`  ·  from `admin_ui.py`, `test_draft_sync.py`
+- **`reconcile_drafts`**() → `dict`  ·  from `ops_jobs.py`, `test_draft_sync.py`
+- **`request_approval`**(kind, summary, payload, notify?, run_id?, system_id?) → `str`  ·  from `command_agent.py`, `correlate.py`, `metrics.py`, `ops_jobs.py`, `seed_demo.py`, `seo_tools.py`, `shopify_webhooks.py`, `skill.py`, `skills.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_digest.py`, `test_draft_sync.py`, `test_replies.py`, `test_review_tab.py`, `test_ship_section.py`, `test_systems.py`, `test_systems_board.py`, `web.py`, `worker.py`
+- **`withdraw`**(run_id, why) → `int`  ·  from `skill_pack.py`, `test_workroom_email.py`
+
+### `archive.py`
+
+- **`backfill_bodies`**(tenant, limit?) → `dict`  ·  from `web.py`
+- **`chunks`**(text, size?) → `list[str]`  ·  **from nothing**
+- **`clean`**(text) → `str`  ·  from `test_archive.py`, `worker.py`
+- **`fetch_attachments`**(tenant, limit?) → `dict`  ·  from `web.py`
+- **`for_thread`**(tenant, thread_id) → `list[dict]`  ·  from `resolve.py`, `test_archive.py`
+- **`index`**(tenant, kind?, limit?) → `dict`  ·  from `admin_ui.py`, `creative.py`, `data_tools.py`, `google_seo.py`, `skill_pack.py`, `systems.py`, `test_archive.py`, `test_context.py`, `test_craft.py`, `test_creative_batch.py`, `test_digest.py`, `test_dossier.py`, `test_grounding.py`, `test_hosting.py`, `test_omnisend.py`, `test_plan_tab.py`, `test_preview_links.py`, `test_review_tab.py`, `test_workflow_ui.py`, `web.py`
+- **`indexable`**(bucket, sender, text) → `tuple[bool, str]`  ·  from `web.py`, `worker.py`
+- **`search`**(tenant, query, kinds?, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `extract.py`, `fitness.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `resolve.py`, `skill_pack.py`, `systems.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_harvest.py`, `test_moments.py`, `test_open_defects.py`, `test_render_smoke.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
+- **`store_document`**(tenant, doc_id, text) → `int`  ·  from `test_archive.py`
+- **`store_email`**(tenant, gmail_message_id, body) → `int`  ·  from `test_archive.py`
+
+### `artifact_check.py`
+
+- **`blocking`**(findings) → `list[dict]`  ·  from `test_artifact_check.py`
+- **`check`**(doc, kind?) → `list[dict]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_claim_trace.py`, `test_seo_guard.py`, `triage.py`, `web.py`, `wordpress_seo.py`
+
+### `assurance.py`
+
+- **`by_system`**(tenant?, days?) → `list[dict]`  ·  from `admin_ui.py`, `test_assurance_tab.py`
+- **`catches`**(tenant?, days?, limit?, system_key?, rule?) → `list[dict]`  ·  from `admin_ui.py`, `test_assurance_tab.py`, `web.py`
+- **`edited_share`**(tenant?, days?) → `dict`  ·  **from nothing**
+- **`navigability`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_assurance_tab.py`
+- **`record`**(tenant, source?, checked?, caught?, verdict?, system_key?, run_id?, output_id?, attempt?, grounded?, thin?) → `str`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
+- **`report`**(tenant?, days?) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `diagnostics.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+- **`thin_runs`**(tenant?, days?, limit?, system_key?, gap?) → `list[dict]`  ·  from `admin_ui.py`, `test_assurance_tab.py`
+
+### `baci_backoffice.py`
+
+- **`context`**() → `dict`  ·  from `command_agent.py`
+- **`create_company_document`**(doc_type?, status?, expires_at?, drive_url?, drive_file_id?, filename?, notes?) → `dict`  ·  from `command_agent.py`
+- **`create_shipment`**(reference?, origin?, status?, eta?, carrier?, tracking?, notes?, lines?, allow_duplicate?) → `dict`  ·  from `command_agent.py`
+- **`enabled`**() → `bool`  ·  **from nothing**
+- **`get_shipment`**(shipment_id) → `dict`  ·  from `command_agent.py`
+- **`list_company_documents`**() → `list[dict]`  ·  **from nothing**
+- **`match`**(query) → `list[dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `oauth.py`, `ops_commands.py`, `test_results.py`, `web.py`
+- **`register_document`**(shipment_id, doc_type?, status?, drive_url?, drive_file_id?, filename?, notes?) → `dict`  ·  from `command_agent.py`
+- **`update_document`**(shipment_id, doc_id, **fields) → `dict`  ·  from `command_agent.py`
+- **`update_shipment`**(shipment_id, **fields) → `dict`  ·  from `command_agent.py`
+
+### `brand_theme.py`
+
+- **`approve`**(tenant, edits?) → `dict`  ·  from `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`
+- **`derive`**(tenant) → `dict`  ·  from `test_brand_theme.py`, `web.py`
+- **`live_theme`**(tenant) → `dict`  ·  from `admin_ui.py`, `links.py`, `skill_pack.py`, `test_brand_theme.py`
+- **`proposed`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_brand_theme.py`
+- **`status`**(tenant) → `dict`  ·  from `admin_ui.py`, `portal_ui.py`, `test_brand_theme.py`, `test_connect_ui.py`, `test_credentials.py`, `test_oauth.py`, `test_review_ui.py`, `test_shopify_oauth.py`, `web.py`
+
+### `brief.py`
+
+- **`assemble`**(tenant, text, sender?, model_fn?) → `Brief`  ·  from `portal_ui.py`, `test_brief.py`, `test_client_report.py`, `test_metrics.py`, `test_selection.py`, `web.py`
+- **`classify`**(text, sender?, model_fn?) → `dict`  ·  **from nothing**
+- **`diagnose`**(classified, enriched, sources_ok?, tenant?) → `tuple[list[str], str]`  ·  **from nothing**
+- **`enrich`**(domain) → `tuple[dict, list[str], list[str]]`  ·  **from nothing**
+
+### `bundle.py`
+
+- **`audit`**(root?) → `dict`  ·  from `test_bundle_contract.py`
+- **`promised`**(tier) → `tuple`  ·  **from nothing**
+- **`verify`**(b) → `list[str]`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
+
+### `canva.py`
+
+- **`brand_kit`**(tenant) → `dict`  ·  from `brand_theme.py`
+- **`create_design`**(tenant, title?, design_type?, asset_id?, entity_key?, width?, height?) → `dict`  ·  from `creative.py`, `test_canva.py`, `verify_canva.py`
+- **`editable_from_image`**(tenant, blob, title?, entity_key?, design_type?) → `dict`  ·  from `hosting.py`, `test_canva.py`
+- **`export`**(tenant, design_id, fmt?) → `dict`  ·  from `data_tools.py`
+- **`export_result`**(tenant, job_id) → `dict`  ·  **from nothing**
+- **`folder`**(tenant) → `dict`  ·  from `test_canva.py`, `verify_canva.py`
+- **`harvest`**(tenant, design_id?, entity_key?, wait?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `web.py`
+- **`mcp_call`**(tenant, tool, arguments?) → `dict`  ·  **from nothing**
+- **`mcp_session`**(tenant) → `—`  ·  **from nothing**
+- **`mcp_tools`**(tenant) → `dict`  ·  from `web.py`
+- **`reconcile`**(tenant) → `dict`  ·  from `test_canva.py`, `test_segments.py`
+- **`upload_asset`**(tenant, url, name, entity_key?, tags?, rights?) → `dict`  ·  from `test_canva.py`
+- **`upload_bytes`**(tenant, blob, name, poll?) → `dict`  ·  from `test_canva.py`
+
+### `catalog_sync.py`
+
+- **`check_compliance`**(tenant, text) → `list[str]`  ·  **from nothing**
+- **`sync_collections`**(tenant, adopt?, dry_run?) → `dict`  ·  from `web.py`
+- **`sync_shopify`**(tenant, limit?, dry_run?) → `dict`  ·  from `skill_pack.py`, `sources.py`, `test_catalog_sync.py`, `test_kb_removal.py`, `web.py`
+
+### `channel.py`
+
+- **`active`**() → `str`  ·  from `ops_commands.py`, `web.py`
+- **`ask`**(question, field, options?) → `—`  ·  route `GET /admin/ask`  ·  from `brief.py`, `creative.py`, `ops_jobs.py`, `skill_pack.py`, `skills.py`, `test_llm.py`, `triage.py`, `voice_learn.py`
+- **`resolve`**(message_id, outcome) → `None`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+- **`send_approval`**(approval_id, summary, detail?) → `bool`  ·  from `approvals.py`
+- **`send_text`**(body, email_fallback?) → `—`  ·  from `approvals.py`, `command_agent.py`, `data_tools.py`, `digest.py`, `ops_jobs.py`, `skills.py`, `systems_map.py`, `web.py`, `worker.py`
+
+### `claim_trace.py`
+
+- **`about_us`**(sentence, marks) → `bool`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`annotate`**(text, claims) → `dict`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`brand_marks`**(tenant) → `set`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`coverage_of`**(tenant, body, claim_ids?) → `int`  ·  from `ledger.py`
+- **`headings`**(body) → `set`  ·  from `admin_ui.py`
+- **`is_assertion`**(sentence) → `bool`  ·  **from nothing**
+- **`off_catalogue`**(sentence, vocab) → `list`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`plain_text`**(body) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_claim_trace.py`
+- **`proposed_claims`**(tenant) → `dict`  ·  from `admin_ui.py`
+- **`summary`**(report) → `str`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`trend`**(tenant?, days?) → `list`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`usage_counts`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_claim_trace.py`
+- **`vocabulary`**(tenant) → `set`  ·  from `admin_ui.py`, `test_claim_trace.py`
+
+### `client_report.py`
+
+- **`assemble`**(tenant, days?) → `dict`  ·  from `portal_ui.py`, `test_brief.py`, `test_client_report.py`, `test_metrics.py`, `test_selection.py`, `web.py`
+
+### `coherence.py`
+
+- **`as_prompt`**(findings) → `str`  ·  from `skill_pack.py`
+- **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
+- **`commit`**(kind, key?, label?, audience?, action?, also?, expects?, proof_scopes?) → `dict`  ·  from `approvals.py`, `archive.py`, `assurance.py`, `canva.py`, `catalog_sync.py`, `command_agent.py`, `compliance.py`, `conversation.py`, `craft.py`, `credentials.py`, `data_tools.py`, `db.py`, `digest.py`, `edits.py`, `email_harvest.py`, `embed.py`, `google_seo.py`, `harvest.py`, `hosting.py`, `kb.py`, `keywords.py`, `ledger.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `moments.py`, `ops_commands.py`, `ops_jobs.py`, `portal.py`, `provenance.py`, `reset.py`, `seed_demo.py`, `segments.py`, `seo_tools.py`, `shopify_webhooks.py`, `skill_pack.py`, `skills.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_assets.py`, `test_ban_list.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_claim_expiry.py`, `test_claim_trace.py`, `test_coherence.py`, `test_compliance.py`, `test_connections_tab.py`, `test_console_controls.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_email_harvest.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_offers.py`, `test_perishable.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_provenance.py`, `test_queue_approval.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_segments.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `toolcalls.py`, `usage.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `worker.py`
+- **`parts`**(text?, prominent?, images?, items?, claims?) → `dict`  ·  from `skill_pack.py`, `test_coherence.py`
+- **`review`**(commitment, artifact, brand_name?, background_budget?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_positioning.py`
+
+### `command_agent.py`
+
+- **`admin_dispatch`**(name, args, session_files) → `str`  ·  from `test_grounding.py`
+- **`handle`**(text, attachments?, force_role?, tenant?) → `str`  ·  from `test_kb.py`, `web.py`
+
+### `commerce_events.py`
+
+- **`handle`**(topic, shop, payload) → `dict`  ·  from `test_kb.py`, `web.py`
+
+### `compliance.py`
+
+- **`check_page`**(tenant, url, html?) → `dict`  ·  **from nothing**
+- **`discover_pages`**(base, limit?) → `tuple[list[dict], str]`  ·  from `harvest.py`, `test_brand_sources.py`, `voice.py`
+- **`is_dead_page`**(html, text?, min_chars?) → `str`  ·  from `harvest.py`, `test_harvest.py`, `voice.py`
+- **`last_scan`**(tenant) → `dict`  ·  from `admin_ui.py`, `correlate.py`, `worker.py`
+- **`page_title`**(html) → `str`  ·  **from nothing**
+- **`purge_scans`**(tenant?, dry_run?) → `dict`  ·  from `web.py`
+- **`record_scan`**(tenant, result) → `str`  ·  from `test_compliance.py`, `test_correlate.py`, `test_kb_ui.py`, `web.py`, `worker.py`
+- **`scan`**(tenant, limit?, since?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_compliance.py`, `web.py`, `worker.py`
+- **`skip_url`**(url) → `bool`  ·  from `harvest.py`, `test_harvest.py`, `voice.py`
+- **`text_blocks`**(html_text) → `list[str]`  ·  from `harvest.py`, `voice.py`
+
+### `compose.py`
+
+- **`composite_on_plate`**(product_png, plate_png, headline?, subline?, text_colour?, formats?) → `dict`  ·  from `imagegen.py`
+- **`crop_placements`**(frame, formats?) → `dict`  ·  from `creative.py`
+- **`photo_with_headline`**(photo, headline?, subline?, formats?, force_band?) → `dict`  ·  from `test_compose.py`
+- **`product_on_colour`**(tenant, asset_id, headline?, subline?, background?, text_colour?, formats?) → `dict`  ·  from `test_compose.py`, `web.py`
+- **`product_on_scene`**(tenant, asset_id, plate, headline?, subline?, text_colour?, formats?) → `dict`  ·  from `creative.py`, `test_compose.py`
+
+### `connections.py`
+
+- **`norm_domain`**(value) → `str`  ·  from `test_connections.py`, `tool_scope.py`
+- **`platform_config`**(profile) → `tuple[dict, str]`  ·  from `shopify_seo.py`, `test_connections.py`, `wordpress_seo.py`
+- **`tenant_for_site`**(site_key) → `str`  ·  from `test_connections.py`, `wordpress_seo.py`
+- **`tenant_for_store`**(store_key) → `str`  ·  from `data_tools.py`, `shopify_seo.py`, `test_toolcalls.py`
+
+### `constant_contact.py`
+
+- **`contact_lists`**(tenant) → `dict`  ·  **from nothing**
+- **`draft_from_html`**(tenant, name?, subject?, html?, from_name?, from_email?, reply_to?, physical_address?, preheader?) → `dict`  ·  from `skill_pack.py`, `test_constant_contact.py`, `test_omnisend.py`
+- **`send_campaign`**(tenant, activity_id, confirm?, when?) → `dict`  ·  from `test_constant_contact.py`, `test_omnisend.py`
+- **`send_test`**(tenant, activity_id, emails) → `dict`  ·  **from nothing**
+- **`senders`**(tenant) → `dict`  ·  from `test_constant_contact.py`
+- **`set_recipients`**(tenant, activity_id, list_ids) → `dict`  ·  from `test_constant_contact.py`
+
+### `conversation.py`
+
+- **`advance`**(tenant, conversation_id, stage, blocked_on?, next_action_at?) → `str`  ·  from `test_conversation.py`
+- **`close`**(tenant, conversation_id, outcome?) → `str`  ·  from `commerce_events.py`, `test_migration.py`
+- **`commit_to`**(tenant, conversation_id, kind, value, detail?, due_at?, stated_in?) → `tuple[db.Commitment | None, str]`  ·  from `test_conversation.py`, `test_resolve.py`
+- **`due`**(tenant, system_key?, at?) → `list`  ·  from `test_conversation.py`, `test_moments.py`, `web.py`
+- **`get`**(tenant, conversation_id) → `db.Conversation | None`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `sites.py`, `skill.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`open_commitments`**(tenant, conversation_id?) → `list`  ·  from `test_conversation.py`, `validator.py`
+- **`open_or_get`**(tenant, contact_id, system_key, subject?, situations?, entity_key?, external_ref?) → `tuple[db.Conversation, bool]`  ·  from `test_conversation.py`, `test_resolve.py`, `test_responder.py`
+- **`record_touch`**(tenant, conversation_id, direction?, channel?, summary?, ref?, run_id?, approval_id?, idempotency_key?) → `tuple[db.Touch | None, bool, str]`  ·  from `responder.py`, `test_conversation.py`
+- **`settle`**(tenant, commitment_id, status, note?) → `str`  ·  from `test_conversation.py`
+- **`stages`**(system_key) → `tuple`  ·  from `test_conversation.py`
+- **`state_for`**(tenant, contact_id?, system_key?, conversation_id?) → `dict`  ·  from `resolve.py`, `test_conversation.py`
+- **`terminal`**(system_key) → `tuple`  ·  from `test_conversation.py`
+- **`touches`**(tenant, conversation_id, limit?) → `list`  ·  from `test_conversation.py`
+
+### `correlate.py`
+
+- **`narrate`**(findings) → `str`  ·  **from nothing**
+- **`nightly`**(days?) → `dict`  ·  from `test_correlate.py`, `web.py`
+- **`sweep`**(tenant, days?) → `list[dict]`  ·  from `test_correlate.py`, `test_creative_seam.py`, `test_hosting.py`, `test_moments.py`, `web.py`, `worker.py`
+
+### `craft.py`
+
+- **`approve`**(lesson_id, by?, approve_it?) → `dict`  ·  from `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`
+- **`block`**(tenant, situations?, limit?) → `str`  ·  from `kernel.py`, `resolve.py`, `seo_tools.py`, `test_craft.py`
+- **`for_account`**(tenant, situations?, limit?) → `list[dict]`  ·  from `test_craft.py`, `web.py`
+- **`leaks`**(text) → `list[str]`  ·  **from nothing**
+- **`pending`**(limit?) → `list[dict]`  ·  from `test_craft.py`, `web.py`
+- **`propose`**(lesson, business_model?, situations?, basis?, learned_from?) → `dict`  ·  from `test_craft.py`, `test_voice.py`, `web.py`
+
+### `creative.py`
+
+- **`assess`**(blob, brief, tenant?) → `dict`  ·  from `test_creative_seam.py`
+- **`axes`**(angles?, levers?, framings?, limit?) → `list`  ·  from `test_creative_batch.py`
+- **`batch`**(tenant, commitment?, positioning?, entity_key?, audience_key?, claim?, prominent?, headline?, subline?, fmt?, plates?, review?) → `dict`  ·  from `test_creative_batch.py`
+- **`brief_for`**(tenant, commitment?, fmt?, prominent?, entity_key?, claim?, situation?, audience_key?, positioning?) → `dict`  ·  from `test_creative_seam.py`
+- **`generate`**(tenant, commitment?, fmt?, prominent?, entity_key?, claim?, situation?, audience_key?, positioning?, prompt?, review?) → `dict`  ·  from `test_creative_seam.py`
+- **`harvest_drive`**(tenant, folder?, limit?) → `dict`  ·  from `web.py`
+- **`hero_for_campaign`**(tenant, segment_key?, entity_keys?, title?, draft_if_missing?) → `dict`  ·  from `skill_pack.py`, `test_campaign_visual.py`, `test_creative_seam.py`
+- **`pick`**(tenant, commitment?, fmt?, entity_key?, audience_key?, claim?, prominent?, positioning?, channel?) → `dict`  ·  from `skill_pack.py`, `test_creative_seam.py`
+- **`placements`**(tenant, asset_id) → `dict`  ·  from `test_creative_batch.py`, `web.py`
+
+### `credentials.py`
+
+- **`connected_providers`**(tenant) → `set[str]`  ·  from `test_connections.py`, `test_credentials.py`
+- **`google_config`**(alias) → `dict`  ·  from `gmail_client.py`, `test_oauth.py`
+- **`granted_scopes`**(tenant) → `dict[str, set[str] | None]`  ·  from `shopify_seo.py`
+- **`needed_for`**(tenant) → `list[str]`  ·  from `resolve.py`, `test_pointer_fixes.py`, `web.py`
+- **`recheck`**(tenant, provider, site?) → `dict`  ·  from `test_credentials.py`, `web.py`
+- **`renew_due`**(now?) → `list[dict]`  ·  from `test_oauth.py`
+- **`renew_tick`**() → `dict`  ·  from `test_oauth.py`, `worker.py`
+- **`resolve`**(tenant, provider, site?) → `dict`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+- **`revoke`**(tenant, provider, site?) → `str`  ·  from `test_credentials.py`, `test_oauth.py`, `test_portal.py`, `web.py`
+- **`routes`**() → `dict`  ·  from `admin_ui.py`, `test_connect_ui.py`
+- **`shopify_config`**(store_key) → `dict`  ·  from `brand_theme.py`, `data_tools.py`, `shopify_seo.py`, `test_credentials.py`, `test_shopify_oauth.py`
+- **`sites`**(tenant, provider) → `list[str]`  ·  from `connections.py`, `google_seo.py`, `test_credentials.py`
+- **`status`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `portal_ui.py`, `test_brand_theme.py`, `test_connect_ui.py`, `test_credentials.py`, `test_oauth.py`, `test_review_ui.py`, `test_shopify_oauth.py`, `web.py`
+- **`store`**(tenant, provider, secret, meta?, granted_by?) → `dict`  ·  from `test_connect_ui.py`, `test_connections.py`, `test_credentials.py`, `test_shopify_compliance.py`, `test_tenant_isolation.py`, `web.py`
+- **`store_oauth`**(tenant, provider, result, granted_by?) → `dict`  ·  from `test_oauth.py`, `web.py`
+- **`wired_capabilities`**(tenant) → `dict[str, str]`  ·  from `client_report.py`, `keywords.py`, `metrics.py`, `sites.py`, `tenants.py`, `test_blog_readiness.py`, `test_connections.py`, `test_credentials.py`, `test_new_organization.py`
+
+### `data_tools.py`
+
+- **`dispatch`**(name, args, tenant?) → `str`  ·  from `command_agent.py`, `kernel.py`, `test_blog_path.py`, `test_site_resolution.py`, `test_tenant_isolation.py`, `tools.py`
+- **`drive_search`**(account, query) → `str`  ·  from `web.py`
+- **`email_history_search`**(account, query, window_days?, intent?) → `str`  ·  **from nothing**
+- **`find_contacts`**(account, who) → `str`  ·  **from nothing**
+- **`find_documents`**(query) → `str`  ·  **from nothing**
+- **`hash_already_filed`**(content_hash) → `str | None`  ·  from `ops_jobs.py`
+- **`index_document`**(filename, path, link?, doc_type?, anchor?, source?, content_hash?) → `None`  ·  from `approvals.py`, `command_agent.py`, `ops_jobs.py`
+- **`onboarding_packet`**() → `str`  ·  from `command_agent.py`
+- **`read_email`**(account, message_id) → `str`  ·  **from nothing**
+- **`read_email_attachment`**(account, message_id, filename?) → `str`  ·  **from nothing**
+- **`rfq_get`**(shipment_name) → `str`  ·  **from nothing**
+- **`rfq_record_quote`**(shipment_name, forwarder_email, total, breakdown?, notes?) → `str`  ·  **from nothing**
+- **`shopify_find_orders`**(store, customer_email?, order_number?) → `str`  ·  **from nothing**
+- **`shopify_order_details`**(store, order_id) → `str`  ·  **from nothing**
+- **`tools_for`**(tenant) → `list[dict]`  ·  from `test_tenant_isolation.py`, `triage.py`
+
+### `db.py`
+
+- **`as_utc`**(value) → `—`  ·  from `admin_ui.py`, `approvals.py`, `assurance.py`, `claim_trace.py`, `compliance.py`, `conversation.py`, `credentials.py`, `diagnostics.py`, `digest.py`, `inbox_events.py`, `kb.py`, `keywords.py`, `ledger.py`, `media.py`, `memory.py`, `metrics.py`, `moments.py`, `offers.py`, `planner.py`, `portal.py`, `replies.py`, `systems.py`, `test_draft_sync.py`, `test_kb_ui.py`, `test_moments.py`, `test_strategy.py`, `web.py`
+- **`init_db`**() → `None`  ·  from `seed_demo.py`, `seed_kb.py`, `tenant_scope.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_llm.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_provenance.py`, `test_queue_approval.py`, `test_render_smoke.py`, `test_replies.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_scope.py`, `test_segments.py`, `test_selection.py`, `test_seo_guard.py`, `test_ship_section.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_sources.py`, `test_spend_complete.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `web.py`, `worker.py`
+- **`tenant_filter`**(model, tenant, include_unassigned?) → `—`  ·  from `archive.py`, `commerce_events.py`, `conversation.py`, `embed.py`, `inbox_events.py`, `ledger.py`, `memory.py`, `meta_ads.py`, `moments.py`, `offers.py`, `performance.py`, `results.py`, `test_tenant_scope.py`, `web.py`, `worker.py`
+- **`utcnow`**() → `dt.datetime`  ·  from `admin_ui.py`, `approvals.py`, `assurance.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `command_agent.py`, `conversation.py`, `correlate.py`, `craft.py`, `credentials.py`, `data_tools.py`, `diagnostics.py`, `digest.py`, `email_harvest.py`, `embed.py`, `google_seo.py`, `harvest.py`, `hosting.py`, `inbox_events.py`, `kb.py`, `keywords.py`, `ledger.py`, `media.py`, `memory.py`, `metrics.py`, `moments.py`, `offers.py`, `portal.py`, `provenance.py`, `replies.py`, `seed_demo.py`, `skill_pack.py`, `skills.py`, `systems.py`, `systems_map.py`, `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_claim_expiry.py`, `test_conversation.py`, `test_correlate.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_perishable.py`, `test_plans.py`, `test_portal.py`, `test_review_tab.py`, `test_schema_tab.py`, `test_shopify_oauth.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems_check.py`, `toolcalls.py`, `web.py`, `worker.py`
+
+### `diagnostics.py`
+
+- **`events`**(tenant?, days?, level?, system?, limit?) → `list[dict]`  ·  from `command_agent.py`, `skills.py`, `test_allclear.py`, `test_diagnostics.py`
+- **`health`**(tenant?, days?) → `dict`  ·  route `GET /health`  ·  from `test_allclear.py`, `test_diagnostics.py`, `test_grounding.py`, `test_plans.py`
+- **`platforms`**(tenant?, days?) → `dict`  ·  from `test_diagnostics.py`
+- **`report`**(tenant?, days?, level?, system?, limit?) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+- **`spend`**(tenant?, days?) → `dict`  ·  **from nothing**
+
+### `digest.py`
+
+- **`ack_links`**(item) → `dict`  ·  from `test_digest.py`
+- **`apply_ack`**(token) → `str`  ·  from `test_digest.py`, `web.py`
+- **`brief`**(hours_back?) → `dict`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`
+- **`build_digest`**(hours_back?) → `str`  ·  from `command_agent.py`, `test_digest.py`
+- **`choices`**(kind, ref, fingerprint) → `dict`  ·  from `web.py`
+- **`collect`**(hours_back?) → `list[dict]`  ·  **from nothing**
+- **`item_link`**(item) → `str`  ·  **from nothing**
+- **`read_token`**(token) → `dict`  ·  from `web.py`
+- **`send_digest`**() → `None`  ·  **from nothing**
+- **`undo_link`**(kind, ref, fingerprint) → `str`  ·  from `test_digest.py`, `web.py`
+
+### `dossier.py`
+
+- **`build`**(tenant, system?) → `dict`  ·  from `ab_context.py`, `test_context.py`, `test_dossier.py`, `test_register.py`, `web.py`
+
+### `drive_io.py`
+
+- **`copy_file`**(alias, file_id, dest_folder_id, new_name?) → `str`  ·  from `ops_jobs.py`
+- **`create_or_update_sheet`**(alias, name, csv_text, parent_id?, existing_id?) → `tuple[str, str]`  ·  from `ops_jobs.py`
+- **`download`**(alias, file_id) → `bytes`  ·  from `ops_jobs.py`, `skills.py`
+- **`ensure_path`**(alias, root_id, path) → `str`  ·  from `approvals.py`, `command_agent.py`, `ops_jobs.py`
+- **`ensure_subfolder`**(alias, parent_id, name) → `str`  ·  from `command_agent.py`, `data_tools.py`, `ops_jobs.py`, `skills.py`
+- **`file_exists`**(alias, folder_id, filename) → `bool`  ·  from `skills.py`
+- **`find_folder`**(alias, name) → `str | None`  ·  from `approvals.py`, `command_agent.py`, `data_tools.py`, `ops_jobs.py`, `skills.py`
+- **`folder_tree`**(alias, root_id, depth?, _prefix?) → `dict[str, str]`  ·  from `ops_jobs.py`
+- **`list_all_files_recursive`**(alias, folder_id, _prefix?, depth?) → `list[dict]`  ·  from `ops_jobs.py`, `skills.py`
+- **`list_files`**(alias, folder_id) → `list[dict]`  ·  from `data_tools.py`, `ops_jobs.py`
+- **`move`**(alias, file_id, new_parent_id) → `None`  ·  from `approvals.py`, `command_agent.py`
+- **`name_search`**(alias, keyword, limit?) → `list[dict]`  ·  from `ops_jobs.py`
+- **`svc`**(alias) → `—`  ·  from `data_tools.py`, `skills.py`
+- **`upload`**(alias, folder_id, filename, data, mime?) → `str`  ·  from `command_agent.py`, `ops_jobs.py`
+- **`upload_html_as_doc`**(alias, folder_id, name, html) → `str`  ·  from `ops_jobs.py`
+
+### `edits.py`
+
+- **`delta`**(generated, sent) → `dict`  ·  from `admin_ui.py`, `keywords.py`, `test_draft_sync.py`
+- **`record`**(approval, generated, sent) → `dict`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
+- **`record_run`**(run_id, generated, sent) → `dict`  ·  from `skill_pack.py`
+
+### `email_craft.py`
+
+- **`as_prompt`**(findings) → `str`  ·  from `skill_pack.py`
+- **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
+- **`dead_links`**(blocks) → `list[str]`  ·  from `skill_pack.py`
+- **`duplicated_text`**(text) → `list[str]`  ·  **from nothing**
+- **`generalisations`**(text, subject?) → `list[str]`  ·  from `test_positioning.py`
+- **`review`**(subject?, preheader?, body?, intent?, asks?, has_proof?, urgency_backed_by?, featured?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_positioning.py`
+
+### `email_harvest.py`
+
+- **`bucket_for`**(alias, thread_id, inbound) → `str`  ·  **from nothing**
+- **`cursor`**(tenant) → `dict`  ·  from `test_email_harvest.py`, `web.py`, `worker.py`
+- **`mine`**(tenant, days?, limit?, apply?, direction?, want?) → `dict`  ·  from `sources.py`, `test_email_harvest.py`, `web.py`, `worker.py`
+- **`reset_cursor`**(tenant) → `str`  ·  from `test_email_harvest.py`, `web.py`
+- **`save_cursor`**(tenant, **fields) → `dict`  ·  **from nothing**
+
+### `email_render.py`
+
+- **`missing_to_send`**(theme) → `list[str]`  ·  from `brand_theme.py`, `skill_pack.py`, `test_brand_theme.py`, `test_email_render.py`
+- **`render`**(theme, blocks, preheader?, webview?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_grounding.py`, `web.py`
+
+### `emailfmt.py`
+
+- **`approval_email`**(items, intro?) → `str`  ·  from `approvals.py`, `test_pointer_fixes.py`
+- **`bullets`**(items) → `str`  ·  **from nothing**
+- **`digest_email`**(brief, when, linker) → `str`  ·  from `digest.py`, `test_digest.py`
+- **`esc`**(s) → `str`  ·  **from nothing**
+- **`heading`**(text) → `str`  ·  **from nothing**
+- **`nl2br`**(s) → `str`  ·  **from nothing**
+- **`text_to_html`**(text) → `str`  ·  from `command_agent.py`, `ops_jobs.py`, `skills.py`, `whatsapp.py`, `worker.py`
+- **`wrap`**(body_html) → `str`  ·  **from nothing**
+
+### `embed.py`
+
+- **`available`**() → `tuple[bool, str]`  ·  from `email_harvest.py`, `harvest.py`, `test_embed.py`, `test_extract.py`, `test_sources.py`, `web.py`
+- **`backfill`**(tenant, kind, items) → `dict`  ·  from `tenant_scope.py`, `test_embed.py`, `test_migration.py`, `test_tenant_scope.py`, `web.py`
+- **`cosine`**(a, b) → `float`  ·  **from nothing**
+- **`cross_pairs`**(tenant, kind_a, kind_b, min_score?, limit?) → `list[dict]`  ·  from `kb.py`
+- **`embed_texts`**(texts) → `tuple[list[list[float]] | None, str]`  ·  from `test_spend_complete.py`
+- **`ensure`**(tenant, kind, row_id, text) → `tuple[bool, str]`  ·  from `archive.py`, `kb.py`, `test_embed.py`
+- **`forget`**(tenant, kind, row_id) → `bool`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`
+- **`pairs`**(tenant, kind, min_score?, limit?) → `list[dict]`  ·  from `kb.py`
+- **`search`**(tenant, kind, query, limit?, min_score?) → `tuple[list[dict], str, dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `archive.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `extract.py`, `fitness.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `resolve.py`, `skill_pack.py`, `systems.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_harvest.py`, `test_moments.py`, `test_open_defects.py`, `test_render_smoke.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
+- **`set_provider`**(fn) → `None`  ·  from `test_archive.py`, `test_embed.py`, `test_propose.py`
+- **`stats`**(tenant?) → `dict`  ·  route `GET /admin/stats`  ·  from `admin_ui.py`, `ops_commands.py`, `test_embed.py`, `test_plans.py`, `test_systems.py`, `web.py`
+- **`text_hash`**(text) → `str`  ·  from `web.py`
+
+### `esp.py`
+
+- **`audiences`**(tenant) → `dict`  ·  from `admin_ui.py`, `assurance.py`, `creative.py`, `planner.py`, `resolve.py`, `segments.py`, `skill_pack.py`, `systems.py`, `test_esp.py`, `test_funnel.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `web.py`
+- **`backend`**(tenant) → `—`  ·  from `admin_ui.py`, `approvals.py`, `hosting.py`, `keywords.py`, `performance.py`, `segments.py`, `seo_tools.py`, `skill_pack.py`, `test_esp.py`, `test_new_organization.py`, `test_site_resolution.py`
+- **`caps`**(tenant) → `dict`  ·  from `skill_pack.py`, `test_esp.py`
+- **`personalize`**(tenant, html) → `dict`  ·  from `skill_pack.py`, `test_esp.py`
+- **`profile`**(tenant) → `dict`  ·  **from nothing**
+- **`provider_for`**(tenant) → `str`  ·  from `performance.py`, `segments.py`, `skill_pack.py`, `test_client_report.py`, `test_esp.py`, `web.py`
+
+### `extract.py`
+
+- **`available`**() → `bool`  ·  from `email_harvest.py`, `harvest.py`, `test_embed.py`, `test_extract.py`, `test_sources.py`, `web.py`
+- **`extract`**(tenant, url, blocks, entity_key?) → `dict`  ·  from `email_harvest.py`, `harvest.py`, `test_extract.py`
+- **`extract_qa`**(tenant, inbound, reply, ref?) → `dict`  ·  from `email_harvest.py`
+- **`review_vocabulary`**(tenant) → `dict`  ·  from `web.py`
+
+### `fitness.py`
+
+- **`named_unfit`**(model, text, entities) → `list[dict]`  ·  from `skill_pack.py`
+- **`rules_for`**(model) → `dict`  ·  **from nothing**
+- **`screen`**(model, entities) → `tuple[list, list]`  ·  from `skill_pack.py`
+- **`unfit`**(model, entity) → `str`  ·  from `test_campaign_variety.py`
+
+### `funnel.py`
+
+- **`angles_for_stage`**(stage, available?) → `tuple`  ·  from `skill_pack.py`, `test_funnel.py`
+- **`brief`**(plan) → `str`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`
+- **`inputs_for`**(tenant, stage, claims?, objections?, entities?, audience?, offer?) → `dict`  ·  from `skill_pack.py`, `test_funnel.py`
+- **`normalise`**(stage) → `str`  ·  from `admin_ui.py`, `claim_trace.py`, `creative.py`, `meta_ads.py`, `offers.py`, `skill_pack.py`, `systems.py`, `test_funnel.py`
+- **`proposals`**(tenant, limit?) → `dict`  ·  from `admin_ui.py`, `skill_pack.py`, `test_funnel.py`, `test_provenance.py`, `test_review_ui.py`
+- **`stage_from`**(warmth?, asks?) → `str`  ·  from `skill_pack.py`, `test_funnel.py`
+- **`stage_from_keyword`**(intent) → `str`  ·  from `skill_pack.py`, `test_funnel.py`
+
+### `gmail_client.py`
+
+- **`add_label`**(alias, message_id, label_name) → `None`  ·  from `worker.py`
+- **`create_draft`**(alias, to, subject, body, thread_id?, cc?) → `str`  ·  from `command_agent.py`, `worker.py`
+- **`creds_for`**(alias) → `Credentials`  ·  from `command_agent.py`, `creative.py`, `data_tools.py`, `drive_io.py`, `google_seo.py`
+- **`download_attachment`**(alias, message_id, attachment_id) → `bytes`  ·  from `archive.py`, `data_tools.py`, `ops_jobs.py`, `worker.py`
+- **`draft_exists`**(alias, draft_id) → `bool`  ·  **from nothing**
+- **`ensure_label`**(alias, name) → `str`  ·  **from nothing**
+- **`fetch_body`**(alias, message_id, limit?) → `str`  ·  from `archive.py`
+- **`fetch_recent`**(alias, days, max_results?) → `list[dict]`  ·  from `worker.py`
+- **`fetch_sent`**(alias, max_results?) → `list[str]`  ·  from `voice_learn.py`
+- **`fetch_sent_threads`**(alias, days?, max_threads?, after?, before?, exclude?) → `list[dict]`  ·  from `email_harvest.py`
+- **`fetch_unanswered`**(alias, days?, max_threads?) → `list[dict]`  ·  from `worker.py`
+- **`fetch_unread`**(alias, max_results?) → `list[dict]`  ·  from `worker.py`
+- **`fetch_with_attachments`**(alias, days, max_results?) → `list[dict]`  ·  from `ops_jobs.py`
+- **`forget`**(alias) → `None`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`
+- **`get_thread_context`**(alias, thread_id, limit?, exclude_id?) → `str`  ·  from `digest.py`, `test_grounding.py`, `worker.py`
+- **`mark_read`**(alias, message_id) → `None`  ·  from `worker.py`
+- **`read_draft`**(alias, draft_id) → `dict`  ·  from `approvals.py`
+- **`send_draft`**(alias, draft_id) → `str`  ·  from `approvals.py`
+- **`send_email`**(alias, to, subject, body, thread_id?, html?, cc?) → `str`  ·  from `approvals.py`, `command_agent.py`, `digest.py`, `ops_jobs.py`, `skills.py`, `whatsapp.py`, `worker.py`
+- **`sent_in_thread`**(alias, thread_id) → `dict`  ·  from `approvals.py`
+- **`sent_to_since`**(alias, to, since) → `dict`  ·  from `approvals.py`
+- **`service_for`**(alias) → `—`  ·  from `archive.py`, `command_agent.py`, `data_tools.py`, `ops_jobs.py`, `skills.py`, `tenants.py`, `web.py`
+
+### `google_seo.py`
+
+- **`ga4_landing_pages`**(profile, days?, limit?) → `str`  ·  **from nothing**
+- **`ga4_list_properties`**(profile) → `str`  ·  **from nothing**
+- **`ga4_overview`**(profile, days?) → `str`  ·  **from nothing**
+- **`gsc_inspect_url`**(profile, url) → `str`  ·  **from nothing**
+- **`gsc_list_sites`**(profile) → `str`  ·  from `keywords.py`
+- **`gsc_page_queries`**(profile, page_url, days?, limit?) → `str`  ·  **from nothing**
+- **`gsc_top_pages`**(profile, days?, limit?) → `str`  ·  **from nothing**
+- **`gsc_top_queries`**(profile, days?, limit?) → `str`  ·  from `keywords.py`
+- **`gsc_trend`**(profile, days?) → `str`  ·  **from nothing**
+- **`seo_link_google`**(profile, gsc_site?, ga4_property?) → `str`  ·  **from nothing**
+
+### `grounding.py`
+
+- **`for_mail`**(tenant, email, bucket?) → `dict`  ·  from `test_grounding.py`, `triage.py`
+- **`render`**(bundle) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_grounding.py`, `web.py`
+- **`utterance_from`**(email) → `str`  ·  from `test_grounding.py`
+- **`verify`**(offered, claimed) → `list[str]`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
+
+### `harvest.py`
+
+- **`forget_pages`**(tenant) → `str`  ·  from `test_harvest.py`, `web.py`
+- **`harvest`**(tenant, limit?, apply?, use_model?, recrawl?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `web.py`
+- **`harvest_all`**(limit?, apply?) → `dict`  ·  from `test_harvest.py`, `web.py`
+
+### `hosting.py`
+
+- **`publish`**(tenant, asset_id) → `dict`  ·  from `keywords.py`, `responder.py`, `test_assets.py`, `test_hosting.py`
+- **`publish_all`**(tenant, limit?) → `dict`  ·  **from nothing**
+- **`stage`**(row) → `str`  ·  from `admin_ui.py`, `test_hosting.py`
+- **`to_canva`**(tenant, asset_id) → `dict`  ·  from `test_hosting.py`, `web.py`
+
+### `imagegen.py`
+
+- **`place_product`**(product_png, prompt, shape?, n?, inspiration?) → `dict`  ·  from `creative.py`, `test_imagegen.py`, `try_imagegen.py`, `web.py`
+- **`plate`**(prompt, shape?, n?, inspiration?) → `dict`  ·  from `creative.py`, `test_imagegen.py`
+- **`scene_with_real_product`**(product_png, prompt, headline?, subline?, inspiration?, shape?, text_colour?, formats?) → `dict`  ·  **from nothing**
+- **`similarity`**(product_png, generated_png, region?) → `float`  ·  from `kb.py`, `test_claim_tagging.py`, `test_imagegen.py`, `test_provenance.py`
+
+### `inbox_events.py`
+
+- **`sweep`**(tenant?, limit?) → `dict`  ·  from `test_correlate.py`, `test_creative_seam.py`, `test_hosting.py`, `test_moments.py`, `web.py`, `worker.py`
+
+### `kb.py`
+
+- **`add_asset`**(tenant, url, rights?, title?, kind?, subject?, source?, prompt?, tags?, entity_key?, canva_design_id?, thumbnail_url?, derived_from?, origin?, batch?) → `str`  ·  from `canva.py`, `catalog_sync.py`, `creative.py`, `harvest.py`, `test_admin_forms.py`, `test_article_image.py`, `test_assets.py`, `test_campaign_visual.py`, `test_canva.py`, `test_compose.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_hosting.py`, `test_kb_removal.py`, `test_photo_library.py`, `test_strategy.py`, `test_strategy_ledger.py`, `web.py`
+- **`add_audience`**(tenant, key, name, pains, vocabulary, buying_trigger?, decision_timeline?, origin?, source?, review?) → `str`  ·  from `kb_seed.py`, `seed_demo.py`, `test_ad_board.py`, `test_bundle_contract.py`, `test_campaign_variety.py`, `test_funnel.py`, `test_kb_removal.py`, `test_plans.py`, `test_provenance.py`, `test_skill.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `web.py`
+- **`add_banned`**(tenant, phrase) → `str`  ·  from `kb_seed.py`, `ops_commands.py`, `seed_demo.py`, `systems.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_rotation.py`, `test_coherence.py`, `test_console_frame.py`, `test_context.py`, `test_craft.py`, `test_data_layer.py`, `test_dossier.py`, `test_funnel.py`, `test_grounding.py`, `test_new_organization.py`, `test_offers.py`, `test_perishable.py`, `test_propose.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_scope.py`, `test_seo_guard.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_tenant_isolation.py`, `test_voice.py`, `test_workroom_email.py`, `web.py`
+- **`add_claim`**(tenant, claim, evidence, tags, proof_type?, source?, strength?, status?, origin?, entity_key?, proves?, context?, attributed_to?, assess?) → `str`  ·  from `email_harvest.py`, `harvest.py`, `kb_seed.py`, `propose.py`, `seed_demo.py`, `test_ad_board.py`, `test_approval_gate.py`, `test_article_review.py`, `test_assurance_tab.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_bridge.py`, `test_campaign_email.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_classify.py`, `test_coherence.py`, `test_console_controls.py`, `test_context.py`, `test_correlate.py`, `test_dossier.py`, `test_embed.py`, `test_grounding.py`, `test_harvest.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_pointer_fixes.py`, `test_positioning.py`, `test_provenance.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_review_tab.py`, `test_review_ui.py`, `test_schema_tab.py`, `test_scope.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_strategy_ledger.py`, `web.py`
+- **`add_context`**(tenant, text, entity_key?, situations?, source?, origin?, status?) → `str`  ·  from `test_context.py`, `web.py`
+- **`add_entity`**(tenant, type, key, name, description?, price?, attributes?, source?, origin?, review?) → `str`  ·  from `catalog_sync.py`, `kb_seed.py`, `links.py`, `offers.py`, `seed_demo.py`, `test_ad_board.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_sync.py`, `test_claim_rotation.py`, `test_coherence.py`, `test_context.py`, `test_craft.py`, `test_dossier.py`, `test_entity_group.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_moment_pressure.py`, `test_objection_scope.py`, `test_photo_library.py`, `test_positioning.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`, `test_review_ui.py`, `test_schema_tab.py`, `test_scope.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_strategy_ledger.py`, `web.py`
+- **`add_objection`**(tenant, objection, response, audience_key?, escalate?, origin?, source?, review?, entity_key?, situations?) → `str`  ·  from `email_harvest.py`, `harvest.py`, `propose.py`, `seed_demo.py`, `test_data_layer.py`, `test_dossier.py`, `test_funnel.py`, `test_grounding.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`, `test_review_tab.py`, `test_schema_tab.py`, `test_selection.py`, `test_workflow_ui.py`, `web.py`
+- **`add_situation`**(tenant, tag, patterns?, description?, kind?, origin?, source?, review?, needs?) → `str`  ·  from `harvest.py`, `kb_seed.py`, `propose.py`, `seed_demo.py`, `test_assurance_tab.py`, `test_bridge.py`, `test_campaign_email.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_classify.py`, `test_console_controls.py`, `test_correlate.py`, `test_craft.py`, `test_dossier.py`, `test_embed.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_perishable.py`, `test_propose.py`, `test_provenance.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_review_ui.py`, `test_schema_tab.py`, `test_scope.py`, `test_selection.py`, `test_skill.py`, `test_strategy_ledger.py`, `web.py`
+- **`ancestors`**(tenant, key) → `list[str]`  ·  from `skill_pack.py`, `test_entity_group.py`, `test_schema_tab.py`, `test_scope.py`, `web.py`
+- **`apply_answer`**(tenant, step_id, text, source?) → `str`  ·  from `ops_commands.py`, `web.py`
+- **`approve`**(kind, row_id, by?, approve_it?, brand_wide?) → `str`  ·  from `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`
+- **`archive_context`**(context_id) → `str`  ·  from `web.py`
+- **`assess_kind`**(claim, evidence?, proof_type?, source?) → `dict`  ·  from `test_context.py`
+- **`assets`**(tenant, publishable_only?, tags?, entity_key?, kind?) → `list[db.KbAsset]`  ·  from `admin_ui.py`, `canva.py`, `creative.py`, `hosting.py`, `test_article_image.py`, `test_assets.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_compose.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_hosting.py`, `test_kb_removal.py`, `test_photo_library.py`, `test_strategy.py`, `web.py`
+- **`assign_to_group`**(tenant, group_key, keys) → `dict`  ·  from `web.py`
+- **`audience`**(tenant, key) → `db.KbAudience | None`  ·  **from nothing**
+- **`audiences`**(tenant, include_proposed?) → `list[db.KbAudience]`  ·  from `admin_ui.py`, `assurance.py`, `creative.py`, `planner.py`, `resolve.py`, `segments.py`, `skill_pack.py`, `systems.py`, `test_esp.py`, `test_funnel.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `web.py`
+- **`banned_claims`**(tenant) → `list[str]`  ·  from `catalog_sync.py`, `compliance.py`, `email_harvest.py`, `harvest.py`, `keywords.py`, `seed_demo.py`, `sources.py`, `systems.py`, `test_ban_list.py`, `test_catalog_sync.py`, `test_intake.py`, `test_kb.py`, `test_objection_scope.py`, `test_systems.py`, `validator.py`, `voice.py`
+- **`batch_assets`**(tenant, batch) → `list[db.KbAsset]`  ·  from `test_creative_batch.py`, `web.py`
+- **`batches`**(tenant) → `list[dict]`  ·  from `admin_ui.py`
+- **`brand`**(tenant) → `db.KbBrand | None`  ·  from `admin_ui.py`, `brand_theme.py`, `creative.py`, `dossier.py`, `extract.py`, `kb_seed.py`, `resolve.py`, `skill_pack.py`, `tenants.py`, `test_assets.py`, `test_brand_theme.py`, `test_intake.py`, `test_kb.py`, `test_kb_ui.py`, `test_reset.py`, `test_schema_tab.py`, `test_shopify_compliance.py`, `test_voice.py`, `validator.py`, `voice.py`, `web.py`
+- **`brand_level_duplicates`**(tenant) → `list[tuple[str, str]]`  ·  from `admin_ui.py`, `test_review_ui.py`, `web.py`
+- **`calibration`**(tenant) → `dict`  ·  from `calibrate_classify.py`, `test_embed.py`, `web.py`
+- **`claim_expiry`**(row) → `dict`  ·  from `admin_ui.py`, `test_claim_expiry.py`, `test_kb_ui.py`
+- **`claim_inventory`**(tenant) → `dict[str, list[db.KbClaim]]`  ·  from `admin_ui.py`, `client_report.py`, `dossier.py`, `ledger.py`, `resolve.py`, `seed_demo.py`, `test_claim_expiry.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `test_skill.py`, `validator.py`, `web.py`
+- **`claim_to_context`**(claim_id) → `str`  ·  from `test_context.py`, `web.py`
+- **`claims`**(tenant, situations?, limit?, entity_key?) → `list[db.KbClaim]`  ·  from `admin_ui.py`, `assurance.py`, `brief.py`, `claim_trace.py`, `correlate.py`, `email_harvest.py`, `funnel.py`, `harvest.py`, `kb_seed.py`, `keywords.py`, `resolve.py`, `responder.py`, `test_assurance_tab.py`, `test_bridge.py`, `test_campaign_variety.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_classify.py`, `test_coherence.py`, `test_console_controls.py`, `test_context.py`, `test_email_harvest.py`, `test_embed.py`, `test_harvest.py`, `test_intake.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_migration.py`, `test_propose.py`, `test_provenance.py`, `test_reset.py`, `test_scope.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_sources.py`, `web.py`
+- **`completeness`**(tenant) → `dict`  ·  from `admin_ui.py`, `brief.py`, `kb_seed.py`, `ops_commands.py`, `resolve.py`, `sources.py`, `systems.py`, `test_brief.py`, `test_intake.py`, `test_kb.py`, `test_provenance.py`, `web.py`
+- **`contested_positioning`**(tenant) → `list`  ·  from `resolve.py`, `test_positioning.py`
+- **`context_to_claim`**(context_id) → `str`  ·  from `web.py`
+- **`contexts`**(tenant, entity_key?, situation?, include_archived?, include_proposed?) → `list[db.KbContext]`  ·  from `admin_ui.py`, `dossier.py`, `resolve.py`, `test_context.py`
+- **`description_for`**(tenant, tag) → `str`  ·  **from nothing**
+- **`detect_subject`**(png_bytes) → `str`  ·  from `web.py`
+- **`ensure_brand`**(tenant, display_name?) → `db.KbBrand`  ·  from `brand_theme.py`, `seed_demo.py`, `test_ad_board.py`, `test_allclear.py`, `test_article_review.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_theme.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_coherence.py`, `test_console_frame.py`, `test_context.py`, `test_correlate.py`, `test_craft.py`, `test_diagnostics.py`, `test_dossier.py`, `test_entity_group.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_kb_ui.py`, `test_new_organization.py`, `test_offers.py`, `test_perishable.py`, `test_pointer_fixes.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_review_tab.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_tenant_isolation.py`, `test_voice.py`, `test_workroom_email.py`, `web.py`
+- **`entities`**(tenant, type?, available_only?, include_proposed?) → `list[db.KbEntity]`  ·  from `admin_ui.py`, `brief.py`, `claim_trace.py`, `creative.py`, `dossier.py`, `harvest.py`, `links.py`, `offers.py`, `planner.py`, `resolve.py`, `skill_pack.py`, `systems.py`, `tenants.py`, `test_campaign_variety.py`, `test_catalog_sync.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_provenance.py`, `test_shopify_compliance.py`, `validator.py`, `web.py`
+- **`expire_due`**(tenant?, apply?) → `dict`  ·  from `test_claim_expiry.py`, `worker.py`
+- **`gaps`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `kb_seed.py`, `ops_commands.py`, `sources.py`, `systems.py`, `test_kb.py`, `test_provenance.py`, `web.py`
+- **`group_members`**(tenant, group_key) → `list[db.KbEntity]`  ·  from `test_entity_group.py`, `test_scope.py`
+- **`join_group`**(tenant, key, group_key) → `str`  ·  from `catalog_sync.py`, `test_scope.py`, `web.py`
+- **`label_conflicts`**(tenant, min_score?, limit?) → `list[dict]`  ·  route `GET /admin/label_conflicts`  ·  from `test_embed.py`, `web.py`
+- **`leave_group`**(tenant, key, group_key?) → `str`  ·  from `test_scope.py`, `web.py`
+- **`lifted_claims`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `seed_demo.py`, `test_ban_list.py`
+- **`logos`**(tenant) → `list[db.KbAsset]`  ·  from `admin_ui.py`, `test_assets.py`
+- **`mark_asset_used`**(asset_id, destination?) → `str`  ·  from `ledger.py`, `skill_pack.py`, `test_photo_library.py`
+- **`match_entities`**(tenant, requirements?, limit?, include_unavailable?) → `list[dict]`  ·  from `brief.py`, `resolve.py`, `test_selection.py`
+- **`may_publish`**(asset_id) → `tuple[bool, str]`  ·  from `approvals.py`, `compose.py`, `creative.py`, `ledger.py`, `test_assets.py`, `test_strategy_ledger.py`, `web.py`
+- **`merge_situations`**(tenant, keep, drop, dry_run?) → `dict`  ·  from `test_claim_tagging.py`, `web.py`
+- **`needs_met`**(tenant, fields) → `list[str]`  ·  from `skill.py`, `systems.py`, `test_approval_gate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_systems.py`
+- **`next_step`**(tenant) → `dict | None`  ·  from `test_intake.py`, `web.py`
+- **`next_step_for`**(tenant, stage) → `dict`  ·  from `brief.py`
+- **`objections`**(tenant, audience_key?, include_proposed?, entity_key?, any_entity?, situations?) → `list[db.KbObjection]`  ·  from `admin_ui.py`, `assurance.py`, `brief.py`, `claim_trace.py`, `dossier.py`, `email_harvest.py`, `funnel.py`, `resolve.py`, `test_email_harvest.py`, `test_funnel.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_propose.py`, `test_provenance.py`, `test_responder.py`, `test_schema_tab.py`, `test_selection.py`, `web.py`
+- **`overlaps`**(tenant, min_score?, limit?) → `dict`  ·  from `admin_ui.py`, `test_context.py`
+- **`pending_claims`**(tenant?) → `list[db.KbClaim]`  ·  from `email_harvest.py`, `harvest.py`, `seed_demo.py`, `test_classify.py`, `test_context.py`, `test_dossier.py`, `test_email_harvest.py`, `test_embed.py`, `test_harvest.py`, `test_intake.py`, `test_kb_ui.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`
+- **`pending_contexts`**(tenant?) → `list[db.KbContext]`  ·  from `admin_ui.py`, `test_context.py`
+- **`pending_counts`**(tenant) → `dict`  ·  from `systems.py`, `test_approval_gate.py`
+- **`proposals`**(tenant?, kind?, analyze_ids?) → `dict[str, list]`  ·  from `admin_ui.py`, `skill_pack.py`, `test_funnel.py`, `test_provenance.py`, `test_review_ui.py`
+- **`proposed_assets`**(tenant) → `list[db.KbAsset]`  ·  from `admin_ui.py`, `test_assets.py`, `test_creative_batch.py`, `test_hosting.py`
+- **`proven_assets`**(tenant, channel?, metric?, limit?) → `list[db.KbAsset]`  ·  from `creative.py`, `test_assets.py`
+- **`purge_harvested`**(tenant, origins?, include_entities?, dry_run?) → `dict`  ·  from `test_objection_scope.py`, `web.py`
+- **`purge_proposals`**(tenant?, origin?, dry_run?) → `dict`  ·  from `test_provenance.py`, `web.py`
+- **`record_asset_outcome`**(asset_id, channel, metrics) → `str`  ·  from `ledger.py`, `test_assets.py`
+- **`record_unknowns`**(tenant, matches, asked_for?) → `int`  ·  from `brief.py`, `seed_demo.py`, `skill.py`, `test_kb_ui.py`, `test_schema_tab.py`
+- **`remove`**(tenant, kind, row_id, by?) → `dict`  ·  from `harvest.py`, `seed_demo.py`, `test_kb_removal.py`, `test_schema_tab.py`, `web.py`
+- **`remove_banned`**(tenant, phrase, by?) → `str`  ·  from `seed_demo.py`, `test_ban_list.py`, `web.py`
+- **`repair_fingerprints`**(tenant, apply?) → `dict`  ·  route `GET /admin/repair_fingerprints`  ·  from `test_provenance.py`, `web.py`
+- **`resolve_entity_ref`**(tenant, text) → `tuple[str, str]`  ·  from `test_review_ui.py`, `web.py`
+- **`resolve_unknown`**(unknown_id, value) → `str`  ·  from `ops_commands.py`, `test_selection.py`, `web.py`
+- **`restore`**(tenant, kind, row_id, by?) → `dict`  ·  from `test_kb_removal.py`, `web.py`
+- **`review_asset`**(asset_id, approve, by?, rights?) → `str`  ·  from `test_assets.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_hosting.py`, `test_strategy_ledger.py`, `web.py`
+- **`review_claim`**(claim_id, approve, by?) → `str`  ·  from `test_claim_expiry.py`, `test_classify.py`, `test_dossier.py`, `test_embed.py`, `test_harvest.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`, `web.py`
+- **`review_context`**(context_id, approve) → `str`  ·  from `web.py`
+- **`review_entity`**(entity_id, approve, by?) → `str`  ·  from `test_offers.py`, `web.py`
+- **`scope_conflicts`**(tenant) → `list[dict]`  ·  from `test_scope.py`, `web.py`
+- **`scope_depth`**(entity_key, claim_entity_key, chain?) → `int`  ·  **from nothing**
+- **`scope_unconfirmed`**(row) → `bool`  ·  from `admin_ui.py`, `test_objection_scope.py`
+- **`seed_agency`**(force?) → `dict`  ·  from `test_brief.py`, `test_claim_tagging.py`, `test_intake.py`, `test_kb.py`, `test_kb_ui.py`, `test_selection.py`, `test_systems.py`, `test_worker_systems.py`
+- **`selection_config`**(tenant) → `dict`  ·  from `admin_ui.py`
+- **`set_asset_assessment`**(asset_id, verdict) → `str`  ·  from `creative.py`
+- **`set_asset_hosted`**(asset_id, where, url?) → `str`  ·  from `hosting.py`
+- **`set_asset_placements`**(asset_id, cut) → `str`  ·  from `creative.py`, `hosting.py`, `test_hosting.py`
+- **`set_brand`**(tenant, **fields) → `str`  ·  from `brand_theme.py`, `kb_seed.py`, `seed_demo.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_approval_gate.py`, `test_assets.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_rotation.py`, `test_coherence.py`, `test_console_frame.py`, `test_context.py`, `test_data_layer.py`, `test_dossier.py`, `test_funnel.py`, `test_offers.py`, `test_perishable.py`, `test_resolve.py`, `test_responder.py`, `test_review_ui.py`, `test_schema_tab.py`, `test_scope.py`, `test_selection.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_tenant_isolation.py`, `test_voice.py`, `test_workroom_email.py`, `voice.py`, `web.py`
+- **`set_claim_expiry`**(claim_id, never?, on?) → `str`  ·  from `test_claim_expiry.py`, `test_kb_ui.py`, `web.py`
+- **`similar`**(tenant, text, entity_key?, limit?) → `dict`  ·  from `test_context.py`, `web.py`
+- **`similar_situation`**(tenant, tag) → `str`  ·  from `harvest.py`, `test_claim_tagging.py`
+- **`situation_desc`**(tenant) → `dict[str, str]`  ·  from `brief.py`
+- **`situation_neighbours`**(tenant, tag, limit?) → `list[dict]`  ·  from `test_claim_tagging.py`, `web.py`
+- **`situation_overlaps`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_claim_tagging.py`, `web.py`
+- **`situation_patterns`**(tenant) → `dict[str, list[tuple]]`  ·  from `brief.py`, `harvest.py`
+- **`situation_rows`**(tenant) → `list[db.KbSituation]`  ·  from `ab_context.py`, `admin_ui.py`, `claim_trace.py`, `dossier.py`, `extract.py`, `funnel.py`, `lookups.py`, `test_claim_tagging.py`, `test_funnel.py`, `test_kb_removal.py`, `test_kb_ui.py`, `web.py`
+- **`situations`**(tenant, include_proposed?) → `set[str]`  ·  from `admin_ui.py`, `extract.py`, `harvest.py`, `resolve.py`, `test_claim_tagging.py`, `test_console_controls.py`, `test_data_layer.py`, `test_harvest.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_propose.py`, `test_provenance.py`, `test_resolve.py`, `test_schema_tab.py`, `test_selection.py`
+- **`suggest_tags`**(tenant, text, limit?, entity_key?, exclude_claim_id?) → `dict`  ·  from `email_harvest.py`, `harvest.py`, `resolve.py`, `test_claim_tagging.py`, `test_classify.py`, `test_embed.py`, `test_harvest.py`, `test_provenance.py`
+- **`support_for`**(tenant, objection, limit?) → `list[db.KbClaim]`  ·  from `brief.py`, `resolve.py`, `test_selection.py`
+- **`tenants_mod`**() → `—`  ·  **from nothing**
+- **`undatable_claims`**(tenant?) → `list[dict]`  ·  from `test_claim_expiry.py`
+- **`unknowns`**(tenant?, status?) → `list[db.KbUnknown]`  ·  from `admin_ui.py`, `ops_commands.py`, `test_kb_ui.py`, `test_schema_tab.py`, `test_selection.py`, `test_skill.py`, `web.py`
+- **`update_audience`**(row_id, name?, pains?, vocabulary?, buying_trigger?, decision_timeline?, notes?) → `str`  ·  from `web.py`
+- **`update_claim`**(claim_id, claim?, evidence?, tags?, proof_type?, source?, strength?, entity_key?, proves?, context?, attributed_to?) → `str`  ·  from `test_assurance_tab.py`, `test_harvest.py`, `test_kb_ui.py`, `test_pointer_fixes.py`, `test_provenance.py`, `web.py`
+- **`update_objection`**(row_id, objection?, response?, entity_key?, audience_key?, escalate?, situations?) → `str`  ·  from `test_objection_scope.py`, `test_responder.py`, `web.py`
+- **`usage_rule`**(proof_type) → `str`  ·  from `admin_ui.py`, `resolve.py`, `test_harvest.py`, `test_positioning.py`
+
+### `kb_seed.py`
+
+- **`backfill`**() → `None`  ·  from `tenant_scope.py`, `test_embed.py`, `test_migration.py`, `test_tenant_scope.py`, `web.py`
+- **`report`**() → `None`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `diagnostics.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+- **`seed_all`**() → `dict`  ·  from `seed_kb.py`, `test_approval_gate.py`, `test_article_image.py`, `test_assurance_tab.py`, `test_brand_sources.py`, `test_catalog_sync.py`, `test_claim_trace.py`, `test_compliance.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_diagnostics_surface.py`, `test_email_harvest.py`, `test_extract.py`, `test_funnel.py`, `test_harvest.py`, `test_hosting.py`, `test_kb.py`, `test_kb_ui.py`, `test_provenance.py`, `test_results.py`, `test_selection.py`, `test_sources.py`, `test_worker_systems.py`, `web.py`
+- **`seed_baci`**() → `None`  ·  **from nothing**
+- **`seed_coverings`**() → `None`  ·  from `test_intake.py`
+- **`seed_eien`**() → `None`  ·  **from nothing**
+- **`seed_ironside`**() → `None`  ·  **from nothing**
+- **`status`**() → `dict`  ·  from `admin_ui.py`, `portal_ui.py`, `test_brand_theme.py`, `test_connect_ui.py`, `test_credentials.py`, `test_oauth.py`, `test_review_ui.py`, `test_shopify_oauth.py`, `web.py`
+
+### `kernel.py`
+
+- **`run`**(role, text, attachments?, thread?, tenant?) → `str`  ·  from `command_agent.py`, `sabotage.py`, `seed_demo.py`, `skill.py`, `skill_pack.py`, `test_ad_board.py`, `test_approval_gate.py`, `test_article_review.py`, `test_blog_skill.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_coherence.py`, `test_funnel.py`, `test_offers.py`, `test_plans.py`, `test_register.py`, `test_replies.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`, `worker.py`
+
+### `keywords.py`
+
+- **`aeo`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `test_keyword_progress.py`
+- **`board`**(tenant, days?, top?) → `dict`  ·  from `admin_ui.py`, `test_article_review.py`, `test_keywords.py`, `test_systems.py`, `web.py`
+- **`brand_tokens_for`**(tenant) → `set[str]`  ·  from `funnel.py`, `skill_pack.py`, `test_funnel.py`, `test_keywords.py`, `web.py`
+- **`classify_intent`**(phrase, brand_tokens?) → `str`  ·  from `funnel.py`, `skill_pack.py`, `test_funnel.py`
+- **`classify_tier`**(phrase, volume?, head_volume?) → `str`  ·  **from nothing**
+- **`cluster`**(tenant) → `dict`  ·  from `skill_pack.py`, `test_article_review.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keywords.py`, `web.py`
+- **`cluster_state`**(tenant) → `dict[str, dict]`  ·  **from nothing**
+- **`harvest`**(tenant, seeds?, sources?, days?, limit?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `web.py`
+- **`harvest_all`**(limit?) → `dict`  ·  from `test_harvest.py`, `web.py`
+- **`harvest_due`**(tenant) → `bool`  ·  from `test_keyword_progress.py`
+- **`is_question`**(phrase) → `bool`  ·  from `skill_pack.py`
+- **`latest_reading`**(tenant, phrase, source?) → `—`  ·  from `test_keyword_progress.py`, `test_keywords.py`
+- **`map_for`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_keywords.py`, `web.py`
+- **`mark_published`**(tenant, output_id, url?) → `dict`  ·  from `approvals.py`, `web.py`
+- **`mute_lessons`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_console_controls.py`, `test_keywords.py`
+- **`muted`**(tenant) → `list`  ·  **from nothing**
+- **`progress`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `test_article_review.py`, `test_keyword_progress.py`, `web.py`
+- **`readiness`**(tenant, probe?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `web.py`
+- **`readiness_all`**(probe?) → `dict`  ·  from `web.py`
+- **`record_reading`**(tenant, phrase, source?, position?, impressions?, clicks?, ctr?, url?, database?) → `str`  ·  from `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_keyword_progress.py`, `test_keywords.py`
+- **`score`**(tenant) → `dict`  ·  from `skill_pack.py`, `test_ad_craft.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keyword_progress.py`, `test_keywords.py`, `web.py`
+- **`set_priority`**(tenant, phrase, mode) → `dict`  ·  from `test_console_controls.py`, `test_keywords.py`, `web.py`
+- **`settle`**(tenant) → `dict`  ·  from `test_conversation.py`
+- **`slug`**(phrase) → `str`  ·  from `planner.py`, `skill_pack.py`
+- **`sync`**(tenant, days?, limit?) → `dict`  ·  from `test_keyword_progress.py`, `test_segments.py`, `test_strategy.py`, `web.py`, `worker.py`
+- **`sync_all`**(days?) → `dict`  ·  from `web.py`, `worker.py`
+- **`targets`**(tenant, tier?, status?, cluster_key?) → `list[db.KeywordTarget]`  ·  from `funnel.py`, `planner.py`, `skill_pack.py`, `test_blog_skill.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_pointer_fixes.py`
+- **`thresholds_for`**(tenant) → `dict`  ·  from `test_keywords.py`
+- **`tokens`**(phrase) → `list[str]`  ·  from `claim_trace.py`, `skill_pack.py`
+- **`upsert`**(tenant, phrase, volume?, difficulty?, cpc?, source?, database?, **plan) → `db.KeywordTarget`  ·  from `embed.py`, `planner.py`, `seed_demo.py`, `skill_pack.py`, `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_embed.py`, `test_funnel.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_plan_tab.py`, `test_render_smoke.py`
+
+### `landing.py`
+
+- **`render`**() → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_grounding.py`, `web.py`
+- **`signin`**(err?) → `str`  ·  from `web.py`
+
+### `ledger.py`
+
+- **`audiences_written_to`**(tenant, days?, fmt?) → `list[str]`  ·  from `strategy.py`
+- **`claims_last_used`**(tenant) → `dict`  ·  from `kb.py`
+- **`confirm_sent`**(tenant, output_id, at?, outcome?) → `dict`  ·  from `performance.py`
+- **`delivered`**(tenant, output_id, destination) → `bool`  ·  from `performance.py`, `skill_pack.py`
+- **`diff`**(tenant, a_id, b_id) → `dict`  ·  from `test_responder.py`
+- **`is_repeat`**(tenant, claim_ids, entity_key?, within_days?) → `dict`  ·  from `validator.py`
+- **`perishable`**(tenant, conversation_id?, within_days?) → `list[dict]`  ·  from `resolve.py`, `test_perishable.py`
+- **`publish`**(tenant, output_id, destination?) → `str`  ·  from `keywords.py`, `responder.py`, `test_assets.py`, `test_hosting.py`
+- **`recent`**(tenant, system_key?, limit?) → `list[db.Output]`  ·  from `skill_pack.py`, `test_bridge.py`, `test_offers.py`, `test_responder.py`, `test_skill.py`, `web.py`
+- **`record`**(tenant, system_key, situation?, entity_key?, audience_key?, objection_id?, claim_ids?, media_ids?, theme?, positioning?, funnel_stage?, angle?, format?, status?, blocked_on?, destination?, body?, conversation_id?, touch_id?, run_id?, lookups?, shape?, meta?) → `db.Output`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
+- **`sends_to`**(tenant, audience_key, days?, fmt?) → `list[dict]`  ·  from `strategy.py`, `test_strategy_ledger.py`
+- **`unused_claims`**(tenant, min_outputs?) → `dict`  ·  from `test_responder.py`, `web.py`
+- **`used_recently`**(tenant, claim_id, entity_key?, within_days?, limit?) → `list[db.Output]`  ·  from `test_strategy.py`
+
+### `links.py`
+
+- **`best_for`**(tenant, entity_keys?, dests?) → `str`  ·  from `skill_pack.py`
+- **`check`**(html, tenant, dests?) → `list[str]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_claim_trace.py`, `test_seo_guard.py`, `triage.py`, `web.py`, `wordpress_seo.py`
+- **`destinations`**(tenant, fetch?) → `list[dict]`  ·  from `skill_pack.py`
+- **`repoint`**(html, tenant, fallback, dests?) → `tuple[str, list[str]]`  ·  from `skill_pack.py`
+- **`shop_url`**(tenant, dests?) → `str`  ·  from `test_campaign_variety.py`
+
+### `llm.py`
+
+- **`ask`**(purpose, prompt, tenant?, system?, model?, max_tokens?, **extra) → `Reply`  ·  route `GET /admin/ask`  ·  from `brief.py`, `channel.py`, `creative.py`, `ops_jobs.py`, `skill_pack.py`, `skills.py`, `test_llm.py`, `triage.py`, `voice_learn.py`
+- **`call`**(purpose, messages, tenant?, system?, model?, max_tokens?, tools?, **extra) → `Reply`  ·  from `kernel.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `triage.py`, `verify_canva.py`
+- **`extract_text`**(blocks) → `str`  ·  from `data_tools.py`, `test_llm.py`
+- **`model_for`**(purpose) → `str`  ·  from `test_creative_seam.py`, `test_llm.py`
+- **`text_or_raise`**(reply) → `str`  ·  from `ops_jobs.py`
+
+### `lookups.py`
+
+- **`extract_params`**(utterance, wanted) → `dict`  ·  **from nothing**
+- **`needed_for`**(tenant, situation_tags, utterance?, entity_key?) → `list[dict]`  ·  from `resolve.py`, `test_pointer_fixes.py`, `web.py`
+- **`validate_declaration`**(needs) → `tuple[list[dict], list[str]]`  ·  from `kb.py`
+
+### `mcp_client.py`
+
+- **`open_session`**(url, bearer?, client_name?) → `tuple[Session | None, str]`  ·  from `canva.py`, `test_mcp_client.py`
+- **`tool_call`**(sess, name, arguments?) → `dict`  ·  from `canva.py`, `test_mcp_client.py`
+- **`tools`**(sess) → `dict`  ·  from `canva.py`, `test_mcp_client.py`
+
+### `media.py`
+
+- **`get`**(blob_id) → `tuple[bytes, str]`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `conversation.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `sites.py`, `skill.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`put`**(tenant, blob, mime?, origin?) → `dict`  ·  from `creative.py`, `test_creative_seam.py`, `test_hosting.py`, `web.py`
+- **`sweep`**(unreviewed_days?, orphan_days?) → `dict`  ·  from `test_correlate.py`, `test_creative_seam.py`, `test_hosting.py`, `test_moments.py`, `web.py`, `worker.py`
+- **`url_for`**(blob_id, mime?) → `str`  ·  **from nothing**
+
+### `memory.py`
+
+- **`add_lesson`**(lesson, scope?, origin?) → `str`  ·  from `web.py`
+- **`clear_concern`**(what, because?, scope?, tenant?) → `str`  ·  from `test_allclear.py`, `web.py`
+- **`cleared_block`**(tenant?) → `str`  ·  from `test_allclear.py`, `triage.py`
+- **`concerns`**(tenant?) → `list[dict]`  ·  from `test_allclear.py`, `web.py`
+- **`forget`**(topic, scope?) → `str`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`
+- **`lessons_block`**(role?, tenant?) → `str`  ·  from `kernel.py`, `test_tenant_isolation.py`, `triage.py`
+- **`load_chat_history`**(thread?) → `list[dict]`  ·  from `kernel.py`, `test_tenant_isolation.py`
+- **`memory_block`**(role?, tenant?) → `str`  ·  from `kernel.py`, `test_allclear.py`, `test_tenant_isolation.py`, `triage.py`
+- **`remember`**(topic, content, scope?) → `str`  ·  from `command_agent.py`, `ops_jobs.py`, `seo_tools.py`, `test_allclear.py`
+- **`retire`**(note_id) → `str`  ·  from `test_allclear.py`, `web.py`
+- **`save_turn`**(thread, role, content) → `None`  ·  from `kernel.py`, `test_tenant_isolation.py`
+- **`sender_history`**(sender_email, tenant, limit?) → `str`  ·  from `test_tenant_isolation.py`, `triage.py`
+- **`shipments_block`**(tenant) → `str`  ·  from `test_tenant_isolation.py`, `triage.py`
+- **`working_notes`**(tenant?) → `list[dict]`  ·  from `test_allclear.py`, `web.py`
+
+### `meta_ads.py`
+
+- **`comparable`**(text) → `str`  ·  from `test_results.py`
+- **`live_ads`**(tenant, limit?) → `dict`  ·  **from nothing**
+- **`match`**(tenant, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `oauth.py`, `ops_commands.py`, `test_results.py`, `web.py`
+
+### `metrics.py`
+
+- **`asks`**(tenant, days?) → `list[dict]`  ·  from `client_report.py`, `test_metrics.py`
+- **`compute`**(tenant, system_key, days?) → `list[dict]`  ·  from `client_report.py`, `test_metrics.py`
+- **`for_system`**(key) → `list[dict]`  ·  from `test_metrics.py`
+- **`outcomes`**(tenant, days?) → `list[dict]`  ·  from `client_report.py`, `test_metrics.py`
+- **`record_figure`**(tenant, metric_key, value, period_start?, period_end?, unit?, supplied_by?, note?) → `str`  ·  from `test_metrics.py`, `web.py`
+- **`request_email`**(tenant, days?, to?, queue?) → `dict`  ·  from `test_metrics.py`, `web.py`
+
+### `model_error.py`
+
+- **`explain`**(exc) → `str`  ·  from `llm.py`, `responder.py`, `skill_pack.py`
+- **`is_operational`**(exc) → `bool`  ·  **from nothing**
+- **`provider_message`**(exc) → `str`  ·  **from nothing**
+
+### `moments.py`
+
+- **`by_model`**(model) → `list[dict]`  ·  **from nothing**
+- **`close`**(moment_id, status, why?, consumed_by?) → `bool`  ·  from `commerce_events.py`, `test_migration.py`
+- **`consumed_for`**(tenant, moment_ids, ref) → `int`  ·  from `planner.py`
+- **`due`**(tenant?, kind?, limit?) → `list[db.Moment]`  ·  from `test_conversation.py`, `test_moments.py`, `web.py`
+- **`expire_stale`**(tenant?) → `int`  ·  from `test_moments.py`, `worker.py`
+- **`for_tenant`**(tenant) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `credentials.py`, `metrics.py`, `ops_commands.py`, `planner.py`, `skill_pack.py`, `strategy.py`, `systems.py`, `test_moments.py`, `test_plan_tab.py`, `test_planner.py`, `test_segments.py`, `test_strategy.py`, `test_systems_board.py`, `web.py`
+- **`pressure`**(tenant) → `list[dict]`  ·  from `planner.py`, `test_moment_pressure.py`, `web.py`
+- **`record`**(tenant, kind, person_key, dedup_key?, source?, entity_key?, contact_id?, conversation_id?, occurred_at?, payload?) → `dict`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
+- **`spec`**(model, kind) → `dict`  ·  from `admin_ui.py`, `inbox_events.py`, `test_moments.py`
+
+### `oauth.py`
+
+- **`access_token`**(provider, refresh_token) → `dict`  ·  from `canva.py`, `constant_contact.py`
+- **`authorize_url`**(provider, state, challenge?, shop?) → `str`  ·  from `test_canva.py`, `test_oauth.py`, `web.py`
+- **`configured`**(provider) → `str`  ·  from `credentials.py`, `test_canva.py`, `test_constant_contact.py`, `test_oauth.py`, `web.py`
+- **`endpoint`**(provider, which, shop?) → `str`  ·  from `test_shopify_oauth.py`
+- **`exchange`**(provider, code, code_verifier?, shop?) → `dict`  ·  from `test_shopify_oauth.py`, `web.py`
+- **`read_state`**(state) → `tuple[dict, str]`  ·  from `test_canva.py`, `test_oauth.py`, `test_shopify_oauth.py`, `web.py`
+- **`redirect_uri`**(provider) → `str`  ·  from `admin_ui.py`, `credentials.py`, `test_oauth.py`, `web.py`
+- **`renew`**(provider, token) → `dict`  ·  from `credentials.py`
+- **`scope_words`**(provider) → `list[str]`  ·  from `admin_ui.py`, `test_shopify_oauth.py`
+- **`shop_host`**(raw) → `str`  ·  from `test_shopify_oauth.py`, `web.py`
+- **`sign_state`**(tenant, provider, connect_token?, via?, verifier?, shop?) → `str`  ·  from `test_canva.py`, `test_oauth.py`, `web.py`
+- **`state_verifier`**(data) → `str`  ·  from `test_canva.py`, `web.py`
+- **`verify_callback`**(provider, params) → `str`  ·  from `web.py`
+
+### `offers.py`
+
+- **`applicable`**(tenant, segment?, entity_keys?) → `dict`  ·  from `skill_pack.py`, `test_offers.py`
+- **`harvest`**(tenant, days?, apply?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `web.py`
+- **`known`**(tenant, include_proposed?) → `list`  ·  from `test_offers.py`
+- **`phrases`**(text) → `list[str]`  ·  from `test_offers.py`
+
+### `omnisend.py`
+
+- **`campaign`**(tenant, campaign_id) → `dict`  ·  from `performance.py`
+- **`campaign_metrics`**(tenant, days?) → `dict`  ·  from `performance.py`
+- **`create_draft_campaign`**(tenant, name?, subject?, sender_name?, template_id?, preheader?, include_segments?, exclude_segments?) → `dict`  ·  from `test_omnisend.py`
+- **`create_segment`**(tenant, name, condition_groups) → `dict`  ·  **from nothing**
+- **`draft_from_html`**(tenant, name?, subject?, sender_name?, html?, preheader?, include_segments?) → `dict`  ·  from `skill_pack.py`, `test_constant_contact.py`, `test_omnisend.py`
+- **`import_template`**(tenant, name, html) → `dict`  ·  from `test_omnisend.py`
+- **`segment_conditions_for`**(key) → `list[dict] | None`  ·  **from nothing**
+- **`segments`**(tenant) → `dict`  ·  from `test_omnisend.py`, `test_segments.py`
+- **`send_campaign`**(tenant, campaign_id, confirm?) → `dict`  ·  from `test_constant_contact.py`, `test_omnisend.py`
+- **`send_test`**(tenant, campaign_id, emails) → `dict`  ·  **from nothing**
+- **`upload_image`**(tenant, url) → `dict`  ·  **from nothing**
+
+### `ops_commands.py`
+
+- **`handle`**(text, chat_id?) → `str | None`  ·  from `test_kb.py`, `web.py`
+
+### `ops_jobs.py`
+
+- **`build_onboarding_packet`**() → `str`  ·  **from nothing**
+- **`daily_review`**() → `str`  ·  **from nothing**
+- **`doc_sweep`**() → `str`  ·  **from nothing**
+- **`file_whatsapp_document`**(media_id, filename, mime, caption, chat_context) → `str`  ·  **from nothing**
+- **`map_drive`**() → `str`  ·  **from nothing**
+- **`organize`**(account?, query?, destination?, scheme?, days?, save_emails?) → `str`  ·  from `command_agent.py`
+- **`recategorize`**() → `str`  ·  **from nothing**
+- **`reconcile_mail`**() → `dict`  ·  **from nothing**
+- **`refile_intake`**() → `str`  ·  **from nothing**
+- **`shipment_audit`**() → `str`  ·  **from nothing**
+- **`sync_catalog`**(account?, destination?) → `str`  ·  from `command_agent.py`
+
+### `performance.py`
+
+- **`sync`**(tenant, days?) → `dict`  ·  from `test_keyword_progress.py`, `test_segments.py`, `test_strategy.py`, `web.py`, `worker.py`
+- **`sync_all`**(days?) → `dict`  ·  from `web.py`, `worker.py`
+
+### `planner.py`
+
+- **`blog_cadence_for`**(sysrow) → `dict`  ·  **from nothing**
+- **`blog_rollout`**(sysrow) → `dict`  ·  from `test_blog_skill.py`, `test_keywords.py`, `web.py`
+- **`cadence_for`**(sysrow) → `dict`  ·  from `admin_ui.py`, `test_planner.py`
+- **`campaign_rollout`**(sysrow) → `dict`  ·  **from nothing**
+- **`rest_days_for`**(sysrow) → `int`  ·  from `test_moment_pressure.py`
+- **`top_up`**(sysrow) → `ok, proposed, refreshed, refusals`  ·  from `test_moment_pressure.py`, `test_planner.py`, `test_strategy.py`, `web.py`, `worker.py`
+
+### `portal.py`
+
+- **`access_of`**(user_id) → `str`  ·  **from nothing**
+- **`can_write`**(request) → `bool`  ·  from `web.py`
+- **`issue_link`**(email, issued_by?) → `dict`  ·  from `test_portal.py`, `web.py`
+- **`people`**(tenant?) → `list[dict]`  ·  from `admin_ui.py`
+- **`principal`**(request) → `dict`  ·  from `web.py`
+- **`read_session`**(raw) → `dict`  ·  from `test_portal.py`, `test_render_smoke.py`
+- **`redeem`**(token) → `dict`  ·  from `test_portal.py`, `web.py`
+- **`resolve_tenant`**(request, asked?) → `tuple[str, str]`  ·  from `web.py`
+- **`revoke`**(user_id) → `str`  ·  from `test_credentials.py`, `test_oauth.py`, `test_portal.py`, `web.py`
+- **`save_person`**(email?, name?, tenant?, access?, role?) → `dict`  ·  from `test_portal.py`, `web.py`
+- **`set_access`**(user_id, access) → `str`  ·  from `test_portal.py`, `web.py`
+
+### `portal_ui.py`
+
+- **`render`**(tenant, tab?, days?, who?, notice?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_grounding.py`, `web.py`
+- **`render_signin`**(error?, sent?) → `str`  ·  from `web.py`
+
+### `propose.py`
+
+- **`claim`**(tenant, text, evidence, source_ref?, situations?, entity_key?) → `dict`  ·  from `test_propose.py`, `web.py`
+- **`from_gap`**(tenant, gap, source_ref?) → `dict`  ·  **from nothing**
+- **`objection`**(tenant, question, answer, source_ref?, situations?, entity_key?) → `dict`  ·  from `test_propose.py`, `web.py`
+- **`situation`**(tenant, tag, description, source_ref?) → `dict`  ·  from `test_propose.py`, `web.py`
+
+### `provenance.py`
+
+- **`apply_fields`**(row, incoming, origin, source_ref?, table?, tenant?) → `dict`  ·  from `catalog_sync.py`, `kb.py`
+- **`conflicts`**(tenant?, status?) → `list`  ·  from `admin_ui.py`, `test_kb_ui.py`, `test_propose.py`, `test_provenance.py`
+- **`fingerprint`**(*parts) → `str`  ·  from `catalog_sync.py`, `db.py`, `email_harvest.py`, `harvest.py`, `kb.py`, `test_claim_tagging.py`, `test_harvest.py`, `test_provenance.py`
+- **`lands_approved`**(origin) → `bool`  ·  from `kb.py`, `test_propose.py`
+- **`may_write`**(field, existing_origin, existing_review, incoming_origin) → `bool`  ·  from `kb.py`, `test_provenance.py`
+- **`near_duplicates`**(text, candidates, field?, threshold?) → `list`  ·  from `kb.py`
+- **`normalise`**(text) → `str`  ·  from `admin_ui.py`, `claim_trace.py`, `creative.py`, `meta_ads.py`, `offers.py`, `skill_pack.py`, `systems.py`, `test_funnel.py`
+- **`record_conflict`**(tenant, table, row_id, field, approved_value, incoming_value, origin, source_ref?) → `str`  ·  from `kb.py`
+- **`resolve_conflict`**(conflict_id, keep) → `str`  ·  from `test_provenance.py`, `web.py`
+- **`similarity`**(a, b) → `float`  ·  from `kb.py`, `test_claim_tagging.py`, `test_imagegen.py`, `test_provenance.py`
+
+### `replies.py`
+
+- **`may_reply`**(tenant, thread_id, system_key) → `dict`  ·  from `skill.py`, `test_replies.py`, `worker.py`
+- **`owner`**(tenant, thread_id) → `dict`  ·  from `test_draft_sync.py`, `test_replies.py`
+- **`route`**(bucket) → `str`  ·  from `grounding.py`, `test_replies.py`, `worker.py`
+
+### `reset.py`
+
+- **`preview`**(tenant, groups?) → `dict`  ·  from `test_reset.py`, `test_shopify_compliance.py`, `test_tenant_scope.py`, `web.py`
+- **`reset`**(tenant, groups?, apply?) → `dict`  ·  from `test_reset.py`, `web.py`
+
+### `resolve.py`
+
+- **`readiness`**(tenant) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `web.py`
+- **`resolve`**(tenant, system?, utterance?, contact_id?, entity_key?, audience_key?, guidance_also?, requirements?, tier?, limit?) → `dict`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+
+### `responder.py`
+
+- **`answer`**(tenant, utterance, contact_id?, entity_key?, system_key?, run_id?, within_days?, facts?, draft_with_model?, bundle?) → `dict`  ·  from `skill_pack.py`, `test_perishable.py`, `test_responder.py`, `web.py`
+- **`send`**(tenant, output_id, conversation_id?, channel?, ref?, destination?) → `dict`  ·  from `gmail_client.py`, `test_responder.py`
+
+### `results.py`
+
+- **`by`**(tenant, dim?, formats?) → `dict`  ·  from `test_results.py`
+- **`headline`**(tenant) → `str`  ·  from `admin_ui.py`, `test_results.py`
+- **`scoreboard`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_results.py`
+
+### `segments.py`
+
+- **`by_model`**(model) → `list[dict]`  ·  **from nothing**
+- **`esp_id_for`**(tenant, key) → `dict`  ·  from `skill_pack.py`, `test_segments.py`
+- **`for_tenant`**(tenant) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `credentials.py`, `metrics.py`, `ops_commands.py`, `planner.py`, `skill_pack.py`, `strategy.py`, `systems.py`, `test_moments.py`, `test_plan_tab.py`, `test_planner.py`, `test_segments.py`, `test_strategy.py`, `test_systems_board.py`, `web.py`
+- **`links`**(tenant) → `dict`  ·  from `test_segments.py`
+- **`materialize`**(tenant, apply?, rec?) → `dict`  ·  from `test_segments.py`, `web.py`
+- **`reconcile`**(tenant) → `dict`  ·  from `test_canva.py`, `test_segments.py`
+- **`stored_state`**(tenant) → `dict | None`  ·  from `admin_ui.py`, `test_segments.py`
+- **`sync`**(tenant) → `dict`  ·  from `test_keyword_progress.py`, `test_segments.py`, `test_strategy.py`, `web.py`, `worker.py`
+- **`warmth`**(key) → `str`  ·  from `skill_pack.py`
+
+### `seo_guard.py`
+
+- **`check`**(profile, fields, what?) → `str`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_claim_trace.py`, `test_seo_guard.py`, `triage.py`, `web.py`, `wordpress_seo.py`
+- **`tenant_for`**(profile) → `str`  ·  from `approvals.py`, `keywords.py`, `seo_tools.py`, `test_seo_guard.py`
+
+### `seo_tools.py`
+
+- **`capture_snapshot`**(domain?, database?, _tenant?) → `str`  ·  **from nothing**
+- **`dispatch`**(name, args, session_files) → `str`  ·  from `command_agent.py`, `kernel.py`, `test_blog_path.py`, `test_site_resolution.py`, `test_tenant_isolation.py`, `tools.py`
+- **`semrush_competitors`**(domain?, database?, limit?, _tenant?) → `str`  ·  **from nothing**
+- **`semrush_domain_overview`**(domain?, database?, _tenant?) → `str`  ·  from `brief.py`, `tenants.py`, `web.py`
+- **`semrush_keyword_metrics`**(phrases, database?, _tenant?) → `str`  ·  **from nothing**
+- **`semrush_opportunity_finder`**(domain?, database?, min_volume?, min_pos?, max_pos?, limit?, exclude_terms?, _tenant?) → `str`  ·  from `keywords.py`
+- **`semrush_questions`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`
+- **`semrush_related_keywords`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`
+- **`semrush_top_keywords`**(domain?, database?, limit?, sort?, _tenant?) → `str`  ·  from `keywords.py`
+- **`seo_context_block`**(tenant?) → `str`  ·  **from nothing**
+- **`seo_progress`**(domain?) → `str`  ·  **from nothing**
+
+### `shopify_seo.py`
+
+- **`create_article`**(profile, blog_id, fields) → `str`  ·  from `approvals.py`, `test_article_image.py`, `test_article_review.py`, `test_seo_guard.py`
+- **`create_collection`**(profile, fields, item_ids?) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`create_page`**(profile, fields) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`find_items`**(profile, query?, limit?) → `str`  ·  from `seo_tools.py`
+- **`get_article`**(profile, blog_id, article_id) → `str`  ·  from `seo_tools.py`, `test_toolcalls.py`
+- **`get_seo`**(profile, resource, resource_id) → `str`  ·  from `seo_tools.py`
+- **`install_schema_renderer`**(profile) → `str`  ·  from `approvals.py`
+- **`list_articles`**(profile, blog_id, limit?) → `str`  ·  from `seo_tools.py`, `test_toolcalls.py`
+- **`list_blogs`**(profile) → `str`  ·  from `admin_ui.py`, `seo_tools.py`
+- **`list_collections`**(profile) → `str`  ·  from `seo_tools.py`
+- **`put_image`**(profile, blob, filename?, alt?) → `dict`  ·  from `hosting.py`, `test_hosting.py`
+- **`sole_blog_id`**(profile) → `str`  ·  from `skill_pack.py`, `test_article_image.py`
+- **`update_article`**(profile, blog_id, article_id, fields) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`update_seo`**(profile, resource, resource_id, fields) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+
+### `shopify_webhooks.py`
+
+- **`handle`**(topic, shop, payload) → `dict`  ·  from `test_kb.py`, `web.py`
+- **`verify`**(raw, header) → `bool`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
+
+### `sites.py`
+
+- **`all_profiles`**() → `dict`  ·  from `command_agent.py`, `connections.py`, `test_connections.py`, `test_new_organization.py`, `test_site_resolution.py`, `tool_scope.py`, `web.py`
+- **`backend`**(profile) → `—`  ·  from `admin_ui.py`, `approvals.py`, `hosting.py`, `keywords.py`, `performance.py`, `segments.py`, `seo_tools.py`, `skill_pack.py`, `test_esp.py`, `test_new_organization.py`, `test_site_resolution.py`
+- **`block`**() → `str`  ·  from `kernel.py`, `resolve.py`, `seo_tools.py`, `test_craft.py`
+- **`compose_jsonld`**(faqs, extra) → `list`  ·  from `seo_tools.py`
+- **`faq_html`**(faqs) → `str`  ·  from `seo_tools.py`
+- **`faq_schema`**(faqs) → `dict`  ·  **from nothing**
+- **`get`**(site_key?) → `dict`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `conversation.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `skill.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`jsonld_script`**(structured) → `str`  ·  from `seo_tools.py`
+- **`verify_links`**(profile, html) → `dict`  ·  from `seo_tools.py`
+
+### `skill.py`
+
+- **`catalogue`**(tenant?) → `list[dict]`  ·  from `command_agent.py`, `test_replies.py`, `test_run_skill.py`, `test_skill.py`, `web.py`
+- **`get`**(key) → `Skill | None`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `conversation.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `sites.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`preflight`**(key, tenant) → `dict`  ·  from `test_skill.py`
+- **`register`**(skill) → `Skill`  ·  from `test_planner.py`, `test_plans.py`, `test_skill.py`, `test_workflow_ui.py`
+- **`registered`**() → `int`  ·  from `systems.py`, `test_skill_conformance.py`, `web.py`
+- **`run`**(key, tenant, trigger?, ref?, run_id?, **params) → `dict`  ·  from `command_agent.py`, `sabotage.py`, `seed_demo.py`, `skill_pack.py`, `test_ad_board.py`, `test_approval_gate.py`, `test_article_review.py`, `test_blog_skill.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_coherence.py`, `test_funnel.py`, `test_offers.py`, `test_plans.py`, `test_register.py`, `test_replies.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`, `worker.py`
+- **`tool_description`**(tenant?) → `str`  ·  from `test_run_skill.py`
+
+### `skill_pack.py`
+
+- **`ad_prompt`**(bundle, claim, angle, objections) → `list[str]`  ·  from `test_ad_craft.py`
+- **`push_campaign_to_esp`**(tenant, output_id) → `dict`  ·  from `approvals.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_strategy_ledger.py`, `web.py`
+- **`redraft_artifact`**(tenant, output_id, note?, overrides?, part?) → `dict`  ·  from `test_article_review.py`, `test_campaign_variety.py`, `web.py`
+
+### `skills.py`
+
+- **`business_pulse`**() → `str`  ·  from `command_agent.py`
+- **`contract_expiry_watch`**() → `str`  ·  **from nothing**
+- **`duplicate_cleanup`**(account?, destination?) → `str`  ·  **from nothing**
+- **`invoice_chase`**(account?, days?) → `str`  ·  from `command_agent.py`
+- **`meeting_scan`**() → `str`  ·  from `command_agent.py`
+- **`spend_flags`**(days?) → `str`  ·  from `command_agent.py`
+- **`tax_receipt_export`**(year?, account?, destination?) → `str`  ·  from `command_agent.py`
+
+### `sources.py`
+
+- **`available`**(tenant) → `list[dict]`  ·  from `email_harvest.py`, `harvest.py`, `test_embed.py`, `test_extract.py`, `test_sources.py`, `web.py`
+- **`fill`**(tenant, apply?, budget?, only?) → `dict`  ·  from `test_sources.py`, `web.py`
+
+### `strategy.py`
+
+- **`read`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `planner.py`, `test_brief.py`, `test_console_frame.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_render_smoke.py`, `test_results.py`, `test_seo_guard.py`, `test_strategy.py`, `web.py`
+
+### `systems.py`
+
+- **`account_block`**(tenant) → `str`  ·  from `test_systems.py`
+- **`account_key`**(tenant) → `str`  ·  **from nothing**
+- **`all_systems`**() → `list[db.System]`  ·  from `admin_ui.py`, `test_systems.py`, `test_worker_systems.py`, `worker.py`
+- **`approve_plan`**(run_id) → `dict`  ·  from `test_plans.py`, `web.py`
+- **`attention`**(tenant?, days?, system_key?, examples?) → `list[dict]`  ·  from `admin_ui.py`, `test_diagnostics_surface.py`, `test_systems_check.py`
+- **`attention_fingerprint`**(rows) → `str`  ·  **from nothing**
+- **`attention_unseen`**(tenant?, days?) → `list[dict]`  ·  from `admin_ui.py`
+- **`autonomy_label`**(rung) → `str`  ·  from `admin_ui.py`, `test_systems.py`
+- **`awaiting`**(tenant, key) → `list[dict]`  ·  from `admin_ui.py`, `test_approval_gate.py`
+- **`blocked_reasons`**(tenant?, days?) → `list[tuple[str, int]]`  ·  from `admin_ui.py`, `client_report.py`, `correlate.py`, `test_allclear.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_systems.py`, `test_systems_check.py`, `test_worker_systems.py`
+- **`board`**() → `list[dict]`  ·  from `admin_ui.py`, `test_article_review.py`, `test_keywords.py`, `test_systems.py`, `web.py`
+- **`can_promote`**(system) → `dict`  ·  from `admin_ui.py`, `test_allclear.py`, `test_systems.py`
+- **`classify_reason`**(reason) → `dict`  ·  from `test_systems_check.py`
+- **`consumable`**(row, sysrow) → `dict`  ·  from `admin_ui.py`, `test_plans.py`, `worker.py`
+- **`create`**(tenant, key, name?) → `db.System`  ·  from `ab_context.py`, `correlate.py`, `data_tools.py`, `drive_io.py`, `extract.py`, `gmail_client.py`, `kernel.py`, `llm.py`, `responder.py`, `seed_demo.py`, `skill_pack.py`, `skills.py`, `test_ad_board.py`, `test_allclear.py`, `test_approval_gate.py`, `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_coherence.py`, `test_compliance.py`, `test_console_controls.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_funnel.py`, `test_grounding.py`, `test_kb_ui.py`, `test_keywords.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_offers.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_queue_approval.py`, `test_replies.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_segments.py`, `test_skill.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_check.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `triage.py`, `voice.py`, `web.py`, `worker.py`
+- **`demote`**(system_id, reason?) → `dict`  ·  from `test_systems.py`
+- **`dismiss_edit_lesson`**(run_id) → `str`  ·  from `web.py`
+- **`drop_note`**(note_id) → `str`  ·  from `web.py`
+- **`edit_lesson_rows`**(tenant, key?, limit?) → `list[dict]`  ·  from `admin_ui.py`, `test_schema_tab.py`, `web.py`
+- **`edit_lessons`**(tenant, key, limit?) → `str`  ·  from `admin_ui.py`, `test_grounding.py`, `test_schema_tab.py`
+- **`externally_driven`**() → `frozenset`  ·  from `admin_ui.py`, `test_correlate.py`, `test_replies.py`, `test_worker_systems.py`, `worker.py`
+- **`feedback_block`**(tenant, key) → `str`  ·  from `admin_ui.py`, `test_render_smoke.py`, `test_schema_tab.py`, `test_systems.py`
+- **`find`**(tenant, key) → `db.System | None`  ·  from `ad_craft.py`, `admin_ui.py`, `artifact_check.py`, `brief.py`, `compliance.py`, `extract.py`, `keywords.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `seed_demo.py`, `skill.py`, `skill_pack.py`, `skills.py`, `test_ad_board.py`, `test_approval_gate.py`, `test_blog_readiness.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_coherence.py`, `test_connections_tab.py`, `test_draft_sync.py`, `test_funnel.py`, `test_grounding.py`, `test_keyword_progress.py`, `test_moment_pressure.py`, `test_offers.py`, `test_queue_approval.py`, `test_replies.py`, `test_schema_tab.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_check.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `triage.py`, `voice.py`, `web.py`, `worker.py`
+- **`finish_run`**(run_id, stage, **fields) → `None`  ·  from `compliance.py`, `seed_demo.py`, `skill.py`, `test_allclear.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_plan_tab.py`, `test_systems.py`, `test_systems_check.py`, `test_workflow_ui.py`, `worker.py`
+- **`for_tenant`**(tenant) → `list[db.System]`  ·  from `admin_ui.py`, `client_report.py`, `credentials.py`, `metrics.py`, `ops_commands.py`, `planner.py`, `skill_pack.py`, `strategy.py`, `test_moments.py`, `test_plan_tab.py`, `test_planner.py`, `test_segments.py`, `test_strategy.py`, `test_systems_board.py`, `web.py`
+- **`get`**(system_id) → `db.System | None`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `conversation.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `sites.py`, `skill.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `tenants.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`goal_for`**(sysrow) → `dict`  ·  from `keywords.py`
+- **`guidance_block`**(tenant, key, also?) → `str`  ·  from `admin_ui.py`, `resolve.py`, `test_systems.py`
+- **`installable`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_review_ui.py`
+- **`instruction_of`**(text) → `str`  ·  from `admin_ui.py`
+- **`is_on`**(system) → `bool`  ·  from `admin_ui.py`, `keywords.py`, `performance.py`, `planner.py`, `skill.py`, `test_replies.py`, `worker.py`
+- **`mark_attention_seen`**(tenant, rows?) → `str`  ·  from `admin_ui.py`
+- **`note`**(tenant, key, text) → `str`  ·  from `skill.py`, `skill_pack.py`, `test_grounding.py`, `test_systems.py`, `web.py`
+- **`notes`**(tenant, key, limit?) → `list[db.Memory]`  ·  from `admin_ui.py`, `test_systems.py`
+- **`open_plan`**(tenant, key, ref?, plan?, planned_for?, trigger?) → `dict`  ·  from `planner.py`, `seed_demo.py`, `test_article_review.py`, `test_plan_tab.py`, `test_plans.py`, `test_workflow_ui.py`, `web.py`
+- **`per_system`**(tenant?, days?) → `list[dict]`  ·  from `admin_ui.py`, `test_systems_check.py`
+- **`plan_capable`**(key) → `bool`  ·  from `admin_ui.py`, `test_plan_tab.py`, `test_plans.py`, `worker.py`
+- **`plan_complete`**(row_or_brief, key) → `dict`  ·  from `admin_ui.py`, `test_workflow_ui.py`
+- **`plan_page`**(tenant, system_key, plan_id, per?) → `int`  ·  from `admin_ui.py`, `test_pointer_fixes.py`, `web.py`
+- **`plans`**(tenant, key?, due_by?) → `list[db.SystemRun]`  ·  from `admin_ui.py`, `planner.py`, `test_planner.py`, `test_plans.py`, `test_workflow_ui.py`, `worker.py`
+- **`plans_needing_action`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_workflow_ui.py`
+- **`prerequisites`**(tenant, key) → `dict`  ·  **from nothing**
+- **`promote`**(system_id) → `dict`  ·  from `test_systems.py`, `web.py`
+- **`promote_rule`**(tenant, phrase) → `str`  ·  from `test_ban_list.py`, `test_systems.py`, `web.py`
+- **`ready`**(system) → `dict`  ·  from `admin_ui.py`, `ops_commands.py`, `skill.py`, `test_allclear.py`, `test_systems.py`, `test_systems_check.py`, `test_worker_systems.py`, `worker.py`
+- **`record_defects`**(run_id, rules) → `int`  ·  from `skill_pack.py`
+- **`rung`**(value) → `str`  ·  from `admin_ui.py`, `test_systems.py`
+- **`runs`**(system_id, limit?) → `list[db.SystemRun]`  ·  from `admin_ui.py`, `compliance.py`, `test_compliance.py`, `test_skill.py`, `test_worker_systems.py`
+- **`save_plan`**(run_id, edits?, planned_for?) → `dict`  ·  from `test_planner.py`, `test_plans.py`, `web.py`
+- **`seed_from_tenants`**() → `dict`  ·  from `test_approval_gate.py`, `test_assurance_tab.py`, `test_brand_sources.py`, `test_compliance.py`, `test_diagnostics_surface.py`, `test_funnel.py`, `test_intake.py`, `test_kb.py`, `test_kb_ui.py`, `test_plan_tab.py`, `test_systems.py`, `test_systems_board.py`, `test_worker_systems.py`, `web.py`
+- **`set_cadence`**(system_id, horizon_days?, per_segment_monthly?, segment_rest_days?) → `dict`  ·  from `test_moment_pressure.py`, `test_planner.py`, `web.py`
+- **`set_goal`**(system_id, **fields) → `dict`  ·  from `test_keyword_progress.py`, `web.py`
+- **`skip_plan`**(run_id, reason?) → `dict`  ·  from `seed_demo.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `web.py`
+- **`spec`**(key) → `dict`  ·  from `admin_ui.py`, `inbox_events.py`, `test_moments.py`
+- **`start_run`**(system_id, tenant, trigger?, ref?) → `str`  ·  from `compliance.py`, `skill.py`, `test_allclear.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_plan_tab.py`, `test_systems.py`, `test_systems_check.py`, `test_workflow_ui.py`, `worker.py`
+- **`stats`**(system_id) → `dict`  ·  route `GET /admin/stats`  ·  from `admin_ui.py`, `ops_commands.py`, `test_embed.py`, `test_plans.py`, `test_systems.py`, `web.py`
+- **`take_plan`**(run_id, tenant, system_id?, skill_params?, caller_params?) → `dict`  ·  from `skill.py`
+- **`thread_key`**(tenant, key) → `str`  ·  **from nothing**
+- **`update`**(system_id, **fields) → `dict`  ·  from `admin_ui.py`, `brief.py`, `catalog_sync.py`, `command_agent.py`, `credentials.py`, `dossier.py`, `drive_io.py`, `google_seo.py`, `kb.py`, `keywords.py`, `llm.py`, `memory.py`, `metrics.py`, `ops_jobs.py`, `planner.py`, `seed_demo.py`, `segments.py`, `skill_pack.py`, `skills.py`, `test_ad_board.py`, `test_approval_gate.py`, `test_article_image.py`, `test_blog_skill.py`, `test_bridge.py`, `test_campaign_variety.py`, `test_funnel.py`, `test_omnisend.py`, `test_planner.py`, `test_plans.py`, `test_render_smoke.py`, `test_skill.py`, `test_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `web.py`, `worker.py`
+- **`waiting_on`**(tenant) → `dict[str, list[str]]`  ·  from `web.py`
+- **`workflow`**(key) → `dict`  ·  from `admin_ui.py`, `planner.py`, `test_blog_skill.py`, `test_campaign_variety.py`, `test_plans.py`, `test_workflow_ui.py`, `web.py`, `worker.py`
+
+### `systems_map.py`
+
+- **`block`**(role?) → `str`  ·  from `kernel.py`, `resolve.py`, `seo_tools.py`, `test_craft.py`
+- **`ensure_seeds`**() → `None`  ·  **from nothing**
+- **`features_list`**(status?) → `list[dict]`  ·  from `web.py`
+- **`get_doc`**(key) → `str`  ·  from `command_agent.py`, `seo_tools.py`
+- **`list_docs`**() → `str`  ·  from `command_agent.py`, `seo_tools.py`
+- **`request_feature`**(role, title, problem, proposal?) → `str`  ·  from `command_agent.py`, `seo_tools.py`
+- **`set_doc`**(key, content, title?, updated_by?, pinned?) → `str`  ·  from `approvals.py`, `command_agent.py`, `seo_tools.py`
+- **`systems_review`**() → `str`  ·  **from nothing**
+
+### `telegram.py`
+
+- **`ack`**(callback_query_id, text?) → `None`  ·  from `web.py`
+- **`ask`**(question, field, options?) → `int`  ·  route `GET /admin/ask`  ·  from `brief.py`, `channel.py`, `creative.py`, `ops_jobs.py`, `skill_pack.py`, `skills.py`, `test_llm.py`, `triage.py`, `voice_learn.py`
+- **`download_media`**(file_id) → `tuple[bytes, str]`  ·  from `ops_jobs.py`, `web.py`
+- **`is_allowed`**(chat_id) → `bool`  ·  from `web.py`
+- **`resolve`**(message_id, outcome) → `None`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+- **`send_approval`**(approval_id, summary, detail?) → `bool`  ·  from `approvals.py`, `channel.py`
+- **`send_text`**(body, email_fallback?, chat_id?, reply_markup?) → `int`  ·  from `approvals.py`, `channel.py`, `command_agent.py`, `data_tools.py`, `digest.py`, `ops_jobs.py`, `skills.py`, `systems_map.py`, `web.py`, `worker.py`
+- **`set_webhook`**(base_url) → `dict`  ·  from `web.py`
+- **`transcribe`**(audio, mime) → `str`  ·  from `web.py`
+- **`wire_secret`**() → `str`  ·  from `test_console_auth.py`, `web.py`
+
+### `tenant_scope.py`
+
+- **`backfill`**() → `dict`  ·  from `test_embed.py`, `test_migration.py`, `test_tenant_scope.py`, `web.py`
+- **`preview`**() → `dict`  ·  from `test_reset.py`, `test_shopify_compliance.py`, `test_tenant_scope.py`, `web.py`
+- **`print_preview`**() → `None`  ·  **from nothing**
+- **`print_report`**() → `None`  ·  from `test_tenant_scope.py`
+- **`report`**() → `dict`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `diagnostics.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+- **`resolve`**(alias?, payload?, key?) → `str`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+
+### `tenants.py`
+
+- **`active`**(user) → `str`  ·  from `ops_commands.py`, `web.py`
+- **`agent_block`**(key) → `str`  ·  from `kernel.py`, `resolve.py`, `test_tenant_isolation.py`, `triage.py`
+- **`all_tenants`**(include_paused?) → `list[db.Tenant]`  ·  from `admin_ui.py`, `correlate.py`, `digest.py`, `harvest.py`, `inbox_events.py`, `kb.py`, `keywords.py`, `performance.py`, `seed_demo.py`, `sites.py`, `systems.py`, `test_assurance_tab.py`, `test_console_frame.py`, `test_render_smoke.py`, `test_site_resolution.py`, `verify_canva.py`, `web.py`, `worker.py`
+- **`capabilities`**(key) → `dict`  ·  from `admin_ui.py`, `catalog_sync.py`, `dossier.py`, `links.py`, `lookups.py`, `moments.py`, `ops_commands.py`, `skill_pack.py`, `sources.py`, `systems.py`, `test_credentials.py`, `test_oauth.py`, `test_tenant_isolation.py`, `tool_scope.py`, `worker.py`
+- **`capability_detail`**(key) → `dict`  ·  from `test_credentials.py`
+- **`content_sources`**(key) → `list[dict]`  ·  from `admin_ui.py`, `compliance.py`, `harvest.py`, `test_brand_sources.py`
+- **`declared_capabilities`**(key) → `dict`  ·  **from nothing**
+- **`for_alias`**(alias) → `str`  ·  from `email_harvest.py`, `ops_jobs.py`, `test_tenant_isolation.py`, `triage.py`, `worker.py`
+- **`get`**(key) → `db.Tenant | None`  ·  from `ab_context.py`, `ad_craft.py`, `admin_ui.py`, `approvals.py`, `archive.py`, `assurance.py`, `baci_backoffice.py`, `brand_theme.py`, `brief.py`, `bundle.py`, `calibrate_classify.py`, `canva.py`, `catalog_sync.py`, `claim_trace.py`, `client_report.py`, `coherence.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `compose.py`, `config.py`, `connections.py`, `constant_contact.py`, `conversation.py`, `correlate.py`, `craft.py`, `creative.py`, `credentials.py`, `data_tools.py`, `db.py`, `diagnostics.py`, `digest.py`, `dossier.py`, `drive_io.py`, `edits.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `emailfmt.py`, `embed.py`, `esp.py`, `extract.py`, `fitness.py`, `funnel.py`, `gen_systems_reference.py`, `gmail_client.py`, `google_seo.py`, `grounding.py`, `harvest.py`, `hosting.py`, `imagegen.py`, `inbox_events.py`, `kb.py`, `kb_seed.py`, `kernel.py`, `keywords.py`, `ledger.py`, `links.py`, `llm.py`, `lookups.py`, `mcp_client.py`, `media.py`, `memory.py`, `meta_ads.py`, `metrics.py`, `model_error.py`, `moments.py`, `oauth.py`, `offers.py`, `omnisend.py`, `ops_commands.py`, `ops_jobs.py`, `performance.py`, `planner.py`, `portal.py`, `portal_ui.py`, `propose.py`, `provenance.py`, `register.py`, `replies.py`, `reset.py`, `resolve.py`, `responder.py`, `results.py`, `seed_demo.py`, `segments.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `shopify_webhooks.py`, `sites.py`, `skill.py`, `skill_pack.py`, `skills.py`, `sources.py`, `strategy.py`, `systems.py`, `systems_map.py`, `telegram.py`, `tenant_scope.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_article_review.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_ban_list.py`, `test_blog_path.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_brief.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_catalog_vocabulary.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_auth.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_control_piping.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_imagegen.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_mcp_client.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_new_organization.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_register.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_sabotage_anchors.py`, `test_schema_tab.py`, `test_segments.py`, `test_selection.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_skill_conformance.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `tool_scope.py`, `toolcalls.py`, `triage.py`, `try_imagegen.py`, `usage.py`, `verify_canva.py`, `voice.py`, `voice_learn.py`, `web.py`, `whatsapp.py`, `wordpress_seo.py`, `worker.py`
+- **`requires`**(key, *needed) → `tuple[bool, list[str]]`  ·  **from nothing**
+- **`resolve`**(key) → `dict`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gen_systems_reference.py`, `grounding.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_funnel.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `verify_canva.py`, `web.py`
+- **`seed`**(force?) → `dict`  ·  from `seed_demo.py`, `test_ad_board.py`, `test_admin_forms.py`, `test_allclear.py`, `test_approval_gate.py`, `test_archive.py`, `test_article_image.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_blog_path.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_canva.py`, `test_catalog_sync.py`, `test_claim_expiry.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_classify.py`, `test_client_report.py`, `test_coherence.py`, `test_compliance.py`, `test_compose.py`, `test_connect_ui.py`, `test_connections.py`, `test_connections_tab.py`, `test_console_controls.py`, `test_console_frame.py`, `test_constant_contact.py`, `test_context.py`, `test_conversation.py`, `test_correlate.py`, `test_craft.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_credentials.py`, `test_data_layer.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_digest.py`, `test_dossier.py`, `test_draft_sync.py`, `test_email_harvest.py`, `test_embed.py`, `test_entity_group.py`, `test_esp.py`, `test_extract.py`, `test_funnel.py`, `test_grounding.py`, `test_harvest.py`, `test_hosting.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_metrics.py`, `test_migration.py`, `test_moment_pressure.py`, `test_moments.py`, `test_oauth.py`, `test_objection_scope.py`, `test_offers.py`, `test_omnisend.py`, `test_perishable.py`, `test_photo_library.py`, `test_plan_tab.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_portal.py`, `test_positioning.py`, `test_propose.py`, `test_provenance.py`, `test_queue_approval.py`, `test_render_smoke.py`, `test_replies.py`, `test_reset.py`, `test_resolve.py`, `test_responder.py`, `test_results.py`, `test_review_tab.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schema_tab.py`, `test_scope.py`, `test_segments.py`, `test_selection.py`, `test_seo_guard.py`, `test_ship_section.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_site_resolution.py`, `test_skill.py`, `test_sources.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_systems.py`, `test_systems_board.py`, `test_systems_check.py`, `test_tenant_isolation.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `test_voice.py`, `test_worker_systems.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `web.py`
+- **`seed_owner`**(chat_id, name?) → `dict`  ·  from `test_kb.py`, `web.py`
+- **`set_blog`**(key, blog_id) → `str`  ·  from `skill_pack.py`, `test_article_image.py`, `web.py`
+- **`set_sources`**(key, rows) → `dict`  ·  from `seed_demo.py`, `test_brand_sources.py`, `web.py`
+- **`set_website`**(key, url) → `dict`  ·  from `test_brand_sources.py`, `web.py`
+- **`source_label`**(key, url) → `str`  ·  from `test_brand_sources.py`
+- **`summary_line`**(key) → `str`  ·  from `web.py`
+- **`switch`**(user, key) → `str`  ·  from `ops_commands.py`, `test_kb.py`
+- **`user_for_chat`**(chat_id) → `db.User | None`  ·  from `ops_commands.py`, `test_kb.py`, `web.py`
+- **`verify`**(key) → `dict`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
+- **`visible_tenants`**(user) → `list[str]`  ·  from `ops_commands.py`
+
+### `tool_scope.py`
+
+- **`account_for`**(tenant, param) → `str`  ·  **from nothing**
+- **`filter_tools`**(tools, tenant) → `list[dict]`  ·  from `data_tools.py`, `kernel.py`, `test_connections.py`, `test_run_skill.py`
+- **`guard`**(name, args, tenant) → `tuple[dict | None, str]`  ·  from `data_tools.py`, `test_run_skill.py`, `test_tenant_isolation.py`, `tools.py`
+- **`handles`**(tenant) → `dict[str, str]`  ·  **from nothing**
+
+### `toolcalls.py`
+
+- **`clean_path`**(path) → `str`  ·  **from nothing**
+- **`http_seam`**(provider, tenant_of, method?) → `—`  ·  from `data_tools.py`, `shopify_seo.py`, `wordpress_seo.py`
+- **`instrument`**(provider, fn) → `—`  ·  from `canva.py`, `constant_contact.py`, `omnisend.py`
+- **`provider_for`**(tool) → `str`  ·  from `performance.py`, `segments.py`, `skill_pack.py`, `test_client_report.py`, `test_esp.py`, `web.py`
+- **`reached`**(tenant, days?) → `dict[str, int]`  ·  from `client_report.py`, `test_client_report.py`
+- **`record`**(tenant, tool, source?, ok?, error?, ms?, bytes_back?, provider?, ref?) → `None`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
+- **`report`**(tenant?, days?) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `diagnostics.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+
+### `tools.py`
+
+- **`call`**(name, args, tenant?, fallback?, source?) → `str`  ·  from `kernel.py`, `test_tenant_isolation.py`, `test_toolcalls.py`, `triage.py`, `verify_canva.py`
+
+### `triage.py`
+
+- **`classify_only`**(email, account_alias, tenant?) → `str`  ·  from `email_harvest.py`, `worker.py`
+- **`triage_email`**(email, account_alias, sender_trusted, tenant?) → `dict`  ·  from `test_grounding.py`, `worker.py`
+
+### `usage.py`
+
+- **`is_priced`**(model) → `bool`  ·  **from nothing**
+- **`log_image`**(purpose, model, count, tenant?) → `None`  ·  from `imagegen.py`, `test_spend_complete.py`
+- **`log_tokens`**(purpose, model, input_tokens?, output_tokens?, tenant?) → `None`  ·  from `embed.py`, `test_spend_complete.py`
+- **`log_usage`**(purpose, model, resp, tenant?) → `None`  ·  from `correlate.py`, `data_tools.py`, `extract.py`, `kernel.py`, `llm.py`, `responder.py`, `skill_pack.py`, `test_usage_attribution.py`, `triage.py`, `voice.py`
+- **`report`**(days?, tenant?) → `dict`  ·  from `admin_ui.py`, `client_report.py`, `command_agent.py`, `correlate.py`, `diagnostics.py`, `metrics.py`, `seed_kb.py`, `test_assurance.py`, `test_client_report.py`, `test_diagnostics.py`, `test_diagnostics_surface.py`, `test_grounding.py`, `test_schema_tab.py`, `test_seo_guard.py`, `test_spend_complete.py`, `test_toolcalls.py`, `test_usage_attribution.py`, `web.py`, `worker.py`
+
+### `validator.py`
+
+- **`check`**(tenant, body, claim_ids?, entity_key?, conversation_id?, within_days?, require_citation?) → `dict`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_claim_trace.py`, `test_seo_guard.py`, `triage.py`, `web.py`, `wordpress_seo.py`
+
+### `voice.py`
+
+- **`derive`**(tenant, limit?) → `dict`  ·  from `test_brand_theme.py`, `web.py`
+- **`describe`**(m) → `list[dict]`  ·  from `test_voice.py`
+- **`gather`**(tenant, limit?) → `tuple[list[str], str]`  ·  from `test_brand_sources.py`, `web.py`
+- **`measure`**(texts) → `dict`  ·  from `test_voice.py`
+- **`propose`**(tenant, texts) → `dict`  ·  from `test_craft.py`, `test_voice.py`, `web.py`
+- **`proposed`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_brand_theme.py`
+- **`sample_warnings`**(m) → `list[str]`  ·  from `test_voice.py`
+- **`sentences`**(texts) → `list[str]`  ·  from `test_voice.py`
+
+### `voice_learn.py`
+
+- **`add_rule`**(alias, rule) → `str`  ·  from `command_agent.py`, `web.py`
+- **`ensure_profiles`**() → `None`  ·  **from nothing**
+
+### `web.py`
+
+- **`ad_batch_decide`**(request, key?) → `error`  ·  route `POST /admin/ad_batch_decide`  ·  **from nothing**
+- **`ad_export`**(key?, output_id?) → `str`  ·  route `GET /admin/ad_export`  ·  **from nothing**
+- **`ad_frames`**(request, key?) → `—`  ·  route `POST /admin/ad_frames`  ·  **from nothing**
+- **`ad_launched`**(request, key?) → `error`  ·  route `POST /admin/ad_launched`  ·  **from nothing**
+- **`ad_variant_drop`**(request, key?) → `error`  ·  route `POST /admin/ad_variant_drop`  ·  **from nothing**
+- **`ad_variant_save`**(request, key?) → `error`  ·  route `POST /admin/ad_variant_save`  ·  **from nothing**
+- **`admin_allclear`**(key?, what?, because?, tenant?) → `dict`  ·  route `GET /admin/allclear`  ·  **from nothing**
+- **`admin_answer`**(key?, tenant?, q?, entity?, contact_id?, system?) → `dict`  ·  route `GET /admin/answer`  ·  **from nothing**
+- **`admin_article_published`**(key?, output_id?, url?) → `error`  ·  route `GET /admin/article_published`  ·  **from nothing**
+- **`admin_article_review`**(request, output_id) → `—`  ·  route `GET /admin/article/{output_id}`  ·  **from nothing**
+- **`admin_article_save`**(request, key?) → `error`  ·  route `POST /admin/article_save`  ·  **from nothing**
+- **`admin_artifact`**(output_id, key?, raw?) → `—`  ·  route `GET /admin/artifact/{output_id}`  ·  **from nothing**
+- **`admin_blog_set`**(key?, tenant?, blog_id?) → `error`  ·  route `GET /admin/blog_set`  ·  from `test_blog_readiness.py`
+- **`admin_exclude_term`**(key?, tenant?, term?, ui?, back?, bsub?, bstate?, bpage?, bq?) → `error`  ·  route `GET /admin/exclude_term`  ·  **from nothing**
+- **`admin_forget_note`**(key?, id?) → `dict`  ·  route `GET /admin/forget_note`  ·  **from nothing**
+- **`admin_key`**(request, key?) → `str`  ·  **from nothing**
+- **`admin_keyword_priority`**(key?, tenant?, phrase?, mode?, ui?) → `error`  ·  route `GET /admin/keyword_priority`  ·  **from nothing**
+- **`admin_keywords`**(key?, tenant?) → `dict`  ·  route `GET /admin/keywords`  ·  **from nothing**
+- **`admin_keywords_goal`**(key?, tenant?, organic_clicks?, top3?, top10?, horizon_days?, ui?) → `error`  ·  route `GET /admin/keywords_goal`  ·  from `test_blog_readiness.py`
+- **`admin_keywords_harvest`**(key?, tenant?, sources?, seeds?, days?, limit?, ui?) → `error`  ·  route `GET /admin/keywords_harvest`  ·  **from nothing**
+- **`admin_keywords_progress`**(key?, tenant?, days?) → `dict`  ·  route `GET /admin/keywords_progress`  ·  **from nothing**
+- **`admin_keywords_propose`**(key?, tenant?, ui?) → `error`  ·  route `GET /admin/keywords_propose`  ·  **from nothing**
+- **`admin_keywords_rescore`**(key?, tenant?, ui?) → `error`  ·  route `GET /admin/keywords_rescore`  ·  **from nothing**
+- **`admin_keywords_sync`**(key?, tenant?, days?) → `dict`  ·  route `GET /admin/keywords_sync`  ·  **from nothing**
+- **`admin_ledger`**(key?, tenant?, system?, limit?) → `dict`  ·  route `GET /admin/ledger`  ·  **from nothing**
+- **`admin_logout`**() → `—`  ·  route `GET /admin/logout`  ·  **from nothing**
+- **`admin_market_set`**(key?, tenant?, market?, ui?) → `error`  ·  route `GET /admin/market_set`  ·  **from nothing**
+- **`admin_memory`**(key?, tenant?) → `dict`  ·  route `GET /admin/memory`  ·  **from nothing**
+- **`admin_moments`**(key?, tenant?, open_only?) → `dict`  ·  route `GET /admin/moments`  ·  **from nothing**
+- **`admin_oauth_start`**(provider, request, key?, tenant?) → `error`  ·  route `GET /admin/oauth/{provider}`  ·  **from nothing**
+- **`admin_signin`**(request) → `—`  ·  route `POST /admin/signin`  ·  **from nothing**
+- **`admin_signin_page`**(request) → `str`  ·  route `GET /admin/signin`  ·  **from nothing**
+- **`admin_situation_add`**(key?, tenant?, tag?, description?, back?, bsub?, bstate?, bpage?, bq?) → `error`  ·  route `GET /admin/situation_add`  ·  **from nothing**
+- **`admin_strategy`**(key?, tenant?, days?) → `dict`  ·  route `GET /admin/strategy`  ·  **from nothing**
+- **`admin_sweep`**(key?, tenant?, days?, run?) → `dict`  ·  route `GET /admin/sweep`  ·  **from nothing**
+- **`admin_theme`**(request, key?, to?) → `—`  ·  route `GET /admin/theme`  ·  **from nothing**
+- **`admin_threads`**(key?, tenant?, pick?, q?, limit?, full?) → `dict`  ·  route `GET /admin/threads`  ·  **from nothing**
+- **`admin_ui`**(request, key?, tab?, tenant?, started?) → `—`  ·  route `GET /admin/ui`  ·  **from nothing**
+- **`admin_workroom`**(request, output_id, key?, ok?, err?) → `—`  ·  route `GET /admin/work/{output_id}`  ·  **from nothing**
+- **`agent_context`**(key?, tenant?, system?, utterance?, entity_key?, audience_key?, contact_id?, tier?, limit?) → `dict`  ·  route `GET /admin/agent_context`  ·  **from nothing**
+- **`agent_emit`**(request, key?) → `dict`  ·  route `POST /admin/agent_emit`  ·  **from nothing**
+- **`archive_attachments`**(key?, tenant?, limit?) → `dict`  ·  route `GET /admin/archive_attachments`  ·  **from nothing**
+- **`archive_fetch`**(key?, tenant?, limit?) → `dict`  ·  route `GET /admin/archive_fetch`  ·  **from nothing**
+- **`archive_index`**(key?, tenant?, kind?, limit?) → `dict`  ·  route `GET /admin/archive_index`  ·  **from nothing**
+- **`archive_search`**(request, auth?, tenant?, q?, limit?) → `dict`  ·  route `GET /archive_search`  ·  **from nothing**
+- **`ask`**(key?, q?, role?, thread?) → `str`  ·  route `GET /admin/ask`  ·  from `brief.py`, `channel.py`, `creative.py`, `ops_jobs.py`, `skill_pack.py`, `skills.py`, `test_llm.py`, `triage.py`, `voice_learn.py`
+- **`asset_add`**(request, key?) → `—`  ·  route `POST /admin/asset_add`  ·  **from nothing**
+- **`asset_canva`**(request, key?) → `—`  ·  route `POST /admin/asset_canva`  ·  **from nothing**
+- **`assets_decide`**(request, key?) → `—`  ·  route `POST /admin/assets_decide`  ·  **from nothing**
+- **`assurance_report`**(key?, tenant?, days?, catches?) → `dict`  ·  route `GET /admin/assurance`  ·  **from nothing**
+- **`audience_update`**(request, key?) → `error`  ·  route `POST /admin/audience_update`  ·  **from nothing**
+- **`bg_status`**(label, tenant) → `dict`  ·  **from nothing**
+- **`brand_markdown`**(request, auth?, tenant?, system?) → `str`  ·  route `GET /brand.md`  ·  **from nothing**
+- **`brand_markdown_meta`**(request, auth?, tenant?, system?) → `dict`  ·  route `GET /brand_meta`  ·  **from nothing**
+- **`brand_sources`**(request, key?) → `—`  ·  route `POST /admin/brand_sources`  ·  **from nothing**
+- **`brand_theme_approve`**(request, key?) → `—`  ·  route `POST /admin/brand_theme/approve`  ·  **from nothing**
+- **`brand_theme_derive`**(request, key?) → `—`  ·  route `POST /admin/brand_theme/derive`  ·  **from nothing**
+- **`brand_theme_page`**(request, key?, tenant?) → `—`  ·  route `GET /admin/brand_theme`  ·  **from nothing**
+- **`brand_update`**(request, key?) → `—`  ·  route `POST /admin/brand_update`  ·  **from nothing**
+- **`brand_voice_derive`**(request, key?) → `—`  ·  route `POST /admin/brand_voice_derive`  ·  **from nothing**
+- **`calibrate_classify`**(key?, tenant?) → `dict`  ·  route `GET /admin/calibrate_classify`  ·  **from nothing**
+- **`campaign_meta_save`**(request, key?) → `error`  ·  route `POST /admin/campaign_meta_save`  ·  **from nothing**
+- **`canva_harvest`**(key?, tenant?, design_id?) → `dict`  ·  route `GET /admin/canva_harvest`  ·  **from nothing**
+- **`canva_probe`**(key?, tenant?) → `dict`  ·  route `GET /admin/canva_probe`  ·  **from nothing**
+- **`catalog_sync`**(key?, tenant?, report_only?, limit?, ui?) → `error`  ·  route `GET /admin/catalog_sync`  ·  **from nothing**
+- **`claim_edit`**(request, key?) → `—`  ·  route `POST /admin/claim_edit`  ·  **from nothing**
+- **`claim_from_note`**(request, key?) → `error`  ·  route `POST /admin/claim_from_note`  ·  **from nothing**
+- **`claim_review`**(key?, claim_id?, approve?, tenant?, ui?, next?, cpage?, back?, bsub?, bstate?, bpage?, bq?) → `error, result`  ·  route `GET /admin/claim_review`  ·  **from nothing**
+- **`claim_update`**(request, key?) → `—`  ·  route `POST /admin/claim_update`  ·  **from nothing**
+- **`claims_decide`**(request, key?) → `—`  ·  route `POST /admin/claims_decide`  ·  **from nothing**
+- **`client_report_route`**(key?, tenant?, days?) → `dict`  ·  route `GET /admin/client_report`  ·  **from nothing**
+- **`collections_sync`**(key?, tenant?, adopt?, dry_run?) → `dict`  ·  route `GET /admin/collections_sync`  ·  **from nothing**
+- **`compliance_scan`**(key?, tenant?, limit?, since?, ui?) → `error`  ·  route `GET /admin/compliance_scan`  ·  **from nothing**
+- **`conflict_resolve`**(request, key?) → `—`  ·  route `POST /admin/conflict_resolve`  ·  **from nothing**
+- **`connect_link_post`**(request, key?) → `—`  ·  route `POST /admin/connect_link`  ·  **from nothing**
+- **`connect_new`**(key?, tenant?, label?, days?) → `dict`  ·  route `GET /admin/connect_new`  ·  **from nothing**
+- **`connect_oauth_start`**(token, provider, request) → `—`  ·  route `GET /connect/{token}/oauth/{provider}`  ·  **from nothing**
+- **`connect_page`**(token, ok?, err?) → `str`  ·  route `GET /connect/{token}`  ·  **from nothing**
+- **`connect_revoke`**(key?, tenant?, provider?, site?) → `dict`  ·  route `GET /admin/connect_revoke`  ·  **from nothing**
+- **`connect_revoke_post`**(request, key?) → `—`  ·  route `POST /admin/connect_revoke`  ·  **from nothing**
+- **`connect_save`**(request, key?) → `—`  ·  route `POST /admin/connect_save`  ·  **from nothing**
+- **`connect_submit`**(token, request) → `—`  ·  route `POST /connect/{token}`  ·  **from nothing**
+- **`connect_test_post`**(request, key?) → `—`  ·  route `POST /admin/connect_test`  ·  **from nothing**
+- **`connections`**(key?, tenant?) → `dict`  ·  route `GET /admin/connections`  ·  **from nothing**
+- **`console_alias`**() → `—`  ·  route `GET /console`  ·  **from nothing**
+- **`context_add`**(request, key?) → `error`  ·  route `POST /admin/context_add`  ·  **from nothing**
+- **`context_promote`**(key?, tenant?, id?) → `error`  ·  route `GET /admin/context_promote`  ·  **from nothing**
+- **`context_retire`**(key?, tenant?, id?) → `error`  ·  route `GET /admin/context_retire`  ·  **from nothing**
+- **`context_review`**(key?, tenant?, id?, yes?) → `error`  ·  route `GET /admin/context_review`  ·  **from nothing**
+- **`craft_add`**(key?, lesson?, business_model?, situations?, basis?, learned_from?) → `dict`  ·  route `GET /admin/craft_add`  ·  **from nothing**
+- **`craft_list`**(key?, tenant?) → `dict`  ·  route `GET /admin/craft`  ·  **from nothing**
+- **`craft_review`**(key?, id?, approve?) → `dict`  ·  route `GET /admin/craft_review`  ·  **from nothing**
+- **`creative`**(key?, tenant?, asset?, prompt?, shape?, mode?, headline?, subline?, inspiration?, background?, fmt?) → `error`  ·  route `GET /admin/creative`  ·  **from nothing**
+- **`creative_assets`**(key?, tenant?) → `dict`  ·  route `GET /admin/creative_assets`  ·  **from nothing**
+- **`decide`**(token) → `str`  ·  route `GET /decide/{token}`  ·  from `test_article_review.py`
+- **`diagnostics_route`**(key?, tenant?, days?, level?, system?, limit?) → `dict`  ·  route `GET /admin/diagnostics`  ·  **from nothing**
+- **`digest_ack`**(token) → `str`  ·  route `GET /digest/{token}`  ·  **from nothing**
+- **`draft_test`**(key?, tenant?, message_id?, pick?, limit?) → `dict`  ·  route `GET /admin/draft_test`  ·  **from nothing**
+- **`drive_photos`**(key?, tenant?, folder?, limit?) → `dict`  ·  route `GET /admin/drive_photos`  ·  **from nothing**
+- **`email_harvest_route`**(key?, tenant?, days?, limit?, apply?, ui?) → `error`  ·  route `GET /admin/email_harvest`  ·  **from nothing**
+- **`embed_backfill`**(key?, tenant?, kind?, report_only?) → `dict`  ·  route `GET /admin/embed_backfill`  ·  **from nothing**
+- **`embed_status`**(request, auth?, tenant?) → `dict`  ·  route `GET /embed_status`  ·  **from nothing**
+- **`entity_group`**(key?, tenant?, entity?, group?) → `dict`  ·  route `GET /admin/entity_group`  ·  **from nothing**
+- **`entity_group_post`**(request, key?) → `—`  ·  route `POST /admin/entity_group`  ·  **from nothing**
+- **`entity_review`**(key?, entity_id?, approve?, tenant?, ui?) → `error, result`  ·  route `GET /admin/entity_review`  ·  **from nothing**
+- **`esp_probe`**(key?, tenant?) → `dict`  ·  route `GET /admin/esp_probe`  ·  **from nothing**
+- **`esp_push_retry`**(key?, output_id?) → `error`  ·  route `GET /admin/esp_push`  ·  **from nothing**
+- **`feature_requests`**(key?, status?) → `dict`  ·  route `GET /admin/features`  ·  **from nothing**
+- **`feedback_add`**(request, key?) → `error`  ·  route `POST /admin/feedback_add`  ·  **from nothing**
+- **`feedback_drop`**(key?, id?, output_id?) → `error`  ·  route `GET /admin/feedback_drop`  ·  **from nothing**
+- **`fill_route`**(key?, tenant?, apply?, budget?, only?) → `dict`  ·  route `GET /admin/fill`  ·  **from nothing**
+- **`harvest_pages`**(key?, tenant?, forget?) → `dict`  ·  route `GET /admin/harvest_pages`  ·  **from nothing**
+- **`harvest_route`**(key?, tenant?, limit?, apply?, ui?, recrawl?) → `error`  ·  route `GET /admin/harvest`  ·  **from nothing**
+- **`health`**(key?) → `dict`  ·  route `GET /health`  ·  from `test_allclear.py`, `test_diagnostics.py`, `test_grounding.py`, `test_plans.py`
+- **`health_blog`**(key?, tenant?, probe?) → `dict`  ·  route `GET /health/blog`  ·  **from nothing**
+- **`health_connections`**(key?) → `—`  ·  route `GET /health/connections`  ·  **from nothing**
+- **`health_seo`**(key?) → `dict`  ·  route `GET /health/seo`  ·  **from nothing**
+- **`intake`**(token, answer?, skip?) → `str`  ·  route `GET /intake/{token}`  ·  **from nothing**
+- **`intake_links`**(key?, tenant?) → `dict`  ·  route `GET /admin/intake_links`  ·  **from nothing**
+- **`intake_new`**(key?, tenant?, label?, days?, ui?) → `error, expires_in_days, note, ok, tenant, url`  ·  route `GET /admin/intake_new`  ·  **from nothing**
+- **`intake_revoke`**(key?, token?, tenant?, ui?) → `error, ok, revoked`  ·  route `GET /admin/intake_revoke`  ·  **from nothing**
+- **`job_status`**(key?) → `dict`  ·  route `GET /admin/status`  ·  **from nothing**
+- **`kb_add`**(key?, tenant?, step?, text?, back?, bsub?, bstate?, bpage?, bq?) → `error, step`  ·  route `GET /admin/kb_add`  ·  **from nothing**
+- **`kb_json`**(key?, tenant?) → `dict`  ·  route `GET /admin/kb`  ·  **from nothing**
+- **`kb_remove`**(request, key?) → `error`  ·  route `POST /admin/kb_remove`  ·  **from nothing**
+- **`kb_restore`**(request, key?) → `error`  ·  route `POST /admin/kb_restore`  ·  **from nothing**
+- **`kb_row_add`**(request, key?) → `error`  ·  route `POST /admin/kb_row_add`  ·  **from nothing**
+- **`kb_unknown`**(key?, tenant?, id?, value?, back?, bsub?, bstate?, bpage?, bq?) → `error, id`  ·  route `GET /admin/kb_unknown`  ·  **from nothing**
+- **`label_conflicts`**(key?, tenant?, min_score?) → `dict`  ·  route `GET /admin/label_conflicts`  ·  from `test_embed.py`
+- **`lesson_act`**(request, key?) → `error`  ·  route `POST /admin/lesson_act`  ·  **from nothing**
+- **`list_systems`**(key?) → `dict`  ·  route `GET /admin/systems`  ·  **from nothing**
+- **`list_tenants`**(key?) → `dict`  ·  route `GET /admin/tenants`  ·  **from nothing**
+- **`mail_cursor`**(key?, tenant?, reset?) → `dict`  ·  route `GET /admin/mail_cursor`  ·  **from nothing**
+- **`media`**(blob_id) → `—`  ·  route `GET /media/{blob_id}`  ·  **from nothing**
+- **`merge_situation`**(request, key?) → `—`  ·  route `POST /admin/merge_situation`  ·  **from nothing**
+- **`oauth_callback`**(provider, request, code?, state?, error?, key?) → `—`  ·  route `GET /oauth/{provider}/callback`  ·  **from nothing**
+- **`objection_add`**(request, key?) → `error`  ·  route `POST /admin/objection_add`  ·  **from nothing**
+- **`objection_edit`**(request, key?) → `—`  ·  route `POST /admin/objection_edit`  ·  **from nothing**
+- **`offers_harvest`**(key?, tenant?, apply?, ui?) → `error`  ·  route `GET /admin/offers_harvest`  ·  **from nothing**
+- **`pending_page`**(key?, tenant?) → `str`  ·  route `GET /admin/pending`  ·  **from nothing**
+- **`person_access`**(request, key?) → `—`  ·  route `POST /admin/person_access`  ·  **from nothing**
+- **`person_save`**(request, key?) → `—`  ·  route `POST /admin/person_save`  ·  **from nothing**
+- **`plan_approve`**(key?, id?, tenant?, system?, ppage?, back?) → `error`  ·  route `GET /admin/plan_approve`  ·  **from nothing**
+- **`plan_cadence`**(key?, tenant?, system?, horizon_days?, per_segment_monthly?) → `error`  ·  route `GET /admin/plan_cadence`  ·  **from nothing**
+- **`plan_new`**(request, key?, tenant?, system?, planned_for?) → `error`  ·  route `GET /admin/plan_new`  ·  **from nothing**
+- **`plan_propose`**(key?, tenant?, system?) → `error`  ·  route `GET /admin/plan_propose`  ·  **from nothing**
+- **`plan_run`**(key?, id?, tenant?, system?, ppage?, approve?) → `error`  ·  route `GET /admin/plan_run`  ·  **from nothing**
+- **`plan_save`**(request, key?, id?, tenant?, system?, planned_for?, ppage?) → `error`  ·  route `GET /admin/plan_save`  ·  **from nothing**
+- **`plan_skip`**(key?, id?, tenant?, system?, reason?, back?) → `error`  ·  route `GET /admin/plan_skip`  ·  **from nothing**
+- **`portal_figure`**(request) → `—`  ·  route `POST /portal/figure`  ·  **from nothing**
+- **`portal_home`**(request, tab?, days?) → `str`  ·  route `GET /portal`  ·  **from nothing**
+- **`portal_in`**(token, tab?) → `—`  ·  route `GET /portal/in/{token}`  ·  **from nothing**
+- **`portal_link`**(key?, email?, ui?, tenant?) → `error`  ·  route `GET /admin/portal_link`  ·  **from nothing**
+- **`portal_out`**() → `—`  ·  route `GET /portal/out`  ·  **from nothing**
+- **`portal_signin`**() → `str`  ·  route `GET /portal/signin`  ·  **from nothing**
+- **`portal_signin_post`**(request) → `—`  ·  route `POST /portal/signin`  ·  **from nothing**
+- **`privacy_close`**(key?, id?) → `dict`  ·  route `GET /admin/privacy_close`  ·  **from nothing**
+- **`privacy_policy`**() → `str`  ·  route `GET /privacy`  ·  **from nothing**
+- **`privacy_requests`**(key?, open_only?) → `dict`  ·  route `GET /admin/privacy_requests`  ·  **from nothing**
+- **`proposal_review`**(request, key?) → `—`  ·  route `POST /admin/proposal_review`  ·  **from nothing**
+- **`propose_row`**(request, auth?) → `dict`  ·  route `POST /propose`  ·  **from nothing**
+- **`propose_voice`**(key?, tenant?, limit?) → `dict`  ·  route `GET /admin/propose_voice`  ·  **from nothing**
+- **`purge_harvested_apply`**(request, key?) → `error`  ·  route `POST /admin/purge_harvested`  ·  **from nothing**
+- **`purge_harvested_report`**(request, key?, tenant?, ui?) → `error`  ·  route `GET /admin/purge_harvested`  ·  **from nothing**
+- **`purge_proposals_do`**(request, key?) → `—`  ·  route `POST /admin/purge_proposals`  ·  **from nothing**
+- **`purge_proposals_route`**(key?, tenant?, origin?) → `dict`  ·  route `GET /admin/purge_proposals`  ·  **from nothing**
+- **`purge_scans_route`**(key?, tenant?, dry_run?) → `dict`  ·  route `GET /admin/purge_scans`  ·  **from nothing**
+- **`queue_approval`**(request, key?) → `error`  ·  route `POST /admin/queue_approval`  ·  **from nothing**
+- **`read_key`**(request, key?) → `str`  ·  **from nothing**
+- **`readiness`**(request, auth?, tenant?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`
+- **`register_owner`**(key?, chat_id?, name?) → `dict`  ·  route `GET /admin/register_owner`  ·  **from nothing**
+- **`renotify`**(key?) → `dict`  ·  route `GET /admin/renotify`  ·  **from nothing**
+- **`repair_fingerprints`**(key?, tenant?, apply?) → `dict`  ·  route `GET /admin/repair_fingerprints`  ·  from `test_provenance.py`
+- **`report_figure`**(request, key?) → `result`  ·  route `POST /admin/report_figure`  ·  **from nothing**
+- **`report_request`**(key?, tenant?, days?, to?, queue?) → `dict`  ·  route `GET /admin/report_request`  ·  **from nothing**
+- **`resolve_context`**(request, auth?, tenant?, system?, utterance?, contact_id?, entity_key?, audience_key?, requirements?, tier?, limit?) → `dict`  ·  route `GET /resolve`  ·  **from nothing**
+- **`root`**() → `str`  ·  route `GET /`  ·  **from nothing**
+- **`run_job`**(job, key?) → `dict`  ·  route `GET /admin/run/{job}`  ·  **from nothing**
+- **`schema_check`**(key?) → `dict`  ·  route `GET /admin/schema_check`  ·  **from nothing**
+- **`scope_conflicts_route`**(key?, tenant?) → `dict`  ·  route `GET /admin/scope_conflicts`  ·  **from nothing**
+- **`seed_kb`**(key?, report_only?) → `dict`  ·  route `GET /admin/seed_kb`  ·  **from nothing**
+- **`segments_build`**(key?, tenant?, apply?, ui?, system?) → `error`  ·  route `GET /admin/segments_build`  ·  **from nothing**
+- **`segments_sync`**(key?, tenant?, system?) → `error`  ·  route `GET /admin/segments_sync`  ·  **from nothing**
+- **`ship_decide`**(request, key?) → `error`  ·  route `POST /admin/ship_decide`  ·  **from nothing**
+- **`shopify_commerce`**(request) → `—`  ·  route `POST /webhooks/shopify/commerce`  ·  **from nothing**
+- **`shopify_compliance`**(request) → `—`  ·  route `POST /webhooks/shopify/compliance`  ·  **from nothing**
+- **`skill_catalogue`**(key?, tenant?) → `dict`  ·  route `GET /admin/skill_catalogue`  ·  **from nothing**
+- **`skill_run`**(request, key?) → `dict`  ·  route `POST /admin/skill_run`  ·  **from nothing**
+- **`startup`**() → `None`  ·  route `ON_EVENT startup`  ·  **from nothing**
+- **`stats`**(key?) → `dict`  ·  route `GET /admin/stats`  ·  from `admin_ui.py`, `ops_commands.py`, `test_embed.py`, `test_plans.py`, `test_systems.py`
+- **`system_add`**(key?, tenant?, system?) → `error`  ·  route `GET /admin/system_add`  ·  **from nothing**
+- **`system_note`**(key?, id?, text?, drop?, back?) → `error`  ·  route `GET /admin/system_note`  ·  **from nothing**
+- **`system_on`**(key?, system?, tenant?, install?, off?) → `dict`  ·  route `GET /admin/system_on`  ·  **from nothing**
+- **`system_promote`**(key?, id?) → `error`  ·  route `GET /admin/system_promote`  ·  **from nothing**
+- **`system_rule`**(key?, id?, phrase?) → `error`  ·  route `GET /admin/system_rule`  ·  **from nothing**
+- **`system_set`**(request, key?, id?) → `error`  ·  route `GET /admin/system_set`  ·  **from nothing**
+- **`systems_seed`**(key?) → `error`  ·  route `GET /admin/systems_seed`  ·  **from nothing**
+- **`telegram_setup`**(key?) → `dict`  ·  route `GET /admin/telegram_setup`  ·  **from nothing**
+- **`telegram_webhook`**(request) → `dict`  ·  route `POST /telegram/webhook`  ·  **from nothing**
+- **`tenant_add`**(key?, tenant?, name?, kind?, domain?, business_model?, ui?) → `error`  ·  route `GET /admin/tenant_add`  ·  **from nothing**
+- **`tenant_reset`**(key?, tenant?, groups?, apply?) → `dict`  ·  route `GET /admin/tenant_reset`  ·  **from nothing**
+- **`tenant_scope_admin`**(key?, report_only?) → `dict`  ·  route `GET /admin/tenant_scope`  ·  **from nothing**
+- **`tenant_set`**(key?, tenant?, field?, value?, ui?) → `error`  ·  route `GET /admin/tenant_set`  ·  **from nothing**
+- **`terms_of_service`**() → `str`  ·  route `GET /terms`  ·  **from nothing**
+- **`test_whatsapp`**(key?) → `dict`  ·  route `GET /admin/test_whatsapp`  ·  **from nothing**
+- **`tool_calls_route`**(key?, tenant?, days?) → `dict`  ·  route `GET /admin/tool_calls`  ·  **from nothing**
+- **`usage_report`**(key?, days?, tenant?) → `dict`  ·  route `GET /admin/usage`  ·  **from nothing**
+- **`user_add`**(key?, chat_id?, name?, role?, tenant?, ui?) → `error`  ·  route `GET /admin/user_add`  ·  **from nothing**
+- **`verify_tenant`**(key?, tenant?, ui?) → `error, tenants`  ·  route `GET /admin/verify`  ·  **from nothing**
+- **`vocabulary_review`**(key?, tenant?, model?) → `dict`  ·  route `GET /admin/vocabulary`  ·  **from nothing**
+- **`whatsapp_diag`**(key?) → `dict`  ·  route `GET /admin/whatsapp_diag`  ·  **from nothing**
+- **`whatsapp_incoming`**(request) → `Response`  ·  route `POST /webhooks/whatsapp`  ·  **from nothing**
+- **`whatsapp_verify`**(request) → `—`  ·  route `GET /webhooks/whatsapp`  ·  **from nothing**
+- **`work_redraft`**(request, key?) → `error`  ·  route `POST /admin/work_redraft`  ·  **from nothing**
+
+### `whatsapp.py`
+
+- **`download_media`**(media_id) → `tuple[bytes, str]`  ·  from `ops_jobs.py`, `web.py`
+- **`send_approval`**(approval_id, summary, detail?) → `bool`  ·  from `approvals.py`, `channel.py`
+- **`send_text`**(body, email_fallback?) → `None`  ·  from `approvals.py`, `channel.py`, `command_agent.py`, `data_tools.py`, `digest.py`, `ops_jobs.py`, `skills.py`, `systems_map.py`, `web.py`, `worker.py`
+- **`transcribe`**(audio, mime) → `str`  ·  from `telegram.py`, `web.py`
+
+### `wordpress_seo.py`
+
+- **`create_article`**(profile, blog_id?, fields?) → `str`  ·  from `approvals.py`, `test_article_image.py`, `test_article_review.py`, `test_seo_guard.py`
+- **`create_collection`**(profile, fields, item_ids?) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`create_page`**(profile, fields) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`find_items`**(profile, query?, limit?) → `str`  ·  from `seo_tools.py`
+- **`get_article`**(profile, blog_id?, article_id?) → `str`  ·  from `seo_tools.py`, `test_toolcalls.py`
+- **`get_seo`**(profile, resource, resource_id) → `str`  ·  from `seo_tools.py`
+- **`install_schema_renderer`**(profile) → `str`  ·  from `approvals.py`
+- **`list_articles`**(profile, blog_id?, limit?) → `str`  ·  from `seo_tools.py`, `test_toolcalls.py`
+- **`list_blogs`**(profile) → `str`  ·  from `admin_ui.py`, `seo_tools.py`
+- **`list_collections`**(profile) → `str`  ·  from `seo_tools.py`
+- **`put_image`**(profile, blob, filename?, alt?) → `dict`  ·  from `hosting.py`, `test_hosting.py`
+- **`sole_blog_id`**(profile) → `str`  ·  from `skill_pack.py`, `test_article_image.py`
+- **`update_article`**(profile, blog_id?, article_id?, fields?) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+- **`update_seo`**(profile, resource, resource_id, fields) → `str`  ·  from `approvals.py`, `test_seo_guard.py`
+
+### `worker.py`
+
+- **`alert_error`**(context, exc) → `None`  ·  **from nothing**
+- **`already_seen`**(message_id) → `bool`  ·  **from nothing**
+- **`backlog_sweep`**() → `None`  ·  **from nothing**
+- **`bucket_backfill`**() → `None`  ·  from `ops_jobs.py`
+- **`claim_expiry_sweep`**() → `None`  ·  **from nothing**
+- **`compliance_sweep`**() → `None`  ·  from `test_correlate.py`
+- **`credential_renewal`**() → `None`  ·  **from nothing**
+- **`deadline_alerts`**() → `None`  ·  **from nothing**
+- **`follow_up_chase`**() → `None`  ·  **from nothing**
+- **`inboxes`**() → `list[tuple[str, str]]`  ·  from `test_worker_systems.py`
+- **`is_trusted`**(sender, alias?) → `bool`  ·  from `test_tenant_scope.py`
+- **`mail_backfill`**() → `None`  ·  **from nothing**
+- **`main`**() → `None`  ·  **from nothing**
+- **`media_sweep`**() → `None`  ·  **from nothing**
+- **`moments_sweep`**() → `None`  ·  **from nothing**
+- **`performance_sweep`**() → `None`  ·  **from nothing**
+- **`poll_all`**() → `None`  ·  **from nothing**
+- **`process_emails`**(alias, emails, new_approvals, tenant?) → `None`  ·  **from nothing**
+- **`segments_sweep`**() → `None`  ·  from `test_segments.py`
+- **`systems_tick`**() → `None`  ·  from `test_planner.py`, `test_plans.py`, `test_worker_systems.py`
+- **`weekly_cost_report`**() → `None`  ·  **from nothing**

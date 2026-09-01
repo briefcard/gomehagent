@@ -3468,6 +3468,33 @@ async def context_add(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant, sub="context", msg=say)
 
 
+@app.get("/admin/context_review")
+def context_review(key: str = Depends(admin_key), tenant: str = "",
+                   id: str = "", yes: str = ""):
+    """Approve a routed statement as background, or send it back."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as _kb
+    return _back_to_content(tenant, sub="context",
+                            msg=_kb.review_context(id, bool(yes)))
+
+
+@app.get("/admin/context_promote")
+def context_promote(key: str = Depends(admin_key), tenant: str = "",
+                    id: str = ""):
+    """"It is provable" — back to the claim queue, as a proposal.
+
+    The reversal the classifier makes necessary. Deliberately NOT an approved
+    claim: proof is a thing a human signs off, and promoting straight past the
+    queue would be the approval process defeating itself.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as _kb
+    return _back_to_content(tenant, sub="context",
+                            msg=_kb.context_to_claim(id))
+
+
 @app.get("/admin/context_retire")
 def context_retire(key: str = Depends(admin_key), tenant: str = "",
                    id: str = ""):

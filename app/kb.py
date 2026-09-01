@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 
 from . import db, provenance as prov
 
@@ -1987,12 +1988,20 @@ def set_claim_expiry(claim_id: str, *, never: bool = False,
                 f"{CLAIM_TTL_DAYS} days.")
 
 
+#: What `add_claim` writes when a caller says nothing. It is a DEFAULT, not a
+#: statement — and `assess_kind` must not read it as one. A harvester that
+#: passes no proof type is not asserting the claim is a case study; it is
+#: saying nothing, and a filter that hears "case_study" there concludes every
+#: candidate carries proof and never routes anything.
+DEFAULT_PROOF_TYPE = "case_study"
+
+
 def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
-              proof_type: str = "case_study", source: str = "",
+              proof_type: str = DEFAULT_PROOF_TYPE, source: str = "",
               strength: str = "strong", status: str = "active",
               origin: str = "human", entity_key: str = "",
               proves: str = "", context: str = "",
-              attributed_to: str = "") -> str:
+              attributed_to: str = "", assess: bool = True) -> str:
     """Add a claim, or record that another source corroborates one on file.
 
     `status="pending"` is kept as the way callers ask for a proposal, and is
@@ -2055,7 +2064,12 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
     # that already exists and already carries a human's approval, so this
     # records a second source on it rather than populating anything. The
     # standing rule holds — generators propose, they never populate.
-    if review != prov.APPROVED:
+    # `assess=False` is a PERSON OVERRULING THE FILTER, and it has to switch
+    # off both halves. Without it "this is provable" sends a statement to the
+    # claim queue, the classifier reads the same words and routes it straight
+    # back to background, and the reversal control is a loop with a button on
+    # it. A human's decision is the one input this layer never re-litigates.
+    if assess and review != prov.APPROVED:
         _bg = _settled_as_background(tenant, claim, entity_key)
         if _bg is not None:
             with db.SessionLocal() as s:
@@ -2072,6 +2086,41 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                     f"{_bg['score']} match with something already on file that "
                     f"way:\n{_bg['text']}\nRecorded that {origin} says it too. "
                     f"Retire that background if this really is provable.")
+
+        # NOT A DUPLICATE, AND NOT A CLAIM EITHER. Owner, 2026-08-31:
+        # *"claims should all be scrutinized to see whether they are pertinent
+        # claims or if they are background knowledge that support a claim."*
+        #
+        # `assess_kind` is deterministic and says its basis, so this is a
+        # filter and not an opinion. It routes only when CONFIDENT, and the
+        # unsure verdict is `claim` on purpose: a real claim filed as
+        # background is proof the brand may no longer use and nobody goes
+        # looking for it, which is the expensive direction to be wrong in.
+        #
+        # AND IT LANDS IN A QUEUE, NOT ON THE SHELF. A classifier writing an
+        # approved row would be populating the knowledge base without a human
+        # — the one thing this layer does not do. It proposes; you decide, and
+        # "it is provable" sends it back to the claim queue.
+        # The default is passed as ABSENT: see DEFAULT_PROOF_TYPE. A caller
+        # that chose `case_study` deliberately and a caller that chose nothing
+        # are indistinguishable here, and treating the second as proof is how
+        # this filter would silently never fire.
+        _kind = assess_kind(claim, evidence,
+                            "" if proof_type == DEFAULT_PROOF_TYPE
+                            else proof_type, source)
+        if _kind["kind"] == "background" and _kind["confident"]:
+            _cid = add_context(tenant, claim, entity_key=entity_key,
+                               situations=tags, origin=origin,
+                               status="pending",
+                               source=f"routed from a claim proposal · "
+                                      f"{_kind['basis']} · {source or origin}")
+            if len(_cid) == 32:
+                return ("Proposed as background rather than as a claim — "
+                        + _kind["basis"] + ".\n" + claim
+                        + "\nIt is waiting on Review > Background: approve it, "
+                          "or say it is provable and it goes to the claim "
+                          "queue instead. Nothing cites it either way until "
+                          "you decide.")
 
     with db.SessionLocal() as s:
         # The same fact arriving from a second source is corroboration, not a
@@ -2832,8 +2881,15 @@ def assets(tenant: str, *, publishable_only: bool = True,
 
 def add_context(tenant: str, text: str, *, entity_key: str = "",
                 situations: list | None = None, source: str = "",
-                origin: str = "human") -> str:
-    """File a statement. Returns the row id, or a refusal sentence."""
+                origin: str = "human", status: str = "active") -> str:
+    """File a statement. Returns the row id, or a refusal sentence.
+
+    `status="pending"` proposes it instead — the same word `add_claim` uses,
+    translated to `review=proposed` here too. Background needed a review queue
+    the moment a MACHINE could route something into it: writing an approved
+    row on a classifier's verdict is populating the knowledge base without a
+    human, which is the one thing this layer does not do.
+    """
     text = (text or "").strip()
     if not text:
         return "Nothing to file."
@@ -2863,7 +2919,9 @@ def add_context(tenant: str, text: str, *, entity_key: str = "",
             return f"already-on-file:{dupe.id}"
         row = db.KbContext(tenant=tenant, text=text, entity_key=entity_key or "",
                            situations=tags, source=source or "",
-                           origin=origin, review=prov.APPROVED, fingerprint=fp)
+                           origin=origin, fingerprint=fp,
+                           review=(prov.PROPOSED if status == "pending"
+                                   else prov.APPROVED))
         s.add(row)
         s.commit()
         row_id = row.id
@@ -2951,6 +3009,101 @@ def similar(tenant: str, text: str, *, entity_key: str = "",
 #: retrieve": a pair that merely bears on the same topic is not a duplicate,
 #: and a report that says it is trains people to ignore the report.
 OVERLAP_SCORE = 0.90
+
+
+#: Words that make a sentence an OBSERVATION ABOUT PEOPLE rather than a
+#: property of the thing being sold. "Buyers ask about lead time" is true and
+#: proves nothing; "the glaze is fired at 1200C" is a property and provable.
+_WHO = ("buyer", "buyers", "customer", "customers", "client", "clients",
+        "people", "shopper", "shoppers", "guest", "guests", "visitor",
+        "visitors", "everyone", "somebody", "someone", "they")
+_DOES = ("ask", "asks", "asked", "assume", "assumes", "assumed", "think",
+         "thinks", "expect", "expects", "expected", "compare", "compares",
+         "notice", "notices", "want", "wants", "prefer", "prefers", "worry",
+         "worries", "believe", "believes", "feel", "feels", "say", "says",
+         "complain", "complains", "wonder", "wonders", "raise", "raises")
+#: Unquantified generalisation. A claim may be general; a claim that is ONLY
+#: general has nothing a validator or a reader can check.
+_HEDGE = ("tend to", "tends to", "often", "usually", "generally", "sometimes",
+          "many", "most", "some", "seem", "seems", "typically", "rarely",
+          "occasionally", "a lot of", "plenty of")
+#: Vocabulary that means somebody can go and check it.
+_CHECKABLE = ("certified", "certification", "iso", "fda", "tested", "test",
+              "warranty", "guarantee", "patent", "compliant", "rated",
+              "measured", "dishwasher-safe", "bpa", "dimensions", "cm", "mm",
+              "kg", "ml", "litre", "liter", "inch", "%", "$", "£", "€")
+
+
+def assess_kind(claim: str, evidence: str = "", proof_type: str = "",
+                source: str = "") -> dict:
+    """Is this a claim, or is it background that supports one?
+
+    Owner, 2026-08-31: *"claims should all be scrutinized to see whether they
+    are pertinent claims or if they are background knowledge that support a
+    claim."*
+
+    DETERMINISTIC, and it says its basis — the same contract `suggest_tags`
+    publishes and for the same reason: a caller has to be able to read WHY,
+    disagree, and act. Nothing here asks a model. A model deciding what counts
+    as proof is the failure this whole layer is built against.
+
+    The distinction is in `KbClaim`'s own docstring: a claim is "a fact the
+    brand is ALLOWED TO ASSERT, **with its proof**", and every factual
+    sentence a generator writes has to cite one. So the question is not "is
+    this true" — background is true — it is **can a reader check it**.
+
+    Signals that it is background, and none of them is subtle:
+      · nothing checkable on the row at all — no evidence, no proof_type
+      · the SUBJECT is people and the verb is a perception: buyers ask,
+        customers assume, people notice. That is an observation about a
+        market, not a property of a thing.
+      · unquantified generalisation and nothing else — often, most, tend to
+
+    Any one CHECKABLE signal outranks all of them, because being wrong in that
+    direction is the expensive one: a real claim filed as background is proof
+    the brand may no longer use, and nobody goes looking for it.
+    """
+    text = f"{claim or ''}".strip()
+    low = text.lower()
+    why: list[str] = []
+
+    checkable = bool((evidence or "").strip()) or bool((proof_type or "").strip())
+    if checkable:
+        why.append("carries its own proof (evidence or proof_type is set)")
+    if any(ch.isdigit() for ch in low):
+        checkable = True
+        why.append("contains a figure a reader can check")
+    hit = [w for w in _CHECKABLE if w in low]
+    if hit:
+        checkable = True
+        why.append(f"names something checkable: {', '.join(sorted(hit)[:3])}")
+    if checkable:
+        return {"kind": "claim", "confident": True, "basis": "checkable",
+                "why": why}
+
+    words = set(re.findall(r"[a-z']+", low))
+    observation = bool(words & set(_WHO)) and bool(words & set(_DOES))
+    hedged = any(h in low for h in _HEDGE)
+    if observation:
+        why.append("says what PEOPLE do or think, which is an observation "
+                   "about a market rather than a property of the thing")
+    if hedged:
+        why.append("is an unquantified generalisation")
+    why.append("carries nothing a reader could check — no figure, no "
+               "evidence, no proof type")
+
+    if observation:
+        return {"kind": "background", "confident": True,
+                "basis": "observation about people, nothing checkable",
+                "why": why}
+    if hedged:
+        return {"kind": "background", "confident": False,
+                "basis": "generalisation with nothing checkable", "why": why}
+    # UNSURE IS NOT BACKGROUND. A flat statement with no number may well be a
+    # spec somebody forgot to evidence, and filing that as background quietly
+    # removes proof the brand is entitled to use.
+    return {"kind": "claim", "confident": False,
+            "basis": "nothing decisive either way", "why": why}
 
 
 def _settled_as_background(tenant: str, text: str,
@@ -3114,7 +3267,8 @@ def claim_to_context(claim_id: str) -> str:
 
 
 def contexts(tenant: str, *, entity_key: str = "", situation: str = "",
-             include_archived: bool = False) -> list[db.KbContext]:
+             include_archived: bool = False,
+             include_proposed: bool = False) -> list[db.KbContext]:
     """Statements that bear here.
 
     Scoped the way claims are: a row with no `entity_key` is about the brand
@@ -3128,6 +3282,12 @@ def contexts(tenant: str, *, entity_key: str = "", situation: str = "",
         q = s.query(db.KbContext).filter(db.KbContext.tenant == tenant)
         if not include_archived:
             q = q.filter(db.KbContext.status == "active")
+        if not include_proposed:
+            # APPROVED ONLY is the safe read, the same as `claims()`. A
+            # proposal must not reach a drafter: everything downstream of this
+            # — `resolve`, the compiled document — treats what it gets as
+            # something a person put on file.
+            q = q.filter(db.KbContext.review != prov.PROPOSED)
         rows = q.order_by(db.KbContext.created_at.desc()).all()
         s.expunge_all()
     if entity_key:
@@ -3137,6 +3297,57 @@ def contexts(tenant: str, *, entity_key: str = "", situation: str = "",
         rows = [r for r in rows
                 if not (r.situations or []) or situation in (r.situations or [])]
     return rows
+
+
+def pending_contexts(tenant: str = "") -> list[db.KbContext]:
+    """Background awaiting review — routed by a classifier, not yet on file."""
+    with db.SessionLocal() as s:
+        q = s.query(db.KbContext).filter(db.KbContext.review == prov.PROPOSED,
+                                         db.KbContext.status == "active")
+        if tenant:
+            q = q.filter(db.KbContext.tenant == tenant)
+        rows = q.order_by(db.KbContext.created_at.desc()).all()
+        s.expunge_all()
+        return rows
+
+
+def review_context(context_id: str, approve: bool) -> str:
+    """Approve a routed statement, or send it back."""
+    with db.SessionLocal() as s:
+        row = s.get(db.KbContext, context_id)
+        if row is None:
+            return "No such note."
+        if approve:
+            row.review, row.approved_by = prov.APPROVED, "owner"
+            row.approved_at = db.utcnow()
+            s.commit()
+            return f"On file as background: {(row.text or '')[:60]}"
+        row.review, row.status = prov.REJECTED, "archived"
+        s.commit()
+        return f"Rejected: {(row.text or '')[:60]}"
+
+
+def context_to_claim(context_id: str) -> str:
+    """"It is provable" — send a routed statement back as a claim PROPOSAL.
+
+    The reversal the classifier makes necessary. Not an approved claim: proof
+    is a thing a human signs off, and a control that promoted straight past
+    the queue would be the approval process defeating itself. It goes where a
+    claim goes, and waits there.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbContext, context_id)
+        if row is None:
+            return "No such note."
+        text, ent, tags = row.text, row.entity_key or "", list(row.situations or [])
+        tenant, src = row.tenant, row.source or ""
+        row.review, row.status = prov.REJECTED, "archived"
+        s.commit()
+    said = add_claim(tenant, text, "", tags, entity_key=ent,
+                     status="pending", origin="human", assess=False,
+                     source=f"was background · {src}"[:300])
+    return (f"Sent to the claim queue as a proposal — it needs evidence and "
+            f"your approval before anything may cite it.\n{said}")
 
 
 def archive_context(context_id: str) -> str:

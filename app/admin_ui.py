@@ -5050,6 +5050,53 @@ def _compliance_body(tenant: str) -> str:
 # send does not. Until 2026-08-26 approvals had NO section here at all: the
 # tab named Review reviewed everything except the thing most people mean by
 # the word, and the real queue lived on the unstyled /admin/pending fallback.
+def _context_queue(key: str, tenant: str) -> str:
+    """Statements a classifier routed here, waiting on a person.
+
+    `kb.assess_kind` reads a harvested candidate and, when it is confidently
+    an observation with nothing checkable in it, proposes it as background
+    rather than filing it in the claim queue. It PROPOSES — a classifier
+    writing an approved row would be populating the knowledge base without a
+    human, and nothing here does that.
+
+    Three answers, and the middle one is the reason this queue can exist at
+    all: if the filter was wrong, "it is provable" sends the statement to the
+    claim queue as a proposal, where proof and an approval are still required.
+    Without that, a misclassification would be a trap.
+    """
+    from . import kb as _kb
+    try:
+        rows = _kb.pending_contexts(tenant)
+    except Exception:                                            # noqa: BLE001
+        return ""
+    if not rows:
+        return ""
+    items = "".join(
+        f'<div class="msg"><div>{_esc(c.text)}</div>'
+        f'<div class="when">{_esc(c.source or "")}</div>'
+        f'<div class="row">'
+        f'<a class="btn go" href="/admin/context_review?key={_esc(key)}'
+        f'&amp;tenant={_esc(tenant)}&amp;id={_esc(c.id)}&amp;yes=1">'
+        f'Yes &mdash; background</a> '
+        f'<a class="btn sec" href="/admin/context_promote?key={_esc(key)}'
+        f'&amp;tenant={_esc(tenant)}&amp;id={_esc(c.id)}">'
+        f'It is provable &mdash; make it a claim</a>'
+        f'<span class="grow"></span>'
+        f'<a class="when" href="/admin/context_review?key={_esc(key)}'
+        f'&amp;tenant={_esc(tenant)}&amp;id={_esc(c.id)}">reject</a>'
+        f'</div></div>' for c in rows[:15])
+    return f"""
+<div class="card"><div class="anchor" id="bgqueue"></div>
+  <div class="head"><h3>Routed here, waiting on you</h3>
+    <span class="chip off">{len(rows)} pending</span></div>
+  <p class="mut">A harvester proposed these as claims and the filter read them
+  as observations with nothing checkable in them. <b>Nothing cites them and
+  nothing counts them</b> until you say so &mdash; and if the filter was
+  wrong, sending one to the claim queue is one press.</p>
+  <div class="thread">{items}</div>
+</div>"""
+
+
 def _overlap_strip(key: str, tenant: str) -> str:
     """The same statement filed twice, in whichever pair of kinds.
 
@@ -5144,6 +5191,7 @@ def _context_card(key: str, tenant: str) -> str:
   every draft &mdash; it is retrieved when the entity or the moment matches.
   For something that must always hold, use a hard rule on the system; for a
   fact you want quoted, that is a claim.</p>
+  {_context_queue(key, tenant)}
   {_overlap_strip(key, tenant)}
   <div class="thread">{items or '<p class="mut">Nothing on file yet.</p>'}</div>
   <form method="post" action="/admin/context_add?key={_esc(key)}"

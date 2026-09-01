@@ -115,6 +115,34 @@ def main() -> int:
             print(f"[  ok  ] {len(gone)} {flag} connection(s) RESOLVED — "
                   f"delete from KNOWN: {'; '.join(gone)}")
 
+    # --- inputs, outputs and connections, for every function --------------
+    #
+    # Owner, 2026-08-31: *"make sure we update the register in the process to
+    # show the inputs outputs and connections of all the functions."* Counted
+    # against an INDEPENDENT AST walk rather than against the register's own
+    # count: a map that computes its own denominator can be complete and empty
+    # at the same time.
+    import ast
+    n_src = 0
+    for _p in sorted((ROOT / "app").glob("*.py")):
+        n_src += len([x for x in ast.parse(_p.read_text()).body
+                      if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and not x.name.startswith("_")])
+    ck("the function map covers every public function",
+       len(reg.get("functions") or []) == n_src,
+       f"mapped {len(reg.get('functions') or [])}, in the source {n_src}")
+    ck("  each one states its inputs",
+       all("params" in f for f in reg.get("functions") or []),
+       "the signature, with a default marked")
+    ck("  and its output, even where nothing is annotated",
+       all(f.get("returns") or f.get("keys") is not None
+           for f in reg.get("functions") or []),
+       "this codebase speaks dicts, so a signature alone says nothing about "
+       "what a caller gets — the returned KEYS are the contract")
+    ck("  and the document renders them",
+       "## Every public function" in (doc.read_text() if doc.exists() else ""),
+       "computed and not rendered is the same defect one level up")
+
     ck("the register still says what it does not reach",
        len(reg["uncovered"]) >= 3,
        "a register silent about its edges reads as complete and is not")

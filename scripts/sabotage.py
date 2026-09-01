@@ -4050,7 +4050,7 @@ SABOTAGES = [
     {
         "name": "a_person_outranks_a_similarity_score",
         "file": "app/kb.py",
-        "find": "    if review != prov.APPROVED:\n        _bg = _settled_as_background",
+        "find": "    if assess and review != prov.APPROVED:\n        _bg = _settled_as_background",
         "replace": "    if True:  # SABOTAGE\n        _bg = _settled_as_background",
         "suites": ["test_context.py"],
         "why": "an APPROVED add — a human in the console, a seed — is "
@@ -4059,6 +4059,64 @@ SABOTAGES = [
                "standing rule runs the other way: generators propose and "
                "never populate, and the converse is that a decision outranks "
                "a measurement",
+    },
+    {
+        "name": "an_observation_is_not_filed_as_proof",
+        "file": "app/kb.py",
+        "find": '        if _kind["kind"] == "background" and _kind["confident"]:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "every harvested observation goes back into the claim queue as "
+               "a candidate for citable proof, so 'buyers ask about lead time' "
+               "is one approval away from being a fact the brand asserts and "
+               "a validator will happily let a draft cite",
+    },
+    {
+        "name": "a_routed_statement_waits_for_a_person",
+        "file": "app/kb.py",
+        "find": '                               status="pending",\n                               source=f"routed from a claim proposal · "',
+        "replace": '                               status="active",  # SABOTAGE\n                               source=f"routed from a claim proposal · "',
+        "suites": ["test_context.py"],
+        "why": "a CLASSIFIER writes an approved row, so a machine's verdict "
+               "becomes knowledge on file and reaches every drafter without a "
+               "human ever seeing it. Generators propose and never populate — "
+               "and a filter is a generator",
+    },
+    {
+        "name": "an_override_is_not_re_litigated",
+        "file": "app/kb.py",
+        "find": "    if assess and review != prov.APPROVED:",
+        "replace": "    if review != prov.APPROVED:  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "'it is provable' sends a statement to the claim queue, the "
+               "classifier reads the same words and routes it straight back "
+               "to background, and the reversal control becomes a loop with a "
+               "button on it. A person's decision is the one input this layer "
+               "may never re-litigate",
+    },
+    {
+        "name": "a_default_is_not_read_as_a_statement",
+        "file": "app/kb.py",
+        "find": '                            "" if proof_type == DEFAULT_PROOF_TYPE',
+        "replace": '                            proof_type if True  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "`add_claim` defaults `proof_type` to case_study, so a caller "
+               "that said NOTHING is indistinguishable from one that chose a "
+               "proof type — the filter concludes every candidate carries "
+               "proof and never routes anything. It fires on nothing and "
+               "looks like it is working",
+    },
+    {
+        "name": "the_register_cannot_go_quietly_out_of_date",
+        "file": "scripts/register.py",
+        "find": "            \"functions\": function_map()}",
+        "replace": '            "functions": []}  # SABOTAGE',
+        "suites": ["test_register.py"],
+        "why": "the register stops describing what it claims to describe and "
+               "nothing says so — the exact failure SYSTEMS-REFERENCE.md had, "
+               "rebuilt in the document written to prevent it. A register is "
+               "only worth reading if a change that moves it fails the build "
+               "in the commit that moves it",
     },
 ]
 
