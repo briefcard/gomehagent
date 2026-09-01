@@ -1742,10 +1742,50 @@ def skip_plan(run_id: str, reason: str = "") -> dict:
         if reason:
             brief["skip_reason"] = reason[:300]
         row.brief = brief
+        sys_id = row.system_id
         s.commit()
     finish_run(run_id, "skipped", decision="denied",
                output="plan skipped before execution")
+    _release_plan_subject(sys_id, brief)
     return {"ok": True, "run_id": run_id}
+
+
+def _release_plan_subject(system_id: str, brief: dict) -> None:
+    """Undo what FILING the plan claimed, now that it is not going to happen.
+
+    Owner, 2026-09-01: *"When I skip an item in the plan, it should no longer
+    appear in that system."* It left the plan QUEUE correctly — `plans()`
+    filters on stage — and stayed on the blog board for ever, because filing a
+    plan marks its keyword `status="planned"` (`planner.py`) and nothing ever
+    marked it back. The board's in-flight list reads that flag, so a declined
+    plan went on advertising an article that was never coming.
+
+    The signature defect of this codebase, one more time: one writer, no
+    reset. The fix is not to teach the board about run stages — it is to make
+    the flag true again.
+
+    Back to `candidate`, not to a new terminal state: declining THIS plan is
+    not a judgement about the keyword. "Never propose this again" already
+    exists and is `owner_priority='muted'`, which is a different sentence and
+    is the owner's to say.
+    """
+    row = get(system_id)
+    if row is None or row.key != "blog":
+        return                      # only the blog claims a subject this way
+    # The plan fields live UNDER `plan`, beside `edited` and `planned_for` —
+    # reading the brief's top level found nothing and released nothing, which
+    # is a silent no-op wearing the shape of a fix.
+    plan = ((brief or {}).get("plan") or {})
+    phrase = str(plan.get("keyword") or "").strip()
+    if not phrase:
+        return
+    try:
+        from . import keywords
+        keywords.upsert(row.tenant, phrase, status="candidate")
+    except Exception:                                            # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "could not release %r after a skip", phrase)
 
 
 def plans(tenant: str, key: str = "", due_by: str = "") -> list[db.SystemRun]:

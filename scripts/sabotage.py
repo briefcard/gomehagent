@@ -4354,6 +4354,40 @@ SABOTAGES = [
                "computed-and-never-rendered shape this console keeps paying "
                "down",
     },
+    {
+        "name": "a_declined_plan_stops_claiming_the_work",
+        "file": "app/systems.py",
+        "find": "    _release_plan_subject(sys_id, brief)",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_plan_lifecycle.py"],
+        "why": "filing a plan marks its keyword `planned` and skipping stops "
+               "marking it back, so a plan you declined goes on advertising "
+               "an article that is never coming — for ever, on the board you "
+               "use to decide what to write next. One writer, no reset",
+    },
+    {
+        "name": "a_hand_carried_publish_is_still_delivered",
+        "file": "app/admin_ui.py",
+        "find": "    live = [r for r in rows if r.published_at or _landed(r.destination or \"\")]",
+        "replace": "    live = [r for r in rows if _landed(r.destination or \"\") and r.stage] if False else []  # SABOTAGE",
+        "suites": ["test_plan_lifecycle.py"],
+        "why": "Delivered lists nothing, so the one view that answers 'what "
+               "actually went out' is empty — and on a platform with no "
+               "content write API, where paste-and-record IS the workflow, "
+               "that is every article the account has ever published",
+    },
+    {
+        "name": "an_intention_is_not_a_delivery",
+        "file": "app/admin_ui.py",
+        "find": "    return d.startswith(\"http\") or \":campaign/\" in d",
+        "replace": "    return bool(d)  # SABOTAGE",
+        "suites": ["test_plan_lifecycle.py"],
+        "why": "`destination` is written at EMIT with an intention — "
+               "`esp:omnisend`, no campaign id — so every drafted campaign "
+               "reads as delivered and the view says the work went out when "
+               "it is sitting in a queue. A list that cannot be trusted "
+               "about that is worse than not having one",
+    },
 ]
 
 

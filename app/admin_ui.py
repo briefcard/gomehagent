@@ -2681,6 +2681,140 @@ def _waiting_section(key: str, row) -> str:
     </div>"""
 
 
+def _delivered_section(key: str, row) -> str:
+    """Everything that actually reached its destination, however it got there.
+
+    Owner, 2026-09-01: *"I should have a view for all blogs that were approved
+    and sent to CMS or emails approved and sent to EMS — even if they were
+    copied over."*
+
+    READ FROM THE DESTINATION, not from the run. `Shipped` lists runs that
+    reached a terminal stage, which is a fact about the PIPELINE — it says a
+    decision was made and says nothing about where the work went. This reads
+    `Output.destination` and `published_at`, which are written by the
+    write-back itself: `keywords.mark_published` for an article and the ESP
+    push for a campaign.
+
+    THAT IS WHY THE HAND-CARRIED ONES APPEAR. On a platform with no content
+    write API the workflow IS paste-and-record, and "It's live here" calls the
+    same `mark_published` the executor calls. One writer, so one list — a view
+    that showed only what the executor pushed would be missing exactly the
+    accounts that need it most.
+    """
+    try:
+        with db.SessionLocal() as s:
+            rows = (s.query(db.Output)
+                    .filter(db.Output.tenant == row.tenant,
+                            db.Output.system_key == row.key)
+                    .order_by(db.Output.created_at.desc()).limit(400).all())
+            s.expunge_all()
+    except Exception:                                            # noqa: BLE001
+        rows = []
+    live = [r for r in rows if r.published_at or _landed(r.destination or "")]
+    if not live:
+        return """
+<div class="anchor" id="delivered"></div>
+<div class="card">
+  <div class="head"><h2>Delivered</h2></div>
+  <p class="mut">Nothing has reached a destination yet. An article lands here
+  when it is published &mdash; by the executor, or by you pasting it in and
+  recording where it went. A campaign lands here once it is in the ESP.</p>
+</div>"""
+    items = []
+    for r in live:
+        dest = r.destination or ""
+        when = r.published_at or r.created_at
+        if dest.startswith("http"):
+            where = (f'<a href="{_esc(dest)}">{_esc(dest[:70])}</a>'
+                     f' <span class="chip on">live page</span>')
+        elif ":campaign/" in dest:
+            prov = dest.split(":")[1] if ":" in dest else "the ESP"
+            where = (f'in <b>{_esc(prov)}</b> as campaign '
+                     f'<code>{_esc(dest.split(":campaign/")[-1])}</code>'
+                     f' <span class="chip on">drafted</span>')
+        else:
+            where = f'<code>{_esc(dest[:70])}</code>'
+        items.append(
+            f'<div class="msg"><div><b>{_esc((r.body or "")[:80])}</b></div>'
+            f'<div class="when">{when:%Y-%m-%d %H:%M} &middot; {where}'
+            f'</div>'
+            + (f'<div class="row"><a class="when" href="/admin/work/'
+               f'{_esc(r.id)}?key={_esc(key)}">open &rarr;</a></div>')
+            + '</div>')
+    return f"""
+<div class="anchor" id="delivered"></div>
+<div class="card">
+  <div class="head"><h2>Delivered</h2>
+    <span class="chip nb">{len(live)}</span></div>
+  <p class="mut">What reached its destination, newest first &mdash; whether
+  the executor pushed it or you carried it there by hand.</p>
+  <div class="thread">{"".join(items[:40])}</div>
+</div>"""
+
+
+def _declined_section(key: str, row) -> str:
+    """Plans you said no to, with the reason, out of the queue and on file.
+
+    Owner, 2026-09-01: *"When I skip an item in the plan, it should no longer
+    appear in that system… set it as skipped and file it outside of the plan
+    view. Same for rejected."*
+
+    Out of the queue is already true — `plans()` filters on stage. This is the
+    other half: somewhere they still exist. A decision recorded nowhere is a
+    decision that gets made again next week, and the reason is the part worth
+    keeping.
+    """
+    try:
+        runs = [r for r in systems.runs(row.id, limit=0)
+                if r.stage == "skipped" or r.decision == "denied"]
+    except Exception:                                            # noqa: BLE001
+        runs = []
+    if not runs:
+        return """
+<div class="anchor" id="declined"></div>
+<div class="card">
+  <div class="head"><h2>Declined</h2></div>
+  <p class="mut">Nothing declined. Skipping a plan files it here with your
+  reason, and takes it out of the queue &mdash; and off the board, so nothing
+  goes on claiming work that is not coming.</p>
+</div>"""
+    items = []
+    for r in runs[:40]:
+        brief = r.brief or {}
+        plan = brief.get("plan") or {}
+        what = (plan.get("keyword") or plan.get("segment")
+                or plan.get("entity_key") or r.ref or "")
+        why = brief.get("skip_reason") or ""
+        items.append(
+            f'<div class="msg"><div><b>{_esc(str(what)[:80])}</b> '
+            f'<span class="chip off">{_esc(r.stage)}</span></div>'
+            + (f'<div class="when">{_esc(why[:200])}</div>' if why else
+               '<div class="when">no reason recorded</div>')
+            + f'<div class="when">{(r.finished_at or r.created_at):%Y-%m-%d %H:%M}'
+              f'</div></div>')
+    return f"""
+<div class="anchor" id="declined"></div>
+<div class="card">
+  <div class="head"><h2>Declined</h2>
+    <span class="chip nb">{len(runs)}</span></div>
+  <p class="mut">Plans you said no to. They are out of the queue and off the
+  board; they are kept here because a decision recorded nowhere is one that
+  gets made again.</p>
+  <div class="thread">{"".join(items)}</div>
+</div>"""
+
+
+def _landed(destination: str) -> bool:
+    """Does this destination name a place the work actually reached?
+
+    `destination` is also written at EMIT with an intention — `esp:omnisend`
+    with no campaign id — so a non-empty value is not delivery. A URL is, and
+    so is a campaign id: both are things somebody could go and look at.
+    """
+    d = str(destination or "")
+    return d.startswith("http") or ":campaign/" in d
+
+
 def _shipped_section(row) -> str:
     done = _shipped_runs(row)
     week = len(_shipped_runs(row, days=7))
@@ -2950,7 +3084,8 @@ def _runs_section(key: str, row) -> str:
 #: `measured`) are the sub keys too, so every link that pointed at an anchor
 #: still lands on the right place (fluidity rule 3).
 WORKFLOW_SUBS = (("planned", "Plan queue"), ("drafts", "Drafts"),
-                 ("waiting", "Waiting on you"), ("shipped", "Shipped"),
+                 ("waiting", "Waiting on you"), ("delivered", "Delivered"),
+                 ("declined", "Declined"), ("shipped", "Shipped"),
                  ("measured", "Measured"), ("settings", "Settings"),
                  ("runs", "Runs"))
 
@@ -3030,6 +3165,8 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
         "drafts": lambda: _drafts_section(key, row),
         "reports": lambda: _reports_section(key, row),
         "waiting": lambda: _waiting_section(key, row),
+        "delivered": lambda: _delivered_section(key, row),
+        "declined": lambda: _declined_section(key, row),
         "shipped": lambda: _shipped_section(row),
         "measured": lambda: _measured_section(row),
         "segments": lambda: _segments_card(key, row),
