@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **206** (206 reached)
+- HTTP routes: **208** (208 reached)
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -113,7 +113,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 | system | performed by | ok |
 |---|---|---|
-| `ad_creative` | `web.ad_batch_decide` | yes |
+| `ad_creative` | `web.ad_export` | yes |
 | `blog` | `approvals._execute:seo_new_article` | yes |
 | `campaign_email` | `approvals.apply_decision:push_campaign_to_esp` | yes |
 | `lead_responder` | `approvals._execute:send_email` | yes |

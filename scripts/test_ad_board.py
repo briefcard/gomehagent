@@ -303,7 +303,82 @@ def main():
        and apr.get(b6["variants"][0]["output_id"]) == "denied", str(apr))
     page = c.get(f"/admin/work/{anchor}?key={KEY}").text
     ck("  the board reads ready, still honest",
-       "Batch ready" in page and "ships by hand" in page)
+       "Batch ready" in page and "by hand" in page)
+    # READY IS AN ENDING, not a state with nothing after it. `ad_creative`'s
+    # whole declared ship is this moment, and until 2026-08-31 the bar
+    # reported it and offered nothing to do about it — a fact with no control,
+    # which is design rule 1 broken on the system the rule matters most to.
+    ck("  and ready offers the two things that end it",
+       "/admin/ad_export" in page and "/admin/ad_launched" in page,
+       "carry the copy out, then tell it to look — `meta_ads.match` closes "
+       "the loop by comparing the copy it wrote")
+
+    print("\n--- 5b · the copy comes out paste-ready, dropped ones excluded ---")
+    txt = c.get(f"/admin/ad_export?key={KEY}&output_id={anchor}").text
+    ck("the export names its variants", "variant 1" in txt, txt[:70])
+    _live_n = len([v for v in b6["variants"] if not v.get("dropped")])
+    ck("  and carries the KEPT variants only",
+       txt.count("--- variant ") == _live_n and _live_n < len(b6["variants"]),
+       f'{txt.count("--- variant ")} exported, {_live_n} kept of '
+       f'{len(b6["variants"])} — approving DENIES a dropped variant, so '
+       f'exporting it hands over the exact thing the decision refused')
+    ck("  and says why the copy must not be edited",
+       "comparing the text" in txt,
+       "meta_ads.match joins by the copy; an edit breaks the join silently")
+    # A FRESH client, because `c` is signed in: `admin_key` accepts the
+    # console session cookie as well as the query key, so `?key=no` on an
+    # already-authenticated browser is still authenticated — correctly. The
+    # property is that a stranger gets nothing.
+    _out = TestClient(web.app, base_url="https://testserver")
+    ck("  and a signed-out stranger gets no copy",
+       "variant 1" not in _out.get(
+           f"/admin/ad_export?key=no&output_id={anchor}").text)
+
+    print("\n--- 5c · telling it the ads are live closes the loop ---")
+    # THE JOIN EXISTED AND NOTHING CALLED IT. `meta_ads.match` has been able to
+    # write `destination` (the ad id) and `outcome` onto the drafted rows since
+    # it was written, reachable from nowhere — so the ads measurement loop was
+    # open at BOTH ends: the copy could not get out, and what came back could
+    # not be recognised.
+    from app import meta_ads as _ma
+    _calls = {}
+
+    def _fake_match(tenant, *, limit=200):
+        _calls["tenant"] = tenant
+        return {"ok": True, "matched": 2, "live": 3, "unmatched_live": 1,
+                "note": "1 ad(s) are running copy this system did not write",
+                "why": ""}
+    _real_match = _ma.match
+    _ma.match = _fake_match
+    try:
+        r5c = c.post(f"/admin/ad_launched?key={KEY}",
+                     data={"output_id": anchor, "tenant": "baci"},
+                     follow_redirects=False)
+    finally:
+        _ma.match = _real_match
+    ck("the button reaches the join", _calls.get("tenant") == "baci",
+       str(_calls))
+    _loc = r5c.headers.get("location", "")
+    ck("  and lands back on the board with what it found",
+       f"/admin/work/{anchor}" in _loc and "joined+2" in _loc.replace("%20", "+"),
+       _loc[:120])
+    ck("  including the ads it did NOT write",
+       "did+not+write" in _loc.replace("%20", "+"),
+       "an ad running copy nobody here wrote is worth knowing beside a system "
+       "that claims to be drafting them")
+
+    def _fake_dead(tenant, *, limit=200):
+        return {"ok": False, "why": "no ad account connected", "matched": 0}
+    _ma.match = _fake_dead
+    try:
+        r5d = c.post(f"/admin/ad_launched?key={KEY}",
+                     data={"output_id": anchor, "tenant": "baci"},
+                     follow_redirects=False)
+    finally:
+        _ma.match = _real_match
+    ck("  a refusal is reported as one, not as zero matches",
+       "err=" in r5d.headers.get("location", ""),
+       r5d.headers.get("location", "")[:110])
 
     print("\n--- 6 · refusals hold ---")
     r6 = c.post("/admin/work_redraft",

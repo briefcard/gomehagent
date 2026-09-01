@@ -3201,6 +3201,101 @@ async def ad_variant_drop(request: Request, key: str = Depends(admin_key)):
                    f"approving the batch denies it")
 
 
+@app.get("/admin/ad_export", response_class=PlainTextResponse)
+def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
+    """The approved copy, as text a person can paste into Meta.
+
+    THIS IS THE SHIP. `ad_creative` declares that approving "marks the batch
+    ready", and until now nothing consumed ready: no ad-platform write exists,
+    so an approved batch sat in the database and the board spent three lines
+    explaining that this was as far as it went. A state with no next step is
+    not an ending, it is a promise the surface has to keep apologising for.
+
+    The blog system already solved the same problem the same way. Squarespace
+    has no content write API, so the workflow IS copy-out-and-record — and
+    that is the workflow, not a lesser version of one. Ads are that case with
+    the write missing on purpose rather than by platform.
+
+    Kept plain text, dropped variants excluded. What comes out is exactly what
+    was approved, in the order the board shows it, so `meta_ads.match` — which
+    joins live ads back to these rows by COMPARING THE COPY — recognises it
+    when it comes back.
+    """
+    if key != config.APPROVAL_SECRET:
+        return "unauthorized"
+    import json as _json
+    art, _kw, _ap = _article_bundle(output_id)
+    if art is None or (art.format or "") != "ad_batch":
+        return "no ad batch with that id"
+    try:
+        batch = _json.loads(art.body or "") or {}
+    except Exception:                                            # noqa: BLE001
+        return "the batch record is unreadable"
+    live = [v for v in (batch.get("variants") or []) if not v.get("dropped")]
+    if not live:
+        return "every variant on this batch was dropped — nothing to carry"
+    out = []
+    for i, v in enumerate(live, 1):
+        out.append(f"--- variant {i} ---")
+        for label, field in (("Headline", "headline"),
+                             ("Primary text", "primary_text"),
+                             ("Description", "description"),
+                             ("Call to action", "cta")):
+            val = str(v.get(field) or "").strip()
+            if val:
+                out.append(f"{label}: {val}")
+        out.append("")
+    out.append("Paste these into Meta Ads Manager as they are. Editing the "
+               "copy breaks the join: `meta_ads.match` finds these rows again "
+               "by comparing the text, and that is what fills in how each one "
+               "performed.")
+    return "\n".join(out)
+
+
+@app.post("/admin/ad_launched")
+async def ad_launched(request: Request, key: str = Depends(admin_key)):
+    """Look for this copy running in the ad account, and join what is found.
+
+    The other half of the ship. `meta_ads.match` has been able to write
+    `destination` (the ad id) and `outcome` (what it did) onto the drafted
+    rows since it was written, and NOTHING EVER CALLED IT — the join the
+    reference describes as the thing `results` is waiting for existed, fully
+    built, reachable from nowhere. So the measurement loop for ads was open at
+    both ends: the copy could not get out, and what came back could not be
+    recognised.
+
+    A button rather than a sweep, on purpose: it is the moment a person KNOWS
+    the ads are live, and asking then is one call instead of a nightly poll
+    against an account that usually has nothing new in it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+    tenant = str(form.get("tenant") or "")
+
+    def _back(msg: str, ok: bool = True) -> RedirectResponse:
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&{'ok' if ok else 'err'}={quote(msg[:400])}", 303)
+
+    from . import meta_ads
+    got = meta_ads.match(tenant)
+    if not got.get("ok"):
+        return _back(f"could not read the ad account: "
+                     f"{str(got.get('why', ''))[:200]}", ok=False)
+    note = got.get("note") or ""
+    return _back(
+        f"joined {got.get('matched', 0)} ad(s) to what we drafted — "
+        f"{got.get('live', 0)} running in the account"
+        + (f". {note}" if note else "")
+        + (". Nothing matched yet — Meta can take a while to report, and "
+           "edited copy will not join." if not got.get("matched") else ""))
+
+
 @app.post("/admin/ad_batch_decide")
 async def ad_batch_decide(request: Request, key: str = Depends(admin_key)):
     """Decide the whole board in one gesture (3.4).

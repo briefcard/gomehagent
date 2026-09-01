@@ -373,11 +373,17 @@ CATALOG = {
                 dict(key="variants", label="Variants (1–5)", required=False),
             ),
             artifact="proposal_rows",
-            ship="marks the batch ready — no ad-platform write is wired, and "
-                 "the surface says so",
-            ship_by="web.ad_batch_decide",
-            measure="asset outcomes per channel (fed by hand until the "
-                    "output→ad-id join exists)")),
+            ship="approving marks the batch ready, then the copy is carried "
+                 "to the platform by hand and the join finds it again",
+            ship_by="web.ad_export",
+            # THE JOIN EXISTS AND IS NOW REACHED. `meta_ads.match` has been
+            # able to write `destination` (the ad id) and `outcome` onto the
+            # drafted rows since it was written, and nothing ever called it —
+            # so the loop was open at both ends: the copy could not get out,
+            # and what came back could not be recognised. Both ends closed
+            # 2026-08-31 (`/admin/ad_export`, `/admin/ad_launched`).
+            measure="asset outcomes per channel, joined by `meta_ads.match` "
+                    "on the copy itself")),
     "reports": dict(
         name="Reports",
         does="The weekly number, assembled from whatever is connected.",

@@ -3827,6 +3827,42 @@ SABOTAGES = [
                "that no-op promotion, so it was named where it did not matter "
                "and dropped everywhere it did",
     },
+    {
+        "name": "ready_is_an_ending_not_a_state",
+        "file": "app/admin_ui.py",
+        "find": '                      f\'href="/admin/ad_export?key={_esc(key)}\'',
+        "replace": '                      f\'href="#"  \'  # SABOTAGE',
+        "suites": ["test_ad_board.py"],
+        "why": "an approved ad batch goes back to being a state with nothing "
+               "after it. `ad_creative`'s entire declared ship is this "
+               "moment, and the bar reported it while offering no way to take "
+               "the copy anywhere — a fact with no control beside it, on the "
+               "one system where that IS the whole product",
+    },
+    {
+        "name": "a_dropped_variant_never_rides_the_export",
+        "file": "app/web.py",
+        "find": '    live = [v for v in (batch.get("variants") or []) if not v.get("dropped")]',
+        "replace": '    live = list(batch.get("variants") or [])  # SABOTAGE',
+        "suites": ["test_ad_board.py"],
+        "why": "copy the owner threw off the board is pasted into Meta with "
+               "the rest of it. Approving already DENIES a dropped variant, so "
+               "the export would be handing over the exact thing the decision "
+               "refused — and once it is running, `meta_ads.match` joins it "
+               "back as though it had been approved",
+    },
+    {
+        "name": "launching_reaches_the_join",
+        "file": "app/web.py",
+        "find": "    got = meta_ads.match(tenant)",
+        "replace": '    got = {"ok": True, "matched": 0, "live": 0}  # SABOTAGE',
+        "suites": ["test_ad_board.py"],
+        "why": "the ads measurement loop goes back to being open at both "
+               "ends. `meta_ads.match` writes the ad id and the outcome onto "
+               "the drafted rows and had no caller at all until 2026-08-31 — "
+               "a fully built join reachable from nowhere, which is the exact "
+               "shape the reachability register was written to find",
+    },
 ]
 
 

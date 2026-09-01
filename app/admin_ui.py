@@ -11028,10 +11028,34 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                          f'on approve</span> ' if _n_drop else "")
                       + ship_note + "</form>")
         elif ad_apr["ready"]:
+            # READY IS NOW AN ENDING, not a state with nothing after it. The
+            # bar used to say "the copy ships by hand" and offer no way to
+            # take it — a fact reported with no control beside it, which is
+            # design rule 1, on the system whose whole declared ship is this
+            # moment. Two controls, and between them the loop closes: carry
+            # the copy out, then tell it to look for the ads, and
+            # `meta_ads.match` fills in destination and outcome by comparing
+            # the text it wrote.
             decide = (f'<div class="ok">Batch ready — {ad_apr["ready"]} '
-                      f'variant(s) approved. No ad-platform write is wired: '
-                      f'the copy ships by hand, and launching stays yours '
-                      f'in the platform.</div>')
+                      f'variant(s) approved. No ad-platform write is wired, '
+                      f'so the copy goes over by hand — that is the workflow, '
+                      f'not a lesser version of one.</div>'
+                      f'<div class="row" style="margin-top:8px">'
+                      f'<a class="btn go" target="_blank" '
+                      f'href="/admin/ad_export?key={_esc(key)}'
+                      f'&amp;output_id={_esc(output_id)}">Copy for Meta</a>'
+                      f'<form method="post" class="inl" '
+                      f'action="/admin/ad_launched?key={_esc(key)}">'
+                      f'<input type="hidden" name="output_id" '
+                      f'value="{_esc(output_id)}">'
+                      f'<input type="hidden" name="tenant" '
+                      f'value="{_esc(tenant)}">'
+                      f'<button class="btn sec" type="submit">'
+                      f'I&rsquo;ve launched these &mdash; find them</button>'
+                      f'</form>'
+                      f'<span class="when">paste it as it is: the join finds '
+                      f'these rows by comparing the copy, and that is what '
+                      f'fills in how each one performed</span></div>')
         elif ad_apr["denied"]:
             decide = ('<div class="note">Denied — nothing on this board '
                       'rides. A regenerate with feedback starts it over.'

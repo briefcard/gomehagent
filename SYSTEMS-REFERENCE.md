@@ -70,8 +70,8 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
 - **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `variants`
 - **Unit:** one ad batch for one audience × entity
 - **Artifact:** proposal_rows
-- **Ship:** marks the batch ready — no ad-platform write is wired, and the surface says so
-- **Measure:** asset outcomes per channel (fed by hand until the output→ad-id join exists)
+- **Ship:** approving marks the batch ready, then the copy is carried to the platform by hand and the join finds it again
+- **Measure:** asset outcomes per channel, joined by `meta_ads.match` on the copy itself
 - **Brand-document scope:** identity, rules, claims, catalogue, gaps
 
 ### `blog` — Blog / content
