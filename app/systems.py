@@ -370,7 +370,14 @@ CATALOG = {
         # the whole point — an account with no banned_claims has nothing to
         # check against and the system says so rather than passing everything.
         requires=(), requires_any=(), needs_kb=True,
-        kb_needs=("banned_claims",)),
+        kb_needs=("banned_claims",),
+        workflow=dict(
+            unit="one sweep of the public site",
+            artifact="report",
+            ship="files a dated report — nothing is rewritten and nothing is "
+                 "sent; the report IS the deliverable",
+            ship_by="compliance.record_scan",
+            measure="violations per sweep, and whether they fall")),
     "catalog_compliance": dict(
         name="Catalogue compliance",
         does="Checks product copy and SEO metadata in the store against the "
@@ -381,7 +388,16 @@ CATALOG = {
         # invisible to it while being the field most likely to hold one,
         # because meta descriptions get templated across a whole catalogue.
         requires=("commerce",), requires_any=(), needs_kb=True,
-        kb_needs=("banned_claims",)),
+        kb_needs=("banned_claims",),
+        workflow=dict(
+            unit="one sweep of the catalogue",
+            skill="catalog_compliance",
+            artifact="report",
+            ship="files a dated report — the tier 2 skill proposes the "
+                 "rewrites separately, and those go through approval",
+            ship_by="skill_pack._run_catalog_compliance",
+            measure="violations per sweep, grouped by the template that "
+                    "caused them")),
     "ad_creative": dict(
         name="Ad creative",
         does="Drafts grounded ad copy from approved claims against an audience "

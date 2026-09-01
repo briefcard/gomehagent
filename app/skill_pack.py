@@ -45,6 +45,8 @@ reason rather than a decorative one, and the whole skill is testable offline.
 """
 from __future__ import annotations
 
+import datetime as _dt
+
 import html as _htmllib
 import re
 
@@ -218,16 +220,25 @@ def _run_catalog_compliance(ctx: Context) -> dict:
     cov = found["coverage"]
     violations = found.get("violations") or []
 
+    # A CLEAN SWEEP IS STILL A CHECK, and it used to return here without
+    # emitting anything — so the history recorded bad days and nothing else,
+    # and "we checked and it was clean" was indistinguishable from "nobody
+    # checked". Those are the two states a compliance record exists to tell
+    # apart. Owner, 2026-08-31, asking for a reviewable history of checks.
+    _when = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     if not violations:
-        return {"summary": f"no violations in {cov.get('scanned', 0)} product(s)",
-                **found}
-
-    lines = [f"{len(violations)} banned-claim violation(s) across "
-             f"{len({f['handle'] for f in violations})} product(s), "
-             f"{cov['scanned']} scanned.", ""]
-    for (fname, phrase), rows in found["ranked"]:
-        lines.append(f"{len(rows)}x  {fname}  —  {phrase!r}")
-        lines.append(f"      e.g. {rows[0]['handle']}: {rows[0]['context'][:160]}")
+        lines = [f"Catalogue compliance — {_when}", "",
+                 f"No banned claim found. {cov.get('scanned', 0)} product(s) "
+                 f"checked."]
+    else:
+        lines = [f"Catalogue compliance — {_when}", "",
+                 f"{len(violations)} banned-claim violation(s) across "
+                 f"{len({f['handle'] for f in violations})} product(s), "
+                 f"{cov['scanned']} scanned.", ""]
+        for (fname, phrase), rows in found["ranked"]:
+            lines.append(f"{len(rows)}x  {fname}  —  {phrase!r}")
+            lines.append(f"      e.g. {rows[0]['handle']}: "
+                         f"{rows[0]['context'][:160]}")
     # A COMPLIANCE REPORT IS MANY SUBJECTS ON PURPOSE — one line per product
     # that broke a rule. Holding it to one subject would be wrong, and leaving
     # it uncommitted would make `no_commitment` fire on every run. `survey` is
@@ -239,8 +250,11 @@ def _run_catalog_compliance(ctx: Context) -> dict:
                  "survey", "catalogue", action="list what breaks a rule"),
              parts=lambda _t: coherence.parts(text=_t))
 
-    return {"summary": f"{len(violations)} violation(s), "
-                       f"{len(found['ranked'])} distinct pattern(s)", **found}
+    return {"summary": (f"{len(violations)} violation(s), "
+                        f"{len(found['ranked'])} distinct pattern(s)"
+                        if violations else
+                        f"no violations in {cov.get('scanned', 0)} product(s)"),
+            **found}
 
 
 register(Skill(

@@ -4315,6 +4315,45 @@ SABOTAGES = [
                "the exact failure it exists to catch, and it shipped that "
                "way for a day",
     },
+    {
+        "name": "a_plain_text_artifact_is_kept",
+        "file": "app/ledger.py",
+        "find": "        if body and format and (\n                format in ARTIFACT_FORMATS\n                or (\"<\" in body and len(body) > 2000)):",
+        "replace": "        if body and format and \"<\" in body and (\n                format in ARTIFACT_FORMATS or len(body) > 2000):  # SABOTAGE",
+        "suites": ["test_compliance_reports.py"],
+        "why": "a declared artifact format is kept only if it happens to "
+               "contain markup, so every PLAIN-TEXT artifact is discarded — "
+               "which is exactly what a compliance report is. Both sweeps go "
+               "back to living in Output.body[:2000] with no workroom and no "
+               "history, and the paragraph directly above says the opposite "
+               "of what the code does",
+    },
+    {
+        "name": "a_clean_check_is_still_on_the_record",
+        "file": "app/compliance.py",
+        "find": "                      body=report_text(tenant, result), run_id=run_id)",
+        "replace": "                      body=(report_text(tenant, result) if result.get(\"violations\") else \"\"), run_id=run_id)  # SABOTAGE",
+        "suites": ["test_compliance_reports.py"],
+        "why": "only sweeps that FOUND something are filed, so the history "
+               "records bad days and nothing else — and 'we checked and it "
+               "was clean' becomes indistinguishable from 'nobody checked'. "
+               "Those are the two states a compliance record exists to tell "
+               "apart, and a clean row is the one that makes it a history "
+               "rather than a complaints file",
+    },
+    {
+        "name": "a_report_system_has_somewhere_to_read_its_history",
+        "file": "app/admin_ui.py",
+        "find": "    if wf[\"artifact\"] == \"report\":\n        subs.insert(1, (\"reports\", \"Reports\"))",
+        "replace": "    pass  # SABOTAGE",
+        "suites": ["test_compliance_reports.py"],
+        "why": "the dated history has no room of its own, so reviewing "
+               "compliance means hunting through Drafts — a shelf for things "
+               "awaiting a decision, which a filed record of a check is not. "
+               "The reports are kept and unreachable, which is the "
+               "computed-and-never-rendered shape this console keeps paying "
+               "down",
+    },
 ]
 
 

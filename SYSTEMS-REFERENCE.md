@@ -120,6 +120,10 @@ Checks product copy and SEO metadata in the store against the brand's own banned
   - parameters: `site`, `limit`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one sweep of the catalogue
+- **Artifact:** report
+- **Ship:** files a dated report — the tier 2 skill proposes the rewrites separately, and those go through approval
+- **Measure:** violations per sweep, grouped by the template that caused them
 - **Brand-document scope:** identity, rules, context, gaps
 
 ### `content_compliance` — Website content compliance
@@ -130,6 +134,10 @@ Checks the live site against the brand's own banned claims and reports the pages
 - **Knowledge (`kb_needs`):** `banned_claims`
 - **Skill:** none — nothing generates for this system
 - **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one sweep of the public site
+- **Artifact:** report
+- **Ship:** files a dated report — nothing is rewritten and nothing is sent; the report IS the deliverable
+- **Measure:** violations per sweep, and whether they fall
 - **Brand-document scope:** identity, rules, context, gaps
 
 ### `lead_responder` — Lead responder

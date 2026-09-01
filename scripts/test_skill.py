@@ -203,9 +203,16 @@ def main():
     print("\n--- the sweep ---")
     skill_pack.fetch_products = fake_fetch([CLEAN], total=1, complete=True)
     r = skill.run("catalog_compliance", "baci")
-    ck("a clean catalogue reports EMPTY, not blocked", r["status"] == "empty",
+    # A CLEAN SWEEP IS STILL A CHECK, and it used to emit nothing — so the
+    # history recorded bad days only and "we checked and it was clean" was
+    # indistinguishable from "nobody checked". Owner, 2026-08-31, asking for a
+    # reviewable history of compliance checks. What must still hold is that it
+    # is not BLOCKED: a clean catalogue is a successful sweep, not a refusal.
+    ck("a clean catalogue is not blocked", r["status"] == "produced",
        r["status"])
-    ck("  and emits nothing", not r["items"])
+    ck("  and it files a report saying so",
+       r["items"] and "No banned claim found" in (r["items"][0].get("body") or ""),
+       (r["items"][0].get("body") or "")[:60] if r["items"] else "no item")
 
     skill_pack.fetch_products = fake_fetch([CLEAN, DIRTY], total=2, complete=True)
     r = skill.run("catalog_compliance", "baci")
@@ -221,8 +228,12 @@ def main():
     skill_pack.fetch_products = fake_fetch([ASKS], total=1, complete=True)
     r = skill.run("catalog_compliance", "baci")
     ck("a QUESTION about a banned phrase is not a violation",
-       r["status"] == "empty",
+       not r["detail"]["violations"],
        str([f["kind"] for f in r["detail"]["findings"]]))
+    ck("  so the sweep reads as clean",
+       "No banned claim found" in (r["items"][0].get("body") or ""),
+       "asserted on the FINDING now, not on whether anything was emitted — a "
+       "clean sweep files a report, so `status` no longer distinguishes them")
     ck("  but it is still surfaced for review",
        any(f["kind"] == "review" for f in r["detail"]["findings"]))
 

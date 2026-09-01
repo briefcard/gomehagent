@@ -22,9 +22,12 @@ nobody has read is the thing this whole platform is built to avoid.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from . import db, kb, tenants
+
+log = logging.getLogger(__name__)
 
 # Identify ourselves honestly on every fetch. The default `python-httpx/…`
 # agent is 403'd by ordinary WAF rules — marketingthatworks.co returns 403 to
@@ -601,6 +604,50 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
     }
 
 
+def report_text(tenant: str, result: dict) -> str:
+    """One scan, as something a person can read a month later.
+
+    Owner, 2026-08-31: *"Both should generate their own reports in the system,
+    dated and organized so it can be reviewed the history of compliance
+    checks."* The findings were on the run's `outcome` — a JSON blob readable
+    only by the tab that rendered it, with no artifact behind it, so there was
+    nothing to open, nothing dated to page through, and no way to compare
+    March with April.
+
+    A CLEAN SCAN STILL WRITES ONE. That is the half worth being deliberate
+    about: a history that only records bad days cannot tell "we checked and it
+    was clean" from "nobody checked", and those are the two states a
+    compliance record exists to distinguish.
+    """
+    when = db.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    if result.get("error"):
+        return (f"Website compliance — {when}\n\n"
+                f"NOT CHECKED: {result['error']}\n\n"
+                f"Nothing on this account's site was read, so nothing here "
+                f"says it is clean.")
+    checked = result.get("pages_checked", 0)
+    vios = result.get("violations") or []
+    head = (f"Website compliance — {when}\n\n"
+            f"{len(vios)} violation(s) across {len({v['url'] for v in vios})} "
+            f"page(s), {checked} page(s) checked."
+            if vios else
+            f"Website compliance — {when}\n\n"
+            f"No banned claim found. {checked} page(s) checked.")
+    lines = [head, ""]
+    for phrase, n in sorted((result.get("by_phrase") or {}).items(),
+                            key=lambda kv: -kv[1]):
+        lines.append(f"{n}x  {phrase!r}")
+    if vios:
+        lines += ["", "Where:"]
+        for v in vios[:40]:
+            lines.append(f"  {v['url']}")
+            for h in (v.get("hits") or [])[:2]:
+                lines.append(f"      {h['phrase']!r} — {h['context'][:160]}")
+        if len(vios) > 40:
+            lines.append(f"  … and {len(vios) - 40} more, not listed")
+    return "\n".join(lines)
+
+
 def record_scan(tenant: str, result: dict) -> str:
     """Log a scan against the compliance system's ledger, if it is installed."""
     from . import systems
@@ -625,6 +672,19 @@ def record_scan(tenant: str, result: dict) -> str:
                        for v in result["violations"][:40]],
             "truncated": max(0, len(result["violations"]) - 40),
         })
+    # THE REPORT ITSELF, filed the way every other system files its work.
+    # `ledger.record` owns both the decision row and the artifact, so this is
+    # an ordinary caller rather than a second writer on those tables — and it
+    # is what gives the scan a workroom, a date and a place in the history.
+    try:
+        from . import ledger
+        ledger.record(tenant, "content_compliance", format="report",
+                      status="blocked" if result.get("error") else "sent",
+                      blocked_on=[result["error"]] if result.get("error")
+                      else None,
+                      body=report_text(tenant, result), run_id=run_id)
+    except Exception:                                            # noqa: BLE001
+        log.exception("compliance report not filed for %s", tenant)
     return run_id
 
 

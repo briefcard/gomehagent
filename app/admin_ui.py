@@ -2960,8 +2960,17 @@ def _workflow_subs(row) -> tuple:
     to an ESP — offering an empty room on a blog system would be a tab that
     teaches you it does nothing."""
     subs = list(WORKFLOW_SUBS)
-    if systems.workflow(row.key)["artifact"] == "esp_campaign":
+    wf = systems.workflow(row.key)
+    if wf["artifact"] == "esp_campaign":
         subs.insert(5, ("segments", "Segments"))
+    # A SYSTEM WHOSE DELIVERABLE IS THE REPORT gets the history as its own
+    # room. Owner, 2026-08-31: *"dated and organized so it can be reviewed the
+    # history of compliance checks."* Drafts is the wrong shelf for it — a
+    # compliance sweep is not a draft awaiting a decision, it is a record that
+    # a check happened, and what you come here to do is compare one against
+    # the last.
+    if wf["artifact"] == "report":
+        subs.insert(1, ("reports", "Reports"))
     return tuple(subs)
 
 
@@ -3019,6 +3028,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     sections = {
         "planned": lambda: _planned_section(key, row, ppage),
         "drafts": lambda: _drafts_section(key, row),
+        "reports": lambda: _reports_section(key, row),
         "waiting": lambda: _waiting_section(key, row),
         "shipped": lambda: _shipped_section(row),
         "measured": lambda: _measured_section(row),
@@ -10271,6 +10281,73 @@ def _progress_section(key: str, tenant: str, days: int,
       {moves}
     </table></div>
     {aeo_html}"""
+
+
+def _reports_section(key: str, row) -> str:
+    """Every check this system has run, newest first, with its headline.
+
+    Owner, 2026-08-31, on the two compliance systems: *"Both should generate
+    their own reports in the system, dated and organized so it can be reviewed
+    the history of compliance checks."*
+
+    THE HEADLINE IS READ FROM THE REPORT, not recomputed. The artifact opens
+    with the date and the count on purpose, so the list and the document
+    cannot disagree about what a sweep found — which is design rule 8 applied
+    to a body of text rather than to a query.
+
+    A CLEAN CHECK IS LISTED. It is the row that makes this a history rather
+    than a complaints file: without it "we checked and it was clean" and
+    "nobody checked" look identical, and those are the two states the record
+    exists to tell apart.
+    """
+    try:
+        with db.SessionLocal() as s:
+            rows = (s.query(db.ArtifactBody)
+                    .filter(db.ArtifactBody.tenant == row.tenant,
+                            db.ArtifactBody.system_key == row.key,
+                            db.ArtifactBody.format == "report")
+                    .order_by(db.ArtifactBody.created_at.desc())
+                    .limit(60).all())
+            s.expunge_all()
+    except Exception:                                            # noqa: BLE001
+        rows = []
+    if not rows:
+        return """
+<div class="anchor" id="reports"></div>
+<div class="card">
+  <div class="head"><h2>Reports</h2></div>
+  <p class="mut">No check has run yet. Every sweep files a dated report here
+  &mdash; including a clean one, because a history that records only the bad
+  days cannot tell a clean check from no check at all.</p>
+</div>"""
+    items = []
+    for a in rows:
+        body = (a.body or "")
+        # Line 3 is the headline the report writes for itself: "N violation(s)
+        # across M page(s)…" or "No banned claim found."
+        _lines = [x for x in body.splitlines() if x.strip()]
+        head = _lines[1] if len(_lines) > 1 else ""
+        clean = "No banned claim" in head or "No violations" in head
+        stale = "NOT CHECKED" in body
+        chip = ('<span class="chip off">not checked</span>' if stale
+                else '<span class="chip on">clean</span>' if clean
+                else '<span class="chip gap">findings</span>')
+        items.append(
+            f'<div class="msg"><div class="row">{chip}'
+            f'<b>{_esc(a.created_at.strftime("%Y-%m-%d %H:%M"))}</b>'
+            f'<span class="grow"></span>'
+            f'<a class="when" href="/admin/work/{_esc(a.output_id)}'
+            f'?key={_esc(key)}">open &rarr;</a></div>'
+            f'<div class="when">{_esc(head[:150])}</div></div>')
+    return f"""
+<div class="anchor" id="reports"></div>
+<div class="card">
+  <div class="head"><h2>Reports</h2>
+    <span class="chip nb">{len(rows)} kept</span></div>
+  <p class="mut">Every check this system has run, newest first. Nothing is
+  rewritten and nothing is sent &mdash; the report is the deliverable.</p>
+  <div class="thread">{"".join(items)}</div>
+</div>"""
 
 
 def _drafts_section(key: str, row) -> str:

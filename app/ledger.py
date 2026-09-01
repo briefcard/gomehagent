@@ -27,7 +27,14 @@ from . import db
 #: Formats whose body IS the deliverable, kept whole however short. A reply
 #: or a report is summarised by its ledger row; an article and a campaign are
 #: the thing itself, and there may be nowhere else they exist.
-ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page")
+ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page", "report")
+# `report` added 2026-08-31. A compliance sweep is the clearest case for this
+# table there is: it is the record that a check happened, it has to be
+# readable a month later, and both compliance systems were keeping theirs in
+# `Output.body[:2000]` — truncated, in the decision row, with no artifact and
+# so no workroom and no dated history to page through. Owner: *"Both should
+# generate their own reports in the system, dated and organized so it can be
+# reviewed the history of compliance checks."*
 # Campaign emails are NOT in that tuple on purpose: `emit` carries the
 # validated COPY, and the reviewable artifact — the rendered HTML — is only
 # final after render/personalize/rehost. The campaign path writes its own
@@ -102,8 +109,17 @@ def record(tenant: str, system_key: str, *, situation: str = "",
         # the short article — which is the case this table exists for, since
         # an account with no CMS has nowhere else for it to live. Format
         # first, length only as the catch-all for everything else.
-        if body and format and "<" in body and (
-                format in ARTIFACT_FORMATS or len(body) > 2000):
+        #
+        # AND `"<" in body` USED TO GATE BOTH BRANCHES, which is not what the
+        # paragraph above describes: a declared artifact format was kept only
+        # if it happened to contain markup. Every PLAIN-TEXT artifact was
+        # therefore dropped — which is both compliance reports, the one kind
+        # whose whole purpose is to be re-read later. The markup test belongs
+        # to the catch-all, where it was doing its real job of not copying
+        # every short reply into this table.
+        if body and format and (
+                format in ARTIFACT_FORMATS
+                or ("<" in body and len(body) > 2000)):
             s.add(db.ArtifactBody(
                 tenant=tenant, output_id=row.id, run_id=run_id,
                 system_key=system_key, format=format,
