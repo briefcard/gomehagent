@@ -143,6 +143,21 @@ def main() -> int:
        "## Every public function" in (doc.read_text() if doc.exists() else ""),
        "computed and not rendered is the same defect one level up")
 
+    # THE FAMILY COVERS THE CATALOGUE. `system_ships` skipped any system with
+    # no declared ship, so the register reported EIGHT where the catalogue has
+    # ten — in a document whose header promises every family is enumerated and
+    # not sampled. Counted against `systems.CATALOG`, not against itself.
+    from app import systems as _sys
+    _got = {x["system"] for x in reg["ships"]}
+    ck("every system in the catalogue is in the register",
+       _got == set(_sys.CATALOG),
+       f"missing: {sorted(set(_sys.CATALOG) - _got)}")
+    ck("  including the ones that declare no ship",
+       any(not x["ship"] for x in reg["ships"])
+       or all((_sys.CATALOG[k].get("workflow") or {}).get("ship")
+              for k in _sys.CATALOG),
+       "a system reported nowhere is the sampling this register warns about")
+
     ck("the register still says what it does not reach",
        len(reg["uncovered"]) >= 3,
        "a register silent about its edges reads as complete and is not")

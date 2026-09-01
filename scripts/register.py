@@ -213,11 +213,28 @@ def system_ships() -> list[dict]:
     for key, sp in sorted(systems.CATALOG.items()):
         wf = sp.get("workflow") or {}
         ship = wf.get("ship") or ""
-        if not ship:
-            continue
         by = wf.get("ship_by")
         row = {"system": key, "ship": ship, "ship_by": by, "ok": False,
                "why": ""}
+        if not ship:
+            # NOT SKIPPED. `continue` here dropped two systems out of this
+            # family entirely — `content_compliance` and `catalog_compliance`
+            # declare no `workflow` at all — so the register reported eight
+            # systems where the catalogue has ten, and said so in a document
+            # whose own header promises every family is ENUMERATED and not
+            # sampled. A register that quietly omits is the failure it exists
+            # to catch.
+            #
+            # Reported as its own state rather than flagged EMPTY: a system
+            # that declares no ship has not declared something nothing
+            # consumes, which is what EMPTY means. It has declared nothing.
+            # Both of these DO produce — compliance findings land on
+            # Assurance — so the gap is in the declaration, and saying that
+            # plainly is more use than a flag that would be wrong.
+            row["why"] = ("declares no ship at all — it may still produce, "
+                          "but nothing here can say where its work goes")
+            out.append(row)
+            continue
         if by is None:
             row["why"] = "declares a ship and names nothing that performs it"
         elif by == "":
@@ -424,7 +441,14 @@ def build() -> dict:
             empty.append(f"disposition {d['value']!r} — no production module "
                          f"branches on it")
     for sh in ships:
-        if not sh["ok"]:
+        # A SYSTEM THAT DECLARED NOTHING IS NOT AN EMPTY CONNECTION. EMPTY is
+        # this register's own term for "declared or built, and nothing
+        # consumes it"; a system with no `workflow.ship` has not declared a
+        # destination for anything to consume. It is reported in the Declared
+        # ships table with that state, which is the honest place for it —
+        # flagging it here would have grown the ratchet by two for a fact
+        # that does not match the flag's definition.
+        if not sh["ok"] and sh["ship"]:
             empty.append(f"system {sh['system']} — {sh['why']} "
                          f"(ship: {sh['ship'][:60]})")
     for f in unreached:
@@ -524,7 +548,14 @@ def markdown(reg: dict) -> str:
     for r in reg["rungs"]:
         L.append(f"| `{r['rung']}` | {r['disposition_writes']} | "
                  f"{r['disposition_reads']} | `{r['signature']}` |")
-    L += ["", "### Declared ships", "", "| system | performed by | ok |",
+    _noship = [sh["system"] for sh in reg["ships"] if not sh["ship"]]
+    L += ["", "### Declared ships", "",
+          (f"**{len(_noship)} system(s) declare no ship at all** — "
+           + ", ".join(f"`{k}`" for k in _noship)
+           + ". They may still produce; nothing here can say where their work "
+             "goes, which is a gap in the DECLARATION rather than a dead "
+             "connection." if _noship else ""),
+          "", "| system | performed by | ok |",
           "|---|---|---|"]
     for sh in reg["ships"]:
         L.append(f"| `{sh['system']}` | `{sh['ship_by'] or ''}` | "

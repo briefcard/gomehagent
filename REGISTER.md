@@ -18,7 +18,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
-- Systems declaring a ship: **8**
+- Systems declaring a ship: **10**
 - Tables with writers: **56** (11 with more than one)
 
 **What this does NOT reach**, stated so the edges are not implied:
@@ -111,11 +111,15 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ### Declared ships
 
+**2 system(s) declare no ship at all** — `catalog_compliance`, `content_compliance`. They may still produce; nothing here can say where their work goes, which is a gap in the DECLARATION rather than a dead connection.
+
 | system | performed by | ok |
 |---|---|---|
 | `ad_creative` | `web.ad_export` | yes |
 | `blog` | `approvals._execute:seo_new_article` | yes |
 | `campaign_email` | `approvals.apply_decision:push_campaign_to_esp` | yes |
+| `catalog_compliance` | `` | **declares no ship at all — it may still produce, but nothing here can say where its work goes** |
+| `content_compliance` | `` | **declares no ship at all — it may still produce, but nothing here can say where its work goes** |
 | `lead_responder` | `approvals._execute:send_email` | yes |
 | `moment_email` | `planner.campaign_rollout` | yes |
 | `reorder_engine` | `` | **declared empty — nothing performs this ship** |

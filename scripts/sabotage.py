@@ -4302,6 +4302,19 @@ SABOTAGES = [
                "silently narrowed to the ones the picker chose — the plan is "
                "the REVIEWED instruction and it stops outranking a guess",
     },
+    {
+        "name": "the_register_reports_every_system",
+        "file": "scripts/register.py",
+        "find": "        if not ship:",
+        "replace": "        if not ship:\n            continue  # SABOTAGE",
+        "suites": ["test_register.py"],
+        "why": "a system with no declared ship drops out of the register "
+               "entirely, so it reports eight where the catalogue has ten — "
+               "in a document whose own header promises every family is "
+               "ENUMERATED and not sampled. A register that quietly omits is "
+               "the exact failure it exists to catch, and it shipped that "
+               "way for a day",
+    },
 ]
 
 
