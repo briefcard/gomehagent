@@ -3997,6 +3997,44 @@ SABOTAGES = [
                "docstring's warning ('degrading silently is not allowed') "
                "broken against itself, and it shipped once already",
     },
+    {
+        "name": "a_proposal_is_indexed_before_it_is_judged",
+        "file": "app/kb.py",
+        "find": '    # INDEXED WHETHER OR NOT IT IS APPROVED, and that is the change of',
+        "replace": '    if review != prov.APPROVED:\n        return "Submitted for review."  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "a proposal is not embedded, so it cannot be compared with "
+               "anything — and 'check what is already on file before "
+               "suggesting something new' is impossible for the one row it "
+               "matters most for. The queue could still say a proposal "
+               "duplicates an approved claim, because that comparison is done "
+               "on rows, and could never say it restates background",
+    },
+    {
+        "name": "parallel_rows_are_not_called_duplicates",
+        "file": "app/kb.py",
+        "find": '        if a["scope"] != b["scope"]:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "the same sentence about two entities is reported as a "
+               "duplicate, so somebody retires one product's answer because "
+               "another product has the same one. Both `add_claim` and "
+               "`add_context` put the entity in the fingerprint precisely "
+               "because those are two statements, and the claim queue already "
+               "says so in prose — a report that argues with the queue is "
+               "worse than no report",
+    },
+    {
+        "name": "a_proposal_that_restates_background_says_so",
+        "file": "app/admin_ui.py",
+        "find": "            for _y, _sc in _bg.get(p.id, [])[:2]:",
+        "replace": "            for _y, _sc in []:  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "a proposal restating something deliberately filed as 'true, "
+               "and NOT proof' arrives in the queue looking new, and "
+               "approving it promotes to citable proof the exact sentence "
+               "somebody filed as not being that",
+    },
 ]
 
 

@@ -2069,18 +2069,25 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                                      "seen": db.utcnow().isoformat()}],
                          verified_at=db.utcnow()))
         s.commit()
-    if review != prov.APPROVED:
-        # claims() filters on approved, so a proposal is invisible to selection
-        # until a human has looked at it. That is the point.
-        return (f"Submitted for review — it will not be used until approved.\n"
-                f"{claim}")
-
-    # A row that lands approved never passes through `review_claim`, so the
-    # index hook there never fires for it — and seeding and console adds are
-    # exactly that path. Without this, every claim written by `seed_kb` was
-    # invisible to semantic recall until somebody remembered to run a backfill,
-    # and nothing would have looked wrong. Index where the row becomes
-    # selectable, which is here as well as there.
+    # INDEXED WHETHER OR NOT IT IS APPROVED, and that is the change of
+    # 2026-08-31. This used to sit below the early return, so a PROPOSAL was
+    # never embedded — and a proposal that is not in the index cannot be
+    # compared with anything, which is the whole of "check what is already on
+    # file before suggesting something new". The queue could tell you a
+    # proposal duplicated an approved claim (that comparison is done on the
+    # rows) and could not tell you it restated something filed as background.
+    #
+    # Indexing a proposal cannot leak it into output: every reader looks its
+    # hits up in a liveness set of its own — `suggest_tags` in
+    # `claim_inventory["selectable"]`, `similar` in `claims()` — and both of
+    # those are approved-only. `overlaps` includes proposals deliberately,
+    # because a proposal is exactly the thing you want compared before you
+    # approve it.
+    #
+    # A row that lands approved never passes through `review_claim` either, so
+    # the index hook there never fires for it — seeding and console adds are
+    # that path, and without this every claim `seed_kb` wrote was invisible to
+    # semantic recall until somebody remembered to run a backfill.
     try:
         from . import embed
         with db.SessionLocal() as s:
@@ -2092,6 +2099,12 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
                          f"{claim} {evidence or ''}".strip())
     except Exception as exc:  # noqa: BLE001 — indexing must not fail a write
         log.warning("embed on add failed for %s: %s", tenant, exc)
+
+    if review != prov.APPROVED:
+        # claims() filters on approved, so a proposal is invisible to selection
+        # until a human has looked at it. That is the point.
+        return (f"Submitted for review — it will not be used until approved.\n"
+                f"{claim}")
 
     return (f"Added to {tenant} ({len(claims(tenant))} claims).\n"
             f"{claim}\n{evidence}\ntags: {', '.join(tags) or 'none'}"
@@ -2895,6 +2908,77 @@ def similar(tenant: str, text: str, *, entity_key: str = "",
                 out["claims" if kind == "claim" else "context"][:limit]
     except Exception as exc:                                     # noqa: BLE001
         out["degraded"] = out["degraded"] or f"{exc.__class__.__name__}"
+    return out
+
+
+#: Where "these two are the same thing" starts being worth saying. Above
+#: `embed.MIN_SEMANTIC_SCORE`, which is the floor for "related enough to
+#: retrieve": a pair that merely bears on the same topic is not a duplicate,
+#: and a report that says it is trains people to ignore the report.
+OVERLAP_SCORE = 0.90
+
+
+def overlaps(tenant: str, min_score: float | None = None,
+             limit: int = 30) -> dict:
+    """Pairs that look like the same statement twice, across BOTH kinds.
+
+    Three combinations, because there are three ways to say a thing twice
+    here: claim/claim, background/background, and the one that only exists
+    now — a claim and a piece of background that are the same sentence
+    wearing different hats.
+
+    Costs no provider call: every row is embedded when it is written, so this
+    is stored vector against stored vector. That is what makes it cheap enough
+    to render on a queue instead of hiding behind a button.
+
+    Stale hits are dropped by looking each id up in the LIVE rows, the same
+    way `suggest_tags` does — an index that has not caught up must never make
+    a retired row reappear as a duplicate of a live one.
+    """
+    # Resolved HERE, not in the signature: a default evaluated at def time
+    # freezes the constant, so tuning `OVERLAP_SCORE` — or a suite running a
+    # cruder embedder than production's — could not move it.
+    min_score = OVERLAP_SCORE if min_score is None else min_score
+    live_cl = {c.id: c for c in claims(tenant)}
+    live_cl.update({c.id: c for c in pending_claims(tenant)})
+    live_cx = {c.id: c for c in contexts(tenant)}
+    out: dict = {"pairs": [], "degraded": ""}
+    try:
+        from . import embed
+        found = (embed.pairs(tenant, "claim", min_score, limit)
+                 + embed.pairs(tenant, "context", min_score, limit)
+                 + embed.cross_pairs(tenant, "claim", "context",
+                                     min_score, limit))
+    except Exception as exc:                                     # noqa: BLE001
+        out["degraded"] = exc.__class__.__name__
+        return out
+
+    def _side(row_id, kind):
+        row = (live_cl if kind == "claim" else live_cx).get(row_id)
+        if row is None:
+            return None
+        return {"kind": kind, "id": row.id,
+                "text": (row.claim if kind == "claim" else row.text),
+                "scope": (row.entity_key or "brand-wide")}
+
+    for p in found:
+        ak = p.get("a_kind") or ("claim" if p["a"] in live_cl else "context")
+        bk = p.get("b_kind") or ("claim" if p["b"] in live_cl else "context")
+        a, b = _side(p["a"], ak), _side(p["b"], bk)
+        if not (a and b):
+            continue
+        # PARALLEL, NOT DUPLICATE. The same sentence about two entities is two
+        # statements — `add_context` and `add_claim` both put the entity in
+        # the fingerprint for that reason, and reporting them as duplicates
+        # would invite somebody to retire one product's answer because another
+        # product has the same one. The claim queue already draws this
+        # distinction in prose ("not a duplicate; both can be true"); the
+        # report has to draw it too or it argues with the queue.
+        if a["scope"] != b["scope"]:
+            continue
+        out["pairs"].append({"a": a, "b": b, "score": p["score"]})
+    out["pairs"].sort(key=lambda x: -x["score"])
+    out["pairs"] = out["pairs"][:limit]
     return out
 
 

@@ -5050,6 +5050,49 @@ def _compliance_body(tenant: str) -> str:
 # send does not. Until 2026-08-26 approvals had NO section here at all: the
 # tab named Review reviewed everything except the thing most people mean by
 # the word, and the real queue lived on the unstyled /admin/pending fallback.
+def _overlap_strip(key: str, tenant: str) -> str:
+    """The same statement filed twice, in whichever pair of kinds.
+
+    Owner, 2026-08-31: *"avoid having too many duplicates of the same
+    background info of different formats."* Costs no provider call — every row
+    is embedded when it is written, so this is stored vector against stored
+    vector, which is what makes it affordable to render here rather than hide
+    behind a button nobody presses.
+
+    Each side carries its own way out, because a pair reported with no control
+    is a fix instruction (design rule 1): background retires in place, and a
+    claim links to the queue where it can be rejected or told it is not proof.
+    """
+    from . import kb as _kb
+    try:
+        rep = _kb.overlaps(tenant)
+    except Exception:                                            # noqa: BLE001
+        return ""
+    if rep.get("degraded"):
+        return (f'<p class="mut">Near-duplicate matching did not run '
+                f'({_esc(rep["degraded"])}), so nothing here has been checked '
+                f'against similar wording.</p>')
+    if not rep["pairs"]:
+        return ""
+
+    def _side(sd) -> str:
+        if sd["kind"] == "context":
+            return (f'<span class="chip nb">background</span> {_esc(sd["text"][:90])} '
+                    f'<a class="when" href="/admin/context_retire?key={_esc(key)}'
+                    f'&amp;tenant={_esc(tenant)}&amp;id={_esc(sd["id"])}">retire</a>')
+        return (f'<span class="chip">claim</span> {_esc(sd["text"][:90])} '
+                f'<a class="when" href="/admin/ui?key={_esc(key)}&amp;tab=kb'
+                f'&amp;tenant={_esc(tenant)}#cl-{_esc(sd["id"])}">open claim</a>')
+    rows = "".join(
+        f'<li>{_side(p["a"])}<br><span class="when">&mdash; and &mdash;</span>'
+        f'<br>{_side(p["b"])} <span class="chip nb">{p["score"]}</span></li>'
+        for p in rep["pairs"][:6])
+    return (f'<div class="note"><b>{len(rep["pairs"])} pair(s) look like the '
+            f'same statement twice.</b> Retire whichever one you do not want '
+            f'&mdash; a claim and a piece of background saying one thing is '
+            f'the case worth catching.<ul class="bl">{rows}</ul></div>')
+
+
 def _context_card(key: str, tenant: str) -> str:
     """Background: true here, and not proof. Filed, listed, retired — in place.
 
@@ -5101,6 +5144,7 @@ def _context_card(key: str, tenant: str) -> str:
   every draft &mdash; it is retrieved when the entity or the moment matches.
   For something that must always hold, use a hard rule on the system; for a
   fact you want quoted, that is a claim.</p>
+  {_overlap_strip(key, tenant)}
   <div class="thread">{items or '<p class="mut">Nothing on file yet.</p>'}</div>
   <form method="post" action="/admin/context_add?key={_esc(key)}"
         style="margin-top:12px">
@@ -5588,6 +5632,23 @@ def render_content(key: str, tenant: str = "", started: str = "",
                              analyze_ids=frozenset(r.id for r in shown)
                              ).get("claim", [])
     _dupes = {e["row"].id: e for e in analyzed}
+    # ALREADY ON FILE AS BACKGROUND. Owner, 2026-08-31: a system should check
+    # background AND claims before suggesting either. `analyzed` only ever
+    # compared claims with claims, so a proposal restating something already
+    # filed as "true, and not proof" arrived looking new — and approving it
+    # promotes to citable proof a sentence somebody had deliberately filed as
+    # not being that.
+    #
+    # One call, zero provider calls: both sides are embedded when written, so
+    # this is stored vector against stored vector.
+    _bg: dict = {}
+    try:
+        for _p in kb.overlaps(tenant)["pairs"]:
+            for _x, _y in ((_p["a"], _p["b"]), (_p["b"], _p["a"])):
+                if _x["kind"] == "claim" and _y["kind"] == "context":
+                    _bg.setdefault(_x["id"], []).append((_y, _p["score"]))
+    except Exception:                                            # noqa: BLE001
+        _bg = {}
     # The page renders the ANALYZED copies of the shown rows — same ids, same
     # order (both queries order by id), with the duplicate context attached.
     shown = [e["row"] for e in analyzed
@@ -5786,6 +5847,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
             for d in others[:2]:
                 dup += ('<div class="note">Close to an approved claim in the same '
                         f'scope: &ldquo;{_esc((d.claim or "")[:110])}&rdquo;</div>')
+            for _y, _sc in _bg.get(p.id, [])[:2]:
+                dup += ('<div class="note"><b>Already on file as background</b> '
+                        f'({_sc}): &ldquo;{_esc(_y["text"][:110])}&rdquo; — '
+                        'somebody filed that as true and NOT proof. Approving '
+                        'this makes the same statement citable. Reject it, or '
+                        'retire the background if this really is provable.'
+                        '</div>')
             for d in ent.get("parallel_on_other_entities", [])[:2]:
                 dup += ('<div class="when">Same wording on a different item '
                         f'({_esc(d.entity_key or "")}): '

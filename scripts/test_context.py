@@ -278,6 +278,51 @@ def main() -> int:
            kb.similar("baci", "Orders ship within three days")["claims"]),
        "one lookup, both kinds — each dedup mechanism used to see half")
 
+    print("\n— the same statement in two kinds is reported as one pair —")
+    kb.add_claim("baci", "Trade buyers raise lead times first of all.",
+                 "carrier data", [])
+    # 0.65 for THIS suite's embedder, not for the real one. `_fake_embed` is
+    # a bag of words: it scores genuine paraphrase around 0.70 where
+    # text-embedding-3 puts it well above 0.90 (see `embed.MIN_SEMANTIC_SCORE`
+    # and OVERLAP_SCORE). The property under test is the cross-kind JOIN, not
+    # the provider's quality, so the threshold is set to the provider in use.
+    rep = kb.overlaps("baci", min_score=0.65)
+    ck("the report ran", not rep["degraded"], rep["degraded"])
+    _cross = [x for x in rep["pairs"]
+              if {x["a"]["kind"], x["b"]["kind"]} == {"claim", "context"}]
+    ck("a claim and a piece of background saying one thing is caught",
+       bool(_cross),
+       f"{[(x['a']['kind'], x['b']['kind'], x['score']) for x in rep['pairs']]}")
+    ck("  and rows differing only by ENTITY are not called duplicates",
+       not any(x["a"]["scope"] != x["b"]["scope"] for x in rep["pairs"]),
+       "the same sentence about two products is two statements — the claim "
+       "queue says so in prose and the report must not argue with it")
+    ck("  and an unrelated note is not dragged in",
+       not any("packaging" in x["a"]["text"] or "packaging" in x["b"]["text"]
+               for x in rep["pairs"]),
+       "a report that calls merely-related rows duplicates trains people to "
+       "ignore the report")
+
+    print("\n— and the CLAIM QUEUE says so before it is approved —")
+    # The SURFACES use the production threshold. `_fake_embed` puts genuine
+    # paraphrase around 0.70 where text-embedding-3 puts it above 0.90, so the
+    # constant is tuned to the embedder in use — the surfaces are unchanged.
+    kb.OVERLAP_SCORE = 0.65
+    kb.add_claim("baci", "Trade buyers raise lead time questions first.",
+                 "", [], status="pending")
+    q = c.get(f"/admin/ui?key={KEY}&tab=content&sub=claims&tenant=baci").text
+    ck("a proposal restating existing background is flagged there",
+       "Already on file as background" in q,
+       "approving it promotes to citable proof a sentence somebody "
+       "deliberately filed as not being that")
+
+    print("\n— the Background card shows the pairs, with a way out —")
+    bg = c.get(f"/admin/ui?key={KEY}&tab=content&sub=context&tenant=baci").text
+    ck("the overlap strip renders", "same statement twice" in bg)
+    ck("  and each side carries its own control",
+       "context_retire" in bg and "open claim" in bg,
+       "a pair reported with no control is a fix instruction, not a control")
+
     print("\n— retiring keeps the record —")
     n_before = len(kb.contexts("baci"))
     c.get(f"/admin/context_retire?key={KEY}&tenant=baci&id={brand_id}",

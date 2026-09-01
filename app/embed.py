@@ -262,6 +262,41 @@ def pairs(tenant: str, kind: str, min_score: float = 0.85,
     return out[:limit]
 
 
+def cross_pairs(tenant: str, kind_a: str, kind_b: str,
+                min_score: float = 0.85, limit: int = 50) -> list[dict]:
+    """Near matches ACROSS two kinds. Same cost as `pairs`: no provider call.
+
+    `pairs` answers "which two claims are secretly the same claim". This
+    answers the question that only exists once there is more than one kind of
+    knowledge: **is this claim the same thing as something already filed as
+    background?** Owner, 2026-08-31 — a statement that keeps coming up in
+    different words is the case both dedup mechanisms were for, and each of
+    them could only see its own half.
+
+    Both sides are stored vectors, so this is arithmetic over rows that are
+    already embedded — which is what makes it cheap enough to run on every
+    render of a queue rather than behind a button nobody presses.
+    """
+    if kind_a == kind_b:
+        return pairs(tenant, kind_a, min_score=min_score, limit=limit)
+    model = config.EMBED_MODEL
+    ra = [r for r in BACKEND.rows(tenant, kind_a)
+          if r.vector and (not r.model or r.model == model)]
+    rb = [r for r in BACKEND.rows(tenant, kind_b)
+          if r.vector and (not r.model or r.model == model)]
+    out = []
+    for a in ra:
+        va = list(a.vector)
+        for b in rb:
+            score = cosine(va, list(b.vector))
+            if score >= min_score:
+                out.append({"a": a.row_id, "b": b.row_id,
+                            "a_kind": kind_a, "b_kind": kind_b,
+                            "score": round(score, 4)})
+    out.sort(key=lambda p: -p["score"])
+    return out[:limit]
+
+
 def forget(tenant: str, kind: str, row_id: str) -> bool:
     """Drop a row's vector when the row stops being usable.
 
