@@ -41,6 +41,33 @@ def as_utc(value):
     return value.replace(tzinfo=dt.timezone.utc)
 
 
+#: WHO MAY WRITE EACH TABLE. `SYSTEMS-REFERENCE` §3 has stated "one writer per
+#: table that matters" since it was written, in prose, where nothing could
+#: enforce it — which is this repo's own rule about rules: a rule that reaches
+#: no validator is a rule that does not exist.
+#:
+#: Transcribed here so `scripts/register.py` can join it. A module writing a
+#: table it does not own is a CROSSOVER; a table with several writers and no
+#: entry here is a DUPLICATE, which is a question for a person rather than a
+#: violation — declare an owner, or declare it shared with `"*"`.
+#:
+#: Only the tables §3 already named are listed. Adding an opinion about the
+#: rest belongs to whoever owns those, not to the commit that built the join.
+TABLE_OWNER: dict[str, str] = {
+    "KbBrand": "kb.py", "KbClaim": "kb.py", "KbAudience": "kb.py",
+    "KbObjection": "kb.py", "KbSituation": "kb.py", "KbEmbedding": "kb.py",
+    "KbUnknown": "kb.py", "KbConflict": "kb.py", "KbEntity": "kb.py",
+    "KbAsset": "kb.py",
+    "KeywordTarget": "keywords.py", "KeywordReading": "keywords.py",
+    "Output": "ledger.py", "ArtifactBody": "ledger.py",
+    "System": "systems.py", "SystemRun": "systems.py",
+    "Approval": "approvals.py",
+    "DigestAck": "digest.py",
+    "ToolCall": "toolcalls.py",
+    "MediaBlob": "media.py",
+}
+
+
 class Approval(Base):
     """Any action that needs Gomeh's sign-off before execution."""
 

@@ -3775,6 +3775,44 @@ SABOTAGES = [
                "no surface can act on is worse than none: the queue says "
                "there is work waiting and no page will ever clear it",
     },
+    {
+        "name": "a_new_dead_connection_is_flagged",
+        "file": "app/systems.py",
+        "find": '            ship_by="approvals._execute:seo_new_article",',
+        "replace": '            ship_by="approvals._execute:no_such_kind",  # SABOTAGE',
+        "suites": ["test_register.py"],
+        "why": "a system declares a ship performed by something that does not "
+               "exist and nothing says so. That is the shape every defect "
+               "found in this repo in one week actually had — two halves of a "
+               "contract written in different places with nothing joining "
+               "them — and the register is the join. One that cannot notice a "
+               "NEW dead connection is a document, not a check",
+    },
+    {
+        "name": "the_register_cannot_go_stale",
+        "file": "REGISTER.md",
+        "find": "| **EMPTY** | declared or built, and nothing consumes it |",
+        "replace": "| **EMPTY** | edited by hand |  <!-- SABOTAGE -->",
+        "suites": ["test_register.py"],
+        "why": "the register is edited BY HAND and nothing notices, so it "
+               "drifts from the code exactly the way SYSTEMS-REFERENCE.md did "
+               "— which is the failure this whole register exists to stop "
+               "happening to anything else. Anchored on the document rather "
+               "than on `--check`, because the suite compares in-process: a "
+               "guard pointed at code the suite does not call is a guard that "
+               "cannot fire (it reported MISSED first time, 2026-08-31)",
+    },
+    {
+        "name": "a_table_owner_is_enforced",
+        "file": "app/db.py",
+        "find": '    "KbBrand": "kb.py", "KbClaim": "kb.py", "KbAudience": "kb.py",',
+        "replace": '    "KbBrand": "*", "KbClaim": "*", "KbAudience": "*",  # SABOTAGE',
+        "suites": ["test_register.py"],
+        "why": "the one-writer-per-table rule SYSTEMS-REFERENCE §3 has stated "
+               "in prose since it was written goes back to being unenforced. "
+               "It was prose for months, which is this repo's own rule about "
+               "rules: one that reaches no validator does not exist",
+    },
 ]
 
 

@@ -109,6 +109,11 @@ CATALOG = {
             unit="one thread's reply",
             artifact="gmail_draft",
             ship="approving sends the draft itself",
+            # WHAT PERFORMS THE SHIP. Declared, because `scripts/register.py`
+            # joins it: a ship sentence with nothing behind it is the shape
+            # this repo keeps finding, and inferring the executor guessed
+            # wrong about the mail systems on the first try.
+            ship_by="approvals._execute:send_email",
             measure="edits.py delta; sent-as-is rate")),
     "campaign_email": dict(
         name="Campaign email",
@@ -193,6 +198,7 @@ CATALOG = {
             ),
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human, in the ESP",
+            ship_by="approvals.apply_decision:push_campaign_to_esp",
             # WHAT IS ACTUALLY MEASURED. This said "generated HTML vs the ESP
             # draft at launch", which cannot be taken: `omnisend.campaign()`
             # returns status, name, sent_at and segment ids and no content. A
@@ -229,6 +235,7 @@ CATALOG = {
             artifact="none — it proposes nothing and sends nothing",
             ship="informs the campaign planner; the campaign system does the "
                  "sending, under its own switch and its own rung",
+            ship_by="planner.campaign_rollout",
             measure="moments consumed into a plan vs moments that expired "
                     "unserved")),
     "blog": dict(
@@ -281,6 +288,7 @@ CATALOG = {
             ),
             artifact="cms_article",
             ship="publishes the draft article, behind seo_guard",
+            ship_by="approvals._execute:seo_new_article",
             measure="draft-vs-published delta; position change in "
                     "`keywords.progress`, against a control")),
     "reorder_engine": dict(
@@ -292,6 +300,10 @@ CATALOG = {
             unit="one replenishment prompt per cohort",
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human",
+            # NOTHING PERFORMS IT. Declared empty rather than left blank: this
+            # system has no generator, so there is no draft for a ship to act
+            # on, and the register says so instead of implying a mechanism.
+            ship_by="",
             measure="provider stats, once `reports` exists")),
     "service_desk": dict(
         name="Service desk",
@@ -302,6 +314,7 @@ CATALOG = {
             unit="one thread's reply",
             artifact="gmail_draft",
             ship="approving sends the draft itself",
+            ship_by="approvals._execute:send_email",
             measure="edits.py delta; sent-as-is rate")),
     "content_compliance": dict(
         name="Website content compliance",
@@ -346,6 +359,7 @@ CATALOG = {
             artifact="proposal_rows",
             ship="marks the batch ready — no ad-platform write is wired, and "
                  "the surface says so",
+            ship_by="web.ad_batch_decide",
             measure="asset outcomes per channel (fed by hand until the "
                     "output→ad-id join exists)")),
     "reports": dict(
@@ -357,6 +371,7 @@ CATALOG = {
             unit="the weekly number, one report",
             artifact="report_document",
             ship="sends it to the client, on approval",
+            ship_by="",
             measure="none — the report IS the measurement")),
 }
 
