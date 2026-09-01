@@ -271,6 +271,31 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
   border-radius:4px;cursor:pointer;border:1px solid var(--rule);
   background:transparent;color:var(--ink2)}
 .nacts button:hover{border-color:var(--acc);color:var(--acc)}
+/* THE CORRECT-IT PANEL. Owner, 2026-08-31: *"sometimes I need to edit the
+   claim specifically before adding it… I dont want to have to leave the
+   system screen."* A <details> rather than a <dialog>, because this console's
+   rule is that script ENHANCES and never gates — the claim margin already
+   says so ("document order is the fallback if the script never runs"), and a
+   <dialog> with no showModal() is a control nobody can reach. Floated, so it
+   reads as a popup and does not push the draft around while it is open. */
+.nacts details.fix{position:relative}
+.nacts details.fix > summary{list-style:none;cursor:pointer;
+  font-family:var(--mono);font-size:.62rem;padding:.34em .55em;
+  border-radius:4px;border:1px solid var(--rule);color:var(--ink2)}
+.nacts details.fix > summary::-webkit-details-marker{display:none}
+.nacts details.fix[open] > summary{border-color:var(--acc);color:var(--acc)}
+.nacts details.fix > .pop{position:absolute;z-index:40;top:calc(100% + 6px);
+  left:0;width:min(30rem,78vw);background:var(--bg);border:1px solid var(--acc);
+  border-radius:7px;padding:12px 13px;box-shadow:0 10px 28px rgba(0,0,0,.28);
+  text-align:left;white-space:normal}
+.nacts details.fix .pop textarea{width:100%;font:inherit;font-size:.78rem;
+  border:1px solid var(--rule);border-radius:5px;padding:6px;background:var(--bg);
+  color:var(--ink)}
+.nacts details.fix .pop input,.nacts details.fix .pop select{width:100%;
+  font:inherit;font-size:.76rem;border:1px solid var(--rule);border-radius:5px;
+  padding:5px 6px;background:var(--bg);color:var(--ink)}
+.nacts details.fix .pop label{display:block;margin:8px 0 3px;font-size:.68rem;
+  color:var(--mut)}
 /* Already proposed: acknowledged in lavender, because a proposal is a thing
    YOU now own — and still shown as unbacked, because it is. */
 .gnote.prop{border-color:var(--acc)}
@@ -10522,7 +10547,65 @@ _TEACH = {
 }
 
 
-def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
+def _fix_claim_panel(key: str, tenant: str, output_id: str,
+                     sentence: str) -> str:
+    """Correct the sentence, then file it — without leaving the draft.
+
+    Owner, 2026-08-31: *"sometimes I need to edit the claim specifically
+    before adding it. For example, 'Glassbox has the capacity for 250 people'
+    this statement is false, but I would like the ability to change it to
+    'Glassbox has the capacity for 180 people' and then adding this correct
+    claim… I also dont want to have to leave the system screen."*
+
+    Add-claim posted the sentence VERBATIM. So the one case that matters most
+    — the drafter got a number wrong and you know the right one — had no path
+    at all: you could file the wrong claim, or drop the sentence and retype
+    the fact somewhere else.
+
+    APPROVING HERE IS NOT THE THING THE OLD RULE FORBADE. `claim_from_note`'s
+    docstring says it proposes and that no argument makes approving safe,
+    and it is right about what it was describing: a path from text a MODEL
+    wrote to a row every future draft may assert. This is not that. The
+    sentence is in a box, a person has read it, corrected the figure and
+    pressed a button that says what it does — which is the review the queue
+    exists to collect, done where the evidence for it is on screen. Filing it
+    unread is still one press away and still says PROPOSED.
+    """
+    from . import kb as _kb
+    try:
+        ents = {e.key: e.name for e in _kb.entities(tenant, available_only=False)}
+    except Exception:                                            # noqa: BLE001
+        ents = {}
+    opts = '<option value="">the brand generally</option>' + "".join(
+        f'<option value="{_esc(k)}">{_esc(v)}</option>'
+        for k, v in sorted(ents.items(), key=lambda kv: kv[1]))
+    return f"""
+    <details class="fix"><summary>Add claim&hellip;</summary>
+      <form class="pop" method="post" action="/admin/claim_from_note">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <label>The claim &mdash; correct it before you file it</label>
+        <textarea name="sentence" rows="3">{_esc(sentence[:600])}</textarea>
+        <label>Evidence &mdash; what makes it checkable (optional)</label>
+        <input name="evidence" placeholder="fire certificate, 2026 survey, the booking sheet">
+        <label>True of</label>
+        <select name="entity_key">{opts}</select>
+        <div class="row" style="margin-top:10px">
+          <button name="action" value="approve" class="btn go"
+            title="Files it as an APPROVED claim, citable from now on. You have
+read it and corrected it, which is the review.">Save &amp; approve</button>
+          <button name="action" value="propose" class="btn sec"
+            title="Files it as a proposal — nothing may cite it until you
+approve it on Review.">Save as proposal</button>
+        </div>
+        <span class="when">Approving makes it citable by every future draft.
+        A proposal is inert until you decide on it.</span>
+      </form>
+    </details>"""
+
+
+def _note_actions(note: dict, key: str, output_id: str, syskey: str,
+                  tenant: str = "") -> str:
     """FILE THE JUDGEMENT WHERE YOU FORMED IT (design rule 1).
 
     Owner, 2026-08-29: *"i dont have a mechanism to indicate that this should
@@ -10581,14 +10664,8 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
     # something the account has never sold, and "glucosamine is the benchmark"
     # is not a claim anybody wants on file. If the account has started
     # carrying it, that begins in the catalogue, not here.
-    add = ("" if note["state"] in ("ok", "off") or note.get("proposed") else
-           f'<form method="post" action="/admin/claim_from_note" class="nact">'
-           f'<input type="hidden" name="key" value="{_esc(key)}">'
-           f'<input type="hidden" name="output_id" value="{_esc(output_id)}">'
-           f'<input type="hidden" name="sentence" value="{_esc(sent[:600])}">'
-           f'<button type="submit" title="Files it as a PROPOSED claim — it '
-           f'is not usable until you approve it on Review, where you add the '
-           f'evidence and the source">Add claim</button></form>')
+    add = ("" if note["state"] in ("ok", "off") or note.get("proposed")
+           else _fix_claim_panel(key, tenant, output_id, sent))
 
     return ('<span class="nacts">'
             + add
@@ -10607,7 +10684,7 @@ def _note_actions(note: dict, key: str, output_id: str, syskey: str) -> str:
 
 
 def _note_html(note: dict, key: str = "", output_id: str = "",
-               syskey: str = "") -> str:
+               syskey: str = "", tenant: str = "") -> str:
     """The same record, opened, in the panel."""
     waiting = bool(note.get("proposed"))
     # The acknowledgement, and it says what is and is not true: the claim
@@ -10623,7 +10700,7 @@ def _note_html(note: dict, key: str = "", output_id: str = "",
             f'<span class="tx">{_esc(note["text"])}</span>'
             f'<span class="mt">{note["meta"]}</span>{flag}'
             f'<a class="mt" href="{note["href"]}">{_esc(act)} &rarr;</a>'
-            f'{_note_actions(note, key, output_id, syskey)}'
+            f'{_note_actions(note, key, output_id, syskey, tenant)}'
             f'</span></li>')
 
 
@@ -11015,7 +11092,8 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
     <div class="gpanel">{filters}
       <ul class="gnotes">{"".join(
         _note_html(n, key, str(getattr(art, "output_id", "") or ""),
-                   str(getattr(art, "system_key", "") or "")) for n in notes)
+                   str(getattr(art, "system_key", "") or ""),
+                   str(getattr(art, "tenant", "") or "")) for n in notes)
         or '<li class="gnote"><span></span><span class="mt">This output '
            'asserts nothing checkable, so there is nothing to trace.</span></li>'}</ul>
     </div>

@@ -3514,17 +3514,29 @@ SABOTAGES = [
         "why": 'the article renders but no sentence can be located in it, so every marker stacks at the top of the gutter pointing at nothing — and the separate Preview card was DELETED on the strength of this lane working, so a silent failure here leaves the workroom with no preview at all',
     },
     {
-        "name": 'a_claim_from_a_draft_is_only_proposed',
+        "name": 'a_corrected_claim_keeps_its_scope',
         "file": 'app/web.py',
-        "find": '        art.tenant or "", sentence, "", [], proof_type="", status="pending",',
-        "replace": '        art.tenant or "", sentence, "", [], proof_type="", status="active",  # SABOTAGE',
-        "suites": ['test_claim_trace.py'],
-        "why": 'a sentence a model wrote becomes an APPROVED claim in one click, so the model authors its own evidence: the next draft cites it, the citation check passes, and an unreviewed guess is now the thing that makes other drafts look grounded',
+        "find": "        status=\"active\" if approve else \"pending\",\n        entity_key=entity_key,",
+        "replace": '        status="active" if approve else "pending",\n        entity_key="",  # SABOTAGE',
+        "suites": ['test_claim_fix.py'],
+        "why": "a claim corrected against ONE venue is filed brand-wide, "
+               "so \"Glassbox holds 180\" becomes true of everything this "
+               "account sells and any draft about any room may cite it. "
+               "The entity picker in the panel becomes a decoration, "
+               "which is the same defect as filing the uncorrected "
+               "sentence one field along.\n\n"
+               "(This slot held `a_claim_from_a_draft_is_only_proposed`, "
+               "then briefly `a_correction_is_not_re_judged_as_an_"
+               "observation` — which reported MISSED, because "
+               "`review != APPROVED` already stops the filter on that "
+               "path and the `assess` flag it anchored is belt-and-braces "
+               "there. The original property is carried by "
+               "`an_unread_sentence_is_still_only_proposed`.)",
     },
     {
         "name": 'an_off_catalogue_steer_is_not_a_claim',
         "file": 'app/admin_ui.py',
-        "find": '    add = ("" if note["state"] in ("ok", "off") or note.get("proposed") else',
+        "find": '    add = ("" if note["state"] in ("ok", "off") or note.get("proposed")',
         "replace": '    add = ("" if note["state"] in ("ok",) or note.get("proposed") else  # SABOTAGE',
         "suites": ['test_claim_trace.py'],
         "why": 'the panel offers to file \\u201cglucosamine remains the benchmark\\u201d as a claim about an account that has never sold it \\u2014 one mis-click away from approving the exact sentence the off-catalogue check exists to catch',
@@ -4117,6 +4129,41 @@ SABOTAGES = [
                "rebuilt in the document written to prevent it. A register is "
                "only worth reading if a change that moves it fails the build "
                "in the commit that moves it",
+    },
+    {
+        "name": "the_correction_is_what_gets_filed",
+        "file": "app/web.py",
+        "find": '        art.tenant or "", sentence, evidence, [], proof_type="",',
+        "replace": '        art.tenant or "", str(form.get("sentence") or "")[:0] or art.draft_body or "", evidence, [], proof_type="",  # SABOTAGE',
+        "suites": ["test_claim_fix.py"],
+        "why": "the box is editable and the DRAFT'S wording is filed anyway, "
+               "so correcting 250 to 180 files 250 — the panel becomes a "
+               "decoration and the owner has no way to know their correction "
+               "was discarded until a draft cites the wrong number",
+    },
+    {
+        "name": "a_corrected_claim_is_the_owners",
+        "file": "app/web.py",
+        "find": '        origin="human" if approve else "agent",',
+        "replace": '        origin="agent",  # SABOTAGE',
+        "suites": ["test_claim_fix.py"],
+        "why": "a claim a person rewrote is filed as the AGENT'S, and "
+               "`origin` is what precedence is computed from — so the next "
+               "crawl or store sync may overwrite the correction and put the "
+               "wrong capacity back, with nothing having gone wrong in its "
+               "own logic",
+    },
+    {
+        "name": "an_unread_sentence_is_still_only_proposed",
+        "file": "app/web.py",
+        "find": '        status="active" if approve else "pending",',
+        "replace": '        status="active",  # SABOTAGE',
+        "suites": ["test_claim_fix.py"],
+        "why": "Save-as-proposal files an APPROVED claim, so a sentence a "
+               "model wrote becomes something every future draft may assert "
+               "without anybody reading it. That is the path this endpoint's "
+               "docstring exists to keep closed, and the panel's whole "
+               "argument for approving is that a person HAS read it",
     },
 ]
 

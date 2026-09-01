@@ -3716,17 +3716,29 @@ async def claim_from_note(request: Request, key: str = Depends(admin_key)):
     was subtractive, so a draft that said something true and unrecorded was a
     loss — the sentence got dropped and the knowledge with it.
 
-    IT PROPOSES. It does not approve, and no argument makes that safe to
-    change: this is a path from text a model wrote to a row the validator
-    lets every future draft assert, and if it landed approved the model would
-    be authoring its own evidence. `status="pending"` maps to
-    `review=proposed`, `kb.claims()` selects only `review == APPROVED`, so the
-    row is inert until a person decides on it.
+    IT PROPOSES BY DEFAULT, and that rule has not moved: this is a path from
+    text a MODEL wrote to a row the validator lets every future draft assert,
+    and a sentence that lands approved unread is the model authoring its own
+    evidence. `status="pending"` maps to `review=proposed`, `kb.claims()`
+    selects only `review == APPROVED`, so a proposal is inert.
 
-    Evidence, proof type and attribution are left EMPTY on purpose. This
-    endpoint knows the sentence and nothing else, and a field filled in by
-    something that cannot know it is the exact defect `attributed_to` was
-    added for — a drafter asked for a credit line invented "Eien Health
+    `action=approve` IS DIFFERENT, and the difference is a person. Owner,
+    2026-08-31: *"'Glassbox has the capacity for 250 people' this statement is
+    false, but I would like the ability to change it to 'Glassbox has the
+    capacity for 180 people' and then adding this correct claim."* The panel
+    puts the sentence in a box; approving means somebody read it, corrected
+    the figure and pressed a button that says what it does. That is the review
+    the queue exists to collect, done where the evidence for it is on screen —
+    not the unread promotion the paragraph above refuses.
+
+    THE SENTENCE IS WHATEVER CAME BACK, not what the draft said. The panel is
+    editable and the correction is the point; posting the original would make
+    the box a decoration.
+
+    Evidence is taken from the form and nowhere else. Proof type and
+    attribution stay EMPTY: this endpoint cannot know them, and a field filled
+    in by something that cannot know it is the exact defect `attributed_to`
+    was added for — a drafter asked for a credit line invented "Eien Health
     Research" and put it under a real statement in a live email.
     """
     if key != config.APPROVAL_SECRET:
@@ -3737,6 +3749,9 @@ async def claim_from_note(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     output_id = str(form.get("output_id") or "")
     sentence = " ".join(str(form.get("sentence") or "").split())[:600]
+    evidence = " ".join(str(form.get("evidence") or "").split())[:300]
+    entity_key = str(form.get("entity_key") or "").strip()
+    approve = str(form.get("action") or "") == "approve"
 
     def back(ok: str = "", err: str = ""):
         # #grounding, not #feedback: the reader was looking at the claim
@@ -3753,10 +3768,27 @@ async def claim_from_note(request: Request, key: str = Depends(admin_key)):
         return back(err="no artifact with that id")
     from . import kb as kbm
     got = kbm.add_claim(
-        art.tenant or "", sentence, "", [], proof_type="", status="pending",
-        origin="agent", source=f"proposed from draft {output_id}")
+        art.tenant or "", sentence, evidence, [], proof_type="",
+        status="active" if approve else "pending",
+        entity_key=entity_key,
+        # A CORRECTED CLAIM IS THE OWNER'S, not the drafter's. `origin` is
+        # what precedence is computed from, so filing a sentence a person
+        # rewrote as `agent` would let the next store sync or crawl overwrite
+        # their correction with the wrong number again.
+        origin="human" if approve else "agent",
+        # AND IT BYPASSES THE FILTER, for the same reason. `assess_kind`
+        # routes an unevidenced observation to background; a person who has
+        # just corrected a figure and pressed approve has already answered
+        # that question, and re-asking it is the loop `context_to_claim`
+        # already had to be protected from.
+        assess=not approve,
+        source=f"{'corrected in' if approve else 'proposed from'} "
+               f"draft {output_id}")
     if got and got.lower().startswith(("unknown", "needs")):
         return back(err=got[:280])
+    if approve:
+        return back(ok="Approved and on file — every future draft may cite it. "
+                       "Edit it any time on Review \u00b7 Claims.")
     return back(ok="Proposed — it is NOT usable until you approve it. Add the "
                    "evidence and the source on Review \u00b7 Claims.")
 
