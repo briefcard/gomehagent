@@ -550,9 +550,12 @@ def create_article(profile: dict, blog_id, fields: dict) -> str:
         blog_handle = ""
     path = (f"blogs/{blog_handle}/{res.get('handle')}" if blog_handle
             else f"blogs/{res.get('handle')}")
-    return (f"{_store_url(store)}/{path} — {state}"
-            + ("" if res.get("published_at") else
-               " (publish it from admin, or pass published=true)"))
+    from . import sites
+    return sites.with_article_id(
+        f"{_store_url(store)}/{path} — {state}"
+        + ("" if res.get("published_at") else
+           " (publish it from admin, or pass published=true)"),
+        res.get("id"))
 
 
 def update_article(profile: dict, blog_id, article_id, fields: dict) -> str:

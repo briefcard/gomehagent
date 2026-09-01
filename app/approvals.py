@@ -671,7 +671,11 @@ def _execute(ap: db.Approval) -> None:
             if p.get("output_id"):
                 keywords.mark_published(
                     seo_guard.tenant_for(profile) or (ap.tenant or ""),
-                    p["output_id"], url=res.split()[0].rstrip(".,"))
+                    p["output_id"], url=res.split()[0].rstrip(".,"),
+                    # CARRIED FROM THE REPLY THAT MADE THE PAGE. The URL was
+                    # read out of this string and the id thrown away, so the
+                    # next run had nothing to revise and proposed a create.
+                    article_id=sites.article_id_in(res))
                 # Published work is not held work: release the workroom's
                 # Save-for-later hold so the In-progress strip only ever
                 # lists things still owed a decision.
@@ -690,11 +694,25 @@ def _execute(ap: db.Approval) -> None:
             if _published(res)
             else f"⛔ Article NOT created ({p.get('site')}): {res}")
     elif ap.kind == "seo_article_revision":
-        from . import sites, whatsapp
+        from . import keywords, seo_guard, sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
         res = sites.backend(profile).update_article(
             profile, p.get("blog_id") or None, p["article_id"], p["fields"])
+        # CLOSE THE LOOP HERE TOO. The create arm learned this in the
+        # 2026-08-26 audit; this arm never had to, because nothing filed a
+        # revision until the refresh lane did. An approved refresh that
+        # records nothing leaves `refreshed_at` unwritten — so the cooldown
+        # never starts, the page is offered for refresh again next week, and
+        # "did refreshing work?" has no date to measure from.
+        #
+        # The URL is deliberately NOT re-sent: a revision keeps the address,
+        # that is most of the point, and `mark_published` leaves `target_url`
+        # alone when it is given none.
+        if _published(res) and p.get("output_id"):
+            keywords.mark_published(
+                seo_guard.tenant_for(profile) or (ap.tenant or ""),
+                p["output_id"])
         whatsapp.send_text(
             f"✏️ Article revised ({p.get('site')}): {res}"
             if _published(res)

@@ -1089,6 +1089,11 @@ class KeywordTarget(Base):
     #: only way `progress` can ever answer whether refreshing works at all.
     #: Adding the work without this would be adding it on faith.
     refreshed_at = Column(DateTime(timezone=True))
+    # THE PLATFORM'S OWN ID FOR THE PAGE, and the difference between a refresh
+    # that revises the ranking article and one that publishes a second beside
+    # it. `propose_article_revision` needs an `article_id`; nothing captured
+    # one, so every blog run — refresh included — queued a create.
+    cms_article_id = Column(String, default="")
     #: The first time this phrase reached `WON_POSITION`. NEVER cleared —
     #: `settle` moves `won` back to `published` the moment a page slips, so
     #: without a remembered high-water mark "it ranked and stopped" is

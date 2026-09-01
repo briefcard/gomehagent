@@ -321,9 +321,12 @@ def create_article(profile: dict, blog_id=None, fields: dict | None = None) -> s
         body["excerpt"] = fields["seo_description"]
     obj = _send(profile, "POST", "posts", body)
     _apply_plugin_meta(profile, "posts", obj.get("id"), fields)
-    return (f"{obj.get('link', '(created)')} — "
-            + ("published" if fields.get("published") else
-               "saved as a draft (pass published=true to publish)"))
+    from . import sites
+    return sites.with_article_id(
+        f"{obj.get('link', '(created)')} — "
+        + ("published" if fields.get("published") else
+           "saved as a draft (pass published=true to publish)"),
+        obj.get("id"))
 
 
 def update_article(profile: dict, blog_id=None, article_id=None,

@@ -94,10 +94,20 @@ def main() -> int:
     # The BUTTON, not the form's action attribute: asserting on the URL let
     # the button itself be deleted with the suite still green (sabotage
     # reported MISSED, 2026-08-31). What a person clicks is the surface.
-    ck("the page offers to queue it", "Put it in front of me" in page,
-       "a page that reports an absence with no control is a fix instruction")
-    ck("  and says what pressing it gets you",
-       "Approve" in page and "send it back" in page.lower(),
+    # ONE CLICK, NOT TWO. Owner, 2026-09-01: *"the 'Put it in front of me'
+    # button is not necessary, just put the approve button directly there.
+    # This applies to all systems."* The two-step was an artefact of how the
+    # control got built — queuing arrived as the missing control and approving
+    # already lived elsewhere — so the page asked for the queue and THEN the
+    # decision. Nobody pressed the first meaning anything but the second.
+    ck("the page offers the decision itself", ">Approve</button>" in page,
+       "a page that reports an absence with no control is a fix instruction; "
+       "one that asks to be asked is one gesture too many")
+    ck("  and it is not a request to be asked later",
+       "Put it in front of me" not in page,
+       "the intermediate step is gone, not renamed")
+    ck("  and says what pressing it does",
+       "releases it to ship" in page,
        "state the consequence on the button, not in a paragraph elsewhere")
 
     print("\n— pressing it produces a decision for THAT artifact —")
@@ -130,9 +140,32 @@ def main() -> int:
        f'name="back_work" value="{oid}"' in page2,
        "design rule 3: a decision never costs the reader their place")
     ck("  Redraft is beside it", "#redraft" in page2)
-    ck("  and it stops offering to queue what is already queued",
-       "Put it in front of me" not in page2,
+    ck("  and it stops offering the standalone control",
+       ">Approve</button>" not in page2 or "/admin/ship_decide" in page2,
        "two ways to ask for the same thing is the bulk this removed")
+
+    print("\n— and the button that says Approve APPROVES —")
+    oid2, _r2 = _stranded("baci")
+    r2 = c.post(f"/admin/queue_approval?key={KEY}",
+                data={"output_id": oid2, "decide": "approved"},
+                follow_redirects=False)
+    ck("it lands back on the workroom", r2.status_code == 303
+       and f"/admin/work/{oid2}" in r2.headers.get("location", ""))
+    with db.SessionLocal() as s_:
+        rows = [a for a in s_.query(db.Approval).all()
+                if str((a.payload or {}).get("output_id") or "") == oid2]
+    ck("the approval row still exists",
+       len(rows) == 1,
+       "one click fewer, not one record fewer — the audit trail is the whole "
+       "reason the row is created rather than skipped")
+    ck("  and it is decided, not pending",
+       rows and rows[0].status in ("approved", "executed"),
+       str(rows[0].status if rows else "none"))
+    ck("  decided by the same executor every other surface uses",
+       rows and rows[0].decided_at is not None,
+       "`approvals.apply_decision` is what the signed email link and "
+       "`ship_decide` call, so the record does not depend on which surface "
+       "made the decision")
 
     print("\n— pressing it twice does not queue twice —")
     c.post(f"/admin/queue_approval?key={KEY}", data={"output_id": oid},

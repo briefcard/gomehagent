@@ -245,6 +245,39 @@ def get(site_key: str = "") -> dict:
 BACKENDS = {"shopify": "shopify_seo", "wordpress": "wordpress_seo"}
 
 
+#: How a create-article reply carries the platform's own id for the page it
+#: just made. ONE FORMATTER, ONE PARSER, because the reply is a sentence for a
+#: person and the id has to survive the trip without turning it into JSON.
+#:
+#: The id is the difference between a refresh that REVISES the ranking page and
+#: one that publishes a second page beside it. Nothing captured it: the reply
+#: was read for its URL and thrown away, so `propose_article_revision` — which
+#: has existed and worked the whole time — had no `article_id` to address and
+#: every blog run queued a create. On a connected store, approving a refresh
+#: put a duplicate on the blog.
+_ID_MARK = " · id "
+
+
+def with_article_id(sentence: str, article_id) -> str:
+    """Append the platform's id to a backend reply, once, in the one form."""
+    aid = str(article_id or "").strip()
+    return f"{sentence}{_ID_MARK}{aid}" if aid else sentence
+
+
+def article_id_in(sentence: str) -> str:
+    """The platform id a create-reply carried, or "" — never a guess.
+
+    Empty is a real answer and the callers treat it as one: no id means the
+    page cannot be revised in place, which is a different situation from a
+    failed publish and gets a different sentence.
+    """
+    text = str(sentence or "")
+    if _ID_MARK not in text:
+        return ""
+    return text.rsplit(_ID_MARK, 1)[1].split()[0].strip() if \
+        text.rsplit(_ID_MARK, 1)[1].strip() else ""
+
+
 def backend(profile: dict):
     """The implementation module for a profile's platform (duck-typed: same
     function surface across backends). An unimplemented platform REFUSES by

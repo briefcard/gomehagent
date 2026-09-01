@@ -1815,7 +1815,8 @@ def mute_lessons(tenant: str) -> dict:
 # ---------------------------------------------------------------------------
 # The publish write-back — the loop's missing wire
 # ---------------------------------------------------------------------------
-def mark_published(tenant: str, output_id: str, url: str = "") -> dict:
+def mark_published(tenant: str, output_id: str, url: str = "",
+                   article_id: str = "") -> dict:
     """An article went live: tell every table that has been waiting to hear.
 
     THE LOOP WAS OPEN HERE AND NOTHING SAID SO. The audit of 2026-08-26 found
@@ -1841,9 +1842,32 @@ def mark_published(tenant: str, output_id: str, url: str = "") -> dict:
                        db.KeywordTarget.output_id == output_id).first())
         if row is not None:
             row.status = "published"
-            row.published_at = db.utcnow()
+            # FIRST PUBLICATION STAYS FIRST PUBLICATION. Overwriting it made a
+            # refreshed page read as brand new — `attention` would call it
+            # `too_early` for another month and "days live" would be a lie
+            # about a page that has been up for a year. A re-publish of a page
+            # that already had a date is a REFRESH, and `refreshed_at` is the
+            # field for it: it drives the cooldown, and it is the only way
+            # "did refreshing work?" can ever be answered.
+            #
+            # Derived from the data rather than passed in, because the caller
+            # that knows is not the caller that publishes: the executor and
+            # the hand-carried "It's live here" both arrive here saying only
+            # that a page went up.
+            if row.published_at is None:
+                row.published_at = db.utcnow()
+            else:
+                row.refreshed_at = db.utcnow()
+                out["refresh"] = True
             if url:
                 row.target_url = url
+            # THE ID IS WHAT MAKES THE NEXT WRITE A REVISION. Without it a
+            # refresh can only propose a create, which on a connected store
+            # publishes a second page beside the one that ranks. Written here
+            # because this is already the one function both publish paths
+            # call, so the id cannot be captured on one and lost on the other.
+            if article_id:
+                row.cms_article_id = str(article_id)
             out["phrase"] = row.phrase
             run_id = row.run_id
         else:

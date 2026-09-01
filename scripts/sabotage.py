@@ -3739,14 +3739,28 @@ SABOTAGES = [
     {
         "name": "a_draft_with_no_decision_can_get_one",
         "file": "app/admin_ui.py",
-        "find": '          <button class="btn go" type="submit">Put it in front of me</button>',
-        "replace": '          <!-- SABOTAGE -->',
+        "find": "    if (not published and not superseded_by and (art.body or \"\").strip()\n"
+                "            and not _has_decision):",
+        "replace": "    if False:  # SABOTAGE — the stranded draft gets no control",
         "suites": ["test_queue_approval.py"],
         "why": "every draft filed before the default rung started queuing is "
                "stranded: real, finished, and with no way to decide it short "
                "of a redraft. The page reports the absence and offers nothing "
                "that ends it, which is design rule 1 broken on the surface "
                "the rule was written for",
+    },
+    {
+        "name": "the_button_that_says_approve_approves",
+        "file": "app/web.py",
+        "find": "    if decide == \"approved\":\n"
+                "        said = _appr.apply_decision(ap_id, \"approved\")",
+        "replace": "    if False:  # SABOTAGE\n"
+                   "        said = _appr.apply_decision(ap_id, \"approved\")",
+        "suites": ["test_queue_approval.py"],
+        "why": "the button reads Approve and only queues, so the draft sits "
+               "pending while the person who pressed it believes they "
+               "decided — the two-step is back, wearing the label of the "
+               "one-step",
     },
     {
         "name": "a_decision_is_made_where_it_is_read",
@@ -4522,6 +4536,108 @@ SABOTAGES = [
                "the ones whose CMS holds it — so the instruction is wrong "
                "for exactly the accounts that could have answered it "
                "automatically",
+    },
+    {
+        "name": "a_refresh_revises_the_page_it_is_refreshing",
+        "file": "app/skill_pack.py",
+        "find": "        _revising = bool(_live_id and (row.target_url or \"\").strip())",
+        "replace": "        _revising = False  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "a refresh queues a CREATE, so approving it publishes a second "
+               "article beside the one that ranks — two of your own pages on "
+               "one query, which is the cannibalisation the whole attention "
+               "lane exists to prevent, produced by the lane",
+    },
+    {
+        "name": "the_platform_id_survives_the_reply",
+        "file": "app/sites.py",
+        "find": "    return f\"{sentence}{_ID_MARK}{aid}\" if aid else sentence",
+        "replace": "    return sentence  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "the id is thrown away at creation, so nothing can ever address "
+               "a revision and every refresh falls back to publishing a new "
+               "page — the exact state this was in before, silently",
+    },
+    {
+        "name": "a_refresh_keeps_the_address_it_is_refreshing",
+        "file": "app/skill_pack.py",
+        "find": "            **({\"article_id\": _live_id} if _revising\n"
+                "               else {\"handle\": kw_mod.slug(keyword)}),",
+        "replace": "            **{\"handle\": kw_mod.slug(keyword),\n"
+                   "               \"article_id\": _live_id},  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "the revision sends a handle, which moves the page's URL — and "
+               "moving the address of something that ranks throws away the "
+               "position that was the reason to refresh it",
+    },
+    {
+        "name": "a_re_publish_is_a_refresh_not_a_first_publication",
+        "file": "app/keywords.py",
+        "find": "            if row.published_at is None:",
+        "replace": "            if True:  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "a refreshed page reads as brand new: `too_early` for another "
+               "month, 'days live' lying about a page that has been up a "
+               "year, and `refreshed_at` never written — so the cooldown "
+               "never starts and it is offered for refresh again next week",
+    },
+    {
+        "name": "a_hand_carried_refresh_says_it_replaces",
+        "file": "app/admin_ui.py",
+        "find": "        _replacing = bool(kw and (kw.target_url or \"\").strip()\n"
+                "                          and not published)",
+        "replace": "        _replacing = False  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "on an account with no CMS the person carrying the copy is "
+               "told nothing about the page it replaces, so the obvious "
+               "reading is to paste it as a new post — a second page on one "
+               "query, by hand, for exactly the keyword being refreshed",
+    },
+    {
+        "name": "a_refresh_that_shipped_is_recorded_as_shipped",
+        "file": "app/seo_tools.py",
+        "find": "                 \"output_id\": str(args.get(\"output_id\") or \"\"),",
+        "replace": "                 \"output_id\": \"\",  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "the revision approval carries no join, so the executor has "
+               "nothing to write the result onto: an approved refresh records "
+               "nothing, the cooldown never starts, and the page comes back "
+               "into the queue next week as though it had never been touched",
+    },
+    {
+        "name": "the_page_a_publish_returns_to_renders",
+        "file": "app/admin_ui.py",
+        "find": "            \"measured — \" + (\"sent as-is\" if d.startswith((\"sent unchanged\",",
+        "replace": "            \"measured — \" + (\"sent as-is\" if d.get(\"as_is\") or ((\"sent unchanged\",  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "`edit_diff` is a Text column holding a string, so `.get()` on "
+               "it raises AttributeError — a 500 on the page the publish loop "
+               "redirects to, firing only AFTER a successful publish, which "
+               "is the one path nobody re-tests",
+    },
+    {
+        "name": "published_is_a_fact_about_this_artifact",
+        "file": "app/admin_ui.py",
+        "find": "    published = bool(kw and (kw.status or \"\") in (\"published\", \"won\")\n"
+                "                     and _out_row is not None\n"
+                "                     and ((_out_row.status or \"\") == \"published\"\n"
+                "                          or _out_row.published_at is not None))",
+        "replace": "    published = bool(kw and (kw.status or \"\") in (\"published\", \"won\"))  # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "every refresh draft claims to be live the moment it is "
+               "written — the keyword is still published because the OLD page "
+               "is up — so the workroom greets a fresh replacement with "
+               "'Published' and offers nothing to do with it",
+    },
+    {
+        "name": "a_queued_refresh_can_be_decided",
+        "file": "app/web.py",
+        "find": "                                                 \"seo_article_revision\",",
+        "replace": "                                                 # SABOTAGE",
+        "suites": ["test_refresh_lands.py"],
+        "why": "the workroom never looks for a revision approval, so a "
+               "refresh is queued and undecidable: the page shows no button "
+               "for the one approval that exists",
     },
 ]
 

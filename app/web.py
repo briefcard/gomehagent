@@ -2866,6 +2866,19 @@ def _article_bundle(output_id: str):
         _cands = [row for row in
                   (s.query(db.Approval)
                    .filter(db.Approval.kind.in_(("seo_new_article",
+                                                 # A REFRESH FILES THIS ONE.
+                                                 # It was absent because until
+                                                 # the refresh lane nothing in
+                                                 # the pipeline ever filed a
+                                                 # revision — only an agent
+                                                 # calling the tool by hand,
+                                                 # which never came to this
+                                                 # page. So the workroom found
+                                                 # no approval for a refresh
+                                                 # and offered no button to
+                                                 # decide it: the draft was
+                                                 # queued and undecidable.
+                                                 "seo_article_revision",
                                                  "skill_output")),
                            db.Approval.status == "pending").all())
                   if (row.payload or {}).get("output_id") == output_id]
@@ -3537,6 +3550,21 @@ async def queue_approval(request: Request, key: str = Depends(admin_key)):
     from fastapi.responses import RedirectResponse
     form = await request.form()
     output_id = str(form.get("output_id") or "")
+    # ONE CLICK, NOT TWO. Owner, 2026-09-01: *"the 'Put it in front of me'
+    # button is not necessary, just put the approve button directly there.
+    # This applies to all systems."* He is right, and the two-step was an
+    # artefact of how the control was built rather than a decision anybody
+    # made: queuing was added as the missing control, and approving was
+    # already somewhere else, so the page ended up asking for the queue and
+    # THEN the decision. Nobody presses "put it in front of me" meaning
+    # anything but "I have read this and I am deciding now".
+    #
+    # SAME EXECUTOR EITHER WAY. `approvals.apply_decision` is what the signed
+    # email link, `ship_decide` and this now all call, so the record is
+    # identical whichever surface made the decision — the approval row exists,
+    # with its decision and its time on it. Skipping the row instead would
+    # have bought one click and lost the audit trail.
+    decide = str(form.get("decide") or "").strip()
 
     def _back(msg: str, ok: bool = False) -> RedirectResponse:
         return RedirectResponse(
@@ -3576,14 +3604,21 @@ async def queue_approval(request: Request, key: str = Depends(admin_key)):
         if not vids:
             return _back("this batch record names no variants, so there is "
                          "nothing to decide")
-        for vid in vids:
-            _appr.request_approval(
-                "skill_output",
-                f"ad variant for {art.tenant}", notify=False,
-                payload={"tenant": art.tenant or "", "skill": skill_key,
-                         "output_id": vid},
-                run_id=art.run_id or "",
-                system_id=sysrow.id if sysrow else "")
+        made = [_appr.request_approval(
+            "skill_output",
+            f"ad variant for {art.tenant}", notify=False,
+            payload={"tenant": art.tenant or "", "skill": skill_key,
+                     "output_id": vid},
+            run_id=art.run_id or "",
+            system_id=sysrow.id if sysrow else "") for vid in vids]
+        if decide == "approved":
+            # A BATCH IS DECIDED PER VARIANT, and one click at batch level
+            # means all of them — which is why the button on a batch SAYS all
+            # of them. Dropping some is a different gesture and it has its own
+            # control on the board; it is not this button worded vaguely.
+            for ap_id in made:
+                _appr.apply_decision(ap_id, "approved")
+            return _back(f"approved — {len(made)} variant(s)", ok=True)
         return _back(f"queued — {len(vids)} variant(s) waiting; approve the "
                      f"batch or send it back, on this page", ok=True)
 
@@ -3592,12 +3627,15 @@ async def queue_approval(request: Request, key: str = Depends(admin_key)):
     push = dict(getattr(art, "push", None) or {})
     if push:
         payload["esp_push"] = push
-    _appr.request_approval(
+    ap_id = _appr.request_approval(
         "skill_output",
         f"{art.system_key or 'draft'} for {art.tenant}: "
         f"{(art.body or '')[:80]}",
         payload, notify=False, run_id=art.run_id or "",
         system_id=sysrow.id if sysrow else "")
+    if decide == "approved":
+        said = _appr.apply_decision(ap_id, "approved")
+        return _back(said or "approved", ok=True)
     return _back("queued — approve or send it back, on this page", ok=True)
 
 

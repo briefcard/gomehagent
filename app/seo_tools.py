@@ -432,6 +432,16 @@ def _propose(name: str, args: dict, profile: dict) -> str:
                 + (fields.get("title") or "copy/structured-data"),
                 {"site": site, "blog_id": blog_id,
                  "article_id": str(args["article_id"]), "fields": fields,
+                 # THE JOIN, on this arm too. The create arm has carried
+                 # output_id/run_id since the 2026-08-26 audit — without them
+                 # the executor has nothing to write the result back onto. The
+                 # revision arm never carried them because nothing filed a
+                 # revision; now the refresh lane does, and an approved
+                 # refresh that records nothing is the same open loop one
+                 # tool over: no `refreshed_at`, so the cooldown never starts
+                 # and the page is offered for refresh again next week.
+                 "output_id": str(args.get("output_id") or ""),
+                 "run_id": str(args.get("run_id") or ""),
                  "bucket": "seo"})
             return (f"Queued for your approval ({ap_id[:8]}): revise article "
                     f"{args['article_id']} on {site}, touching only "

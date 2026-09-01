@@ -11509,7 +11509,21 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     if ap:
         for k, v in ((ap.payload or {}).get("fields") or {}).items():
             fields.setdefault(k, v)
-    published = bool(kw and (kw.status or "") in ("published", "won"))
+    # PUBLISHED IS A FACT ABOUT THIS ARTIFACT, not about its keyword. Read
+    # off the keyword alone, every REFRESH draft claimed to be live the moment
+    # it was written: the keyword is still `published` — the OLD page is up —
+    # and `_run_blog_article` repoints `output_id` to the new draft, so both
+    # halves of the old test said yes about a page nobody had published. The
+    # workroom greeted a fresh replacement with "Published — live page" and
+    # offered no way to do anything with it.
+    _out_row = None
+    if output_id:
+        with db.SessionLocal() as _s:
+            _out_row = _s.get(db.Output, output_id)
+    published = bool(kw and (kw.status or "") in ("published", "won")
+                     and _out_row is not None
+                     and ((_out_row.status or "") == "published"
+                          or _out_row.published_at is not None))
     title = fields.get("title") or (kw.phrase if kw else "") or "Artifact"
 
     with db.SessionLocal() as s:
@@ -11630,9 +11644,24 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                  + _chip("published", published))
     measured = ""
     if run is not None and getattr(run, "edit_diff", None):
-        d = run.edit_diff or {}
+        # `edit_diff` IS A STRING. It is a Text column and both writers store
+        # one — `edits.py` and `keywords.mark_published` — either a sample of
+        # what changed, or the words "sent unchanged" / "published unchanged"
+        # when nothing did. This read `.get("as_is")` on it, so the workroom
+        # raised AttributeError for EVERY artifact whose run had been measured:
+        # a 500 on the page the whole publish loop sends people back to, and it
+        # only fired after a successful publish, which is the one path nobody
+        # re-tests. Found by the refresh suite, which publishes and then reads
+        # the page.
+        #
+        # A sample means it was edited; the fixed wording means it was not.
+        # Both writers agree on that wording, which is why this reads it rather
+        # than sniffing the sample for a word a diff could legitimately hold.
+        d = str(run.edit_diff or "")
         measured = _chip(
-            "measured — " + ("sent as-is" if d.get("as_is") else "edited"),
+            "measured — " + ("sent as-is" if d.startswith(("sent unchanged",
+                                                           "published unchanged"))
+                             else "edited"),
             True)
 
     # --- decide bar (moved from web.py, restyled; same consequences) ------
@@ -11783,14 +11812,41 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         # content write API, so the workflow IS paste-then-record — not a
         # lesser version of publishing. Factored out because it belongs beside
         # a reviewed-but-unpushable draft as much as beside an undecided one.
-        _mark_live = f"""
+        # A REPLACEMENT, SAID PLAINLY, WITH THE ADDRESS ALREADY IN THE BOX.
+        # Owner, 2026-09-01: *"do we have the mechanism to patch with link in
+        # a way that makes sense, or providing updated copy if no CMS exists?
+        # Make sure that the workflow still makes sense and is very clear."*
+        #
+        # With a CMS the answer is structural — the run proposes a REVISION
+        # against the platform's own article id, so approving updates the page
+        # that ranks. With none, a person carries it, and the one thing they
+        # could get wrong is the one thing this never said: paste it OVER the
+        # existing page, not as a new post. A second post on the same query is
+        # the cannibalisation the whole lane exists to prevent, and the
+        # instruction that prevented it did not exist.
+        #
+        # The URL is pre-filled because it does not change. A refresh keeps
+        # the address — that is most of why it is worth doing — so retyping it
+        # is a chance to typo the join between the page and its measurements.
+        _replacing = bool(kw and (kw.target_url or "").strip()
+                          and not published)
+        _live_url = (kw.target_url or "") if kw else ""
+        _mark_live = (f"""
+        <div class="note"><b>This replaces a page that is already live.</b>
+          It goes over <a href="{_esc(_live_url)}">{_esc(_live_url)}</a> —
+          the same address, not a new post. Publishing it as a second page
+          would put two of your own pages on one query, which is the thing
+          the refresh was for.</div>""" if _replacing else "") + f"""
         <form class="row" method="get" action="/admin/article_published">
           <input type="hidden" name="key" value="{_esc(key)}">
           <input type="hidden" name="output_id" value="{_esc(output_id)}">
-          <span class="when">Copy the source, paste it into the platform by
-          hand, then record where it went live so the measurement loop can
-          see it:</span>
-          <input name="url" size="42" placeholder="https://…/blogs/…">
+          <span class="when">{'Paste it over that page, then record it — the '
+          'address is unchanged, so this confirms the refresh landed:'
+          if _replacing else
+          'Copy the source, paste it into the platform by hand, then record '
+          'where it went live so the measurement loop can see it:'}</span>
+          <input name="url" size="42" placeholder="https://…/blogs/…"
+                 value="{_esc(_live_url) if _replacing else ''}">
           <button type="submit" class="sec">It&rsquo;s live here</button>
         </form>"""
         if ap is not None:
@@ -11800,7 +11856,15 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             # rung queues, and one button saying "Approve & publish" over both
             # would promise a write that does not exist on a platform with no
             # write API.
-            if ap.kind == "seo_new_article":
+            if ap.kind == "seo_article_revision":
+                # NAME THE WRITE. "Approve & publish" over a revision reads as
+                # a new post, which is the one thing a refresh must not be
+                # mistaken for — and the difference is the whole point of the
+                # button.
+                says, note = ("Approve &amp; update the live page",
+                              "Approving rewrites the page already at that "
+                              "address — the URL does not change.")
+            elif ap.kind == "seo_new_article":
                 says, note = ("Approve &amp; publish",
                               "Approving publishes THIS text — saving below "
                               "updates what ships.")
@@ -11818,7 +11882,11 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                       + _decide_form(key, tenant, ap.id, output_id, "denied",
                                      "discard", "lnk")
                       + '</div>')
-            if ap.kind != "seo_new_article":
+            # A CMS ARM WRITES THE PAGE ITSELF, so offering paste-and-record
+            # beside it is two ways to do one thing and an invitation to do
+            # both. `seo_article_revision` joins `seo_new_article` here for
+            # the same reason it always applied to the create.
+            if ap.kind not in ("seo_new_article", "seo_article_revision"):
                 decide += _mark_live
         elif published:
             live = (f' — <a href="{_esc(kw.target_url)}">live page</a>'
@@ -11843,14 +11911,31 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                                              or ad_apr["denied"]))
     if (not published and not superseded_by and (art.body or "").strip()
             and not _has_decision):
+        # THE DECISION, NOT A REQUEST FOR ONE. Owner, 2026-09-01: *"the 'Put
+        # it in front of me' button is not necessary, just put the approve
+        # button directly there. This applies to all systems."* The two-step
+        # was an artefact of how this got built — queuing arrived as the
+        # missing control and approving already lived elsewhere, so the page
+        # asked for the queue and then the decision. Nobody pressed the first
+        # one meaning anything but the second.
+        #
+        # The approval row is still created, by the same call, with the same
+        # executor recording the same decision: one click fewer, not one
+        # record fewer.
+        _n = len(batch.get("variants") or []) if (is_ads and batch) else 0
         decide += f"""
         <form class="row" method="post"
               action="/admin/queue_approval?key={_esc(key)}"
               style="margin-top:8px">
           <input type="hidden" name="output_id" value="{_esc(output_id)}">
-          <button class="btn go" type="submit">Put it in front of me</button>
-          <span class="when">queues this draft for a decision — then it is
-          Approve or send it back, here</span>
+          <input type="hidden" name="decide" value="approved">
+          <button class="btn go" type="submit">{
+              f'Approve all {_n} variants' if _n else 'Approve'}</button>
+          <span class="when">{
+              'a batch is decided per variant, so one click here is all of '
+              'them — drop some first on the board if that is not what you '
+              'mean' if _n else
+              'records your decision and releases it to ship'}</span>
         </form>"""
 
     if superseded_by:

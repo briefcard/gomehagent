@@ -4361,9 +4361,29 @@ def _run_blog_article(ctx: Context) -> dict:
             f"more than one blog and guessing writes to the wrong place. "
             f"Pick one on the console&#39;s Plan tab, then re-run.")
     else:
-        said = seo_tools._propose("propose_article", {
+        # REVISE THE PAGE THAT RANKS; NEVER PUBLISH A SECOND BESIDE IT.
+        # Owner, 2026-09-01: *"when a Needs Attention is addressed, do we have
+        # the mechanism to patch with link in a way that makes sense?"* We did
+        # not. This call was hardcoded to the CREATE tool, so a refresh of a
+        # live page queued `seo_new_article` — reproduced as two identical
+        # create approvals for one keyword. Approving the second would have
+        # put a duplicate on the blog: the exact cannibalisation the whole
+        # attention lane exists to prevent, produced by the lane.
+        #
+        # `propose_article_revision` has existed and worked the whole time and
+        # needed one thing nothing supplied — the platform's `article_id`. It
+        # is now captured at create and stored by `mark_published`.
+        #
+        # A REVISION TOUCHES ONLY WHAT IT SENDS, which is why the handle is
+        # absent here: changing it moves the page's URL, and moving the URL of
+        # something that ranks throws away the reason to refresh it.
+        _live_id = str(getattr(row, "cms_article_id", "") or "") if row else ""
+        _revising = bool(_live_id and (row.target_url or "").strip())
+        said = seo_tools._propose(
+            "propose_article_revision" if _revising else "propose_article", {
             "blog_id": blog_id, "title": title, "body_html": body,
-            "handle": kw_mod.slug(keyword),
+            **({"article_id": _live_id} if _revising
+               else {"handle": kw_mod.slug(keyword)}),
             "seo_title": _seo_title(keyword, title),
             "seo_description": _meta_description(keyword, body),
             "faqs": [f for f in faqs if f["answer"]],
