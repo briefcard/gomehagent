@@ -72,7 +72,7 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
 - **Artifact:** proposal_rows
 - **Ship:** approving marks the batch ready, then the copy is carried to the platform by hand and the join finds it again
 - **Measure:** asset outcomes per channel, joined by `meta_ads.match` on the copy itself
-- **Brand-document scope:** identity, rules, claims, catalogue, gaps
+- **Brand-document scope:** identity, rules, claims, context, catalogue, gaps
 
 ### `blog` — Blog / content
 
@@ -90,7 +90,7 @@ Writes grounded articles against the keyword map, and publishes them where there
 - **Artifact:** cms_article
 - **Ship:** publishes the draft article, behind seo_guard
 - **Measure:** draft-vs-published delta; position change in `keywords.progress`, against a control
-- **Brand-document scope:** identity, rules, claims, gaps
+- **Brand-document scope:** identity, rules, claims, context, gaps
 
 ### `campaign_email` — Campaign email
 
@@ -108,7 +108,7 @@ Builds and schedules campaign sends from the catalogue and calendar.
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human, in the ESP
 - **Measure:** our first draft vs what you approved
-- **Brand-document scope:** identity, rules, objections, claims, catalogue, gaps
+- **Brand-document scope:** identity, rules, objections, claims, context, catalogue, gaps
 
 ### `catalog_compliance` — Catalogue compliance
 
@@ -120,7 +120,7 @@ Checks product copy and SEO metadata in the store against the brand's own banned
   - parameters: `site`, `limit`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
-- **Brand-document scope:** identity, rules, gaps
+- **Brand-document scope:** identity, rules, context, gaps
 
 ### `content_compliance` — Website content compliance
 
@@ -130,7 +130,7 @@ Checks the live site against the brand's own banned claims and reports the pages
 - **Knowledge (`kb_needs`):** `banned_claims`
 - **Skill:** none — nothing generates for this system
 - **Planner:** none — plans are filed by hand or by another system
-- **Brand-document scope:** identity, rules, gaps
+- **Brand-document scope:** identity, rules, context, gaps
 
 ### `lead_responder` — Lead responder
 
@@ -144,7 +144,7 @@ Answers an inbound enquiry with a grounded, approved draft.
 - **Artifact:** gmail_draft
 - **Ship:** approving sends the draft itself
 - **Measure:** edits.py delta; sent-as-is rate
-- **Brand-document scope:** identity, rules, situations, objections, claims, lookups, gaps
+- **Brand-document scope:** identity, rules, situations, objections, claims, context, lookups, gaps
 
 ### `moment_email` — Moments (windows worth writing into)
 
@@ -158,7 +158,7 @@ Watches for windows opening — a cart gone cold, an enquiry gone quiet — and 
 - **Artifact:** none — it proposes nothing and sends nothing
 - **Ship:** informs the campaign planner; the campaign system does the sending, under its own switch and its own rung
 - **Measure:** moments consumed into a plan vs moments that expired unserved
-- **Brand-document scope:** identity, rules, gaps
+- **Brand-document scope:** identity, rules, context, gaps
 
 ### `reorder_engine` — Reorder engine
 
@@ -172,7 +172,7 @@ Triggers replenishment prompts off purchase cadence.
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human
 - **Measure:** provider stats, once `reports` exists
-- **Brand-document scope:** identity, rules, catalogue, gaps
+- **Brand-document scope:** identity, rules, context, catalogue, gaps
 
 ### `reports` — Reports
 
@@ -186,7 +186,7 @@ The weekly number, assembled from whatever is connected.
 - **Artifact:** report_document
 - **Ship:** sends it to the client, on approval
 - **Measure:** none — the report IS the measurement
-- **Brand-document scope:** identity, rules, gaps
+- **Brand-document scope:** identity, rules, context, gaps
 
 ### `service_desk` — Service desk
 
@@ -202,7 +202,7 @@ Handles routine inbound support with a drafted, checked reply.
 - **Artifact:** gmail_draft
 - **Ship:** approving sends the draft itself
 - **Measure:** edits.py delta; sent-as-is rate
-- **Brand-document scope:** identity, rules, situations, objections, lookups, catalogue, gaps
+- **Brand-document scope:** identity, rules, situations, objections, context, lookups, catalogue, gaps
 <!-- END GENERATED -->
 
 ## 2a. What the declarations do not carry

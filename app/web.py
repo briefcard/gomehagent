@@ -3423,6 +3423,40 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
         303)
 
 
+@app.post("/admin/context_add")
+async def context_add(request: Request, key: str = Depends(admin_key)):
+    """File a statement that is true here and is not proof."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    sit = str(form.get("situation") or "").strip()
+    from . import kb as _kb
+    got = _kb.add_context(
+        tenant, str(form.get("text") or ""),
+        entity_key=str(form.get("entity_key") or "").strip(),
+        situations=[sit] if sit else [], source="console")
+    # `add_context` returns a row id on success and a SENTENCE on refusal —
+    # the same shape `seo_tools._propose` uses. Reading which is the
+    # difference between a note that was filed and one that was not.
+    filed = len(got) == 32 and " " not in got
+    return _back_to_content(tenant, sub="context",
+                            msg="Filed — background, not proof" if filed else "",
+                            err="" if filed else got)
+
+
+@app.get("/admin/context_retire")
+def context_retire(key: str = Depends(admin_key), tenant: str = "",
+                   id: str = ""):
+    """Retire one. Archived, never deleted: what was on file when a draft was
+    written is part of why it reads the way it does."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as _kb
+    return _back_to_content(tenant, sub="context",
+                            msg=_kb.archive_context(id))
+
+
 @app.post("/admin/queue_approval")
 async def queue_approval(request: Request, key: str = Depends(admin_key)):
     """Put an existing draft in front of a person — the missing control.

@@ -2767,6 +2767,82 @@ def assets(tenant: str, *, publishable_only: bool = True,
     return rows
 
 
+# --------------------------------------------------------------------------
+# Context — true, and not proof.
+#
+# The third kind, added 2026-08-31. A claim is something the brand may ASSERT
+# and must cite; an objection is approved wording for a question; context is a
+# statement that is neither — background a drafter is better for knowing and
+# must never repeat as fact.
+#
+# Everything about it is deliberately weaker than a claim: it is retrieved
+# rather than injected, it is never citable, and it is absent from
+# `KB_SUPPLIERS` so no amount of it can make an account look ready. That last
+# one is the important one, and it is an omission ON PURPOSE — see the
+# assertion in `scripts/test_context.py`, which fails if it is ever added.
+# --------------------------------------------------------------------------
+
+def add_context(tenant: str, text: str, *, entity_key: str = "",
+                situations: list | None = None, source: str = "",
+                origin: str = "human") -> str:
+    """File a statement. Returns the row id, or a refusal sentence."""
+    text = (text or "").strip()
+    if not text:
+        return "Nothing to file."
+    if entity_key:
+        ent = entities(tenant, available_only=False)
+        if entity_key not in {e.key for e in ent}:
+            return (f"{entity_key!r} is not an entity on this account — file "
+                    f"it against one that exists, or leave it blank for "
+                    f"something true of the brand generally.")
+    tags = [t.strip() for t in (situations or []) if str(t).strip()]
+    with db.SessionLocal() as s:
+        row = db.KbContext(tenant=tenant, text=text, entity_key=entity_key or "",
+                           situations=tags, source=source or "",
+                           origin=origin, review=prov.APPROVED)
+        s.add(row)
+        s.commit()
+        return row.id
+
+
+def contexts(tenant: str, *, entity_key: str = "", situation: str = "",
+             include_archived: bool = False) -> list[db.KbContext]:
+    """Statements that bear here.
+
+    Scoped the way claims are: a row with no `entity_key` is about the brand
+    and always in scope; one with a key is in scope only when writing about
+    that entity. Same for `situations` — empty means whenever.
+
+    That is why nothing had to be decided in advance about whether these are
+    about a thing, a moment or the brand. The row says which.
+    """
+    with db.SessionLocal() as s:
+        q = s.query(db.KbContext).filter(db.KbContext.tenant == tenant)
+        if not include_archived:
+            q = q.filter(db.KbContext.status == "active")
+        rows = q.order_by(db.KbContext.created_at.desc()).all()
+        s.expunge_all()
+    if entity_key:
+        rows = [r for r in rows
+                if not (r.entity_key or "") or r.entity_key == entity_key]
+    if situation:
+        rows = [r for r in rows
+                if not (r.situations or []) or situation in (r.situations or [])]
+    return rows
+
+
+def archive_context(context_id: str) -> str:
+    """Retire one. Never deleted — what was on file when a draft was written
+    is part of why it reads the way it does."""
+    with db.SessionLocal() as s:
+        row = s.get(db.KbContext, context_id)
+        if not row:
+            return "No such note."
+        row.status = "archived"
+        s.commit()
+        return f"Retired: {(row.text or '')[:60]}"
+
+
 def proposed_assets(tenant: str) -> list[db.KbAsset]:
     """Pictures waiting on a human. The queue the crawler fills."""
     with db.SessionLocal() as s:

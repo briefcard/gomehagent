@@ -14,12 +14,12 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **208** (208 reached)
+- HTTP routes: **210** (210 reached)
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
 - Systems declaring a ship: **8**
-- Tables with writers: **55** (11 with more than one)
+- Tables with writers: **56** (11 with more than one)
 
 **What this does NOT reach**, stated so the edges are not implied:
 
@@ -139,6 +139,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 | `KbBrand` | `kb.py` | kb.py |
 | `KbClaim` | `kb.py` | kb.py |
 | `KbConflict` | `kb.py` | provenance.py |
+| `KbContext` | `kb.py` | kb.py |
 | `KbEmbedding` | `kb.py` | embed.py |
 | `KbEntity` | `kb.py` | catalog_sync.py, kb.py |
 | `KbObjection` | `kb.py` | kb.py |

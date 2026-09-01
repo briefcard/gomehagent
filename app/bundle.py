@@ -116,6 +116,14 @@ PARTS: dict[str, dict] = {
                    what="approved proof, the only thing a draft may assert"),
     "contested_positioning": dict(tier=2, absent=THINS, supplies="resolve.resolve",
                                   what="claims that argue with the positioning"),
+    # TRUE, AND NOT PROOF. The third kind (2026-08-31): statements that are
+    # neither assertions the brand may make nor approved answers — background
+    # a drafter is better for knowing and must never repeat as fact. Retrieved
+    # by entity and situation like claims, never citable, and deliberately
+    # absent from `kb.KB_SUPPLIERS` so no amount of it makes an account ready.
+    "context": dict(tier=2, absent=THINS, supplies="resolve.resolve",
+                    what="statements that bear on this but prove nothing — "
+                         "background only, never quotable as fact"),
     # -- tier 3: the catalogue, the history, the perishable ----------------
     "entities": dict(tier=3, absent=THINS, supplies="resolve.resolve",
                      what="what is actually for sale, and whether it can be "

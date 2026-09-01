@@ -57,7 +57,7 @@ TABLE_OWNER: dict[str, str] = {
     "KbBrand": "kb.py", "KbClaim": "kb.py", "KbAudience": "kb.py",
     "KbObjection": "kb.py", "KbSituation": "kb.py", "KbEmbedding": "kb.py",
     "KbUnknown": "kb.py", "KbConflict": "kb.py", "KbEntity": "kb.py",
-    "KbAsset": "kb.py",
+    "KbAsset": "kb.py", "KbContext": "kb.py",
     "KeywordTarget": "keywords.py", "KeywordReading": "keywords.py",
     "Output": "ledger.py", "ArtifactBody": "ledger.py",
     "System": "systems.py", "SystemRun": "systems.py",
@@ -1661,6 +1661,56 @@ class KbObjection(_Provenance, Base):
     entity_key = Column(String, default="", index=True)
     escalate = Column(String, default="no")     # yes -> hand to a human, don't answer
     source = Column(Text)                       # where this objection came from
+
+
+class KbContext(_Provenance, Base):
+    """True, and not proof. The row a statement goes in when it is neither.
+
+    Owner, 2026-08-31: *"Sometimes there are claims that come up that are not
+    false or true, they're just statements sometimes relevant sometimes not.
+    How can i file them without affecting the system?"*
+
+    Until now there was nowhere. `KbClaim` is "a fact the brand is ALLOWED TO
+    ASSERT" — filed there, an observation becomes selectable, gets cited in
+    copy, appears in the brand document under "Proof you may lean on", and
+    counts toward the `claim` token in `kb_needs`, which can flip a thin
+    account to ready on the strength of a note. Guidance was the only other
+    home and it is the instruction channel: capped at eight, injected on every
+    draft whether it bears or not, and headed "treat as current instruction".
+
+    So: a separate table, on purpose. A `kind` column on `KbClaim` would have
+    put context one missed filter away from being asserted as proof, and one
+    missed filter is what every defect this file keeps commenting on actually
+    was.
+
+    THREE THINGS IT IS NOT, and each is enforced somewhere rather than
+    described here:
+      · not citable — `validator` refuses a sentence that cites one, by name
+      · not counted — deliberately absent from `kb.KB_SUPPLIERS`, so it can
+        never make a system look ready
+      · not injected wholesale — `resolve` RETRIEVES it by entity and
+        situation, the way claims are picked, so a sometimes-relevant note is
+        present sometimes
+
+    Scoping follows `KbClaim` exactly rather than inventing a vocabulary:
+    `entity_key` blank means the brand generally, `situations` empty means
+    whenever. The row says which; nobody had to guess in advance.
+    """
+
+    __tablename__ = "kb_contexts"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    #: The statement, in the owner's own words. Not normalised, not rewritten.
+    text = Column(Text, nullable=False)
+    #: Blank = true of the brand generally. Set = only when writing about it.
+    entity_key = Column(String, default="", index=True)
+    #: Empty = whenever. The same vocabulary claims and objections share, so
+    #: "which context bears on this situation" is the query that already exists.
+    situations = Column(JSON, default=list)
+    source = Column(Text)                       # where it came from
+    status = Column(String, default="active")   # active | archived
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class _SituationNeedsMixin:

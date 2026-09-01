@@ -39,7 +39,14 @@ from . import db
 # avoid, found in the file itself.
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
-             "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs"}
+             "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
+             "kb_contexts"}
+# `kb_contexts` is KNOWLEDGE for the plainest reason in this file: it is
+# something a person told us about the account. It is not proof and it is not
+# an instruction, but a knowledge reset that left it behind would leave the
+# next drafter reasoning from statements about a brand that has just been
+# cleared — classified in the change that adds it, which is the rule below.
+#
 # `media_blobs` is KNOWLEDGE because it is the same thing as `kb_assets` split
 # across two tables: the row holds the URL, this holds the bytes behind it.
 # Classified in the change that adds it, which is the whole lesson of the two

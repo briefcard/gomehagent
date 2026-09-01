@@ -461,6 +461,52 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         if rows:
             searched.append("claims")
 
+        # WHAT IS TRUE HERE AND PROVES NOTHING. Retrieved, not injected: a
+        # note filed against an entity is out of scope for every other one,
+        # and a note tagged to a situation is silent until that situation is
+        # the one in hand. That is the whole difference from guidance, which
+        # is capped at eight and rides every draft whether it bears or not.
+        # The situation ACTUALLY DETECTED, which is the same key claims and
+        # objections were just filtered on — not a parameter, because nobody
+        # passes one. With none detected the filter is off and every note is
+        # in scope for its entity, which is the honest default: a statement
+        # nobody tagged applies whenever.
+        _tag = (situations.get("detected") or [""])[0] if situations else ""
+        _ctx = kb.contexts(tenant, entity_key=entity_key or "",
+                           situation=_tag or "")
+        bundle["context"] = [
+            {"text": c.text, "scope": c.entity_key or "brand-wide",
+             "situations": sorted(c.situations or []), "context_id": c.id}
+            for c in _ctx]
+        if _ctx:
+            searched.append("context")
+            # ONE APPEND, and every skill, the responder and the mail path
+            # draft with it — the same argument `_rules` makes for guidance,
+            # and for the same reason: `feedback_block` spent its whole life
+            # with no caller precisely because wiring it meant touching seven
+            # places. `bundle["context"]` stays its own key beside this, so a
+            # caller that renders the parts separately still can.
+            #
+            # SAID PLAINLY, because the failure mode is specific: a drafter
+            # handed an interesting sentence will use it as evidence. The
+            # validator already catches that — a factual sentence must cite an
+            # approved claim id and these have none — but a refusal after the
+            # fact costs a draft, and saying it here is how it rarely happens.
+            _lines = "\n".join(
+                f"- {c['text']}"
+                + (f"  _(about {c['scope']})_" if c["scope"] != "brand-wide"
+                   else "")
+                for c in bundle["context"])
+            bundle.setdefault("rules", {})
+            bundle["rules"]["block"] = (
+                (bundle["rules"].get("block") or "")
+                + "\n\n## BACKGROUND — true here, and NOT proof\n"
+                  "Context somebody filed about this account. It is not "
+                  "approved proof and carries no id: you may let it shape "
+                  "what you write and what you leave out, and you may not "
+                  "state it as a fact, quote it, or build a claim on it.\n"
+                + _lines)
+
         # WHETHER THIS BRAND HOLDS MORE THAN ONE POSITION, and which ranges
         # hold them. Carried on every bundle rather than fetched by the one
         # generator that happens to think of it: a copywriter, a script and an
@@ -473,6 +519,7 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             for c in kb.contested_positioning(tenant)]
     else:
         bundle["claims"] = []
+        bundle["context"] = []
 
     # --- what no knowledge base can answer --------------------------------
     #

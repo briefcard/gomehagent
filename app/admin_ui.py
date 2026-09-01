@@ -5045,8 +5045,76 @@ def _compliance_body(tenant: str) -> str:
 # send does not. Until 2026-08-26 approvals had NO section here at all: the
 # tab named Review reviewed everything except the thing most people mean by
 # the word, and the real queue lived on the unstyled /admin/pending fallback.
+def _context_card(key: str, tenant: str) -> str:
+    """Background: true here, and not proof. Filed, listed, retired — in place.
+
+    Owner, 2026-08-31: *"Sometimes there are claims that come up that are not
+    false or true, they're just statements sometimes relevant sometimes not.
+    How can i file them without affecting the system?"* There was nowhere.
+    Filed as a claim a statement becomes citable proof and counts toward
+    readiness; filed as guidance it becomes a standing instruction competing
+    for eight slots on every draft.
+
+    The card states, next to the box, exactly what filing here does and does
+    not do — because the whole reason this row exists is that the other two
+    homes do more than the owner wanted.
+    """
+    from . import kb as _kb
+    try:
+        rows = _kb.contexts(tenant)
+        ents = {e.key: e.name for e in _kb.entities(tenant, available_only=False)}
+        tags = sorted(_kb.situations(tenant))
+    except Exception:                                            # noqa: BLE001
+        rows, ents, tags = [], {}, []
+    items = "".join(
+        f'<div class="msg"><div>{_esc(c.text)}</div>'
+        f'<div class="row"><span class="when">'
+        + (f'about {_esc(ents.get(c.entity_key, c.entity_key))}'
+           if c.entity_key else "the brand generally")
+        + (f' &middot; when {_esc(", ".join(c.situations or []))}'
+           if (c.situations or []) else " &middot; whenever")
+        + f'</span><span class="grow"></span>'
+        f'<a class="when" href="/admin/context_retire?key={_esc(key)}'
+        f'&amp;tenant={_esc(tenant)}&amp;id={_esc(c.id)}">retire</a>'
+        f'</div></div>' for c in rows)
+    ent_opts = '<option value="">the brand generally</option>' + "".join(
+        f'<option value="{_esc(k)}">{_esc(v)}</option>'
+        for k, v in sorted(ents.items(), key=lambda kv: kv[1]))
+    tag_opts = '<option value="">whenever</option>' + "".join(
+        f'<option value="{_esc(x)}">{_esc(x)}</option>' for x in tags)
+    return f"""
+<div class="anchor" id="context"></div>
+<div class="card">
+  <div class="head"><h2>Background</h2>
+    <span class="chip nb">{len(rows)} on file</span></div>
+  <p class="mut"><b>True here, and not proof.</b> Things that are neither
+  right nor wrong &mdash; how buyers behave, what a range photographs like,
+  what people keep assuming. A drafter is better for knowing them and will
+  never state one as a fact.</p>
+  <p class="mut">Filing here does <b>not</b> make it citable proof, does
+  <b>not</b> count toward whether a system is ready, and does <b>not</b> ride
+  every draft &mdash; it is retrieved when the entity or the moment matches.
+  For something that must always hold, use a hard rule on the system; for a
+  fact you want quoted, that is a claim.</p>
+  <div class="thread">{items or '<p class="mut">Nothing on file yet.</p>'}</div>
+  <form method="post" action="/admin/context_add?key={_esc(key)}"
+        style="margin-top:12px">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <div class="f"><label>the statement</label>
+      <textarea name="text" rows="2"
+        placeholder="Buyers from trade shows ask about lead time before price."></textarea>
+    </div>
+    <div class="row">
+      <select name="entity_key" style="width:auto">{ent_opts}</select>
+      <select name="situation" style="width:auto">{tag_opts}</select>
+      <button class="btn go" type="submit">File it</button>
+    </div>
+  </form>
+</div>"""
+
+
 REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
-               ("pictures", "Pictures"),
+               ("pictures", "Pictures"), ("context", "Background"),
                ("other", "Everything else"), ("plans", "Plans"),
                ("conflicts", "Conflicts"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
@@ -6448,6 +6516,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   {clear_all}
 </div>""",
         "pictures": assets_form,
+        "context": _context_card(key, tenant),
         "other": f"""
 <div class="anchor" id="others"></div>
 <div class="card">
@@ -6793,6 +6862,14 @@ _KB_DESCRIBED = [
      "`owned` is inspiration, never inventory. `entity_key` is what a hero "
      "gets checked against, and `uses`/`outcome` are what publishing writes "
      "back. Approved ones are listed on the Knowledge tab."),
+    ("KbContext", "kb_contexts", "Background — true here, and not proof",
+     "Statements that are neither right nor wrong: how buyers behave, what a "
+     "range photographs like, what people keep assuming. Retrieved by entity "
+     "and situation the way claims are, and deliberately WEAKER than one — no "
+     "id to cite, absent from `kb.KB_SUPPLIERS` so no volume of it can make a "
+     "system look ready, and the block it rides says it may not be stated as "
+     "fact. It exists because filing such a thing as a claim made it citable "
+     "proof, and filing it as guidance made it a standing instruction."),
     ("KbEmbedding", "kb_embeddings", "The vector index over the rows above",
      "Derived, never authored — it is how near-duplicate proposals and "
      "same-fact-different-tag pairs are found. Removing a row must forget its "

@@ -44,8 +44,8 @@ from . import kb, tenants
 #:
 #: A scope FILTERS this tuple rather than listing its own order, so no scope
 #: can reorder the document and cost every account its cache.
-ORDER = ("identity", "rules", "situations", "objections", "claims", "lookups",
-         "catalogue", "gaps")
+ORDER = ("identity", "rules", "situations", "objections", "claims", "context",
+         "lookups", "catalogue", "gaps")
 
 
 def _sections_for(key: str) -> tuple[str, ...]:
@@ -92,6 +92,11 @@ def _sections_for(key: str) -> tuple[str, ...]:
         "situations": mail, "lookups": mail,
         "objections": "objection" in needs,
         "claims": "claim" in needs,
+        # EVERY SYSTEM THAT WRITES ANYTHING. Context is not a `kb_needs`
+        # token — deliberately, so no amount of it can make an account look
+        # ready — so there is nothing to key it on, and there should not be:
+        # background bears on any draft. It costs nothing where none is filed.
+        "context": True,
         "catalogue": "entity" in needs,
     }
     return tuple(s for s in ORDER if want[s])
@@ -191,6 +196,26 @@ def _claims(t) -> list[str]:
     return out + [""]
 
 
+def _context(t) -> list[str]:
+    """True here, and not proof. Its own heading, on purpose.
+
+    Put under "Proof you may lean on" it would be quoted; left out entirely
+    the document would be missing what a person reading this account actually
+    knows about it. So: present, named, and told what it is not.
+    """
+    rows = sorted(kb.contexts(t.key), key=lambda c: (c.entity_key or "", c.text))
+    if not rows:
+        return []
+    out = ["## Background — true here, and NOT proof", "",
+           "Context somebody filed about this account. It carries no id and "
+           "nothing here may be stated as a fact, quoted, or built into a "
+           "claim. Let it shape what you write and what you leave out.", ""]
+    for c in rows:
+        scope = f" _(about {c.entity_key})_" if c.entity_key else ""
+        out.append(f"- {c.text}{scope}")
+    return out + [""]
+
+
 def _lookups(t) -> list[str]:
     from . import lookups as lk
     rows = [r for r in kb.situation_rows(t.key) if getattr(r, "needs", None)]
@@ -248,8 +273,8 @@ def _gaps(t) -> list[str]:
 
 SECTIONS = {
     "identity": _identity, "rules": _rules, "situations": _situations,
-    "objections": _objections, "claims": _claims, "lookups": _lookups,
-    "catalogue": _catalogue, "gaps": _gaps,
+    "objections": _objections, "claims": _claims, "context": _context,
+    "lookups": _lookups, "catalogue": _catalogue, "gaps": _gaps,
 }
 
 

@@ -3888,6 +3888,42 @@ SABOTAGES = [
                "reads to the owner as the console being broken rather than as "
                "a rung having been renamed",
     },
+    {
+        "name": "background_is_never_counted_as_readiness",
+        "file": "app/kb.py",
+        "find": '    "asset":         lambda t, b: bool(assets(t)),',
+        "replace": '    "asset":         lambda t, b: bool(assets(t)),\n    "context":       lambda t, b: bool(contexts(t)),  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "background becomes a kb_needs supplier, so filing statements "
+               "that prove nothing starts making a system look READY. That is "
+               "the exact reason it is a separate table rather than a `kind` "
+               "column on KbClaim: one wrong entry and a thin account clears "
+               "its gate on notes nobody could cite",
+    },
+    {
+        "name": "background_is_scoped_to_what_it_is_about",
+        "file": "app/kb.py",
+        "find": '        rows = [r for r in rows\n                if not (r.entity_key or "") or r.entity_key == entity_key]',
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "a note filed about one product is handed to the drafter "
+               "writing about every other one. Retrieval by scope is the "
+               "whole difference between this and guidance — guidance is "
+               "capped at eight and rides every draft, and if background does "
+               "the same it is guidance with a longer list",
+    },
+    {
+        "name": "background_reaches_the_drafter_saying_what_it_is_not",
+        "file": "app/resolve.py",
+        "find": '+ "\\n\\n## BACKGROUND — true here, and NOT proof\\n"',
+        "replace": '+ "\\n\\n## BACKGROUND\\n"  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "the drafter is handed interesting sentences with nothing "
+               "saying they are not evidence. The validator still refuses a "
+               "factual sentence that cites no approved claim, so this does "
+               "not ship a false claim — it spends a draft to catch what one "
+               "line of the prompt was preventing",
+    },
 ]
 
 
