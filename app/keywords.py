@@ -1474,46 +1474,68 @@ def attention(tenant: str, *, top: int = 12) -> list[dict]:
         rd = readings.get(r.phrase)
         pos = rd.position if rd else None
         if age is not None and age < REFRESH_AFTER_DAYS:
-            state, owed = "too_early", "nothing yet — give it time to settle"
+            state, act, owed = ("too_early", "wait",
+                                "nothing yet — give it time to settle")
         elif pos is None:
-            state, owed = ("no_reading",
-                           "Search Console has no reading — check it is "
-                           "indexed before rewriting anything")
+            state, act, owed = ("no_reading", "index",
+                                "Search Console has no reading — check it is "
+                                "indexed before rewriting anything")
         elif r.status == "won" or pos <= WON_POSITION:
             continue                      # winning: nothing owed
         elif r.won_at is not None:
-            state, owed = "slipping", "it ranked and stopped — refresh it first"
+            # SLIPPING IS ALWAYS A REFRESH, whatever the band says. The band
+            # answers "what is likely to move a page that never got there";
+            # a page that DID get there and fell has already proved the intent
+            # matches and the cluster carries it, so the question is what
+            # changed on the page or past it — which is what a refresh asks.
+            state, act, owed = ("slipping", "refresh",
+                                "it ranked and stopped — refresh it first")
         else:
-            state, owed = "stalled", _owed_for(pos)
+            state = "stalled"
+            act, owed = _owed_for(pos)
         out.append({"phrase": r.phrase, "status": r.status, "position": pos,
                     "role": r.role, "cluster": r.cluster_key,
                     "target_url": r.target_url, "published_days": age,
-                    "since_refresh": since_refresh,
-                    "state": state, "owed": owed,
+                    "since_refresh": since_refresh, "output_id": r.output_id,
+                    "state": state, "action": act, "owed": owed,
                     "priority": r.priority})
     order = {"slipping": 0, "stalled": 1, "no_reading": 2, "too_early": 3}
     out.sort(key=lambda x: (order.get(x["state"], 9), -(x["priority"] or 0)))
     return out[:top]
 
 
-def _owed_for(position: float) -> str:
-    """Which move the position itself argues for.
+#: Where a page sits -> what that argues for, as (ceiling, action, sentence).
+#:
+#: ONE TABLE, because the planner acts on the action while the console shows
+#: the sentence, and a band written in two places drifts in exactly the way
+#: every other defect in this repo drifted: the surface goes on saying
+#: "supports in its cluster" while the planner quietly files a refresh.
+#: `_owed_for` returns both halves together so they cannot disagree.
+#:
+#:   4-10  the page is close, so depth, intent match and question coverage
+#:         are what move it. Refresh THIS page.
+#:   11-30 usually topical authority rather than page quality. Supports in
+#:         the cluster, linking up to it.
+#:   >30   usually intent mismatch or indexation, and a refresh rarely fixes
+#:         either. Re-read what is actually ranking for the phrase before
+#:         spending anything on it.
+_MOVES = (
+    (10.0, "refresh", "close — refresh this page (depth, intent, questions)"),
+    (30.0, "supports", "supports in its cluster, linking up — not a rewrite"),
+    (None, "reread", "re-read the intent: what ranks for this may not be this page"),
+)
 
-    Stated data, not a model's guess — and the bands are the argument:
 
-      4-10  the page is close, so depth, intent match and question coverage
-            are what move it. Refresh THIS page.
-      11-30 usually topical authority rather than page quality. Supports in
-            the cluster, linking up to it.
-      >30   usually intent mismatch or indexation, and a refresh rarely fixes
-            either. Re-read what is actually ranking for the phrase before
-            spending anything on it.
+def _owed_for(position: float) -> tuple[str, str]:
+    """Which move the position itself argues for: (action, sentence).
+
+    Stated data, not a model's guess. See `_MOVES` for the bands and why
+    both halves are returned from one place.
     """
-    if position <= 10:
-        return "close — refresh this page (depth, intent, questions)"
-    if position <= 30:
-        return "supports in its cluster, linking up — not a rewrite"
-    return "re-read the intent: what ranks for this may not be this page"
+    for ceiling, action, sentence in _MOVES:
+        if ceiling is None or position <= ceiling:
+            return action, sentence
+    raise AssertionError("_MOVES must end in an open band")
 
 
 def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:

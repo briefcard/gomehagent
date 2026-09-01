@@ -331,6 +331,14 @@ CATALOG = {
                 # alone, so nothing changes for an article about one thing.
                 dict(key="entity_keys", label="Also about (comma-separated)",
                      required=False, kind="entity_list"),
+                # WHY THIS ONE IS BEING WRITTEN AGAIN. A refresh plan is an
+                # ordinary blog plan whose keyword already has a live page,
+                # and this is the difference between the two: the reading
+                # that argued for it. Blank on a new article, and blank is
+                # what the drafter sees, so nothing changes for one.
+                dict(key="revision_notes",
+                     label="What this redraft must fix", required=False,
+                     kind="text"),
             ),
             artifact="cms_article",
             ship="publishes the draft article, behind seo_guard",

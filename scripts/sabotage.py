@@ -4426,13 +4426,58 @@ SABOTAGES = [
     {
         "name": "the_move_is_chosen_by_where_the_page_sits",
         "file": "app/keywords.py",
-        "find": "    if position <= 10:",
-        "replace": "    if True:  # SABOTAGE",
+        "find": "    (10.0, \"refresh\",",
+        "replace": "    (1e9, \"refresh\",  # SABOTAGE",
         "suites": ["test_keyword_attention.py"],
         "why": "every stalled page is told to refresh itself, including the "
                "ones at position 40 where the problem is intent or "
                "indexation and a rewrite changes nothing — the advice stops "
                "being advice and becomes a default with a sentence attached",
+    },
+    {
+        "name": "a_published_page_is_replaced_not_duplicated",
+        "file": "app/skill_pack.py",
+        "find": "        supersede(ctx.tenant, prior, new_oid,",
+        "replace": "        _noop(ctx.tenant, prior, new_oid,  # SABOTAGE",
+        "suites": ["test_refresh_lane.py"],
+        "why": "the keyword's pointer moves to the new article and the old "
+               "one is left LIVE — still queued, still counted, still on the "
+               "site. Two pages aimed at one query is the cannibalisation "
+               "this whole lane exists to prevent, produced by the lane",
+    },
+    {
+        "name": "the_month_a_plan_falls_in_is_read_not_parsed",
+        "file": "app/planner.py",
+        "find": "            d = dt.date.fromisoformat(str((brief or {}).get(\"planned_for\") or \"\"))",
+        "replace": "            d = dt.date.fromisoformat(\"not-a-date\")  # SABOTAGE",
+        "suites": ["test_refresh_lane.py"],
+        "why": "every row raises ValueError and is skipped, so the helper "
+               "returns {} on every call and the monthly cap binds only "
+               "WITHIN one run — and the tick runs the planner daily, so a "
+               "cap of one article a month files one a day",
+    },
+    {
+        "name": "only_the_pages_a_refresh_would_help_get_one",
+        "file": "app/planner.py",
+        "find": "        if item[\"action\"] != \"refresh\":",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_refresh_lane.py"],
+        "why": "a page at position 60 — where the problem is intent or "
+               "indexation — is queued for a rewrite that changes neither, "
+               "and so is one at 20 whose cluster needs supports. The lane "
+               "looks productive and is wrong three times in four",
+    },
+    {
+        "name": "every_candidate_planned_is_not_a_quiet_month",
+        "file": "app/planner.py",
+        "find": "        ref_out = _blog_refreshes(sysrow, cad,\n"
+                "                                  today + dt.timedelta(days=cad[\"horizon_days\"]))",
+        "replace": "        ref_out = {\"filed\": 0, \"reasons\": [], \"refusals\": []}  # SABOTAGE",
+        "suites": ["test_refresh_lane.py"],
+        "why": "with every keyword already planned the planner returns early "
+               "and files no refreshes — and that is not a quiet month, it is "
+               "the steady state this lane was built for, when fixing pages "
+               "that already shipped is the only writing left",
     },
 ]
 

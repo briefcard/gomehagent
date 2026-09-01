@@ -3296,6 +3296,70 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
     return got
 
 
+def _prior_run_id(output_id: str) -> str:
+    """The run that produced an output, so superseding it withdraws its
+    approval too. An approval left standing on a replaced draft is a button
+    that publishes the page the replacement was written to replace."""
+    from . import db
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        return (art.run_id or "") if art is not None else ""
+
+
+def supersede(tenant: str, output_id: str, new_oid: str, *,
+              keyword_id: str = "", run_id: str = "",
+              close_feedback: bool = False, why: str = "redraft") -> None:
+    """Retire one output in favour of its replacement. ONE WRITER.
+
+    SUPERSEDE, NEVER DUPLICATE: one intent keeps one live row. The old item
+    stays readable — its workroom page names the successor — but it leaves
+    every queue, every count and the anti-repeat window, its pending approval
+    is withdrawn, and the keyword's pointer moves to the living draft.
+
+    Extracted because a second caller arrived. A refresh writes the same
+    article again, and the half-dozen writes that make a replacement a
+    replacement rather than a second page were written out longhand inside
+    the workroom redraft. Copied to the new caller they would have drifted;
+    the version that drifts is always the one that stops withdrawing the old
+    approval, which leaves two live articles queued for one keyword.
+
+    `close_feedback` is the workroom's alone: the notes are marked applied
+    because that redraft consumed them. A planner-driven refresh consumed
+    nobody's notes and must not close them.
+    """
+    from . import approvals as _appr
+    from . import db, ledger
+
+    with db.SessionLocal() as s:
+        old = s.get(db.Output, output_id)
+        if old is not None:
+            old.status = "superseded"
+        old_art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id).first())
+        if old_art is not None and (old_art.state or "") == "in_review":
+            old_art.state = ""
+        if close_feedback:
+            for f_row in (s.query(db.FeedbackItem)
+                          .filter(db.FeedbackItem.output_id == output_id,
+                                  db.FeedbackItem.level == "draft",
+                                  db.FeedbackItem.status == "open").all()):
+                f_row.status = "applied"
+                f_row.applied_at = db.utcnow()
+        if keyword_id:
+            kw_row = s.get(db.KeywordTarget, keyword_id)
+            if kw_row is not None:
+                # The board's draft link must point at the LIVING draft.
+                kw_row.output_id = new_oid
+        s.commit()
+    try:
+        ledger.delivered(tenant, output_id, f"superseded:{new_oid}")
+    except Exception:                                            # noqa: BLE001
+        pass
+    if run_id:
+        _appr.withdraw(run_id, f"superseded by {why} -> {new_oid}")
+
+
 def redraft_artifact(tenant: str, output_id: str, note: str = "",
                      overrides: dict | None = None, part: str = "") -> dict:
     """Request changes: redraft one held artifact, consuming its feedback.
@@ -3445,36 +3509,9 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
                                     or r.get("status") or "unknown"))[:200])}
     new_oid = new_item["output_id"]
 
-    # SUPERSEDE, never duplicate: one intent keeps one live row. The old
-    # item stays readable — its workroom page names the successor — but it
-    # leaves every queue, every count and the anti-repeat window.
-    with db.SessionLocal() as s:
-        old = s.get(db.Output, output_id)
-        if old is not None:
-            old.status = "superseded"
-        old_art = (s.query(db.ArtifactBody)
-                   .filter(db.ArtifactBody.output_id == output_id).first())
-        if old_art is not None and (old_art.state or "") == "in_review":
-            old_art.state = ""
-        for f_row in (s.query(db.FeedbackItem)
-                      .filter(db.FeedbackItem.output_id == output_id,
-                              db.FeedbackItem.level == "draft",
-                              db.FeedbackItem.status == "open").all()):
-            f_row.status = "applied"
-            f_row.applied_at = db.utcnow()
-        if kw is not None:
-            kw_row = s.get(db.KeywordTarget, kw.id)
-            if kw_row is not None:
-                # The board's draft link must point at the LIVING draft.
-                kw_row.output_id = new_oid
-        s.commit()
-    try:
-        ledger.delivered(tenant, output_id, f"superseded:{new_oid}")
-    except Exception:                                            # noqa: BLE001
-        pass
-    if art.run_id:
-        _appr.withdraw(art.run_id,
-                       f"superseded by redraft (workroom) -> {new_oid}")
+    supersede(tenant, output_id, new_oid, keyword_id=(kw.id if kw else ""),
+              run_id=art.run_id or "", close_feedback=True,
+              why="redraft (workroom)")
     return {"ok": True, "output_id": new_oid, "consumed": len(fb),
             "summary": (r.get("summary") or "")[:200]}
 
@@ -4347,6 +4384,21 @@ def _run_blog_article(ctx: Context) -> dict:
         publish["queued"] = said.startswith("Queued for your approval")
         publish["detail"] = said if publish["queued"] else f"NOT queued — {said}"
     ctx.note(publish["detail"])
+
+    # ONE KEYWORD, ONE PAGE — enforced HERE, because every caller comes
+    # through the skill. Owner, 2026-09-01: *"keywords often need a few
+    # articles to start ranking"* — a TOPIC does, a KEYWORD does not, and two
+    # pages aimed at one query cannibalise. The keyword's existing article
+    # was silently orphaned by the `output_id` write below: the pointer moved
+    # and the old page stayed live, queued and countable. So a refresh — or
+    # anyone re-running a keyword that already shipped — produced exactly the
+    # second page this lane exists to prevent.
+    prior = (row.output_id or "") if row is not None else ""
+    new_oid = ((ctx.items[-1] or {}).get("output_id", "") if ctx.items else "")
+    if prior and new_oid and prior != new_oid:
+        supersede(ctx.tenant, prior, new_oid,
+                  keyword_id=(row.id if row is not None else ""),
+                  run_id=_prior_run_id(prior), why="refresh")
 
     if row is not None:
         kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,

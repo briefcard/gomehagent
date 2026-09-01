@@ -108,14 +108,23 @@ def rest_days_for(sysrow) -> int:
 #: site does not tire of being written ABOUT. The ceiling is higher and the
 #: default is still conservative, because the constraint on publishing is
 #: rarely appetite and almost always review.
-BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4}
+BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4,
+                # REFRESHES DO NOT SHARE THE ARTICLE BUDGET. Under one cap the
+                # two compete, and the loser is always the refresh: a new
+                # article is visibly a thing that did not exist, while fixing
+                # a page that already ranks at 6 is invisible until it moves.
+                # A separate, small number is what keeps the lane from either
+                # starving or eating the month.
+                "refreshes_monthly": 2}
 MAX_ARTICLES_MONTHLY = 30
+MAX_REFRESHES_MONTHLY = 12
 
 
 def blog_cadence_for(sysrow) -> dict:
     return _cadence(sysrow, BLOG_CADENCE,
                     {"horizon_days": MAX_HORIZON_DAYS,
-                     "articles_monthly": MAX_ARTICLES_MONTHLY})
+                     "articles_monthly": MAX_ARTICLES_MONTHLY,
+                     "refreshes_monthly": MAX_REFRESHES_MONTHLY})
 
 
 def _month(d: dt.date) -> str:
@@ -132,15 +141,25 @@ def _existing_by_month(sysrow, prefix: str) -> dict[str, int]:
     EVERY stage counts — an open plan, a consumed run, and a SKIPPED one.
     A skip was the owner's decision about that month, and a planner that
     re-proposes a declined item is a nag wearing an algorithm.
+
+    THE MONTH IS READ FROM `planned_for`, not parsed out of the ref. It was
+    parsed out of the ref, which is a date only for campaigns: a campaign's
+    ref ends in its slot, an article's ends in a keyword slug. So every blog
+    row raised ValueError and was skipped, this returned {} on every call,
+    and `articles_monthly` only ever bound WITHIN a single run — three runs
+    in one month filed three articles against a cap of one. `planned_for` is
+    the field the cap is about and both planners set it, so one reader
+    answers for both; for a campaign it is the same value the ref carried,
+    which is why nothing about campaign pacing moves.
     """
     out: dict[str, int] = {}
     with db.SessionLocal() as s:
-        rows = (s.query(db.SystemRun.ref)
+        rows = (s.query(db.SystemRun.brief)
                 .filter(db.SystemRun.system_id == sysrow.id,
                         db.SystemRun.ref.like(prefix + "%")).all())
-    for (ref,) in rows:
+    for (brief,) in rows:
         try:
-            d = dt.date.fromisoformat((ref or "")[len(prefix):])
+            d = dt.date.fromisoformat(str((brief or {}).get("planned_for") or ""))
         except ValueError:
             continue
         out[_month(d)] = out.get(_month(d), 0) + 1
@@ -508,9 +527,18 @@ def blog_rollout(sysrow) -> dict:
     # a decision he has to make again every week, which is how a queue stops
     # being worked.
     if not rows:
+        # STILL RUN THE REFRESH PASS. Returning here skipped it, and "every
+        # candidate is already planned" is not a quiet month — it is the
+        # steady state this lane was built for, when the only writing left is
+        # fixing pages that already shipped.
+        ref_out = _blog_refreshes(sysrow, cad,
+                                  today + dt.timedelta(days=cad["horizon_days"]))
         return {"ok": True, "proposed": 0, "refreshed": 0,
+                "refresh_plans": ref_out["filed"],
+                "refresh_reasons": ref_out["reasons"],
                 "refusals": ["no candidate keywords — press Build the map "
-                             "first, or every candidate is already planned"]}
+                             "first, or every candidate is already planned"]
+                            + ref_out["refusals"]}
 
     # Who is a pillar, and has it been dealt with. Read once: asking per
     # keyword would be a query per row on a map of several hundred.
@@ -578,8 +606,77 @@ def blog_rollout(sysrow) -> dict:
             refreshed += 1
         slot += dt.timedelta(days=max(1, 30 // cad["articles_monthly"]))
 
+    ref_out = _blog_refreshes(sysrow, cad, horizon_end)
+    refusals.extend(ref_out["refusals"])
     return {"ok": True, "proposed": proposed, "refreshed": refreshed,
-            "pillar_first": promoted, "refusals": refusals}
+            "pillar_first": promoted, "refusals": refusals,
+            "refresh_plans": ref_out["filed"],
+            "refresh_reasons": ref_out["reasons"]}
+
+
+def _blog_refreshes(sysrow, cad: dict, horizon_end: dt.date) -> dict:
+    """File a plan for each published page whose ranking says refresh THIS one.
+
+    THE ACTION IS READ, NOT RE-DERIVED. `keywords.attention` already decides
+    what each published page is owed, from one band table; this asks it and
+    files the rows whose action is `refresh`. Re-testing `position <= 10`
+    here would put the bands in two places, and the console would go on
+    saying "supports in its cluster" while the planner quietly filed a
+    rewrite — the same split-contract defect as everything else this week.
+
+    Only `refresh` is filed. The other actions are real answers that are not
+    a blog plan: `supports` is a different keyword's article and gets planned
+    as one, `index` is a Search Console question, `reread` is a judgement
+    nobody should automate into a queue. Filing them all as "refresh" would
+    make the lane look productive and be wrong three times in four.
+
+    Its own ref space and its own monthly cap, so a refresh can never be
+    mistaken for — or displace — a new article on the same keyword.
+    """
+    from . import keywords
+
+    prefix = f"refresh:{sysrow.tenant}:"
+    have = _existing_by_month(sysrow, prefix)
+    cap = cad["refreshes_monthly"]
+    slot = dt.date.today() + dt.timedelta(days=LEAD_DAYS)
+    filed = 0
+    reasons: list[str] = []
+    refusals: list[str] = []
+
+    for item in keywords.attention(sysrow.tenant, top=50):
+        if item["action"] != "refresh":
+            continue
+        while slot <= horizon_end and have.get(_month(slot), 0) >= cap:
+            slot = _next_month(slot)
+        if slot > horizon_end:
+            refusals.append(f"refresh horizon full at {cap}/month — "
+                            f"more pages are owed one")
+            break
+        # THE READING IS THE INSTRUCTION. A redraft brief that says only
+        # "refresh this" is a rewrite with no target; the position, the state
+        # and the move the band argues for are what make it a revision
+        # somebody can check afterwards.
+        why = (f"This page is published and not working: {item['state']}"
+               + (f" at position {item['position']:.0f}"
+                  if item.get("position") is not None else "")
+               + f". {item['owed']}")
+        out = systems.open_plan(
+            sysrow.tenant, sysrow.key,
+            ref=prefix + keywords.slug(item["phrase"]),
+            plan={"keyword": item["phrase"],
+                  "role": item["role"] or "support",
+                  "cluster": item["cluster"] or "",
+                  "revision_notes": why},
+            planned_for=slot.isoformat(), trigger="planner")
+        if out.get("error"):
+            refusals.append(out["error"])
+            continue
+        if out.get("created"):
+            filed += 1
+            have[_month(slot)] = have.get(_month(slot), 0) + 1
+            reasons.append(f"{item['phrase']!r} — {item['state']}")
+        slot += dt.timedelta(days=max(1, 30 // cap))
+    return {"filed": filed, "reasons": reasons, "refusals": refusals}
 
 
 PLANNERS = {
