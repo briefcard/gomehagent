@@ -3924,6 +3924,30 @@ SABOTAGES = [
                "not ship a false claim — it spends a draft to catch what one "
                "line of the prompt was preventing",
     },
+    {
+        "name": "a_demoted_claim_keeps_its_row",
+        "file": "app/kb.py",
+        "find": '        row.review, row.status = prov.REJECTED, "retired"\n        s.commit()\n        text = (row.claim or "")[:60]',
+        "replace": '        s.delete(row)  # SABOTAGE\n        s.commit()\n        text = ""',
+        "suites": ["test_context.py"],
+        "why": "demoting a claim to background DELETES it, so every output "
+               "already on the ledger that cited it has a dangling id and the "
+               "record of why a published draft said what it said is gone. "
+               "Changing your mind about a claim must not rewrite the history "
+               "of the work that used it",
+    },
+    {
+        "name": "evidence_does_not_ride_into_background",
+        "file": "app/kb.py",
+        "find": "        ctx = db.KbContext(tenant=row.tenant, text=row.claim,",
+        "replace": '        ctx = db.KbContext(tenant=row.tenant, text=(row.claim + (" — " + row.evidence if row.evidence else "")),  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "the number rides into the background line, so 'Dishwasher "
+               "safe — tested 200 cycles' sits in a section headed 'not "
+               "proof' with the proof attached. That is proof wearing another "
+               "hat, and it is exactly the thing background exists to stop "
+               "being quotable",
+    },
 ]
 
 

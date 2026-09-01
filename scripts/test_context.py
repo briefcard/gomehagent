@@ -144,6 +144,54 @@ def main() -> int:
        "err=" in r2.headers.get("location", ""),
        r2.headers.get("location", "")[:90])
 
+    print("\n— a claim can be demoted to background, from both surfaces —")
+    kb.add_claim("baci", "Buyers compare us with melamine.",
+                 "tested 200 cycles", [], entity_key="aqua")
+    with db.SessionLocal() as s_:
+        cid = [r.id for r in s_.query(db.KbClaim).all()
+               if "melamine" in (r.claim or "")][0]
+    n_ctx = len(kb.contexts("baci"))
+    r3 = c.post(f"/admin/claim_edit?key={KEY}",
+                data={"claim_id": cid, "tenant": "baci", "action": "background",
+                      "claim": "Buyers compare us with melamine."},
+                follow_redirects=False)
+    ck("the proposal queue's third button files it",
+       r3.status_code == 303 and len(kb.contexts("baci")) == n_ctx + 1,
+       "reject threw the sentence away; approve made it citable")
+    moved = [x for x in kb.contexts("baci") if "melamine" in x.text][0]
+
+    ck("  scope travels with it", moved.entity_key == "aqua", moved.entity_key)
+    ck("  the EVIDENCE does not travel into the text",
+       "200 cycles" not in moved.text and "200 cycles" in (moved.source or ""),
+       "'X — tested 200 cycles' as background is proof wearing another hat; "
+       "`source` is documented as internal provenance a customer never sees")
+    ck("  it is no longer selectable as proof",
+       not any("melamine" in x.claim for x in kb.claims("baci")))
+    with db.SessionLocal() as s_:
+        was = s_.get(db.KbClaim, cid)
+        ck("  and the claim row SURVIVES, retired",
+           was is not None and was.status == "retired",
+           "outputs on the ledger cite claim ids — a deleted row turns a past "
+           "draft's provenance into a dangling reference")
+    ck("  doing it twice says so rather than filing twice",
+       "already retired" in kb.claim_to_context(cid),
+       kb.claim_to_context(cid))
+
+    # The same control on an APPROVED claim: a sentence that turned out to be
+    # true and not proof does not stop being that because somebody approved it.
+    kb.add_claim("baci", "People assume the glaze is plastic.", "", [])
+    with db.SessionLocal() as s_:
+        cid2 = [r.id for r in s_.query(db.KbClaim).all()
+                if "glaze" in (r.claim or "")][0]
+    n2 = len(kb.contexts("baci"))
+    r4 = c.post(f"/admin/claim_update?key={KEY}",
+                data={"claim_id": cid2, "tenant": "baci",
+                      "action": "background"},
+                follow_redirects=False)
+    ck("the approved-claim editor has it too",
+       r4.status_code == 303 and len(kb.contexts("baci")) == n2 + 1,
+       r4.headers.get("location", "")[:90])
+
     print("\n— retiring keeps the record —")
     n_before = len(kb.contexts("baci"))
     c.get(f"/admin/context_retire?key={KEY}&tenant=baci&id={brand_id}",

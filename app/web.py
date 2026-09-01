@@ -7542,6 +7542,12 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
     action = str(form.get("action", "save"))
     anchor = f"cl-{claim_id}"
 
+    if action == "background":
+        # Same control as the proposal queue's, on an APPROVED claim: a
+        # sentence that turned out to be true and not proof does not stop
+        # being that because somebody approved it once.
+        return _back_to_kb(tenant, ok=kbm.claim_to_context(claim_id),
+                           anchor=anchor, back=_back_parts(form))
     if action == "never":
         return _back_to_kb(tenant, ok=kbm.set_claim_expiry(claim_id, never=True),
                            anchor=anchor, back=_back_parts(form))
@@ -7690,6 +7696,13 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
 
     def _back(**kw):
         return _back_to_content(tenant, cpage=cpage, keep=_keep, **kw)
+
+    if action == "background":
+        # THE THIRD ANSWER. The commonest correction on this queue is not
+        # "wrong" — it is "true, and not proof". Rejecting threw the sentence
+        # away; approving made it citable. Neither is what the reader meant.
+        said = kbm.claim_to_context(claim_id)
+        return _back(msg=said, anchor=f"c-{nxt or claim_id}")
 
     if action == "reject":
         kbm.review_claim(claim_id, approve=False)

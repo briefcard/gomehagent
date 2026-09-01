@@ -2805,6 +2805,61 @@ def add_context(tenant: str, text: str, *, entity_key: str = "",
         return row.id
 
 
+def claim_to_context(claim_id: str) -> str:
+    """Demote a claim to background. Owner's control, 2026-08-31.
+
+    The commonest correction on a claim queue is not "this is wrong" — it is
+    "this is true and it is not proof". Rejecting it threw the sentence away;
+    approving it made it citable. Neither is what the reader meant, so the
+    third option is the one that was missing.
+
+    THREE THINGS IT IS CAREFUL ABOUT:
+
+    · The claim is RETIRED, never deleted. Outputs already on the ledger cite
+      claim ids, and a deleted row turns a past draft's provenance into a
+      dangling reference — the record of why something was written has to
+      survive a change of mind about the thing it cited.
+    · The EVIDENCE does not travel into the text. A background line reading
+      "Dishwasher safe — tested 200 cycles" is proof wearing a different hat,
+      and the whole point is that background may not be built on. It is kept
+      on `source`, which `KbClaim` already documents as internal provenance
+      that must never be shown to a customer, so nothing is lost and nothing
+      leaks.
+    · Scope travels: `entity_key` and `situations` mean the same thing in both
+      tables, so a claim about one product becomes background about it.
+
+    ONE WAY, deliberately. Going back is not an edit, it is an approval: proof
+    is a thing a human signs off, and a control that quietly re-promoted a
+    sentence would be the approval process defeating itself.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.KbClaim, claim_id)
+        if row is None:
+            return "No such claim."
+        if (row.status or "") == "retired":
+            return "That claim is already retired."
+        trail = f"converted from claim {row.id}"
+        if row.evidence:
+            trail += f" · evidence kept off the text: {row.evidence}"
+        if row.source:
+            trail += f" · was: {row.source}"
+        ctx = db.KbContext(tenant=row.tenant, text=row.claim,
+                           entity_key=row.entity_key or "",
+                           situations=list(row.situations or []),
+                           source=trail, origin="human",
+                           review=prov.APPROVED)
+        s.add(ctx)
+        # Retired, not removed — see the docstring. `review` and `status` are
+        # moved the same way `kb.remove` moves them, so every reader that
+        # already knows how to skip a retired claim skips this one.
+        row.review, row.status = prov.REJECTED, "retired"
+        s.commit()
+        text = (row.claim or "")[:60]
+    return (f"Filed as background: {text}. It is no longer citable proof and "
+            f"no longer counts toward readiness. Making it a claim again is "
+            f"an approval, not an edit.")
+
+
 def contexts(tenant: str, *, entity_key: str = "", situation: str = "",
              include_archived: bool = False) -> list[db.KbContext]:
     """Statements that bear here.

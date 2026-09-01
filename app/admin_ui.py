@@ -4260,6 +4260,11 @@ review can be QUOTED</label>
               <button title="Saving re-attests it: verified today, any expiry
 date reset to a year from now (a timeless claim stays timeless)">Save</button>
               {exp_btn}
+              <button class="sec" name="action" value="background"
+                      title="True, and not proof. Files it as background:
+never cited, never counted toward readiness, retrieved only when the entity or
+the moment matches. The claim is retired, not deleted, so anything already
+written that cited it keeps its provenance.">Not proof &mdash; background</button>
             </div>
           </form>
         </details>"""
@@ -5853,6 +5858,11 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <div class="row">
                 <button name="action" value="approve">Save &amp; approve</button>
                 <button class="sec" name="action" value="save">Save only</button>
+                <button class="sec" name="action" value="background"
+                        title="True, and not proof. Files it as background:
+never cited, never counted toward readiness, retrieved only when the entity or
+the moment matches. The claim is retired, not deleted.">Not proof &mdash;
+                  file as background</button>
                 <button class="sec" name="action" value="reject">Reject</button>
               </div>
               <details class="sec"><summary class="mut">Details — where it
