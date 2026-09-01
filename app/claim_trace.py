@@ -126,6 +126,50 @@ def _sentences(text: str) -> list[str]:
             if s.strip()]
 
 
+#: What may sit BETWEEN two words of a sentence in the markup and still be the
+#: same sentence to a reader: whitespace, a tag, an entity. `plain_text` throws
+#: all three away, which is why the sentence the claim margin shows is almost
+#: never a literal substring of the body it came from.
+_GAP = r"(?:\s|<[^>]+>|&[A-Za-z#0-9]+;)+"
+
+
+def replace_sentence(body: str, old: str, new: str) -> tuple[str, int]:
+    """Swap one sentence in the MARKUP, matching it as a reader sees it.
+
+    The claim margin reads `plain_text(body)` — tags stripped, entities
+    decoded, whitespace collapsed — so `body.replace(old, new)` misses any
+    sentence carrying a `<strong>`, a `&amp;` or a line break, which in real
+    article prose is most of them. This matches the words in order, tolerating
+    markup between them, and rewrites the span.
+
+    Returns `(body, count)`. **Count matters more than the body**: 0 means the
+    caller must say the draft was NOT changed rather than implying it was, and
+    that honesty is the whole reason this returns a number at all.
+
+    Only the FIRST occurrence is rewritten. A sentence appearing twice is two
+    decisions, and silently changing both would be this function deciding one
+    of them.
+
+    Inline markup inside the sentence does not survive as EMPHASIS — the
+    replacement is the plain corrected text, which is the right trade for a
+    correction (the numbers matter, the italics do not). But the tags are
+    RE-EMITTED after it, because dropping them is not the same trade at all: a
+    sentence opening inside `<strong>` and closing after it would leave the
+    tag unclosed and the rest of the article bold. Losing emphasis is a
+    cosmetic loss; losing a closing tag corrupts the document.
+    """
+    words = [w for w in re.findall(r"[^\s]+", str(old or "")) if w]
+    if not words or not str(body or ""):
+        return body, 0
+    pattern = _GAP.join(re.escape(w) for w in words)
+    m = re.search(pattern, body, re.I)
+    if not m:
+        return body, 0
+    n = len(re.findall(pattern, body, re.I))
+    tags = "".join(re.findall(r"<[^>]+>", m.group(0)))
+    return body[:m.start()] + str(new or "") + tags + body[m.end():], n
+
+
 def plain_text(body: str) -> str:
     """Markup out, one space between everything. Headings are kept — an H2 can
     assert as loudly as a paragraph ("Glucosamine and chondroitin work")."""

@@ -10584,6 +10584,7 @@ def _fix_claim_panel(key: str, tenant: str, output_id: str,
       <form class="pop" method="post" action="/admin/claim_from_note">
         <input type="hidden" name="key" value="{_esc(key)}">
         <input type="hidden" name="output_id" value="{_esc(output_id)}">
+        <input type="hidden" name="original" value="{_esc(sentence[:600])}">
         <label>The claim &mdash; correct it before you file it</label>
         <textarea name="sentence" rows="3">{_esc(sentence[:600])}</textarea>
         <label>Evidence &mdash; what makes it checkable (optional)</label>
@@ -10598,8 +10599,9 @@ read it and corrected it, which is the review.">Save &amp; approve</button>
             title="Files it as a proposal — nothing may cite it until you
 approve it on Review.">Save as proposal</button>
         </div>
-        <span class="when">Approving makes it citable by every future draft.
-        A proposal is inert until you decide on it.</span>
+        <span class="when">Approving makes it citable by every future draft
+        <b>and rewrites this sentence in the draft</b>, so what publishes says
+        what you approved. A proposal is inert and changes nothing.</span>
       </form>
     </details>"""
 

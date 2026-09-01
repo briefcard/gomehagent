@@ -4165,6 +4165,51 @@ SABOTAGES = [
                "docstring exists to keep closed, and the panel's whole "
                "argument for approving is that a person HAS read it",
     },
+    {
+        "name": "an_approved_correction_reaches_the_draft",
+        "file": "app/web.py",
+        "find": "        if original and original != sentence:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_claim_fix.py"],
+        "why": "the corrected claim is filed and the article still says 250 "
+               "— so the right fact is on record, the wrong number is what "
+               "publishes, and the new claim makes the wrong sentence look "
+               "GROUNDED. That is worse than never having filed it",
+    },
+    {
+        "name": "a_correction_that_missed_says_so",
+        "file": "app/web.py",
+        "find": '        return ("The draft was NOT changed — that sentence is no longer in it, "',
+        "replace": '        return ("The draft now says it too."  # SABOTAGE and ("',
+        "suites": ["test_claim_fix.py"],
+        "why": "a correction that matched nothing reports success, so a "
+               "reader is told the draft was updated while it still reads "
+               "250. A silent no-op on the one action whose entire purpose "
+               "is to change the text is the worst shape this console has",
+    },
+    {
+        "name": "a_correction_keeps_the_markup_balanced",
+        "file": "app/claim_trace.py",
+        "find": '    tags = "".join(re.findall(r"<[^>]+>", m.group(0)))',
+        "replace": '    tags = ""  # SABOTAGE',
+        "suites": ["test_claim_fix.py"],
+        "why": "a sentence that opens inside <strong> and closes after it "
+               "loses its closing tag, so the rest of the article is bold "
+               "and the markup is unbalanced from there down. Losing "
+               "emphasis is cosmetic; losing a closing tag corrupts the "
+               "document",
+    },
+    {
+        "name": "a_correction_meets_the_ban_list",
+        "file": "app/web.py",
+        "find": "    hit = next((b for b in banned if str(b).strip()\n                and str(b).lower() in corrected.lower()), \"\")",
+        "replace": '    hit = ""  # SABOTAGE',
+        "suites": ["test_claim_fix.py"],
+        "why": "the one edit path that writes into a draft without meeting "
+               "the account's ban list is the correction panel — so "
+               "'handmade' can be typed straight into an article by the "
+               "control that exists to make articles more accurate",
+    },
 ]
 
 

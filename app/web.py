@@ -3706,6 +3706,59 @@ async def feedback_add(request: Request, key: str = Depends(admin_key)):
     return back(ok=said)
 
 
+def _apply_correction(art, original: str, corrected: str) -> str:
+    """Put the corrected sentence into the draft the correction was made on.
+
+    Returns the sentence to append to the flash — including when it did
+    NOTHING, which is the case that must never be silent: a reader told
+    "approved" while the article still reads 250 has been told the wrong
+    thing by omission.
+
+    THE BAN LIST BINDS THIS TOO. A correction is an owner edit and reaches the
+    body the same way the save form does, so it meets the same phrase scan —
+    otherwise the one edit path that skipped it would be the one nobody typed
+    into.
+    """
+    from . import claim_trace as _ct
+    body = str(getattr(art, "body", "") or "")
+    if not body:
+        return "The draft has no body to correct."
+    with db.SessionLocal() as s:
+        brand = (s.query(db.KbBrand)
+                 .filter(db.KbBrand.tenant == (art.tenant or "")).first())
+        banned = list((brand.banned_claims or []) if brand else [])
+    hit = next((b for b in banned if str(b).strip()
+                and str(b).lower() in corrected.lower()), "")
+    if hit:
+        return (f"The draft was NOT changed: {art.tenant}'s ban list forbids "
+                f"{hit!r}, whoever typed it.")
+    new_body, n = _ct.replace_sentence(body, original, corrected)
+    if not n:
+        return ("The draft was NOT changed — that sentence is no longer in it, "
+                "so correct it by hand or redraft.")
+    with db.SessionLocal() as s:
+        row = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id ==
+                       str(getattr(art, "output_id", "") or "")).first())
+        if row is None:
+            return "The draft was NOT changed — its record could not be read."
+        row.body = new_body
+        row.bytes = len(new_body)
+        # APPENDED, like every other edit. The draft-vs-published delta is the
+        # blog system's declared measure and a history that can lose a step
+        # cannot tell it.
+        k = 2 + s.query(db.ArtifactVersion).filter(
+            db.ArtifactVersion.output_id == row.output_id).count()
+        s.add(db.ArtifactVersion(tenant=row.tenant or "",
+                                 output_id=row.output_id, n=k, author="owner",
+                                 note="claim corrected", body=new_body))
+        s.commit()
+    extra = (f" It appeared {n} times; the first was changed and the rest "
+             f"were left, because a sentence repeated is two decisions."
+             if n > 1 else "")
+    return f"The draft now says it too.{extra}"
+
+
 @app.post("/admin/claim_from_note")
 async def claim_from_note(request: Request, key: str = Depends(admin_key)):
     """Turn a sentence in a draft into a PROPOSED claim.
@@ -3749,6 +3802,7 @@ async def claim_from_note(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     output_id = str(form.get("output_id") or "")
     sentence = " ".join(str(form.get("sentence") or "").split())[:600]
+    original = " ".join(str(form.get("original") or "").split())[:600]
     evidence = " ".join(str(form.get("evidence") or "").split())[:300]
     entity_key = str(form.get("entity_key") or "").strip()
     approve = str(form.get("action") or "") == "approve"
@@ -3787,8 +3841,21 @@ async def claim_from_note(request: Request, key: str = Depends(admin_key)):
     if got and got.lower().startswith(("unknown", "needs")):
         return back(err=got[:280])
     if approve:
-        return back(ok="Approved and on file — every future draft may cite it. "
-                       "Edit it any time on Review \u00b7 Claims.")
+        # AND THE DRAFT IN FRONT OF YOU SAYS THE OLD NUMBER. Owner,
+        # 2026-08-31: *"check the updated text in an edited claim and adjust
+        # it in the draft copy… once it's approved."* Correcting 250 to 180
+        # and leaving the article saying 250 files the right fact and
+        # publishes the wrong one — and the claim now makes the wrong sentence
+        # look grounded, which is worse than not having filed it.
+        #
+        # ONCE APPROVED, and only then: a proposal is inert, so rewriting the
+        # draft on one would be editing an article on the strength of a
+        # decision nobody has made.
+        said = ("Approved and on file — every future draft may cite it. "
+                "Edit it any time on Review \u00b7 Claims.")
+        if original and original != sentence:
+            said += " " + _apply_correction(art, original, sentence)
+        return back(ok=said)
     return back(ok="Proposed — it is NOT usable until you approve it. Add the "
                    "evidence and the source on Review \u00b7 Claims.")
 

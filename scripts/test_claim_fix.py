@@ -128,11 +128,78 @@ def main() -> int:
        "assess_kind would call that an observation; a person who corrected it "
        "and pressed approve has already answered that question")
 
+    print("\n— and the DRAFT is corrected too, once approved —")
+    oid4 = _draft()
+    with db.SessionLocal() as s_:
+        _a = (s_.query(db.ArtifactBody)
+              .filter(db.ArtifactBody.output_id == oid4).first())
+        # Markup THROUGH the sentence, which is the normal case: the claim
+        # margin reads plain text, so the sentence is not a literal substring
+        # of the body it came from.
+        _a.body = ("<p>A bright room. <strong>Glassbox</strong> has the "
+                   "capacity for 250&nbsp;people.</p>")
+        s_.commit()
+    r4 = c.post(f"/admin/claim_from_note?key={KEY}",
+                data={"output_id": oid4, "original": WRONG, "sentence": RIGHT,
+                      "evidence": "", "entity_key": "glassbox",
+                      "action": "approve"},
+                follow_redirects=False)
+    with db.SessionLocal() as s_:
+        body = (s_.query(db.ArtifactBody)
+                .filter(db.ArtifactBody.output_id == oid4).first()).body
+    ck("the draft now says the corrected number", "180" in body, body[:90])
+    ck("  and no longer says the wrong one", "250" not in body, body[:90])
+    ck("  the markup is still balanced",
+       body.count("<strong>") == body.count("</strong>"),
+       "a sentence opening inside <strong> and closing after it would leave "
+       "the tag unclosed and the rest of the article bold")
+    ck("  the flash says the draft changed",
+       "draft now says it too" in r4.headers.get("location", "").replace("%20", " ")
+       or "draft%20now%20says" in r4.headers.get("location", ""),
+       r4.headers.get("location", "")[-90:])
+    with db.SessionLocal() as s_:
+        vs = (s_.query(db.ArtifactVersion)
+              .filter(db.ArtifactVersion.output_id == oid4).all())
+    ck("  and it is a VERSION, not a silent overwrite",
+       any((v.note or "") == "claim corrected" for v in vs),
+       "the draft-vs-published delta is the blog system's declared measure "
+       "and a history that can lose a step cannot tell it")
+
+    print("\n— when the sentence has moved on, it SAYS so —")
+    oid5 = _draft()
+    with db.SessionLocal() as s_:
+        _a = (s_.query(db.ArtifactBody)
+              .filter(db.ArtifactBody.output_id == oid5).first())
+        _a.body = "<p>Something else entirely.</p>"
+        s_.commit()
+    r5 = c.post(f"/admin/claim_from_note?key={KEY}",
+                data={"output_id": oid5, "original": WRONG, "sentence": RIGHT,
+                      "evidence": "", "entity_key": "", "action": "approve"},
+                follow_redirects=False)
+    ck("a miss is reported, not passed over",
+       "NOT%20changed" in r5.headers.get("location", ""),
+       "a reader told 'approved' while the article still reads 250 has been "
+       "told the wrong thing by omission")
+
+    print("\n— a correction meets the ban list like any other edit —")
+    kb.add_banned("baci", "handmade")
+    oid6 = _draft()
+    r6 = c.post(f"/admin/claim_from_note?key={KEY}",
+                data={"output_id": oid6, "original": WRONG,
+                      "sentence": "Glassbox is handmade.", "evidence": "",
+                      "entity_key": "", "action": "approve"},
+                follow_redirects=False)
+    ck("the draft is not rewritten with a banned phrase",
+       "ban%20list%20forbids" in r6.headers.get("location", ""),
+       "the one edit path that skipped the ban list would be the one nobody "
+       "typed into")
+
     print("\n— proposing is unchanged: inert until reviewed —")
     oid3 = _draft()
     n_before = len(kb.pending_claims("baci"))
     c.post(f"/admin/claim_from_note?key={KEY}",
-           data={"output_id": oid3, "sentence": "Ceilings are 6.2 metres.",
+           data={"output_id": oid3, "original": WRONG,
+                 "sentence": "Ceilings are 6.2 metres.",
                  "evidence": "", "entity_key": "", "action": "propose"},
            follow_redirects=False)
     ck("it is proposed, not approved",
