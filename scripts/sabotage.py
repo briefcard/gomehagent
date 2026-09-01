@@ -3927,8 +3927,8 @@ SABOTAGES = [
     {
         "name": "a_demoted_claim_keeps_its_row",
         "file": "app/kb.py",
-        "find": '        row.review, row.status = prov.REJECTED, "retired"\n        s.commit()\n        text = (row.claim or "")[:60]',
-        "replace": '        s.delete(row)  # SABOTAGE\n        s.commit()\n        text = ""',
+        "find": '        row.review, row.status = prov.REJECTED, "retired"\n        s.commit()\n        text, ctx_id, ctx_text = (row.claim or "")[:60], ctx.id, row.claim',
+        "replace": '        s.delete(row)  # SABOTAGE\n        s.commit()\n        text, ctx_id, ctx_text = "", ctx.id, ""',
         "suites": ["test_context.py"],
         "why": "demoting a claim to background DELETES it, so every output "
                "already on the ledger that cited it has a dangling id and the "
@@ -3947,6 +3947,55 @@ SABOTAGES = [
                "proof' with the proof attached. That is proof wearing another "
                "hat, and it is exactly the thing background exists to stop "
                "being quotable",
+    },
+    {
+        "name": "background_is_an_indexed_kind",
+        "file": "app/kb.py",
+        "find": '        embed.ensure(tenant, "context", row_id, text)',
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "background goes back to being invisible to semantic recall — "
+               "`embed` indexes claims and situations and not this — so a "
+               "statement re-filed in different words cannot be matched "
+               "against what is already there. That is the entire purpose of "
+               "having somewhere to put the things that keep coming up",
+    },
+    {
+        "name": "the_same_statement_is_not_filed_twice",
+        "file": "app/kb.py",
+        "find": "        if dupe is not None:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_context.py"],
+        "why": "background loses the identity a claim has, so re-typing the "
+               "same observation a fortnight later files a second row and the "
+               "drafter is handed both. `prov.fingerprint` already decides "
+               "two claims are the same claim; background having a weaker "
+               "identity than proof is backwards",
+    },
+    {
+        "name": "a_filing_check_spans_both_kinds",
+        "file": "app/kb.py",
+        "find": '        for kind, live, field in (("claim", live_cl, "claim"),\n                                  ("context", live_ctx, "text")):',
+        "replace": '        for kind, live, field in (("claim", live_cl, "claim"),):  # SABOTAGE',
+        "suites": ["test_context.py"],
+        "why": "the near-duplicate check sees claims only, so filing "
+               "background cannot notice the same statement is already filed "
+               "as background — each of the two dedup mechanisms this repo "
+               "has ends up able to see half the knowledge base, which is the "
+               "state that made this work necessary",
+    },
+    {
+        "name": "an_indexed_kind_is_a_kind_the_index_accepts",
+        "file": "app/embed.py",
+        "find": '"media", "context",',
+        "replace": '"media",  # SABOTAGE',
+        "suites": ["test_catalog_vocabulary.py", "test_context.py"],
+        "why": "`ensure` returns the STRING \"unknown kind\" rather than "
+               "raising, so a kind the KB indexes and the index does not "
+               "accept fails in silence — background unsearchable while every "
+               "surface reports it filed. That is this module's own "
+               "docstring's warning ('degrading silently is not allowed') "
+               "broken against itself, and it shipped once already",
     },
 ]
 

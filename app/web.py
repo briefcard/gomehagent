@@ -3432,17 +3432,40 @@ async def context_add(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant") or "")
     sit = str(form.get("situation") or "").strip()
     from . import kb as _kb
-    got = _kb.add_context(
-        tenant, str(form.get("text") or ""),
-        entity_key=str(form.get("entity_key") or "").strip(),
-        situations=[sit] if sit else [], source="console")
-    # `add_context` returns a row id on success and a SENTENCE on refusal —
-    # the same shape `seo_tools._propose` uses. Reading which is the
-    # difference between a note that was filed and one that was not.
+    text = str(form.get("text") or "")
+    ent = str(form.get("entity_key") or "").strip()
+    # ASKED BEFORE FILING, and it does not block. Owner's rule everywhere else
+    # in this layer — enrich, do not gatekeep — and the right one here: two
+    # sentences at 0.86 are sometimes one fact and sometimes two, and the
+    # layer that cannot tell must not be the one that decides.
+    near = _kb.similar(tenant, text, entity_key=ent)
+    got = _kb.add_context(tenant, text, entity_key=ent,
+                          situations=[sit] if sit else [], source="console")
+    # `add_context` returns a row id on success, `already-on-file:<id>` when
+    # the same statement is already filed, and a SENTENCE on refusal — the
+    # same shape `seo_tools._propose` uses. Reading which is the difference
+    # between a note that was filed and one that was not.
+    if got.startswith("already-on-file:"):
+        return _back_to_content(
+            tenant, sub="context",
+            msg="Already on file, word for word — nothing filed twice.")
     filed = len(got) == 32 and " " not in got
-    return _back_to_content(tenant, sub="context",
-                            msg="Filed — background, not proof" if filed else "",
-                            err="" if filed else got)
+    if not filed:
+        return _back_to_content(tenant, sub="context", err=got)
+    # WHAT IT RESEMBLES, said at the moment of filing. A duplicate in another
+    # phrasing is the case this whole lookup exists for, and the person who
+    # just typed it is the only one who can tell whether it is one.
+    say = "Filed — background, not proof"
+    _n = [f"background: {x['text'][:60]}" for x in near["context"]] + \
+         [f"claim: {x['text'][:60]}" for x in near["claims"]]
+    if _n:
+        say += (". Close to what is already on file — "
+                + "; ".join(_n[:2])
+                + ". Retire one if they are the same thing.")
+    elif near["degraded"]:
+        say += (f". Near-duplicate matching did not run ({near['degraded']}), "
+                f"so this was not checked against similar wording.")
+    return _back_to_content(tenant, sub="context", msg=say)
 
 
 @app.get("/admin/context_retire")

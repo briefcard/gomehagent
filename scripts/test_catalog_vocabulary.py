@@ -165,6 +165,29 @@ def main() -> int:
            for v in dossier.SCOPES.values()),
        "who this is, what may never be said, and what is not established")
 
+    # --- every kind the KB indexes is a kind the index accepts -------------
+    #
+    # `embed.KINDS` is an allowlist and `ensure` returns "unknown kind" for
+    # anything outside it — a STRING, not a raise, so a caller that does not
+    # read the return gets silence. `context` shipped with its table, its
+    # accessors, its retrieval and its console in one commit and not on that
+    # line, so background was unsearchable while every surface reported it
+    # filed. Computed from the calls, both directions.
+    import ast as _ast
+    from app import embed as _embed
+    _indexed = set()
+    for _n in _ast.walk(_ast.parse((ROOT / "app" / "kb.py").read_text())):
+        if not isinstance(_n, _ast.Call):
+            continue
+        if getattr(_n.func, "attr", "") not in ("ensure", "forget", "search",
+                                                "pairs"):
+            continue
+        if len(_n.args) >= 2 and isinstance(_n.args[1], _ast.Constant):
+            _indexed.add(_n.args[1].value)
+    _unknown = sorted(k for k in _indexed if k not in _embed.KINDS)
+    ck("every kind the KB indexes is accepted by the index", not _unknown,
+       ", ".join(_unknown) or ", ".join(sorted(_indexed)))
+
     # --- the reference describes the code, so the code writes it -----------
     gen = ROOT / "scripts" / "gen_systems_reference.py"
     ck("the per-system reference has a generator", gen.exists(), gen.name)

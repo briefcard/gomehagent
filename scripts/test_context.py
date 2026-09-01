@@ -39,11 +39,37 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import (bundle, db, dossier, kb, resolve as rs,  # noqa: E402
-                 systems, tenants, web)
+from app import (bundle, db, dossier, embed, kb,  # noqa: E402
+                 resolve as rs, systems, tenants, web)
 
 KEY = "s3cret"
 _fail = []
+
+
+def _fake_embed(texts):
+    """A deterministic bag-of-words embedder, so the semantic half RUNS here.
+
+    Without it every semantic assertion in this file is vacuous offline: no
+    `OPENAI_API_KEY` means `embed_texts` degrades, `similar` returns fingerprint
+    matches only, and a guard that deletes the whole context branch reports
+    `MISSED` because nothing observable changed. Two of them did exactly that
+    on 2026-08-31 before this existed.
+
+    Tokens hashed into 64 buckets: a rephrasing shares most of its words and
+    lands near, which is the property under test — not the provider's quality.
+    """
+    import hashlib
+    import re as _re
+    out = []
+    for t in texts:
+        v = [0.0] * 64
+        for w in _re.findall(r"[a-z]+", (t or "").lower()):
+            if len(w) < 3:
+                continue
+            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1.0
+        n = sum(x * x for x in v) ** 0.5 or 1.0
+        out.append([x / n for x in v])
+    return out, ""
 
 
 def ck(label, cond, detail=""):
@@ -53,7 +79,31 @@ def ck(label, cond, detail=""):
         _fail.append(label)
 
 
+def _indexed_kinds() -> set:
+    """Which kinds `kb` actually indexes — read from the calls, not recalled.
+
+    Background landed unindexed: `embed` already covered `claim` and
+    `situation`, and nothing put context in front of it, so a rephrasing of
+    something already on file could not be found by anything. That is the
+    whole reason for having somewhere to put statements that keep coming up
+    in different words.
+    """
+    import ast
+    import pathlib as _pl
+    src = (_pl.Path(__file__).resolve().parent.parent / "app" / "kb.py")
+    out = set()
+    for n in ast.walk(ast.parse(src.read_text())):
+        if not isinstance(n, ast.Call):
+            continue
+        if getattr(n.func, "attr", "") not in ("ensure", "forget"):
+            continue
+        if len(n.args) >= 2 and isinstance(n.args[1], ast.Constant):
+            out.add(n.args[1].value)
+    return out
+
+
 def main() -> int:
+    embed._PROVIDER = _fake_embed          # the seam, replaced — see above
     db.init_db()
     tenants.seed()
     kb.ensure_brand("baci", "Baci")
@@ -191,6 +241,42 @@ def main() -> int:
     ck("the approved-claim editor has it too",
        r4.status_code == 303 and len(kb.contexts("baci")) == n2 + 1,
        r4.headers.get("location", "")[:90])
+
+    print("\n— the same statement twice is one row, not two —")
+    n0 = len(kb.contexts("baci"))
+    again = kb.add_context("baci", "buyers ask about lead time before price")
+    ck("a re-typed statement is recognised, in any casing",
+       again.startswith("already-on-file:") and len(kb.contexts("baci")) == n0,
+       again[:40])
+    ck("  but the same words about a THING are a different statement",
+       len(kb.add_context("baci", "Buyers ask about lead time before price.",
+                          entity_key="vera")) == 32,
+       "entity is part of the identity, the same as it is for a claim")
+
+    print("\n— and the lookup spans BOTH kinds —")
+    kb.add_claim("baci", "Ships in three days.", "carrier data", [])
+    r = kb.similar("baci", "Ships in three days.")
+    ck("an existing CLAIM is found from a filing check",
+       r["exact"].startswith("claim:"), r["exact"][:24])
+    r2 = kb.similar("baci", "buyers ask about lead time before price")
+    ck("  and so is existing BACKGROUND",
+       r2["exact"].startswith("context:"), r2["exact"][:24])
+    ck("  and when the semantic half cannot run it SAYS so",
+       isinstance(r2["degraded"], str),
+       r2["degraded"] or "(semantic ran)")
+    ck("background is an INDEXED kind now, like claims",
+       "context" in _indexed_kinds(), str(sorted(_indexed_kinds())))
+    # THE PROPERTY THE OWNER ASKED FOR, asserted on behaviour: a REPHRASING,
+    # sharing no fingerprint with anything, is matched against what is on file.
+    kb.add_context("baci", "Lead times are the first thing trade buyers raise.")
+    r3 = kb.similar("baci", "Trade buyers raise lead times first of all")
+    ck("a rephrasing is matched to existing background",
+       any("Lead times" in x["text"] for x in r3["context"]),
+       f"{[x['text'][:40] for x in r3['context']]} · {r3['degraded']}")
+    ck("  and a rephrased CLAIM is found too, from the same call",
+       any("three days" in x["text"].lower() for x in
+           kb.similar("baci", "Orders ship within three days")["claims"]),
+       "one lookup, both kinds — each dedup mechanism used to see half")
 
     print("\n— retiring keeps the record —")
     n_before = len(kb.contexts("baci"))

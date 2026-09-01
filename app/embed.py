@@ -40,7 +40,14 @@ log = logging.getLogger("embed")
 # `thread` and `document` are the correspondence archive. They were the point
 # of making this table polymorphic: adding the two kinds that fix the inbox
 # agent is a tuple entry, not a migration.
-KINDS = ("claim", "objection", "situation", "entity", "media",
+#: `context` added 2026-08-31 with `db.KbContext`. The table, its accessors,
+#: its retrieval and its console all shipped in one commit and this line did
+#: not — so `ensure` returned "unknown kind 'context'", the caller's
+#: try/except swallowed it, and background was unsearchable while every
+#: surface said it was filed. A degrade that reads like a working path, which
+#: is the failure this module's own docstring warns about, committed against
+#: it. `test_catalog_vocabulary` now joins the two lists.
+KINDS = ("claim", "objection", "situation", "entity", "media", "context",
          "thread", "document")
 
 #: Cosine floor for a semantic match to count. text-embedding-3 puts unrelated

@@ -200,19 +200,37 @@ def main() -> int:
         # which is the worst kind of red — a suite that fails on a particular
         # day teaches people that red means "try again tomorrow".
         #
-        # Ten days back is outside the six-day rest window and inside the
-        # month the cap counts, so the cap is the only gate left and the
-        # assertion below tests what it says it tests.
+        # TEN DAYS BACK WAS THE BUG THE COMMENT ABOVE WAS WORRYING ABOUT.
+        # The cap counts by calendar month (`planner._month`, "%Y-%m"), so on
+        # the 1st through the 10th "ten days ago" is LAST month, the plan does
+        # not count, and this suite goes red for the first days of every
+        # month — the precise thing the note above says must not happen,
+        # written into the fixture underneath it. Found 2026-09-01, the 1st.
+        #
+        # There is no date that is both outside a six-day rest window and
+        # inside the current month on the 1st, so dating around it cannot
+        # work. It does not need to: `planner` checks the CAP first
+        # (planner.py:414) and only then the rest window (planner.py:417), so
+        # a plan dated the 1st satisfies the cap fixture whatever the rest
+        # gate would have said. The old assertion below asserted an ordering
+        # the code does not use, and passed only because ten days happened to
+        # clear both.
         import datetime as _dt
         _pre = ref.rsplit(":", 1)[0]
-        _row.ref = f"{_pre}:{(_dt.date.today() - _dt.timedelta(days=10))}"
+        _row.ref = f"{_pre}:{_dt.date.today().replace(day=1)}"
+        _row_ref = _row.ref
         s.commit()
     ck("the fixture has no open plan for that cohort now",
        not any(":cart_abandoners:" in r for r in _plan_refs("baci")))
-    ck("…and the one it consumed is outside the rest window",
-       planner._nearest_campaign("baci", "cart_abandoners",
-                                 _dt.date.today()) > planner.rest_days_for(camp),
-       "otherwise the rest gate answers first and the cap is never reached")
+    # THE FIXTURE'S REAL PRECONDITION: the consumed plan has to fall in the
+    # month the cap counts. That is what broke — `_month` is "%Y-%m", so a
+    # plan dated ten days back is LAST month for the first ten days of every
+    # one, the cap sees nothing, and this suite went red on a calendar.
+    ck("…and the plan it consumed is inside the month the cap counts",
+       any(r.rsplit(":", 1)[1].startswith(_dt.date.today().strftime("%Y-%m"))
+           for r in _plan_refs("baci") + [_row_ref]
+           if ":cart_abandoners:" in r),
+       f"this month is {_dt.date.today().strftime('%Y-%m')}")
     _carts("baci", 8, start=100)
     g = _seg("baci", "cart_abandoners")
     ck("the fixture really is over the floor again", g["ready"], str(g["people"]))

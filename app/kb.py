@@ -2796,13 +2796,106 @@ def add_context(tenant: str, text: str, *, entity_key: str = "",
                     f"it against one that exists, or leave it blank for "
                     f"something true of the brand generally.")
     tags = [t.strip() for t in (situations or []) if str(t).strip()]
+    # THE SAME IDENTITY A CLAIM HAS. `prov.fingerprint` is the normalised form
+    # that decides two claims are the same claim, and the entity is part of it
+    # because the same sentence about two products is two statements. Without
+    # this, filing the same observation twice — which is exactly what happens
+    # when a note is re-typed a fortnight later — made two rows and put both
+    # in front of the drafter.
+    fp = prov.fingerprint(text, entity_key or "")
     with db.SessionLocal() as s:
+        dupe = (s.query(db.KbContext)
+                .filter(db.KbContext.tenant == tenant,
+                        db.KbContext.fingerprint == fp,
+                        db.KbContext.status == "active").first())
+        if dupe is not None:
+            # Not an error and not a second row. Background has no strength to
+            # reinforce the way guidance does, so the honest answer is to say
+            # it is already on file and where.
+            return f"already-on-file:{dupe.id}"
         row = db.KbContext(tenant=tenant, text=text, entity_key=entity_key or "",
                            situations=tags, source=source or "",
-                           origin=origin, review=prov.APPROVED)
+                           origin=origin, review=prov.APPROVED, fingerprint=fp)
         s.add(row)
         s.commit()
-        return row.id
+        row_id = row.id
+    # INDEXED LIKE A CLAIM, and this is the half that was missing when the
+    # table landed. `embed` already indexes `claim` and `situation`; background
+    # was invisible to it, so a rephrasing of something already on file could
+    # not be found by anything — which is the whole point of having somewhere
+    # to put statements that come up repeatedly in different words.
+    try:
+        from . import embed
+        embed.ensure(tenant, "context", row_id, text)
+    except Exception:                                            # noqa: BLE001
+        pass        # an unindexed row is worse than an indexed one, not fatal
+    return row_id
+
+
+def similar(tenant: str, text: str, *, entity_key: str = "",
+            limit: int = 4) -> dict:
+    """Is this already on file — as a claim, or as background?
+
+    Owner, 2026-08-31: *"Even if the output of the system rephrases claims or
+    background info in different ways, we should be able to match it with
+    existing information in the knowledge base."*
+
+    ACROSS BOTH KINDS, which is the point. Claims were indexed and background
+    was not, so the two dedup mechanisms this repo already had could each only
+    see half the knowledge base: `add_claim` collapsed a repeated claim by
+    fingerprint and could not see that the same sentence was already filed as
+    background, and background could not see anything at all. A statement that
+    keeps coming up in different words is exactly the case both were for.
+
+    IT SURFACES, IT DOES NOT GATEKEEP — the standing rule in `resolve`, and
+    the right one here: a near-match is evidence for a person, not grounds for
+    a refusal. Two sentences at 0.86 are sometimes one fact and sometimes two,
+    and the layer that cannot tell must not be the one that decides.
+
+    `degraded` carries WHY when the semantic pass could not run — no key, no
+    network, nothing indexed — because a fallback that reads like the real
+    path is how the extractor ran at 0% recall for weeks.
+    """
+    out: dict = {"claims": [], "context": [], "degraded": "", "exact": ""}
+    text = (text or "").strip()
+    if not text:
+        return out
+    fp = prov.fingerprint(text, entity_key or "")
+    with db.SessionLocal() as s:
+        hit = (s.query(db.KbContext)
+               .filter(db.KbContext.tenant == tenant,
+                       db.KbContext.fingerprint == fp,
+                       db.KbContext.status == "active").first())
+        if hit is not None:
+            out["exact"] = f"context:{hit.id}"
+        else:
+            c = (s.query(db.KbClaim)
+                 .filter(db.KbClaim.tenant == tenant,
+                         db.KbClaim.fingerprint == fp,
+                         db.KbClaim.status != "retired").first())
+            if c is not None:
+                out["exact"] = f"claim:{c.id}"
+    try:
+        from . import embed
+        live_ctx = {c.id: c for c in contexts(tenant)}
+        live_cl = {c.id: c for c in claims(tenant)}
+        for kind, live, field in (("claim", live_cl, "claim"),
+                                  ("context", live_ctx, "text")):
+            hits, why, _ = embed.search(tenant, kind, text, limit=limit * 2)
+            out["degraded"] = out["degraded"] or why
+            for h in hits[:limit * 2]:
+                row = live.get(h["row_id"])
+                if row is None:
+                    continue    # retired or demoted since indexing
+                out["claims" if kind == "claim" else "context"].append(
+                    {"id": row.id, "text": getattr(row, field),
+                     "score": round(h["score"], 3),
+                     "scope": (row.entity_key or "brand-wide")})
+            out["claims" if kind == "claim" else "context"] = \
+                out["claims" if kind == "claim" else "context"][:limit]
+    except Exception as exc:                                     # noqa: BLE001
+        out["degraded"] = out["degraded"] or f"{exc.__class__.__name__}"
+    return out
 
 
 def claim_to_context(claim_id: str) -> str:
@@ -2854,7 +2947,16 @@ def claim_to_context(claim_id: str) -> str:
         # already knows how to skip a retired claim skips this one.
         row.review, row.status = prov.REJECTED, "retired"
         s.commit()
-        text = (row.claim or "")[:60]
+        text, ctx_id, ctx_text = (row.claim or "")[:60], ctx.id, row.claim
+        tenant_key = row.tenant
+    # The demoted row joins the background index and leaves the claim one —
+    # both halves, or a search finds it as proof it no longer is.
+    try:
+        from . import embed
+        embed.forget(tenant_key, "claim", claim_id)
+        embed.ensure(tenant_key, "context", ctx_id, ctx_text)
+    except Exception:                                            # noqa: BLE001
+        pass
     return (f"Filed as background: {text}. It is no longer citable proof and "
             f"no longer counts toward readiness. Making it a claim again is "
             f"an approval, not an edit.")
@@ -2894,8 +2996,16 @@ def archive_context(context_id: str) -> str:
         if not row:
             return "No such note."
         row.status = "archived"
+        tenant, text = row.tenant, (row.text or "")[:60]
         s.commit()
-        return f"Retired: {(row.text or '')[:60]}"
+    # An index that keeps rows the KB has retired is a second source of truth
+    # with a window in it — the failure `embed`'s own docstring names.
+    try:
+        from . import embed
+        embed.forget(tenant, "context", context_id)
+    except Exception:                                            # noqa: BLE001
+        pass
+    return f"Retired: {text}"
 
 
 def proposed_assets(tenant: str) -> list[db.KbAsset]:
