@@ -20,7 +20,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'ce.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import (config, db, esp, kb, skill,  # noqa: E402
+from app import (coherence, config, db, esp, kb, skill,  # noqa: E402
                  skill_pack, systems, tenants)
 
 _fail = []
@@ -106,6 +106,52 @@ def main():
        bool(item.get("claim_ids")), str(item.get("claim_ids")))
     ck("the rendered HTML is on the item", bool(item.get("meta", {}).get("html")))
     ck("it targeted the segment", item.get("meta", {}).get("segment") == "reorder_due")
+
+    print("\n— a plan naming several rooms outranks whatever was featured —")
+    # Owner, 2026-08-31: an email about a LOCATION is about its rooms, and the
+    # value proposition is the range. `also` used to be whatever the entity
+    # picker happened to return, so a plan naming three was silently narrowed
+    # to the ones it chose — and the gate then read every other room's fact as
+    # proof borrowed from elsewhere.
+    for _k, _n in (("glassbox", "Glassbox"), ("atrium", "Atrium")):
+        kb.add_entity("baci", "product", _k, _n, origin="human")
+    # THE NAMED ROOM MUST BE ONE THE PICKER WOULD NOT HAVE CHOSEN, or the
+    # assertion passes on the picker's behaviour and says nothing about the
+    # plan. `ents` is capped at three and drawn from what the bundle carries;
+    # an unavailable room is not in it, so its presence can only come from the
+    # plan. (Asserted below — this suite reported [ MISSED ] against an
+    # `atrium` the picker was returning anyway.)
+    with db.SessionLocal() as _s:
+        _row = (_s.query(db.KbEntity)
+                .filter(db.KbEntity.tenant == "baci",
+                        db.KbEntity.key == "atrium").first())
+        _row.availability = "unavailable"
+        _s.commit()
+    _seen = {}
+    _real_commit = coherence.commit
+
+    def _spy(kind, key, **kw):
+        got = _real_commit(kind, key, **kw)
+        _seen.update(got)
+        return got
+    coherence.commit = _spy
+    try:
+        skill.run("campaign_email", "baci", segment="reorder_due",
+                  entity_key="glassbox", entity_keys="atrium")
+    finally:
+        coherence.commit = _real_commit
+    ck("the named room joins the subjects the email is about",
+       "atrium" in (_seen.get("also") or []), str(_seen.get("also")))
+    ck("  and it is there because the PLAN said so, not the picker",
+       "atrium" not in [e.get("key") for e in
+                        (skill_pack._last_ents or [])],
+       "an assertion that passes on the picker's behaviour says nothing "
+       "about the plan")
+    ck("  and its claims are legitimate proof in that email",
+       "atrium" in (_seen.get("proof_scopes") or []),
+       str(_seen.get("proof_scopes")))
+    ck("  while the hero still governs the positioning",
+       _seen.get("key") == "glassbox", str(_seen.get("key")))
 
     print("\n— personalization is made native for the client's ESP —")
     ck("the {{FIRST_NAME}} token was rendered native",

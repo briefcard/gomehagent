@@ -4280,6 +4280,28 @@ SABOTAGES = [
                "`audience_key` accepted a persona this account had never "
                "approved for a fortnight",
     },
+    {
+        "name": "every_drafting_system_can_name_several_subjects",
+        "file": "app/systems.py",
+        "find": "                dict(key=\"entity_keys\", label=\"Also about (comma-separated)\",\n                     required=False, kind=\"entity_list\"),\n                # The SOURCE for any urgency in the email.",
+        "replace": "                # SABOTAGE\n                # The SOURCE for any urgency in the email.",
+        "suites": ["test_entity_scope.py"],
+        "why": "campaign_email loses the field and only the blog can say a "
+               "piece is about several things — so the same account gets one "
+               "answer in an article and another in the email beside it, "
+               "which is the vocabulary drift this repo keeps closing",
+    },
+    {
+        "name": "a_plan_subject_outranks_the_pickers",
+        "file": "app/skill_pack.py",
+        "find": "        for k in _named:\n            if k != _subject and k not in _also:\n                _also.append(k)",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_campaign_email.py"],
+        "why": "an email is only as multi-subject as whatever the drafter "
+               "happened to feature, so a plan naming three rooms is "
+               "silently narrowed to the ones the picker chose — the plan is "
+               "the REVIEWED instruction and it stops outranking a guess",
+    },
 ]
 
 

@@ -792,11 +792,19 @@ def _run_ad_copy(ctx: Context) -> dict:
     # to serve.
     _label = ""
     _scopes: list[str] = []
+    from . import systems as _sysm_ad
+    _named_ad = [k for k in _sysm_ad.entity_list(
+        ctx.params.get("entity_keys") or "") if k != entity_key]
     if entity_key:
         _row = next((e for e in kb_mod.entities(ctx.tenant, available_only=False)
                      if e.key == entity_key), None)
         _label = (getattr(_row, "name", "") or "") if _row else ""
-        _scopes = [entity_key] + list(kb_mod.ancestors(ctx.tenant, entity_key))
+        # THE HERO PLUS WHAT ELSE THE BATCH IS ABOUT. An ad for a venue may
+        # legitimately lean on the campus it sits in; `entity_key` is still
+        # the hero, and this is the rest of what its copy may cite.
+        _scopes = ([entity_key] + _named_ad
+                   + [a for k in [entity_key] + _named_ad
+                      for a in kb_mod.ancestors(ctx.tenant, k)])
     _commit_base = dict(label=_label, audience=audience_key,
                         proof_scopes=_scopes)
 
@@ -1085,7 +1093,7 @@ register(Skill(
     # refuses manufactured urgency when no deadline exists. Both are owner
     # input — a generator inventing a discount or a deadline is the one
     # failure here that costs real money.
-    params=("entity_key", "audience_key", "variants", "utterance",
+    params=("entity_key", "entity_keys", "audience_key", "variants", "utterance",
             "revision_notes", "into_batch", "offer", "deadline",
             # awareness | interest | consideration | bottom — see app/funnel.py.
             # Optional: without it the stage is DERIVED, which briefs the
@@ -1753,6 +1761,10 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
         from . import model_error
         return None, "composed", model_error.explain(exc)
 
+
+#: What the entity picker chose on the last campaign run — a test seam,
+#: so a suite can tell a subject the PLAN named from one the picker did.
+_last_ents: list = []
 
 draft_campaign = _draft_campaign_live   # the seam the offline suite replaces
 
@@ -2523,10 +2535,25 @@ def _run_campaign_email(ctx: Context) -> dict:
     # audience instead; the parts are then held to agreeing with each other.
     _subject = str(ctx.params.get("entity_key") or "").strip() or (
         picked[0] if picked else "")
+    # WHAT THE PICKER CHOSE, kept so a suite can tell a plan's subjects from
+    # the drafter's. Without it an assertion about the plan passes whenever
+    # the picker happened to return the same room, which is how this went
+    # [ MISSED ] on 2026-08-31.
+    global _last_ents
+    _last_ents = list(ents)
+    # WHAT THE OWNER SAID THE SEND IS ABOUT, on top of what the drafter
+    # featured. `also` was whatever `ents` happened to hold, so an email
+    # covering three rooms was only as multi-subject as the picker made it.
+    # A plan naming them is the reviewed instruction and outranks that.
+    from . import systems as _sysm
+    _named = _sysm.entity_list(ctx.params.get("entity_keys") or "")
     if _subject:
         _sub_name = next((e.get("name", "") for e in ents
                           if e.get("key") == _subject), _subject)
         _also = [e.get("key", "") for e in ents if e.get("key") != _subject]
+        for k in _named:
+            if k != _subject and k not in _also:
+                _also.append(k)
         commitment = coherence.commit(
             "entity", _subject, label=_sub_name, audience=seg["key"],
             action=goal or seg.get("angle", ""), also=_also,
@@ -2545,9 +2572,16 @@ def _run_campaign_email(ctx: Context) -> dict:
         # No product at all is a legitimate email — a story, a letter. It has
         # no entity subject, so the subject checks are vacuous; the proof and
         # image checks still hold, and those are the ones that matter here.
-        commitment = coherence.commit("audience", seg["key"],
-                                      audience=seg["key"],
-                                      action=goal or seg.get("angle", ""))
+        commitment = coherence.commit(
+            "audience", seg["key"], audience=seg["key"],
+            action=goal or seg.get("angle", ""),
+            # A letter with no product subject may still be ABOUT several
+            # rooms, and the plan is where that was said. Without this the
+            # gate reads every venue fact in it as proof borrowed from
+            # somewhere else.
+            proof_scopes=(_named + [a for k in _named
+                                    for a in _kb.ancestors(ctx.tenant, k)])
+            or None)
     ctx.note(f"this email is about: {commitment.get('label') or seg['name']}"
              + (f" (with " + ", ".join(commitment["also"]) + ")"
                 if commitment.get("also") else ""))
@@ -3566,6 +3600,10 @@ register(Skill(
     # already made is the defect design rule 4 exists to stop.
     params=("revision_notes",
             "segment", "goal", "subject", "intent", "deadline", "entity_key",
+            # THE REST OF WHAT THE SEND IS ABOUT. `entity_key` is the hero;
+            # this is everything else its copy may cite, for the email whose
+            # subject is a place rather than a thing.
+            "entity_keys",
             # WHO IT IS WRITTEN FOR — back, and wired this time. Removing it
             # (ec58e7a) reasoned that "the segment already decides who is
             # written to". That conflated two different facts: the segment is

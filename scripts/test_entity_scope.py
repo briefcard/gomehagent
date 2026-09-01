@@ -174,6 +174,21 @@ def main() -> int:
     ck("  while a run naming none still sees the brand alone",
        len(seen["claims"]) == 1, str(seen["claims"]))
 
+    print("\n— all three drafting systems can say it, the same way —")
+    # One field, one kind, one meaning. Three systems each inventing their own
+    # word for "the rest of what this is about" is the vocabulary drift this
+    # repo keeps closing; asserted rather than left to habit.
+    for k in ("blog", "campaign_email", "ad_creative"):
+        f = {x["key"]: x for x in systems.workflow(k)["plan_fields"]}
+        ck(f"  {k:15s} has the field", "entity_keys" in f, ", ".join(sorted(f)))
+        ck(f"    of the same checked kind",
+           f.get("entity_keys", {}).get("kind") == "entity_list")
+    for sk_key in ("blog_article", "campaign_email", "ad_copy"):
+        ck(f"  {sk_key:15s} accepts it",
+           "entity_keys" in skill.REGISTRY[sk_key].params,
+           "`run` refuses an undeclared parameter at the door, so a plan "
+           "field the skill has not declared is a field that blocks the run")
+
     print("\n— and nothing moves for a piece about one thing —")
     ck("an article naming one venue is unchanged",
        [c.claim for c in kb.claims("baci", entity_key="glassbox")] == one)

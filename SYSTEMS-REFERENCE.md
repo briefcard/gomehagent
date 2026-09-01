@@ -64,10 +64,10 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
 - **Connections:** at least one of `ads`, `commerce`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`, `entity`
 - **Skill** `ad_copy` — produces `draft`, tier 3, writes=False
-  - parameters: `entity_key`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
+  - parameters: `entity_key`, `entity_keys`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
   - constitutive (no draft without it): none
 - **Planner:** none — plans are filed by hand or by another system
-- **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `variants`
+- **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `entity_keys` (entity_list), `variants`
 - **Unit:** one ad batch for one audience × entity
 - **Artifact:** proposal_rows
 - **Ship:** approving marks the batch ready, then the copy is carried to the platform by hand and the join finds it again
@@ -99,11 +99,11 @@ Builds and schedules campaign sends from the catalogue and calendar.
 - **Connections:** `esp`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `entity`, `claim`, `objection`, `audience`, `asset`
 - **Skill** `campaign_email` — produces `draft`, tier 3, writes=True
-  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `audience_key`, `offer`, `utterance`, `draft_visual`
+  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`
   - constitutive (no draft without it): none
 - **Planner:** `campaign_rollout`
 - **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
-- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `deadline`, `offer`, `draft_visual` (flag)
+- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag)
 - **Unit:** a campaign email to one segment
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human, in the ESP

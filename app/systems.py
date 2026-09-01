@@ -199,6 +199,11 @@ CATALOG = {
                      choices=("story", "education", "proof", "offer")),
                 dict(key="entity_key", label="Featured entity", required=False,
                      kind="entity"),
+                # SEVERAL, WHEN THE SEND IS ABOUT A PLACE. Same field, same
+                # kind and same meaning as blog's: the hero above, everything
+                # else its copy may cite here.
+                dict(key="entity_keys", label="Also about (comma-separated)",
+                     required=False, kind="entity_list"),
                 # The SOURCE for any urgency in the email. Blank means there
                 # is no deadline — and then the craft check refuses to let the
                 # copy imply one. Urgency is only honest when something real
@@ -395,6 +400,10 @@ CATALOG = {
                 # nobody.
                 dict(key="audience_key", label="Written for", required=True,
                      kind="audience"),
+                # An ad for a venue may legitimately lean on the campus it
+                # sits in. The hero above still governs the positioning.
+                dict(key="entity_keys", label="Also about (comma-separated)",
+                     required=False, kind="entity_list"),
                 dict(key="variants", label="Variants (1–5)", required=False),
             ),
             artifact="proposal_rows",
