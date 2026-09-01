@@ -797,6 +797,12 @@ def settle(tenant: str) -> dict:
                 continue
             if pos <= WON_POSITION and row.status in ("published", "planned"):
                 row.status, won = "won", won + 1
+                # The HIGH-WATER MARK, set once and never cleared. `settle`
+                # walks a page back to `published` as soon as it slips, so
+                # this is the only thing that can tell "it ranked and stopped"
+                # from "it never ranked" — and those owe different work.
+                if row.won_at is None:
+                    row.won_at = db.utcnow()
             elif pos > WON_POSITION and row.status == "won":
                 row.status, lost = "published", lost + 1
         s.commit()
@@ -1407,6 +1413,109 @@ def aeo(tenant: str, *, days: int = 28) -> dict:
 # score delta would need snapshots nothing writes, and inventing one from the
 # current parts would be a number describing a week that was never measured.
 
+#: How long a page gets before "not ranking" is a fact about the page rather
+#: than about Google not having settled. Longer than `ATTRIBUTION_DAYS`, which
+#: is the floor for ATTRIBUTING a movement — this is the floor for ACTING on
+#: the absence of one, and acting is the more expensive mistake.
+REFRESH_AFTER_DAYS = 30
+
+#: And how long between refreshes of the same page. Refreshing something that
+#: has not had time to be re-crawled measures nothing and spends the budget
+#: that a page which HAS settled was waiting for.
+REFRESH_COOLDOWN_DAYS = 60
+
+
+def attention(tenant: str, *, top: int = 12) -> list[dict]:
+    """Published pages and what each one is owed. FOUR STATES, not one.
+
+    Owner, 2026-09-01: *"keywords often need a few articles to start ranking
+    for them right?"* Half right, and the half that matters is that a TOPIC
+    needs several pages while a KEYWORD needs one — two pages aimed at one
+    query cannibalise, and the engine picks one. So the answer is never a
+    second article on the same phrase.
+
+    The real gap was one step later. `writing_next` is `status == candidate`,
+    so once a page is published its keyword is never proposed again WHATEVER
+    IT DOES — while `progress()` has been measuring position against a control
+    the whole time. The system measured whether a page ranked and did nothing
+    with the answer.
+
+    THE FOUR STATES OWE DIFFERENT THINGS, and lumping them together is what
+    would make this lane noise:
+
+      · `too_early`  — inside REFRESH_AFTER_DAYS. Nothing is owed; Google has
+        not settled, and `progress` already refuses to attribute here.
+      · `no_reading` — Search Console has nothing for the phrase. That is an
+        INDEXATION question, not a content one, and a refresh does not answer
+        it.
+      · `slipping`   — it was `won` and is not now. The most urgent, because
+        something that worked stopped working.
+      · `stalled`    — past the window, ranking outside the top 3, and not
+        refreshed lately.
+
+    A page inside the cooldown is not listed at all: it was refreshed and is
+    waiting to be re-crawled, and offering it again is asking for a decision
+    that cannot yet be informed.
+    """
+    import datetime as _dt
+    now_utc = _dt.datetime.now(_dt.timezone.utc)
+    rows = [r for r in targets(tenant)
+            if (r.owner_priority or "") != "muted"
+            and r.status in ("published", "won")]
+    readings, _then = _period_readings(tenant, 7)
+    out: list[dict] = []
+    for r in rows:
+        pub = db.as_utc(r.published_at) if r.published_at else None
+        age = (now_utc - pub).days if pub else None
+        ref = db.as_utc(r.refreshed_at) if r.refreshed_at else None
+        since_refresh = (now_utc - ref).days if ref else None
+        if since_refresh is not None and since_refresh < REFRESH_COOLDOWN_DAYS:
+            continue
+        rd = readings.get(r.phrase)
+        pos = rd.position if rd else None
+        if age is not None and age < REFRESH_AFTER_DAYS:
+            state, owed = "too_early", "nothing yet — give it time to settle"
+        elif pos is None:
+            state, owed = ("no_reading",
+                           "Search Console has no reading — check it is "
+                           "indexed before rewriting anything")
+        elif r.status == "won" or pos <= WON_POSITION:
+            continue                      # winning: nothing owed
+        elif r.won_at is not None:
+            state, owed = "slipping", "it ranked and stopped — refresh it first"
+        else:
+            state, owed = "stalled", _owed_for(pos)
+        out.append({"phrase": r.phrase, "status": r.status, "position": pos,
+                    "role": r.role, "cluster": r.cluster_key,
+                    "target_url": r.target_url, "published_days": age,
+                    "since_refresh": since_refresh,
+                    "state": state, "owed": owed,
+                    "priority": r.priority})
+    order = {"slipping": 0, "stalled": 1, "no_reading": 2, "too_early": 3}
+    out.sort(key=lambda x: (order.get(x["state"], 9), -(x["priority"] or 0)))
+    return out[:top]
+
+
+def _owed_for(position: float) -> str:
+    """Which move the position itself argues for.
+
+    Stated data, not a model's guess — and the bands are the argument:
+
+      4-10  the page is close, so depth, intent match and question coverage
+            are what move it. Refresh THIS page.
+      11-30 usually topical authority rather than page quality. Supports in
+            the cluster, linking up to it.
+      >30   usually intent mismatch or indexation, and a refresh rarely fixes
+            either. Re-read what is actually ranking for the phrase before
+            spending anything on it.
+    """
+    if position <= 10:
+        return "close — refresh this page (depth, intent, questions)"
+    if position <= 30:
+        return "supports in its cluster, linking up — not a rewrite"
+    return "re-read the intent: what ranks for this may not be this page"
+
+
 def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
     """The map, split into the four questions worth asking of it."""
     rows = targets(tenant)
@@ -1490,6 +1599,10 @@ def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
         "new_this_week": fresh[:top],
         "opportunities": opportunities,
         "in_flight": in_flight,
+        # WHAT A PUBLISHED PAGE IS OWED. `writing_next` answers "what should
+        # we write"; nothing answered "what did we write that is not working",
+        # which is where more winning pages actually come from.
+        "attention": attention(tenant, top=top),
         "muted": [_row(r) for r in rows
                   if (r.owner_priority or "") == "muted"],
         "lessons": mute_lessons(tenant),

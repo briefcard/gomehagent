@@ -10218,7 +10218,48 @@ def _board_section(key: str, tenant: str, days: int) -> str:
         </details>"""
 
     counts = " · ".join(f"{n} {s}" for s, n in sorted(b["counts"].items()))
+
+    # WHAT A PUBLISHED PAGE IS OWED. Writing next answers "what should we
+    # write"; nothing answered "what did we write that is not working" — and
+    # that is where more winning pages actually come from, because a page at
+    # position 7 is a shorter distance than a page that does not exist.
+    _STATE = {
+        "slipping": ("off", "slipping"),
+        "stalled": ("gap", "stalled"),
+        "no_reading": ("nb", "no reading"),
+        "too_early": ("nb", "too early"),
+    }
+    att = "".join(
+        f'<tr><td>'
+        + (f'<a href="{_esc(r["target_url"])}">{_esc(r["phrase"])}</a>'
+           if r.get("target_url") else _esc(r["phrase"]))
+        + f'</td>'
+          f'<td><span class="chip {_STATE.get(r["state"], ("nb", ""))[0]}">'
+          f'{_esc(_STATE.get(r["state"], ("nb", r["state"]))[1])}</span></td>'
+          f'<td class="num">{r["position"] if r["position"] is not None else "—"}</td>'
+          f'<td class="num">{r["published_days"] if r["published_days"] is not None else "—"}</td>'
+          f'<td>{_esc(r["role"] or "")}</td>'
+          f'<td class="when">{_esc(r["owed"])}</td></tr>'
+        for r in b.get("attention") or []) or (
+        '<tr><td colspan="6" class="mut">nothing published is waiting on you '
+        '— every page is either winning, too new to judge, or recently '
+        'refreshed</td></tr>')
+
     return f"""
+    <h3>Needs attention <span class="when">published pages, and what each is
+    owed</span></h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>state</th><th>position</th><th>days live</th>
+          <th>role</th><th>what it is owed</th></tr>
+      {att}
+    </table>
+    <p class="when">A keyword needs ONE page &mdash; two aimed at the same
+    query compete with each other. A <em>topic</em> needs several, which is
+    what the pillar and its supports are. So nothing here proposes a second
+    article on the same phrase: close pages are refreshed, distant ones are
+    helped by supports in their cluster, and a page with no reading at all is
+    an indexing question before it is a writing one.</p>
+
     <h3>Writing next <span class="when">{_esc(counts)}</span></h3>
     <table class="tbl">
       <tr><th>keyword</th><th>tier</th><th>intent</th><th>role</th>

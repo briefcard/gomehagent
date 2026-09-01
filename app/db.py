@@ -1083,6 +1083,17 @@ class KeywordTarget(Base):
     output_id = Column(String, default="", index=True)   # -> Output.id
     run_id = Column(String, default="", index=True)      # -> SystemRun.id
     published_at = Column(DateTime(timezone=True))
+    #: When the page behind this phrase was last REWRITTEN, as distinct from
+    #: first published. Two jobs: it is the cooldown, so a page is not offered
+    #: for refresh again before it can have been re-crawled; and it is the
+    #: only way `progress` can ever answer whether refreshing works at all.
+    #: Adding the work without this would be adding it on faith.
+    refreshed_at = Column(DateTime(timezone=True))
+    #: The first time this phrase reached `WON_POSITION`. NEVER cleared —
+    #: `settle` moves `won` back to `published` the moment a page slips, so
+    #: without a remembered high-water mark "it ranked and stopped" is
+    #: indistinguishable from "it never ranked", and those owe different work.
+    won_at = Column(DateTime(timezone=True))
 
     #: Last computed priority + its components, so a ranking can be argued
     #: with rather than only obeyed.

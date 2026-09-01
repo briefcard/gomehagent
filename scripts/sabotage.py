@@ -4388,6 +4388,52 @@ SABOTAGES = [
                "it is sitting in a queue. A list that cannot be trusted "
                "about that is worse than not having one",
     },
+    {
+        "name": "a_published_page_that_is_not_working_is_work",
+        "file": "app/keywords.py",
+        "find": "        \"attention\": attention(tenant, top=top),",
+        "replace": "        \"attention\": [],  # SABOTAGE",
+        "suites": ["test_keyword_attention.py"],
+        "why": "the board goes back to answering only 'what should we "
+               "write' — so a page sitting at position 7, which is a far "
+               "shorter distance to a win than a page that does not exist "
+               "yet, is invisible for ever. `progress` goes on measuring "
+               "whether pages rank and nothing acts on the answer",
+    },
+    {
+        "name": "a_slipped_page_is_told_from_one_that_never_ranked",
+        "file": "app/keywords.py",
+        "find": "                if row.won_at is None:\n                    row.won_at = db.utcnow()",
+        "replace": "                pass  # SABOTAGE",
+        "suites": ["test_keyword_attention.py"],
+        "why": "`settle` walks a page back to `published` the moment it "
+               "slips, so with no remembered high-water mark 'it ranked and "
+               "stopped' is indistinguishable from 'it never ranked' — and "
+               "the first is the most urgent thing on the board while the "
+               "second may not be worth writing at all",
+    },
+    {
+        "name": "a_refreshed_page_is_left_to_settle",
+        "file": "app/keywords.py",
+        "find": "        if since_refresh is not None and since_refresh < REFRESH_COOLDOWN_DAYS:\n            continue",
+        "replace": "        if False:  # SABOTAGE\n            continue",
+        "suites": ["test_keyword_attention.py"],
+        "why": "a page refreshed last week is offered for refresh again, "
+               "before it can have been re-crawled — so the queue asks for a "
+               "decision that cannot yet be informed, and the refresh budget "
+               "is spent on measuring nothing",
+    },
+    {
+        "name": "the_move_is_chosen_by_where_the_page_sits",
+        "file": "app/keywords.py",
+        "find": "    if position <= 10:",
+        "replace": "    if True:  # SABOTAGE",
+        "suites": ["test_keyword_attention.py"],
+        "why": "every stalled page is told to refresh itself, including the "
+               "ones at position 40 where the problem is intent or "
+               "indexation and a rewrite changes nothing — the advice stops "
+               "being advice and becomes a default with a sentence attached",
+    },
 ]
 
 
