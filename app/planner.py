@@ -493,6 +493,36 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
 
 #: system key -> planner. The tick and the console both resolve through this,
 #: so a new planner is a row here and nothing else.
+def _links_up(row, pillars: dict) -> bool:
+    """Can this row link up, or is it going to ship pointing nowhere?
+
+    True for a pillar — it IS the top of its cluster and links sideways, so it
+    is never waiting on one. True for a support whose pillar has a resolving
+    `target_url`, which is the only form of "the pillar exists" the drafter
+    can see: the link pool is built from `target_url` alone.
+
+    AND TRUE FOR A SUPPORT WHOSE PILLAR IS STILL A CANDIDATE, which is the
+    distinction that keeps this rule from swallowing the older one. That case
+    is already handled, and handled BETTER, by the pillar-before-support rule
+    below: the pillar gets promoted ahead of it and the run SAYS so. Demoting
+    here as well would reach the same order by a silent route and cost the
+    sentence — and "silently planning something other than the thing that
+    ranked first is the kind of helpfulness nobody can audit" is why that
+    sentence exists. Caught by `test_blog_skill`, which asserts the run
+    reports its own reordering.
+
+    So this fires on the case nothing in the run can fix: a pillar that has
+    been WRITTEN — approved, even published — and still has no address. No
+    promotion helps, because there is nothing left to promote.
+    """
+    if (row.role or "") != "support":
+        return True
+    pillar = pillars.get(row.cluster_key)
+    if pillar is None or pillar.status == "candidate":
+        return True
+    return bool((pillar.target_url or "").strip())
+
+
 def blog_rollout(sysrow) -> dict:
     """Propose the next articles, off the keyword map, in cluster order.
 
@@ -560,7 +590,21 @@ def blog_rollout(sysrow) -> dict:
     # instead of it.
     order: list[str] = []
     by_phrase = {r.phrase: r for r in rows}
-    for row in rows:                     # already priority-ordered
+    # A SUPPORT WHOSE PILLAR HAS A REAL URL COMES FIRST. Owner, 2026-09-01:
+    # *"Lets prioritize linked support articles."* The pillar-before-support
+    # rule below handles the pillar that has not been WRITTEN; this handles the
+    # one that has been written and approved and still has no address, which
+    # `_run_blog_article` treats identically to not existing — it offers only
+    # siblings whose `target_url` resolves. So a support written into that
+    # cluster ships pointing nowhere and needs a second pass later, while one
+    # whose pillar is addressable can do its whole job the first time.
+    #
+    # A REORDER, NOT A REFUSAL, for the reason the ordering is stable
+    # everywhere else here: the unlinkable support is still real work and still
+    # gets written; it just does not go first when something else can land
+    # complete. Refusing it would punish the account for a fact about its CMS.
+    rows = sorted(rows, key=lambda r: 0 if _links_up(r, by_cluster_pillar) else 1)
+    for row in rows:                     # priority order, linkable first
         if row.role == "support":
             pillar = by_cluster_pillar.get(row.cluster_key)
             if pillar is not None and pillar.status == "candidate" \

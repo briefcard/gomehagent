@@ -4479,6 +4479,50 @@ SABOTAGES = [
                "the steady state this lane was built for, when fixing pages "
                "that already shipped is the only writing left",
     },
+    {
+        "name": "an_approved_article_with_no_address_is_flagged",
+        "file": "app/keywords.py",
+        "find": "            if o is None or (o.status or \"\") not in (\"approved\", \"published\"):",
+        "replace": "            if True:  # SABOTAGE",
+        "suites": ["test_link_flag.py"],
+        "why": "the flag empties, and an approved article nobody can link to "
+               "or measure goes back to reading as done — which is the state "
+               "it was already in, silently, in all three directions at once",
+    },
+    {
+        "name": "a_linkable_support_is_written_first",
+        "file": "app/planner.py",
+        "find": "    rows = sorted(rows, key=lambda r: 0 if _links_up(r, by_cluster_pillar) else 1)",
+        "replace": "    rows = list(rows)  # SABOTAGE",
+        "suites": ["test_link_flag.py"],
+        "why": "a support whose pillar has no address is written before one "
+               "whose pillar has a real URL, so it ships pointing nowhere and "
+               "needs a second pass later — while the article that could have "
+               "landed complete waits behind it",
+    },
+    {
+        "name": "an_address_is_a_flag_never_a_gate",
+        "file": "app/keywords.py",
+        "find": "    rows = [r for r in targets(tenant)\n"
+                "            if not (r.target_url or \"\").strip() and (r.output_id or \"\").strip()]",
+        "replace": "    rows = [r for r in targets(tenant) if False]  # SABOTAGE",
+        "suites": ["test_link_flag.py"],
+        "why": "the population is empty, so the strip never renders and the "
+               "state stays silent — the flag was the whole mechanism, since "
+               "requiring the address would block the hand-publishing "
+               "accounts this happens to",
+    },
+    {
+        "name": "the_move_depends_on_whether_there_is_a_cms",
+        "file": "app/keywords.py",
+        "find": "                         f\"{platform}\" if platform else",
+        "replace": "                         f\"{platform}\" if False else  # SABOTAGE",
+        "suites": ["test_link_flag.py"],
+        "why": "every account is told to paste an address by hand, including "
+               "the ones whose CMS holds it — so the instruction is wrong "
+               "for exactly the accounts that could have answered it "
+               "automatically",
+    },
 ]
 
 

@@ -10245,7 +10245,42 @@ def _board_section(key: str, tenant: str, days: int) -> str:
         '— every page is either winning, too new to judge, or recently '
         'refreshed</td></tr>')
 
+    # APPROVED, AND NOBODY CAN LINK TO IT. Above Needs attention on purpose:
+    # every row here is a page that is already outside the lane below, because
+    # `attention` reads published/won and this is neither. A flag, never a
+    # gate — a hard requirement would block the accounts that publish by hand,
+    # which are exactly the ones this happens to.
+    unl = kw.unlinked(tenant)
+    unl_rows = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td>'
+        f'<td>{_esc(r["role"])}</td>'
+        f'<td class="num">{r["waiting"] or "—"}</td>'
+        f'<td class="num">{r["days"] if r["days"] is not None else "—"}</td>'
+        f'<td class="when">{_esc(r["owed"])}</td>'
+        f'<td><a class="btn" href="/admin/work/{_esc(r["output_id"])}'
+        f'?key={_esc(key)}">Add the address</a></td></tr>'
+        for r in unl)
+    unlinked_block = f"""
+    <h3>Not linked yet <span class="when">approved, but nothing knows where it
+    is</span></h3>
+    <table class="tbl">
+      <tr><th>keyword</th><th>role</th><th>waiting on it</th><th>days</th>
+          <th>what it needs</th><th></th></tr>
+      {unl_rows}
+    </table>
+    <p class="when">An approved article with no address is invisible three
+    ways at once. Nothing can <em>link</em> to it &mdash; a draft is only
+    offered siblings whose URL resolves, so an unlinked pillar is a cluster
+    with no hub and every support in it ships pointing nowhere. Nothing can
+    <em>measure</em> it, because the lane below reads published pages only.
+    And nothing <em>says</em> so, because approved reads as done. This is a
+    flag rather than a rule: the address does not exist until the page does,
+    so refusing the article for it would punish the writer for the calendar.
+    </p>
+""" if unl else ""
+
     return f"""
+    {unlinked_block}
     <h3>Needs attention <span class="when">published pages, and what each is
     owed</span></h3>
     <table class="tbl">

@@ -1425,6 +1425,75 @@ REFRESH_AFTER_DAYS = 30
 REFRESH_COOLDOWN_DAYS = 60
 
 
+def unlinked(tenant: str, *, top: int = 12) -> list[dict]:
+    """Articles that were APPROVED and have no URL. Flagged, never required.
+
+    Owner, 2026-09-01: *"I can see issues with it being required — for example
+    clients who don't have a CMS we would need to derive the link unless
+    otherwise stated and associated. Lets prioritize linked support articles
+    and raise a flag when an approved article has no link associated yet."*
+
+    Right, and requiring it would have been the wrong shape twice over. A hard
+    gate would block exactly the accounts that publish by hand — the ones where
+    paste-and-record IS the workflow — and it would refuse an article for a
+    fact nobody knew yet at drafting time. A URL is not something the writer
+    withheld; it is something that does not exist until the page does.
+
+    SO IT IS A FLAG, AND THE FLAG IS THE POINT: an approved article with no URL
+    is invisible in every direction at once, and each direction is silent.
+
+      · Nothing can link to it. `_run_blog_article` offers only siblings whose
+        `target_url` resolves, so an unlinked pillar is a cluster with no hub
+        and every support in it ships pointing nowhere.
+      · Nothing can measure it. `attention` reads `published`/`won` and
+        `progress` attributes the same, so the page is outside both lanes.
+      · Nothing says so. It was approved, which reads as done.
+
+    THE MOVE DEPENDS ON WHETHER THERE IS A CMS, which is why that is computed
+    here rather than left to the reader. With one connected the URL is captured
+    on publish already (`approvals._execute` takes it from the backend's own
+    reply), so a row here means the page was published OUTSIDE the flow and the
+    address needs fetching. With none, paste-and-record is the workflow and
+    this is simply the second half of it, not yet done.
+    """
+    from . import tenants
+    row = tenants.get(tenant)
+    platform = str((getattr(row, "cms", None) or {}).get("platform") or "")
+    rows = [r for r in targets(tenant)
+            if not (r.target_url or "").strip() and (r.output_id or "").strip()]
+    # WHO IS WAITING ON IT, counted rather than described. A pillar with six
+    # supports behind it is a different-sized problem from a lone support, and
+    # "some articles may be affected" is the kind of sentence that gets
+    # scrolled past.
+    by_cluster: dict[str, int] = {}
+    for r in targets(tenant):
+        if r.cluster_key:
+            by_cluster[r.cluster_key] = by_cluster.get(r.cluster_key, 0) + 1
+    out: list[dict] = []
+    now_utc = db.utcnow()
+    with db.SessionLocal() as s:
+        for r in rows:
+            o = s.get(db.Output, r.output_id)
+            if o is None or (o.status or "") not in ("approved", "published"):
+                continue
+            decided = db.as_utc(o.published_at or o.created_at)
+            out.append({
+                "phrase": r.phrase, "role": r.role or "support",
+                "cluster": r.cluster_key or "", "output_id": r.output_id,
+                "waiting": max(0, by_cluster.get(r.cluster_key or "", 1) - 1),
+                "days": (db.as_utc(now_utc) - decided).days if decided else None,
+                "platform": platform,
+                "owed": (f"published outside the flow — fetch the address from "
+                         f"{platform}" if platform else
+                         "paste the address it went live at"),
+            })
+    # A pillar first: an unlinked pillar is a cluster with no hub, and every
+    # support written into it inherits the problem.
+    out.sort(key=lambda x: (0 if x["role"] == "pillar" else 1,
+                            -x["waiting"], -(x["days"] or 0)))
+    return out[:top]
+
+
 def attention(tenant: str, *, top: int = 12) -> list[dict]:
     """Published pages and what each one is owed. FOUR STATES, not one.
 
