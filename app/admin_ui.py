@@ -2374,7 +2374,7 @@ def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
     comp = systems.plan_complete(p, row.key)
     approved = bool(brief.get("plan_approved_at"))
     when = str(brief.get("planned_for") or "")
-    low_rung = rung in ("shadow", "approve_all")
+    low_rung = rung == "shadow"      # `approve_all` merged into it, 2026-08-31
 
     if not comp["complete"]:
         state = ('<span class="pre no">✗ needs completing: '

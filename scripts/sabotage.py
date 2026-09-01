@@ -3699,7 +3699,7 @@ SABOTAGES = [
     {
         "name": "the_default_rung_can_be_decided",
         "file": "app/skill.py",
-        "find": "    # approve_all AND shadow, and that is the change of 2026-08-31.",
+        "find": "    # `shadow` — the one manual rung, and the change of 2026-08-31.",
         "replace": '    if autonomy == "shadow":\n        return "recorded"  # SABOTAGE',
         "suites": ["test_skill.py", "test_workroom_email.py"],
         "why": "shadow goes back to filing `recorded`, and `emit` queues an "
@@ -3812,6 +3812,20 @@ SABOTAGES = [
                "in prose since it was written goes back to being unenforced. "
                "It was prose for months, which is this repo's own rule about "
                "rules: one that reaches no validator does not exist",
+    },
+    {
+        "name": "no_two_rungs_behave_alike",
+        "file": "app/systems.py",
+        "find": 'AUTONOMY = ("shadow", "approve_exceptions", "auto")',
+        "replace": 'AUTONOMY = ("shadow", "approve_all", "approve_exceptions", "auto")  # SABOTAGE',
+        "suites": ["test_systems.py", "test_register.py"],
+        "why": "the ladder carries two rungs that return the same disposition "
+               "for the same input again, so every card explains a difference "
+               "that is not there and the first promotion moves a system from "
+               "'everything waits for you' to 'everything waits for you'. It "
+               "also hid a real defect: the thin-knowledge caveat rode ONLY "
+               "that no-op promotion, so it was named where it did not matter "
+               "and dropped everywhere it did",
     },
 ]
 

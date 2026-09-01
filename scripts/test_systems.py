@@ -141,9 +141,14 @@ def main() -> int:
     lead = systems.find("agency", "lead_responder")
     check("starts in shadow", lead.autonomy == "shadow")
 
+    # THE FIRST PROMOTION IS NOW EARNED, and that is the merge of
+    # 2026-08-31. It used to be shadow -> approve_all, which had no gate
+    # because there was nothing to judge — and nothing to judge because the
+    # two rungs did the same thing. With one manual rung, the first move is
+    # the first real one: routine output starts sending itself.
     p = systems.promote(lead.id)
-    check("the learning phase -> approve_all needs only readiness",
-          p.get("autonomy") == "approve_all", str(p)[:80])
+    check("the first promotion out of manual approval must be earned",
+          not p.get("ok") and "20" in str(p), str(p)[:90])
 
     # THIN KNOWLEDGE CAVEATS A PROMOTION, IT DOES NOT VETO ONE.
     # `can_promote` refused on `ready`, which is False whenever any kb_need is
@@ -165,6 +170,13 @@ def main() -> int:
     check("the fixture system is genuinely thin but able to produce",
           bool(_rt["thin"]) and _rt["can_produce"] and not _rt["ready"],
           str(_rt["blockers"])[:80])
+    # Earn the run history first: the point under test is that THIN
+    # KNOWLEDGE does not veto, not that a system with no history may promote.
+    _g = systems.GATES["approve_exceptions"]
+    for _ in range(_g["min_runs"]):
+        _rid = systems.start_run(_thin.id, "ironside", trigger="tick")
+        systems.finish_run(_rid, "drafted", decision="approved")
+    _thin = systems.find("ironside", "blog")
     _cp = systems.can_promote(_thin)
     check("thin knowledge no longer blocks leaving the learning phase",
           _cp["can"] is True, str(_cp.get("why"))[:90])
@@ -172,12 +184,18 @@ def main() -> int:
           bool(_cp.get("caveat")), str(_cp.get("caveat"))[:80])
 
     check("the rung has a name a person would use",
-          systems.autonomy_label("shadow") == "Learning phase",
+          systems.autonomy_label("shadow") == "Manual approval",
           "`shadow` stays the stored value — a label is not worth a migration")
+    check("the ladder carries no two rungs that behave alike",
+          len(systems.AUTONOMY) == 3 and "approve_all" not in systems.AUTONOMY,
+          str(systems.AUTONOMY))
+    check("  and the word it dropped still resolves",
+          systems.AUTONOMY_ALIASES.get("approve_all") == "shadow",
+          "a bookmarked form must not 400 on a word that used to be valid")
 
     lead = systems.find("agency", "lead_responder")
     verdict = systems.can_promote(lead)
-    check("approve_all -> approve_exceptions is refused with no history",
+    check("manual approval -> approve_exceptions is refused with no history",
           not verdict["can"], verdict["why"])
 
     # Earn it: enough clean decided runs to clear the gate.

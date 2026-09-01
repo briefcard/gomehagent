@@ -55,7 +55,6 @@ KNOWN = {
         "system reports \u2014 declared empty \u2014 nothing performs this ship (ship: sends it to the client, on approval)"
     ],
     "duplicate": [
-        "autonomy rung 'approve_all' behaves exactly like 'shadow' (needs_approval/needs_approval)",
         "table ArtifactVersion has 2 writers and no declared owner: skill_pack.py, web.py",
         "table Deadline has 3 writers and no declared owner: ops_jobs.py, skills.py, worker.py",
         "table DocIndex has 2 writers and no declared owner: archive.py, data_tools.py",

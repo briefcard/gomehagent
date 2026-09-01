@@ -608,7 +608,7 @@ def _disposition(autonomy: str, valid: bool, writes: bool) -> str:
         # A write is the exception, always. Reading and reporting at this rung
         # goes through; changing a live store does not.
         return "needs_approval" if writes else "cleared"
-    # approve_all AND shadow, and that is the change of 2026-08-31.
+    # `shadow` — the one manual rung, and the change of 2026-08-31.
     #
     # Shadow returned "recorded" — it happened, it does not leave — and `emit`
     # queues an approval ONLY on `needs_approval` (this file, ~line 523). So

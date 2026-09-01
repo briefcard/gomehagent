@@ -6318,9 +6318,12 @@ async def agent_emit(request: Request, key: str = Depends(admin_key)) -> dict:
         may_send, disposition = False, "blocked"
     elif autonomy == "auto":
         may_send, disposition = True, "send"
-    elif autonomy == "shadow":
-        may_send, disposition = False, "shadow — record only, send nothing"
     else:
+        # `shadow` used to be a third case here — "record only, send nothing" —
+        # and it stopped being true on 2026-08-31, when the learning rung
+        # began queuing an approval like every rung below `auto`. Two branches
+        # saying the same thing is how a surface starts describing a mode the
+        # code no longer has.
         may_send, disposition = False, "needs approval"
 
     from . import assurance

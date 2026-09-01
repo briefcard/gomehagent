@@ -2050,7 +2050,7 @@ class System(Base):
     name = Column(String, nullable=False)
 
     status = Column(String, default="designed")   # designed | live | paused | retired
-    autonomy = Column(String, default="shadow")   # shadow | approve_all | approve_exceptions | auto
+    autonomy = Column(String, default="shadow")   # shadow | approve_exceptions | auto
 
     # --- the 8-part contract (locked decision #8) ---
     job_replaced = Column(Text)      # the human task this removes
@@ -2194,6 +2194,27 @@ def _migrate_constraints() -> None:
                 cols = ", ".join(f'"{c}"' for c in new_cols)
                 conn.execute(text(
                     f'ALTER TABLE "{table}" ADD CONSTRAINT "{new_name}" UNIQUE ({cols})'))
+
+
+def _migrate_rungs() -> None:
+    """`approve_all` was merged into `shadow` on 2026-08-31.
+
+    The two rungs had become behaviourally identical the moment shadow started
+    queuing approvals: `_disposition` returned `needs_approval` for both, so
+    the ladder carried two names for one behaviour and every card had to
+    explain a distinction that no longer existed. `scripts/register.py` found
+    it by computing each rung's observable signature rather than by anybody
+    noticing.
+
+    `shadow` is the survivor because it is the DEFAULT and the stored value
+    the owner already ruled should not move ("renaming a column to improve a
+    label is how a migration gets written for a sentence"). Its LABEL is now
+    "Manual approval", which is what they asked it to read as.
+    """
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE systems SET autonomy = 'shadow' "
+                          "WHERE autonomy = 'approve_all'"))
 
 
 def _auto_migrate() -> None:
@@ -2362,6 +2383,7 @@ def init_db() -> None:
     try:
         _auto_migrate()
         _migrate_constraints()
+        _migrate_rungs()
     except Exception:  # noqa: BLE001 — never block startup on migration
         import logging
         logging.getLogger("db").exception("auto-migrate failed")

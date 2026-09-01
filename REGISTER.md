@@ -17,7 +17,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - HTTP routes: **206** (206 reached)
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
-- Autonomy rungs: **4**
+- Autonomy rungs: **3**
 - Systems declaring a ship: **8**
 - Tables with writers: **55** (11 with more than one)
 
@@ -51,9 +51,8 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ---
 
-## DUPLICATE (11)
+## DUPLICATE (10)
 
-- autonomy rung 'approve_all' behaves exactly like 'shadow' (needs_approval/needs_approval)
 - table ArtifactVersion has 2 writers and no declared owner: skill_pack.py, web.py
 - table Deadline has 3 writers and no declared owner: ops_jobs.py, skills.py, worker.py
 - table DocIndex has 2 writers and no declared owner: archive.py, data_tools.py
@@ -107,7 +106,6 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 | rung | writes | reads | signature |
 |---|---|---|---|
 | `shadow` | needs_approval | needs_approval | `needs_approval/needs_approval` |
-| `approve_all` | needs_approval | needs_approval | `needs_approval/needs_approval` |
 | `approve_exceptions` | needs_approval | cleared | `needs_approval/cleared` |
 | `auto` | cleared | cleared | `cleared/cleared` |
 

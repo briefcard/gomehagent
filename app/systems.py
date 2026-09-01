@@ -33,7 +33,21 @@ STATUSES = ("designed", "live", "paused", "retired")
 
 # The earned-autonomy ladder (locked decision #7). Order is meaningful — the
 # index is the rung, and promotion may only ever move up by one.
-AUTONOMY = ("shadow", "approve_all", "approve_exceptions", "auto")
+# MERGED 2026-08-31. `approve_all` is gone: from the moment shadow began
+# queuing approvals the two rungs returned the same disposition for the same
+# input, so the ladder carried two names for one behaviour and every card had
+# to explain a difference that was not there. `scripts/register.py` found it
+# by computing each rung's observable signature — a DUPLICATE in its
+# vocabulary — rather than by anybody noticing.
+#
+# `shadow` survives because it is the default and the stored value the owner
+# already ruled should not move. `db._migrate_rungs` moves any `approve_all`
+# row onto it, and `AUTONOMY_ALIASES` keeps a bookmarked form or an old digest
+# link from 400-ing on a word that used to be valid.
+AUTONOMY = ("shadow", "approve_exceptions", "auto")
+
+#: Words that no longer name a rung, and what they mean now.
+AUTONOMY_ALIASES = {"approve_all": "shadow"}
 
 #: What each rung is CALLED to a person. `shadow` is the stored value and does
 #: not change — renaming a column to improve a label is how a migration gets
@@ -41,12 +55,15 @@ AUTONOMY = ("shadow", "approve_all", "approve_exceptions", "auto")
 #: Phase' instead of Shadow." It reads as a stage a system moves THROUGH,
 #: which is what it is, rather than as a mode it was put in.
 AUTONOMY_LABEL = {
-    "shadow": "Learning phase",
+    # Owner, 2026-08-31: "It doesn't have to be 'Approve All' it should still
+    # be 'Manual Approval' during the learning phase." Once the two rungs
+    # merged there was one rung left to name, and this is the name they gave
+    # it. The learning framing lives in AUTONOMY_MEANING below.
+    "shadow": "Manual approval",
     # Owner, 2026-08-31: "It doesn't have to be 'Approve All' it should still
     # be 'Manual Approval' during the learning phase." What the rung DOES is
     # unchanged — every output waits for a tap — but "approve all" reads like
     # a bulk action you take, and this reads like the mode you are in.
-    "approve_all": "Manual approval",
     "approve_exceptions": "Approve exceptions",
     "auto": "Automatic",
 }
@@ -58,8 +75,7 @@ def autonomy_label(rung: str) -> str:
 
 
 AUTONOMY_MEANING = {
-    "shadow": "Runs and records. Nothing leaves by itself — every draft waits for your tap, and you compare against what you'd have done.",
-    "approve_all": "Every output waits for your tap before it leaves.",
+    "shadow": "The learning phase. Every draft waits for your tap — nothing leaves by itself — and you compare against what you'd have done.",
     "approve_exceptions": "Routine output sends itself; anything the rules flag waits for you.",
     "auto": "Sends without asking. Alerts on anomaly. Kill criteria are armed.",
 }
@@ -595,6 +611,12 @@ def update(system_id: str, **fields) -> dict:
             return {"error": "unknown system"}
         if "status" in fields and fields["status"] not in STATUSES:
             return {"error": f"status must be one of {STATUSES}"}
+        if "autonomy" in fields:
+            # A word that used to name a rung still resolves. A bookmarked
+            # form or an old digest link posting `approve_all` must land on
+            # the rung that absorbed it, not on a 400.
+            fields["autonomy"] = AUTONOMY_ALIASES.get(fields["autonomy"],
+                                                      fields["autonomy"])
         if "autonomy" in fields and fields["autonomy"] not in AUTONOMY:
             return {"error": f"autonomy must be one of {AUTONOMY}"}
         # Going live is gated on readiness: connections and the knowledge the
@@ -783,7 +805,7 @@ def can_promote(system: db.System) -> dict:
     caveat = ("; ".join(r["thin"]) if r["thin"] else "")
 
     gate = GATES.get(target)
-    if not gate:  # learning -> approve_all: nothing has run yet to judge
+    if not gate:  # learning -> approve_exceptions: nothing has run yet
         return {"can": True, "target": target, "why": "", "caveat": caveat}
 
     st = stats(system.id)
@@ -802,7 +824,14 @@ def can_promote(system: db.System) -> dict:
     if tail:
         return {"can": False, "target": target,
                 "why": f"a denial inside the last {gate['clean_tail']} runs"}
-    return {"can": True, "target": target, "why": ""}
+    # THE CAVEAT RIDES EVERY PERMISSION, not just the ungated one. It was
+    # attached only to the `if not gate` return above — which, until the rung
+    # merge of 2026-08-31, was shadow -> approve_all: the one promotion that
+    # changed nothing, because both rungs behaved identically. So thin
+    # knowledge was named at the moment it did not matter and dropped at every
+    # moment it did. Merging the rungs made that visible by deleting the only
+    # path that carried it.
+    return {"can": True, "target": target, "why": "", "caveat": caveat}
 
 
 def promote(system_id: str) -> dict:
@@ -1701,7 +1730,7 @@ def plans_needing_action(tenant: str) -> list[dict]:
         brief = row.brief or {}
         if not comp["complete"]:
             need, detail = "complete", ", ".join(comp["missing"])
-        elif ((sysrow.autonomy or "shadow") in ("shadow", "approve_all")
+        elif ((sysrow.autonomy or "shadow") == "shadow"
                 and not brief.get("plan_approved_at")):
             need, detail = "approve", "complete — awaiting your go-ahead"
         else:
@@ -1732,7 +1761,7 @@ def consumable(row, sysrow) -> dict:
                 "why": "this plan is not a complete instruction yet — "
                        "still missing: " + ", ".join(comp["missing"])}
     rung = sysrow.autonomy or "shadow"
-    if rung in ("shadow", "approve_all") \
+    if rung == "shadow" \
             and not (row.brief or {}).get("plan_approved_at"):
         return {"ok": False,
                 "why": f"on the {rung} rung a plan needs your explicit "
