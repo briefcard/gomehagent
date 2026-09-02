@@ -493,6 +493,44 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
 
 #: system key -> planner. The tick and the console both resolve through this,
 #: so a new planner is a row here and nothing else.
+def article_window(sysrow) -> dict:
+    """Everything needed to place an article legally: the cadence, what each
+    month already holds, the first candidate slot, and where the horizon ends.
+
+    ONE READER, so the console's Plan-supports control and the weekly run
+    cannot disagree about when an article may be planned. The control shipped
+    with a docstring claiming "the monthly cap that governs one governs the
+    other" — and it read `articles_monthly` only to SPACE the plans, never to
+    stop. Twelve supports filed in one press put 8 into a month capped at 4
+    and three past the horizon; the overrun persisted, so the next weekly run
+    read the month as full and refused entirely. A claim about a cap, with no
+    cap behind it, in a docstring: exactly the shape this repo keeps paying
+    for.
+    """
+    cad = blog_cadence_for(sysrow)
+    today = dt.date.today()
+    return {"cadence": cad,
+            "have": _existing_by_month(sysrow, f"article:{sysrow.tenant}:"),
+            "slot": today + dt.timedelta(days=LEAD_DAYS),
+            "horizon_end": today + dt.timedelta(days=cad["horizon_days"])}
+
+
+def next_article_slot(win: dict, slot: dt.date):
+    """The next date an article may be planned for, or None when the horizon
+    is full. Month-forward only, so it terminates."""
+    cap = win["cadence"]["articles_monthly"]
+    while slot <= win["horizon_end"] and win["have"].get(_month(slot), 0) >= cap:
+        slot = _next_month(slot)
+    return slot if slot <= win["horizon_end"] else None
+
+
+def took_slot(win: dict, slot: dt.date) -> dt.date:
+    """Record that a slot was used, and return where to look next."""
+    win["have"][_month(slot)] = win["have"].get(_month(slot), 0) + 1
+    return slot + dt.timedelta(
+        days=max(1, 30 // max(1, win["cadence"]["articles_monthly"])))
+
+
 def _links_up(row, pillars: dict) -> bool:
     """Can this row link up, or is it going to ship pointing nowhere?
 
@@ -576,7 +614,8 @@ def blog_rollout(sysrow) -> dict:
                          if r.role == "pillar"}
 
     prefix = f"article:{sysrow.tenant}:"
-    have = _existing_by_month(sysrow, prefix)
+    _win = article_window(sysrow)
+    have = _win["have"]
     proposed = refreshed = 0
     refusals: list[str] = []
     promoted: list[str] = []
@@ -622,12 +661,12 @@ def blog_rollout(sysrow) -> dict:
         if target.phrase in filed:
             continue
 
-        while slot <= horizon_end and have.get(_month(slot), 0) >= cad["articles_monthly"]:
-            slot = _next_month(slot)     # strictly month-forward: it terminates
-        if slot > horizon_end:
+        nxt = next_article_slot(_win, slot)
+        if nxt is None:
             refusals.append(f"horizon full at {cad['articles_monthly']}/month "
                             f"— {len(order) - len(filed)} keyword(s) still waiting")
             break
+        slot = nxt
 
         out = systems.open_plan(
             sysrow.tenant, sysrow.key,
@@ -642,13 +681,13 @@ def blog_rollout(sysrow) -> dict:
         filed.add(target.phrase)
         if out.get("created"):
             proposed += 1
-            have[_month(slot)] = have.get(_month(slot), 0) + 1
+            slot = took_slot(_win, slot)
             # Marked so the next run does not re-rank something already
             # queued, and so `score` stops offering it as available work.
             keywords.upsert(sysrow.tenant, target.phrase, status="planned")
         else:
             refreshed += 1
-        slot += dt.timedelta(days=max(1, 30 // cad["articles_monthly"]))
+            slot += dt.timedelta(days=max(1, 30 // cad["articles_monthly"]))
 
     ref_out = _blog_refreshes(sysrow, cad, horizon_end)
     refusals.extend(ref_out["refusals"])

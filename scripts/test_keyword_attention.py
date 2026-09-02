@@ -73,6 +73,14 @@ def main() -> int:
     _target("no data page", "published", 60)
     _target("stalled close", "published", 60, pos=7)
     _target("stalled far", "published", 60, pos=22)
+    # A CLUSTER WITH SOMETHING LEFT TO WRITE. The band's advice is "supports
+    # in its cluster" and it is only that advice when the cluster HAS one
+    # available — with none, telling somebody to write supports is advice
+    # that cannot be taken. Both cases are asserted below; without this
+    # fixture the first assertion silently tested the second case.
+    keywords.upsert("baci", "stalled far", cluster_key="mid")
+    keywords.upsert("baci", "a narrow question", cluster_key="mid",
+                    role="support", status="candidate")
     _target("stalled miles", "published", 60, pos=55)
     _target("slipped one", "published", 90, pos=9, won_days=40)
     _target("winning", "won", 90, pos=2)
@@ -140,6 +148,22 @@ def main() -> int:
     ck("mid: supports in the cluster, not a rewrite",
        "supports in its cluster" in got["stalled far"]["owed"],
        got["stalled far"]["owed"])
+    ck("  and it names which ones are left to write",
+       got["stalled far"].get("supports", {}).get("writable")
+       == ["a narrow question"],
+       str(got["stalled far"].get("supports")) + " — the sentence was the end "
+       "of the line: nothing said WHICH supports, so no surface could offer "
+       "to file them")
+    # THE OTHER HALF OF THE SAME BAND. A cluster with nothing left to write
+    # gets a different sentence, because "write supports" there is advice
+    # somebody follows, finds nothing, and stops trusting the column for.
+    _target("stalled empty", "published", 60, pos=25)
+    keywords.upsert("baci", "stalled empty", cluster_key="bare")
+    empty = {x["phrase"]: x for x in keywords.attention("baci")}["stalled empty"]
+    ck("  and a cluster with none left says THAT instead",
+       "none left to write" in empty["owed"]
+       or "no cluster around it" in empty["owed"],
+       empty["owed"])
     ck("far: re-read the intent before spending anything",
        "intent" in got["stalled miles"]["owed"],
        got["stalled miles"]["owed"])

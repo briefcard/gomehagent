@@ -151,6 +151,38 @@ def best_for(tenant: str, entity_keys: list[str] | None = None,
     return shop_url(tenant, dests)
 
 
+def points_at(html: str, url: str) -> bool:
+    """Does this markup link to that page? Offline, and deliberately so.
+
+    `sites.verify_links` HTTP-checks every href, which is right before a
+    publish and wrong for a question asked about hundreds of stored articles
+    at once: the answer here is "did the writer link to this", not "does the
+    internet still serve it".
+
+    Compared on the normalised form — scheme dropped, query and fragment
+    dropped, trailing slash dropped, lowercased — because the same page is
+    written half a dozen ways and a comparison that calls those different
+    would report a link that plainly exists as missing.
+    """
+    want = _norm_href(url)
+    if not want:
+        return False
+    return any(_norm_href(h) == want
+               for h in re.findall(r'href\s*=\s*["\']([^"\']+)["\']',
+                                   str(html or "")))
+
+
+def _norm_href(href: str) -> str:
+    h = str(href or "").strip().split("#")[0].split("?")[0]
+    if not h:
+        return ""
+    for prefix in ("https://", "http://"):
+        if h.lower().startswith(prefix):
+            h = h[len(prefix):]
+            break
+    return h.rstrip("/").lower()
+
+
 def check(html: str, tenant: str, dests: list[dict] | None = None) -> list[str]:
     """Links in this markup that point at the tenant's own site but at no
     URL known to exist. External links are somebody else's business."""

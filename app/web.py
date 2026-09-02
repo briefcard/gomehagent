@@ -7192,6 +7192,95 @@ def _back_parts(src) -> dict:
             "q": str(src.get("bq") or "")}
 
 
+@app.post("/admin/plan_supports")
+async def plan_supports(request: Request, key: str = Depends(admin_key)):
+    """File the supports a stalled page's cluster is owed. The band's control.
+
+    `_owed_for` tells a page at 11-30 that it needs "supports in its cluster,
+    linking up" — and that sentence was the end of the line. Nothing said
+    which supports, nothing filed them, and a surface that states a
+    recommendation and offers no way to take it is a fix instruction where a
+    control belongs (design rule 1).
+
+    It files the SAME way the planner does — `systems.open_plan` under the
+    `article:` ref space, marking each keyword `planned` — so a support filed
+    here is indistinguishable from one the weekly run proposed, and the
+    monthly cap that governs one governs the other. Nothing here is a second
+    way to create work.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    cluster = str(form.get("cluster") or "")
+
+    def _back(msg: str, ok: bool = False) -> RedirectResponse:
+        return RedirectResponse(
+            f"/admin/ui?tab=plan&tenant={quote(tenant)}"
+            f"&key={quote(key)}&{'ok' if ok else 'err'}={quote(msg)}", 303)
+
+    from . import keywords as kwm, planner as plm, systems as sysm
+    row = sysm.find(tenant, "blog")
+    if row is None:
+        return _back("the blog system is not installed for this account")
+    sup = kwm.cluster_support(tenant, cluster)
+    if not sup["writable"]:
+        # SAY WHICH EMPTY IT IS. "The map needs more keywords" is false when
+        # the cluster's supports are simply already planned, and it sends
+        # somebody to harvest keywords for work that is scheduled.
+        return _back(
+            f"{sup['in_flight']} support(s) are already planned for that "
+            f"cluster — nothing more to file" if sup["in_flight"] else
+            "nothing left to write in that cluster — the map needs more "
+            "keywords for this topic first")
+    # THE SAME CAP AND THE SAME HORIZON THE WEEKLY RUN OBEYS. The first cut
+    # read `articles_monthly` only to SPACE the plans and never to stop:
+    # twelve supports in one press put 8 into a month capped at 4 and three
+    # past the horizon, and because the overrun persists the next weekly run
+    # read the month as full and refused entirely — the console press silently
+    # spent the planner's budget. `article_window` / `next_article_slot` are
+    # now the one place that rule lives, and `blog_rollout` goes through them
+    # too, so the two cannot drift again.
+    win = plm.article_window(row)
+    slot = win["slot"]
+    filed, refused, deferred = 0, [], 0
+    for phrase in sup["writable"]:
+        nxt = plm.next_article_slot(win, slot)
+        if nxt is None:
+            # NOT A FAILURE, AND SAID AS SUCH. The rest are still worth
+            # writing; the calendar is simply full, which is the same answer
+            # the weekly run gives and for the same reason.
+            deferred = len(sup["writable"]) - filed - len(refused)
+            break
+        slot = nxt
+        got = sysm.open_plan(
+            tenant, "blog",
+            ref=f"article:{tenant}:{kwm.slug(phrase)}",
+            plan={"keyword": phrase, "role": "support", "cluster": cluster},
+            planned_for=slot.isoformat(), trigger="console")
+        if got.get("error"):
+            refused.append(got["error"])
+            continue
+        if got.get("created"):
+            filed += 1
+            kwm.upsert(tenant, phrase, status="planned")
+            slot = plm.took_slot(win, slot)
+    if not filed:
+        return _back("nothing was filed — "
+                     + ("; ".join(refused)[:180] or
+                        (f"the horizon is full at "
+                         f"{win['cadence']['articles_monthly']}/month"
+                         if deferred else "they were already planned")))
+    return _back(f"{filed} support(s) planned for that cluster"
+                 + (f" — {deferred} left for a later month, the horizon is "
+                    f"full at {win['cadence']['articles_monthly']}/month"
+                    if deferred else "")
+                 + (f" — {len(refused)} refused" if refused else ""), ok=True)
+
+
 @app.post("/admin/article_picture")
 async def article_picture(request: Request, key: str = Depends(admin_key)):
     """Generate the picture this article was told a brief was ready for.

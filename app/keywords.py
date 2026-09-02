@@ -1425,6 +1425,97 @@ REFRESH_AFTER_DAYS = 30
 REFRESH_COOLDOWN_DAYS = 60
 
 
+def cluster_support(tenant: str, cluster_key: str, rows: list | None = None) -> dict:
+    """What a cluster's support layer actually looks like. Computed, not
+    described.
+
+    `_owed_for` tells a page at 11-30 that it needs "supports in its cluster,
+    linking up". That sentence was the end of the line: nothing said WHICH
+    supports, whether any were left to write, or whether the ones already
+    written link up at all. Advice a surface cannot act on is a fix
+    instruction where a control belongs.
+
+    Returns the three counts that decide what to offer, and the phrases behind
+    two of them so a control can file exactly those and no others.
+    """
+    # `rows` LETS THE CALLER READ ONCE. `attention` calls this per stalled
+    # row, and reading the map inside turned one board render into a full
+    # keyword_targets scan per row: 602 queries and 9.7 seconds on a
+    # 600-keyword account, 588 of them thrown away by `top=12`. Quadratic in
+    # the size of the thing this feature exists to manage.
+    rows = [r for r in (targets(tenant) if rows is None else rows)
+            if (r.cluster_key or "") == cluster_key]
+    writable = [r.phrase for r in rows
+                if (r.role or "") == "support" and r.status == "candidate"
+                and (r.owner_priority or "") != "muted"]
+    published = [r for r in rows if (r.role or "") == "support"
+                 and r.status in ("published", "won")]
+    return {"cluster": cluster_key,
+            "writable": writable,
+            "published": len(published),
+            "in_flight": len([r for r in rows if (r.role or "") == "support"
+                              and r.status == "planned"])}
+
+
+def orphan_supports(tenant: str, *, top: int = 12) -> list[dict]:
+    """Published supports whose body does not link up to their pillar.
+
+    THE BAND RECOMMENDS THIS AND NOTHING CHECKED IT. `_owed_for` sends a
+    stalled page its cluster's supports "linking up", the drafter is TOLD a
+    support "links back to the pillar", and `_link_grounding` verifies that
+    the links present RESOLVE — it never verifies a required link is THERE. So
+    a support could ship with zero links up and pass every gate, and the
+    mechanism the whole pillar/cluster model rests on was advice.
+
+    A FLAG, NEVER A GATE. Owner, 2026-09-01, on requiring the link: *"I can
+    see issues with it being required — for example clients who dont have a
+    cms."* Right, and the reason generalises past the CMS: at drafting time
+    the pillar may not be published yet, so the link CANNOT exist, and
+    refusing the article would punish it for the order the work was done in.
+    The honest handling is to notice later and offer the fix — which is a
+    refresh, and a refresh is now a thing this system can file.
+
+    Only supports whose pillar HAS an address are listed. One whose pillar has
+    none is not an orphan, it is waiting — and `unlinked()` already reports
+    the pillar as the thing to fix, which is the one action that helps both.
+    """
+    pillars = {}
+    for r in targets(tenant):
+        if (r.role or "") == "pillar" and (r.target_url or "").strip():
+            pillars[r.cluster_key or ""] = r
+    from . import links as _links
+    cand = [r for r in targets(tenant)
+            if (r.role or "") == "support"
+            and r.status in ("published", "won")
+            and (r.output_id or "")
+            and pillars.get(r.cluster_key or "") is not None]
+    out: list[dict] = []
+    if not cand:
+        return out
+    # ONE QUERY FOR EVERY BODY, not one per support. The first cut asked
+    # inside the loop, which is the same N+1 shape as `cluster_support` and on
+    # the same page.
+    with db.SessionLocal() as s:
+        bodies = {a.output_id: (a.body or "") for a in
+                  s.query(db.ArtifactBody)
+                  .filter(db.ArtifactBody.output_id
+                          .in_([r.output_id for r in cand])).all()}
+    for r in cand:
+        pillar = pillars[r.cluster_key or ""]
+        if r.output_id not in bodies:
+            continue
+        if _links.points_at(bodies[r.output_id], pillar.target_url or ""):
+            continue
+        out.append({"phrase": r.phrase, "cluster": r.cluster_key or "",
+                    "pillar": pillar.phrase,
+                    "pillar_url": pillar.target_url or "",
+                    "output_id": r.output_id,
+                    "owed": (f"links nowhere — it should link up to "
+                             f"{pillar.phrase!r}")})
+    out.sort(key=lambda x: x["phrase"])
+    return out[:top]
+
+
 def unlinked(tenant: str, *, top: int = 12) -> list[dict]:
     """Articles that were APPROVED and have no URL. Flagged, never required.
 
@@ -1528,7 +1619,8 @@ def attention(tenant: str, *, top: int = 12) -> list[dict]:
     """
     import datetime as _dt
     now_utc = _dt.datetime.now(_dt.timezone.utc)
-    rows = [r for r in targets(tenant)
+    every = targets(tenant)          # read ONCE; `cluster_support` reuses it
+    rows = [r for r in every
             if (r.owner_priority or "") != "muted"
             and r.status in ("published", "won")]
     readings, _then = _period_readings(tenant, 7)
@@ -1562,12 +1654,50 @@ def attention(tenant: str, *, top: int = 12) -> list[dict]:
         else:
             state = "stalled"
             act, owed = _owed_for(pos)
-        out.append({"phrase": r.phrase, "status": r.status, "position": pos,
-                    "role": r.role, "cluster": r.cluster_key,
-                    "target_url": r.target_url, "published_days": age,
-                    "since_refresh": since_refresh, "output_id": r.output_id,
-                    "state": state, "action": act, "owed": owed,
-                    "priority": r.priority})
+        row_out = {"phrase": r.phrase, "status": r.status, "position": pos,
+                   "role": r.role, "cluster": r.cluster_key,
+                   "target_url": r.target_url, "published_days": age,
+                   "since_refresh": since_refresh, "output_id": r.output_id,
+                   "state": state, "action": act, "owed": owed,
+                   "priority": r.priority}
+        # WHAT "SUPPORTS IN ITS CLUSTER" ACTUALLY MEANS HERE. The band said
+        # the words and stopped; a surface could render them and offer
+        # nothing, because nothing said WHICH supports or whether any were
+        # left to write. Computed only for the rows it applies to — asking
+        # per row on a map of several hundred is a query per row, and the
+        # other three actions have no use for the answer.
+        if act == "supports":
+            sup = cluster_support(tenant, r.cluster_key or "", every)
+            row_out["supports"] = sup
+            if not sup["writable"]:
+                # THREE DIFFERENT SITUATIONS, SAID DIFFERENTLY. "Write
+                # supports" when there are none left to write is advice that
+                # cannot be taken, and a person who tries it and finds nothing
+                # stops trusting the column.
+                #
+                # ALREADY PLANNED IS NOT NONE. The first cut folded
+                # `in_flight` into the same sentence as `published` and then
+                # printed only the published count — so a cluster whose whole
+                # support layer had just been queued read as "0 support(s) and
+                # none left to write — the map needs more keywords", telling
+                # the owner to go harvest keywords for work already scheduled.
+                # It did not need the new button either: the weekly run marks
+                # each candidate `planned` as it files it.
+                if sup["in_flight"]:
+                    row_out["owed"] = (
+                        f"{sup['in_flight']} support(s) are already planned "
+                        f"for this cluster — nothing more to file; this page "
+                        f"should move as they land")
+                elif sup["published"]:
+                    row_out["owed"] = (
+                        f"its cluster has {sup['published']} support(s) and "
+                        f"none left to write — the map needs more keywords "
+                        f"for this topic before supports can help it")
+                else:
+                    row_out["owed"] = (
+                        "this topic has no cluster around it yet — build the "
+                        "map for it before spending anything on this page")
+        out.append(row_out)
     order = {"slipping": 0, "stalled": 1, "no_reading": 2, "too_early": 3}
     out.sort(key=lambda x: (order.get(x["state"], 9), -(x["priority"] or 0)))
     return out[:top]

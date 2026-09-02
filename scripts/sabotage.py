@@ -4768,6 +4768,105 @@ SABOTAGES = [
         "why": "a Generate button sits over an article that already carries a "
                "chosen image, which is a way to lose it",
     },
+    {
+        "name": "a_support_that_links_nowhere_is_flagged",
+        "file": "app/keywords.py",
+        "find": "        if _links.points_at(bodies[r.output_id], pillar.target_url or \"\"):",
+        "replace": "        if True:  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "a support published with no link up is never noticed — and "
+               "the publish check could never catch it, because it verifies "
+               "the links present RESOLVE and never that a required one is "
+               "THERE. The mechanism the whole pillar/cluster model rests on "
+               "goes back to being advice",
+    },
+    {
+        "name": "a_support_waiting_on_its_pillar_is_not_an_orphan",
+        "file": "app/keywords.py",
+        "find": "            and pillars.get(r.cluster_key or \"\") is not None]",
+        "replace": "            ]  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "a support whose pillar has no address is reported as failing "
+               "to link to a page that has nowhere to be linked to — a queue "
+               "of work nobody can do, beside the one row that would fix all "
+               "of it",
+    },
+    {
+        "name": "the_supports_band_names_which_ones",
+        "file": "app/keywords.py",
+        "find": "        if act == \"supports\":",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_support_links.py", "test_keyword_attention.py"],
+        "why": "the band recommends supports and says nothing about which, so "
+               "the surface renders a sentence and offers no way to take it "
+               "— a fix instruction where a control belongs",
+    },
+    {
+        "name": "a_muted_keyword_is_never_offered_as_a_support",
+        "file": "app/keywords.py",
+        "find": "                and (r.owner_priority or \"\") != \"muted\"]",
+        "replace": "                ]  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "a keyword the owner ruled out comes back in the one-click "
+               "control, so a decision they already made has to be made "
+               "again every time they look at the board",
+    },
+    {
+        "name": "planned_supports_stop_being_offered",
+        "file": "app/web.py",
+        "find": "            kwm.upsert(tenant, phrase, status=\"planned\")",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "filing without marking, so the same support is offered again "
+               "next render and the weekly planner proposes it too — one "
+               "keyword, two articles, which is the cannibalisation this "
+               "whole lane exists to prevent",
+    },
+    {
+        "name": "one_writer_decides_when_an_article_may_be_planned",
+        "file": "app/web.py",
+        "find": "        nxt = plm.next_article_slot(win, slot)",
+        "replace": "        nxt = slot  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "the console control files past the monthly cap and past the "
+               "horizon while its docstring claims otherwise — and because "
+               "the overrun persists, the next weekly run reads the month as "
+               "full and refuses entirely, so one press silently spends the "
+               "planner's whole budget",
+    },
+    {
+        "name": "work_already_planned_is_not_reported_as_missing",
+        "file": "app/keywords.py",
+        "find": "                if sup[\"in_flight\"]:",
+        "replace": "                if False:  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "a cluster whose whole support layer was queued last week "
+               "reads as '0 support(s) and none left to write — the map needs "
+               "more keywords', sending somebody to harvest keywords for work "
+               "that is already scheduled",
+    },
+    {
+        "name": "the_supports_control_is_rendered",
+        "file": "app/admin_ui.py",
+        "find": "        + (_plan_supports_btn(key, tenant, r) if (r.get(\"supports\") or {})",
+        "replace": "        + (\"\" if (r.get(\"supports\") or {})  # SABOTAGE",
+        "suites": ["test_support_links.py"],
+        "why": "the band's recommendation goes back to being a sentence with "
+               "nothing behind it — `_plan_supports_btn` has exactly one "
+               "caller, so deleting this deletes the whole control and every "
+               "route behind it becomes unreachable",
+    },
+    {
+        "name": "the_board_reads_the_keyword_map_once",
+        "file": "app/keywords.py",
+        "find": "            sup = cluster_support(tenant, r.cluster_key or \"\", every)",
+        "replace": "            sup = cluster_support(tenant, r.cluster_key or \"\")  # SABOTAGE",
+        "suites": ["test_board_cost.py"],
+        "why": "one full keyword_targets scan per stalled row: 602 queries "
+               "and ~10 seconds to render the board on a 600-keyword account, "
+               "quadratic in the size of the thing the feature exists to "
+               "manage",
+    },
 ]
 
 

@@ -10107,6 +10107,20 @@ def _plan_window(key: str, tenant: str, days: int) -> str:
         'page reads this window</span></div>'
 
 
+def _plan_supports_btn(key: str, tenant: str, row: dict) -> str:
+    """File this cluster's remaining supports, from the row that asks for
+    them. Separate from the cell so the f-string above stays readable and the
+    nesting stays legal."""
+    n = len((row.get("supports") or {}).get("writable") or [])
+    return (f'<form method="post" class="inl" style="margin-left:6px" '
+            f'action="/admin/plan_supports?key={_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="cluster" '
+            f'value="{_esc(row.get("cluster") or "")}">'
+            f'<button class="btn sec" type="submit">Plan {n} support'
+            f'{"" if n == 1 else "s"}</button></form>')
+
+
 def _board_section(key: str, tenant: str, days: int) -> str:
     """The map as the four questions somebody asks of it, not one sorted list.
 
@@ -10292,7 +10306,15 @@ def _board_section(key: str, tenant: str, days: int) -> str:
           f'<td class="num">{r["position"] if r["position"] is not None else "—"}</td>'
           f'<td class="num">{r["published_days"] if r["published_days"] is not None else "—"}</td>'
           f'<td>{_esc(r["role"] or "")}</td>'
-          f'<td class="when">{_esc(r["owed"])}</td></tr>'
+          f'<td class="when">{_esc(r["owed"])}'
+        # THE BAND'S OWN CONTROL, where the band is read. "Supports in its
+        # cluster, linking up" was a sentence with nothing behind it: no
+        # surface said WHICH supports, and none filed them. This files
+        # exactly the ones that cluster still has to write, through the same
+        # `open_plan` the weekly run uses.
+        + (_plan_supports_btn(key, tenant, r) if (r.get("supports") or {})
+           .get("writable") else "")
+        + '</td></tr>'
         for r in b.get("attention") or []) or (
         '<tr><td colspan="6" class="mut">nothing published is waiting on you '
         '— every page is either winning, too new to judge, or recently '
@@ -10332,8 +10354,40 @@ def _board_section(key: str, tenant: str, days: int) -> str:
     </p>
 """ if unl else ""
 
+    # SUPPORTS THAT LINK NOWHERE. The band above recommends "supports in its
+    # cluster, linking up" and the drafter is told a support "links back to
+    # the pillar" — and nothing ever checked that it did. `_link_grounding`
+    # verifies the links present RESOLVE; it never verifies a required link
+    # is THERE, so a support could ship with zero links up and pass every
+    # gate. A flag rather than a gate, for the reason the owner gave about
+    # addresses: at drafting time the pillar may not be published yet, so the
+    # link CANNOT exist and refusing the article would punish it for the
+    # order the work was done in.
+    orph = kw.orphan_supports(tenant)
+    orph_rows = "".join(
+        f'<tr><td>{_esc(r["phrase"])}</td>'
+        f'<td>{_esc(r["pillar"])}</td>'
+        f'<td class="when">{_esc(r["owed"])}</td>'
+        f'<td><a class="btn sec" href="/admin/work/{_esc(r["output_id"])}'
+        f'?key={_esc(key)}">Open it</a></td></tr>' for r in orph)
+    orphan_block = f"""
+    <h3>Links nowhere <span class="when">supports that never linked up</span></h3>
+    <table class="tbl">
+      <tr><th>support</th><th>its pillar</th><th>what is missing</th><th></th></tr>
+      {orph_rows}
+    </table>
+    <p class="when">A support&rsquo;s whole job is to answer one narrow
+    question thoroughly and pass authority up to the pillar. These were
+    published without the link, which the publish check could never have
+    caught &mdash; it verifies that the links present <em>resolve</em>, never
+    that a required one is <em>there</em>. Often the pillar simply was not
+    live yet when these were written, which is why this is a flag and not a
+    rule. Opening one and sending it back for a redraft adds the link.</p>
+""" if orph else ""
+
     return f"""
     {unlinked_block}
+    {orphan_block}
     <h3>Needs attention <span class="when">published pages, and what each is
     owed</span></h3>
     <table class="tbl">
