@@ -1340,7 +1340,12 @@ SABOTAGES = [
                "which is how a read with no writer reaches production",
     },
     {
-        "name": "the_buyers_own_words_reach_the_drafter",
+        # Renamed 2026-09-02: this and a guard in app/funnel.py shared one
+        # name, so `sabotage.py the_buyers_own_words_reach_the_drafter` ran
+        # whichever came first and the other could not be addressed at all.
+        # Two different claims — this one is that the audiences reach the
+        # bundle; the funnel one is that their VOCABULARY reaches the brief.
+        "name": "the_audiences_reach_the_bundle",
         "file": "app/resolve.py",
         "find": '    bundle["audiences"] = ([',
         "replace": '    bundle["audiences"] = []; _unused = ([  # SABOTAGE',

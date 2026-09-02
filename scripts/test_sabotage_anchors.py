@@ -140,6 +140,18 @@ def main() -> int:
        "suite at import, so [ caught ] is printed without the assertion ever "
        "running")
 
+    # A NAME IS AN ADDRESS. Two guards sharing one means `sabotage.py <name>`
+    # runs whichever comes first and the other cannot be reached at all —
+    # it is in the list, it is counted, and it can never be run on purpose.
+    # Found by an audit: two genuinely different claims (audiences reaching
+    # the bundle, and their vocabulary reaching the brief) under one name.
+    import collections as _c
+    dup_names = sorted(n for n, c in _c.Counter(
+        e["name"] for e in rows).items() if c > 1)
+    ck("every guard has its own name", not dup_names,
+       ", ".join(dup_names) or "a shared name makes one of them "
+       "unaddressable, while still being counted as coverage")
+
     ck("no anchor matches more than once", not ambiguous,
        ", ".join(ambiguous) or "an anchor matching twice patches whichever "
        "copy comes first, which may not be the one under test")
