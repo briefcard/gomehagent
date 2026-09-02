@@ -4018,13 +4018,38 @@ def admin_keyword_priority(key: str = Depends(admin_key), tenant: str = "",
     from . import keywords
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+    # WHAT THE BOARD WAS OFFERING BEFORE, so the message can name what the
+    # decision CHANGED rather than restate what was pressed. Owner,
+    # 2026-09-02: *"I want updates for muting some keywords to be pulled and
+    # replaced by high opportunity keywords that aren't already on the board
+    # but grow from those clusters."*
+    _before = keywords.next_to_write(tenant) if mode == "muted" else []
     got = keywords.set_priority(tenant, phrase, mode)
     if not ui:
         return got
     if got.get("error"):
         return _plan_back(tenant, key, err=got["error"])
-    return _plan_back(tenant, key,
-                      msg=f"{phrase!r} — {got['owner_priority']}")
+    said = f"{phrase!r} — {got['owner_priority']}"
+    if mode == "muted":
+        eff = keywords.mute_effect(tenant, phrase, _before)
+        if eff["from_cluster"]:
+            said += (". Taking its place from the same cluster: "
+                     + ", ".join(repr(p) for p in eff["from_cluster"][:3]))
+        elif eff["surfaced"]:
+            # HONEST ABOUT WHERE IT CAME FROM. The slot filled, but not from
+            # this cluster — saying "from the same cluster" there would be a
+            # sentence nobody could check against the board in front of them.
+            said += (". A slot opened and " + ", ".join(
+                repr(p) for p in eff["surfaced"][:3])
+                + " moved up, from elsewhere in the map")
+        elif eff["cluster"]:
+            said += (f". Nothing else in {eff['cluster']!r} is ready to write "
+                     f"— that cluster needs more keywords before it can "
+                     f"replace this one")
+        if eff["still_held"]:
+            said += (f" ({len(eff['still_held'])} more in that cluster are "
+                     f"below the cut)")
+    return _plan_back(tenant, key, msg=said)
 
 
 @app.get("/admin/exclude_term")

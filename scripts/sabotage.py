@@ -5333,6 +5333,48 @@ SABOTAGES = [
                "other resolutions go back to being reachable only by "
                "hand-editing a URL",
     },
+    {
+        "name": "muting_says_what_took_its_place",
+        "file": "app/web.py",
+        "find": "        eff = keywords.mute_effect(tenant, phrase, _before)",
+        "replace": "        eff = {\"cluster\": \"\", \"surfaced\": [], \"from_cluster\": [],\n               \"still_held\": []}  # SABOTAGE",
+        "suites": ["test_mute_replacement.py"],
+        "why": "muting reports only that it was muted, so a decision that "
+               "changed what the board is offering says nothing about the "
+               "change — and the owner has to re-read the whole list to find "
+               "out what moved",
+    },
+    {
+        "name": "a_replacement_is_not_credited_to_the_wrong_cluster",
+        "file": "app/keywords.py",
+        "find": "    same_cluster = [p for p in fresh\n                    if (rows.get(p) and (rows[p].cluster_key or \"\") == cluster\n                        and cluster)]",
+        "replace": "    same_cluster = list(fresh)  # SABOTAGE",
+        "suites": ["test_mute_replacement.py"],
+        "why": "whatever moved up is announced as coming from the cluster "
+               "being pruned, whichever cluster it actually came from — a "
+               "sentence nobody can check against the board in front of them",
+    },
+    {
+        "name": "an_exhausted_cluster_says_it_is_exhausted",
+        "file": "app/web.py",
+        "find": "        elif eff[\"cluster\"]:",
+        "replace": "        elif False:  # SABOTAGE",
+        "suites": ["test_mute_replacement.py"],
+        "why": "a cluster with nothing left to write goes silent instead of "
+               "naming itself as a harvest gap — 'nothing surfaced' and "
+               "'nothing exists' are different, and only one of them is work "
+               "for somebody",
+    },
+    {
+        "name": "the_board_and_the_mute_read_one_list",
+        "file": "app/keywords.py",
+        "find": "    return [r.phrase for r in targets(tenant)\n            if (r.owner_priority or \"\") != \"muted\"\n            and r.status == \"candidate\"][:top]",
+        "replace": "    return [r.phrase for r in targets(tenant)\n            if (r.owner_priority or \"\") != \"muted\"\n            and r.status == \"candidate\"][1:top]  # SABOTAGE",
+        "suites": ["test_mute_replacement.py"],
+        "why": "the board offers a different set from the one the mute route "
+               "measures against, so every message about what changed is "
+               "computed from a list nobody is looking at",
+    },
 ]
 
 

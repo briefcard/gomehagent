@@ -1999,6 +1999,62 @@ def _owed_for(position: float) -> tuple[str, str]:
     raise AssertionError("_MOVES must end in an open band")
 
 
+def next_to_write(tenant: str, *, top: int = 12) -> list:
+    """The phrases the board is currently offering as work. ONE READER.
+
+    `board()` computed this inline, and the mute route needed the same answer
+    to say what a mute had CHANGED — two copies of "what is on the board"
+    disagree the first time either is touched, and this is the list a person
+    reads decisions off.
+
+    Muted is EXCLUDED rather than sorted last, for the reason `board` gives:
+    ranking a ruled-out keyword bottom still puts it on the page, so a
+    decision already made is re-presented every week.
+    """
+    return [r.phrase for r in targets(tenant)
+            if (r.owner_priority or "") != "muted"
+            and r.status == "candidate"][:top]
+
+
+def mute_effect(tenant: str, phrase: str, before: list, *,
+                top: int = 12) -> dict:
+    """What muting actually changed on the board, computed from before/after.
+
+    Owner, 2026-09-02: *"I want updates for muting some keywords to be pulled
+    and replaced by high opportunity keywords that aren't already on the board
+    but grow from those clusters."*
+
+    REPORTED, NOT PROMISED. The obvious implementation picks "the best
+    candidate in that cluster" and announces it — and is wrong whenever the
+    board was not full, whenever the cluster is exhausted, or whenever the
+    keyword that actually surfaced came from somewhere else because the muted
+    one was not in the last slot. This reads the board on both sides of the
+    change and names what genuinely appeared, which is the only version that
+    cannot mislead.
+
+    A mute that surfaced NOTHING is a real and useful answer: the cluster has
+    no more candidates, which is an authoring or harvest gap rather than a
+    silence.
+    """
+    rows = {r.phrase: r for r in targets(tenant)}
+    muted = rows.get(phrase)
+    cluster = (muted.cluster_key or "") if muted is not None else ""
+    after = next_to_write(tenant, top=top)
+    fresh = [p for p in after if p not in set(before)]
+    same_cluster = [p for p in fresh
+                    if (rows.get(p) and (rows[p].cluster_key or "") == cluster
+                        and cluster)]
+    # What the cluster still holds that nothing is offering — the honest
+    # answer to "is there more here", separate from what surfaced today.
+    held = [r.phrase for r in targets(tenant)
+            if cluster and (r.cluster_key or "") == cluster
+            and r.status == "candidate"
+            and (r.owner_priority or "") != "muted"
+            and r.phrase not in set(after)]
+    return {"cluster": cluster, "surfaced": fresh,
+            "from_cluster": same_cluster, "still_held": held}
+
+
 def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
     """The map, split into the four questions worth asking of it."""
     rows = targets(tenant)
@@ -2022,7 +2078,11 @@ def board(tenant: str, *, days: int = 7, top: int = 12) -> dict:
     # every week — which is the thing a mute was supposed to stop. It has its
     # own section, with the count and a way back.
     live = [r for r in rows if (r.owner_priority or "") != "muted"]
-    writing_next = [_row(r) for r in live if r.status == "candidate"][:top]
+    # Through `next_to_write`, so the board and the mute route cannot disagree
+    # about what is currently being offered.
+    _offered = set(next_to_write(tenant, top=top))
+    writing_next = [_row(r) for r in live
+                    if r.status == "candidate" and r.phrase in _offered][:top]
 
     # --- what changed since last week -------------------------------------
     moved_up, moved_down, entered = [], [], []
