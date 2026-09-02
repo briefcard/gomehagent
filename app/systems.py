@@ -93,6 +93,39 @@ def autonomy_label(rung: str) -> str:
 import re as _re
 
 
+#: Which systems may SHIP on their own when the rung is `auto`, and why each
+#: answer is what it is. Owner, 2026-09-02: *"Yes Cleared should push."*
+#:
+#: PER SYSTEM, NEVER ONE SWITCH, because "push" means a different irreversible
+#: act in each one and the owner has already ruled differently on two of them:
+#:
+#:   blog            publishes to the client's CMS. The declared ship, it has
+#:                   a working executor arm, and a published page can be
+#:                   revised — the refresh lane exists to do exactly that.
+#:   campaign_email  OFF, and not by omission. Owner, 2026-08-31: *"Leave it
+#:                   human, in the ESP."* A send cannot be revised, recalled or
+#:                   refreshed; it is the one act here with no second attempt.
+#:                   Turning this on is a decision for the owner to make in
+#:                   words, not for a rung to imply.
+#:   ad_creative     OFF, because there is nothing to turn on: no ad-platform
+#:                   write is wired at all. Its declared ship is "mark the
+#:                   batch ready", which approving already does. Listing it as
+#:                   True would promise a spend that no code performs.
+#:
+#: A system absent from this table does not ship on its own. Absence is not
+#: permission — the standing rule this codebase keeps re-learning.
+AUTO_SHIPS = {
+    "blog": True,
+    "campaign_email": False,
+    "ad_creative": False,
+}
+
+
+def may_auto_ship(system_key: str) -> bool:
+    """May this system perform its declared ship with no human, on `auto`?"""
+    return bool(AUTO_SHIPS.get(str(system_key or ""), False))
+
+
 def _cleared_has_a_consumer() -> bool:
     """Does any production module BRANCH on the `cleared` disposition?
 
@@ -151,13 +184,20 @@ def branches_on_cleared(text: str) -> bool:
     return bool(_CLEARED_BRANCH.search(str(text or "")))
 
 
-#: Answered once at import: it is a fact about the source, not about a run.
-CLEARED_IS_WIRED = _cleared_has_a_consumer()
+#: Answered once at import: a fact about the source, not about a run.
+#:
+#: TWO HALVES OF ONE QUESTION. A consumer that branches on the disposition is
+#: one way `cleared` can act; `AUTO_SHIPS` is the other and is the one actually
+#: taken — the blog's run decides its own pending ship when the rung is `auto`,
+#: through the same executor a person would. Reading only the first would have
+#: left the card saying "nothing pushes on its own yet" on the day the blog
+#: started publishing unattended, which is the same defect this scan was added
+#: to end, pointing the other way.
+CLEARED_IS_WIRED = _cleared_has_a_consumer() or any(AUTO_SHIPS.values())
 
-#: What a rung MEANS, told truthfully. The two upper rungs describe sending
-#: only when something can actually send.
-_UNWIRED = (" Nothing pushes on its own yet — no module acts on the "
-            "`cleared` disposition these rungs produce, so output is drafted "
+#: What a rung MEANS, told truthfully. The upper rungs describe sending only
+#: where something can actually send.
+_UNWIRED = (" Nothing on this system pushes on its own — output is drafted "
             "and waits here exactly as it does on manual approval.")
 AUTONOMY_MEANING = {
     "shadow": "The learning phase. Every draft waits for your tap — nothing leaves by itself — and you compare against what you'd have done.",
@@ -168,6 +208,27 @@ AUTONOMY_MEANING = {
              "armed." if CLEARED_IS_WIRED else
              "Meant to send without asking." + _UNWIRED),
 }
+
+
+def autonomy_meaning(rung_value: str, system_key: str = "") -> str:
+    """What a rung means FOR THIS SYSTEM.
+
+    The platform answer is not the account's answer any more, and pretending
+    otherwise is how a card ends up promising a publish on a system that has
+    no write wired. `blog` publishes unattended on `auto`; `campaign_email`
+    does not, by the owner's decision, and its card has to say the difference
+    rather than inherit the general sentence.
+    """
+    r = rung(rung_value)
+    base = AUTONOMY_MEANING.get(r, "")
+    if r not in ("auto", "approve_exceptions") or not system_key:
+        return base
+    if may_auto_ship(system_key):
+        return base
+    return ("This system does not push on its own at any rung, deliberately: "
+            "its output is drafted and waits for you exactly as it does on "
+            "manual approval. What that costs and why it is worth it is "
+            "recorded beside the decision in `systems.AUTO_SHIPS`.")
 
 # The 8-part contract. ADVISORY since 2026-08-20 (owner's call): it is
 # computed, shown on the card, and gates promotion to `auto` — the rung where

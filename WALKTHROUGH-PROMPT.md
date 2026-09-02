@@ -213,10 +213,9 @@ input again"; read it before adding a system.
    written by `scripts/gen_systems_reference.py` and byte-compared. Start
    there: that suite is the register's first three columns already.
 
-**Left deliberately unchanged, flagged not fixed:** the `auto` rung produces
-`"cleared"`, which nothing consumes — so it cannot actually push. Five CATALOG
-systems have no skill at all (`content_compliance`, `lead_responder`,
-`moment_email`, `reorder_engine`, `reports`), so no contract reaches them.
+**Left deliberately unchanged, flagged not fixed:** five CATALOG systems have
+no skill at all (`content_compliance`, `lead_responder`, `moment_email`,
+`reorder_engine`, `reports`), so no contract reaches them.
 
 **Open question the owner has not answered:** should `blog_article` require a
 reader? It is one-to-many, but its reader is defined by search intent.

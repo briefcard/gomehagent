@@ -246,6 +246,52 @@ def decide(token: str) -> str:
     return apply_decision(ap_id, decision)
 
 
+def ship_unattended(tenant: str, output_id: str, why: str = "") -> dict:
+    """Approve this output's pending ship on the system's behalf, on `auto`.
+
+    Owner, 2026-09-02: *"Yes Cleared should push."*
+
+    THE SAME DECISION A PERSON MAKES, THROUGH THE SAME EXECUTOR. It would have
+    been shorter to call the backend directly from the run; it would also have
+    been a SECOND publishing path, and this codebase has paid for a second
+    path of anything every time. Going through `apply_decision` means the
+    approval row exists, `_execute` runs the same arm, the write-back fires,
+    the ledger sees it, and `withdraw`/supersede keep working — none of which
+    would be true of a direct call.
+
+    AND IT IS MARKED. The run's decision reads `auto`, not `approved`, so
+    "how many pages went live with nobody looking" is a question with an
+    answer. A human approval and an unattended one that record identically
+    are indistinguishable exactly when somebody needs to tell them apart.
+
+    Refuses rather than guesses: no pending ship, more than one, or a kind
+    with no executor arm all return `ok: False` with the reason. Nothing here
+    decides which of two approvals was meant.
+    """
+    kinds = ("seo_new_article", "seo_article_revision")
+    with db.SessionLocal() as s:
+        rows = [a for a in s.query(db.Approval)
+                .filter(db.Approval.tenant == tenant,
+                        db.Approval.kind.in_(kinds),
+                        db.Approval.status == "pending").all()
+                if str((a.payload or {}).get("output_id") or "") == output_id]
+        ids = [a.id for a in rows]
+        runs = {a.id: a.run_id for a in rows}
+    if not ids:
+        return {"ok": False, "why": "no pending ship for that output"}
+    if len(ids) > 1:
+        return {"ok": False,
+                "why": f"{len(ids)} pending ships for one output — refusing to "
+                       f"choose; a person should"}
+    said = apply_decision(ids[0], "approved")
+    with db.SessionLocal() as s:
+        run = s.get(db.SystemRun, runs[ids[0]]) if runs[ids[0]] else None
+        if run is not None:
+            run.decision = "auto"
+            s.commit()
+    return {"ok": True, "said": said, "approval_id": ids[0], "why": why}
+
+
 def apply_decision(ap_id: str, decision: str) -> str:
     with db.SessionLocal() as s:
         ap = s.get(db.Approval, ap_id)

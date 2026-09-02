@@ -4923,13 +4923,17 @@ SABOTAGES = [
     {
         "name": "a_rung_describes_what_it_actually_does",
         "file": "app/systems.py",
-        "find": "CLEARED_IS_WIRED = _cleared_has_a_consumer()",
-        "replace": "CLEARED_IS_WIRED = True  # SABOTAGE",
+        # Flipped to False on 2026-09-02. It set True while the value already
+        # WAS True — a no-op that reported MISSED — because the blog now ships
+        # on `auto`. The direction that can still be wrong is the card denying
+        # a push that really happens.
+        "find": "CLEARED_IS_WIRED = _cleared_has_a_consumer() or any(AUTO_SHIPS.values())",
+        "replace": "CLEARED_IS_WIRED = False  # SABOTAGE",
         "suites": ["test_rung_truth.py"],
-        "why": "the card promises `auto` \"Sends without asking\" while "
-               "nothing acts on the disposition it produces — so an owner "
-               "who promotes a system to the top of the ladder gets exactly "
-               "the outcome they got at the bottom, and is told otherwise",
+        "why": "the card tells an owner nothing pushes on its own while the "
+               "blog is publishing to their client's CMS unattended — the "
+               "same defect the derived sentence was added to end, pointing "
+               "the other way, and the more dangerous direction of the two",
     },
     {
         "name": "the_rung_sentence_is_derived_not_written",
@@ -5070,6 +5074,57 @@ SABOTAGES = [
         "why": "a typo saves into `System.config` and reads back as configuration that "
                "works — config nothing reads is indistinguishable from config "
                "that does",
+    },
+    {
+        "name": "the_auto_rung_actually_ships",
+        "file": "app/skill_pack.py",
+        "find": "        if publish[\"queued\"] and _sysm.rung(ctx.autonomy) == \"auto\" \\",
+        "replace": "        if False and _sysm.rung(ctx.autonomy) == \"auto\" \\  # SABOTAGE",
+        "suites": ["test_auto_ships.py"],
+        "why": "`auto` goes back to removing the approval and putting nothing "
+               "in its place — strictly worse than shadow, because the draft "
+               "is finished, nobody is asked, and nothing goes out",
+    },
+    {
+        "name": "only_the_named_systems_ship_unattended",
+        "file": "app/systems.py",
+        "find": "    return bool(AUTO_SHIPS.get(str(system_key or \"\"), False))",
+        "replace": "    return True  # SABOTAGE",
+        "suites": ["test_auto_ships.py"],
+        "why": "every system pushes on its own at the top rung — including "
+               "campaign_email, where the owner said leave it human and where "
+               "a send cannot be recalled, and ad_creative, where the promise "
+               "is of a spend no code performs",
+    },
+    {
+        "name": "an_unattended_ship_is_marked_as_one",
+        "file": "app/approvals.py",
+        "find": "            run.decision = \"auto\"",
+        "replace": "            run.decision = \"approved\"  # SABOTAGE",
+        "suites": ["test_auto_ships.py"],
+        "why": "a page published with nobody looking records identically to "
+               "one somebody read and approved, so 'how much went out "
+               "unattended' is a question with no answer",
+    },
+    {
+        "name": "an_unattended_ship_uses_the_normal_executor",
+        "file": "app/approvals.py",
+        "find": "    said = apply_decision(ids[0], \"approved\")",
+        "replace": "    said = \"skipped\"  # SABOTAGE",
+        "suites": ["test_auto_ships.py"],
+        "why": "the approval is marked without the executor running, so the "
+               "console shows a published article and the CMS never received "
+               "one — the write-back, the ledger and supersede all skipped",
+    },
+    {
+        "name": "a_cards_promise_is_scoped_to_its_system",
+        "file": "app/systems.py",
+        "find": "    if may_auto_ship(system_key):\n        return base",
+        "replace": "    if True:  # SABOTAGE\n        return base",
+        "suites": ["test_auto_ships.py"],
+        "why": "campaign_email's card promises 'Sends without asking' on a "
+               "system that deliberately never sends by itself — the platform "
+               "answer rendered as the account's",
     },
 ]
 

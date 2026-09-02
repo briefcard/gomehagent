@@ -58,9 +58,19 @@ def main() -> int:
     wired = systems.CLEARED_IS_WIRED
     ck("the answer is a boolean about the source, not a written-down claim",
        isinstance(wired, bool))
-    ck("  and it agrees with a fresh scan",
-       systems._cleared_has_a_consumer() == wired,
-       "one reader, so the card and the ledger cannot disagree")
+    # TWO HALVES OF ONE QUESTION, since 2026-09-02. A module branching on the
+    # disposition is one way `cleared` can act; `AUTO_SHIPS` is the other and
+    # is the one actually taken — the blog decides its own pending ship on
+    # `auto`. Asserting equality with the SCAN alone would fail the day the
+    # policy became the answer, which is exactly what happened.
+    ck("  and it is the scan OR the ship policy, not one of them",
+       wired == (systems._cleared_has_a_consumer()
+                 or any(systems.AUTO_SHIPS.values())),
+       f"scan={systems._cleared_has_a_consumer()} "
+       f"policy={any(systems.AUTO_SHIPS.values())} wired={wired}")
+    ck("  and something really does push now",
+       any(systems.AUTO_SHIPS.values()),
+       "the ledger entry that held this open closed on 2026-09-02")
     # THE SCANNER ITSELF. Without this, breaking the search is invisible: the
     # codebase currently has no consumer, so a scanner that can no longer FIND
     # one returns the same answer as a working one and the card tells the
@@ -82,6 +92,15 @@ def main() -> int:
     print("— and the sentence follows it, in BOTH directions —")
     auto = systems.AUTONOMY_MEANING["auto"]
     exc = systems.AUTONOMY_MEANING["approve_exceptions"]
+    # ASSERTED, NOT BRANCHED ON. This read `if wired:` / `else:` and accepted
+    # either state, which was right while the answer was an accident of the
+    # source and is wrong now that it is a decision (`AUTO_SHIPS`, blog=True).
+    # A suite that accepts both answers cannot catch a guard flipping one —
+    # `a_rung_describes_what_it_actually_does` reported MISSED for exactly
+    # that reason.
+    ck("something pushes, so the constant is True",
+       wired is True and any(systems.AUTO_SHIPS.values()),
+       "the blog decides its own ship on `auto` since 2026-09-02")
     if wired:
         ck("wired: auto says it sends", "Sends without asking" in auto, auto)
         ck("  and the rung below says routine output sends itself",

@@ -4645,6 +4645,31 @@ def _run_blog_article(ctx: Context) -> dict:
         # silently dropped.
         publish["queued"] = said.startswith("Queued for your approval")
         publish["detail"] = said if publish["queued"] else f"NOT queued — {said}"
+        # ON `auto`, AND ONLY WHERE THE OWNER SAID SO. Owner, 2026-09-02:
+        # *"Yes Cleared should push."* `systems.AUTO_SHIPS` holds the per-system
+        # answer, because "push" is a different irreversible act in each one —
+        # a published page can be revised and the refresh lane exists to do
+        # exactly that, while a send cannot be recalled. campaign_email is off
+        # there by decision, not omission.
+        #
+        # The approval is still created and still executed by the same arm; it
+        # is simply decided by the rung instead of by a person, and the run
+        # records `auto` so the two can be told apart afterwards.
+        if publish["queued"] and _sysm.rung(ctx.autonomy) == "auto" \
+                and _sysm.may_auto_ship(ctx.skill.system_key):
+            from . import approvals as _appr
+            _oid = ((ctx.items[-1] or {}).get("output_id", "")
+                    if ctx.items else "")
+            _shipped = _appr.ship_unattended(
+                ctx.tenant, _oid, why="auto rung")
+            if _shipped.get("ok"):
+                publish["detail"] = ("published without asking (auto rung) — "
+                                     + str(_shipped.get("said") or "")[:160])
+            else:
+                # NAMED. An unattended ship that quietly did not happen is the
+                # worst of both: nobody was asked, and nothing went out.
+                publish["detail"] += (f" — auto ship did not run: "
+                                      f"{_shipped.get('why', 'unknown')}")
     ctx.note(publish["detail"])
 
     # ONE KEYWORD, ONE PAGE — enforced HERE, because every caller comes

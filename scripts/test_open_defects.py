@@ -29,11 +29,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER = "WALKTHROUGH-PROMPT.md §5"
 
 _fail = []
+#: The entries that reported open, counted rather than asserted. The summary
+#: line said "all 3 defects still open" from a hardcoded 3, so closing one left
+#: it claiming three while printing two — a count written beside the thing it
+#: counts, in the one file whose entire job is refusing exactly that.
+_open = []
 
 
 def still_broken(what, cond, fixed_msg):
     """PASSES while the defect stands. Fails — loudly — once it is fixed."""
     if cond:
+        _open.append(what)
         print(f"  [ open  ] {what}")
     else:
         _fail.append(f"{what}\n      FIXED — now delete it from {LEDGER}: {fixed_msg}")
@@ -60,22 +66,20 @@ def main():
         "worker.py now indexes a sent reply — response patterns are assembled context",
     )
 
-    # 3 — the `auto` rung cannot actually push.
-    #     It produces "cleared", and nothing consumes that word.
-    # The bare word appears in seven modules for unrelated reasons (digest
-    # counts, cleared concerns, keyword priority). What matters is whether any
-    # PRODUCTION module BRANCHES on the disposition. Only scripts/test_skill.py
-    # does, and a test reading it is not a consumer.
-    _branch = re.compile(r'(==|!=|\bis)\s*"cleared"|"cleared"\s*(==|!=)')
-    consumers = sorted(
-        p.name for p in (ROOT / "app").glob("*.py") if _branch.search(p.read_text())
-    )
-    emits = '"cleared"' in (ROOT / "app" / "skill.py").read_text()
-    still_broken(
-        'the `auto` rung emits "cleared", which no production module branches on',
-        emits and not consumers,
-        f"{consumers} now act on it — auto can push",
-    )
+    # 3 — CLOSED 2026-09-02. The `auto` rung now pushes: `blog` decides its own
+    #     pending ship through `approvals.ship_unattended`, which goes through
+    #     `apply_decision` and the same executor arm a person would trigger, and
+    #     marks the run `auto` so an unattended publish is distinguishable from
+    #     a human one. `systems.AUTO_SHIPS` holds the per-system answer —
+    #     `campaign_email` is off there by the owner's decision ("Leave it
+    #     human, in the ESP"), and `ad_creative` because no ad-platform write
+    #     exists to turn on.
+    #
+    #     The check that held this entry open looked for a branch on the word
+    #     "cleared". It was a PROXY, and the fix does not take that shape — the
+    #     rung is read, not the disposition string — so the proxy would have
+    #     gone on reporting the defect after it was fixed. A ledger that fails
+    #     on good news has to be measuring the news.
 
     # 4 — five CATALOG systems have no skill, so no contract reaches them.
     from app import skill  # noqa: E402
@@ -96,7 +100,7 @@ def main():
     print(
         "\n"
         + (
-            f"all {3} defects still open — ledger is accurate"
+            f"all {len(_open)} defect(s) still open — ledger is accurate"
             if not _fail
             else f"{len(_fail)} entry(s) are STALE:\n  - " + "\n  - ".join(_fail)
         )
