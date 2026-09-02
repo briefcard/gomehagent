@@ -149,10 +149,29 @@ def main() -> int:
                 .filter(db.ArtifactBody.output_id == oid4).first()).body
     ck("the draft now says the corrected number", "180" in body, body[:90])
     ck("  and no longer says the wrong one", "250" not in body, body[:90])
-    ck("  the markup is still balanced",
+    # BALANCED **AND** STILL THERE. `count == count` is 0 == 0 when the
+    # correction destroys the markup entirely, so it passed on the one
+    # outcome as readily as on the other — and losing the emphasis silently
+    # is the more likely failure, because the replacement rewrites the span
+    # the tags live in.
+    ck("  the markup survived the correction",
+       body.count("<strong>") >= 1,
+       body[:110] + " — the tags wrap the very sentence being replaced")
+    ck("  and it is still balanced",
        body.count("<strong>") == body.count("</strong>"),
        "a sentence opening inside <strong> and closing after it would leave "
        "the tag unclosed and the rest of the article bold")
+    # A KNOWN TRADE-OFF, RECORDED SO IT CANNOT DRIFT UNNOTICED. The tags
+    # consumed by the replaced span are re-emitted AROUND the replacement, so
+    # emphasis that wrapped one word ends up wrapping the whole corrected
+    # sentence. That is cosmetic and safe; the alternative — dropping them —
+    # left the tag unclosed and the rest of the article bold, which is the
+    # defect this behaviour was built to fix. Asserted, not assumed, so a
+    # future change to `replace_sentence` has to face the choice again.
+    ck("  emphasis spreads to the corrected sentence, and that is known",
+       "<strong>Glassbox has the capacity for 180" in body,
+       "one bold word becomes a bold sentence — cosmetic, and the price of "
+       "never leaving a tag unclosed")
     ck("  the flash says the draft changed",
        "draft now says it too" in r4.headers.get("location", "").replace("%20", " ")
        or "draft%20now%20says" in r4.headers.get("location", ""),

@@ -201,6 +201,10 @@ def main() -> int:
         cid = [r.id for r in s_.query(db.KbClaim).all()
                if "melamine" in (r.claim or "")][0]
     n_ctx = len(kb.contexts("baci"))
+    # THE BEFORE-STATE, read where the claim is actually visible. Without it,
+    # "no longer selectable" is a statement about a list that never held it.
+    _was_citable = any("melamine" in x.claim
+                       for x in kb.claims("baci", entity_key="aqua"))
     r3 = c.post(f"/admin/claim_edit?key={KEY}",
                 data={"claim_id": cid, "tenant": "baci", "action": "background",
                       "claim": "Buyers compare us with melamine."},
@@ -215,8 +219,19 @@ def main() -> int:
        "200 cycles" not in moved.text and "200 cycles" in (moved.source or ""),
        "'X — tested 200 cycles' as background is proof wearing another hat; "
        "`source` is documented as internal provenance a customer never sees")
+    # READ WHERE IT WAS VISIBLE. `kb.claims("baci")` unscoped never returned
+    # this claim — it is scoped to `aqua` — so the assertion passed on SCOPE
+    # and would have passed identically with retirement broken. The scoped
+    # read is the one that changes, and the before-state is asserted so the
+    # after-state means something.
+    ck("  it WAS selectable before, under its own scope",
+       _was_citable,
+       "if it was not, the check below proves nothing about retirement")
     ck("  it is no longer selectable as proof",
-       not any("melamine" in x.claim for x in kb.claims("baci")))
+       not any("melamine" in x.claim
+               for x in kb.claims("baci", entity_key=moved.entity_key)),
+       "a retired claim reaching a generator is a fact the owner withdrew, "
+       "asserted in a draft")
     with db.SessionLocal() as s_:
         was = s_.get(db.KbClaim, cid)
         ck("  and the claim row SURVIVES, retired",
