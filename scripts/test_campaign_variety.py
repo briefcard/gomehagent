@@ -401,6 +401,15 @@ def main():
     print("\n— a repair re-renders: the ESP gets the REPAIRED email —")
     calls = {"n": 0}
 
+    # ON `auto`, THE ONLY RUNG THAT REPAIRS SINCE 2026-09-02. The property
+    # asserted below is unchanged and was a real bug once: the rendered HTML
+    # was built from the PRE-repair copy, so a repaired email filed the
+    # repaired text and shipped the failing HTML. Only the precondition moved.
+    with db.SessionLocal() as _s:
+        _row = systems.find("baci", "campaign_email")
+        _s.get(db.System, _row.id).autonomy = "auto"
+        _s.commit()
+
     def _first_banned(bundle, seg, goal, craft=None):
         calls["n"] += 1
         if calls["n"] == 1:

@@ -4942,6 +4942,92 @@ SABOTAGES = [
                "nothing sends — the same defect pointing the other way, which "
                "is why a hand-corrected string was not the fix",
     },
+    {
+        "name": "a_body_picture_comes_from_an_approved_asset",
+        "file": "app/skill_pack.py",
+        "find": "        if not aid or aid in seen or not (got.get(\"url\") or \"\"):",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_article_images.py"],
+        "why": "a marker with nothing behind it renders an <img> with an "
+               "empty src, and the hero is repeated halfway down the page — "
+               "the two failures a placement system exists to prevent",
+    },
+    {
+        "name": "an_unfilled_marker_is_removed_and_named",
+        "file": "app/skill_pack.py",
+        "find": "            wanted.append(subject)\n            return \"\"\n        seen.add(aid)",
+        "replace": "            return m.group(0)  # SABOTAGE\n        seen.add(aid)",
+        "suites": ["test_article_images.py"],
+        "why": "the raw marker survives into the published body and the "
+               "picture nobody could supply is never recorded — an account "
+               "with no approved photographs publishes scaffolding and hears "
+               "nothing about it",
+    },
+    {
+        "name": "an_article_is_not_a_gallery",
+        "file": "app/skill_pack.py",
+        "find": "        if len(placed) >= MAX_BODY_IMAGES:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_article_images.py"],
+        "why": "every marker the drafter felt like leaving becomes a picture, "
+               "so one article can carry six and the piece reads as a "
+               "slideshow with captions",
+    },
+    {
+        "name": "alt_text_describes_the_picture_that_was_chosen",
+        "file": "app/skill_pack.py",
+        "find": "        alt = str(got.get(\"alt\") or got.get(\"subject\") or subject)",
+        "replace": "        alt = subject  # SABOTAGE",
+        "suites": ["test_article_images.py"],
+        "why": "a screen reader is told what the WRITER wanted to see rather "
+               "than what the picture shows — and the two differ whenever the "
+               "ladder picked something adjacent, which is most of the time",
+    },
+    {
+        "name": "a_blocked_article_gets_another_attempt",
+        "file": "app/skill_pack.py",
+        "find": "             fmt=\"cms_article\", redraft=_repair_article,",
+        "replace": "             fmt=\"cms_article\",  # SABOTAGE",
+        "suites": ["test_article_repair.py"],
+        "why": "the longest thing this system writes — and the only one that "
+               "lands on a public page under the client's own domain — is the "
+               "one piece that never gets a second attempt: a banned phrase "
+               "in paragraph nine blocks the whole article and waits for a "
+               "person, at every rung including `auto`, where nobody is "
+               "watching",
+    },
+    {
+        "name": "a_retry_is_told_what_broke",
+        "file": "app/skill_pack.py",
+        "find": "        note = \"\\n\".join(f\"- {f['detail']} → {f['fix']}\" for f in failures)\n        fixed, _ = _draft_article_live(",
+        "replace": "        note = \"\"  # SABOTAGE\n        fixed, _ = _draft_article_live(",
+        "suites": ["test_article_repair.py"],
+        "why": "the article is asked again with no idea what was wrong with "
+               "it, so the retry is the same question and burns the attempt "
+               "budget producing the same rejection three times",
+    },
+    {
+        "name": "only_the_unattended_rung_repairs_itself",
+        "file": "app/skill.py",
+        "find": "        may_repair = _rung(self.autonomy) == \"auto\"",
+        "replace": "        may_repair = True  # SABOTAGE",
+        "suites": ["test_article_repair.py"],
+        "why": "a draft on a MANUAL rung silently rewrites itself, hiding the "
+               "one thing the person reading it is there to see — which rule "
+               "keeps biting, and whether the rule or the brief is what needs "
+               "changing. Three quiet repairs a week is a ban list nobody "
+               "learns from",
+    },
+    {
+        "name": "a_withheld_repair_says_it_was_withheld",
+        "file": "app/skill.py",
+        "find": "            self.note(\"blocked, and not repaired automatically: this system is \"",
+        "replace": "            pass  # SABOTAGE\n            _ = (\"blocked, and not repaired automatically: this system is \"",
+        "suites": ["test_article_repair.py"],
+        "why": "a blocked draft on a manual rung is silent about WHY nothing "
+               "was retried, so a deliberate rung difference reads as a "
+               "broken repairer",
+    },
 ]
 
 

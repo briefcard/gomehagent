@@ -406,7 +406,34 @@ class Context:
         verdict = _check(body)
         attempts = []          # every rejected draft, in order, with its reasons
 
-        while not verdict["ok"] and redraft and len(attempts) < MAX_REPAIRS:
+        # REPAIRING IS THE UNATTENDED RUNG'S JOB, AND ONLY ITS JOB.
+        #
+        # Owner, 2026-09-02: *"Lets make sure this only happens for auto rung
+        # because manually I'd like to catch if things need to be updated and
+        # how."* Right, and the reason is the one the whole ladder is built
+        # on. On a manual rung a person reads the output — and a draft that
+        # silently rewrote itself hides the very thing they are there to see:
+        # WHICH rule keeps biting, and whether the rule or the brief is what
+        # needs changing. Three quiet repairs a week is a ban list nobody
+        # learns from and a `repair_rate` nobody looks at.
+        #
+        # On `auto` nobody reads it, so a blocked draft is a silent gap and
+        # self-correction is the only thing standing between a rejection and
+        # nothing happening at all.
+        #
+        # The failures are kept either way — `item["failures"]` carries them
+        # and the workroom renders them — so the manual rungs LOSE nothing.
+        # They stop getting a repair they did not ask for; they still get the
+        # named rule, the phrase, and the fix.
+        may_repair = _rung(self.autonomy) == "auto"
+        if not may_repair and not verdict["ok"] and redraft:
+            self.note("blocked, and not repaired automatically: this system is "
+                      "on a manual rung, where a draft that rewrote itself "
+                      "would hide which rule is biting. The failures are on "
+                      "the draft — fix the copy, or the rule.")
+
+        while (not verdict["ok"] and redraft and may_repair
+               and len(attempts) < MAX_REPAIRS):
             attempts.append({"body": body, "failures": verdict["failures"]})
             try:
                 fixed = (redraft(body, verdict["failures"]) or "").strip()
@@ -590,6 +617,14 @@ class Context:
                 "needs": needs, "meta": (meta() if callable(meta) else meta) or {}}
         self.items.append(item)
         return item
+
+
+def _rung(value) -> str:
+    """The rung a stored value MEANS. Delegates to `systems.rung`, which is the
+    one reader — a second normaliser here is how a retired word starts
+    behaving differently in two places."""
+    from . import systems
+    return systems.rung(value)
 
 
 def _disposition(autonomy: str, valid: bool, writes: bool) -> str:

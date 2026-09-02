@@ -439,6 +439,18 @@ def main():
         ck(f"  {why}", bool(_v._banned("baci", text)) is want, text[:46])
 
     print("\n--- a rejection explains and adjusts, it does not queue a human ---")
+    # ON `auto`, WHICH IS NOW THE ONLY RUNG THAT REPAIRS. Owner, 2026-09-02:
+    # *"Lets make sure this only happens for auto rung because manually I'd
+    # like to catch if things need to be updated and how."* The property below
+    # is unchanged and still matters — a repair happens, keeps its rejected
+    # attempt, and files as `repaired` rather than inflating the KB backlog.
+    # What moved is the PRECONDITION, so the fixture moves with it rather than
+    # the assertions being weakened.
+    _ads = systems.find("baci", "ad_creative") or systems.create("baci", "ad_creative")
+    with db.SessionLocal() as _s:
+        _r = _s.get(db.System, _ads.id)
+        _r.status, _r.autonomy = "live", "auto"
+        _s.commit()
     # A model that says the banned thing once, then fixes it when told.
     _tries = {"n": 0}
 

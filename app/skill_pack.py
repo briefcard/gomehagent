@@ -3869,6 +3869,17 @@ statistic, a date, a material, a place of manufacture, or a superlative.
 NEVER write a link you were not given. If you were given internal links, use
 them once each, in the sentence where they are genuinely useful.
 
+WHERE A PICTURE WOULD HELP, MARK THE PLACE — never write an image tag. Put
+`<!--IMAGE: what it should show-->` on its own line between two paragraphs, at
+most twice, and only where a reader would genuinely be helped by seeing the
+thing rather than reading about it. Describe the SUBJECT of the passage it sits
+beside, concretely and in a few words — "a folding table set for eight in a
+garden", not "an image about outdoor dining". You are naming a place and a
+subject; the system chooses the actual picture from what this brand has
+approved, and removes the marker when it has nothing that fits. An article
+where every marker was dropped must still read correctly, so never refer to a
+picture in the prose.
+
 Return HTML: h1, h2, h3, p, ul/li, and a href only for links you were given.
 No <script>, no <style>, no inline styles, no image tags."""
 
@@ -3947,6 +3958,83 @@ def _article_prompt(bundle: dict, keyword: str, role: str, angle: str,
                      "brief and the anti-repeat list:\n"
                      + str(bundle["revision_notes"]))
     return "\n".join(parts)
+
+
+import re as _re
+
+
+#: What the drafter leaves behind where a picture would help. An HTML COMMENT
+#: on purpose: if one is ever missed, it renders as nothing. `[IMAGE: …]` would
+#: render as literal text on a live page, and the failure mode of a placement
+#: system has to be an absent picture, never visible scaffolding.
+_IMG_MARK = _re.compile(r'[ \t]*<!--\s*IMAGE:\s*(.{3,160}?)\s*-->[ \t]*\n?',
+                        _re.I | _re.S)
+
+#: An article is not a gallery. Two is enough to break up a long piece and few
+#: enough that each one has to earn its place.
+MAX_BODY_IMAGES = 2
+
+
+def place_images(body: str, tenant: str, *, commitment: dict | None = None,
+                 entity_key: str = "", used: set | None = None) -> tuple:
+    """Fill the drafter's placement markers from what this brand has approved.
+
+    THE MODEL NAMES THE PLACE AND THE SUBJECT; IT NEVER NAMES THE PICTURE. The
+    same rule the internal links already follow, for the same reason: a URL
+    from a model is a URL nobody can vouch for, and `_link_grounding` exists
+    because that failure shipped once. Here it cannot happen by construction —
+    the marker carries prose, and every `src` comes from `creative.pick`,
+    which selects only assets somebody approved.
+
+    A MARKER WITH NOTHING BEHIND IT IS REMOVED, NOT LEFT. It is also recorded:
+    the subject becomes a brief, the same queue the hero's absence feeds, so
+    "this article wanted a picture of X" reaches the person who can make one
+    instead of dying in a run log. An article whose markers were all dropped
+    still reads correctly, which is why the prompt forbids referring to a
+    picture in the prose.
+
+    THE HERO IS NEVER REPEATED. `used` carries the hero's asset id in, and a
+    body image that duplicated it would read as a rendering fault rather than
+    as illustration — the same picture twice, once under the headline and once
+    halfway down.
+
+    Returns `(html, placed, wanted)` — the body, the assets used, and the
+    briefs for the ones that could not be filled.
+    """
+    from . import creative
+    seen = set(used or ())
+    placed: list[dict] = []
+    wanted: list[str] = []
+
+    def _one(m):
+        subject = " ".join(m.group(1).split())
+        if len(placed) >= MAX_BODY_IMAGES:
+            wanted.append(subject)
+            return ""
+        got = creative.pick(tenant, commitment=commitment, fmt="article_body",
+                            entity_key=entity_key, prominent=subject)
+        aid = str(got.get("asset_id") or "")
+        if not aid or aid in seen or not (got.get("url") or ""):
+            wanted.append(subject)
+            return ""
+        seen.add(aid)
+        placed.append({"asset_id": aid, "url": got["url"], "subject": subject,
+                       "rung": got.get("rung", ""), "why": got.get("why", "")})
+        # ALT TEXT FROM THE ASSET, never from the marker. The marker is what
+        # the writer WANTED to see; the alt has to describe what is actually
+        # there, or a screen reader is told about a picture nobody chose.
+        alt = str(got.get("alt") or got.get("subject") or subject)
+        return (f'<figure><img src="{_esc_attr(got["url"])}" '
+                f'alt="{_esc_attr(alt)}" loading="lazy"></figure>\n')
+
+    return _IMG_MARK.sub(_one, str(body or "")), placed, wanted
+
+
+def _esc_attr(v: str) -> str:
+    """Attribute-safe. A caption or alt carrying a quote would otherwise close
+    the attribute and put prose into the markup."""
+    return (str(v or "").replace("&", "&amp;").replace('"', "&quot;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def _draft_article_live(bundle: dict, keyword: str, role: str, angle: str,
@@ -4318,6 +4406,24 @@ def _run_blog_article(ctx: Context) -> dict:
         entity_key=entity_key, prominent=title,
         claim=(ctx.bundle.get("claims") or [{}])[0].get("claim", ""))
     _hero_id = str(_hero.get("asset_id") or "")
+    # THE PICTURES INSIDE THE PIECE, filled where the drafter marked a place.
+    # After the hero on purpose: the hero's id goes in as `used`, so the same
+    # photograph cannot appear twice — once under the headline and once
+    # halfway down, which reads as a rendering fault rather than illustration.
+    body, _in_body, _img_wanted = place_images(
+        body, ctx.tenant, commitment=_about, entity_key=entity_key,
+        used={_hero_id} if _hero_id else set())
+    if _in_body:
+        ctx.note("pictures in the piece: "
+                 + "; ".join(f"{p['subject']} ({p['rung']})" for p in _in_body))
+    for _w in _img_wanted:
+        # THE SAME QUEUE THE HERO'S ABSENCE FEEDS. A marker the account could
+        # not fill is a picture somebody wanted, named — not a silent gap.
+        ctx.thin.append(f"image:{_w}")
+    if _img_wanted:
+        ctx.note(f"{len(_img_wanted)} place(s) in the article wanted a picture "
+                 f"this account does not have yet — the markers were removed, "
+                 f"and each is filed as a brief.")
     if _hero_id:
         ctx.note(f"picture: {_hero['rung']} — {_hero['why']}")
     else:
@@ -4343,9 +4449,47 @@ def _run_blog_article(ctx: Context) -> dict:
                  f"approve before anything can use it.")
         ctx.thin.append(f"image:{_hero['subject'] or 'no subject declared'}")
 
+    def _repair_article(previous: str, failures: list) -> str:
+        """Hand the article its own rejection and ask again.
+
+        Owner, 2026-09-02: *"Does the auto have a redraft capability with
+        instruction on why it failed validation?"* The loop exists in
+        `Context.emit` and runs at EVERY rung — but only when the skill hands
+        it a repairer, and `blog_article` handed it none. Three of the six
+        emits in this pack passed one; the article did not, so the longest
+        thing this system writes and the only one that lands on a public page
+        under the client's own domain was the one that never got a second
+        attempt. A banned phrase in paragraph nine blocked the whole piece and
+        waited for a person, at every rung including `auto` — where nobody is
+        watching, which is precisely where a blocked draft costs the most.
+
+        The failures are named, not summarised: `detail` is what broke and
+        `fix` is what the checker itself says to do about it. Rewriting the
+        rules into a nicer sentence here would be a second vocabulary for the
+        same thing, and the drafter would be reasoning about my paraphrase
+        rather than the gate it has to pass.
+
+        Only the model can repair; with no key there is nothing to reason with
+        and `_draft_article_live` returns "", which `emit` reads as "nothing
+        more to give" and stops on — correctly.
+        """
+        note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
+        fixed, _ = _draft_article_live(
+            {**ctx.bundle,
+             "rules": {**ctx.bundle.get("rules", {}),
+                       "block": ctx.bundle.get("rules", {}).get("block", "")
+                       + f"\n\n## Your previous article was rejected\n"
+                         f"{previous[:6000]}\n\n## Why, and what to change\n"
+                         f"{note}\nRewrite it so none of these apply. Keep the "
+                         f"H1, keep the structure, keep every internal link "
+                         f"you were given, and do not drop the claims. Do not "
+                         f"argue with the rules."}},
+            keyword, role, angle, questions, links, entity, avoid)
+        return fixed
+
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
              entity_key=entity_key, angle=angle or f"{role} article",
-             fmt="cms_article",
+             fmt="cms_article", redraft=_repair_article,
              # WHAT THIS ARTICLE IS ABOUT, handed to the gate.
              #
              # `_about` was built above and went only to `creative.pick`, so an

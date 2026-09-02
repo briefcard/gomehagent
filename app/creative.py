@@ -174,6 +174,20 @@ FORMATS = {
             "must read as journalism rather than as an advertisement. No "
             "packshot, no staged selling.",
         extra=("on_subject",)),
+    "article_body": dict(
+        # NOT THE HERO'S JOB. The hero sits under a headline in a search
+        # result and has to summarise the whole piece; a body image sits
+        # inside one section and has to make THAT passage concrete. Selecting
+        # both with one rule is how an article ends up with two versions of
+        # the same picture — the hero repeated halfway down, which reads as a
+        # rendering fault rather than as illustration.
+        shape="landscape",
+        job="Illustration for ONE passage of an article, not for the article. "
+            "It sits beside a specific paragraph and its whole job is to make "
+            "that paragraph concrete — the thing being described, at the "
+            "moment being described. It must not restate the headline, and it "
+            "must not read as an advertisement any more than the hero does.",
+        extra=("on_subject",)),
     "ad_frame": dict(
         shape="square",
         job="AN ARGUMENT, not a decoration. It has to stop a thumb and land "

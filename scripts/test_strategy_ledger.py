@@ -318,6 +318,15 @@ def main():
     print("\n— a rejected draft never enters the anti-repeat window —")
     calls = {"n": 0}
 
+    # ON `auto`, THE ONLY RUNG THAT REPAIRS SINCE 2026-09-02. What is asserted
+    # below — that the ledger window shows the SURVIVING row and not the draft
+    # that was thrown away — is unchanged; it just needs a run that actually
+    # repaired in order to have a superseded row to not show.
+    with db.SessionLocal() as _s:
+        _row = systems.find("baci", "campaign_email")
+        _s.get(db.System, _row.id).autonomy = "auto"
+        _s.commit()
+
     def _first_banned(bundle, seg, goal, craft=None):
         calls["n"] += 1
         bad = calls["n"] == 1
