@@ -568,6 +568,55 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
 
 #: system key -> planner. The tick and the console both resolve through this,
 #: so a new planner is a row here and nothing else.
+def file_articles(sysrow, phrases: list, *, role: str = "support",
+                  cluster: str = "", trigger: str = "console") -> dict:
+    """File a named set of keywords as blog plans, under the run's own cap.
+
+    ONE FILER. The Plan-supports control grew this loop inline, and the
+    Answer-engines control needed the identical thing for a different set —
+    two copies of "how work gets filed" drift on the day either learns
+    something, and the thing they would drift ON is the monthly cap, which has
+    already been the source of one silent overrun.
+
+    Everything the weekly run obeys is obeyed here: `article_window` for what
+    each month already holds, `next_article_slot` to skip a full month and
+    stop at the horizon, `open_plan` under the same `article:` ref space, and
+    the keyword marked `planned` so nothing offers it twice. A plan filed from
+    a console button is indistinguishable from one the planner proposed, which
+    is the point — there is no second way to create work.
+
+    Returns what happened rather than a bare count: filed, deferred because
+    the calendar is full, and refused with reasons.
+    """
+    from . import keywords as kwm
+    win = article_window(sysrow)
+    slot = win["slot"]
+    filed, refused, deferred = 0, [], 0
+    for phrase in phrases:
+        nxt = next_article_slot(win, slot)
+        if nxt is None:
+            # NOT A FAILURE, AND SAID AS SUCH. The rest are still worth
+            # writing; the calendar is simply full, which is the same answer
+            # the weekly run gives and for the same reason.
+            deferred = len(phrases) - filed - len(refused)
+            break
+        slot = nxt
+        got = systems.open_plan(
+            sysrow.tenant, "blog",
+            ref=f"article:{sysrow.tenant}:{kwm.slug(phrase)}",
+            plan={"keyword": phrase, "role": role, "cluster": cluster},
+            planned_for=slot.isoformat(), trigger=trigger)
+        if got.get("error"):
+            refused.append(got["error"])
+            continue
+        if got.get("created"):
+            filed += 1
+            kwm.upsert(sysrow.tenant, phrase, status="planned")
+            slot = took_slot(win, slot)
+    return {"filed": filed, "deferred": deferred, "refused": refused,
+            "cap": win["cadence"]["articles_monthly"]}
+
+
 def article_window(sysrow) -> dict:
     """Everything needed to place an article legally: the cadence, what each
     month already holds, the first candidate slot, and where the horizon ends.

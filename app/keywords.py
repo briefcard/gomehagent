@@ -1999,6 +1999,26 @@ def _owed_for(position: float) -> tuple[str, str]:
     raise AssertionError("_MOVES must end in an open band")
 
 
+def unanswered_questions(tenant: str) -> list:
+    """Question-shaped keywords that could be FILED right now. ONE READER.
+
+    `aeo()["coverage"]["unanswered"]` means "not published", which counts the
+    ones already planned — so a button sized from it offered to plan work that
+    was already scheduled and filed nothing when pressed. The button and the
+    route were counting different populations, which is the split-contract
+    shape this codebase keeps closing: two halves of one question, answered in
+    two places.
+
+    Highest priority first, because the monthly cap stops the filing long
+    before a real backlog runs out and the ones that get in should be the ones
+    worth writing.
+    """
+    return [r.phrase for r in targets(tenant)
+            if is_question(r.phrase)
+            and r.status == "candidate"
+            and (r.owner_priority or "") != "muted"]
+
+
 def next_to_write(tenant: str, *, top: int = 12) -> list:
     """The phrases the board is currently offering as work. ONE READER.
 

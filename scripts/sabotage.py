@@ -4817,9 +4817,11 @@ SABOTAGES = [
                "again every time they look at the board",
     },
     {
+        # Re-anchored 2026-09-02: the filing loop moved into
+        # `planner.file_articles`, which both console controls now share.
         "name": "planned_supports_stop_being_offered",
-        "file": "app/web.py",
-        "find": "            kwm.upsert(tenant, phrase, status=\"planned\")",
+        "file": "app/planner.py",
+        "find": "            kwm.upsert(sysrow.tenant, phrase, status=\"planned\")",
         "replace": "            pass  # SABOTAGE",
         "suites": ["test_support_links.py"],
         "why": "filing without marking, so the same support is offered again "
@@ -4828,10 +4830,15 @@ SABOTAGES = [
                "whole lane exists to prevent",
     },
     {
+        # Re-anchored 2026-09-02 when the filing loop moved into
+        # `planner.file_articles`. Its old target is now covered by
+        # `one_filer_files_every_console_control`; this takes the other half of
+        # the rule — a slot that is used has to be RECORDED, or the month
+        # never fills and the cap never binds.
         "name": "one_writer_decides_when_an_article_may_be_planned",
-        "file": "app/web.py",
-        "find": "        nxt = plm.next_article_slot(win, slot)",
-        "replace": "        nxt = slot  # SABOTAGE",
+        "file": "app/planner.py",
+        "find": "            slot = took_slot(win, slot)",
+        "replace": "            slot = slot  # SABOTAGE",
         "suites": ["test_support_links.py"],
         "why": "the console control files past the monthly cap and past the "
                "horizon while its docstring claims otherwise — and because "
@@ -5374,6 +5381,38 @@ SABOTAGES = [
         "why": "the board offers a different set from the one the mute route "
                "measures against, so every message about what changed is "
                "computed from a list nobody is looking at",
+    },
+    {
+        "name": "the_question_backlog_has_a_control",
+        "file": "app/admin_ui.py",
+        "find": "    {_plan_questions_btn(key, tenant, cov, kw.unanswered_questions(tenant))}",
+        "replace": "    ",
+        "suites": ["test_question_backlog.py"],
+        "why": "the Answer-engines block states a 56-item backlog and offers "
+               "nothing that acts on it — a fix instruction where a control "
+               "belongs, on the section the owner asked 'what can I do about "
+               "this' of",
+    },
+    {
+        "name": "the_button_counts_what_the_route_files",
+        "file": "app/admin_ui.py",
+        "find": "    n = len(fileable)",
+        "replace": "    n = cov.get(\"unanswered\", 0)  # SABOTAGE",
+        "suites": ["test_question_backlog.py"],
+        "why": "`unanswered` means not PUBLISHED and counts the ones already "
+               "planned, so the button offers to plan work that is already "
+               "scheduled and files nothing when pressed — the button and the "
+               "route counting different populations of one thing",
+    },
+    {
+        "name": "one_filer_files_every_console_control",
+        "file": "app/planner.py",
+        "find": "        nxt = next_article_slot(win, slot)\n        if nxt is None:",
+        "replace": "        nxt = slot\n        if False:  # SABOTAGE",
+        "suites": ["test_question_backlog.py", "test_support_links.py"],
+        "why": "both console controls file past the monthly cap and past the "
+               "horizon at once — one shared filer means one place to get "
+               "this wrong, and this is that place",
     },
 ]
 

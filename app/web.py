@@ -7231,6 +7231,78 @@ def _back_parts(src) -> dict:
             "q": str(src.get("bq") or "")}
 
 
+def _filed_message(out: dict, what: str) -> tuple:
+    """One sentence for a filing result, and whether it is good news.
+
+    Both console filing controls report the same three facts — how many were
+    filed, how many the calendar deferred, how many were refused — and a
+    second wording for one outcome is how two buttons start describing the
+    same thing differently.
+    """
+    if not out["filed"]:
+        return ("nothing was filed — "
+                + ("; ".join(out["refused"])[:180]
+                   or (f"the horizon is full at {out['cap']}/month"
+                       if out["deferred"] else "they were already planned")),
+                False)
+    return (f"{out['filed']} {what}"
+            + (f" — {out['deferred']} left for a later month, the horizon is "
+               f"full at {out['cap']}/month" if out["deferred"] else "")
+            + (f" — {len(out['refused'])} refused" if out["refused"] else ""),
+            True)
+
+
+@app.post("/admin/plan_questions")
+async def plan_questions(request: Request, key: str = Depends(admin_key)):
+    """File the question-shaped keywords nothing has answered yet.
+
+    Owner, 2026-09-02, reading the Answer-engines block: *"0 of 56 question(s)
+    in the map are answered · 0 planned · 56 not yet written… What can I do
+    about this? Where can I look to see that this is being progressed?"*
+
+    Nothing was wrong with the numbers — 56 questions were harvested, none
+    written, so the clicks and CTR beneath them were honestly zero. What was
+    wrong is that the section reported a 56-item backlog and offered nothing
+    that acts on it, which is a fix instruction where a control belongs.
+
+    Through the same filer the Plan-supports control uses, so these obey the
+    monthly cap and the horizon and are indistinguishable from what the weekly
+    run proposes. Highest-priority first, because the cap will stop it long
+    before 56 and the ones that get in should be the ones worth writing.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+
+    def _back(msg: str, ok: bool = False) -> RedirectResponse:
+        return RedirectResponse(
+            f"/admin/ui?tab=plan&tenant={quote(tenant)}&sub=progress"
+            f"&key={quote(key)}&{'ok' if ok else 'err'}={quote(msg)}"
+            f"#progress", 303)
+
+    from . import keywords as kwm, planner as plm, systems as sysm
+    row = sysm.find(tenant, "blog")
+    if row is None:
+        return _back("the blog system is not installed for this account")
+    unanswered = kwm.unanswered_questions(tenant)
+    if not unanswered:
+        # WHICH EMPTY IT IS. "None to plan" is true of an account that has
+        # written them all and of one whose map holds no questions, and those
+        # are opposite situations.
+        _any_q = [r for r in kwm.targets(tenant) if kwm.is_question(r.phrase)]
+        return _back(
+            "every question in the map is already written or planned"
+            if _any_q else
+            "no question-shaped keywords in the map yet — Architecture is "
+            "where they get harvested")
+    out = plm.file_articles(row, unanswered, role="support")
+    return _back(*_filed_message(out, "question(s) planned"))
+
+
 @app.post("/admin/plan_supports")
 async def plan_supports(request: Request, key: str = Depends(admin_key)):
     """File the supports a stalled page's cluster is owed. The band's control.
@@ -7275,49 +7347,13 @@ async def plan_supports(request: Request, key: str = Depends(admin_key)):
             f"cluster — nothing more to file" if sup["in_flight"] else
             "nothing left to write in that cluster — the map needs more "
             "keywords for this topic first")
-    # THE SAME CAP AND THE SAME HORIZON THE WEEKLY RUN OBEYS. The first cut
-    # read `articles_monthly` only to SPACE the plans and never to stop:
-    # twelve supports in one press put 8 into a month capped at 4 and three
-    # past the horizon, and because the overrun persists the next weekly run
-    # read the month as full and refused entirely — the console press silently
-    # spent the planner's budget. `article_window` / `next_article_slot` are
-    # now the one place that rule lives, and `blog_rollout` goes through them
-    # too, so the two cannot drift again.
-    win = plm.article_window(row)
-    slot = win["slot"]
-    filed, refused, deferred = 0, [], 0
-    for phrase in sup["writable"]:
-        nxt = plm.next_article_slot(win, slot)
-        if nxt is None:
-            # NOT A FAILURE, AND SAID AS SUCH. The rest are still worth
-            # writing; the calendar is simply full, which is the same answer
-            # the weekly run gives and for the same reason.
-            deferred = len(sup["writable"]) - filed - len(refused)
-            break
-        slot = nxt
-        got = sysm.open_plan(
-            tenant, "blog",
-            ref=f"article:{tenant}:{kwm.slug(phrase)}",
-            plan={"keyword": phrase, "role": "support", "cluster": cluster},
-            planned_for=slot.isoformat(), trigger="console")
-        if got.get("error"):
-            refused.append(got["error"])
-            continue
-        if got.get("created"):
-            filed += 1
-            kwm.upsert(tenant, phrase, status="planned")
-            slot = plm.took_slot(win, slot)
-    if not filed:
-        return _back("nothing was filed — "
-                     + ("; ".join(refused)[:180] or
-                        (f"the horizon is full at "
-                         f"{win['cadence']['articles_monthly']}/month"
-                         if deferred else "they were already planned")))
-    return _back(f"{filed} support(s) planned for that cluster"
-                 + (f" — {deferred} left for a later month, the horizon is "
-                    f"full at {win['cadence']['articles_monthly']}/month"
-                    if deferred else "")
-                 + (f" — {len(refused)} refused" if refused else ""), ok=True)
+    # THROUGH THE ONE FILER, which obeys the same cap and horizon the weekly
+    # run obeys. That rule lives in `planner` and both this control and the
+    # Answer-engines one go through it — a second copy would drift on the
+    # monthly cap, which has already caused one silent overrun.
+    out = plm.file_articles(row, sup["writable"], role="support",
+                            cluster=cluster)
+    return _back(*_filed_message(out, "support(s) planned for that cluster"))
 
 
 @app.post("/admin/article_picture")

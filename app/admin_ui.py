@@ -10574,6 +10574,45 @@ def _board_section(key: str, tenant: str, days: int) -> str:
     {muted_html}"""
 
 
+def _plan_questions_btn(key: str, tenant: str, cov: dict,
+                        fileable: list) -> str:
+    """Act on the backlog this block reports.
+
+    Owner, 2026-09-02: *"0 of 56 question(s) in the map are answered… What can
+    I do about this? Where can I look to see that this is being progressed?"*
+    The numbers were honest — 56 harvested, none written, so the clicks below
+    them were truthfully zero — and the section stated a 56-item backlog and
+    offered nothing that acts on it.
+
+    Only when there is something to file. A button reading "Plan 0" is a
+    control that reports a failure, and one on an account whose questions are
+    all written is an invitation to press something that does nothing.
+    """
+    # SIZED FROM WHAT THE ROUTE WOULD FILE, not from `unanswered`. That
+    # number means "not published" and counts the ones already PLANNED — so
+    # the button offered to plan work that was scheduled and filed nothing
+    # when pressed. The button and the route were counting different
+    # populations of one thing.
+    n = len(fileable)
+    if not n:
+        return ('<p class="when">Every question in the map is written or '
+                'planned.</p>' if cov.get("questions_in_map") else
+                '<p class="when">No question-shaped keywords in the map yet — '
+                'Architecture is where they get harvested.</p>')
+    return f"""
+    <form method="post" action="/admin/plan_questions?key={_esc(key)}"
+          class="row" style="margin-top:4px">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <button class="btn go" type="submit">Plan
+        {n} question{"" if n == 1 else "s"}
+      </button>
+      <span class="when">Files them as articles, highest priority first,
+      under the same monthly cap the weekly run obeys — so the calendar will
+      stop it long before {n}, and the rest wait their
+      turn.</span>
+    </form>"""
+
+
 def _sub_href_days(key: str, tenant: str, days: int) -> str:
     """The Progress tab at a different window. One builder, so a link that
     changes the window cannot lose the tab or the account on the way."""
@@ -10732,6 +10771,7 @@ def _progress_section(key: str, tenant: str, days: int,
     <p><strong>{cov["answered"]}</strong> of <strong>{cov["questions_in_map"]}</strong>
        question(s) in the map are answered · {cov["planned"]} planned ·
        {cov["unanswered"]} not yet written</p>
+    {_plan_questions_btn(key, tenant, cov, kw.unanswered_questions(tenant))}
     <p>Question-shaped queries: <strong>{surf["now"]["clicks"]}</strong> click(s)
        from {surf["now"]["impressions"]} impression(s)
        {("(" + str(surf["change"]["clicks_pct"]) + "% vs before)")
