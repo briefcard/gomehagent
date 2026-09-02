@@ -165,8 +165,11 @@ def main() -> int:
     print("\n— one-to-many work names its reader —")
     for k, sk in drafters:
         if k in ONE_TO_ONE or k in NO_SEGMENT:
-            ck(f"  {k} is exempt, and says which kind it is",
-               True, "one-to-one" if k in ONE_TO_ONE else "no chosen segment")
+            # REPORTED, not asserted. The exemption is a fact about the
+            # DECLARATION above, and printing [ ok ] for each one made the
+            # exempt skills look checked rather than skipped.
+            print(f"       skipped: {k} is exempt — "
+                  + ("one-to-one" if k in ONE_TO_ONE else "no chosen segment"))
             continue
         ck(f"  {k} requires a reader", "audience_key" in (sk.requires or ()),
            "a campaign or an ad written for everybody is written for nobody")

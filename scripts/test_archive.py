@@ -101,7 +101,23 @@ def main() -> int:
            "agreed" in archive.clean(threaded)
            and "please credit" not in archive.clean(threaded),
            archive.clean(threaded)[:40] + "…")
-        ck("or a fifteen-message chain is fifteen identical rows", True)
+        # THE CLAIM, ACTUALLY MADE. This was the literal `True` — a rhetorical
+        # continuation of the assertion above, printing [ ok ] for a case
+        # nobody built. Fifteen deep is where quoting compounds: if `clean`
+        # kept even one layer, the row would grow with every reply and the
+        # index would hold fifteen near-identical copies of one thread.
+        deep = "The latest word."
+        for i in range(15):
+            deep = f"{deep}\n\nOn Mon, Someone wrote:\n> layer {i}"
+        cleaned = archive.clean(deep)
+        ck("or a fifteen-message chain is fifteen identical rows",
+           "latest word" in cleaned and "layer 0" not in cleaned
+           and "layer 14" not in cleaned,
+           cleaned[:60] + "…")
+        ck("  and it does not grow with the chain",
+           len(cleaned) < len(deep) / 3,
+           f"{len(cleaned)} chars from {len(deep)} — quoting compounds, so a "
+           f"clean that keeps one layer keeps all of them")
 
         print("\n— THE CASE: found by meaning, not by keyword —")
         archive.index("baci", kind="thread")

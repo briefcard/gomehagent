@@ -5414,6 +5414,35 @@ SABOTAGES = [
                "horizon at once — one shared filer means one place to get "
                "this wrong, and this is that place",
     },
+    {
+        "name": "a_hollow_assertion_cannot_be_added",
+        "file": "scripts/test_assertions_can_fail.py",
+        # Re-anchored on the DETECTOR, which is where the property lives now.
+        # Anchored on the file walk it was untestable: with the codebase
+        # clean, breaking the search returns the same empty answer a working
+        # search returns.
+        "find": "        if lbl not in false_labels:\n            out.append((n.lineno, lbl))",
+        "replace": "        if False:  # SABOTAGE\n            out.append((n.lineno, lbl))",
+        "suites": ["test_assertions_can_fail.py"],
+        "why": "every bare `ck(label, True)` is counted as the honest "
+               "try/except form, so a check that prints [ ok ] and tests "
+               "nothing can be added to any suite and nothing says so — the "
+               "defect this file exists to make impossible",
+    },
+    {
+        "name": "the_try_except_form_is_not_banned",
+        "file": "scripts/test_assertions_can_fail.py",
+        # Re-anchored on `paired_in`, which is the half that RECOGNISES the
+        # honest form. The old anchor appeared in both helpers after the
+        # detector was extracted, and now in neither in that shape.
+        "find": "        if (isinstance(n.args[1], ast.Constant) and n.args[1].value is True):\n            try:\n                if ast.unparse(n.args[0]) in false_labels:\n                    n_paired += 1",
+        "replace": "        if False:  # SABOTAGE\n            try:\n                if ast.unparse(n.args[0]) in false_labels:\n                    n_paired += 1",
+        "suites": ["test_assertions_can_fail.py"],
+        "why": "the legitimate form — a True in an except branch paired with "
+               "a False on the success path — is reported as hollow, so the "
+               "check cries wolf on five honest assertions and gets turned "
+               "off",
+    },
 ]
 
 

@@ -167,9 +167,16 @@ def main() -> int:
     ck("a scan is recorded as a run", len(runs) == before + 1)
     ck("carrying what it found",
        (runs[0].outcome or {}).get("violations") == 1, str(runs[0].outcome))
+    # A REAL CHECK. This was the literal `True` with the call it describes on
+    # the NEXT line — so it printed [ ok ] whatever `scan` did, including
+    # returning a clean bill of health for an account with no rules to check
+    # against, which is the one outcome it exists to forbid.
+    fresh = compliance.scan("fresh")
     ck("an account without the rules blocks rather than reporting clean",
-       True)
-    compliance.record_scan("fresh", compliance.scan("fresh"))
+       "no banned_claims" in str(fresh.get("error", "")),
+       str(fresh)[:110] + " — a clean report from an account with nothing to "
+       "check against is the most dangerous output this can produce")
+    compliance.record_scan("fresh", fresh)
 
     httpx.get = real_get
     print()

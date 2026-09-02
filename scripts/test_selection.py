@@ -168,8 +168,11 @@ def main() -> int:
     ck("the answer carries the proof that backs it",
        sup and all("capacity_doubt" in (c.situations or []) for c in sup),
        str([c.claim[:40] for c in sup]))
-    ck("a pinned claim_id outranks the situation join", True,
-       "covered by kb.support_for's first branch")
+    # A POINTER, NOT A CHECK. It asserted `True` and named where the property
+    # is actually covered — so this file reported one more passing check than
+    # it has, for a behaviour it never exercised.
+    print("       note: a pinned claim_id outranks the situation join — "
+          "covered by kb.support_for's first branch, not here")
     kb.set_brand("ironside", tone="direct, warm, practical")
     b = brief.assemble("ironside", "venue for 220 seated in March",
                        "dana@northwind.com", model_fn=stub).to_dict()

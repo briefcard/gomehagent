@@ -105,9 +105,11 @@ def main() -> int:
 
     # ---- 2. uniqueness is per client, never global -----------------------
     print("\n— uniqueness —")
+    _scanned = 0
     for name, model in sorted(models.items()):
         if "tenant" not in {c.name for c in model.__table__.columns}:
             continue
+        _scanned += 1
         for col in model.__table__.columns:
             # A globally unique column on a per-client table means two clients
             # cannot both have one. Provider-issued ids are the exception:
@@ -116,7 +118,16 @@ def main() -> int:
                 ck(f"{name}.{col.name} is not globally unique", False,
                    "make it a composite UniqueConstraint with tenant")
 
-    ck("no per-client table has a global unique column", True)
+    # THE POPULATION, then the finding. This was the literal `True` — a
+    # summary of a loop that would pass identically over zero models, which is
+    # what an import error or a renamed base class produces.
+    ck("the sweep examined the per-client tables",
+       _scanned >= 5, f"{_scanned} model(s) — a sweep over nothing passes")
+    # The finding itself is reported by the loop above — one `ck(…, False)`
+    # per offending column. A trailing "and none were found" would be another
+    # bare True, so the population assertion above carries the summary.
+    print(f"       {_scanned} per-client table(s) checked for global "
+          f"uniqueness")
 
     # ---- 3. the agent is scoped ------------------------------------------
     print("\n— the agent —")

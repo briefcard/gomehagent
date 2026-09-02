@@ -200,10 +200,12 @@ def main() -> int:
         srow = s.get(db.System, row.id)
         srow.key = "blog"          # ensure the plan-fields note can render
         s.commit()
-    ck("register_owner stays code, deliberately",
-       True,
-       "it needs a Telegram chat_id no console click can supply — a link "
-       "would 400; named as a scope cut, not forgotten")
+    # A NOTE, NOT A CHECK. It asserted the literal `True`, so it printed
+    # [ ok ] and tested nothing — a decision recorded as though it were
+    # coverage. The decision is worth keeping; the tick is not.
+    print("       note: register_owner stays code, deliberately — it needs a "
+          "Telegram chat_id no console click can supply; a link would 400. "
+          "Named as a scope cut, not forgotten.")
 
     print()
     if _fail:
