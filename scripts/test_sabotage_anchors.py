@@ -57,8 +57,15 @@ def entries() -> list[dict]:
             out = []
             for e in node.value.elts:
                 d = {k.value: v for k, v in zip(e.keys, e.values)}
+                # `replace` is extracted too. Without it the parseability
+                # check below skipped every entry on `"replace" not in e` and
+                # reported clean while seven mutations were syntax errors — a
+                # hollow assertion written in the act of removing hollow
+                # assertions, which is the whole argument for checking rather
+                # than asserting.
                 out.append({k: ast.literal_eval(v) for k, v in d.items()
-                            if k in ("name", "file", "find", "suites")})
+                            if k in ("name", "file", "find", "replace",
+                                     "suites")})
             return out
     return []
 
@@ -102,6 +109,37 @@ def main() -> int:
     ck("no NEW guard has gone stale", not new_stale,
        ", ".join(new_stale) or "a guard whose code moved is a guard that "
        "stopped covering it, silently")
+    # A MUTATION THAT DOES NOT PARSE PROVES NOTHING. The suite then dies at
+    # IMPORT — before it reaches the assertion the guard is named for — so
+    # `[ caught ]` is unconditional and would print for a guard pointed at a
+    # blank line. Seven guards were in this state when it was first checked,
+    # two of them a day old; the pattern is a `\` continuation or a bracket
+    # left open by the replacement.
+    #
+    # This is the check that makes the class impossible rather than the seven
+    # fixes, which is why it is here and not a note in a commit message.
+    import ast as _ast
+    unparseable = []
+    for e in rows:
+        f = ROOT / e["file"]
+        if not f.exists():
+            continue
+        src = f.read_text()
+        if (e["find"] not in src or "replace" not in e
+                or f.suffix != ".py"):
+            # Only Python can be parsed. A guard on REGISTER.md is mutating
+            # markdown, and calling that unparseable would be the check being
+            # wrong rather than the guard.
+            continue        # staleness, and delete-only entries, handled above
+        try:
+            _ast.parse(src.replace(e["find"], e["replace"], 1))
+        except SyntaxError:
+            unparseable.append(e["name"])
+    ck("every mutation leaves the file parseable", not unparseable,
+       ", ".join(unparseable) or "a mutation that breaks the syntax fails the "
+       "suite at import, so [ caught ] is printed without the assertion ever "
+       "running")
+
     ck("no anchor matches more than once", not ambiguous,
        ", ".join(ambiguous) or "an anchor matching twice patches whichever "
        "copy comes first, which may not be the one under test")

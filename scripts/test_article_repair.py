@@ -124,6 +124,33 @@ def main() -> int:
        f'repair rate nobody can measure')
 
     print()
+    print("— and the repaired body still gets its pictures placed —")
+    # A REPAIR IS A FRESH DRAFT, WITH FRESH MARKERS. `place_images` ran once,
+    # on the FIRST body; the repaired one came back carrying
+    # `<!--IMAGE: …-->` that nothing filled, and `emit` took it as final. So a
+    # repaired article published raw scaffolding and no pictures — and repair
+    # runs only on `auto`, the rung that publishes with nobody looking.
+    calls["n"] = 0
+    MARKED_BAD = BANNED.replace("</p>", "</p>\n<!--IMAGE: a jug on a table-->")
+    MARKED_OK = GOOD.replace("</p>", "</p>\n<!--IMAGE: a jug on a table-->")
+
+    def _marked(bundle, keyword, role, angle, questions, links, entity,
+                avoid=None):
+        calls["n"] += 1
+        return (MARKED_BAD if calls["n"] == 1 else MARKED_OK), ""
+    skill_pack._draft_article_live = _marked
+    rm = skill.run("blog_article", "baci", keyword="acrylic jug",
+                   role="pillar")
+    itm = (rm.get("items") or [{}])[-1]
+    ck("the drafter marked a place in BOTH attempts",
+       calls["n"] >= 2,
+       f'{calls["n"]} — without a repair this proves nothing')
+    ck("  and no raw marker survives into the filed body",
+       "<!--IMAGE" not in (itm.get("body") or ""),
+       (itm.get("body") or "")[-90:] + " — an HTML comment renders as "
+       "nothing, so this ships silently and the page has no pictures")
+
+    print()
     print("— the retry is told WHAT broke, in the checker's own words —")
     second = seen[1] if len(seen) > 1 else ""
     ck("it is shown its own previous article",

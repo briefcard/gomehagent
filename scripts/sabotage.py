@@ -57,7 +57,7 @@ SABOTAGES = [
         "name": 'a_frame_and_its_crops_move_together',
         "file": 'app/hosting.py',
         "find": '            return {"ok": False, "keeps": True, "error": (\n                f"the frame uploaded but its {fmt} crop did not "',
-        "replace": '            moved[fmt] = ""; _unused = (\n                f"the frame uploaded but its {fmt} crop did not "',
+        "replace": '            return {"ok": True, "keeps": True, "error": (\n                f"the frame uploaded but its {fmt} crop did not "',
         "suites": ['test_hosting.py'],
         "why": 'a frame whose 1:1 is on the client store and whose 9:16 is still ours is half-moved, and the half nobody looked at is the half that breaks',
     },
@@ -1075,7 +1075,7 @@ SABOTAGES = [
         "name": "a_redraft_carries_the_reader",
         "file": "app/skill_pack.py",
         "find": '            "audience_key": (overrides.get("audience_key")',
-        "replace": '            "audience_key": ("",  # SABOTAGE',
+        "replace": '            "audience_key": ("" if True else overrides.get("audience_key")',
         "suites": ["test_campaign_variety.py"],
         "why": "Request changes stops redrafting on every account that has a "
                "persona — `campaign_email` requires a reader and this caller "
@@ -3537,7 +3537,7 @@ SABOTAGES = [
         "name": 'an_off_catalogue_steer_is_not_a_claim',
         "file": 'app/admin_ui.py',
         "find": '    add = ("" if note["state"] in ("ok", "off") or note.get("proposed")',
-        "replace": '    add = ("" if note["state"] in ("ok",) or note.get("proposed") else  # SABOTAGE',
+        "replace": '    add = ("" if note["state"] in ("ok",) or note.get("proposed")',
         "suites": ['test_claim_trace.py'],
         "why": 'the panel offers to file \\u201cglucosamine remains the benchmark\\u201d as a claim about an account that has never sold it \\u2014 one mis-click away from approving the exact sentence the off-catalogue check exists to catch',
     },
@@ -3906,7 +3906,7 @@ SABOTAGES = [
         "name": "a_retired_rung_word_still_posts",
         "file": "app/systems.py",
         "find": '            fields["autonomy"] = AUTONOMY_ALIASES.get(fields["autonomy"],',
-        "replace": '            pass  # SABOTAGE\n            _x = (AUTONOMY_ALIASES.get(fields["autonomy"],',
+        "replace": '            fields["autonomy"] = dict().get(fields["autonomy"],',
         "suites": ["test_systems.py"],
         "why": "a bookmarked rung form, an old digest link, or any client "
                "still posting `approve_all` is refused with 'autonomy must be "
@@ -4441,7 +4441,7 @@ SABOTAGES = [
         "name": "the_move_is_chosen_by_where_the_page_sits",
         "file": "app/keywords.py",
         "find": "    (10.0, \"refresh\",",
-        "replace": "    (1e9, \"refresh\",  # SABOTAGE",
+        "replace": "    (1e9, \"refresh\",",
         "suites": ["test_keyword_attention.py"],
         "why": "every stalled page is told to refresh itself, including the "
                "ones at position 40 where the problem is intent or "
@@ -5079,7 +5079,7 @@ SABOTAGES = [
         "name": "the_auto_rung_actually_ships",
         "file": "app/skill_pack.py",
         "find": "        if publish[\"queued\"] and _sysm.rung(ctx.autonomy) == \"auto\" \\",
-        "replace": "        if False and _sysm.rung(ctx.autonomy) == \"auto\" \\  # SABOTAGE",
+        "replace": "        if False and _sysm.rung(ctx.autonomy) == \"auto\" \\",
         "suites": ["test_auto_ships.py"],
         "why": "`auto` goes back to removing the approval and putting nothing "
                "in its place — strictly worse than shadow, because the draft "
@@ -5125,6 +5125,90 @@ SABOTAGES = [
         "why": "campaign_email's card promises 'Sends without asking' on a "
                "system that deliberately never sends by itself — the platform "
                "answer rendered as the account's",
+    },
+    {
+        "name": "a_schedule_link_lands_on_the_card",
+        "file": "app/admin_ui.py",
+        "find": "    if plan_id:\n        url += f\"&amp;plan={_esc(plan_id)}\"",
+        "replace": "    if False:  # SABOTAGE\n        url += f\"&amp;plan={_esc(plan_id)}\"",
+        "suites": ["test_schedule_nav.py"],
+        "why": "the Schedule's links go back to dropping you on the system "
+               "page — the card carries `id=plan-<id>` and nothing points at "
+               "it, so finding the item you clicked means scrolling a "
+               "paginated queue",
+    },
+    {
+        "name": "a_named_plan_decides_which_page_opens",
+        "file": "app/admin_ui.py",
+        "find": "    if plan_id:\n        for i, pl in enumerate(open_plans):",
+        "replace": "    if False:  # SABOTAGE\n        for i, pl in enumerate(open_plans):",
+        "suites": ["test_schedule_nav.py"],
+        "why": "the deep link lands on page one while the card it names is "
+               "three pages down, which reads as a link that does not work "
+               "rather than as pagination",
+    },
+    {
+        "name": "the_schedule_defaults_to_date",
+        "file": "app/admin_ui.py",
+        "find": "SCHEDULE_SORT_DEFAULT = \"when\"",
+        "replace": "SCHEDULE_SORT_DEFAULT = \"state\"  # SABOTAGE",
+        "suites": ["test_schedule_nav.py"],
+        "why": "the table opens ordered by state again — right for triage, "
+               "wrong for reading a calendar, and the owner asked for date",
+    },
+    {
+        "name": "a_sortable_heading_actually_sorts",
+        "file": "app/admin_ui.py",
+        "find": "    _key = SCHEDULE_SORTS[sort][1]",
+        "replace": "    _key = SCHEDULE_SORTS[\"when\"][1]  # SABOTAGE",
+        "suites": ["test_schedule_nav.py"],
+        "why": "every column heading is clickable and none of them changes "
+               "the order — a control that reports a failure by doing "
+               "nothing visible",
+    },
+    {
+        "name": "every_attention_state_is_drawn_distinctly",
+        "file": "app/admin_ui.py",
+        "find": "        \"no_reading\": (\"nb\", \"no reading\"),",
+        "replace": "        \"no_reading\": (\"gap\", \"stalled\"),  # SABOTAGE",
+        "suites": ["test_keyword_attention.py"],
+        "why": "two of the four states render byte-identically, so a page "
+               "with no Search Console reading — an INDEXING question — is "
+               "drawn as one that stalled, and the reader is sent to rewrite "
+               "a page that may not be indexed",
+    },
+    {
+        "name": "the_gap_note_links_somewhere_real",
+        "file": "app/admin_ui.py",
+        "find": "    sep = \"&amp;\" if \"?\" in str(where or \"\") else \"?\"",
+        "replace": "    sep = \"?\"  # SABOTAGE",
+        "suites": ["test_publish_gap.py"],
+        "why": "the fix link becomes `/admin/ui?tab=accounts?key=…`, which "
+               "parses as one parameter whose value is `accounts?key=…` — so "
+               "the click lands on no tab and carries no key, and reads as a "
+               "sign-in bounce rather than as a broken link",
+    },
+    {
+        "name": "a_stuck_plan_leads_whatever_the_sort",
+        "file": "app/admin_ui.py",
+        "find": "    rows.sort(key=lambda e: (0 if e[0] == 0 else 1, _key(e)), reverse=desc)",
+        "replace": "    rows.sort(key=_key, reverse=desc)  # SABOTAGE",
+        "suites": ["test_schedule_nav.py", "test_plan_tab.py"],
+        "why": "the one row anybody has to act on — a plan that reads as "
+               "queued and is not moving — drops into the middle of the "
+               "table the moment somebody sorts by a column, which is what "
+               "the sort was added for",
+    },
+    {
+        "name": "a_repaired_article_still_gets_its_pictures",
+        "file": "app/skill_pack.py",
+        "find": "        fixed, _again, _still_wanted = place_images(",
+        "replace": "        _again, _still_wanted = [], []; _skip = place_images(",
+        "suites": ["test_article_images.py", "test_article_repair.py"],
+        "why": "a repaired article ships the raw `<!--IMAGE: …-->` markers "
+               "and no pictures — and repair runs only on `auto`, the rung "
+               "that publishes to the client's site with nobody looking, so "
+               "the scaffolding goes live unread",
     },
 ]
 

@@ -2024,7 +2024,8 @@ def _board_counts(rows: list) -> dict:
     return out
 
 
-def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0) -> str:
+def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0,
+                 plan_id: str = "") -> str:
     """A link into one system's workflow view.
 
     `anchor` names both the sub-view and the in-page anchor, because the four
@@ -2039,6 +2040,17 @@ def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0) -> str:
         url += f"&amp;wf={anchor}"
     if ppage and ppage > 1:
         url += f"&amp;ppage={ppage}"
+    # NAMING THE PLAN, NOT THE PAGE IT HAPPENS TO BE ON. Owner, 2026-09-02:
+    # *"I want the clickable link to take you to the specific planned action
+    # in the respective system — right now it just takes you to the system
+    # page."* The card has carried `id="plan-<id>"` all along; nothing ever
+    # linked to it, and a bare `#plan-<id>` would still miss whenever the
+    # queue paginates past it. So the URL says WHICH plan and
+    # `_planned_section` works out which page holds it — one query, in the
+    # place that already reads the list.
+    if plan_id:
+        url += f"&amp;plan={_esc(plan_id)}"
+        return url + f"#plan-{_esc(plan_id)}"
     return url + (f"#{anchor}" if anchor else "")
 
 
@@ -2477,7 +2489,7 @@ def _plan_card(key: str, row, p, rung: str, live: bool, ppage: int) -> str:
     </div>"""
 
 
-def _planned_section(key: str, row, ppage: int) -> str:
+def _planned_section(key: str, row, ppage: int, plan_id: str = "") -> str:
     """The queue: what this system intends to do, editable before it does."""
     wf = systems.workflow(row.key)
     if not systems.plan_capable(row.key):
@@ -2495,6 +2507,14 @@ def _planned_section(key: str, row, ppage: int) -> str:
     open_plans = systems.plans(row.tenant, row.key)
     total = len(open_plans)
     pages = max(1, -(-total // PLANS_PAGE))
+    # A NAMED PLAN DECIDES THE PAGE. Without this the deep link lands on page
+    # one and the card it names is three pages down — which reads as a link
+    # that does not work rather than as pagination.
+    if plan_id:
+        for i, pl in enumerate(open_plans):
+            if pl.id == plan_id:
+                ppage = i // PLANS_PAGE + 1
+                break
     ppage = max(1, min(ppage, pages))
     shown = open_plans[(ppage - 1) * PLANS_PAGE: ppage * PLANS_PAGE]
     rung = row.autonomy or "shadow"
@@ -2595,6 +2615,25 @@ def _planned_section(key: str, row, ppage: int) -> str:
         way</span></div>
       {empty}{planner_ctl}{pager}{cards}{pager}{create}
     </div>"""
+
+
+def _gap_href(where: str, key: str) -> str:
+    """Join a console path to the admin key with the RIGHT separator.
+
+    Every `where` `sites.publish_gap` returns already carries a query string
+    (`/admin/ui?tab=accounts`), and this appended `?key=…` — so the browser
+    parsed ONE parameter, `tab`, whose value was `accounts?key=s3cret`. The
+    "Go there" link landed on no tab and carried no key, which reads as a
+    sign-in bounce rather than as a broken link, so it would have been
+    reported as an auth problem.
+
+    Found by an audit of the assertion that was supposed to cover it: the
+    check greps the whole workroom for `tab=accounts`, and the left-hand nav
+    contains that string on every page whatever the note says. It was green
+    on the broken URL.
+    """
+    sep = "&amp;" if "?" in str(where or "") else "?"
+    return f"{_esc(where)}{sep}key={_esc(key)}"
 
 
 def _cadence_form(key: str, row, lead: str, propose: str) -> str:
@@ -3142,7 +3181,7 @@ def _workflow_subs(row) -> tuple:
 
 
 def _system_view(key: str, row, flash: str, ppage: int = 1,
-                 wf: str = "") -> str:
+                 wf: str = "", plan_id: str = "") -> str:
     """One system's workflow: planned, waiting, shipped, measured — in the
     order the work moves, with the queue's controls leading each section.
 
@@ -3193,7 +3232,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
         + '</a>' for v, label in subs) + "</div>"
 
     sections = {
-        "planned": lambda: _planned_section(key, row, ppage),
+        "planned": lambda: _planned_section(key, row, ppage, plan_id),
         "drafts": lambda: _drafts_section(key, row),
         "reports": lambda: _reports_section(key, row),
         "waiting": lambda: _waiting_section(key, row),
@@ -3257,7 +3296,7 @@ SYSTEM_SUBS = (("active", "Active"), ("available", "Available"))
 
 def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
                    system: str = "", ppage: int = 1, sub: str = "",
-                   wf: str = "") -> str:
+                   wf: str = "", plan_id: str = "") -> str:
     """One account's pipelines.
 
     This tab used to render `systems.all_systems()` grouped by client, so the
@@ -3282,7 +3321,8 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     if system and not every:
         target = systems.find(tenant, system)
         if target is not None:
-            return _system_view(key, target, flash, ppage=ppage, wf=wf)
+            return _system_view(key, target, flash, ppage=ppage, wf=wf,
+                                plan_id=plan_id)
         flash += (f'<div class="note">No <code>{_esc(system)}</code> system '
                   f'is installed for this account — the list below is what '
                   f'is.</div>')
@@ -10031,7 +10071,47 @@ def _plan_outcome(run, sysrow) -> tuple[str, str, int]:
             str(run.output or "")[:160], 2)
 
 
-def _schedule_section(key: str, tenant: str) -> str:
+def _sort_headers(key: str, tenant: str, sort: str, desc: bool) -> str:
+    """Clickable column headings for the Schedule table.
+
+    A heading that sorts is one listed in `SCHEDULE_SORTS`; there is no
+    heading here that is not, so a column cannot look sortable and do
+    nothing. Clicking the column you are already on reverses it, which is the
+    behaviour every table in every other product has and the only one nobody
+    has to be taught.
+    """
+    out = []
+    for col, (label, _fn) in SCHEDULE_SORTS.items():
+        nxt = "1" if (col == sort and not desc) else "0"
+        arrow = (" &darr;" if (col == sort and not desc)
+                 else " &uarr;" if col == sort else "")
+        out.append(
+            f'<th><a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
+            f'&amp;tenant={_esc(tenant)}&amp;sub=schedule'
+            f'&amp;ssort={col}&amp;sdesc={nxt}#schedule">{label}{arrow}</a></th>')
+    return "".join(out)
+
+
+#: How the Schedule table may be ordered, and what each column sorts ON.
+#: Owner, 2026-09-02: *"I want to be able to sort the columns with a default by
+#: date."* Declared rather than branched on at render, so a column that appears
+#: in the header is one this can actually order by — the alternative is a
+#: clickable heading that silently does nothing.
+SCHEDULE_SORTS = {
+    "when": ("when", lambda e: (e[1] or "9999-99-99")),
+    "system": ("system", lambda e: (e[3].name if e[3] else "").lower()),
+    "planned": ("planned", lambda e: str((e[4].get("plan") or {}))),
+    "state": ("what happened", lambda e: e[0]),
+}
+#: DATE, because the question this table answers is "what is coming and what
+#: became of it", and that question is chronological. The old order led with
+#: state — overdue first — which is the right DEFAULT for triage and the wrong
+#: one for reading a calendar, and it could not be changed.
+SCHEDULE_SORT_DEFAULT = "when"
+
+
+def _schedule_section(key: str, tenant: str, sort: str = "",
+                      desc: bool = False) -> str:
     """WHAT WAS PLANNED, AND WHAT BECAME OF IT — across every system.
 
     The owner's question (2026-08-27): *"if something is changed / added to
@@ -10078,7 +10158,15 @@ def _schedule_section(key: str, tenant: str) -> str:
                      sysrow, brief, chip, detail))
     # Rank first, then date: within "still open" soonest leads; within "done"
     # the most recent does.
-    rows.sort(key=lambda e: (e[0], e[1] if e[0] < 2 else ""), reverse=False)
+    sort = sort if sort in SCHEDULE_SORTS else SCHEDULE_SORT_DEFAULT
+    # STUCK ROWS LEAD, WITHIN the chosen order — and the first cut said so in
+    # this comment while sorting purely by the column, which dropped them into
+    # the middle. `test_plan_tab` caught it. A plan that reads as queued and is
+    # not moving is the only row here anybody has to act on, and that stays
+    # true whichever column you picked; the column decides the order WITHIN
+    # each group, not whether the stuck ones are findable.
+    _key = SCHEDULE_SORTS[sort][1]
+    rows.sort(key=lambda e: (0 if e[0] == 0 else 1, _key(e)), reverse=desc)
     stuck = sum(1 for e in rows if e[0] == 0)
 
     def _tr(rank, when, run, sysrow, brief, chip, detail) -> str:
@@ -10090,7 +10178,7 @@ def _schedule_section(key: str, tenant: str) -> str:
         edited = [e for e in (brief.get("edited") or []) if e]
         yours = (f'<div class="when"><b>you changed:</b> '
                  f'{_esc(", ".join(edited))}</div>' if edited else "")
-        link = (f'<a href="{_sysview_url(key, sysrow, "planned")}">'
+        link = (f'<a href="{_sysview_url(key, sysrow, "planned", plan_id=run.id)}">'
                 f'{_esc(sysrow.name)}</a>' if sysrow else
                 '<span class="mut">unknown system</span>')
         return (f'<tr><td>{_esc(when) or "&mdash;"}</td>'
@@ -10111,7 +10199,7 @@ def _schedule_section(key: str, tenant: str) -> str:
         what was planned, and what became of it</span></div>
       {stuck_note}
       <div class="tblwrap"><table class="tbl">
-        <tr><th>when</th><th>system</th><th>planned</th><th>what happened</th></tr>
+        <tr>{_sort_headers(key, tenant, sort, desc)}</tr>
         {"".join(_tr(*e) for e in rows[:60])}
       </table></div>
       <p class="when">A direct run is not listed: it carries no plan, so it
@@ -12044,7 +12132,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
             decide = (f'<div class="note"><b>Not publishing from here yet.</b> '
                       f'{_esc(_gap["why"])}'
                       + (f' <b>{_esc(_gap["fix"])}</b>' if _gap["fix"] else "")
-                      + (f' <a href="{_esc(_gap["where"])}?key={_esc(key)}">'
+                      + (f' <a href="{_gap_href(_gap["where"], key)}">'
                          f'Go there &rarr;</a>' if _gap["where"] else "")
                       + '</div>') + _mark_live
 
@@ -12573,7 +12661,7 @@ PLAN_SUBS = (("strategy", "Strategy"), ("schedule", "Schedule"),
 
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
                 pick: bool = False, days: int = 28, probe: bool = False,
-                sub: str = "") -> str:
+                sub: str = "", ssort: str = "", sdesc: bool = False) -> str:
     """The keyword plan the blog is built from.
 
     STATE BEFORE INSTRUCTIONS, which is the rule this page was missing
@@ -12791,7 +12879,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
 
     rooms = {
         "strategy": lambda: _strategy_section(key, tenant, days),
-        "schedule": lambda: _schedule_section(key, tenant),
+        "schedule": lambda: _schedule_section(key, tenant, ssort, sdesc),
         "board": lambda: (_board_section(key, tenant, days)
                           or '<p class="mut">No keyword map yet — Architecture '
                              'is where one gets built.</p>'),

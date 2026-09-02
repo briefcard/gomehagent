@@ -170,9 +170,16 @@ def main() -> int:
        "the page said 'No CMS to push to' — four words for four situations")
     ck("  and gives the action",
        "Reconnect Shopify" in page)
+    # THE NOTE'S OWN LINK, and a WELL-FORMED one. `"tab=accounts" in page`
+    # was satisfied by the left-hand nav, which carries that string on every
+    # console page whatever the note says — so it was green with the link
+    # deleted, and green on the malformed `?tab=accounts?key=…` that landed
+    # on no tab and carried no key.
+    note = page.split("Not publishing from here yet", 1)[-1].split("</div>", 1)[0]
     ck("  and a way to get there",
-       "tab=accounts" in page,
-       "act where you report: the fix is a click from the absence")
+       "Go there" in note and "/admin/ui?tab=accounts&amp;key=" in note,
+       note[-140:] + " — act where you report: the fix is a click from the "
+       "absence, and a second `?` makes it a click to nowhere")
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

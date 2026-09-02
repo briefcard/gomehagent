@@ -195,10 +195,22 @@ def main() -> int:
     # A hollow assertion is worse than none: it reads as coverage.
     card = admin_ui._board_section("s3cret", "baci", 7)
     ck("the lane renders on the Plan board", "Needs attention" in card)
+    # THE CHIPS THEMSELVES, not the page. Grepping the card for "no reading"
+    # passed with the chip collapsed onto "stalled", because the phrase also
+    # occurs in that row's own owed sentence AND in the static paragraph under
+    # the table — three times in all. The mutation
+    # `_STATE["no_reading"] = ("gap", "stalled")` rendered two states
+    # byte-identically and the suite stayed green: exactly the failure the
+    # assertion names.
+    import re as _re
+    chips = _re.findall(r'<span class="chip [a-z]+">([^<]+)</span>', card)
     ck("  every state is drawn distinctly",
-       all(w in card for w in ("slipping", "stalled", "no reading",
-                               "too early")),
-       "four states in one list is a queue; four states drawn alike is noise")
+       len(set(chips)) == len({r["state"] for r in keywords.attention("baci")}),
+       f"{sorted(set(chips))} — four states in one list is a queue; four "
+       f"states drawn alike is noise")
+    ck("  and each is the state's own word",
+       set(chips) >= {"slipping", "stalled"},
+       str(sorted(set(chips))))
     ck("  the page it is about is reachable",
        "slipped one" in card and "stalled close" in card)
     # WHITESPACE-NORMALISED. The markup wraps prose across lines, so a raw

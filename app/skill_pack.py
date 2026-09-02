@@ -4485,6 +4485,22 @@ def _run_blog_article(ctx: Context) -> dict:
                          f"you were given, and do not drop the claims. Do not "
                          f"argue with the rules."}},
             keyword, role, angle, questions, links, entity, avoid)
+        if not fixed:
+            return fixed
+        # THE REPAIR IS A FRESH DRAFT, WITH FRESH MARKERS. `place_images` ran
+        # once, on the FIRST body; a repaired one comes back carrying
+        # `<!--IMAGE: …-->` that nothing has filled, and `emit` takes it as
+        # final. So a repaired article published raw scaffolding and no
+        # pictures — and repair only runs on `auto`, which is the rung that
+        # publishes with nobody looking. Every stage that transforms a body
+        # has to run on every body, not on the first one.
+        _hero_used = {_hero_id} if _hero_id else set()
+        _hero_used |= {p["asset_id"] for p in _in_body}
+        fixed, _again, _still_wanted = place_images(
+            fixed, ctx.tenant, commitment=_about, entity_key=entity_key,
+            used=_hero_used)
+        for _w in _still_wanted:
+            ctx.thin.append(f"image:{_w}")
         return fixed
 
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],

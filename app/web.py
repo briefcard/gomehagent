@@ -2198,6 +2198,9 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  err=request.query_params.get("err", ""),
                                  system=request.query_params.get("system", ""),
                                  wf=request.query_params.get("wf", ""),
+                                 # Which plan the reader came for, so the
+                                 # queue opens on the page that holds it.
+                                 plan_id=request.query_params.get("plan", ""),
                                  ppage=pp)
     if tab == "kb":
         try:
@@ -2272,6 +2275,10 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                               pick=bool(request.query_params.get("pick")),
                               probe=bool(request.query_params.get("probe")),
                               sub=request.query_params.get("sub", ""),
+                              # Which column the Schedule is ordered by, and
+                              # which way. Absent means the default — date.
+                              ssort=request.query_params.get("ssort", ""),
+                              sdesc=request.query_params.get("sdesc") == "1",
                               days=_plan_days(request.query_params.get("days")))
     if tab == "content":
         try:
