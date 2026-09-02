@@ -2247,13 +2247,47 @@ def _run_campaign_email(ctx: Context) -> dict:
     ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
             if e.get("name")]
     if not ents:
-        rows = _kb.entities(ctx.tenant, available_only=True)
-        rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
-                                 r.name or ""))
-        ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
-                       "description": r.description or "",
-                       "availability": r.availability or "",
-                       "attributes": r.attributes or {}}) for r in rows[:6]]
+        # WHAT THIS BUYER IS FOR, before what the catalogue happens to list
+        # first. Owner, 2026-09-01: *"some audiences are more associated with
+        # different entities."* With no entity on the plan this offered the
+        # catalogue's first six by "has a photograph, then alphabetically" —
+        # and the note underneath admitted it. Alphabetical order is not a
+        # judgement about who is reading; a recommendation somebody entered
+        # is.
+        #
+        # ORDER IS THE RECOMMENDATION, so these are not re-sorted: the first
+        # entity named for an audience is the one they are most for, and
+        # re-sorting by photograph would put that decision back where it was.
+        _aud_key = str((ctx.bundle.get("audience") or {}).get("key")
+                       or ctx.params.get("audience_key") or "").strip()
+        rec = _kb.audience_entities(ctx.tenant, _aud_key)
+        if rec:
+            ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
+                           "description": r.description or "",
+                           "availability": r.availability or "",
+                           "attributes": r.attributes or {}}) for r in rec[:6]]
+            ctx.note(f"products: offered from what {_aud_key!r} is recommended "
+                     f"for — " + ", ".join(e["name"] for e in ents))
+        else:
+            rows = _kb.entities(ctx.tenant, available_only=True)
+            rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
+                                     r.name or ""))
+            ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
+                           "description": r.description or "",
+                           "availability": r.availability or "",
+                           "attributes": r.attributes or {}})
+                    for r in rows[:6]]
+            # SAID AT THE MOMENT OF CHOOSING, in both branches. The
+            # explanation for this branch lived in a later note, after the
+            # drafter — so a run that failed at drafting chose products by
+            # guessing and said nothing about it, which is the one case where
+            # somebody most needs to know a guess was made.
+            if ents:
+                ctx.note("products: nobody has said what this audience is "
+                         "for, so the catalogue's top available items are "
+                         "offered — set Featured entity on the plan, or "
+                         "recommended entities on the audience, to choose "
+                         "them")
     # Where a CTA goes when the drafter supplies no URL. A featured product's
     # own page first, the storefront second — anything but the `#` that
     # shipped a button reading "Learn about CitroBurn" straight to nowhere.
@@ -2529,10 +2563,19 @@ def _run_campaign_email(ctx: Context) -> dict:
     else:
         ents = ents[:3]
         if ents and not plan_scoped and not copy.get("blocks"):
-            ctx.note("products: no entity on the plan and no drafter "
-                     "choice — the catalogue's top available items are "
-                     "featured; set Featured entity on the plan to "
-                     "choose them")
+            # NAME WHICH GUESS THIS WAS. "Nobody chose" and "the audience's
+            # recommendation stood" are different situations and the fix for
+            # each is different: the first wants a Featured entity on the
+            # plan, the second is already somebody's decision and wants
+            # nothing.
+            ctx.note("products: no entity on the plan and no drafter choice — "
+                     + (f"the recommendation on {_aud_key!r} stood"
+                        if _aud_key and _kb.audience_entities(ctx.tenant,
+                                                              _aud_key)
+                        else "the catalogue's top available items are "
+                             "featured; set Featured entity on the plan, or "
+                             "recommended entities on the audience, to choose "
+                             "them"))
     ctx.bundle["entities"] = ents
 
     # THE COMMITMENT: what this email is about, declared now, so every selector
@@ -4354,7 +4397,27 @@ def _run_blog_article(ctx: Context) -> dict:
                      f"publish into it. Change it on the Plan tab.")
 
     if not can_push:
-        pass
+        # SAY WHAT IS MISSING — AND STILL SAY WHERE THE ARTICLE IS.
+        #
+        # `backend()`'s refusal names the generic case; `publish_gap` names
+        # THIS account's, including the one the generic sentence gets WRONG:
+        # a connection that exists but was approved without the scope that
+        # writes articles, which the generic text sends somebody to reconnect
+        # from scratch.
+        #
+        # BOTH HALVES SHIP. The first cut REPLACED the message and lost "the
+        # article is written and kept; paste it in from its review page" — so
+        # a person was told what was missing and not where the work went,
+        # which is the more urgent of the two when a run has just finished.
+        # `test_blog_skill` caught it on exactly that sentence, and it was the
+        # code that was wrong, not the assertion.
+        _gap = sites.publish_gap(ctx.tenant)
+        if not _gap["ok"]:
+            publish["detail"] = (
+                "NOT queued — " + _gap["why"]
+                + (" " + _gap["fix"] if _gap["fix"] else "")
+                + " The article is written and kept; paste it in from its "
+                  "review page, then record the live URL there.")
     elif profile.get("platform") != "wordpress" and not blog_id:
         publish["detail"] = (
             f"NOT queued — no blog_id set for {ctx.tenant}. This store holds "

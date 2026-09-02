@@ -4639,6 +4639,93 @@ SABOTAGES = [
                "refresh is queued and undecidable: the page shows no button "
                "for the one approval that exists",
     },
+    {
+        "name": "a_connected_store_missing_one_scope_is_told_which",
+        "file": "app/sites.py",
+        "find": "        if need and have is not None and need not in have:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_publish_gap.py"],
+        "why": "an account with Shopify connected but approved without "
+               "`write_content` reads as having nothing connected, so the "
+               "console tells somebody to redo a connection that already "
+               "exists instead of re-granting one scope — which is exactly "
+               "what the owner hit",
+    },
+    {
+        "name": "a_platform_with_no_write_api_is_not_a_failure",
+        "file": "app/sites.py",
+        "find": "    if platform not in BACKENDS:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_publish_gap.py"],
+        "why": "Squarespace reads as an unconnected account being nagged to "
+               "connect something, when paste-and-record IS the workflow "
+               "there and no connection could ever change it",
+    },
+    {
+        "name": "the_absence_names_its_own_fix",
+        "file": "app/admin_ui.py",
+        "find": "            _gap = _sites.publish_gap(tenant)",
+        "replace": "            _gap = {\"why\": \"No CMS to push to.\", \"fix\": \"\",\n"
+                   "                    \"where\": \"\"}  # SABOTAGE",
+        "suites": ["test_publish_gap.py"],
+        "why": "four different absences with four different fixes collapse "
+               "back into four words, one of which points at the wrong thing "
+               "entirely — a page reporting an absence and offering nothing "
+               "that ends it is design rule 1 broken",
+    },
+    {
+        "name": "an_audience_says_which_products_it_is_for",
+        "file": "app/skill_pack.py",
+        "find": "        rec = _kb.audience_entities(ctx.tenant, _aud_key)",
+        "replace": "        rec = []  # SABOTAGE",
+        "suites": ["test_audience_entities.py"],
+        "why": "the recommendation is ignored and the catalogue's first few "
+               "are offered alphabetically again — a selection with no "
+               "decision behind it, in the one place a decision had been "
+               "made",
+    },
+    {
+        "name": "a_recommendation_never_empties_the_offer",
+        "file": "app/kb.py",
+        "find": "    have = {e.key: e for e in entities(tenant, available_only=available_only)}",
+        "replace": "    have = {k: k for k in wanted}  # SABOTAGE",
+        "suites": ["test_audience_entities.py"],
+        "why": "an out-of-stock recommendation is offered anyway, so the "
+               "email features something nobody can buy — and a shortlist "
+               "that goes out of stock takes the whole offer with it",
+    },
+    {
+        "name": "a_recommendation_cannot_name_nothing",
+        "file": "app/kb.py",
+        "find": "        (clean if k in known else unknown).append(k)",
+        "replace": "        clean.append(k)  # SABOTAGE",
+        "suites": ["test_audience_entities.py"],
+        "why": "a mistyped key saves silently and then intersects with "
+               "nothing, so the recommendation reads exactly like 'none set' "
+               "— the failure is invisible at both ends",
+    },
+    {
+        "name": "a_guessed_offer_says_it_guessed",
+        "file": "app/skill_pack.py",
+        "find": "                ctx.note(\"products: nobody has said what this audience is \"",
+        "replace": "                pass  # SABOTAGE\n                _ = (\"products: nobody has said what this audience is \"",
+        "suites": ["test_audience_entities.py"],
+        "why": "the branch that picks products with no decision behind it "
+               "goes silent, so a run that failed at drafting guessed and "
+               "said nothing — the case where somebody most needs to know",
+    },
+    {
+        "name": "a_run_that_cannot_publish_still_says_where_the_work_is",
+        "file": "app/skill_pack.py",
+        "find": "                + \" The article is written and kept; paste it in from its \"\n"
+                "                  \"review page, then record the live URL there.\")",
+        "replace": "                )  # SABOTAGE",
+        "suites": ["test_blog_skill.py"],
+        "why": "the run names what is missing and drops where the article "
+               "actually went, so a person is told to go fix a connection "
+               "and not told the copy exists and is waiting on a page — the "
+               "more urgent of the two the moment a run finishes",
+    },
 ]
 
 

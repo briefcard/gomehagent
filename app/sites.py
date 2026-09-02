@@ -278,6 +278,94 @@ def article_id_in(sentence: str) -> str:
         text.rsplit(_ID_MARK, 1)[1].strip() else ""
 
 
+def publish_gap(tenant: str) -> dict:
+    """Why this account cannot publish an article, and what would fix it.
+
+    Owner, 2026-09-01: *"I have shopify connected to one of the clients and it
+    says 'No CMS' so it doesnt publish directly."* And: *"It should guide us to
+    fill in whatever is missing."*
+
+    HE WAS RIGHT AND THE CONSOLE WAS WORSE THAN WRONG. `backend()` refuses with
+    "has no CMS connected — connect a site or store at /connect/<token>", which
+    is the correct sentence for an account that connected nothing and the WRONG
+    INSTRUCTION for his: Shopify is connected, and `('shopify','cms')` requires
+    the `write_content` scope. A connection granted without it reports no `cms`
+    capability at all, so the account looks unconnected and the advice sends
+    somebody to redo a connection that already exists rather than to re-grant
+    one scope.
+
+    FOUR DIFFERENT ABSENCES WERE COLLAPSED INTO ONE SENTENCE, and they have
+    four different fixes:
+
+      · no domain on the tenant — `_from_tenants` skips the row entirely, so
+        no profile exists and nothing else can even be diagnosed;
+      · connected, but the capability's scope was not granted — reconnect and
+        approve it; naming the scope is the whole fix;
+      · a platform nothing implements (Squarespace) — there is no backend to
+        build against, so paste-and-record IS the workflow, not a lesser one;
+      · connected and capable, but no blog chosen on a store that holds
+        several — pick one.
+
+    Returns `ok` when a push is possible. `why` states the situation, `fix` is
+    the next action in the imperative, and `where` is the console path that
+    performs it — the three things a person needs and the sentence it replaced
+    had none of.
+    """
+    from . import credentials, tenants
+    t = tenants.get(tenant)
+    if t is None:
+        return {"ok": False, "why": f"No account keyed {tenant!r}.",
+                "fix": "Create it first.", "where": "/admin/ui?tab=accounts"}
+    if not (getattr(t, "domain", "") or "").strip():
+        return {"ok": False,
+                "why": "This account has no website address on file, so it "
+                       "has no site profile at all — every other check is "
+                       "downstream of that one.",
+                "fix": "Set the domain on the account.",
+                "where": "/admin/ui?tab=accounts"}
+    connected = credentials.connected_providers(tenant)
+    granted = credentials.granted_scopes(tenant)
+    for prov in sorted(connected):
+        if "cms" not in credentials.GRANTS.get(prov, ()):
+            continue
+        need = credentials.CAPABILITY_SCOPES.get((prov, "cms"))
+        have = granted.get(prov)
+        if need and have is not None and need not in have:
+            # THE ONE THE OWNER HIT. Connected, working for everything else,
+            # and invisible to publishing because of a single scope.
+            return {"ok": False,
+                    "why": (f"{prov.title()} is connected, but this connection "
+                            f"was approved without the {need!r} scope — which "
+                            f"is the one that lets anything write a blog "
+                            f"article. Everything else on {prov.title()} keeps "
+                            f"working."),
+                    "fix": f"Reconnect {prov.title()} and approve {need!r}.",
+                    "where": "/admin/ui?tab=accounts"}
+    profile = get(tenant)
+    platform = (profile.get("platform") or "").strip().lower()
+    if not platform:
+        return {"ok": False,
+                "why": "Nothing that can publish is connected to this account.",
+                "fix": "Connect the store or site.",
+                "where": "/admin/ui?tab=accounts"}
+    if platform not in BACKENDS:
+        return {"ok": False,
+                "why": (f"This site is on {platform}, which has no write API "
+                        f"anything could publish through — so copying the "
+                        f"article across by hand IS the workflow here, not a "
+                        f"lesser version of one."),
+                "fix": "Paste it in, then record the address below.",
+                "where": ""}
+    blog_id = ((getattr(t, "cms", None) or {}).get("blog_id") or "")
+    if not blog_id and platform != "wordpress":
+        return {"ok": False,
+                "why": ("This store can hold several blogs, and guessing which "
+                        "one writes the article to the wrong place."),
+                "fix": "Choose the blog for this account.",
+                "where": "/admin/ui?tab=plan"}
+    return {"ok": True, "why": "", "fix": "", "where": ""}
+
+
 def backend(profile: dict):
     """The implementation module for a profile's platform (duck-typed: same
     function surface across backends). An unimplemented platform REFUSES by

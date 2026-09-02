@@ -1644,6 +1644,16 @@ class KbAudience(_Provenance, Base):
     decision_timeline = Column(String)
     notes = Column(Text)
     source = Column(Text)                       # where this segment came from
+    # WHICH PRODUCTS THIS BUYER IS ACTUALLY FOR. Owner, 2026-09-01: *"some
+    # audiences are more associated with different entities so maybe help to
+    # have a 'recommended entities' selector in the audiences."*
+    #
+    # A RECOMMENDATION, not a restriction — see `kb.audience_entities`. It
+    # replaces the one place the pipeline picked products with no decision
+    # behind it at all: with no entity on the plan, `_run_campaign_email`
+    # offered the catalogue's first six by "has a photo, then alphabetical",
+    # and said so in its own note.
+    entity_keys = Column(JSON, default=list)
 
 
 class KbObjection(_Provenance, Base):

@@ -4228,6 +4228,54 @@ def _pager(base: str, page: int, total: int, per: int, what: str) -> str:
             + "</div>")
 
 
+def _audience_entities_control(key: str, tenant: str, row, catalogue) -> str:
+    """Which products this buyer is for — a recommendation, on the card.
+
+    Owner, 2026-09-01: *"some audiences are more associated with different
+    entities so maybe help to have a 'recommended entities' selector in the
+    audiences."*
+
+    It is a checklist rather than free text because the failure it prevents is
+    a typo: `audience_entities` intersects the saved keys with the catalogue,
+    so a mistyped key produces an empty recommendation that reads exactly like
+    "none set". Nothing here can name an entity that does not exist.
+
+    Open when set and folded when not, because what it changes is what gets
+    OFFERED when nobody named a product — so the account that has filled it in
+    wants to see it, and the one that has not is not being nagged.
+    """
+    have = list((row.entity_keys or []))
+    boxes = "".join(
+        f'<label class="chip" style="margin:2px 4px 2px 0">'
+        f'<input type="checkbox" name="entity_keys" value="{_esc(e.key)}"'
+        + (" checked" if e.key in have else "")
+        + f'> {_esc(e.name or e.key)}</label>'
+        for e in catalogue)
+    if not boxes:
+        return ('<p class="mut" style="margin-top:6px">No entities on file '
+                'yet, so there is nothing to recommend this buyer.</p>')
+    return f"""
+    <details class="sec" style="margin-top:6px"{' open' if have else ''}>
+      <summary class="mut">Recommended entities{
+          f" — {len(have)} set" if have else ""}</summary>
+      <p class="mut" style="margin-top:6px">What this buyer is for. When a run
+      has this audience and <em>nobody named a product</em> — no Featured
+      entity on the plan, no choice from the drafter — these are what get
+      offered, in this order. Without it the catalogue's first few are offered
+      alphabetically, which is not a judgement about who is reading.<br>
+      It is a recommendation, not a rule: a plan&rsquo;s Featured entity still
+      wins, and if everything here is out of stock the catalogue is used
+      rather than offering nothing.</p>
+      <form method="post" action="/admin/kb_audience_entities?key={_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <input type="hidden" name="audience_key" value="{_esc(row.key)}">
+        <div>{boxes}</div>
+        <button class="btn go" type="submit" style="margin-top:6px">Save
+        recommendations</button>
+      </form>
+    </details>"""
+
+
 def _remove_control(key: str, tenant: str, kind: str, row_id: str,
                     name: str = "", note: str = "",
                     back_fields: str = "") -> str:
@@ -4749,6 +4797,10 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
         + _claim_block("Claims — retired", inv["retired"],
                        "Nothing retired.", "withdrawn from selection", "gone"))
 
+    # Read once: a checklist per audience over the same catalogue would be a
+    # query per row on an account with fifty segments.
+    _aud_catalogue = sorted(kb.entities(tenant, available_only=False),
+                            key=lambda e: (e.name or e.key or "").lower())
     aud_html = _kb_list("All audiences", [
         f"<div><strong>{_esc(r.name)}</strong> <code>{_esc(r.key)}</code></div>"
         + _kv([("pains", _words(r.pains, "none recorded")),
@@ -4757,6 +4809,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
                ("buying trigger", _esc(r.buying_trigger) or _mut("not set")),
                ("decides in", _esc(r.decision_timeline) or _mut("not set"))]
               + ([("notes", _esc(r.notes))] if r.notes else []))
+        + _audience_entities_control(key, tenant, r, _aud_catalogue)
         + _remove_control(key, tenant, "audience", r.id, r.name or r.key)
         for r in kb.audiences(tenant)],
         "No segments. Selection cannot narrow to a buyer.")
@@ -11893,8 +11946,21 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                     if kw and kw.target_url else "")
             decide = f'<div class="ok">Published{live}.</div>'
         else:
-            decide = ('<div class="row"><b>No CMS to push to.</b></div>'
-                      + _mark_live)
+            # NAME THE ABSENCE AND THE FIX. Owner, 2026-09-01: *"I have shopify
+            # connected to one of the clients and it says 'No CMS'"* — and
+            # *"it should guide us to fill in whatever is missing."* This said
+            # four words about four different situations with four different
+            # fixes, one of which was "a scope was not granted on a connection
+            # that already exists", where "No CMS" is not merely unhelpful but
+            # points at the wrong thing entirely.
+            from . import sites as _sites
+            _gap = _sites.publish_gap(tenant)
+            decide = (f'<div class="note"><b>Not publishing from here yet.</b> '
+                      f'{_esc(_gap["why"])}'
+                      + (f' <b>{_esc(_gap["fix"])}</b>' if _gap["fix"] else "")
+                      + (f' <a href="{_esc(_gap["where"])}?key={_esc(key)}">'
+                         f'Go there &rarr;</a>' if _gap["where"] else "")
+                      + '</div>') + _mark_live
 
     # THE CONTROL THAT WAS MISSING, on the surface that reports its absence.
     #

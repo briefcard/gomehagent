@@ -7192,6 +7192,34 @@ def _back_parts(src) -> dict:
             "q": str(src.get("bq") or "")}
 
 
+@app.post("/admin/kb_audience_entities")
+async def kb_audience_entities(request: Request, key: str = Depends(admin_key)):
+    """Record which entities an audience is recommended for.
+
+    Owner, 2026-09-01: *"some audiences are more associated with different
+    entities so maybe help to have a 'recommended entities' selector in the
+    audiences."* It replaces the one selection in the pipeline that had no
+    decision behind it — with no entity on a plan, the catalogue's first few
+    were offered alphabetically.
+
+    An empty submission CLEARS rather than refusing: unchecking everything is
+    a decision, and a form that cannot express "none of these any more" makes
+    the first save permanent.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import kb as kbm
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    aud = str(form.get("audience_key") or "")
+    said = kbm.set_audience_entities(
+        tenant, aud, [str(v) for v in form.getlist("entity_keys")])
+    bad = said.startswith("No ")
+    return _back_to_kb(tenant, err=said if bad else "",
+                       ok="" if bad else said, anchor="audiences",
+                       back=_back_parts(form))
+
+
 def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = "",
                 back: dict | None = None):
     """Return to the tab the edit was made on, carrying the outcome and the

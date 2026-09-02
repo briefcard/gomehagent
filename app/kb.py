@@ -4119,6 +4119,80 @@ def approve(kind: str, row_id: str, by: str = "owner",
             if approve_it else f"Rejected {kind} “{label}”.")
 
 
+def audience_entities(tenant: str, audience_key: str,
+                      *, available_only: bool = True) -> list:
+    """The entities an audience is recommended for. A DEFAULT, NOT A RULE.
+
+    Owner, 2026-09-01: *"some audiences are more associated with different
+    entities so maybe help to have a 'recommended entities' selector in the
+    audiences."*
+
+    It answers the one selection in this pipeline that had no decision behind
+    it. With no entity on the plan, `_run_campaign_email` offered the
+    catalogue's first six sorted by "has a photograph, then alphabetically" —
+    and its own note said so: *"the catalogue's top available items are
+    featured"*. Alphabetical order is not a judgement about who is reading.
+
+    THREE THINGS IT DELIBERATELY IS NOT:
+
+      · Not a restriction. A plan's `entity_key` still outranks it, the way a
+        plan outranks every picker here; this only changes what is OFFERED
+        when nobody named anything.
+      · Not a filter that can empty the offer. A recommendation whose products
+        are all out of stock returns nothing, and the caller falls back to the
+        catalogue — an email with no products because the shortlist went out
+        of stock would be a worse answer than the one this replaced.
+      · Not a claim about the buyer. It records an association somebody
+        entered; it does not license saying anything about them.
+
+    Returns rows in the ORDER THEY WERE ENTERED, because that order is itself
+    the recommendation — the first one named is the one this buyer is most for.
+    """
+    if not (audience_key or "").strip():
+        return []
+    with db.SessionLocal() as s:
+        row = (s.query(db.KbAudience)
+               .filter(db.KbAudience.tenant == tenant,
+                       db.KbAudience.key == audience_key).first())
+        wanted = [str(k) for k in list((row.entity_keys or []) if row else [])
+                  if str(k or "").strip()]
+    if not wanted:
+        return []
+    have = {e.key: e for e in entities(tenant, available_only=available_only)}
+    return [have[k] for k in wanted if k in have]
+
+
+def set_audience_entities(tenant: str, audience_key: str,
+                          keys: list[str]) -> str:
+    """Record which entities an audience is for. One writer."""
+    clean, seen = [], set()
+    known = {e.key for e in entities(tenant, available_only=False)}
+    unknown = []
+    for k in keys:
+        k = str(k or "").strip()
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        # NAMED, NOT INVENTED. A key that matches no entity would be a
+        # recommendation pointing at nothing, and it would fail silently:
+        # `audience_entities` intersects with the catalogue, so a typo would
+        # simply produce an empty recommendation that looks like "none set".
+        (clean if k in known else unknown).append(k)
+    if unknown:
+        return ("No entity is keyed " + ", ".join(unknown)
+                + " — a recommendation pointing at nothing reads as none set.")
+    with db.SessionLocal() as s:
+        row = (s.query(db.KbAudience)
+               .filter(db.KbAudience.tenant == tenant,
+                       db.KbAudience.key == audience_key).first())
+        if row is None:
+            return f"No audience keyed {audience_key!r}."
+        row.entity_keys = clean
+        s.commit()
+    return (f"{len(clean)} recommended for {audience_key}" if clean
+            else f"cleared the recommendations for {audience_key}")
+
+
 def add_audience(tenant: str, key: str, name: str, pains: list[str],
                  vocabulary: list[str], buying_trigger: str = "",
                  decision_timeline: str = "", origin: str = "human",
