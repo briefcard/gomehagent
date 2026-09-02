@@ -4867,6 +4867,59 @@ SABOTAGES = [
                "quadratic in the size of the thing the feature exists to "
                "manage",
     },
+    {
+        "name": "a_refresh_is_judged_from_its_own_date",
+        "file": "app/keywords.py",
+        "find": "        (after if at >= split else before).setdefault(r.phrase, r)",
+        "replace": "        (after if at >= db.utcnow() else before).setdefault(r.phrase, r)  # SABOTAGE",
+        "suites": ["test_refresh_effect.py"],
+        "why": "a page refreshed partway through the window is compared "
+               "against a reading from before it started drifting, so the "
+               "refresh is credited with recovering a fall that happened "
+               "before anybody touched it",
+    },
+    {
+        "name": "a_refresh_lift_is_never_claimed_without_a_control",
+        "file": "app/keywords.py",
+        "find": "                 if judged and c_gains else None),",
+        "replace": "                 if judged else None),  # SABOTAGE",
+        "suites": ["test_refresh_effect.py"],
+        "why": "with no control the raw gain is reported as lift, so a "
+               "quarter when the whole site rose reads as refreshing working "
+               "— the exact claim `progress` was built to refuse for "
+               "publishing, made one section down for refreshes",
+    },
+    {
+        "name": "the_refresh_control_is_a_real_cohort",
+        "file": "app/keywords.py",
+        "find": "        c_before, c_after = _readings_astride(tenant, {k: mid for k in keys})",
+        "replace": "        c_before, c_after = _period_readings(tenant, days)  # SABOTAGE",
+        "suites": ["test_refresh_effect.py"],
+        "why": "the control splits on the window's edge, whose `then` holds "
+               "only readings OLDER than the window — so every control page "
+               "lands in one bucket, the cohort is silently zero, and `lift` "
+               "is withheld forever for a right-looking wrong reason",
+    },
+    {
+        "name": "an_unsettled_refresh_does_not_carry_the_claim",
+        "file": "app/keywords.py",
+        "find": "    judged = [m for m in moved if not m[\"too_early\"]]",
+        "replace": "    judged = list(moved)  # SABOTAGE",
+        "suites": ["test_refresh_effect.py"],
+        "why": "a page refreshed three days ago, which Google may not have "
+               "re-crawled, is averaged into the attributable result — and a "
+               "single unsettled reading can carry the whole claim",
+    },
+    {
+        "name": "a_refresh_that_cannot_be_judged_is_named",
+        "file": "app/keywords.py",
+        "find": "            blind.append({\"phrase\": phrase, \"days_since_refresh\": age,",
+        "replace": "            _ = ({\"phrase\": phrase, \"days_since_refresh\": age,  # SABOTAGE",
+        "suites": ["test_refresh_effect.py"],
+        "why": "pages with no reading on one side of the refresh vanish from "
+               "the report, so a result computed from two pages out of twenty "
+               "reads exactly like one computed from all twenty",
+    },
 ]
 
 

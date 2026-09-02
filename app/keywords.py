@@ -832,6 +832,155 @@ def _period_readings(tenant: str, days: int) -> tuple[dict, dict]:
     return now, then
 
 
+def _readings_astride(tenant: str, when: dict) -> tuple[dict, dict]:
+    """Per phrase: the latest reading BEFORE its own moment, and after it.
+
+    `_period_readings` splits on ONE cutoff for the whole account, which is
+    right for "what moved this month" and wrong for "did refreshing work". A
+    page refreshed 10 days into a 28-day window compared now-against-28-days-
+    ago folds 18 days of PRE-refresh drift into the answer and calls it the
+    refresh's doing. The split has to be each page's own refresh date.
+    """
+    before: dict[str, db.KeywordReading] = {}
+    after: dict[str, db.KeywordReading] = {}
+    if not when:
+        return before, after
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KeywordReading)
+                .filter(db.KeywordReading.tenant == tenant,
+                        db.KeywordReading.source == "gsc",
+                        db.KeywordReading.phrase.in_(list(when)))
+                .order_by(db.KeywordReading.at.desc()).all())
+    for r in rows:
+        at = db.as_utc(r.at)
+        split = when.get(r.phrase)
+        if at is None or split is None:
+            continue
+        (after if at >= split else before).setdefault(r.phrase, r)
+    return before, after
+
+
+def refresh_effect(tenant: str, *, days: int = 90) -> dict:
+    """Did refreshing work — and can we honestly say it was the refresh.
+
+    THE WHOLE LANE RESTS ON THIS AND NOTHING ANSWERED IT. Phase 1 made a
+    published page that is not working visible; Phase 2 filed the plan; the
+    revision arm rewrites the page that ranks. All of that is a bet that
+    refreshing moves a page, and until this the system had no way to be told
+    it was wrong. Adding a class of work without the measurement is adding it
+    on faith, which is the thing this codebase refuses everywhere else.
+
+    The same three refusals `progress` makes, for the same reasons:
+
+    * **No claim without a control.** Refreshed pages are compared to
+      published pages that were NOT refreshed over the same window. A quarter
+      when the whole site rose is not a refresh working.
+    * **No attribution Google has not settled.** A refresh inside
+      `ATTRIBUTION_DAYS` is listed and flagged `too_early`, exactly as a
+      publication is — the page may not have been re-crawled.
+    * **No number where there is no reading.** A page with no reading from
+      BEFORE its refresh cannot be judged at all: there is nothing to compare
+      to. It is counted and named rather than dropped, because a silent drop
+      makes a thin answer look like a confident one.
+
+    Measured against each page's OWN refresh date, not the window's edge.
+    """
+    import datetime as dt
+    cutoff = db.utcnow() - dt.timedelta(days=days)
+    rows = targets(tenant)
+    when, control_rows = {}, []
+    for r in rows:
+        ref = db.as_utc(r.refreshed_at) if r.refreshed_at else None
+        if ref is not None and ref >= cutoff:
+            when[r.phrase] = ref
+        elif r.status in ("published", "won"):
+            control_rows.append(r)
+
+    before, after = _readings_astride(tenant, when)
+    moved, early, blind = [], 0, []
+    now_utc = db.utcnow()
+    for phrase, ref_at in when.items():
+        a, b = after.get(phrase), before.get(phrase)
+        age = (now_utc - ref_at).days
+        if b is None or b.position is None or a is None or a.position is None:
+            # NAMED, NOT DROPPED. Most accounts will land here at first: a
+            # refresh only becomes measurable once there is a reading on each
+            # side of it, and reporting "0 refreshes helped" when the truth is
+            # "none can be judged yet" is the more damaging of the two errors.
+            blind.append({"phrase": phrase, "days_since_refresh": age,
+                          "why": ("no reading from before the refresh"
+                                  if b is None or b.position is None else
+                                  "no reading since the refresh")})
+            continue
+        if age < ATTRIBUTION_DAYS:
+            early += 1
+        moved.append({"phrase": phrase, "days_since_refresh": age,
+                      "from": b.position, "to": a.position,
+                      "gain": round(b.position - a.position, 1),
+                      "too_early": age < ATTRIBUTION_DAYS})
+    moved.sort(key=lambda m: -m["gain"])
+
+    # THE CONTROL, ASTRIDE THE SAME MOMENT. What an unrefreshed published page
+    # did over a COMPARABLE span — which means splitting it on a date, not on
+    # the window's edge. The first cut used `_period_readings(days)`, whose
+    # `then` bucket holds only readings OLDER than the window: every control
+    # page's history sat inside it, `then` was empty, and the control silently
+    # came back as zero pages. A control that quietly evaluates to nothing is
+    # worse than none — `lift` would have been withheld for the right-looking
+    # wrong reason, and on an account with a real control it would have stayed
+    # withheld forever.
+    #
+    # The median refresh date is the split: it is the moment the treated
+    # cohort was representatively treated, so the control is measured over the
+    # same calendar span rather than a longer or shorter one.
+    c_gains: list[float] = []
+    if when:
+        dates = sorted(when.values())
+        mid = dates[len(dates) // 2]
+        keys = {r.phrase for r in control_rows}
+        c_before, c_after = _readings_astride(tenant, {k: mid for k in keys})
+        c_gains = [round(c_before[k].position - c_after[k].position, 1)
+                   for k in keys
+                   if k in c_before and k in c_after
+                   and c_before[k].position is not None
+                   and c_after[k].position is not None]
+
+    judged = [m for m in moved if not m["too_early"]]
+    notes: list[str] = []
+    if blind:
+        notes.append(f"{len(blind)} refreshed page(s) cannot be judged yet — "
+                     f"a refresh needs a reading on each side of it.")
+    if early:
+        notes.append(f"{early} refresh(es) are inside the {ATTRIBUTION_DAYS}-day "
+                     f"window and are listed but not attributed.")
+    if not c_gains:
+        notes.append("no control group: every published page with readings was "
+                     "refreshed, so a rise here cannot be told apart from a "
+                     "rise everywhere.")
+    if not judged:
+        notes.append("nothing is attributable yet — this is a baseline.")
+
+    def _avg(xs):
+        return round(sum(xs) / len(xs), 1) if xs else None
+
+    return {
+        "window_days": days,
+        "refreshed": len(when),
+        "judged": len(judged),
+        "too_early": early,
+        "unmeasurable": blind,
+        "avg_gain": _avg([m["gain"] for m in judged]),
+        "control_avg_gain": _avg(c_gains),
+        "control_pages": len(c_gains),
+        # THE ONLY NUMBER THAT ANSWERS THE QUESTION, and it is None whenever
+        # either side is missing rather than falling back to the raw gain —
+        # a lift computed against no control is the claim this refuses to make.
+        "lift": (round(_avg([m["gain"] for m in judged]) - _avg(c_gains), 1)
+                 if judged and c_gains else None),
+        "movements": moved[:50],
+        "notes": notes}
+
+
 def _totals(readings: list) -> dict:
     ranked = [r.position for r in readings if r.position is not None]
     return {"phrases": len(readings),
@@ -952,6 +1101,14 @@ def progress(tenant: str, *, days: int = 28) -> dict:
                               "invented to fill the gap."}
         notes.append(against["missing"])
 
+    # DID REFRESHING WORK. The declared measure for the blog system is
+    # "position change in `keywords.progress`, against a control" — and until
+    # now that covered only PUBLISHING. A whole second class of work was added
+    # (find a stalled page, plan a refresh, revise the live article) with no
+    # way for the system to be told the bet was wrong. Its own window, longer
+    # than the publish one, because a refresh is judged from its own date and
+    # a 28-day view would drop most of them.
+    refresh = refresh_effect(tenant, days=max(days, 90))
     return {
         "tenant": tenant, "window_days": days,
         "goal": against,
@@ -960,7 +1117,8 @@ def progress(tenant: str, *, days: int = 28) -> dict:
         "movements": moves[:50],
         "attributable": len(moves) - too_early,
         "too_early_to_attribute": too_early,
-        "notes": notes}
+        "refresh": refresh,
+        "notes": notes + [f"refresh: {n}" for n in refresh["notes"]]}
 
 
 #: How often the map itself is refreshed. Distinct from the nightly reading
