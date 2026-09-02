@@ -12155,8 +12155,23 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     # the ones they actually want, one at a time, from the page they are on.
     # An ad batch reads its own decisions off the VARIANTS (`ad_apr`), not off
     # `ap`, so `ap` alone is the wrong test for "has a decision" there.
-    _has_decision = bool(ap) or (is_ads and (ad_apr["pending"] or ad_apr["ready"]
-                                             or ad_apr["denied"]))
+    # A DECIDED ARTIFACT HAS A DECISION, not a pending one. `ap` is the
+    # PENDING approval, and deciding makes it non-pending — so the moment you
+    # approved, `_has_decision` went False and the standalone control came
+    # BACK. Pressing it queued a second approval and approved that too, which
+    # on a system that ships means executing the same ship twice.
+    #
+    # Asked of every approval on this output, whatever its status. The
+    # decision is the fact; pending is one state of it.
+    _decided_ever = False
+    if output_id:
+        with db.SessionLocal() as _s:
+            _decided_ever = any(
+                str((a.payload or {}).get("output_id") or "") == output_id
+                for a in _s.query(db.Approval)
+                .filter(db.Approval.tenant == tenant).all())
+    _has_decision = bool(ap) or _decided_ever or (
+        is_ads and (ad_apr["pending"] or ad_apr["ready"] or ad_apr["denied"]))
     if (not published and not superseded_by and (art.body or "").strip()
             and not _has_decision):
         # THE DECISION, NOT A REQUEST FOR ONE. Owner, 2026-09-01: *"the 'Put

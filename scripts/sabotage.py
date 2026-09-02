@@ -5249,6 +5249,18 @@ SABOTAGES = [
                "the platform's answer rendered as the account's, next to the "
                "button that promotes it",
     },
+    {
+        "name": "a_decided_artifact_stops_offering_the_decision",
+        "file": "app/admin_ui.py",
+        "find": "    _has_decision = bool(ap) or _decided_ever or (",
+        "replace": "    _has_decision = bool(ap) or (",
+        "suites": ["test_queue_approval.py"],
+        "why": "the Approve control comes back the moment you approve, "
+               "because the test is for a PENDING approval and deciding "
+               "makes it non-pending — so pressing it again queues a second "
+               "approval and approves that too, which on a shipping system "
+               "executes the same push twice",
+    },
 ]
 
 

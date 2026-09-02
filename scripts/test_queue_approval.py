@@ -204,10 +204,25 @@ def main() -> int:
     ck("  which renders the confirmation as UI",
        'class="flash"' in page3 or 'class="ok"' in page3,
        "the owner's complaint was an unstyled <h2> with no way back")
+    # ONE CLAIM. `X or Y` where Y is "the ship_decide form is gone" — which
+    # is true by definition once a decision exists — so the half that mattered
+    # never ran. It was green while the standalone control CAME BACK after
+    # deciding: `_has_decision` tested the PENDING approval, and deciding
+    # makes it non-pending. Pressing it queued a second approval and approved
+    # that too, which on a shipping system executes the same push twice.
     ck("  and there is no second Approve to press",
-       "Approve" not in page3.split("Waiting on you")[0]
-       or "/admin/ship_decide" not in page3,
-       "a decided artifact must stop offering the decision")
+       "/admin/queue_approval" not in page3,
+       f'{page3.count("/admin/queue_approval")} queue form(s) — a decided '
+       f'artifact must stop offering the decision')
+    # THE CONTROLS, NOT THE WORD. Banning ">Approve" anywhere on the page
+    # also banned the confirmation flash — "Approved — but the push to the
+    # ESP failed" — which is the page correctly reporting what happened. A
+    # control is a form; a sentence is not.
+    ck("    and no decision form of any kind remains",
+       "/admin/queue_approval" not in page3
+       and "/admin/ship_decide" not in page3,
+       "the two ways to decide are these two routes; the word Approve also "
+       "appears in the confirmation, which must stay")
 
     print("\n— an ad batch is queued the way its board READS: per variant —")
     import json as _json
