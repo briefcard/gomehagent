@@ -795,12 +795,22 @@ def settle(tenant: str) -> dict:
             pos = positions.get(row.phrase)
             if pos is None:
                 continue
-            if pos <= WON_POSITION and row.status in ("published", "planned"):
-                row.status, won = "won", won + 1
+            # THE MARK IS RECORDED FOR ANY PAGE THAT IS WINNING, not only for
+            # one that just started to. It was nested inside the transition —
+            # `status in ("published", "planned")` — which a row already at
+            # `won` cannot enter, so a page that was winning before `won_at`
+            # existed, or that was marked `won` by any other path, never got
+            # one. It then slipped, `settle` walked it back to `published`,
+            # and it read as a page that had never ranked at all: the two owe
+            # different work, and the more urgent one was invisible.
+            if pos <= WON_POSITION and row.status in ("published", "planned",
+                                                      "won"):
+                if row.status != "won":
+                    row.status, won = "won", won + 1
                 # The HIGH-WATER MARK, set once and never cleared. `settle`
                 # walks a page back to `published` as soon as it slips, so
                 # this is the only thing that can tell "it ranked and stopped"
-                # from "it never ranked" — and those owe different work.
+                # from "it never ranked".
                 if row.won_at is None:
                     row.won_at = db.utcnow()
             elif pos > WON_POSITION and row.status == "won":

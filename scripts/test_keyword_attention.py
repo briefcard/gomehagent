@@ -141,6 +141,29 @@ def main() -> int:
        .get("round trip", {}).get("state") == "slipping",
        str({x["phrase"]: x["state"] for x in keywords.attention("baci")}))
 
+    print("\n— a page that was ALREADY winning still gets its mark —")
+    # The write was nested inside the TRANSITION (`status in published/
+    # planned`), which a row already at `won` cannot enter. So a page winning
+    # before `won_at` existed never got one; it later slipped, `settle` walked
+    # it back to `published`, and it read as a page that had never ranked —
+    # the more urgent of the two states, invisible.
+    keywords.upsert("baci", "already winning", status="won")
+    with db.SessionLocal() as s:
+        s.add(db.KeywordReading(tenant="baci", phrase="already winning",
+                                position=2.0, source="gsc"))
+        s.commit()
+    keywords.settle("baci")
+    with db.SessionLocal() as s:
+        aw = (s.query(db.KeywordTarget)
+              .filter(db.KeywordTarget.tenant == "baci",
+                      db.KeywordTarget.phrase == "already winning").first())
+    ck("the high-water mark is recorded", aw.won_at is not None,
+       "without it, slipping is indistinguishable from never having ranked")
+    ck("  and it is not counted as a NEW win",
+       (aw.status or "") == "won",
+       "it was already winning; counting it again would inflate the number "
+       "the goal is measured against")
+
     print("\n— and the move is chosen by where it actually sits —")
     ck("close: refresh THIS page",
        "refresh this page" in got["stalled close"]["owed"],

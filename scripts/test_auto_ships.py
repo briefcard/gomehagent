@@ -130,6 +130,31 @@ def main() -> int:
        "promoting the system must not sweep up what was already waiting")
 
     print()
+    print("— and the keyword map learns the page went live —")
+    # THE WRITE-BACK THAT NEVER FIRED. `keywords.mark_published` joins on
+    # `KeywordTarget.output_id`, and that column was written AFTER the publish
+    # block — harmless while every push waited for a person, fatal on `auto`
+    # where the ship happens inside the same run. The page went live on the
+    # client's site while the map still read `status=planned, target_url=''`:
+    # live, unlinkable, unmeasurable, and silent.
+    with db.SessionLocal() as s:
+        kw = (s.query(db.KeywordTarget)
+              .filter(db.KeywordTarget.tenant == "baci",
+                      db.KeywordTarget.phrase == "melamine bowl").first())
+    ck("the keyword knows its article",
+       (kw.output_id or "") != "", kw.output_id)
+    ck("  it is marked published, not left planned",
+       (kw.status or "") == "published",
+       f"status={kw.status!r} — the board would go on offering it as work "
+       f"nobody had done")
+    ck("  it carries the address the CMS gave it",
+       (kw.target_url or "").startswith("http"), kw.target_url)
+    ck("  and the platform id, so a refresh can revise it",
+       (kw.cms_article_id or "") != "",
+       "without it the next refresh proposes a CREATE and publishes a "
+       "duplicate beside the page that ranks")
+
+    print()
     print("— and the record says a machine decided, not a person —")
     with db.SessionLocal() as s:
         run = s.get(db.SystemRun, aps2[0].run_id) if aps2[0].run_id else None
@@ -155,6 +180,21 @@ def main() -> int:
        "inherits the general sentence promises a send that will not happen")
     ck("  and shadow still says every draft waits",
        "waits for your tap" in systems.autonomy_meaning("shadow", "blog"))
+    # THE CARD THAT ACTUALLY RENDERS. The per-system reader existed and this
+    # one call site still read the global `AUTONOMY_MEANING`, so the settings
+    # card promised campaign_email "Sends without asking" on a system
+    # `AUTO_SHIPS` deliberately holds back.
+    from app import admin_ui
+    mail_row = systems.find("baci", "campaign_email") or \
+        systems.create("baci", "campaign_email")
+    with db.SessionLocal() as s:
+        s.get(db.System, mail_row.id).autonomy = "auto"
+        s.commit()
+    mail_row = systems.find("baci", "campaign_email")
+    card = " ".join(admin_ui._rung("auto", mail_row.key).split())
+    ck("the settings card says it too, per system",
+       "does not push on its own" in card and "Sends without asking" not in card,
+       card[:110])
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

@@ -4554,6 +4554,32 @@ def _run_blog_article(ctx: Context) -> dict:
     # `ctx.note` said so and nobody saw it: notes are not in the one line a
     # "Run now" prints. So the state goes in the SUMMARY, first, before the
     # things that went right.
+    # THE KEYWORD LEARNS ITS OUTPUT BEFORE ANYTHING PUBLISHES IT.
+    #
+    # This sat AFTER the publish block, which was harmless while every push
+    # waited for a person: the approval was decided minutes or days later, by
+    # which time the row knew its `output_id`. On `auto` the ship happens
+    # INSIDE this run, and `keywords.mark_published` joins on exactly that
+    # column — so it found no row, wrote nothing, and the page went live on
+    # the client's site while the map still read `status=planned`,
+    # `target_url=''`. Live, unlinkable, unmeasurable, and silent.
+    #
+    # A join has to exist before the thing that uses it. Reproduced at
+    # rung=auto: approval `executed`, CMS had the article, KeywordTarget
+    # unchanged.
+    if row is not None:
+        kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,
+                      # A row with an article behind it is past "candidate"
+                      # whatever filed it. A DIRECT run (no plan) left the
+                      # status untouched, so the board's targeting table —
+                      # the exact place the run summary told the owner to
+                      # look — did not list it: the notification pointed at
+                      # a row that was not there.
+                      status=("planned" if row is not None
+                              and row.status == "candidate" else None),
+                      output_id=(ctx.items[-1] or {}).get("output_id", "")
+                      if ctx.items else "")
+
     t = tenants.get(ctx.tenant)
     blog_id = ((t.cms or {}) if t else {}).get("blog_id") or ""
     profile = sites.get(ctx.tenant)
@@ -4702,19 +4728,6 @@ def _run_blog_article(ctx: Context) -> dict:
         supersede(ctx.tenant, prior, new_oid,
                   keyword_id=(row.id if row is not None else ""),
                   run_id=_prior_run_id(prior), why="refresh")
-
-    if row is not None:
-        kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,
-                      # A row with an article behind it is past "candidate"
-                      # whatever filed it. A DIRECT run (no plan) left the
-                      # status untouched, so the board's targeting table —
-                      # the exact place the run summary told the owner to
-                      # look — did not list it: the notification pointed at
-                      # a row that was not there.
-                      status=("planned" if row is not None
-                              and row.status == "candidate" else None),
-                      output_id=(ctx.items[-1] or {}).get("output_id", "")
-                      if ctx.items else "")
 
     head = ("drafted and queued for approval" if publish["queued"]
             else "DRAFTED — the copy is kept, nothing queued")

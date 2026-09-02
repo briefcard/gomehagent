@@ -5210,6 +5210,40 @@ SABOTAGES = [
                "that publishes to the client's site with nobody looking, so "
                "the scaffolding goes live unread",
     },
+    {
+        "name": "the_keyword_learns_its_output_before_the_push",
+        "file": "app/skill_pack.py",
+        "find": "    if row is not None:\n        kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,",
+        "replace": "    if False:  # SABOTAGE\n        kw_mod.upsert(ctx.tenant, keyword, run_id=ctx.run_id,",
+        "suites": ["test_auto_ships.py"],
+        "why": "`mark_published` joins on `KeywordTarget.output_id`, so on "
+               "`auto` — where the ship happens inside the same run — it "
+               "finds no row and writes nothing: the page goes live on the "
+               "client's site while the map still reads planned, with no "
+               "address and no platform id. Live, unlinkable, unmeasurable, "
+               "and silent",
+    },
+    {
+        "name": "a_winning_page_keeps_its_high_water_mark",
+        "file": "app/keywords.py",
+        "find": "            if pos <= WON_POSITION and row.status in (\"published\", \"planned\",\n                                                      \"won\"):",
+        "replace": "            if pos <= WON_POSITION and row.status in (\"published\", \"planned\"):",
+        "suites": ["test_keyword_attention.py"],
+        "why": "a page already at `won` never records `won_at`, so when it "
+               "slips it reads as one that never ranked — and those owe "
+               "different work, with the more urgent one invisible",
+    },
+    {
+        "name": "the_settings_card_speaks_for_its_own_system",
+        "file": "app/admin_ui.py",
+        "find": "f'{_esc(systems.autonomy_meaning(current, system_key))}'",
+        "replace": "f'{_esc(systems.AUTONOMY_MEANING.get(current, \"\"))}'",
+        "suites": ["test_auto_ships.py"],
+        "why": "the settings card promises campaign_email \"Sends without "
+               "asking\" on a system `AUTO_SHIPS` deliberately holds back — "
+               "the platform's answer rendered as the account's, next to the "
+               "button that promotes it",
+    },
 ]
 
 

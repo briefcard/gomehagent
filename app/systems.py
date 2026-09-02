@@ -1454,10 +1454,11 @@ def set_cadence(system_id: str, **values) -> dict:
     50-a-month cap is refused BY NAME at the knob. Blank means "leave it" —
     the same blank-is-not-an-edit rule the plan form keeps.
 
-    Three knobs, one planner. `horizon_days` and `per_segment_monthly` pace
-    the calendar path; `segment_rest_days` is the floor under the pressure
-    path, so a cohort with a bad week cannot be written to twice in three
-    days.
+    EVERY declared knob, and only those — `planner.KNOBS` is the list, and
+    this validates against it rather than against a copy. The docstring used
+    to say "three knobs, one planner" and name them, fourteen lines above a
+    loop over seven across two planners: a count written beside the thing that
+    computes it, which is the defect this module keeps closing elsewhere.
 
     There is no per-PERSON knob, and its absence is deliberate rather than
     missing: every send goes to a segment whose membership the ESP knows and

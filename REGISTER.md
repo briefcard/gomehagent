@@ -1187,7 +1187,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`attention_fingerprint`**(rows) → `str`  ·  **from nothing**
 - **`attention_unseen`**(tenant?, days?) → `list[dict]`  ·  from `admin_ui.py`
 - **`autonomy_label`**(rung) → `str`  ·  from `admin_ui.py`, `test_rung_truth.py`, `test_systems.py`
-- **`autonomy_meaning`**(rung_value, system_key?) → `str`  ·  from `test_auto_ships.py`
+- **`autonomy_meaning`**(rung_value, system_key?) → `str`  ·  from `admin_ui.py`, `test_auto_ships.py`
 - **`awaiting`**(tenant, key) → `list[dict]`  ·  from `admin_ui.py`, `test_approval_gate.py`
 - **`blocked_reasons`**(tenant?, days?) → `list[tuple[str, int]]`  ·  from `admin_ui.py`, `client_report.py`, `correlate.py`, `test_allclear.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_systems.py`, `test_systems_check.py`, `test_worker_systems.py`
 - **`board`**() → `list[dict]`  ·  from `admin_ui.py`, `test_article_review.py`, `test_keyword_attention.py`, `test_keywords.py`, `test_plan_lifecycle.py`, `test_systems.py`, `web.py`

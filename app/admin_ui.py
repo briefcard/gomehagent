@@ -1788,14 +1788,22 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
 # Systems tab
 # ---------------------------------------------------------------------------
 
-def _rung(current: str) -> str:
+def _rung(current: str, system_key: str = "") -> str:
     at = systems.AUTONOMY.index(systems.rung(current))
     steps = "".join(
         f'<span class="step {"at" if i == at else ("done" if i < at else "")}">'
         f'{_esc(systems.autonomy_label(r))}</span>'
         for i, r in enumerate(systems.AUTONOMY))
     return (f'<div class="rung">{steps}</div>'
-            f'<div class="mut">{_esc(systems.AUTONOMY_MEANING.get(current, ""))}</div>')
+            # PER SYSTEM. `AUTONOMY_MEANING` is the platform's answer, and
+            # this is the one surface that renders a rung beside the system it
+            # belongs to — so campaign_email on `auto` promised "Sends without
+            # asking" while `AUTO_SHIPS` deliberately holds it back. The
+            # per-system reader exists precisely for this call site and this
+            # was still reading the global.
+            f'<div class="mut">'
+            f'{_esc(systems.autonomy_meaning(current, system_key))}'
+            f'</div>')
 
 
 def _contract_form(key: str, row) -> str:
@@ -3120,7 +3128,7 @@ def _settings_section(key: str, row) -> str:
         <span class="mut">what it needs, how far it may go, and what it has
         been told</span></div>
       {gate}
-      {_rung(row.autonomy or "shadow")}
+      {_rung(row.autonomy or "shadow", row.key)}
       <div class="row">{promo}</div>
       {_contract_form(key, row)}
       {_thread(key, row)}
