@@ -582,6 +582,20 @@ def _fetch_gap(profile: dict, limit: int) -> list[dict]:
         _tenant=seo_guard.tenant_for(profile)))
 
 
+def _fetch_serp(profile: dict, phrase: str, limit: int) -> list[dict]:
+    """The rivals holding one phrase. The fifth seam, and the only one that is
+    charged PER PHRASE rather than per account — which is why every caller of
+    it goes through a cap."""
+    from . import seo_guard, seo_tools
+    return _json_rows(seo_tools.semrush_serp_rivals(
+        phrase, database=profile.get("database", ""), limit=limit,
+        _tenant=seo_guard.tenant_for(profile)))
+
+
+#: Most seeds one harvest will expand, whoever asked. Each costs two Semrush
+#: reports, so this is the difference between a bounded top-up and a bill.
+MAX_SEEDS = 8
+
 #: GSC positions worth harvesting as targets. Below 3 is won; past 40 the
 #: query is not really about this site yet.
 STRIKING_BAND = (3.0, 40.0)
@@ -657,8 +671,17 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     # the head terms already in the map makes the second run of `harvest`
     # deepen what the first found, rather than needing a person each time.
     if {"related", "questions"} & set(sources):
-        pool = list(seeds) or [r.phrase for r in targets(tenant)
-                               if r.tier in ("head", "body")][:8]
+        # THE CAP BINDS BOTH BRANCHES. It used to sit on the fallback only —
+        # `list(seeds) or [...][:8]` — so the eight applied to the phrases this
+        # module chose for itself and not to the ones a caller passed. Since
+        # `GET /admin/keywords_harvest?seeds=` builds that tuple straight from
+        # a query string with no length of its own, a hand-typed URL was an
+        # unbounded per-seed loop: 2 reports x N seeds x up to 200 lines each,
+        # synchronous, in one request. The route's docstring already warned
+        # that "one URL doing both is one somebody refreshes into a Semrush
+        # bill" — it separated the routes and left the count open.
+        pool = (list(seeds) or [r.phrase for r in targets(tenant)
+                                if r.tier in ("head", "body")])[:MAX_SEEDS]
         if not pool:
             # Names what is actually missing rather than the command that was
             # just run. If `own` and `gap` both came back empty there is
@@ -2034,6 +2057,189 @@ def next_to_write(tenant: str, *, top: int = 12) -> list:
     return [r.phrase for r in targets(tenant)
             if (r.owner_priority or "") != "muted"
             and r.status == "candidate"][:top]
+
+
+#: How deep a SERP we capture. Ten names everyone a page-one contender has to
+#: pass; past that the domains are not competitors yet, and Semrush bills by
+#: the LINE returned, so depth is half the cost of this feature.
+RIVALS_DEPTH = 10
+
+#: THE COST CONTROL, and the reason this feature is affordable at all. Rivals
+#: are the one Semrush read charged PER PHRASE, so the population it runs over
+#: has to be the words being worked and nothing wider. The owner set this scope
+#: directly (2026-09-02): "just based on the words we're prioritizing. We dont
+#: want an expensive solution that we dont actually need or use regularly."
+#:
+#: Twelve x ten lines is 120 lines per account per refresh. One `harvest()`
+#: already pulls up to 880 Semrush lines (40 own + 200 gap + 8 seeds x 2
+#: reports x 40), so a full rivals refresh costs about a seventh of one "Top up
+#: the map" click — a button that already runs weekly, unattended.
+RIVALS_MAX_PHRASES = 12
+
+#: Do not re-ask about a phrase inside this window. A SERP does not turn over
+#: fast enough for a fortnightly reading to miss anything that matters, and
+#: without a gate the weekly sweep would pay the full price every Monday
+#: forever, including on accounts where nothing has been published since.
+RIVALS_EVERY_DAYS = 14
+
+
+def _bare(domain: str) -> str:
+    """A domain reduced to what two spellings of the same site share."""
+    d = (domain or "").strip().lower()
+    for cut in ("https://", "http://"):
+        if d.startswith(cut):
+            d = d[len(cut):]
+    d = d.split("/")[0]
+    return d[4:] if d.startswith("www.") else d
+
+
+def rivals_scope(tenant: str, *, top: int = RIVALS_MAX_PHRASES) -> list[str]:
+    """The words we are prioritising — the ONLY population rivals are read for.
+
+    Both halves of "being worked", in the order they pay off. `attention` is
+    published pages owed a move, where a rival is someone we are actively
+    trying to pass; `next_to_write` is what the planner files next, where the
+    rivals are who already owns the result we are about to enter. Both are
+    already muted-excluded, pinned-first and priority-ordered, so this function
+    inherits every decision the owner has made and invents no new ranking.
+
+    `top` IS CLAMPED, not merely defaulted. `attention(top=)` and
+    `next_to_write(top=)` both take a caller's number straight through, so a
+    scope that only defaulted to the cap would let one wrong argument turn a
+    120-line refresh into an unbounded charge — which is the exact shape of the
+    `seeds=` overrun this work also fixed.
+    """
+    top = max(0, min(int(top or 0), RIVALS_MAX_PHRASES))
+    if not top:
+        return []
+    ordered = [r["phrase"] for r in attention(tenant)] + list(next_to_write(tenant))
+    seen, out = set(), []
+    for phrase in ordered:
+        low = (phrase or "").strip().lower()
+        if not low or low in seen:
+            continue
+        seen.add(low)
+        out.append(phrase)
+    return out[:top]
+
+
+def latest_serp(tenant: str, phrase: str):
+    with db.SessionLocal() as s:
+        return (s.query(db.KeywordSerp)
+                .filter(db.KeywordSerp.tenant == tenant,
+                        db.KeywordSerp.phrase == phrase)
+                .order_by(db.KeywordSerp.at.desc()).first())
+
+
+def _serp_fresh(tenant: str, phrase: str) -> bool:
+    row = latest_serp(tenant, phrase)
+    if row is None or not row.at:
+        return False
+    return (db.utcnow() - db.as_utc(row.at)).days < RIVALS_EVERY_DAYS
+
+
+def rivals_refresh(tenant: str, *, top: int = RIVALS_MAX_PHRASES,
+                   force: bool = False) -> dict:
+    """Capture the SERP for the prioritised words. SPENDS API CALLS.
+
+    Returns what it spent rather than what it found, because the number worth
+    watching here is the bill: `fetched` is exactly the number of Semrush reads
+    made, and it can never exceed `RIVALS_MAX_PHRASES`.
+
+    A phrase whose fetch comes back empty is counted as `failed` and NOT
+    stored. `_semrush` returns a SENTENCE on every failure — no key, timeout,
+    plan limit — and `_json_rows` turns each of those into `[]`, so an
+    unconfigured account would otherwise write a row saying "nobody ranks for
+    this", which reads as a won SERP rather than as a broken one.
+    """
+    from . import sites
+    profile = sites.get(tenant)
+    own = _bare(profile.get("domain", ""))
+    scope = rivals_scope(tenant, top=top)
+    fetched = skipped = failed = 0
+    for phrase in scope:
+        if not force and _serp_fresh(tenant, phrase):
+            skipped += 1
+            continue
+        rows = _fetch_serp(profile, phrase, RIVALS_DEPTH)
+        fetched += 1
+        if not rows:
+            failed += 1
+            continue
+        ours, rivals = None, []
+        for r in rows:
+            dom = _bare(str(r.get("domain") or ""))
+            try:
+                pos = float(r.get("position") or 0) or None
+            except (TypeError, ValueError):
+                pos = None
+            if not dom or pos is None:
+                continue
+            if own and dom == own:
+                ours = pos if ours is None else min(ours, pos)
+                continue
+            rivals.append({"domain": dom, "position": pos,
+                           "url": str(r.get("url") or "")})
+        with db.SessionLocal() as s:
+            s.add(db.KeywordSerp(
+                tenant=tenant, phrase=phrase,
+                database=profile.get("database", "") or "",
+                our_position=ours, depth=len(rows), rivals=rivals))
+            s.commit()
+    return {"tenant": tenant, "scope": len(scope), "fetched": fetched,
+            "skipped": skipped, "failed": failed, "cap": RIVALS_MAX_PHRASES,
+            "depth": RIVALS_DEPTH}
+
+
+def overtaking(tenant: str) -> list[dict]:
+    """Who is ahead of us, and how many we have passed since the first reading.
+
+    THE MEASURE OF SUCCESS, and the reason a baseline is kept rather than only
+    the newest capture. "Six sites ahead" is a static number of the kind the
+    Architecture page was already full of; "six ahead, two passed since June"
+    is the same reading turned into a direction of travel.
+
+    Reads only. Nothing here can spend an API call, which is what makes it safe
+    to render on a page.
+    """
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KeywordSerp)
+                .filter(db.KeywordSerp.tenant == tenant)
+                .order_by(db.KeywordSerp.at.asc()).all())
+        by_phrase: dict[str, list] = {}
+        for r in rows:
+            by_phrase.setdefault(r.phrase, []).append(
+                {"at": db.as_utc(r.at), "our_position": r.our_position,
+                 "rivals": list(r.rivals or [])})
+
+    def _ahead(cap) -> set:
+        pos = cap["our_position"]
+        return {v["domain"] for v in cap["rivals"]
+                if pos is None or (v.get("position") or 0) < pos}
+
+    out = []
+    for phrase, caps in by_phrase.items():
+        first, last = caps[0], caps[-1]
+        ahead_now = _ahead(last)
+        passed = sorted(_ahead(first) - ahead_now)
+        ranked = sorted(
+            [v for v in last["rivals"] if v["domain"] in ahead_now],
+            key=lambda v: v.get("position") or 99)
+        out.append({
+            "phrase": phrase,
+            "our_position": last["our_position"],
+            "ahead": ranked,
+            "ahead_count": len(ahead_now),
+            "passed": passed,
+            "passed_count": len(passed),
+            # A single capture has no baseline to have moved from, and saying
+            # "0 passed" of one reading is the same false precision the static
+            # numbers on this page already carried.
+            "has_baseline": len(caps) > 1,
+            "at": last["at"], "since": first["at"],
+        })
+    out.sort(key=lambda d: (-d["passed_count"], d["our_position"] or 999))
+    return out
 
 
 def mute_effect(tenant: str, phrase: str, before: list, *,

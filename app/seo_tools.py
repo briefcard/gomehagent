@@ -140,6 +140,47 @@ def semrush_competitors(domain: str = "", database: str = "", limit: int = 15, _
     return json.dumps(slim)
 
 
+def semrush_serp_rivals(phrase: str, database: str = "", limit: int = 10,
+                        _tenant: str = "") -> str:
+    """Who ranks for ONE phrase — the only report that answers "who is above us".
+
+    `domain_organic_organic` (semrush_competitors, above) is the cheap
+    domain-level neighbour and cannot answer this: it says which sites compete
+    with us OVERALL, never who holds position 3 for the phrase we are about to
+    write against. Per-keyword rivals need a per-keyword report.
+
+    THE LIMIT IS THE BILL. Semrush charges by the LINE returned, not by the
+    call, so `display_limit` is the cost control and it is clamped here rather
+    than trusted from the caller — `_semrush` forwards params blind, so an
+    unclamped limit is an unbounded charge. Ten is deep enough to name everyone
+    a page-one contender has to pass and shallow enough that a full refresh of
+    a prioritised map costs a fraction of one harvest.
+
+    `export_columns` is deliberately NOT sent. The API's column codes are short
+    aliases that differ per report, and a wrong one returns a valid-looking row
+    set with the wrong fields in it; the defaults already carry domain and url,
+    and rank comes from ORDER, which is what an organic report is sorted by.
+    """
+    rows = _semrush("phrase_organic", _tenant=_tenant, phrase=phrase,
+                    database=database or config.SEO_DATABASE,
+                    display_limit=max(1, min(int(limit or 10), 20)))
+    if isinstance(rows, str):
+        return rows
+    out = []
+    for i, r in enumerate(rows):
+        domain = (r.get("Domain") or r.get("domain") or "").strip()
+        if not domain:
+            continue
+        # Position from the column when the report carries one, else from
+        # order. Both are read because the organic report is rank-sorted by
+        # definition, so order is a correct fallback and never a guess.
+        pos = _f(r.get("Position") or r.get("position") or 0) or float(i + 1)
+        out.append({"domain": domain,
+                    "url": (r.get("Url") or r.get("url") or "").strip(),
+                    "position": pos})
+    return json.dumps(out)
+
+
 def semrush_keyword_metrics(phrases: str, database: str = "", _tenant: str = "") -> str:
     rows = _semrush("phrase_these", _tenant=_tenant, phrase=phrases,
                     database=database or config.SEO_DATABASE)

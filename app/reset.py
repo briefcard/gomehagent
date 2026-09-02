@@ -78,7 +78,7 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "tool_calls", "reported_figures", "compliance_events",
               "moments", "keyword_targets", "keyword_readings",
               "artifact_bodies", "artifact_versions", "feedback_items",
-              "digest_acks"}
+              "digest_acks", "keyword_serps"}
 # Both classified in the change that adds them, per the lesson below.
 # `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
 # it looks like research about the brand, but what it stores is what somebody
@@ -87,6 +87,11 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
 # quarter of publishing plan. `keyword_readings` sits beside `seo_snapshots`
 # for the same reason those do: a measurement taken is something the system
 # did, and no crawl rebuilds a series.
+# `keyword_serps` is OPERATIONS for exactly that reason and one more: it is the
+# BASELINE half of "how many sites have we passed". Semrush will happily sell
+# today's result again, but nobody can buy back where a competitor stood six
+# months ago, so a knowledge reset that dropped this table would delete the
+# only evidence the work was moving.
 # `moments` is OPERATIONS, classified in the same change that adds the table —
 # which is the whole lesson of the comments below. It records that a signal was
 # SEEN and what was decided about it, including the ones deliberately not acted

@@ -10249,6 +10249,81 @@ def _plan_supports_btn(key: str, tenant: str, row: dict) -> str:
             f'{"" if n == 1 else "s"}</button></form>')
 
 
+def _overtaking_section(key: str, tenant: str) -> str:
+    """Which sites we are aiming to overtake, and how many we have passed.
+
+    LIVES IN THE LAZY HALF ON PURPOSE. `arch` and the `m = kw.map_for(tenant)`
+    above it are built on EVERY Plan request whatever sub-tab is asked for —
+    only `rooms[sub]()` is deferred — so a query written into that block would
+    run on all six rooms. This one is called from the lambda, so it costs
+    nothing until somebody opens Architecture.
+
+    It cannot spend an API call. `kw.overtaking` reads stored captures only;
+    the fetch is behind the button, which is the same shape as "Top up the
+    map" and for the same reason.
+    """
+    from . import keywords as kw
+    rows = kw.overtaking(tenant)
+    scope = kw.rivals_scope(tenant)
+    refresh = (f'<a href="/admin/keywords_rivals?key={_esc(key)}'
+               f'&amp;tenant={_esc(tenant)}&amp;ui=1">'
+               f'<button class="sec">Read the competition</button></a>')
+    cost = (f'<span class="when">Asks Semrush who ranks for the '
+            f'{len(scope)} word(s) you are working — at most '
+            f'{kw.RIVALS_MAX_PHRASES}, {kw.RIVALS_DEPTH} results each, and '
+            f'never for a word read in the last {kw.RIVALS_EVERY_DAYS} days. '
+            f'Spends API calls.</span>')
+
+    if not rows:
+        if not scope:
+            return ('<h3>Who we are overtaking</h3>'
+                    '<p class="mut">Nothing is being worked yet, so there is '
+                    'no one to overtake. Once a keyword is queued to write or '
+                    'a published page is owed a move, its rivals can be '
+                    'read.</p>')
+        return ('<h3>Who we are overtaking</h3>'
+                '<p class="mut">Not read yet — so the positions above are this '
+                'site talking about itself. Who actually holds these results '
+                'is the thing that makes them a target rather than a '
+                f'number.</p><p>{refresh} {cost}</p>')
+
+    body = ""
+    for r in rows:
+        pos = r["our_position"]
+        us = f'{pos:.0f}' if pos is not None else '<span class="mut">not in top '
+        if pos is None:
+            us += f'{kw.RIVALS_DEPTH}</span>'
+        ahead = ", ".join(
+            f'{_esc(v["domain"])} <span class="mut">{v["position"]:.0f}</span>'
+            for v in r["ahead"][:5]) or '<span class="mut">nobody</span>'
+        if r["ahead_count"] > 5:
+            ahead += f' <span class="mut">+{r["ahead_count"] - 5} more</span>'
+        # A first capture has no baseline, so it gets a dash rather than a
+        # zero: "0 passed" of a single reading is a claim about movement made
+        # from one point.
+        if not r["has_baseline"]:
+            moved = '<span class="mut">baseline</span>'
+        elif r["passed_count"]:
+            moved = (f'<strong>{r["passed_count"]} passed</strong> '
+                     f'<span class="when">{_esc(", ".join(r["passed"][:3]))}</span>')
+        else:
+            moved = '<span class="mut">none yet</span>'
+        body += (f'<tr><td>{_esc(r["phrase"])}</td>'
+                 f'<td class="num">{us}</td>'
+                 f'<td>{ahead}</td>'
+                 f'<td>{moved}</td></tr>')
+
+    won = sum(r["passed_count"] for r in rows)
+    head = (f'<h3>Who we are overtaking — {won} site(s) passed</h3>'
+            if won else '<h3>Who we are overtaking</h3>')
+    return (head
+            + '<div class="tblwrap"><table class="tbl">'
+              '<tr><th>keyword</th><th>us</th>'
+              '<th>ahead of us</th><th>since baseline</th></tr>'
+            + body + '</table></div>'
+            + f'<p>{refresh} {cost}</p>')
+
+
 def _board_section(key: str, tenant: str, days: int) -> str:
     """The map as the four questions somebody asks of it, not one sorted list.
 
@@ -12995,7 +13070,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         "board": lambda: (_board_section(key, tenant, days)
                           or '<p class="mut">No keyword map yet — Architecture '
                              'is where one gets built.</p>'),
-        "architecture": lambda: arch,
+        "architecture": lambda: arch + _overtaking_section(key, tenant),
         "progress": lambda: _progress_section(key, tenant, days),
         "goal": lambda: _progress_section(key, tenant, days, goal_only=True),
     }

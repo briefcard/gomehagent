@@ -2793,6 +2793,45 @@ def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
                       + lone + ("  " + " ".join(got.get("notes") or [])))
 
 
+@app.get("/admin/keywords_rivals")
+def admin_keywords_rivals(key: str = Depends(admin_key), tenant: str = "",
+                          ui: int = 0):
+    """Read who ranks for the words we are working. THIS ONE SPENDS API CALLS.
+
+    Takes no scope argument, deliberately. Every other spending route here
+    accepts the caller's numbers and clamps them; this one has no number to
+    clamp because the population is not the caller's to choose — it is
+    `rivals_scope`, which is the prioritised words and nothing wider. A `top=`
+    on this URL would be the `seeds=` overrun again, one report further down.
+    """
+    from . import keywords
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    try:
+        got = keywords.rivals_refresh(tenant)
+    except Exception as exc:  # noqa: BLE001
+        out = {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+        return _plan_back(tenant, key, err=out["error"]) if ui else out
+    if not ui:
+        return got
+    if not got["scope"]:
+        return _plan_back(tenant, key, msg="nothing is being worked yet, so "
+                          "there is no competition to read")
+    parts = [f"read {got['fetched']} of {got['scope']} word(s)"]
+    if got["skipped"]:
+        parts.append(f"{got['skipped']} still fresh")
+    # Named, not swallowed. Semrush answers a failure with a SENTENCE and the
+    # parser turns it into an empty list, so a plan that does not carry this
+    # report and a key that is missing both look exactly like "nobody ranks".
+    if got["failed"]:
+        parts.append(f"{got['failed']} came back empty — either Semrush has "
+                     "nothing for the phrase, or this key cannot call the "
+                     "per-keyword report; Diagnostics has the error")
+    return _plan_back(tenant, key, msg="; ".join(parts))
+
+
 def _plan_days(raw) -> int:
     try:
         return max(1, min(int(raw or 28), 365))

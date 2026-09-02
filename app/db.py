@@ -1156,6 +1156,43 @@ class KeywordReading(Base):
     url = Column(String, default="")  # the page that ranked, when reported
 
 
+class KeywordSerp(Base):
+    """Who ELSE holds the page-one result for one phrase we are working.
+
+    THE MARKET'S SIDE OF `KeywordReading`. That table records where WE sit and
+    is the only place a position question is answered from. Neither it nor
+    `SeoSnapshot` has ever held a rival: `SeoSnapshot.top_keywords` is OUR
+    keywords, so before this table the console could say a page had slipped to
+    9 and could not say who was standing on 1-8. "Which sites are we aiming to
+    overtake" had no data to be answered from at all.
+
+    ONE ROW PER CAPTURE, RIVALS AS JSON, not a row per domain. The question
+    asked of this table is always "the whole result as it stood then" — a
+    baseline to compare today against — and never "one domain across time". Ten
+    rows per phrase per capture would be ten times the writes on a 256MB
+    database to serve a query nothing makes. `SeoSnapshot.top_keywords` already
+    set this precedent for the same reason.
+
+    `our_position` is stored rather than re-derived because it is the half that
+    makes the rest mean something: a rival at 4 is being overtaken if we are at
+    3 and is beating us if we are at 9, and the SERP alone does not say which.
+    NULL means we did not appear in the captured depth — which is a real
+    reading, not a gap.
+    """
+
+    __tablename__ = "keyword_serps"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, default="", index=True)
+    phrase = Column(String, nullable=False, index=True)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    database = Column(String, default="")     # Semrush regional market
+
+    our_position = Column(Float)              # NULL = absent from the capture
+    depth = Column(Integer, default=0)        # how many results were captured
+    rivals = Column(JSON, default=list)       # [{domain, position, url}]
+
+
 class ArtifactBody(Base):
     """The rendered thing itself, kept whole, beside the ledger row about it.
 

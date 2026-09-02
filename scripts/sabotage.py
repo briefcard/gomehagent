@@ -5065,6 +5065,72 @@ SABOTAGES = [
                "still render, still save, and change nothing",
     },
     {
+        "name": "the_rivals_read_stays_out_of_the_eager_half",
+        "file": "app/admin_ui.py",
+        # A default argument is evaluated when the lambda is DEFINED, so this
+        # mutation is the real bug in miniature: same output, same page, but
+        # the read now happens on every Plan request instead of only in the
+        # room that shows it.
+        "find": "        \"architecture\": lambda: arch + _overtaking_section(key, tenant),",
+        "replace": "        \"architecture\": (lambda _s=_overtaking_section(key, tenant): arch + _s),  # SABOTAGE",
+        "suites": ["test_console_controls.py"],
+        "why": "every Plan page view queries the stored SERPs for five rooms "
+               "that never show them — the same shape as the fetch-on-render "
+               "trap this feature was built to stay out of",
+    },
+    {
+        "name": "the_rivals_cap_binds_against_a_caller",
+        "file": "app/keywords.py",
+        # Anchored on the clamp itself, not the constant: replacing the
+        # constant would be caught by arithmetic anywhere, while the bug this
+        # guards is a caller's number reaching `attention(top=)` untouched.
+        "find": "    top = max(0, min(int(top or 0), RIVALS_MAX_PHRASES))",
+        "replace": "    top = int(top or 0)  # SABOTAGE",
+        "suites": ["test_rivals.py"],
+        "why": "one wrong argument turns a 120-line Semrush read into an "
+               "unbounded charge across the whole keyword map, and nothing "
+               "says so until the bill",
+    },
+    {
+        "name": "rivals_are_read_only_for_prioritised_words",
+        "file": "app/keywords.py",
+        "find": "    ordered = [r[\"phrase\"] for r in attention(tenant)] + list(next_to_write(tenant))",
+        "replace": "    ordered = [r.phrase for r in targets(tenant)]  # SABOTAGE",
+        "suites": ["test_rivals.py"],
+        "why": "the account pays per phrase for its ENTIRE map — hundreds of "
+               "words including every muted one — instead of the dozen being "
+               "worked",
+    },
+    {
+        "name": "a_serp_already_read_is_not_bought_again",
+        "file": "app/keywords.py",
+        "find": "    return (db.utcnow() - db.as_utc(row.at)).days < RIVALS_EVERY_DAYS",
+        "replace": "    return False  # SABOTAGE",
+        "suites": ["test_rivals.py"],
+        "why": "the weekly sweep pays the full price for every account every "
+               "Monday forever, including ones where nothing was published",
+    },
+    {
+        "name": "a_failed_serp_read_is_not_stored_as_an_empty_one",
+        "file": "app/keywords.py",
+        "find": "        if not rows:\n            failed += 1\n            continue",
+        "replace": "        if False:  # SABOTAGE\n            failed += 1\n            continue",
+        "suites": ["test_rivals.py"],
+        "why": "an account whose key cannot call the report files 'nobody "
+               "ranks for this' against every word it is working — a won SERP, "
+               "shown as a win",
+    },
+    {
+        "name": "a_callers_own_seed_list_is_capped",
+        "file": "app/keywords.py",
+        "find": "                                if r.tier in (\"head\", \"body\")])[:MAX_SEEDS]",
+        "replace": "                                if r.tier in (\"head\", \"body\")])  # SABOTAGE",
+        "suites": ["test_rivals.py"],
+        "why": "?seeds= on the harvest route becomes an unbounded per-seed "
+               "Semrush loop — two reports each, up to 200 lines apiece — run "
+               "synchronously inside one web request",
+    },
+    {
         "name": "a_cadence_knob_out_of_range_is_refused",
         "file": "app/systems.py",
         # Anchored on the CADENCE loop's own line: the range check three

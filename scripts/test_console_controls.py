@@ -85,6 +85,31 @@ def main() -> int:
     with db.SessionLocal() as s:
         s.get(db.System, row.id).status = "live"
         s.commit()
+    # ── the rivals read stays in the lazy half ──────────────────────────
+    print("— reading the competition costs nothing until you open the room —")
+    seen = {"n": 0}
+    _real_ot = keywords.overtaking
+
+    def _counted(tenant):
+        seen["n"] += 1
+        return _real_ot(tenant)
+
+    keywords.overtaking = _counted
+    try:
+        admin_ui.render_plan("s3cret", "ironside", sub="board")
+        away = seen["n"]
+        admin_ui.render_plan("s3cret", "ironside", sub="architecture")
+        here = seen["n"] - away
+    finally:
+        keywords.overtaking = _real_ot
+    ck("another room does not read the competition", away == 0,
+       f"{away} read(s) from the Board — `m = kw.map_for(tenant)` and the "
+       f"whole `arch` block are built on EVERY Plan request whatever sub is "
+       f"asked for, so anything put there runs on all six rooms")
+    ck("and opening Architecture does", here == 1,
+       f"{here} read(s) — the pair is the point: 0 everywhere and 0 here "
+       f"would pass the check above while showing nothing")
+
     page = admin_ui.render_plan("s3cret", "ironside", sub="architecture")
     ck("the form is on the chip that states the fact",
        "market_set" in page and "Set market" in page,
