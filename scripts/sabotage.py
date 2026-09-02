@@ -5261,6 +5261,46 @@ SABOTAGES = [
                "approval and approves that too, which on a shipping system "
                "executes the same push twice",
     },
+    {
+        "name": "a_klaviyo_campaign_names_its_audience",
+        "file": "app/klaviyo.py",
+        "find": "    if not segs:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_klaviyo.py"],
+        "why": "a campaign is created with an empty audience because nobody "
+               "chose one — and an ESP resolving that to everybody is the one "
+               "mistake it cannot undo",
+    },
+    {
+        "name": "a_half_made_klaviyo_draft_is_reported",
+        "file": "app/klaviyo.py",
+        "find": "                \"orphan\": f\"template {tpl['template_id']} was created and is \"\n                          f\"not referenced by any campaign\"}",
+        "replace": "                \"orphan\": \"\"}",
+        "suites": ["test_klaviyo.py"],
+        "why": "a template that imported and a campaign that did not leaves an "
+               "orphan in the client's Klaviyo account with nothing naming it, "
+               "so nobody knows to clean it up",
+    },
+    {
+        "name": "the_html_rides_in_the_template",
+        "file": "app/klaviyo.py",
+        "find": "                 \"attributes\": {\"name\": name[:120], \"editor_type\": \"CODE\",\n                                \"html\": html}}})",
+        "replace": "                 \"attributes\": {\"name\": name[:120], \"editor_type\": \"CODE\",\n                                \"html\": \"\"}}})",
+        "suites": ["test_klaviyo.py"],
+        "why": "the template is created empty, so the campaign attaches to a "
+               "blank one and the owner opens a draft with no email in it",
+    },
+    {
+        "name": "a_half_made_draft_reaches_the_person_who_cleans_it_up",
+        "file": "app/approvals.py",
+        "find": "                _orphan = str(got.get(\"orphan\") or \"\")",
+        "replace": "                _orphan = \"\"  # SABOTAGE",
+        "suites": ["test_klaviyo.py", "test_control_piping.py"],
+        "why": "a template that imported while the campaign failed is real "
+               "and sitting in the client's ESP, and the message says "
+               "\"Nothing is in the platform\" — so nobody cleans it up and "
+               "the retry makes a second one",
+    },
 ]
 
 

@@ -344,10 +344,26 @@ def apply_decision(ap_id: str, decision: str) -> str:
                             f"a draft (campaign {got.get('campaign_id')})"
                             f"{extra} — launch-ready. Launching stays yours, "
                             f"in the platform.")
+                # "NOTHING IS IN THE PLATFORM" IS NOT ALWAYS TRUE. Both
+                # adapters build a draft in stages, and a template that
+                # imported while the campaign failed leaves something real in
+                # the client's account. Saying nothing is there sends nobody
+                # to clean it up — and a retry then makes a second one.
+                #
+                # `orphan` is the adapters' own name for exactly that, and
+                # until now it was computed and rendered nowhere: the piping
+                # audit flagged `klaviyo.draft_from_html.orphan` as a
+                # warning-shaped key no UI file mentions, which is how it was
+                # found.
+                _orphan = str(got.get("orphan") or "")
                 return (f"Approved — but the push to the ESP failed: "
-                        f"{got.get('error', 'unknown')[:200]}. Nothing is in "
-                        f"the platform; retry from the workroom once it is "
-                        f"fixed.")
+                        f"{got.get('error', 'unknown')[:200]}. "
+                        + (f"LEFT BEHIND IN THE PLATFORM: {_orphan[:200]} — "
+                           f"clean that up before retrying, or the retry adds "
+                           f"a second one."
+                           if _orphan else
+                           "Nothing is in the platform; retry from the "
+                           "workroom once it is fixed."))
             if ap.kind == "skill_output":
                 return (f"Approved: {ap.summary}. Nothing was sent — this "
                         f"marks the draft reviewed. Launch it in the platform "

@@ -63,9 +63,35 @@ def main() -> int:
     mod, refusal = esp.backend("eien")
     ck("no ESP connected refuses by name",
        mod is None and "no email platform connected" in refusal, refusal[:70])
+    # KLAVIYO HAS AN ADAPTER NOW (2026-09-02), built after the owner hit the
+    # refusal on Ironside. This assertion used to encode that GAP as a fact —
+    # so it failed the moment the gap closed, which is a test asserting the
+    # absence of work rather than a rule.
     mod, refusal = esp.backend("ironside")
-    ck("connected to Klaviyo (no adapter yet) refuses honestly",
-       mod is None and "not built yet" in refusal, refusal[:70])
+    ck("ironside now gets a Klaviyo adapter",
+       mod is not None and not refusal,
+       refusal or getattr(mod, "__name__", ""))
+    ck("  and it is the draft-only one",
+       hasattr(mod, "draft_from_html") and not hasattr(mod, "send_campaign"),
+       "a Klaviyo campaign is created and left for a person — 'leave it "
+       "human, in the ESP'")
+
+    # THE RULE THE OLD ASSERTION WAS ACTUALLY ABOUT, kept and tested without
+    # depending on any provider staying unbuilt: a profile naming an adapter
+    # module that does not exist refuses BY NAME rather than returning a None
+    # the generator trips over three calls later.
+    _real = esp.PROFILES["klaviyo"]
+    esp.PROFILES["klaviyo"] = {**_real, "adapter": "no_such_adapter"}
+    try:
+        mod, refusal = esp.backend("ironside")
+        ck("a provider whose adapter is missing refuses honestly",
+           mod is None and "not built yet" in refusal, refusal[:80])
+        ck("  and says whose gap it is",
+           "our gap, not the account's" in refusal,
+           "the owner should not go looking at their own Klaviyo settings for "
+           "something we have not written")
+    finally:
+        esp.PROFILES["klaviyo"] = _real
 
     print("\n— personalization becomes each provider's native syntax —")
     body = "<p>Hi {{FIRST_NAME}}, <a href='{{UNSUBSCRIBE}}'>unsubscribe</a></p>"
