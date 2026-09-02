@@ -108,6 +108,73 @@ def rest_days_for(sysrow) -> int:
 #: site does not tire of being written ABOUT. The ceiling is higher and the
 #: default is still conservative, because the constraint on publishing is
 #: rarely appetite and almost always review.
+#: EVERY CADENCE KNOB, DECLARED ONCE — the number, its ceiling, and what it
+#: means to a person. The form used to render three hardcoded inputs, all of
+#: them the CAMPAIGN planner's, on a card that also serves the blog: an owner
+#: looking at the blog system was offered "per segment / month" and never
+#: shown `articles_monthly` at all, while the two numbers that actually pace
+#: their refreshes were module constants no console could reach.
+#:
+#: Owner, 2026-09-02: *"That should be set in the UI based on the cadence."*
+#: Right, and the fix is not three more inputs — it is one table the planner
+#: reads and the form renders, so a knob cannot exist in one and not the
+#: other.
+KNOBS = {
+    "horizon_days": dict(
+        label="horizon, days", cap=90,
+        why="How far ahead work is scheduled. Past this the planner stops and "
+            "says so rather than filling a quarter nobody has looked at."),
+    "per_segment_monthly": dict(
+        label="per segment / month", cap=8,
+        why="How often one cohort may be written to. The floor under fatigue."),
+    "segment_rest_days": dict(
+        label="rest between sends, days", cap=60,
+        why="The minimum gap after a send to one cohort, so a bad week cannot "
+            "be answered by writing to them again on Thursday."),
+    "articles_monthly": dict(
+        label="articles / month", cap=30,
+        why="New articles the blog planner may file per calendar month."),
+    "refreshes_monthly": dict(
+        label="refreshes / month", cap=12,
+        why="Rewrites of pages already published. Its OWN budget, because "
+            "under one cap the refresh always loses to a new article — a new "
+            "page is visibly a thing that did not exist, and moving a page "
+            "from position 6 is invisible until it moves."),
+    "refresh_after_days": dict(
+        label="settle before refreshing, days", cap=180,
+        why="How long a page must be live before it may be refreshed at all. "
+            "Below this the ranking has not settled and `progress` refuses to "
+            "attribute movement anyway, so acting is the more expensive "
+            "mistake. Raise it on a site Google crawls slowly."),
+    "refresh_cooldown_days": dict(
+        label="between refreshes, days", cap=365,
+        why="How long after refreshing before the same page may be offered "
+            "again. It has to be re-crawled before the refresh can be judged; "
+            "sooner is asking for a decision nothing can inform."),
+}
+
+
+def knobs_for(sysrow) -> list[dict]:
+    """The cadence fields THIS system actually uses, with its current values.
+
+    Derived from the planner's own defaults rather than listed beside them, so
+    the form cannot offer a knob the planner ignores — or hide one it reads.
+    """
+    fn = PLANNERS.get(sysrow.key)
+    defaults = (BLOG_CADENCE if fn is blog_rollout else DEFAULT_CADENCE)
+    if fn is blog_rollout:
+        live = blog_cadence_for(sysrow)
+    elif fn is campaign_rollout:
+        live = cadence_for(sysrow)
+        defaults = {**defaults, "segment_rest_days": SEGMENT_REST_DAYS}
+        live = {**live, "segment_rest_days": rest_days_for(sysrow)}
+    else:
+        return []
+    return [{"key": k, "value": live.get(k, v), "default": v,
+             **{kk: vv for kk, vv in KNOBS.get(k, {}).items()}}
+            for k, v in defaults.items() if k in KNOBS]
+
+
 BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4,
                 # REFRESHES DO NOT SHARE THE ARTICLE BUDGET. Under one cap the
                 # two compete, and the loser is always the refresh: a new
@@ -115,7 +182,13 @@ BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4,
                 # a page that already ranks at 6 is invisible until it moves.
                 # A separate, small number is what keeps the lane from either
                 # starving or eating the month.
-                "refreshes_monthly": 2}
+                "refreshes_monthly": 2,
+                # THE TWO WINDOWS THAT PACE THE REFRESH LANE, per account
+                # rather than per platform. A site Google crawls weekly and one
+                # it crawls monthly cannot share a settle time, and these were
+                # module constants no console could reach.
+                "refresh_after_days": 30,
+                "refresh_cooldown_days": 60}
 MAX_ARTICLES_MONTHLY = 30
 MAX_REFRESHES_MONTHLY = 12
 
@@ -124,7 +197,9 @@ def blog_cadence_for(sysrow) -> dict:
     return _cadence(sysrow, BLOG_CADENCE,
                     {"horizon_days": MAX_HORIZON_DAYS,
                      "articles_monthly": MAX_ARTICLES_MONTHLY,
-                     "refreshes_monthly": MAX_REFRESHES_MONTHLY})
+                     "refreshes_monthly": MAX_REFRESHES_MONTHLY,
+                     "refresh_after_days": 180,
+                     "refresh_cooldown_days": 365})
 
 
 def _month(d: dt.date) -> str:

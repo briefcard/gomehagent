@@ -6102,10 +6102,15 @@ def plan_propose(key: str = Depends(admin_key), tenant: str = "",
 
 
 @app.get("/admin/plan_cadence")
-def plan_cadence(key: str = Depends(admin_key), tenant: str = "",
-                 system: str = "", horizon_days: str = "",
-                 per_segment_monthly: str = ""):
-    """The owner's cadence numbers for one system's planner."""
+async def plan_cadence(request: Request, key: str = Depends(admin_key),
+                       tenant: str = "", system: str = ""):
+    """The owner's cadence numbers for one system's planner.
+
+    Every declared knob is accepted rather than two named parameters, because
+    the form now renders whatever `planner.knobs_for` says this system reads —
+    and a route that named its fields would silently drop the blog's the day
+    they were added, which is exactly what it did.
+    """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import systems
@@ -6114,8 +6119,10 @@ def plan_cadence(key: str = Depends(admin_key), tenant: str = "",
         return _back_to_system(tenant, system,
                                err=f"no {system} system on this account",
                                anchor="planned")
-    out = systems.set_cadence(row.id, horizon_days=horizon_days,
-                              per_segment_monthly=per_segment_monthly)
+    from . import planner as _pl
+    q = request.query_params
+    out = systems.set_cadence(
+        row.id, **{k: q.get(k, "") for k in _pl.KNOBS if k in q})
     if out.get("error"):
         return _back_to_system(tenant, system, err=out["error"], anchor="planned")
     said = ", ".join(f"{k} = {v}" for k, v in out.items() if k != "ok")

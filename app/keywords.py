@@ -1583,6 +1583,28 @@ REFRESH_AFTER_DAYS = 30
 REFRESH_COOLDOWN_DAYS = 60
 
 
+def refresh_windows(tenant: str) -> tuple:
+    """(settle, cooldown) in days, for THIS account.
+
+    ONE READER, because two surfaces ask: `attention` decides what is
+    `too_early` and what is still cooling, and the console renders both numbers
+    beside the boxes that set them. Reading the cadence in one and the module
+    constant in the other is how a knob starts being ignored by the very thing
+    it was added to control.
+
+    Falls back to the constants when no blog system exists — a keyword map can
+    be read before a system is installed, and refusing there would make the
+    board depend on an unrelated row.
+    """
+    from . import planner, systems
+    row = systems.find(tenant, "blog")
+    if row is None:
+        return REFRESH_AFTER_DAYS, REFRESH_COOLDOWN_DAYS
+    cad = planner.blog_cadence_for(row)
+    return (int(cad.get("refresh_after_days") or REFRESH_AFTER_DAYS),
+            int(cad.get("refresh_cooldown_days") or REFRESH_COOLDOWN_DAYS))
+
+
 def cluster_support(tenant: str, cluster_key: str, rows: list | None = None) -> dict:
     """What a cluster's support layer actually looks like. Computed, not
     described.
@@ -1776,6 +1798,13 @@ def attention(tenant: str, *, top: int = 12) -> list[dict]:
     that cannot yet be informed.
     """
     import datetime as _dt
+    # THE ACCOUNT'S OWN WINDOWS, not the platform's. Owner, 2026-09-02: *"That
+    # should be set in the UI based on the cadence."* A site Google crawls
+    # weekly and one it crawls monthly cannot share a settle time, and these
+    # were module constants no console could reach. The constants survive as
+    # the DEFAULTS the cadence falls back to, so an account that has set
+    # nothing behaves exactly as it did.
+    settle, cooldown = refresh_windows(tenant)
     now_utc = _dt.datetime.now(_dt.timezone.utc)
     every = targets(tenant)          # read ONCE; `cluster_support` reuses it
     rows = [r for r in every
@@ -1788,11 +1817,11 @@ def attention(tenant: str, *, top: int = 12) -> list[dict]:
         age = (now_utc - pub).days if pub else None
         ref = db.as_utc(r.refreshed_at) if r.refreshed_at else None
         since_refresh = (now_utc - ref).days if ref else None
-        if since_refresh is not None and since_refresh < REFRESH_COOLDOWN_DAYS:
+        if since_refresh is not None and since_refresh < cooldown:
             continue
         rd = readings.get(r.phrase)
         pos = rd.position if rd else None
-        if age is not None and age < REFRESH_AFTER_DAYS:
+        if age is not None and age < settle:
             state, act, owed = ("too_early", "wait",
                                 "nothing yet — give it time to settle")
         elif pos is None:

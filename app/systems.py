@@ -1385,8 +1385,7 @@ def workflow(key: str) -> dict:
     return wf
 
 
-def set_cadence(system_id: str, horizon_days=None,
-                per_segment_monthly=None, segment_rest_days=None) -> dict:
+def set_cadence(system_id: str, **values) -> dict:
     """The owner's cadence override, onto `System.config["cadence"]`.
 
     Validated here rather than trusted at read time, because a bad value
@@ -1406,12 +1405,15 @@ def set_cadence(system_id: str, horizon_days=None,
     """
     from . import planner as _pl
     updates: dict[str, int] = {}
-    for name, val, cap in (("horizon_days", horizon_days,
-                            _pl.MAX_HORIZON_DAYS),
-                           ("per_segment_monthly", per_segment_monthly,
-                            _pl.MAX_PER_SEGMENT_MONTHLY),
-                           ("segment_rest_days", segment_rest_days,
-                            _pl.MAX_SEGMENT_REST_DAYS)):
+    # EVERY DECLARED KNOB, AND ONLY THOSE. The ceilings were listed here in a
+    # second tuple alongside the planner's own — two places holding one fact,
+    # and the reason `articles_monthly` and the refresh windows could not be
+    # set at all: they existed in the planner and not in this list.
+    unknown = sorted(k for k in values if k not in _pl.KNOBS)
+    if unknown:
+        return {"error": "no cadence knob called " + ", ".join(unknown)}
+    for name, spec in _pl.KNOBS.items():
+        val, cap = values.get(name), spec["cap"]
         if val is None or str(val).strip() == "":
             continue
         try:

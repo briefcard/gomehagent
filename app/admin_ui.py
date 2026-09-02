@@ -2583,28 +2583,9 @@ def _planned_section(key: str, row, ppage: int) -> str:
         # once there ARE plans, proposing again is a cadence decision and
         # belongs back with cadence.
         lead = propose if not total else ""
-        planner_ctl = (f'<div class="row" style="margin-top:4px">{lead}</div>'
-                       if lead else "") + f"""
-        <details class="sec">
-          <summary>Cadence — {cad["per_segment_monthly"]}/segment/month,
-            {cad["horizon_days"]}-day horizon</summary>
-          <p class="mut">High-value segments only, first proposal two days
-          out. The planner proposes from the segment catalog and never
-          overwrites your edits; a skipped month stays skipped.</p>
-          <form method="get" action="/admin/plan_cadence" class="row">
-            <input type="hidden" name="key" value="{_esc(key)}">
-            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
-            <input type="hidden" name="system" value="{_esc(row.key)}">
-            <div class="f" style="max-width:180px"><label>per segment / month</label>
-              <input name="per_segment_monthly" inputmode="numeric"
-                     value="{cad["per_segment_monthly"]}"></div>
-            <div class="f" style="max-width:180px"><label>horizon, days</label>
-              <input name="horizon_days" inputmode="numeric"
-                     value="{cad["horizon_days"]}"></div>
-            <button class="sec">Set cadence</button>
-          </form>
-          {"" if lead else propose}
-        </details>"""
+        planner_ctl = ((f'<div class="row" style="margin-top:4px">{lead}</div>'
+                        if lead else "")
+                       + _cadence_form(key, row, lead, propose))
 
     return f"""
     <div class="card"><div class="anchor" id="planned"></div>
@@ -2614,6 +2595,57 @@ def _planned_section(key: str, row, ppage: int) -> str:
         way</span></div>
       {empty}{planner_ctl}{pager}{cards}{pager}{create}
     </div>"""
+
+
+def _cadence_form(key: str, row, lead: str, propose: str) -> str:
+    """The cadence knobs THIS system's planner actually reads.
+
+    It rendered two inputs, both the CAMPAIGN planner's, on a card that also
+    serves the blog: an owner looking at the blog system was offered "per
+    segment / month" — a number nothing on that system reads — and never shown
+    `articles_monthly` at all, while the two windows pacing their refreshes
+    were module constants no console could reach.
+
+    Owner, 2026-09-02: *"That should be set in the UI based on the cadence."*
+    So the fields come from `planner.knobs_for`, which derives them from the
+    planner's own defaults. A knob cannot now exist in the planner and not in
+    the form, or the reverse.
+
+    EACH ONE CARRIES ITS REASON AND ITS RECOMMENDED VALUE. A number with no
+    explanation is a number somebody changes once, watches nothing happen for
+    six weeks, and never touches again — and "settle before refreshing" is
+    exactly the kind of knob whose consequence arrives a month after the edit.
+    """
+    from . import planner as _pl
+    knobs = _pl.knobs_for(row)
+    if not knobs:
+        return ""
+    fields = "".join(f"""
+            <div class="f" style="max-width:200px">
+              <label>{_esc(k.get("label") or k["key"])}</label>
+              <input name="{_esc(k["key"])}" inputmode="numeric"
+                     value="{_esc(str(k["value"]))}">
+              <div class="when">{_esc(k.get("why") or "")}
+                {"" if k["value"] == k["default"]
+                 else f'<b>Recommended: {k["default"]}.</b>'}</div>
+            </div>""" for k in knobs)
+    summary = " · ".join(f'{k["value"]} {_esc(k.get("label") or k["key"])}'
+                         for k in knobs[:3])
+    return f"""
+        <details class="sec">
+          <summary>Cadence — {_esc(summary)}</summary>
+          <p class="mut">How much work this planner may create, and how far
+          ahead. It never overwrites your edits, and a skipped month stays
+          skipped. Blank a box to leave it alone.</p>
+          <form method="get" action="/admin/plan_cadence" class="row">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+            <input type="hidden" name="system" value="{_esc(row.key)}">
+            {fields}
+            <button class="sec">Set cadence</button>
+          </form>
+          {"" if lead else propose}
+        </details>"""
 
 
 def _waiting_section(key: str, row) -> str:

@@ -4429,7 +4429,7 @@ SABOTAGES = [
     {
         "name": "a_refreshed_page_is_left_to_settle",
         "file": "app/keywords.py",
-        "find": "        if since_refresh is not None and since_refresh < REFRESH_COOLDOWN_DAYS:\n            continue",
+        "find": "        if since_refresh is not None and since_refresh < cooldown:\n            continue",
         "replace": "        if False:  # SABOTAGE\n            continue",
         "suites": ["test_keyword_attention.py"],
         "why": "a page refreshed last week is offered for refresh again, "
@@ -5027,6 +5027,49 @@ SABOTAGES = [
         "why": "a blocked draft on a manual rung is silent about WHY nothing "
                "was retried, so a deliberate rung difference reads as a "
                "broken repairer",
+    },
+    {
+        "name": "a_planner_is_offered_its_own_knobs",
+        "file": "app/planner.py",
+        "find": "            for k, v in defaults.items() if k in KNOBS]",
+        "replace": "            for k, v in []]  # SABOTAGE",
+        "suites": ["test_cadence_knobs.py"],
+        "why": "the cadence card offers no knobs at all, so the numbers that "
+               "decide how much work a planner creates go back to being "
+               "unreachable from the console",
+    },
+    {
+        "name": "the_refresh_windows_are_the_accounts_own",
+        "file": "app/keywords.py",
+        "find": "    settle, cooldown = refresh_windows(tenant)",
+        "replace": "    settle, cooldown = REFRESH_AFTER_DAYS, REFRESH_COOLDOWN_DAYS  # SABOTAGE",
+        "suites": ["test_cadence_knobs.py"],
+        "why": "every account gets the platform's settle time however fast "
+               "Google actually crawls their site — and the boxes that set it "
+               "still render, still save, and change nothing",
+    },
+    {
+        "name": "a_cadence_knob_out_of_range_is_refused",
+        "file": "app/systems.py",
+        # Anchored on the CADENCE loop's own line: the range check three
+        # lines below is byte-identical to the goal validator's, and an anchor
+        # matching two blocks covers neither.
+        "find": "        val, cap = values.get(name), spec[\"cap\"]",
+        "replace": "        val, cap = values.get(name), 10 ** 9  # SABOTAGE",
+        "suites": ["test_cadence_knobs.py"],
+        "why": "a 9999-day cooldown is written silently and sits behind the "
+               "planner for weeks — the refresh lane stops offering anything "
+               "and nothing says why",
+    },
+    {
+        "name": "an_undeclared_cadence_knob_is_not_stored",
+        "file": "app/systems.py",
+        "find": "    unknown = sorted(k for k in values if k not in _pl.KNOBS)",
+        "replace": "    unknown = []  # SABOTAGE",
+        "suites": ["test_cadence_knobs.py"],
+        "why": "a typo saves into `System.config` and reads back as configuration that "
+               "works — config nothing reads is indistinguishable from config "
+               "that does",
     },
 ]
 
