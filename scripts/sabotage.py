@@ -5301,6 +5301,38 @@ SABOTAGES = [
                "\"Nothing is in the platform\" — so nobody cleans it up and "
                "the retry makes a second one",
     },
+    {
+        "name": "an_empty_progress_window_is_not_a_zero",
+        "file": "app/keywords.py",
+        "find": "        measurable = has_before and has_now",
+        "replace": "        measurable = has_before  # SABOTAGE",
+        "suites": ["test_progress_windows.py"],
+        "why": "a window with no reading INSIDE it reports as measured, so "
+               "the day view shows a dash with no explanation — 'nothing "
+               "moved' where the truth is 'nothing was measured', and those "
+               "lead to opposite decisions",
+    },
+    {
+        "name": "each_progress_window_has_its_own_control",
+        "file": "app/keywords.py",
+        "find": "        theirs = (_delta(c_now, c_then)\n                  if c_then[\"phrases\"] and c_now[\"phrases\"] else {})",
+        "replace": "        theirs = {}  # SABOTAGE",
+        "suites": ["test_progress_windows.py"],
+        "why": "every window reports the work's movement with nothing to "
+               "compare it against, so a quarter when the whole site rose "
+               "reads as the work rising — the claim `progress` was built to "
+               "refuse, made three times over",
+    },
+    {
+        "name": "the_progress_page_offers_its_resolutions",
+        "file": "app/admin_ui.py",
+        "find": "    {windows_html}",
+        "replace": "    ",
+        "suites": ["test_progress_windows.py"],
+        "why": "the page answers one question at one window again, and the "
+               "other resolutions go back to being reachable only by "
+               "hand-editing a URL",
+    },
 ]
 
 

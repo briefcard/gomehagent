@@ -10574,6 +10574,13 @@ def _board_section(key: str, tenant: str, days: int) -> str:
     {muted_html}"""
 
 
+def _sub_href_days(key: str, tenant: str, days: int) -> str:
+    """The Progress tab at a different window. One builder, so a link that
+    changes the window cannot lose the tab or the account on the way."""
+    return (f"/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant={_esc(tenant)}"
+            f"&amp;sub=progress&amp;days={int(days)}#progress")
+
+
 def _progress_section(key: str, tenant: str, days: int,
                      goal_only: bool = False) -> str:
     """Did the work move anything, and may we say it was the work.
@@ -10679,6 +10686,47 @@ def _progress_section(key: str, tenant: str, days: int,
         + _esc(" · ".join(a["answer_taken"]["bands"].values()) or "no readings yet")
         + '</td></tr>')
 
+    # THREE RESOLUTIONS, because one was not enough. Owner, 2026-09-02: *"The
+    # progress page as it stands isn't helpful being that it only checks 28
+    # days out. We need daily, weekly and monthly progress."* `days` was a
+    # parameter with no control that set it, so the page answered one question
+    # and the other two were reachable only by editing a URL.
+    #
+    # A window with no reading on the far side says BASELINE rather than 0 —
+    # the day view is the one most likely to be empty, because Search Console
+    # lags and most accounts sync weekly, and a 0 there reads as "nothing
+    # moved" when the truth is "nothing was measured".
+    _wins = kw.progress_windows(tenant)
+    _win_rows = "".join(
+        f'<tr><td>{_esc(w["label"])} <span class="when">'
+        f'{w["days"]}d</span></td>'
+        + (f'<td class="num">{w["clicks"]}</td>'
+           f'<td class="num">{"—" if w["position_gain"] is None else w["position_gain"]}</td>'
+           f'<td class="num">{"—" if w["control_gain"] is None else w["control_gain"]}</td>'
+           f'<td class="when">{"" if w["control_pages"] else "no control group"}</td>'
+           if w["measurable"] else
+           f'<td class="num">{w["clicks"]}</td>'
+           f'<td colspan="3" class="when">{_esc(w["why_not"])}</td>')
+        + '</tr>' for w in _wins)
+    windows_html = f"""
+    <h3>Movement <span class="when">at three resolutions, each against its own
+    control</span></h3>
+    <table class="tbl">
+      <tr><th>window</th><th>clicks</th><th>our position gain</th>
+          <th>everything else</th><th></th></tr>
+      {_win_rows}
+    </table>
+    <p class="when">A gain is places moved UP, so a bigger number is better.
+    &ldquo;Everything else&rdquo; is this account&rsquo;s own untargeted
+    queries over the same window &mdash; a week when the whole site rose is
+    not a week the work rose, and which of those it was changes with the
+    window, which is most of why one was never enough. The detail below is for
+    {days} days; <a href="{_esc(_sub_href_days(key, tenant, 1))}">day</a> ·
+    <a href="{_esc(_sub_href_days(key, tenant, 7))}">week</a> ·
+    <a href="{_esc(_sub_href_days(key, tenant, 30))}">month</a> ·
+    <a href="{_esc(_sub_href_days(key, tenant, 90))}">quarter</a>.</p>
+"""
+
     aeo_html = f"""
     <h3>Answer engines</h3>
     <p><strong>{cov["answered"]}</strong> of <strong>{cov["questions_in_map"]}</strong>
@@ -10718,6 +10766,7 @@ def _progress_section(key: str, tenant: str, days: int,
     <div class="anchor" id="progress"></div>
     <h3>Progress</h3>
     {notes}
+    {windows_html}
     {compare}
     <p><strong>{p["wins"]["top3"]}</strong> keyword(s) ranking 1–3 ·
        <strong>{p["wins"]["top10"]}</strong> in the top 10 ·

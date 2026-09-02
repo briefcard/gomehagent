@@ -1016,6 +1016,71 @@ def _delta(a: dict, b: dict) -> dict:
     return out
 
 
+#: The three resolutions a person actually asks in. Owner, 2026-09-02: *"The
+#: progress page as it stands isn't helpful being that it only checks 28 days
+#: out. We need daily, weekly and monthly progress."*
+#:
+#: `days` has been a parameter all along, clamped 1-365 — with NO control that
+#: sets it. So the page answered one question at one resolution and the other
+#: two were reachable only by hand-editing a URL.
+PROGRESS_WINDOWS = ((1, "yesterday"), (7, "this week"), (30, "this month"))
+
+
+def progress_windows(tenant: str, windows=None) -> list:
+    """The headline movement at several resolutions, each against its control.
+
+    ONE ROW PER WINDOW, and each row carries the same honesty `progress` does:
+    a window with no reading on the far side is a BASELINE, not a zero, and
+    says so. A day-over-day view is the one most likely to be empty — Search
+    Console lags and most accounts sync weekly — and printing 0 there would
+    read as "nothing moved" when the truth is "nothing was measured".
+
+    Cheap by construction: it reads this module's own tables, one pass per
+    window, and makes no API call — the same reason `progress` can render on
+    every visit.
+    """
+    out = []
+    for days, label in (windows or PROGRESS_WINDOWS):
+        now, then = _period_readings(tenant, days)
+        rows = targets(tenant)
+        tracked = {r.phrase for r in rows if r.status in ("published", "won")}
+        t_now = _totals([v for k, v in now.items() if k in tracked])
+        t_then = _totals([v for k, v in then.items() if k in tracked])
+        c_now = _totals([v for k, v in now.items() if k not in tracked])
+        c_then = _totals([v for k, v in then.items() if k not in tracked])
+        # BOTH SIDES, not just the far one. Checking only `then` reported a
+        # 1-day window as measurable while `now` was empty — Search Console
+        # lags and most accounts sync weekly, so the near side is the one
+        # usually missing. It rendered as a dash with no explanation, which is
+        # the "0 reads as nothing moved" failure this row exists to avoid,
+        # wearing a different mark.
+        has_before = t_then["phrases"] > 0
+        has_now = t_now["phrases"] > 0
+        measurable = has_before and has_now
+        ours = _delta(t_now, t_then) if measurable else {}
+        theirs = (_delta(c_now, c_then)
+                  if c_then["phrases"] and c_now["phrases"] else {})
+        out.append({
+            "days": days, "label": label,
+            "measurable": measurable,
+            "why_not": ("" if measurable else
+                        f"no reading inside {days} day(s) — nothing was "
+                        f"measured in this window, which is not the same as "
+                        f"nothing moving" if not has_now else
+                        f"no tracked reading older than {days} day(s) — this "
+                        f"is a baseline, not a comparison"),
+            "clicks": t_now["clicks"],
+            "position_gain": ours.get("position_gain"),
+            "clicks_pct": ours.get("clicks_pct"),
+            # THE CONTROL AT THE SAME RESOLUTION. A week when the whole site
+            # rose is not a week our work rose, and the answer differs by
+            # window — which is most of why one window was not enough.
+            "control_gain": theirs.get("position_gain"),
+            "control_pages": c_now["phrases"],
+        })
+    return out
+
+
 def progress(tenant: str, *, days: int = 28) -> dict:
     """Did the work move anything, and can we honestly say it was the work.
 
