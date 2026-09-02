@@ -4920,6 +4920,28 @@ SABOTAGES = [
                "the report, so a result computed from two pages out of twenty "
                "reads exactly like one computed from all twenty",
     },
+    {
+        "name": "a_rung_describes_what_it_actually_does",
+        "file": "app/systems.py",
+        "find": "CLEARED_IS_WIRED = _cleared_has_a_consumer()",
+        "replace": "CLEARED_IS_WIRED = True  # SABOTAGE",
+        "suites": ["test_rung_truth.py"],
+        "why": "the card promises `auto` \"Sends without asking\" while "
+               "nothing acts on the disposition it produces — so an owner "
+               "who promotes a system to the top of the ladder gets exactly "
+               "the outcome they got at the bottom, and is told otherwise",
+    },
+    {
+        "name": "the_rung_sentence_is_derived_not_written",
+        "file": "app/systems.py",
+        "find": "    return bool(_CLEARED_BRANCH.search(str(text or \"\")))",
+        "replace": "    return False  # SABOTAGE",
+        "suites": ["test_rung_truth.py"],
+        "why": "the scan can no longer find a consumer even when one exists, "
+               "so the day somebody wires the push the card goes on saying "
+               "nothing sends — the same defect pointing the other way, which "
+               "is why a hand-corrected string was not the fix",
+    },
 ]
 
 

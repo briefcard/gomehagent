@@ -90,10 +90,83 @@ def autonomy_label(rung: str) -> str:
     return AUTONOMY_LABEL.get(str(rung or ""), str(rung or ""))
 
 
+import re as _re
+
+
+def _cleared_has_a_consumer() -> bool:
+    """Does any production module BRANCH on the `cleared` disposition?
+
+    `_disposition` returns `cleared` for everything on `auto`, and for
+    non-writing work on `approve_exceptions`. `Context.emit` queues an
+    approval only on `needs_approval` — so a `cleared` item is drafted, filed,
+    and then acted on by nothing at all.
+
+    Meanwhile the console said `auto` "Sends without asking" and
+    `approve_exceptions` "Routine output sends itself". Both were false, and
+    an owner who promoted a system to the top of the ladder got the same
+    outcome as the bottom of it, with a sentence promising otherwise.
+
+    COMPUTED, NOT WRITTEN DOWN. The whole reason this defect survived is that
+    the promise lived in a hand-written string while the behaviour lived in a
+    branch nobody had. A hand-corrected string would rot the other way the
+    moment somebody wires the push — telling the owner their automatic system
+    does nothing while it publishes. So the sentence is derived from whether
+    the branch exists, and it changes by itself when one appears.
+
+    The bare word occurs in several modules for unrelated reasons — digest
+    counts, cleared concerns, keyword priority — so this looks for a
+    COMPARISON against it, which is the same test `scripts/test_open_defects`
+    uses to hold the entry open.
+    """
+    import pathlib
+    here = pathlib.Path(__file__).parent
+    for f in here.glob("*.py"):
+        if f.name in ("systems.py", "skill.py"):
+            continue
+        try:
+            if branches_on_cleared(f.read_text()):
+                return True
+        except OSError:                                          # noqa: PERF203
+            continue
+    return False
+
+
+#: A COMPARISON against the word, not the word. It occurs in several modules
+#: for unrelated reasons — digest counts, cleared concerns, keyword priority —
+#: and counting those would report the rung as wired on the day somebody
+#: renames a variable.
+_CLEARED_BRANCH = _re.compile(r'(==|!=|\bis)\s*"cleared"|"cleared"\s*(==|!=)')
+
+
+def branches_on_cleared(text: str) -> bool:
+    """Does this source BRANCH on the `cleared` disposition?
+
+    Separate from the file walk so the scanner itself can be tested against a
+    literal. Without that, a guard that breaks the search reports [ caught ]
+    on nothing: the codebase currently has no consumer, so a scanner that can
+    no longer FIND one returns the same answer as a working scanner, and the
+    card goes on telling the truth by accident. It would stop the day somebody
+    wired the push — which is the one day it matters.
+    """
+    return bool(_CLEARED_BRANCH.search(str(text or "")))
+
+
+#: Answered once at import: it is a fact about the source, not about a run.
+CLEARED_IS_WIRED = _cleared_has_a_consumer()
+
+#: What a rung MEANS, told truthfully. The two upper rungs describe sending
+#: only when something can actually send.
+_UNWIRED = (" Nothing pushes on its own yet — no module acts on the "
+            "`cleared` disposition these rungs produce, so output is drafted "
+            "and waits here exactly as it does on manual approval.")
 AUTONOMY_MEANING = {
     "shadow": "The learning phase. Every draft waits for your tap — nothing leaves by itself — and you compare against what you'd have done.",
-    "approve_exceptions": "Routine output sends itself; anything the rules flag waits for you.",
-    "auto": "Sends without asking. Alerts on anomaly. Kill criteria are armed.",
+    "approve_exceptions": ("Routine output sends itself; anything the rules "
+                           "flag waits for you." if CLEARED_IS_WIRED else
+                           "Anything the rules flag waits for you." + _UNWIRED),
+    "auto": ("Sends without asking. Alerts on anomaly. Kill criteria are "
+             "armed." if CLEARED_IS_WIRED else
+             "Meant to send without asking." + _UNWIRED),
 }
 
 # The 8-part contract. ADVISORY since 2026-08-20 (owner's call): it is
