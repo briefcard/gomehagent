@@ -12004,6 +12004,37 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
               'records your decision and releases it to ship'}</span>
         </form>"""
 
+    # THE PICTURE THIS ARTICLE WAS TOLD A BRIEF WAS READY FOR.
+    #
+    # Owner, 2026-09-01: *"I also dont see any images both for featured image
+    # nor for throughout the article. Where is all the work we did for
+    # generating images?"* All of it was there and nothing called it —
+    # `creative.generate` and `creative.batch` are complete, assessed and
+    # guarded, with zero production callers. The only image path that ran was
+    # `creative.pick`, which SELECTS among approved assets and never makes
+    # one, so an account with no approved photographs got no hero ever, while
+    # the run's note promised a workroom control and a nightly sweep. Neither
+    # existed. This is the control; the sentence now points at it.
+    #
+    # ONLY WHEN THERE IS NONE. An article that already carries a picture does
+    # not need a second one offered, and a button that regenerates over a
+    # chosen image is a way to lose it.
+    if (art.format or "") == "cms_article" and not superseded_by:
+        _has_pic = bool(_out_row is not None
+                        and (getattr(_out_row, "media_ids", None) or []))
+        if not _has_pic:
+            decide += f"""
+        <form class="row" method="post"
+              action="/admin/article_picture?key={_esc(key)}"
+              style="margin-top:8px">
+          <input type="hidden" name="output_id" value="{_esc(output_id)}">
+          <button class="btn sec" type="submit">Generate the picture</button>
+          <span class="when">no approved photograph fitted this piece, so
+          nothing was attached. This briefs one from what the article is
+          about &mdash; it arrives on <b>Review &middot; Pictures</b> as
+          proposed, and cannot be used until you approve it there.</span>
+        </form>"""
+
     if superseded_by:
         # A replaced draft is a record, not a workspace — every decision and
         # adjustment belongs to its successor.

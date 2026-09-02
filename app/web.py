@@ -7192,6 +7192,87 @@ def _back_parts(src) -> dict:
             "q": str(src.get("bq") or "")}
 
 
+@app.post("/admin/article_picture")
+async def article_picture(request: Request, key: str = Depends(admin_key)):
+    """Generate the picture this article was told a brief was ready for.
+
+    Owner, 2026-09-01: *"I also dont see any images both for featured image nor
+    for throughout the article. Where is all the work we did for generating
+    images?"*
+
+    ALL OF IT WAS THERE AND NOTHING CALLED IT. `creative.generate` renders,
+    assesses, repairs once on the reviewer's own instruction, files the asset
+    and attaches the verdict; `creative.batch` does the grid. Both are covered
+    by `test_creative_batch.py` with nine sabotage guards. Neither had a single
+    production caller. The only image path that ran was `creative.pick`, which
+    SELECTS among approved assets and never makes one — so an account with no
+    approved photographs got no hero, ever, while the run's note promised
+    "generate it from the workroom, or the nightly sweep will". There was no
+    workroom control and there was no sweep.
+
+    This is the workroom control. It briefs from `article_commitment` — the
+    same function the run used to choose a picture — because a picture briefed
+    against a different subject than the article was written against is a
+    picture of the wrong thing, and it would look right in both places
+    separately.
+
+    IT DOES NOT ATTACH ANYTHING. `creative.generate` files the asset as
+    PROPOSED, and a proposed picture cannot be used until somebody approves it
+    on Review · Pictures. Attaching it here would put an unreviewed image on a
+    page bound for a public site, which is the one thing the whole rights
+    ladder exists to prevent.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    output_id = str(form.get("output_id") or "")
+
+    def _back(msg: str, ok: bool = False) -> RedirectResponse:
+        return RedirectResponse(
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&{'ok' if ok else 'err'}={quote(msg)}", 303)
+
+    art, kw, _ap = _article_bundle(output_id)
+    if art is None:
+        return _back("no artifact with that id")
+    from . import creative, kb as kbm, skill_pack as _sp, systems as _sysm
+    tenant = art.tenant or ""
+    meta = getattr(art, "meta", None) or {}
+    keyword = str((kw.phrase if kw is not None else "") or meta.get("keyword") or "")
+    if not keyword:
+        return _back("no keyword joins this article, so there is nothing to "
+                     "brief a picture against")
+    entity_key = str(getattr(art, "entity_key", "") or meta.get("entity_key") or "")
+    also = _sysm.entity_list(meta.get("entity_keys") or "")
+    about = _sp.article_commitment(keyword, entity_key, also,
+                                   str(meta.get("title") or keyword))
+    claim = ""
+    try:
+        rows = kbm.claims(tenant, entity_keys=[entity_key] if entity_key else None)
+        claim = (rows[0].claim if rows else "")
+    except Exception:                                            # noqa: BLE001
+        claim = ""
+    got = creative.generate(
+        tenant, commitment=about, fmt="article_hero",
+        entity_key=entity_key, prominent=str(meta.get("title") or keyword),
+        claim=claim)
+    if not got.get("ok"):
+        # NAME THE REFUSAL. A generator that fails silently is the state this
+        # replaced, one layer down.
+        return _back("no picture was made — "
+                     + str(got.get("error") or "generation failed")[:180])
+    v = got.get("assessment") or {}
+    failed = ", ".join(v.get("failed") or [])
+    return _back(
+        "a picture was generated and filed as PROPOSED — approve it on "
+        "Review \u00b7 Pictures before anything can use it"
+        + (f". The reviewer flagged: {failed}" if failed else ""),
+        ok=True)
+
+
 @app.post("/admin/kb_audience_entities")
 async def kb_audience_entities(request: Request, key: str = Depends(admin_key)):
     """Record which entities an audience is recommended for.

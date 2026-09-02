@@ -4726,6 +4726,48 @@ SABOTAGES = [
                "and not told the copy exists and is waiting on a page — the "
                "more urgent of the two the moment a run finishes",
     },
+    {
+        "name": "the_picture_a_run_asks_for_can_be_made",
+        "file": "app/web.py",
+        "find": "    got = creative.generate(",
+        "replace": "    got = (lambda **k: {\"ok\": False, \"error\": \"x\"})(  # SABOTAGE",
+        "suites": ["test_article_picture.py"],
+        "why": "the workroom control stops reaching the generator, so the "
+               "run's note points at a button that does nothing — which is "
+               "the state this fixed: a complete, tested, nine-guard image "
+               "generator with no production caller and two surfaces "
+               "promising it",
+    },
+    {
+        "name": "a_generated_picture_is_briefed_from_the_article",
+        "file": "app/web.py",
+        "find": "    about = _sp.article_commitment(keyword, entity_key, also,",
+        "replace": "    about = _sp.article_commitment(\"something else\", \"\", [],  # SABOTAGE",
+        "suites": ["test_article_picture.py"],
+        "why": "the picture is briefed against a different subject than the "
+               "article was written against, so it is a picture of the wrong "
+               "thing — and it would look right on both surfaces separately",
+    },
+    {
+        "name": "a_generated_picture_is_not_attached_unapproved",
+        "file": "app/skill_pack.py",
+        "find": "                 f\"article's page; it arrives on Review \u00b7 Pictures for you to \"",
+        "replace": "                 f\"article's page. \"  # SABOTAGE",
+        "suites": ["test_article_picture.py"],
+        "why": "the run stops saying the generated picture is only PROPOSED, "
+               "so somebody presses the button and expects an image on the "
+               "page — and an unreviewed image reaching a public site is "
+               "what the whole rights ladder exists to prevent",
+    },
+    {
+        "name": "an_article_that_has_a_picture_is_not_offered_another",
+        "file": "app/admin_ui.py",
+        "find": "        _has_pic = bool(_out_row is not None",
+        "replace": "        _has_pic = bool(False and _out_row is not None  # SABOTAGE",
+        "suites": ["test_article_picture.py"],
+        "why": "a Generate button sits over an article that already carries a "
+               "chosen image, which is a way to lose it",
+    },
 ]
 
 

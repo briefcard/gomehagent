@@ -4108,6 +4108,31 @@ def _meta_description(keyword: str, body_html: str) -> str:
     return _trim_words(text, 155)
 
 
+def article_commitment(keyword: str, entity_key: str, also: list,
+                       title: str = "") -> dict:
+    """What one article is ABOUT. One writer, two callers.
+
+    The run builds this to choose a picture and to hand the coherence gate its
+    subject. The workroom's Generate-the-picture control has to build the SAME
+    one — a generated picture briefed against a different subject than the
+    article was written against is a picture of the wrong thing, and it would
+    look right in both places separately.
+
+    Extracted rather than copied for the reason everything here is: the copy
+    that drifts is the one nobody re-reads.
+    """
+    from . import coherence, keywords as kw_mod
+
+    also = [k for k in (also or []) if k and k != entity_key]
+    scopes = [k for k in ([entity_key] if entity_key else []) + also if k]
+    return coherence.commit(
+        "entity" if entity_key else "topic",
+        entity_key or kw_mod.slug(keyword),
+        label=title or keyword,
+        also=also,
+        proof_scopes=scopes or None)
+
+
 def _run_blog_article(ctx: Context) -> dict:
     from . import (coherence, creative, keywords as kw_mod, seo_tools,
                    sites, tenants)
@@ -4287,12 +4312,7 @@ def _run_blog_article(ctx: Context) -> dict:
     from . import systems as _sysm
     _also = [k for k in _sysm.entity_list(ctx.params.get("entity_keys") or "")
              if k != entity_key]
-    _scopes = [k for k in ([entity_key] if entity_key else []) + _also if k]
-    _about = coherence.commit(
-        "entity" if entity_key else "topic", entity_key or kw_mod.slug(keyword),
-        label=title or keyword,
-        also=[k for k in _also if k != entity_key],
-        proof_scopes=_scopes or None)
+    _about = article_commitment(keyword, entity_key, _also, title)
     _hero = creative.pick(
         ctx.tenant, commitment=_about, fmt="article_hero",
         entity_key=entity_key, prominent=title,
@@ -4301,11 +4321,26 @@ def _run_blog_article(ctx: Context) -> dict:
     if _hero_id:
         ctx.note(f"picture: {_hero['rung']} — {_hero['why']}")
     else:
-        # NAMED AS A REQUEST, not as a shrug. This is the queue the generator
-        # drains, and a note nobody can act on was the state this replaced.
+        # NAMED AS A REQUEST, not as a shrug — and the request has to be one
+        # somebody can actually make.
+        #
+        # THIS SENTENCE WAS FALSE IN BOTH HALVES. It read "generate it from the
+        # workroom, or the nightly sweep will", and there was no workroom
+        # control and no sweep: `creative.generate` and `creative.batch` are
+        # complete, assessed, guarded by nine sabotage entries — and had ZERO
+        # production callers. The only image path that ran was `creative.pick`,
+        # which selects among APPROVED assets and never makes one, so an
+        # account with no approved photographs got no hero, ever, and was told
+        # twice that something was coming. Owner, 2026-09-01: *"I also dont see
+        # any images… where is all the work we did for generating images?"*
+        #
+        # The control now exists (`/admin/article_picture`), so the sentence
+        # points at it and says where the result lands — proposed, on Review ·
+        # Pictures, because a generated picture is not an approved one.
         ctx.note(f"no picture: {_hero['why']}. A brief is ready for one about "
-                 f"“{_hero['subject']}” — generate it from the workroom, or "
-                 f"the nightly sweep will.")
+                 f"“{_hero['subject']}” — press Generate the picture on this "
+                 f"article's page; it arrives on Review · Pictures for you to "
+                 f"approve before anything can use it.")
         ctx.thin.append(f"image:{_hero['subject'] or 'no subject declared'}")
 
     ctx.emit(body, claim_ids=[c["claim_id"] for c in (ctx.bundle.get("claims") or [])[:12]],
