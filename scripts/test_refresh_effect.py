@@ -180,7 +180,19 @@ def main() -> int:
     print()
     print("— and it rides in the report the system's measure names —")
     rep = keywords.progress("baci", days=28)
-    ck("progress carries it", "refresh" in rep)
+    # A VALUE, NOT A KEY. `"refresh" in rep` passes on an empty dict, on a
+    # block computed for a different account, on anything at all under that
+    # name. It has to be THIS tenant's answer.
+    direct = keywords.refresh_effect("baci", days=rep["refresh"]["window_days"])
+    ck("progress carries it",
+       rep["refresh"]["refreshed"] == direct["refreshed"]
+       and rep["refresh"]["judged"] == direct["judged"]
+       and rep["refresh"]["avg_gain"] == direct["avg_gain"],
+       f'{rep["refresh"]["refreshed"]}/{rep["refresh"]["judged"]} vs '
+       f'{direct["refreshed"]}/{direct["judged"]}')
+    ck("  and it is not empty, so the comparison above means something",
+       rep["refresh"]["refreshed"] > 0 and rep["refresh"]["judged"] > 0,
+       str({k: rep["refresh"][k] for k in ("refreshed", "judged")}))
     ck("  over its own longer window",
        rep["refresh"]["window_days"] >= 90,
        "a 28-day view drops most refreshes, which are judged from their own "

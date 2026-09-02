@@ -92,8 +92,13 @@ def main() -> int:
     ck("  and the src is the asset's, not the model's",
        'src="https://cdn.example/one.png"' in html,
        "the model never supplies a URL — it cannot, the marker is prose")
+    # BOTH TAGS. Counting only `<figure>` passes on an unclosed one, which
+    # swallows the rest of the article into the figure element in every
+    # browser that tries to fix it.
     ck("  each is a figure, not a bare img",
-       html.count("<figure>") == 2)
+       html.count("<figure>") == 2 and html.count("</figure>") == 2
+       and html.count("<img ") == 2,
+       f'{html.count("<figure>")} open, {html.count("</figure>")} closed')
     ck("  and lazy, because a body image is below the fold by definition",
        html.count('loading="lazy"') == 2)
 
@@ -178,6 +183,15 @@ def main() -> int:
     ck("  and so are angle brackets",
        "&lt;b&gt;" in html5 and "<b>" not in html5,
        "an unescaped alt puts prose into the markup and a tag into the page")
+    # THE SRC TOO. The fixture plants a quote in the URL and nothing asserted
+    # on it — an unescaped `src` closes the attribute exactly as an alt does,
+    # and the URL is the half that comes from outside.
+    ck("  and a quote in the URL cannot close the attribute",
+       'src="https://cdn.example/a&quot;b.png"' in html5,
+       html5.strip())
+    ck("  so the tag is still one tag",
+       html5.count("<img ") == 1 and html5.count("<figure>") == 1,
+       "a broken-out attribute shows up as extra markup, not as an error")
 
     print()
     print("— the drafter is told the contract —")

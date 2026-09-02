@@ -216,14 +216,24 @@ def main() -> int:
        "already planned" in after["owed"]
        and "needs more keywords" not in after["owed"],
        after["owed"])
-    ck("  while a cluster with published supports and none left still says so",
-       "needs more keywords" in
-       {x["phrase"]: x for x in keywords.attention("baci")}
-       .get("stalled empty", {"owed": ""})["owed"]
-       if any(x["phrase"] == "stalled empty"
-              for x in keywords.attention("baci")) else True,
-       "the three empties are different situations and only one of them is "
-       "an authoring backlog")
+    # THE THIRD EMPTY, with a fixture that makes it real. This read
+    # `… if any(row exists) else True` — and the row did not exist in this
+    # suite, so the assertion was the literal `True`. An unfalsifiable check
+    # naming a distinction nobody had built the case for.
+    _page("baci", "done hub", role="pillar", cluster="done",
+          status="published", url="https://baci.example/d",
+          body="<p>Done.</p>", pos=22)
+    _page("baci", "done support", role="support", cluster="done",
+          status="published", url="https://baci.example/ds",
+          body=f'<p><a href="https://baci.example/d">up</a></p>')
+    done = {x["phrase"]: x for x in keywords.attention("baci")}["done hub"]
+    ck("  a cluster with published supports and none left is an authoring gap",
+       done["supports"]["published"] >= 1
+       and not done["supports"]["writable"]
+       and not done["supports"]["in_flight"],
+       str(done["supports"]))
+    ck("    and it says to build the map, not to wait",
+       "needs more keywords" in done["owed"], done["owed"])
 
     print()
     print("— pressing it with nothing to write says so —")

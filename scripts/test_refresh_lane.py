@@ -246,14 +246,39 @@ def main() -> int:
        f"status={o1.status!r} — the `output_id` write moved the pointer and "
        f"left the old article live, queued, countable and on the site: the "
        f"second page on one query that cannibalisation means")
-    ck("the replacement is live", (o2.status or "") != "superseded")
+    # AGAINST A CONTROL, not against one forbidden word. `!= "superseded"`
+    # passes for every status there is, including ones that mean the draft
+    # went nowhere.
+    # THE CONTROL COMES FROM THE SAME PIPELINE. Hand-setting one to "draft"
+    # compared the replacement against a status the pipeline never produces —
+    # so the check failed on correct behaviour, which is its own kind of
+    # wrong. A second keyword, same rung, never superseded.
+    _c = skill.run("blog_article", "baci", keyword="control jug", role="pillar")
+    _ctrl_oid = ((_c.get("items") or [{}])[-1] or {}).get("output_id", "")
+    with db.SessionLocal() as sx:
+        _ctrl_status = (sx.get(db.Output, _ctrl_oid).status or "")
+    ck("the replacement is live",
+       (o2.status or "") == _ctrl_status,
+       f'{o2.status!r} vs a fresh draft\'s {_ctrl_status!r} — the '
+       f'replacement has to be in the state a new draft is in, not merely '
+       f'not-superseded')
     ck("the keyword points at the living draft",
        (krow.output_id or "") == oid2, krow.output_id)
-    ck("supersede has exactly one writer",
-       __import__("pathlib").Path(skill_pack.__file__).read_text()
-       .count('old.status = "superseded"') == 1,
-       "the copy that drifts is always the one that stops withdrawing the "
-       "old approval, which leaves two live articles for one keyword")
+    # THE CLAIM, STATED ACCURATELY. "Exactly one writer" was false — three
+    # modules retire an Output that way, and two of them are other things
+    # (an ad VARIANT, a generated image). What is true, and what matters, is
+    # that the ARTICLE path has one: `supersede()`, called by both the
+    # workroom redraft and the skill rather than inlined in either. The copy
+    # that drifts is always the one that stops withdrawing the old approval.
+    _src = __import__("pathlib").Path(skill_pack.__file__).read_text()
+    ck("the article path has one supersede, and two callers",
+       _src.count("def supersede(") == 1 and _src.count("supersede(") >= 3,
+       f'{_src.count("supersede(")} mentions — one definition, one call from '
+       f'the workroom redraft, one from the skill')
+    ck("  and neither caller inlines the retire",
+       _src.count('old.status = "superseded"') == 1,
+       "a second hand-written copy is how withdrawing the old approval gets "
+       "dropped, leaving two live articles for one keyword")
 
     print()
     print("— a page inside the cooldown is not offered again —")

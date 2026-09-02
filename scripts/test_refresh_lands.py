@@ -249,12 +249,18 @@ def main() -> int:
                 .filter(db.KeywordTarget.tenant == "eien",
                         db.KeywordTarget.phrase == "acrylic jug").first())
     ck("the keyword is published", (e_kw.status or "") == "published")
+    # ONE CLAIM, NOT A DISJUNCTION. The second half — that the page says it
+    # replaces a live one — is TRUE for every refresh draft, so the `or` made
+    # the whole thing unfalsifiable and the first half was never tested.
+    _w2 = " ".join(_workroom(oid2).split())
     ck("  but the refresh draft is NOT shown as published",
-       "Published" not in " ".join(_workroom(oid2).split()).split("<h1")[0]
-       or "replaces a page that is already live" in _workroom(oid2),
+       "Published<" not in _w2 and "live page</a>." not in _w2,
        "read off the keyword alone, every refresh draft claimed to be live "
        "the moment it was written — and the workroom greeted a fresh "
        "replacement with 'Published — live page' and no way to act on it")
+    ck("    while still saying it replaces one",
+       "replaces a page that is already live" in _w2,
+       "the two are separate claims and were asserted as one")
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

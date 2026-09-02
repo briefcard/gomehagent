@@ -140,9 +140,18 @@ def main() -> int:
        f'name="back_work" value="{oid}"' in page2,
        "design rule 3: a decision never costs the reader their place")
     ck("  Redraft is beside it", "#redraft" in page2)
+    # NAME THE CONTROL THAT SHOULD BE GONE. The old form was
+    # `X not in page2 or Y in page2`, and Y — the ship_decide form — is on
+    # this page by definition, so it could never fail. What must disappear
+    # once an approval exists is the STANDALONE control that creates one;
+    # what must remain is the decision itself.
     ck("  and it stops offering the standalone control",
-       ">Approve</button>" not in page2 or "/admin/ship_decide" in page2,
+       "/admin/queue_approval" not in page2,
        "two ways to ask for the same thing is the bulk this removed")
+    ck("    while the decision itself stays",
+       "/admin/ship_decide" in page2 and ">Approve" in page2,
+       "removing both would be a page that reports a pending decision and "
+       "offers no way to make it")
 
     print("\n— and the button that says Approve APPROVES —")
     oid2, _r2 = _stranded("baci")
