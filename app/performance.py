@@ -123,17 +123,31 @@ def sync(tenant: str, *, days: int = 30) -> dict:
             "warnings": warnings, "measured": len(metrics)}
 
 
+def sync_one(tenant: str, *, days: int = 30) -> dict:
+    """One account's provider stats, gated on the campaign switch. The unit
+    `sync_all` loops and the worker shards."""
+    from . import systems
+    row = systems.find(tenant, "campaign_email")
+    if not (row and systems.is_on(row)):
+        return {"ok": False, "why": "campaign_email is not on"}
+    try:
+        return sync(tenant, days=days)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "why": f"{exc.__class__.__name__}"}
+
+
 def sync_all(*, days: int = 30) -> dict:
-    """Every account whose campaign system is on. Returns a per-account map."""
+    """Every account whose campaign system is on. Returns a per-account map.
+
+    ONE LOOP, ONE UNIT — `sync_one` over every account with the campaign
+    system switched on, so the worker can shard the same unit per tenant.
+    """
     from . import systems, tenants
-    out: dict[str, dict] = {}
+    out = {}
     for t in tenants.all_tenants():
         row = systems.find(t.key, "campaign_email")
         if not (row and systems.is_on(row)):
             continue
-        try:
-            out[t.key] = sync(t.key, days=days)
-        except Exception as exc:                                 # noqa: BLE001
-            log.exception("performance sync failed for %s", t.key)
-            out[t.key] = {"ok": False, "why": f"{exc.__class__.__name__}"}
+        out[t.key] = sync_one(t.key, days=days)
     return out
+

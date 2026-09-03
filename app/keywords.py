@@ -1243,71 +1243,66 @@ def harvest_due(tenant: str) -> bool:
     return (db.utcnow() - newest).days >= HARVEST_EVERY_DAYS
 
 
+def harvest_one(tenant: str, *, limit: int = 40) -> dict:
+    """One account's weekly top-up, with its gates. The unit `harvest_all`
+    loops and the worker shards: every skip is a dict that says why, so a
+    sharded run reads the same as a serial one."""
+    from . import systems
+    if not systems.find(tenant, "blog"):
+        return {"skipped": "no blog system installed"}
+    if not harvest_due(tenant):
+        return {"skipped": "topped up within the last "
+                           f"{HARVEST_EVERY_DAYS} days"}
+    try:
+        return harvest(tenant, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+
+
 def harvest_all(*, limit: int = 40) -> dict:
     """Top up every account's map that is due, on the weekly schedule.
 
-    Only accounts that ALREADY have a map. A first harvest stays a deliberate
-    act — it is the moment somebody decides this account is being worked on,
-    and starting one automatically would spend a client's Semrush quota on a
-    map nobody asked for.
+Only accounts that ALREADY have a map. A first harvest stays a deliberate
+act — it is the moment somebody decides this account is being worked on,
+and starting one automatically would spend a client's Semrush quota on a
+map nobody asked for.
+
+    ONE LOOP, ONE UNIT. This is `harvest_one` over every account and nothing
+    else, so the worker can shard the same unit per tenant and the two paths
+    cannot drift — `test_job_lease` compares them.
     """
     from . import systems, tenants
-    out: dict[str, dict] = {}
-    for t in tenants.all_tenants():
-        if not systems.find(t.key, "blog"):
-            continue
-        if not harvest_due(t.key):
-            out[t.key] = {"skipped": "topped up within the last "
-                                     f"{HARVEST_EVERY_DAYS} days"}
-            continue
-        try:
-            out[t.key] = harvest(t.key, limit=limit)
-        except Exception as exc:  # noqa: BLE001 — one account must not stop the rest
-            out[t.key] = {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
-    return out
+    return {t.key: harvest_one(t.key, limit=limit)
+            for t in tenants.all_tenants()
+            if systems.find(t.key, "blog")}
+
+def sync_one(tenant: str, *, days: int = 28) -> dict:
+    """One account's nightly readings, with its gates. See `harvest_one`."""
+    from . import systems
+    if not systems.find(tenant, "blog"):
+        return {"skipped": "no blog system installed"}
+    if not targets(tenant):
+        return {"skipped": "no keyword map — nothing to measure"}
+    try:
+        return sync(tenant, days=days)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
 
 
 def sync_all(*, days: int = 28) -> dict:
     """Every account whose blog system is installed and whose CMS is wired.
 
-    Scoped to those two facts on purpose. Syncing an account with no blog
-    system spends a client's Search Console quota on a map nobody is writing
-    against, and an account with no CMS cannot have published anything for the
-    readings to be about.
+Scoped to those two facts on purpose. Syncing an account with no blog
+system spends a client's Search Console quota on a map nobody is writing
+against, and an account with no CMS cannot have published anything for the
+readings to be about.
+
+    ONE LOOP, ONE UNIT — `sync_one` over every account with a blog system.
     """
     from . import systems, tenants
-    out: dict[str, dict] = {}
-    for t in tenants.all_tenants():
-        if not systems.find(t.key, "blog"):
-            continue
-        # Gated on having a MAP, not on having a CMS. The first version
-        # checked `cms`, which is the wrong question twice over: Search
-        # Console reports on a domain whether or not we can write to it, and
-        # a site with rankings we did not publish is exactly the baseline this
-        # loop needs. What makes a sync pointless is nothing to measure.
-        if not targets(t.key):
-            out[t.key] = {"skipped": "no keyword map — nothing to measure"}
-            continue
-        try:
-            out[t.key] = sync(t.key, days=days)
-        except Exception as exc:  # noqa: BLE001 — one account must not stop the rest
-            out[t.key] = {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Readiness — can this account actually run the blog pipeline, end to end
-# ---------------------------------------------------------------------------
-#
-# `systems.ready()` answers whether the SYSTEM may run: it checks the `requires`
-# the catalogue declares, which for `blog` is `cms`. That is the right gate for
-# PUBLISHING and it is not the whole pipeline, because the measurement half
-# needs Search Console and no catalogue field says so.
-#
-# Making `analytics` a hard `requires` would be worse, not better: it would
-# refuse to publish an article because nobody had connected the thing that
-# reports on it afterwards. Publishing and measuring fail independently and
-# should be reported independently — which is what this does.
+    return {t.key: sync_one(t.key, days=days)
+            for t in tenants.all_tenants()
+            if systems.find(t.key, "blog")}
 
 def _gsc_probe(tenant: str, profile: dict) -> dict:
     """Can we actually read Search Console for this site.

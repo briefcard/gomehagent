@@ -5639,6 +5639,26 @@ SABOTAGES = [
                "reorder_engine reads as never having run",
     },
     {
+        "name": "a_sharded_job_leases_per_account",
+        "file": "app/worker.py",
+        "find": "        name = _lease_name(context, t.key)\n        if not _acquire(name, _LEASE_TTL.get(context, LEASE_TTL_SECONDS)):",
+        "replace": "        name = _lease_name(context)  # SABOTAGE\n        if not _acquire(name, _LEASE_TTL.get(context, LEASE_TTL_SECONDS)):",
+        "suites": ["test_job_lease.py"],
+        "why": "every account leases the same name, so the first account taken "
+               "by one instance locks every other instance out of the whole "
+               "job — parallel workers do the work of one",
+    },
+    {
+        "name": "a_sharded_job_takes_no_job_level_lease",
+        "file": "app/worker.py",
+        "find": "        if not sharded and not _acquire(name, ttl):",
+        "replace": "        if not _acquire(name, ttl):  # SABOTAGE",
+        "suites": ["test_job_lease.py"],
+        "why": "the job-level lease sits on top of the per-tenant ones and "
+               "hands the whole sharded job to one instance again — throughput "
+               "silently back to N=1",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

@@ -749,12 +749,14 @@ def media_sweep() -> None:
     Runs for every account, and says something only when it did something —
     a nightly line reporting zero is how a log stops being read.
     """
-    from . import media, tenants
-    for t in tenants.all_tenants():
-        got = media.sweep()
-        if any(got[k] for k in ("dropped_rejected", "expired_unreviewed",
-                                "dropped_orphan")):
-            log.info("picture retention %s: %s", t.key, got)
+    # ONCE. `media.sweep()` takes no tenant — it is the whole library — and
+    # this loop called it once per account, so a five-account platform swept
+    # the same library five times a night and logged it under five names.
+    from . import media
+    got = media.sweep()
+    if any(got[k] for k in ("dropped_rejected", "expired_unreviewed",
+                            "dropped_orphan")):
+        log.info("picture retention: %s", got)
 
 
 def moments_sweep() -> None:
@@ -790,27 +792,6 @@ def moments_sweep() -> None:
             log.info("moments: expired %s past their window", n)
     except Exception:                                            # noqa: BLE001
         log.exception("moments sweep (expiry) failed")
-
-
-def performance_sweep() -> None:
-    """Daily: ask the sending platform what actually happened.
-
-    After the 07:00 tick rather than before it, so a campaign launched
-    yesterday has its numbers on the row before today's planner reads the
-    ledger to decide which cohort is most owed a send.
-
-    Daily and not hourly because of the rate limit — Omnisend allows 55
-    analytics requests a day per brand, and this spends one per account.
-    """
-    from . import performance
-
-    got = performance.sync_all()
-    for tenant, res in got.items():
-        if not res.get("ok"):
-            log.warning("performance: %s — %s", tenant, res.get("why", ""))
-        elif res.get("confirmed"):
-            log.info("performance: %s confirmed %s send(s), %s still waiting",
-                     tenant, res["confirmed"], res.get("waiting", 0))
 
 
 def systems_tick() -> None:
@@ -1095,7 +1076,56 @@ def _release(name: str) -> None:
         s.commit()
 
 
-def _safe(fn, context: str, *, tenant: str = ""):
+def _each_tenant(context: str, one, *, include_paused: bool = False) -> dict:
+    """Run one per-tenant unit for every account, leasing PER TENANT.
+
+    THIS IS WHERE PARALLEL BECOMES THROUGHPUT. `_safe`'s job-level lease makes
+    a second instance safe: one of them runs the job and the other skips it,
+    so N instances do the work of one. A sharded job leases `context:tenant`
+    instead — two instances waking on the same minute split the accounts
+    between them, and every account is still worked exactly once.
+
+    The unit owns its gates and returns a dict that says why it skipped, so a
+    sharded run reads the same as the serial `*_all` it replaces.
+    """
+    from . import tenants
+    out: dict[str, object] = {}
+    for t in tenants.all_tenants(include_paused=include_paused):
+        name = _lease_name(context, t.key)
+        if not _acquire(name, _LEASE_TTL.get(context, LEASE_TTL_SECONDS)):
+            out[t.key] = {"skipped": "leased by another worker"}
+            continue
+        try:
+            out[t.key] = one(t.key)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("%s failed for %s", context, t.key)
+            alert_error(f"{context} ({t.key})", exc)
+            out[t.key] = {"error": exc.__class__.__name__}
+        finally:
+            _release(name)
+    return out
+
+
+def keyword_sync_sharded() -> dict:
+    from . import keywords
+    return _each_tenant("keyword sync", keywords.sync_one)
+
+
+def keyword_harvest_sharded() -> dict:
+    from . import keywords
+    return _each_tenant("keyword map top-up", keywords.harvest_one)
+
+
+def performance_sharded() -> dict:
+    from . import performance
+    got = _each_tenant("performance sweep", performance.sync_one)
+    for tenant, res in got.items():
+        if isinstance(res, dict) and not res.get("ok") and not res.get("skipped"):
+            log.info("performance sweep %s: %s", tenant, res.get("why", ""))
+    return got
+
+
+def _safe(fn, context: str, *, tenant: str = "", sharded: bool = False):
     """Run one job: leased, logged, alerted — never raised.
 
     THE LEASE LIVES HERE AND NOWHERE ELSE, so every `sched.add_job` in this
@@ -1108,7 +1138,11 @@ def _safe(fn, context: str, *, tenant: str = ""):
     ttl = _LEASE_TTL.get(context, LEASE_TTL_SECONDS)
 
     def wrapped() -> None:
-        if not _acquire(name, ttl):
+        # A SHARDED job takes no job-level lease: the per-tenant leases in
+        # `_each_tenant` ARE its lease, and a job-level one on top would hand
+        # the whole job to one instance again. `test_job_lease` holds the
+        # pair — sharded skips this, unsharded takes it.
+        if not sharded and not _acquire(name, ttl):
             log.info("%s: another worker holds the lease — skipped", name)
             return
         try:
@@ -1117,7 +1151,8 @@ def _safe(fn, context: str, *, tenant: str = ""):
             log.exception("%s failed", context)
             alert_error(context, exc)
         finally:
-            _release(name)
+            if not sharded:
+                _release(name)
     return wrapped
 
 
@@ -1196,13 +1231,13 @@ def main() -> None:
     # :10 — a sweep that runs first reports on yesterday's positions and calls
     # them today's.
     from . import keywords
-    sched.add_job(_safe(keywords.sync_all, "keyword sync"), "cron",
+    sched.add_job(_safe(keyword_sync_sharded, "keyword sync", sharded=True), "cron",
                   hour=config.SWEEP_HOUR, minute=5)
     # The map itself, weekly. Positions move nightly and the competitive
     # landscape does not — and a harvest spends Semrush calls per account, so
     # running it on the reading schedule would be a bill for no new answer.
     # Monday, before the week's writing is planned.
-    sched.add_job(_safe(keywords.harvest_all, "keyword map top-up"), "cron",
+    sched.add_job(_safe(keyword_harvest_sharded, "keyword map top-up", sharded=True), "cron",
                   day_of_week="mon", hour=config.SWEEP_HOUR, minute=25)
     # Weekly and overnight: a full site crawl is the expensive kind of job, a
     # site's copy does not change hourly, and a violations queue that grows
@@ -1225,7 +1260,7 @@ def main() -> None:
                   hour=3, minute=40)
     # After the tick, so today's results are on the rows before tomorrow's
     # planner reads them.
-    sched.add_job(_safe(performance_sweep, "performance sweep"), "cron",
+    sched.add_job(_safe(performance_sharded, "performance sweep", sharded=True), "cron",
                   hour=9, minute=15)
     from . import ops_jobs
     sched.add_job(_safe(ops_jobs.daily_review, "daily review"), "cron",

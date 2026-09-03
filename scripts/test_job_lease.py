@@ -141,6 +141,82 @@ def main() -> int:
        and worker._lease_name("keyword sync") == "keyword sync",
        "so two instances can work two accounts of the same job at once")
 
+    # ======================================================================
+    # SHARDING: two instances split the accounts, every account worked once
+    # ======================================================================
+    from app import keywords, media, performance, tenants
+    tenants.seed()
+    keys = [x.key for x in tenants.all_tenants()]
+    ck("there are accounts to split", len(keys) >= 2, str(keys))
+    worked = []
+    # Instance A holds the first account's lease mid-run; instance B ticks.
+    worker._holder = lambda: "instance-A"
+    worker._acquire(worker._lease_name("shard job", keys[0]), 600)
+    worker._holder = lambda: "instance-B"
+    got = worker._each_tenant("shard job", lambda k: worked.append(k) or {"ok": True})
+    worker._holder = lambda: "instance-A"
+    worker._release(worker._lease_name("shard job", keys[0]))
+    worker._holder = real
+    ck("a sharded job skips the account another instance holds and works the rest",
+       keys[0] not in worked and set(worked) == set(keys[1:]),
+       f"worked {worked} of {keys}")
+    ck("  and says which account was skipped, by name",
+       got.get(keys[0], {}).get("skipped") == "leased by another worker", str(got.get(keys[0])))
+
+    # A sharded registration takes NO job-level lease — the pair.
+    with db.SessionLocal() as s:
+        s.query(db.JobLease).filter(db.JobLease.name == "pair job").delete()
+        s.commit()
+    worker._safe(lambda: None, "pair job", sharded=True)()
+    with db.SessionLocal() as s:
+        job_lease_after_sharded = s.get(db.JobLease, "pair job")
+    worker._safe(lambda: None, "pair job", sharded=False)()
+    with db.SessionLocal() as s:
+        job_lease_after_plain = s.get(db.JobLease, "pair job")
+    ck("a sharded job takes no job-level lease, an unsharded one does",
+       job_lease_after_sharded is None and job_lease_after_plain is not None,
+       "a job-level lease on top of per-tenant ones hands the whole job to "
+       "one instance again")
+
+    # The serial *_all is exactly the unit over every account — the two
+    # paths cannot drift. Stub the expensive unit and compare.
+    real_sync, real_harvest, real_psync = keywords.sync, keywords.harvest, performance.sync
+    keywords.sync = lambda tenant, *, days=28: {"synced": tenant, "days": days}
+    keywords.harvest = lambda tenant, *, limit=40: {"harvested": tenant}
+    performance.sync = lambda tenant, *, days=30: {"ok": True, "t": tenant}
+    try:
+        a = keywords.sync_all(days=9)
+        b = {k: keywords.sync_one(k, days=9) for k in keys
+             if __import__("app.systems", fromlist=["find"]).find(k, "blog")}
+        ck("keywords.sync_all is sync_one over every account with a blog", a == b, f"{a} vs {b}")
+        a2 = performance.sync_all(days=5)
+        from app import systems as _sy
+        b2 = {k: performance.sync_one(k, days=5) for k in keys
+              if (_sy.find(k, "campaign_email") and _sy.is_on(_sy.find(k, "campaign_email")))}
+        ck("performance.sync_all is sync_one over every switched-on account", a2 == b2, f"{a2} vs {b2}")
+    finally:
+        keywords.sync, keywords.harvest, performance.sync = real_sync, real_harvest, real_psync
+
+    # The library sweep runs once, not once per account.
+    calls = {"n": 0}
+    real_sweep = media.sweep
+    media.sweep = lambda: calls.__setitem__("n", calls["n"] + 1) or {
+        "dropped_rejected": 0, "expired_unreviewed": 0, "dropped_orphan": 0}
+    try:
+        worker.media_sweep()
+    finally:
+        media.sweep = real_sweep
+    ck("picture retention sweeps the library once, not once per account",
+       calls["n"] == 1, f"{calls['n']} sweep(s) for {len(keys)} account(s)")
+
+    # Every sharded registration points at a wrapper that shards.
+    sharded_regs = re.findall(r'_safe\((\w+), "[^"]+", sharded=True\)', src)
+    ck("every sharded registration names a wrapper", len(sharded_regs) == 3, str(sharded_regs))
+    ck("  and each wrapper calls _each_tenant",
+       all(re.search(r'def ' + w + r'\(\) -> dict:\n(?:.*\n){0,3}.*_each_tenant\(', src)
+           for w in sharded_regs),
+       "a wrapper that loops itself is the job-level lease wearing a new name")
+
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0
