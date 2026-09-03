@@ -558,37 +558,31 @@ def backlog_sweep() -> None:
         )
 
 
-def mail_backfill() -> None:
-    """Walk one more window of each account's sent-mail history, nightly.
-
-    A mailbox holds years; a request holds seconds. Before this, the harvest
-    asked Gmail for `newer_than:365d` capped at a few dozen threads and Gmail
-    answers newest-first, so every run read the same newest few dozen for ever
-    — which is why a real account reported 40 threads seen and 0 claims found.
-
-    Backwards, on a schedule, is the only shape that fits: each night the
-    cursor moves a little further into history and the knowledge base fills
-    over a week or two, at no cost to any request. `/admin/fill` stays a fast
-    top-up of new mail only.
-    """
+def _backfill_one(key: str) -> dict:
+    """One account's backward sent-mail pass, or why it did not run."""
     from . import email_harvest, tenants
-    done = []
-    for t in tenants.all_tenants():
-        if not tenants.capabilities(t.key).get("inbox"):
-            continue
-        cur = email_harvest.cursor(t.key)
-        if cur["backfill_done"]:
-            continue
-        r = email_harvest.mine(t.key, apply=True, direction="backward",
-                               limit=config.MAIL_BACKFILL_THREADS, want=0)
-        if r.get("error"):
-            log.warning("mail backfill %s: %s", t.key, r["error"])
-            continue
-        done.append(f"{t.key}: +{r.get('threads_seen', 0)} threads, "
-                    f"{r.get('claims_count', 0)} claims, "
-                    f"{r.get('objections_count', 0)} objections")
+    if not tenants.capabilities(key).get("inbox"):
+        return {"skipped": "no inbox"}
+    cur = email_harvest.cursor(key)
+    if cur["backfill_done"]:
+        return {"skipped": "backfill done"}
+    r = email_harvest.mine(key, apply=True, direction="backward",
+                           limit=config.MAIL_BACKFILL_THREADS, want=0)
+    if r.get("error"):
+        log.warning("mail backfill %s: %s", key, r["error"])
+        return {"error": r["error"]}
+    return {"threads": r.get("threads_seen", 0), "claims": r.get("claims_count", 0),
+            "objections": r.get("objections_count", 0)}
+
+
+def mail_backfill_sharded() -> dict:
+    got = _each_tenant("sent-mail backfill", _backfill_one)
+    done = [f"{k}: +{v.get('threads', 0)} threads, {v.get('claims', 0)} claims, "
+            f"{v.get('objections', 0)} objections"
+            for k, v in got.items() if isinstance(v, dict) and "threads" in v]
     if done:
         log.info("mail backfill — %s", "; ".join(done))
+    return got
 
 
 def credential_renewal() -> None:
@@ -610,38 +604,85 @@ def credential_renewal() -> None:
             + "\n\nThe client needs to reconnect it from their connect link.")
 
 
-def claim_expiry_sweep() -> None:
-    """Weekly: return claims that have come due to the approval queue.
+def _claim_expiry_one(key: str) -> dict:
+    """One account's claim-expiry pass: warn on the first sighting, act on the
+    next. Verbatim from the loop it replaces; paused accounts included, so a
+    paused client's stale claims are not quietly kept as live proof."""
+    from . import kb
+    marker = f"claim_expiry_warned:{key}"
+    dry = kb.expire_due(key)
+    if not dry["expired"]:
+        return {"expired": 0}
+    with db.SessionLocal() as s:
+        warned = s.get(db.Setting, marker)
+        if not warned:
+            s.add(db.Setting(key=marker, value=db.utcnow().isoformat()))
+            s.commit()
+            log.info("claim expiry: %s has %d claim(s) due — reporting "
+                     "only on this first pass", key, dry["expired"])
+            return {"due": dry["expired"], "warned": True}
+    applied = kb.expire_due(key, apply=True)
+    log.info("claim expiry: returned %d claim(s) to the queue for %s",
+             applied["expired"], key)
+    return {"expired": applied["expired"]}
 
-    Owner's rule — claims expire by default, and an expired one goes back to be
-    asked about rather than silently dropping out of selection.
 
-    **Reports before it moves anything, once.** The first run on a knowledge
-    base nobody has ever dated will find every claim older than a year at the
-    same moment, and forty approved claims quietly reopening overnight is a
-    surprise even when it is correct. So the first sweep on each account is a
-    dry run that says what it WOULD do, and the `Setting` marker means the next
-    one applies. This codebase has had the other kind of incident: a poller
-    re-triggered a slow endpoint and 200 queued drafts went out at 400 sends a
-    minute.
-    """
-    from . import kb, tenants
-    for t in tenants.all_tenants(include_paused=True):
-        marker = f"claim_expiry_warned:{t.key}"
-        dry = kb.expire_due(t.key)
-        if not dry["expired"]:
-            continue
-        with db.SessionLocal() as s:
-            warned = s.get(db.Setting, marker)
-            if not warned:
-                s.add(db.Setting(key=marker, value=db.utcnow().isoformat()))
-                s.commit()
-                log.info("claim expiry: %s has %d claim(s) due — reporting "
-                         "only on this first pass", t.key, dry["expired"])
-                continue
-        applied = kb.expire_due(t.key, apply=True)
-        log.info("claim expiry: returned %d claim(s) to the queue for %s",
-                 applied["expired"], t.key)
+def claim_expiry_sharded() -> dict:
+    return _each_tenant("claim expiry", _claim_expiry_one, include_paused=True)
+
+
+def _compliance_one(key: str) -> dict:
+    """One account's compliance pass: the live site, then the catalogue.
+    Verbatim from the loop it replaces, gates included."""
+    from . import compliance, skill, systems
+    out: dict = {}
+    # --- the live website ------------------------------------------
+    site = systems.find(key, "content_compliance")
+    if site and systems.is_on(site):
+        # `record_scan` files the run ITSELF, including the refusal case —
+        # no domain, or no ban list to check against, which matters because
+        # a sweep reporting CLEAN when it had no rules is exactly the false
+        # assurance `catalog_compliance` declares `banned_claims`
+        # constitutive to prevent. Filing a second run here would double
+        # every scan in the ledger and halve every rate computed from it.
+        try:
+            prev = compliance.last_scan(key) or {}
+            at = prev.get("at")
+            since = at.date().isoformat() if at else ""
+            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))
+            out["site"] = "scanned"
+        except Exception as exc:                             # noqa: BLE001
+            # Only reached if the scan RAISED, which `record_scan` never
+            # sees. Recorded rather than swallowed: a sweep that fails
+            # silently reads as a clean site.
+            log.exception("compliance scan failed for %s", key)
+            run_id = systems.start_run(site.id, key, trigger="schedule")
+            systems.finish_run(run_id, "failed",
+                               error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
+            out["site"] = f"failed: {exc.__class__.__name__}"
+    else:
+        out["site"] = "off"
+    # --- the catalogue ---------------------------------------------
+    # A registered skill, so `skill.run` files its own run, applies the
+    # switch and carries its own refusals. Nothing to wrap but the call.
+    cat = systems.find(key, "catalog_compliance")
+    if cat and systems.is_on(cat):
+        try:
+            res = skill.run("catalog_compliance", key, trigger="schedule")
+            if (res or {}).get("status") == "refused":
+                # A refusal is OUR bug (an unknown skill, an unknown
+                # account) and files no run — unlogged, this sweep
+                # refused for weeks with an empty registry and read as
+                # a quiet Monday.
+                log.error("catalog compliance REFUSED for %s: %s", key,
+                          "; ".join(res.get("blocked_on") or []))
+            out["catalogue"] = (res or {}).get("status", "")
+        except Exception:                                    # noqa: BLE001
+            log.exception("catalog compliance failed for %s", key)
+            out["catalogue"] = "failed"
+    else:
+        out["catalogue"] = "off"
+    return out
 
 
 def compliance_sweep() -> None:
@@ -664,50 +705,35 @@ def compliance_sweep() -> None:
     Nothing is rewritten and nothing is sent. A violation is a URL and the
     sentence around it, which is what makes it fixable.
     """
-    from . import compliance, skill, systems, tenants as tn
-
+    # Serial entry point, kept for the suites that drive it directly. The
+    # scheduled job is `compliance_sharded`; both run the same unit.
+    from . import tenants as tn
     for t in tn.all_tenants():
-        # --- the live website ------------------------------------------
-        site = systems.find(t.key, "content_compliance")
-        if site and systems.is_on(site):
-            # `record_scan` files the run ITSELF, including the refusal case —
-            # no domain, or no ban list to check against, which matters because
-            # a sweep reporting CLEAN when it had no rules is exactly the false
-            # assurance `catalog_compliance` declares `banned_claims`
-            # constitutive to prevent. Filing a second run here would double
-            # every scan in the ledger and halve every rate computed from it.
-            try:
-                prev = compliance.last_scan(t.key) or {}
-                at = prev.get("at")
-                since = at.date().isoformat() if at else ""
-                compliance.record_scan(
-                    t.key, compliance.scan(t.key, limit=60, since=since))
-            except Exception as exc:                             # noqa: BLE001
-                # Only reached if the scan RAISED, which `record_scan` never
-                # sees. Recorded rather than swallowed: a sweep that fails
-                # silently reads as a clean site.
-                log.exception("compliance scan failed for %s", t.key)
-                run_id = systems.start_run(site.id, t.key, trigger="schedule")
-                systems.finish_run(
-                    run_id, "failed",
-                    error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
+        _compliance_one(t.key)
 
-        # --- the catalogue ---------------------------------------------
-        # A registered skill, so `skill.run` files its own run, applies the
-        # switch and carries its own refusals. Nothing to wrap but the call.
-        cat = systems.find(t.key, "catalog_compliance")
-        if cat and systems.is_on(cat):
-            try:
-                res = skill.run("catalog_compliance", t.key, trigger="schedule")
-                if (res or {}).get("status") == "refused":
-                    # A refusal is OUR bug (an unknown skill, an unknown
-                    # account) and files no run — unlogged, this sweep
-                    # refused for weeks with an empty registry and read as
-                    # a quiet Monday.
-                    log.error("catalog compliance REFUSED for %s: %s", t.key,
-                              "; ".join(res.get("blocked_on") or []))
-            except Exception:                                    # noqa: BLE001
-                log.exception("catalog compliance failed for %s", t.key)
+
+def compliance_sharded() -> dict:
+    return _each_tenant("compliance sweep", _compliance_one)
+
+
+def _segments_one(key: str) -> dict:
+    """One account's ESP segment read, gated on the campaign switch."""
+    from . import segments as segmod, systems
+    row = systems.find(key, "campaign_email")
+    if not (row and systems.is_on(row)):
+        return {"skipped": "campaign_email is not on"}
+    try:
+        out = segmod.sync(key)
+        if not out.get("ok"):
+            log.warning("segments sweep could not read %s's ESP: %s",
+                        key, out.get("error", ""))
+        elif out.get("drift"):
+            log.warning("segment drift for %s: %s", key,
+                        "; ".join(d["what"] for d in out["drift"])[:400])
+        return {"ok": bool(out.get("ok")), "drift": len(out.get("drift") or [])}
+    except Exception:                                        # noqa: BLE001
+        log.exception("segments sweep failed for %s", key)
+        return {"error": "exception"}
 
 
 def segments_sweep() -> None:
@@ -725,22 +751,13 @@ def segments_sweep() -> None:
     in the log; a sweep that cannot read the ESP records that refusal as
     the state rather than silently keeping last week's.
     """
-    from . import segments as segmod, systems, tenants as tn
-
+    from . import tenants as tn
     for t in tn.all_tenants():
-        row = systems.find(t.key, "campaign_email")
-        if not (row and systems.is_on(row)):
-            continue
-        try:
-            out = segmod.sync(t.key)
-            if not out.get("ok"):
-                log.warning("segments sweep could not read %s's ESP: %s",
-                            t.key, out.get("error", ""))
-            elif out.get("drift"):
-                log.warning("segment drift for %s: %s", t.key,
-                            "; ".join(d["what"] for d in out["drift"])[:400])
-        except Exception:                                        # noqa: BLE001
-            log.exception("segments sweep failed for %s", t.key)
+        _segments_one(t.key)
+
+
+def segments_sharded() -> dict:
+    return _each_tenant("segments sweep", _segments_one)
 
 
 def media_sweep() -> None:
@@ -1233,7 +1250,7 @@ def main() -> None:
     sched.add_job(_safe(systems_tick, "systems tick"), "cron", hour=7, minute=0)
     # Weekly, not daily: a claim that came due on Tuesday is not more true on
     # Wednesday, and a queue that grows every morning stops being read.
-    sched.add_job(_safe(claim_expiry_sweep, "claim expiry"), "cron",
+    sched.add_job(_safe(claim_expiry_sharded, "claim expiry", sharded=True), "cron",
                   day_of_week="mon", hour=8, minute=30)
     # Keep the queue and the mailbox in step. Frequent, because the window
     # being closed is "Gomeh sent it from Gmail and the approval is still
@@ -1249,7 +1266,7 @@ def main() -> None:
                   hour=6, minute=30)
     # Overnight, so a long walk never competes with the inbox loop. Stops on
     # its own once each account's cursor reaches the start of its mailbox.
-    sched.add_job(_safe(mail_backfill, "sent-mail backfill"), "cron",
+    sched.add_job(_safe(mail_backfill_sharded, "sent-mail backfill", sharded=True), "cron",
                   hour=3, minute=15)
     # The evening sweep. Late on purpose: it reads the day that just happened,
     # and it competes with nothing. The correlation is deterministic Python
@@ -1279,11 +1296,11 @@ def main() -> None:
     # site's copy does not change hourly, and a violations queue that grows
     # every morning stops being read. After the first pass it only walks what
     # changed. Monday early, clear of the other weekly jobs.
-    sched.add_job(_safe(compliance_sweep, "compliance sweep"), "cron",
+    sched.add_job(_safe(compliance_sharded, "compliance sweep", sharded=True), "cron",
                   day_of_week="mon", hour=4, minute=30)
     # Segment upkeep: re-link and report drift before the 07:00 tick plans
     # the week's campaigns against those segments.
-    sched.add_job(_safe(segments_sweep, "segments sweep"), "cron",
+    sched.add_job(_safe(segments_sharded, "segments sweep", sharded=True), "cron",
                   day_of_week="mon", hour=5, minute=15)
     # Moments: watch for windows opening, and close the ones that shut. Every
     # hour, because a window is measured in hours and a daily pass would serve

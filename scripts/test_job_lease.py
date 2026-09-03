@@ -211,11 +211,51 @@ def main() -> int:
 
     # Every sharded registration points at a wrapper that shards.
     sharded_regs = re.findall(r'_safe\((\w+), "[^"]+", sharded=True\)', src)
-    ck("every sharded registration names a wrapper", len(sharded_regs) == 4, str(sharded_regs))
+    ck("every sharded registration names a wrapper", len(sharded_regs) == 8, str(sharded_regs))
     ck("  and each wrapper calls _each_tenant",
        all(re.search(r'def ' + w + r'\(\) -> dict:\n(?:.*\n){0,3}.*_each_tenant\(', src)
            for w in sharded_regs),
        "a wrapper that loops itself is the job-level lease wearing a new name")
+
+    # ---- the worker-local sweeps are units now --------------------------
+    loops = [m for m in re.finditer(r"^def (\w+)\(.*?\n(?:(?!^def ).*\n)*?.*all_tenants\(", src, re.M)]
+    loop_fns = sorted({m.group(1) for m in loops})
+    ck("the only per-account loops left in the worker are the mapper, the sharder "
+       "and the two serial entry points suites drive",
+       set(loop_fns) <= {"inboxes", "_each_tenant", "compliance_sweep", "segments_sweep"},
+       str(loop_fns))
+    from app import kb, systems
+    seen_keys: list[str] = []
+    real_expire = kb.expire_due
+    kb.expire_due = lambda key, apply=False: seen_keys.append(key) or {"expired": 0}
+    with db.SessionLocal() as s:
+        paused = s.query(db.Tenant).first()
+        paused_key, prev = paused.key, paused.status
+        paused.status = "paused"
+        s.commit()
+    try:
+        worker.claim_expiry_sharded()
+        claim_saw_paused = paused_key in seen_keys
+        seen_keys.clear()
+        real_sync = None
+        got = worker._each_tenant("segments sweep", lambda k: seen_keys.append(k) or {"ok": True})
+        seg_saw_paused = paused_key in seen_keys
+    finally:
+        kb.expire_due = real_expire
+        with db.SessionLocal() as s:
+            s.get(db.Tenant, paused_key).status = prev
+            s.commit()
+    ck("claim expiry visits a paused account (its stale claims must not stay live proof)",
+       claim_saw_paused, f"visited {seen_keys}")
+    ck("  and an ordinary sharded job does not — the pair", not seg_saw_paused, str(got.keys()))
+    row = systems.find(paused_key, "campaign_email")
+    if row:
+        with db.SessionLocal() as s:
+            s.get(db.System, row.id).status = "paused"
+            s.commit()
+    ck("the segments unit refuses by name when the campaign system is not on",
+       worker._segments_one(paused_key).get("skipped") == "campaign_email is not on",
+       str(worker._segments_one(paused_key)))
 
     # ======================================================================
     # PARALLEL IS OBSERVED, NOT ASSUMED

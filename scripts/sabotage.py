@@ -669,10 +669,11 @@ SABOTAGES = [
     {
         "name": "compliance_double_run",
         "file": "app/worker.py",
-        "find": "                compliance.record_scan(\n                    t.key, compliance.scan(t.key, limit=60, since=since))",
-        "replace": ("                compliance.record_scan(\n"
-                    "                    t.key, compliance.scan(t.key, limit=60, since=since))\n"
-                    "                systems.start_run(site.id, t.key, trigger='schedule')  # SABOTAGE"),
+        # Re-anchored 2026-09-04 when the loop became `_compliance_one` (the
+        # sweep sharded per account); the claim is unchanged.
+        "find": "            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))",
+        "replace": ("            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))\n"
+                    "            systems.start_run(site.id, key, trigger='schedule')  # SABOTAGE"),
         "suites": ["test_correlate.py"],
         "why": "every compliance scan is recorded twice, halving every rate "
                "computed from the ledger",
@@ -5735,6 +5736,26 @@ SABOTAGES = [
         "suites": ["test_report_planner.py"],
         "why": "the owner sets one report a week and gets two — the knob "
                "renders, saves and changes nothing",
+    },
+    {
+        "name": "claim_expiry_still_visits_paused_accounts",
+        "file": "app/worker.py",
+        "find": "    return _each_tenant(\"claim expiry\", _claim_expiry_one, include_paused=True)",
+        "replace": "    return _each_tenant(\"claim expiry\", _claim_expiry_one)  # SABOTAGE",
+        "suites": ["test_job_lease.py"],
+        "why": "a paused client's stale claims stay selectable proof for ever — "
+               "the sweep that used to reach them skips them the day it is "
+               "sharded",
+    },
+    {
+        "name": "the_segments_unit_keeps_its_switch_gate",
+        "file": "app/worker.py",
+        "find": "    if not (row and systems.is_on(row)):\n        return {\"skipped\": \"campaign_email is not on\"}",
+        "replace": "    if False:  # SABOTAGE\n        return {\"skipped\": \"campaign_email is not on\"}",
+        "suites": ["test_job_lease.py"],
+        "why": "an account that switched campaigns off has its ESP read every "
+               "Monday anyway — the maintenance job for a system nobody turned "
+               "on, the daily-noise defect wearing a new name",
     },
     {
         "name": "the_rivals_read_stays_out_of_the_eager_half",

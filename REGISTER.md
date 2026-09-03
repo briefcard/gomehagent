@@ -1651,7 +1651,8 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`already_seen`**(message_id) → `bool`  ·  **from nothing**
 - **`backlog_sweep`**() → `None`  ·  **from nothing**
 - **`bucket_backfill`**() → `None`  ·  from `ops_jobs.py`
-- **`claim_expiry_sweep`**() → `None`  ·  **from nothing**
+- **`claim_expiry_sharded`**() → `dict`  ·  from `test_job_lease.py`
+- **`compliance_sharded`**() → `dict`  ·  **from nothing**
 - **`compliance_sweep`**() → `None`  ·  from `test_correlate.py`
 - **`credential_renewal`**() → `None`  ·  **from nothing**
 - **`deadline_alerts`**() → `None`  ·  **from nothing**
@@ -1662,13 +1663,14 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`keyword_harvest_sharded`**() → `dict`  ·  **from nothing**
 - **`keyword_sync_sharded`**() → `dict`  ·  **from nothing**
 - **`learning_sharded`**() → `dict`  ·  **from nothing**
-- **`mail_backfill`**() → `None`  ·  **from nothing**
+- **`mail_backfill_sharded`**() → `dict`  ·  **from nothing**
 - **`main`**() → `None`  ·  **from nothing**
 - **`media_sweep`**() → `None`  ·  from `test_job_lease.py`
 - **`moments_sweep`**() → `None`  ·  **from nothing**
 - **`performance_sharded`**() → `dict`  ·  **from nothing**
 - **`poll_all`**() → `None`  ·  **from nothing**
 - **`process_emails`**(alias, emails, new_approvals, tenant?) → `None`  ·  **from nothing**
+- **`segments_sharded`**() → `dict`  ·  **from nothing**
 - **`segments_sweep`**() → `None`  ·  from `test_segments.py`
 - **`systems_tick`**() → `None`  ·  from `test_planner.py`, `test_plans.py`, `test_worker_systems.py`
 - **`weekly_cost_report`**() → `None`  ·  **from nothing**
