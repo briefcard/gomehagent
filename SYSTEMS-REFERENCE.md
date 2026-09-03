@@ -204,7 +204,9 @@ The weekly number, assembled from whatever is connected.
 
 - **Connections:** at least one of `analytics`, `ads`, `commerce`
 - **Knowledge (`kb_needs`):** —  ·  `needs_kb=False`, so readiness falls back to `kb.completeness`
-- **Skill:** none — nothing generates for this system
+- **Skill** `weekly_report` — produces `report`, tier 1, writes=True
+  - parameters: `days`, `to`
+  - constitutive (no draft without it): none
 - **Planner:** none — plans are filed by hand or by another system
 - **Unit:** the weekly number, one report
 - **Artifact:** report_document
@@ -243,7 +245,7 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `lead_responder` | `assurance.edited_share` | — | same delta as service_desk, same absence of a reader |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |
 | `reorder_engine` | — | — | not built — no generator, no executor |
-| `reports` | `client_report.assemble` | — | the report IS the measurement and it exists; not built is the rest — render, approval, send |
+| `reports` | `client_report.assemble` | — | sent on approval; the client's reply — the figures they send back — is not yet read into the next report |
 | `service_desk` | `assurance.edited_share` | — | edits.record writes what the owner changed before sending; the drafter never sees a single one of those edits |
 <!-- END GENERATED -->
 

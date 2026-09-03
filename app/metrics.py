@@ -443,8 +443,13 @@ def request_email(tenant: str, days: int = 30, *, to: str = "",
         out["approval_id"] = approvals.request_approval(
             kind="send_email",
             summary=f"Ask {t.name} for {len(wanted)} report figure(s)",
+            # `account` is what `_execute` sends FROM and it indexes the key
+            # directly. This payload never carried it, so approving the
+            # figures request raised KeyError instead of sending — found
+            # building `reports`, which leaves by the same door.
             payload={"to": to, "subject": subject, "body": body,
-                     "tenant": tenant},
+                     "tenant": tenant,
+                     "account": getattr(t, "gmail_alias", "") or ""},
             notify=False)
         out["queued"] = True
     return out

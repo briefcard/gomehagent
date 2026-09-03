@@ -178,6 +178,49 @@ def notify_pending(title: str | None = None) -> int:
     return len(items)
 
 
+def attach_send(run_id: str, send: dict) -> int:
+    """Stash what an approval-time SEND needs on the approval itself.
+
+    The sibling of `attach_esp_push`, for artifacts that leave as mail rather
+    than as a platform draft. The approval IS the authorisation, so it carries
+    the whole message — account, to, subject, body — and `send_report` reads
+    nothing else. `account` is REQUIRED here because `_execute`'s send arm
+    indexes `p["account"]`, and the one other `send_email` approval this
+    codebase constructed (metrics.request_email) never set it: approving it
+    raised KeyError instead of sending.
+    """
+    if not run_id or not send.get("account") or not send.get("to"):
+        return 0
+    n = 0
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.run_id == run_id,
+                        db.Approval.status == "pending").all())
+        for ap in rows:
+            ap.payload = {**(ap.payload or {}), "send_mail": dict(send)}
+            n += 1
+        s.commit()
+    return n
+
+
+def send_report(ap: "db.Approval") -> str:
+    """Send the message an approval carries. The `reports` executor.
+
+    Named, so `ship_by` resolves to it and the register can join the
+    system's ship sentence to the code that performs it.
+    """
+    from . import gmail_client
+    p = (ap.payload or {}).get("send_mail") or {}
+    if not p.get("account") or not p.get("to"):
+        return (f"Approved — but nothing was sent: the message has no "
+                f"{'sending account' if not p.get('account') else 'recipient'}."
+                f" Set one on the account and re-run.")
+    gmail_client.send_email(p["account"], p["to"], p.get("subject", ""),
+                            p.get("text") or p.get("body", ""),
+                            html=p.get("html"))
+    return f"Approved and sent to {p['to']}: {p.get('subject', '')[:80]}"
+
+
 def attach_esp_push(run_id: str, push: dict) -> int:
     """Stash what the approval-time ESP push needs on the approval itself.
 
@@ -327,6 +370,11 @@ def apply_decision(ap_id: str, decision: str) -> str:
             # that actually sent something, which is how approving a campaign
             # read as sending it and left the owner looking for an email that
             # nothing had promised to move.
+            if ap.kind == "skill_output" and (ap.payload or {}).get("send_mail"):
+                # A report leaves as mail, not as a platform draft. Same rule
+                # as the ESP push: approving IS the send, and the approval
+                # carries everything the send needs.
+                return send_report(ap)
             if ap.kind == "skill_output" and (ap.payload or {}).get("esp_push"):
                 # Review-before-push (UI overhaul 3.3): the campaign was HELD
                 # in our store for the workroom's review, and approving is

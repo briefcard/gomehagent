@@ -5600,6 +5600,25 @@ SABOTAGES = [
                "with no generator",
     },
     {
+        "name": "a_report_approval_carries_its_send",
+        "file": "app/approvals.py",
+        "find": "    if not run_id or not send.get(\"account\") or not send.get(\"to\"):\n        return 0",
+        "replace": "    if True:  # SABOTAGE\n        return 0",
+        "suites": ["test_reports_skill.py"],
+        "why": "the owner approves the week's report and nothing leaves — the "
+               "approval says 'Nothing was sent' and the client never hears",
+    },
+    {
+        "name": "the_figures_request_names_its_sending_account",
+        "file": "app/metrics.py",
+        "find": "                     \"account\": getattr(t, \"gmail_alias\", \"\") or \"\"},",
+        "replace": "                     \"account\": \"\"},  # SABOTAGE",
+        "suites": ["test_reports_skill.py"],
+        "why": "approving the email that asks the client for their figures "
+               "raises KeyError inside the executor — which is what it did for "
+               "as long as the payload existed",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

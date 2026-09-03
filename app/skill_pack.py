@@ -516,6 +516,56 @@ register(Skill(
     produces="draft",
     run=_run_inbound_reply))
 
+def _run_weekly_report(ctx: Context) -> dict:
+    """The weekly number, as a message to the client, held for approval."""
+    from . import approvals as _appr, client_report, tenants
+    t = tenants.get(ctx.tenant)
+    days = int(ctx.params.get("days") or 7)
+    to = str(ctx.params.get("to") or getattr(t, "report_to", "") or "").strip()
+    rep = client_report.assemble(ctx.tenant, days)
+    if rep.get("error"):
+        ctx.note(rep["error"])
+        return {"summary": rep["error"]}
+    msg = client_report.render_email(rep)
+    account = getattr(t, "gmail_alias", "") or ""
+    # Blockers are NAMED on the run, not discovered at approval. A report
+    # with nowhere to go still renders — the owner can read it — but the
+    # send cannot be attached, and the note says which half is missing.
+    if not to:
+        ctx.note("no recipient: pass to= or set the account's report address")
+    if not account:
+        ctx.note("no sending account: this account has no Gmail alias")
+    # The TEXT is the artifact and the summary; the html rides in meta and in
+    # the send. Emitting the html put a <div style=...> on the approval card.
+    item = ctx.emit(msg["text"], fmt="report_document", destination=to,
+                    require_citation=False,
+                    meta={"subject": msg["subject"], "days": days, "to": to,
+                          "html": msg["html"]})
+    if to and account and ctx.run_id:
+        _appr.attach_send(ctx.run_id, {"account": account, "to": to,
+                                       "subject": msg["subject"],
+                                       "text": msg["text"], "html": msg["html"]})
+    return {"summary": f"weekly report drafted for {to or 'nobody yet'}",
+            "output_id": item.get("output_id", ""), "subject": msg["subject"]}
+
+
+register(Skill(
+    key="weekly_report",
+    name="Weekly report",
+    does="The week's number for one client, read off the record and put in "
+         "their vocabulary — what moved, what we did, what is not yet "
+         "measured and why. Held for approval; approving sends it.",
+    system_key="reports",
+    tier=1,
+    needs=(),
+    params=("days", "to"),
+    # A report that SENDS is a write. `writes=False` filed it as a draft with
+    # no approval to carry the send on — nothing to approve, nothing sent.
+    writes=True,
+    produces="report",
+    run=_run_weekly_report))
+
+
 # THE SAME REPLY, GOVERNED AS A LEAD. `replies.ROUTES` sends `sales_leads`
 # mail to `lead_responder` and everything else to `service_desk`, and the
 # responder files each run under the system it was called for — but a Skill

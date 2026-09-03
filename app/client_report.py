@@ -183,3 +183,51 @@ def _outcomes(tenant: str, days: int) -> dict:
     t = tenants.get(tenant)
     return {"model": (getattr(t, "business_model", "") or "") if t else "",
             "figures": metrics.outcomes(tenant, days)}
+
+
+def render_email(rep: dict) -> dict:
+    """The weekly number as a message: subject, text, html.
+
+    THE REPORT IS THE MEASUREMENT (CATALOG: reports.measure), so nothing here
+    computes — it reads `assemble` and puts it in the client's vocabulary.
+    Leads with outcomes and says what is not yet measured by name, because a
+    report that silently leaves out revenue reads as "we did not move
+    revenue" and one that says the figure is not wired reads as what it is.
+    """
+    from . import emailfmt
+    acct, per = rep.get("account") or {}, rep.get("period") or {}
+    work, out = rep.get("work") or {}, rep.get("outcomes") or {}
+    figs = out.get("figures") or {}
+    lines = [f"{acct.get('name', 'Your account')} — the week of "
+             f"{per.get('from', '')} to {per.get('to', '')}", ""]
+    if isinstance(figs, dict) and figs:
+        lines.append("What moved:")
+        for k, v in list(figs.items())[:8]:
+            val = v.get("value") if isinstance(v, dict) else v
+            lines.append(f"  • {str(k).replace('_', ' ')}: "
+                         f"{val if val not in (None, '') else 'not yet measured'}")
+        lines.append("")
+    lines += ["What we did:",
+              f"  • {work.get('produced', 0)} thing(s) produced across "
+              f"{work.get('runs', 0)} run(s); {work.get('decisions_recorded', 0)} "
+              f"decision(s) recorded",
+              f"  • {work.get('self_corrected', 0)} self-corrected before you saw "
+              f"them; {work.get('blocked', 0)} held back",
+              ""]
+    unm = rep.get("not_yet_measured") or []
+    if unm:
+        lines.append("Not yet measured, and why:")
+        lines += [f"  • {u.get('label', u.get('key', '?'))}: {u.get('why', '')}"
+                  for u in unm[:6]]
+        lines.append("")
+    asks = rep.get("awaiting_client") or []
+    if asks:
+        lines.append("One thing we need from you:")
+        lines += [f"  • {a.get('label', a.get('key', '?'))}" for a in asks[:4]]
+        lines.append("")
+    text = "\n".join(lines).rstrip()
+    subject = (f"{acct.get('name', 'Your account')}: this week's number "
+               f"({per.get('to', '')})")
+    return {"subject": subject, "text": text,
+            "html": emailfmt.wrap(emailfmt.text_to_html(text))}
+

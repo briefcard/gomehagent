@@ -161,8 +161,8 @@ EFFECTIVENESS = {
         measure_fn="", learns_into="", gap="not built — no generator, no executor"),
     "reports": dict(
         measure_fn="client_report.assemble", learns_into="",
-        gap="the report IS the measurement and it exists; not built is the "
-            "rest — render, approval, send"),
+        gap="sent on approval; the client's reply — the figures they send "
+            "back — is not yet read into the next report"),
     "gbp_post": dict(
         measure_fn="", learns_into="",
         gap="not built; Google API access not applied for (INITIATIVE-gbp §0)"),
@@ -695,9 +695,10 @@ CATALOG = {
         kb_needs=(),
         workflow=dict(
             unit="the weekly number, one report",
+            skill="weekly_report",
             artifact="report_document",
             ship="sends it to the client, on approval",
-            ship_by="",
+            ship_by="approvals.apply_decision:send_report",
             measure="none — the report IS the measurement")),
 }
 
