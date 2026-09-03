@@ -1193,6 +1193,39 @@ class KeywordSerp(Base):
     rivals = Column(JSON, default=list)       # [{domain, position, url}]
 
 
+class JobLease(Base):
+    """One row per scheduled job: who holds it, and until when.
+
+    THE ONLY THING STANDING BETWEEN A SECOND WORKER AND A DOUBLED BILL. Every
+    job in `worker.py` is a cron in an in-process scheduler, so a second
+    instance of the worker service — the obvious way to run operations in
+    parallel — would fire every cron twice: two harvests, two campaign sends,
+    two Semrush bills, two digests. `_safe` acquires a row here before
+    running and skips if another holder has it, which makes N instances
+    correct before it makes them fast.
+
+    Acquired by a single UPDATE whose WHERE clause carries the expiry, so the
+    race between two instances waking on the same minute is decided by the
+    database — rowcount 1 wins, rowcount 0 skips — on SQLite and Postgres
+    alike, with no advisory locks and nothing to leak on a crash: the TTL is
+    the release nobody has to remember.
+
+    No tenant column on purpose. A lease is about the WORKER, not the client;
+    the per-tenant sharding that spreads `*_all` jobs across instances keys
+    the lease name on the tenant instead (see `worker._lease_name`).
+    """
+
+    __tablename__ = "job_leases"
+
+    name = Column(String, primary_key=True)          # the job's context string
+    holder = Column(String, default="")               # instance that holds it
+    leased_until = Column(DateTime(timezone=True))    # NULL/expired = free
+    last_run_at = Column(DateTime(timezone=True))
+    last_holder = Column(String, default="")
+    runs = Column(Integer, default=0)
+    skips = Column(Integer, default=0)                # ticks another holder won
+
+
 class ArtifactBody(Base):
     """The rendered thing itself, kept whole, beside the ledger row about it.
 

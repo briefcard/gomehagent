@@ -5550,6 +5550,26 @@ SABOTAGES = [
                "220 people",
     },
     {
+        "name": "two_worker_instances_run_a_job_once",
+        "file": "app/worker.py",
+        "find": "        if got.rowcount == 1:\n            return True",
+        "replace": "        if True:  # SABOTAGE\n            return True",
+        "suites": ["test_job_lease.py"],
+        "why": "the day a second worker instance is started, every cron fires "
+               "twice — two campaign sends, two harvests, two Semrush bills — "
+               "and nothing says so until the client asks why they got two",
+    },
+    {
+        "name": "a_crashed_job_releases_its_lease",
+        "file": "app/worker.py",
+        "find": "        finally:\n            _release(name)",
+        "replace": "        finally:\n            pass  # SABOTAGE",
+        "suites": ["test_job_lease.py"],
+        "why": "one exception parks that job on every instance until the TTL "
+               "passes — a failing digest stops the digest for twenty minutes "
+               "and a failing harvest for an hour",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

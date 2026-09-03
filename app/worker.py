@@ -1,5 +1,6 @@
 """Background worker: polls every inbox, triages, schedules digests."""
 import logging
+import os
 import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1028,13 +1029,95 @@ def alert_error(context: str, exc: Exception) -> None:
         log.exception("alert delivery failed")
 
 
-def _safe(fn, context: str):
+#: Who this process is, for the lease row. Render sets RENDER_INSTANCE_ID per
+#: instance; anywhere else, host and pid are enough to tell two apart.
+def _holder() -> str:
+    import socket
+    return (os.environ.get("RENDER_INSTANCE_ID")
+            or f"{socket.gethostname()}:{os.getpid()}")
+
+
+#: How long a lease is held if the job never releases it (a crash mid-run).
+#: Long enough that a slow harvest is not re-run by a sibling that woke a
+#: minute later; short enough that a dead instance does not park a job for a
+#: day. Per-job overrides go in _LEASE_TTL by context string.
+LEASE_TTL_SECONDS = 20 * 60
+_LEASE_TTL = {"inbox polling": 90, "moments sweep": 15 * 60,
+              "keyword map top-up": 60 * 60, "nightly sweep": 60 * 60}
+
+
+def _lease_name(context: str, tenant: str = "") -> str:
+    return f"{context}:{tenant}" if tenant else context
+
+
+def _acquire(name: str, ttl: int) -> bool:
+    """Take the lease or return False. ONE statement decides the race.
+
+    The row is created on first sight; after that, acquisition is a single
+    UPDATE whose WHERE clause says "free or expired". Two instances issuing it
+    in the same instant get rowcounts 1 and 0 from the database, which is the
+    whole correctness argument — nothing here reads-then-writes.
+    """
+    import datetime as _dt
+    from sqlalchemy import or_, update
+    now = db.utcnow()
+    me = _holder()
+    with db.SessionLocal() as s:
+        if s.get(db.JobLease, name) is None:
+            try:
+                s.add(db.JobLease(name=name)); s.commit()
+            except Exception:  # noqa: BLE001 — a sibling created it first
+                s.rollback()
+        got = s.execute(
+            update(db.JobLease)
+            .where(db.JobLease.name == name,
+                   or_(db.JobLease.leased_until.is_(None),
+                       db.JobLease.leased_until < now))
+            .values(holder=me, leased_until=now + _dt.timedelta(seconds=ttl),
+                    last_run_at=now, last_holder=me,
+                    runs=db.JobLease.runs + 1))
+        s.commit()
+        if got.rowcount == 1:
+            return True
+        s.execute(update(db.JobLease).where(db.JobLease.name == name)
+                  .values(skips=db.JobLease.skips + 1))
+        s.commit()
+        return False
+
+
+def _release(name: str) -> None:
+    from sqlalchemy import update
+    with db.SessionLocal() as s:
+        s.execute(update(db.JobLease)
+                  .where(db.JobLease.name == name,
+                         db.JobLease.holder == _holder())
+                  .values(leased_until=None))
+        s.commit()
+
+
+def _safe(fn, context: str, *, tenant: str = ""):
+    """Run one job: leased, logged, alerted — never raised.
+
+    THE LEASE LIVES HERE AND NOWHERE ELSE, so every `sched.add_job` in this
+    file is covered by the same six lines and a second worker instance is
+    safe the day it is started. `test_job_lease.py` counts that every
+    registration goes through this wrapper; a job registered around it would
+    be the one that runs twice.
+    """
+    name = _lease_name(context, tenant)
+    ttl = _LEASE_TTL.get(context, LEASE_TTL_SECONDS)
+
     def wrapped() -> None:
+        if not _acquire(name, ttl):
+            log.info("%s: another worker holds the lease — skipped", name)
+            return
         try:
             fn()
         except Exception as exc:  # noqa: BLE001
             log.exception("%s failed", context)
             alert_error(context, exc)
+        finally:
+            _release(name)
     return wrapped
 
 

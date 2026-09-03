@@ -50,6 +50,13 @@ PLATFORM_MODELS = {
     "CraftLesson": "cross-client TECHNIQUE by design — never a client fact; "
                    "guarded by craft.leaks() + business_model reach + approval",
     "Setting": "run-once markers for the service itself",
+    # A lease is about the WORKER, not the client. Which instance holds a cron
+    # is a fact about this service; giving it a tenant would invite it to be
+    # filtered like client data. The per-tenant sharding keys the lease NAME
+    # on the tenant instead (`worker._lease_name`), so nothing is lost.
+    "JobLease": "which worker instance holds a scheduled job — the service's "
+                "own coordination, keyed by job name (and tenant, when "
+                "sharded) rather than owned by an account",
     "IntakeLink": "carries tenant",
     "ConnectLink": "carries tenant",
     "Credential": "carries tenant",
