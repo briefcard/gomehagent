@@ -50,6 +50,14 @@ with TestClient(app) as cl:
         cl.get(f"/intake/{tok}",params={"answer":ANS[st["id"]]})
     ck("a misrouted pipe answer never becomes a banned phrase",
        not any("|" in p for p in kb.banned_claims("coverings")), str(kb.banned_claims("coverings")))
+    # The loop above routes every answer to its OWN step, so a pipe never
+    # reaches banned_claims and the check above cannot fail — it passed with
+    # the refusal deleted. This sends the misrouted answer on purpose.
+    before=list(kb.banned_claims("coverings"))
+    said=kb.apply_answer("coverings","banned_claims","cheap | fast | guaranteed")
+    ck("  and one sent to the wrong step is refused, not filed",
+       kb.banned_claims("coverings")==before and "|" not in " ".join(kb.banned_claims("coverings")),
+       f"{said[:80]!r}; banned now {kb.banned_claims('coverings')}")
     # A client's answer counts as answered — the intake must not re-ask it —
     # while staying unusable until someone approves it. Two different questions
     # of the same row, which is why gaps() and objections() disagree here.

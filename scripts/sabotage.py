@@ -5065,6 +5065,491 @@ SABOTAGES = [
                "still render, still save, and change nothing",
     },
     {
+        "name": "an_escalation_is_counted_as_raised_not_hidden",
+        "file": "app/diagnostics.py",
+        "find": "    if stages.get(\"escalated\") and not waiting:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_allclear.py"],
+        "why": "a run that raised three things for the owner on purpose reads "
+               "as a run that did nothing — escalation is success and the "
+               "status line stops saying so",
+    },
+    {
+        "name": "an_empty_row_is_counted_as_no_text_not_skipped",
+        "file": "app/archive.py",
+        "find": "        if not body.strip():\n            no_text += 1\n            continue",
+        "replace": "        if False:  # SABOTAGE\n            no_text += 1\n            continue",
+        "suites": ["test_archive.py"],
+        "why": "'nothing has been stored yet' and 'already indexed' collapse "
+               "into one number again, which was a defect once already",
+    },
+    {
+        "name": "a_word_that_repeats_its_own_tail_is_caught",
+        "file": "app/artifact_check.py",
+        "find": "        if head.lower().endswith(tail.lower()):",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_artifact_check.py"],
+        "why": "'delivery.ivery' ships in a client email — the one blocking "
+               "structural fault becomes advisory nothing",
+    },
+    {
+        "name": "no_events_reports_nothing_checked_not_zeros",
+        "file": "app/assurance.py",
+        "find": "    rows = _rows(tenant, days)\n    if not rows:",
+        "replace": "    rows = _rows(tenant, days)\n    if False:  # SABOTAGE",
+        "suites": ["test_assurance.py"],
+        "why": "a data layer that ran no checks reports 0 caught, which is "
+               "indistinguishable from a healthy one — the console shows a "
+               "clean bill for a system that was switched off",
+    },
+    {
+        "name": "a_dry_run_of_the_catalogue_reports_what_it_would_add",
+        "file": "app/catalog_sync.py",
+        # "Writes nothing" is gated TWICE in `sync_shopify` — the loop
+        # `continue`s before any `s.add`, and `s.commit()` is behind its own
+        # `if not dry_run` — so no single mutation reaches persistence: a row
+        # added past the first gate is rolled back at the second. Two guards
+        # were MISSED learning that. What one mutation CAN break is the other
+        # half of a dry run, the count it reports, so that is what is held.
+        "find": "            if dry_run:\n                if row:\n                    updated += 1\n                else:\n                    added += 1",
+        "replace": "            if dry_run:\n                if row:\n                    updated += 1\n                else:\n                    pass  # SABOTAGE",
+        "suites": ["test_catalog_sync.py"],
+        "why": "'show me what it would add' says nothing would be added, and "
+               "the owner approves a sync that files 250 products",
+    },
+    {
+        "name": "an_invented_situation_tag_is_dropped_not_stored",
+        "file": "app/extract.py",
+        "find": "        tags = ([s for s in want if s in valid_situations]\n                if valid_situations is not None else want)",
+        "replace": "        tags = want  # SABOTAGE",
+        "suites": ["test_claim_tagging.py"],
+        "why": "a tag the model made up is stored, nothing can ever select on "
+               "it, and the claim is silently retired the moment it is filed",
+    },
+    {
+        "name": "a_failing_provider_keeps_its_own_words_in_the_report",
+        "file": "app/client_report.py",
+        "find": "            \"failing\": tools.get(\"failing\", []),",
+        "replace": "            \"failing\": [],  # SABOTAGE",
+        "suites": ["test_client_report.py"],
+        "why": "a client report shows every platform reachable while one has "
+               "been refusing the key for a week — the error was recorded and "
+               "the report threw it away",
+    },
+    {
+        "name": "a_claim_past_the_default_interval_is_expired",
+        "file": "app/kb.py",
+        "find": "CLAIM_TTL_DAYS = 365",
+        "replace": "CLAIM_TTL_DAYS = 10 ** 6  # SABOTAGE",
+        "suites": ["test_claim_expiry.py"],
+        "why": "a fact nobody re-verified in three years is still selectable "
+               "proof — 'expires by default' becomes 'expires only if somebody "
+               "remembered to set a date'",
+    },
+    {
+        "name": "a_pattern_hit_carries_no_score",
+        "file": "app/kb.py",
+        "find": "                \"score\": None,\n                \"candidates\": [{\"tag\": t, \"score\": None, \"shared\": None}",
+        "replace": "                \"score\": 1.0,  # SABOTAGE\n                \"candidates\": [{\"tag\": t, \"score\": None, \"shared\": None}",
+        "suites": ["test_classify.py"],
+        "why": "a decision made by a rule reads like a guess made by overlap — "
+               "the reviewer sees a confidence on something that has none, "
+               "which is metadata-as-content in a new place",
+    },
+    {
+        "name": "a_banned_claim_never_reaches_the_article_queue",
+        "file": "app/seo_tools.py",
+        "find": "            what=\"article revision\" if revision else \"new article\")\n        if refusal:\n            return refusal",
+        "replace": "            what=\"article revision\" if revision else \"new article\")\n        if False:  # SABOTAGE\n            return refusal",
+        "suites": ["test_blog_path.py"],
+        "why": "the owner is asked to approve prose that cannot publish — the "
+               "scarcest thing here, attention on a queue, spent on a decision "
+               "with no outcome",
+    },
+    {
+        "name": "material_in_review_never_reaches_a_brief",
+        "file": "app/kb.py",
+        "find": "        q = s.query(db.KbClaim).filter(\n            db.KbClaim.tenant == tenant,\n            db.KbClaim.review == prov.APPROVED,",
+        "replace": "        q = s.query(db.KbClaim).filter(\n            db.KbClaim.tenant == tenant,\n            db.KbClaim.review.isnot(None),  # SABOTAGE",
+        "suites": ["test_bridge.py"],
+        "why": "a skill quotes a claim the owner has not approved yet — the "
+               "review queue stops being a gate and becomes a suggestion",
+    },
+    {
+        "name": "the_cart_is_not_read_as_brand_copy",
+        "file": "app/compliance.py",
+        "find": "_SKIP = (\"/cart\", \"/checkout\", \"/account\", \"/policies/\", \"/wp-json\",",
+        "replace": "_SKIP = (\"/never-a-real-path\",  # SABOTAGE",
+        "suites": ["test_compliance.py"],
+        "why": "the checkout page is scanned for banned phrases as if it were "
+               "marketing copy, and every 'proceed to payment' is a finding",
+    },
+    {
+        "name": "a_crawler_cannot_reintroduce_a_banned_phrase",
+        "file": "app/harvest.py",
+        "find": "            hit = next((b for b in banned if b in low), \"\")",
+        "replace": "            hit = \"\"  # SABOTAGE",
+        "suites": ["test_harvest.py"],
+        "why": "'hand-decorated' comes back off the brand's own old pages as a "
+               "proposal, and the ban the owner set is one approval click from "
+               "being undone",
+    },
+    {
+        "name": "a_reference_asset_is_refused_for_compositing",
+        "file": "app/compose.py",
+        "find": "    ok, why = kb.may_publish(asset_id)\n    if not ok:\n        return b\"\", f\"that asset cannot be used in an ad: {why}\"",
+        "replace": "    ok, why = kb.may_publish(asset_id)\n    if False:  # SABOTAGE\n        return b\"\", f\"that asset cannot be used in an ad: {why}\"",
+        "suites": ["test_compose.py"],
+        "why": "a competitor's photograph, saved for inspiration, is "
+               "composited into a client's ad and published under their name",
+    },
+    {
+        "name": "no_connection_refuses_and_says_where_to_make_one",
+        "file": "app/constant_contact.py",
+        "find": "    if not c.get(\"secret\"):\n        return \"\", (f\"{tenant} has no Constant Contact connection — connect it \"",
+        "replace": "    if False:  # SABOTAGE\n        return \"\", (f\"{tenant} has no Constant Contact connection — connect it \"",
+        "suites": ["test_constant_contact.py"],
+        "why": "an unconnected account is sent to mint a token from an empty "
+               "secret and fails somewhere downstream with a message about "
+               "OAuth, not about the missing connection",
+    },
+    {
+        "name": "an_undeclared_system_still_gets_a_ladder",
+        "file": "app/conversation.py",
+        "find": "    return tuple(STAGES.get(system_key, DEFAULT)[\"stages\"])",
+        "replace": "    return tuple(STAGES[system_key][\"stages\"])  # SABOTAGE",
+        "suites": ["test_conversation.py"],
+        "why": "the first inbound message for any system nobody declared "
+               "stages for crashes on a KeyError instead of opening a "
+               "conversation",
+    },
+    {
+        "name": "promotional_threads_are_never_mined",
+        "file": "app/email_harvest.py",
+        # MINEABLE is the gate, not EXCLUDED — emptying EXCLUDED was MISSED
+        # because an unlisted bucket is already not mined. The sabotage that
+        # matters is LISTING promo.
+        "find": "MINEABLE = {\n    \"sales_leads\": \"claims made to a prospect\",",
+        "replace": "MINEABLE = {\n    \"promo\": \"SABOTAGE\",\n    \"sales_leads\": \"claims made to a prospect\",",
+        "suites": ["test_email_harvest.py"],
+        "why": "a newsletter's own copy is mined for objections and a receipt "
+               "line is proposed as a brand claim",
+    },
+    {
+        "name": "an_embedding_failure_is_not_filed_as_a_skip",
+        "file": "app/embed.py",
+        "find": "        else:\n            failed += 1\n            reason = reason or note",
+        "replace": "        else:\n            unchanged += 1  # SABOTAGE\n            reason = reason or note",
+        "suites": ["test_embed.py"],
+        "why": "a dead embeddings key reads as 'already indexed' and the "
+               "semantic search quietly answers from a stale index for ever",
+    },
+    {
+        "name": "an_altered_span_is_discarded",
+        "file": "app/extract.py",
+        "find": "        if text not in joined:\n            rejected.append(text[:120])\n            continue",
+        "replace": "        if False:  # SABOTAGE\n            rejected.append(text[:120])\n            continue",
+        "suites": ["test_extract.py"],
+        "why": "the model's paraphrase of the page is filed as what the page "
+               "says — the one guarantee the extractor makes is gone",
+    },
+    {
+        "name": "the_empty_surface_rule_is_always_attached",
+        "file": "app/imagegen.py",
+        "find": "    \"The surface in the centre foreground must be COMPLETELY EMPTY — no \"",
+        "replace": "    \"\"  # SABOTAGE",
+        "suites": ["test_imagegen.py"],
+        "why": "the generated background arrives with a jug already on the "
+               "table, and the client's product is composited on top of it",
+    },
+    {
+        "name": "collections_are_offered_as_groups",
+        "file": "app/admin_ui.py",
+        "find": "    groups = [r for r in ents if (r.type or \"\") == \"collection\"]\n    if groups and len(ents) > len(groups):",
+        "replace": "    groups = []  # SABOTAGE\n    if groups and len(ents) > len(groups):",
+        "suites": ["test_entity_group.py"],
+        "why": "the grouping form offers nothing to group into, and the only "
+               "way to file a claim against a collection is one hand-typed "
+               "URL per product again",
+    },
+    {
+        "name": "five_words_is_long_tail_whatever_the_volume",
+        "file": "app/keywords.py",
+        "find": "    if len(words) >= 5 or is_question(phrase):\n        return \"long_tail\"",
+        "replace": "    if False:  # SABOTAGE\n        return \"long_tail\"",
+        "suites": ["test_keywords.py"],
+        "why": "a five-word question with volume is tiered as a head term and "
+               "the planner tries to win it with a pillar page instead of an "
+               "article",
+    },
+    {
+        "name": "the_bearer_rides_every_mcp_request",
+        "file": "app/mcp_client.py",
+        "find": "            h[\"Authorization\"] = f\"Bearer {self.bearer}\"",
+        "replace": "            pass  # SABOTAGE",
+        "suites": ["test_mcp_client.py"],
+        "why": "every call after the handshake goes out unauthenticated and "
+               "the server's 401 is reported as a tool that does not exist",
+    },
+    {
+        "name": "every_pointed_at_path_is_a_registered_route",
+        "file": "app/web.py",
+        "find": "@app.get(\"/admin/keywords_rivals\")",
+        "replace": "@app.get(\"/admin/keywords_rivalz\")  # SABOTAGE",
+        "suites": ["test_pointers.py"],
+        "why": "a button on the Architecture page 404s and nothing in the "
+               "suite notices that the console points at a route that is not "
+               "there",
+    },
+    {
+        "name": "a_portal_link_redeems_once_and_only_once",
+        "file": "app/portal.py",
+        "find": "        if link.used_at:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_portal.py"],
+        "why": "a sign-in link forwarded from one inbox to another signs both "
+               "of them in — the link is a password that never expires",
+    },
+    {
+        "name": "a_misrouted_pipe_answer_never_becomes_a_banned_phrase",
+        "file": "app/kb.py",
+        "find": "    if step_id in (\"display_name\", \"positioning\", \"tone\", \"banned_claims\",\n                   \"next_steps\") and \"|\" in text:",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_intake.py"],
+        "why": "a client answering the objections question in the banned-"
+               "phrases box files 'price|too expensive|we offer payment plans' "
+               "as a phrase the brand may never say",
+    },
+    {
+        "name": "no_leftover_picker_is_still_being_built",
+        "file": "app/admin_ui.py",
+        "find": "def _shell(key: str, tab: str, title: str, body: str, suffix: str = \"\",",
+        "replace": "picker = \"\"  # SABOTAGE\ndef _shell(key: str, tab: str, title: str, body: str, suffix: str = \"\",",
+        "suites": ["test_console_frame.py"],
+        "why": "a second client picker is one re-render away from coming back, "
+               "and two controls for one decision is how they disagree",
+    },
+    {
+        "name": "a_migrated_column_gets_its_default_not_null",
+        "file": "app/db.py",
+        "find": "ADD COLUMN \"{col.name}\" {ddl}{default}'",
+        "replace": "ADD COLUMN \"{col.name}\" {ddl}'",
+        "suites": ["test_migration.py"],
+        "why": "every existing row comes back with a NULL tenant that no "
+               "`tenant_filter` can find — a live account's history vanishes "
+               "from every page on the first boot after the column is added",
+    },
+    {
+        "name": "ironside_cannot_imply_a_quote",
+        "file": "app/kb_seed.py",
+        "find": "    for phrase in [\"starting at\", \"per person\", \"our rate\", \"the price is\",\n                   \"all-inclusive package\", \"we can do it for\"]:",
+        "replace": "    for phrase in []:  # SABOTAGE",
+        "suites": ["test_kb.py"],
+        "why": "a venue with no rate card answers 'starting at $4,500' in a "
+               "draft — an invented price, sent under the client's name",
+    },
+    {
+        "name": "a_non_https_base_url_is_refused_before_the_round_trip",
+        "file": "app/oauth.py",
+        "find": "    if not config.PUBLIC_BASE_URL.startswith(\"https://\"):",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_oauth.py"],
+        "why": "the owner is sent through Google's consent screen and rejected "
+               "at the end of it with a redirect-URI error, instead of being "
+               "told before leaving that the base URL is http",
+    },
+    {
+        "name": "no_lookup_can_quietly_have_no_half_life",
+        "file": "app/lookups.py",
+        "find": "    \"tracking\": 12,                # a scan lands and the answer is wrong\n",
+        "replace": "",
+        "suites": ["test_perishable.py"],
+        "why": "a tracking answer from last week is quoted as current — the "
+               "one lookup with no half-life is the one treated as never stale",
+    },
+    {
+        "name": "tenant_is_stripped_from_the_schema_the_model_sees",
+        "file": "app/tool_scope.py",
+        # ACCOUNT_PARAMS is the completeness guard, not the stripper — removing
+        # "tenant" from it was MISSED. The strip is the comprehension in
+        # `filter_tools`; this leaves the key in.
+        "find": "                                if k != param}",
+        "replace": "                                if True}  # SABOTAGE",
+        "suites": ["test_run_skill.py"],
+        "why": "the model can name an account in a tool call, and one "
+               "hallucinated key reads another client's knowledge base",
+    },
+    {
+        "name": "a_tone_is_not_concluded_from_six_sentences",
+        "file": "app/voice.py",
+        "find": "MIN_SENTENCES = 20",
+        "replace": "MIN_SENTENCES = 1  # SABOTAGE",
+        "suites": ["test_voice.py"],
+        "why": "a brand voice is proposed from one email and every draft "
+               "inherits the mood of whoever wrote it",
+    },
+    {
+        "name": "an_omnisend_draft_does_not_send_itself",
+        "file": "app/omnisend.py",
+        "find": "    return {\"ok\": True, \"campaign_id\": cid,",
+        "replace": "    call(tenant, \"POST\", f\"/api/campaigns/{cid}/actions/send\")  # SABOTAGE\n    return {\"ok\": True, \"campaign_id\": cid,",
+        "suites": ["test_omnisend.py"],
+        "why": "producing a campaign sends it — the approval step approves a "
+               "thing that has already gone out",
+    },
+    {
+        "name": "a_metric_a_system_does_not_declare_is_not_invented",
+        "file": "app/metrics.py",
+        "find": "    return list(CATALOG.get(key, []))",
+        "replace": "    return [m for v in CATALOG.values() for m in v]  # SABOTAGE",
+        "suites": ["test_metrics.py"],
+        "why": "a venue's report carries 'average order value' with no value "
+               "and no reason — a number the client did not ask about on a "
+               "page that says we know their business",
+    },
+    {
+        "name": "a_reset_on_an_empty_tenant_is_refused",
+        "file": "app/reset.py",
+        "find": "    tenant = (tenant or \"\").strip()\n    if not tenant:\n        return {\"error\": \"name an account. An empty tenant is UNASSIGNED — \"",
+        "replace": "    tenant = (tenant or \"\").strip()\n    if False:  # SABOTAGE\n        return {\"error\": \"name an account. An empty tenant is UNASSIGNED — \"",
+        "suites": ["test_reset.py"],
+        "why": "a reset with a blank account deletes every row whose owner "
+               "could not be determined — the backlog, across all clients, "
+               "in one GET",
+    },
+    {
+        "name": "a_bundle_with_no_ban_list_blocks",
+        "file": "app/resolve.py",
+        "find": "    bundle[\"blocked_on\"] = blocked",
+        "replace": "    bundle[\"blocked_on\"] = []  # SABOTAGE",
+        "suites": ["test_resolve.py"],
+        "why": "with nothing to check against, the validator says 'clean' and "
+               "means 'unchecked' — the one case the bundle is meant to stop",
+    },
+    {
+        "name": "an_unmatched_site_is_refused_not_waved_through",
+        "file": "app/seo_guard.py",
+        "find": "    return by_domain.get(tenant_scope._norm_domain(profile.get(\"domain\", \"\")), \"\")",
+        "replace": "    return \"baci\"  # SABOTAGE",
+        "suites": ["test_seo_guard.py"],
+        "why": "a site nobody registered publishes under Baci's ban list and "
+               "Baci's Semrush quota — the wrong client's rules on the wrong "
+               "client's pages",
+    },
+    {
+        "name": "a_platform_nothing_connects_to_offers_no_backend",
+        "file": "app/sites.py",
+        # Bypassing the first gate was MISSED: an empty platform then lands on
+        # the second refusal (`BACKENDS.get("")` is None) and the suite only
+        # asks that it refuses. This is the defect the code's own comment
+        # names — `or "shopify"` — and it passes BOTH gates.
+        "find": "    # different — connect something, rather than build a backend.\n    platform = (profile.get(\"platform\") or \"\").strip().lower()",
+        "replace": "    # different — connect something, rather than build a backend.\n    platform = (profile.get(\"platform\") or \"shopify\").strip().lower()  # SABOTAGE",
+        "suites": ["test_new_organization.py"],
+        "why": "an organisation with nothing connected is handed a backend "
+               "anyway, and the first publish goes to a Shopify store it does "
+               "not have",
+    },
+    {
+        "name": "a_refused_switch_on_is_a_flash_not_raw_json",
+        "file": "app/web.py",
+        "find": "            return _plan_back(tenant, key, msg=msg, err=err)",
+        "replace": "            return {\"error\": err, \"msg\": msg}  # SABOTAGE",
+        "suites": ["test_pointer_fixes.py"],
+        "why": "pressing a button on the Plan tab lands the owner on a page "
+               "of JSON with no way back — the pointer fix that was pinned "
+               "comes unpinned",
+    },
+    {
+        "name": "the_whole_ban_list_is_enforced_not_the_first_rule",
+        "file": "app/validator.py",
+        # The first cut cut the model-draft branch in `responder` and was
+        # MISSED: the suite reads `rules_enforced`, which is the count of ban
+        # rules the validator LOADED, on the confident-match path. Enforcement
+        # is weakened where the rules are read, not where a verdict is used.
+        "find": "    rules = kb.banned_claims(tenant) or []",
+        "replace": "    rules = (kb.banned_claims(tenant) or [])[:1]  # SABOTAGE",
+        "suites": ["test_responder.py"],
+        "why": "a reply carrying the fourth banned phrase goes out clean — "
+               "three of the owner's four rules are read and never checked",
+    },
+    {
+        "name": "the_seed_is_not_a_source",
+        "file": "app/sources.py",
+        "find": "SOURCES = [\n    {\"key\": \"catalogue\", \"label\": \"Product catalogue\",",
+        "replace": "SOURCES = [\n    {\"key\": \"seed\", \"label\": \"SABOTAGE\", \"produces\": \"\", \"capability\": \"\", \"precondition\": None, \"run\": _catalogue},\n    {\"key\": \"catalogue\", \"label\": \"Product catalogue\",",
+        "suites": ["test_sources.py"],
+        "why": "a client nobody wrote a seed for is offered 'run the seed' as "
+               "a way to fill their knowledge base, and it fills it with "
+               "another brand's facts",
+    },
+    {
+        "name": "intake_does_not_re_ask_what_a_proposal_answered",
+        "file": "app/kb.py",
+        "find": "        \"objection\": len(objections(tenant, include_proposed=True)) > 0,",
+        "replace": "        \"objection\": len(objections(tenant, include_proposed=False)) > 0,  # SABOTAGE",
+        "suites": ["test_provenance.py"],
+        "why": "a client who answered the audience question is asked it again "
+               "every week until somebody approves their own answer",
+    },
+    {
+        "name": "an_unscoped_product_answer_cannot_be_approved",
+        "file": "app/kb.py",
+        "find": "                and scope_unconfirmed(row)):",
+        "replace": "                and False):  # SABOTAGE",
+        "suites": ["test_objection_scope.py"],
+        "why": "'is it dishwasher safe — yes' answered about one pitcher is "
+               "approved as true of the whole catalogue, glassware included",
+    },
+    {
+        "name": "the_dry_run_predicts_the_backfill_exactly",
+        "file": "app/tenant_scope.py",
+        "find": "            row.tenant = key\n            filled[table] = filled.get(table, 0) + 1",
+        "replace": "            if filled.get(table): continue  # SABOTAGE\n            row.tenant = key\n            filled[table] = filled.get(table, 0) + 1",
+        "suites": ["test_tenant_scope.py"],
+        "why": "the preview says 40 rows will be assigned and the backfill "
+               "assigns 12 — the one number the owner reads before saying yes "
+               "is the one that lies",
+    },
+    {
+        "name": "spend_shares_are_of_real_cost_not_call_count",
+        "file": "app/usage.py",
+        "find": "        t[\"calls\"] += 1; t[\"cost\"] += c",
+        "replace": "        t[\"calls\"] += 1; t[\"cost\"] += 1  # SABOTAGE",
+        "suites": ["test_usage_attribution.py"],
+        "why": "a client on Haiku with a thousand calls is billed as the "
+               "biggest spender over one on Opus with ten",
+    },
+    {
+        "name": "an_agent_proposal_is_not_auto_approved",
+        "file": "app/propose.py",
+        "find": "        status=\"pending\", origin=\"agent\", entity_key=entity_key)",
+        "replace": "        status=\"active\", origin=\"agent\", entity_key=entity_key)  # SABOTAGE",
+        "suites": ["test_propose.py"],
+        "why": "a fact the model made up mid-draft is filed with the owner's "
+               "authority and is proof in the next draft",
+    },
+    {
+        "name": "a_blank_entity_ref_stays_blank",
+        "file": "app/kb.py",
+        "find": "    text = (text or \"\").strip()\n    if not text:\n        return \"\", \"\"\n    if LABEL_SEP in text:",
+        "replace": "    text = (text or \"\").strip()\n    if False:  # SABOTAGE\n        return \"\", \"\"\n    if LABEL_SEP in text:",
+        "suites": ["test_review_ui.py"],
+        "why": "leaving the entity blank — the way you say 'this is about the "
+               "brand' — is matched against every entity name and lands on "
+               "whichever sorts first",
+    },
+    {
+        "name": "a_room_that_seats_200_is_never_offered_for_220",
+        "file": "app/kb.py",
+        "find": "            fits = have >= need",
+        "replace": "            fits = True  # SABOTAGE",
+        "suites": ["test_selection.py"],
+        "why": "a draft promises a 220-seat dinner in a room that seats 200, "
+               "under the venue's name, to a prospect who will show up with "
+               "220 people",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

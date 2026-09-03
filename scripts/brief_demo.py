@@ -7,17 +7,17 @@ Two modes, because they prove different things:
   deterministic majority of the pipeline. This is where "generic vs specific"
   is actually won or lost.
 
-      python3 scripts/test_brief.py --demo
-      python3 scripts/test_brief.py --say "our ads stopped working and margin is thin" \\
+      python3 scripts/brief_demo.py --demo
+      python3 scripts/brief_demo.py --say "our ads stopped working and margin is thin" \\
                                     --type ecom_inventory
-      python3 scripts/test_brief.py --say "we need more corporate bookings" \\
+      python3 scripts/brief_demo.py --say "we need more corporate bookings" \\
                                     --type local_venue --stage referral_intro
 
   LIVE MODE (needs ANTHROPIC_API_KEY) — full chain including extraction from a
   real email and enrichment from the prospect's own site.
 
-      python3 scripts/test_brief.py --email prospect.txt
-      pbpaste | python3 scripts/test_brief.py
+      python3 scripts/brief_demo.py --email prospect.txt
+      pbpaste | python3 scripts/brief_demo.py
 
 Uses a local sqlite file and seeds the agency KB on first run. Touches nothing
 in production.

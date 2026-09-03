@@ -34,6 +34,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: 2026-08-27: found stale at HEAD, predating the UI overhaul's step 4. Each
 #: needs its target located and the entry repointed, or the entry deleted with
 #: a reason if the behaviour genuinely no longer exists.
+#: Suites no guard names yet. May shrink; must never grow. Counted, not
+#: remembered — see the check in main().
+UNGUARDED: set = set()
+
 KNOWN_STALE = {
     "drafted_is_not_published",
     "withhold_false_or_forbidden",
@@ -167,6 +171,27 @@ def main() -> int:
     ck("every entry names at least one suite",
        all(e.get("suites") for e in rows),
        "an entry with no suite can never be caught or missed")
+
+    # A SUITE NO GUARD NAMES IS A SUITE NOBODY HAS PROVED CAN FAIL. Fifty of
+    # 165 were in that state on 2026-09-03 — a third of the suite — and the
+    # number was known only from a sentence in a handoff note, which is the
+    # exact "claim in a comment" this file exists to refuse. Same shape as
+    # KNOWN_STALE and the render smoke's UNWRAPPED_TABLES: named, so a new
+    # suite cannot join the list silently, and allowed to shrink only.
+    named = {s for e in rows for s in (e.get("suites") or [])}
+    unguarded_now = sorted(p.name for p in (ROOT / "scripts").glob("test_*.py")
+                           if p.name not in named)
+    newly = sorted(set(unguarded_now) - UNGUARDED)
+    ck("no NEW suite ships without a guard", not newly,
+       ", ".join(newly) or "a suite nothing mutates against is a suite whose "
+       "assertions have never been shown to fail")
+    now_guarded = sorted(UNGUARDED - set(unguarded_now))
+    ck("the unguarded list has not grown",
+       set(unguarded_now) <= UNGUARDED | set(newly),
+       "it may shrink; it must never grow")
+    if now_guarded:
+        print(f"[  ok  ] {len(now_guarded)} suite(s) now guarded — remove from "
+              f"UNGUARDED: {', '.join(now_guarded)}")
 
     # THE SUITE HAS TO EXIST. `test_blog.py` and `test_campaign.py` were named
     # by three guards and neither file was in the tree. A suite that cannot be

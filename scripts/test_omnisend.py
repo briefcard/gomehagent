@@ -71,6 +71,12 @@ def main() -> int:
        str(r)[:110])
     ck("  and it is a DRAFT — nothing was sent",
        r["status"] == "draft" and "nothing has been sent" in r["note"])
+    # The line above reads the module's own report of itself. This reads the
+    # transport: a create that also sent would still say "draft" and pass the
+    # check above — it did, with a send call inserted after the create.
+    ck("  and no send reached the transport",
+       not any("send" in s["path"] for s in _sent),
+       str([s["path"] for s in _sent]))
     ck("  the campaign id is the top-level id, not contentID or templateID",
        r["campaign_id"] == "camp_1" and r["template_id"] == "tpl_1",
        f"{r['campaign_id']} / {r['template_id']}")
