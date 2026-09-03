@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **217** (217 reached)
+- HTTP routes: **218** (218 reached)
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -1504,6 +1504,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`health_blog`**(key?, tenant?, probe?) → `dict`  ·  route `GET /health/blog`  ·  **from nothing**
 - **`health_connections`**(key?) → `—`  ·  route `GET /health/connections`  ·  **from nothing**
 - **`health_seo`**(key?) → `dict`  ·  route `GET /health/seo`  ·  **from nothing**
+- **`health_workers`**(key?, hours?) → `dict`  ·  route `GET /health/workers`  ·  **from nothing**
 - **`intake`**(token, answer?, skip?) → `str`  ·  route `GET /intake/{token}`  ·  **from nothing**
 - **`intake_links`**(key?, tenant?) → `dict`  ·  route `GET /admin/intake_links`  ·  **from nothing**
 - **`intake_new`**(key?, tenant?, label?, days?, ui?) → `error, expires_in_days, note, ok, tenant, url`  ·  route `GET /admin/intake_new`  ·  **from nothing**
@@ -1641,6 +1642,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`deadline_alerts`**() → `None`  ·  **from nothing**
 - **`follow_up_chase`**() → `None`  ·  **from nothing**
 - **`inboxes`**() → `list[tuple[str, str]]`  ·  from `test_worker_systems.py`
+- **`instances_seen`**(hours?) → `dict`  ·  from `admin_ui.py`, `test_job_lease.py`, `web.py`
 - **`is_trusted`**(sender, alias?) → `bool`  ·  from `test_tenant_scope.py`
 - **`keyword_harvest_sharded`**() → `dict`  ·  **from nothing**
 - **`keyword_sync_sharded`**() → `dict`  ·  **from nothing**

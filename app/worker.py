@@ -1125,6 +1125,31 @@ def performance_sharded() -> dict:
     return got
 
 
+def instances_seen(hours: int = 24) -> dict:
+    """Which worker instances actually did work in the window.
+
+    THE PROOF THAT PARALLEL IS ON. `numInstances: 2` in render.yaml is a
+    request; this reads the lease table, where every job records the holder
+    that ran it (`RENDER_INSTANCE_ID` per instance). Two distinct holders in
+    a day means two workers are sharing the work. One means you are paying
+    for parallel and getting a spare, and nothing else on the platform would
+    say so.
+    """
+    import datetime as _dt
+    since = db.utcnow() - _dt.timedelta(hours=hours)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.JobLease)
+                .filter(db.JobLease.last_run_at.isnot(None),
+                        db.JobLease.last_run_at >= since).all())
+        holders = sorted({r.last_holder for r in rows if r.last_holder})
+        jobs = len(rows)
+    return {"hours": hours, "instances": len(holders), "holders": holders,
+            "jobs_run": jobs,
+            "verdict": ("parallel" if len(holders) >= 2 else
+                        "one instance did every job" if holders else
+                        "nothing has run in the window")}
+
+
 def _safe(fn, context: str, *, tenant: str = "", sharded: bool = False):
     """Run one job: leased, logged, alerted — never raised.
 

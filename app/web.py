@@ -1019,6 +1019,17 @@ def health_seo(key: str = Depends(admin_key)) -> dict:
     return out
 
 
+@app.get("/health/workers")
+def health_workers(key: str = Depends(admin_key), hours: int = 24) -> dict:
+    """Are two worker instances actually working, or is one doing every job?
+    Reads the lease table, where each job records the instance that ran it.
+    /health/workers?key=APPROVAL_SECRET"""
+    from . import worker
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return worker.instances_seen(max(1, min(int(hours or 24), 24 * 14)))
+
+
 @app.get("/health/blog")
 def health_blog(key: str = Depends(admin_key), tenant: str = "",
                 probe: int = 1) -> dict:

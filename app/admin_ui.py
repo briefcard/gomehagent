@@ -9776,6 +9776,16 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         f'{"live off" if not v else f"every {v}s"}</a>' for v in LIVE_EVERY)
     refresh = (f'<meta http-equiv="refresh" content="{live}">' if live else "")
 
+    # PARALLEL, OBSERVED. render.yaml asks for two worker instances; this
+    # reads the lease table and says how many actually did work. A pure read,
+    # like `report()` above, so it is safe under the live poll.
+    from . import worker as _wk
+    _seen = _wk.instances_seen(24)
+    workers_chip = (
+        f' <span class="sep"></span><a class="mut" href="/health/workers?key={_esc(key)}" '
+        f'title="{_esc(_seen["verdict"])}">workers: {_seen["instances"]} '
+        f'instance(s) did {_seen["jobs_run"]} job(s) in 24h</a>')
+
     lay = rep["layers"]
     # The controls lead the page (owner, 2026-08-21: a window nobody can
     # change from the page is a URL-editing exercise). The whole report is
@@ -9853,7 +9863,7 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
 {_every_note(every, "Every account's runs, calls and checks in one timeline. "
              "Each row names the client it belongs to.")}
 <div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
-  <span class="sep"></span>{livebar}</div>
+  <span class="sep"></span>{livebar}{workers_chip}</div>
 {strip}
 <details class="sec">
   <summary>How to read this page</summary>

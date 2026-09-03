@@ -217,6 +217,28 @@ def main() -> int:
            for w in sharded_regs),
        "a wrapper that loops itself is the job-level lease wearing a new name")
 
+    # ======================================================================
+    # PARALLEL IS OBSERVED, NOT ASSUMED
+    # ======================================================================
+    with db.SessionLocal() as s:
+        s.query(db.JobLease).delete()
+        s.add(db.JobLease(name="j1", last_holder="instance-A", last_run_at=db.utcnow()))
+        s.add(db.JobLease(name="j2", last_holder="instance-A", last_run_at=db.utcnow()))
+        s.add(db.JobLease(name="j3", last_holder="instance-B",
+                          last_run_at=db.utcnow() - dt.timedelta(hours=48)))
+        s.commit()
+    one = worker.instances_seen(24)
+    ck("one holder inside the window reads as one instance",
+       one["instances"] == 1 and one["verdict"] == "one instance did every job", str(one))
+    ck("  a holder outside the window is not counted",
+       "instance-B" not in one["holders"], str(one["holders"]))
+    with db.SessionLocal() as s:
+        s.add(db.JobLease(name="j4", last_holder="instance-B", last_run_at=db.utcnow()))
+        s.commit()
+    two = worker.instances_seen(24)
+    ck("two holders inside the window read as parallel — the pair",
+       two["instances"] == 2 and two["verdict"] == "parallel", str(two))
+
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0

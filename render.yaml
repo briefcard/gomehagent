@@ -16,6 +16,12 @@ services:
     name: assistant-worker
     runtime: python
     plan: starter
+    # Two instances, and safe to be two: every cron takes a lease (worker._safe)
+    # and the per-account jobs shard across holders (worker._each_tenant), so
+    # the second instance splits the work instead of repeating it. Committed
+    # here rather than set in the dashboard so the count survives a sync.
+    # Verify it is real, not assumed: /health/workers counts distinct holders.
+    numInstances: 2
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.worker
     envVars:

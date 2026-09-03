@@ -5659,6 +5659,15 @@ SABOTAGES = [
                "silently back to N=1",
     },
     {
+        "name": "parallel_is_counted_inside_the_window_only",
+        "file": "app/worker.py",
+        "find": "                .filter(db.JobLease.last_run_at.isnot(None),\n                        db.JobLease.last_run_at >= since).all())",
+        "replace": "                .filter(db.JobLease.last_run_at.isnot(None)).all())  # SABOTAGE",
+        "suites": ["test_job_lease.py"],
+        "why": "an instance that died last month still counts as a worker, and "
+               "'parallel' is reported for a platform running on one",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this
