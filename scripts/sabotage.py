@@ -5590,6 +5590,16 @@ SABOTAGES = [
                "learning gap shows none",
     },
     {
+        "name": "a_lead_reply_is_governed_as_a_lead_not_a_service_reply",
+        "file": "app/skill_pack.py",
+        "find": "    system_key=\"lead_responder\",\n    tier=3,\n    needs=(\"rules.banned_claims\",),",
+        "replace": "    system_key=\"service_desk\",  # SABOTAGE\n    tier=3,\n    needs=(\"rules.banned_claims\",),",
+        "suites": ["test_lead_reply.py"],
+        "why": "every first enquiry is drafted under the service desk's rung and "
+               "guidance, and lead_responder goes back to reading as a system "
+               "with no generator",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

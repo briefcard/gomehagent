@@ -516,6 +516,29 @@ register(Skill(
     produces="draft",
     run=_run_inbound_reply))
 
+# THE SAME REPLY, GOVERNED AS A LEAD. `replies.ROUTES` sends `sales_leads`
+# mail to `lead_responder` and everything else to `service_desk`, and the
+# responder files each run under the system it was called for — but a Skill
+# binds ONE system_key, so only service_desk had a skill and lead_responder
+# read as "no generator" to autonomy, readiness and the effectiveness map.
+# A first enquiry and a routine order question are the same drafting act with
+# different governance: different rung, different guidance, different measure.
+# One run function, two envelopes.
+register(Skill(
+    key="lead_reply",
+    name="Lead reply",
+    does="Answer a first enquiry from a prospect with a grounded, approved "
+         "draft — the same responder as a service reply, governed as a lead: "
+         "its own autonomy rung, its own guidance, its own edit rate.",
+    system_key="lead_responder",
+    tier=3,
+    needs=("rules.banned_claims",),
+    params=("utterance", "contact_id", "entity_key", "facts",
+            "draft_with_model", "thread_id"),
+    writes=False,
+    produces="draft",
+    run=_run_inbound_reply))
+
 
 # ---------------------------------------------------------------------------
 # 4 · Ad copy — the model writes it, code decides what it may write from

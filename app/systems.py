@@ -361,6 +361,12 @@ CATALOG = {
                   "next_steps"),
         workflow=dict(
             unit="one thread's reply",
+            # Bound 2026-09-03. `inbound_reply` had run this system's mail for
+            # weeks under `system_key="service_desk"` only; triage re-homed the
+            # RUNS here, but the substrate — autonomy, readiness, the
+            # effectiveness map — saw a system with no generator. Same run
+            # function, its own binding, so what governs it can be earned.
+            skill="lead_reply",
             artifact="gmail_draft",
             ship="approving sends the draft itself",
             # WHAT PERFORMS THE SHIP. Declared, because `scripts/register.py`

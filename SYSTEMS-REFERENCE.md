@@ -160,7 +160,9 @@ Answers an inbound enquiry with a grounded, approved draft.
 
 - **Connections:** `inbox`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `objection`, `claim`, `next_steps`
-- **Skill:** none — nothing generates for this system
+- **Skill** `lead_reply` — produces `draft`, tier 3, writes=False
+  - parameters: `utterance`, `contact_id`, `entity_key`, `facts`, `draft_with_model`, `thread_id`
+  - constitutive (no draft without it): none
 - **Planner:** none — plans are filed by hand or by another system
 - **Unit:** one thread's reply
 - **Artifact:** gmail_draft

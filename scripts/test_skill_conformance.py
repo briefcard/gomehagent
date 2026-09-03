@@ -45,7 +45,11 @@ _fail = []
 #: "Audience only applies in plural to segments in mass marketing."
 #: Listed rather than derived because it is a judgement about the WORK, and a
 #: new skill should have to state which kind it is rather than inherit one.
-ONE_TO_ONE = {"inbound_reply"}
+# A reply to one person has its reader by definition; the rule that a piece
+# written for everybody is written for nobody is about one-to-many work.
+# `lead_reply` is the same responder as `inbound_reply` under its own
+# governance envelope (2026-09-03), so it is one-to-one for the same reason.
+ONE_TO_ONE = {"inbound_reply", "lead_reply"}
 
 #: Draft/proposal skills that legitimately have no reader to name. An article
 #: is read by whoever searched, so its subject comes from the keyword rather
