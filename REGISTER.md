@@ -18,7 +18,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
-- Systems declaring a ship: **10**
+- Systems declaring a ship: **11**
 - Tables with writers: **58** (11 with more than one)
 
 **What this does NOT reach**, stated so the edges are not implied:
@@ -29,7 +29,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ---
 
-## EMPTY (17)
+## EMPTY (18)
 
 - approval kind 'privacy_request' — created in shopify_webhooks.py, no executor arm
 - approval kind 'skill_output' — created in skill.py, web.py, no executor arm
@@ -46,6 +46,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - function propose.py::from_gap — nothing references this name anywhere
 - function seo_tools.py::seo_context_block — nothing references this name anywhere
 - function systems.py::account_key — nothing references this name anywhere
+- system gbp_post — declared empty — nothing performs this ship (ship: publishes the post to the profile, on approval)
 - system reorder_engine — declared empty — nothing performs this ship (ship: marks it launch-ready — launching stays human)
 - system reports — declared empty — nothing performs this ship (ship: sends it to the client, on approval)
 
@@ -120,6 +121,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 | `campaign_email` | `approvals.apply_decision:push_campaign_to_esp` | yes |
 | `catalog_compliance` | `skill_pack._run_catalog_compliance` | yes |
 | `content_compliance` | `compliance.record_scan` | yes |
+| `gbp_post` | `` | **declared empty — nothing performs this ship** |
 | `lead_responder` | `approvals._execute:send_email` | yes |
 | `moment_email` | `planner.campaign_rollout` | yes |
 | `reorder_engine` | `` | **declared empty — nothing performs this ship** |
@@ -1193,7 +1195,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `strategy.py`
 
-- **`read`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `brief_demo.py`, `planner.py`, `test_console_frame.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_job_lease.py`, `test_render_smoke.py`, `test_results.py`, `test_seo_guard.py`, `test_strategy.py`, `web.py`
+- **`read`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `brief_demo.py`, `planner.py`, `test_console_frame.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_effectiveness.py`, `test_job_lease.py`, `test_render_smoke.py`, `test_results.py`, `test_seo_guard.py`, `test_strategy.py`, `web.py`
 
 ### `systems.py`
 
@@ -1219,6 +1221,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`drop_note`**(note_id) → `str`  ·  from `web.py`
 - **`edit_lesson_rows`**(tenant, key?, limit?) → `list[dict]`  ·  from `admin_ui.py`, `test_schema_tab.py`, `web.py`
 - **`edit_lessons`**(tenant, key, limit?) → `str`  ·  from `admin_ui.py`, `test_grounding.py`, `test_schema_tab.py`
+- **`effectiveness`**() → `list[dict]`  ·  from `gen_systems_reference.py`, `test_effectiveness.py`
 - **`entity_list`**(value) → `list[str]`  ·  from `skill.py`, `skill_pack.py`, `web.py`
 - **`externally_driven`**() → `frozenset`  ·  from `admin_ui.py`, `test_correlate.py`, `test_replies.py`, `test_worker_systems.py`, `worker.py`
 - **`feedback_block`**(tenant, key) → `str`  ·  from `admin_ui.py`, `test_render_smoke.py`, `test_schema_tab.py`, `test_systems.py`

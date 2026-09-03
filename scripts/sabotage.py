@@ -5570,6 +5570,26 @@ SABOTAGES = [
                "and a failing harvest for an hour",
     },
     {
+        "name": "a_system_with_no_effectiveness_row_is_reported_not_dropped",
+        "file": "app/systems.py",
+        "find": "    for key in sorted(CATALOG):\n        e = EFFECTIVENESS.get(key)",
+        "replace": "    for key in sorted(EFFECTIVENESS):  # SABOTAGE\n        e = EFFECTIVENESS.get(key)",
+        "suites": ["test_effectiveness.py"],
+        "why": "a new system ships with no measure and no learner and the map "
+               "simply does not list it — the table iterates itself instead of "
+               "the catalogue",
+    },
+    {
+        "name": "a_measure_that_cannot_be_imported_is_not_ok",
+        "file": "app/systems.py",
+        "find": "        return callable(getattr(importlib.import_module(f\"app.{mod}\"), fn, None))",
+        "replace": "        return True  # SABOTAGE",
+        "suites": ["test_effectiveness.py"],
+        "why": "a measurement that exists only as a string in a table is "
+               "rendered as wired, and the one document meant to show the "
+               "learning gap shows none",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

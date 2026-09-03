@@ -114,6 +114,94 @@ import re as _re
 #:
 #: A system absent from this table does not ship on its own. Absence is not
 #: permission — the standing rule this codebase keeps re-learning.
+#: THE LEARNING CONTRACT, one row per system. `measure` in the CATALOG is a
+#: sentence, and a sentence is read by nobody: every system declared how it
+#: would be measured and `wf["measure"]` was consumed nowhere. Meanwhile
+#: `edits.record` wrote draft-vs-sent deltas on every reply and no generator
+#: ever read one. Two halves of a contract in different places, again.
+#:
+#: So each system names the FUNCTION that computes its measure and the
+#: FUNCTION that consumes it before the next run — or names the gap. A blank
+#: is refused; a gap must be a sentence somebody can act on. `effectiveness()`
+#: resolves every name to a callable and is what the reference renders, so
+#: the map of what learns and what does not is computed, not remembered.
+EFFECTIVENESS = {
+    "blog": dict(
+        measure_fn="keywords.progress", learns_into="planner.blog_rollout",
+        how="position per keyword feeds the next plan and the refresh lane"),
+    "campaign_email": dict(
+        measure_fn="performance.sync", learns_into="",
+        gap="strategy.read turns provider stats into findings; the drafter "
+            "(_run_campaign_email) does not read strategy — only the FORM of "
+            "recent sends, for anti-repeat"),
+    "ad_creative": dict(
+        measure_fn="meta_ads.match", learns_into="",
+        gap="asset outcomes are joined per channel; ad_copy is shown no "
+            "winners or losers when it drafts the next batch"),
+    "catalog_compliance": dict(
+        measure_fn="", learns_into="",
+        gap="violations per template are in each filed report; nothing reads "
+            "consecutive reports to say whether they fall"),
+    "content_compliance": dict(
+        measure_fn="compliance.scan", learns_into="",
+        gap="'whether they fall' is the declared measure and is computed "
+            "across no two sweeps"),
+    "service_desk": dict(
+        measure_fn="assurance.edited_share", learns_into="",
+        gap="edits.record writes what the owner changed before sending; the "
+            "drafter never sees a single one of those edits"),
+    "lead_responder": dict(
+        measure_fn="assurance.edited_share", learns_into="",
+        gap="same delta as service_desk, same absence of a reader"),
+    "moment_email": dict(
+        measure_fn="", learns_into="planner.campaign_rollout",
+        gap="'consumed vs expired' is the declared measure; moments.consumed_for "
+            "counts per plan ref and nothing totals expiries against it"),
+    "reorder_engine": dict(
+        measure_fn="", learns_into="", gap="not built — no generator, no executor"),
+    "reports": dict(
+        measure_fn="client_report.assemble", learns_into="",
+        gap="the report IS the measurement and it exists; not built is the "
+            "rest — render, approval, send"),
+    "gbp_post": dict(
+        measure_fn="", learns_into="",
+        gap="not built; Google API access not applied for (INITIATIVE-gbp §0)"),
+}
+
+
+def _resolves(dotted: str) -> bool:
+    """`module.fn` under app/, and it is callable. Anything else is False."""
+    import importlib
+    if not dotted or "." not in dotted:
+        return False
+    mod, fn = dotted.rsplit(".", 1)
+    try:
+        return callable(getattr(importlib.import_module(f"app.{mod}"), fn, None))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def effectiveness() -> list[dict]:
+    """One row per CATALOG system: what measures it, what learns from it, or
+    the named gap. Iterates the CATALOG, not the table, so a system with no
+    row is a row that says so rather than a system that vanished."""
+    out = []
+    for key in sorted(CATALOG):
+        e = EFFECTIVENESS.get(key)
+        if e is None:
+            out.append({"system": key, "measure_fn": "", "measure_ok": False,
+                        "learns_into": "", "learns_ok": False,
+                        "gap": "NO EFFECTIVENESS ROW — undeclared", "how": ""})
+            continue
+        out.append({"system": key,
+                    "measure_fn": e.get("measure_fn", ""),
+                    "measure_ok": _resolves(e.get("measure_fn", "")),
+                    "learns_into": e.get("learns_into", ""),
+                    "learns_ok": _resolves(e.get("learns_into", "")),
+                    "gap": e.get("gap", ""), "how": e.get("how", "")})
+    return out
+
+
 AUTO_SHIPS = {
     "blog": True,
     "campaign_email": False,
@@ -479,6 +567,24 @@ CATALOG = {
             ship_by="approvals._execute:seo_new_article",
             measure="draft-vs-published delta; position change in "
                     "`keywords.progress`, against a control")),
+    "gbp_post": dict(
+        name="Google Business Profile post",
+        does="Posts to the client's Business Profile. The listing IS the "
+             "local ranking surface, so a post is a ranking act, not a notice.",
+        requires=("gbp",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "claim", "entity"),
+        workflow=dict(
+            unit="one post to one profile",
+            artifact="gbp_post",
+            ship="publishes the post to the profile, on approval",
+            # NOTHING PERFORMS IT, and declared here rather than left out so
+            # the register, readiness and the effectiveness map all see the
+            # gap by name. The critical path is not engineering: Google API
+            # access has not been applied for (INITIATIVE-gbp §0), and the
+            # `gbp` capability is False for every account until it is.
+            ship_by="",
+            measure="views and actions per post from the Performance API, "
+                    "once the capability is wired")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",

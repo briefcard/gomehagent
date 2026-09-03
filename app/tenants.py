@@ -21,7 +21,7 @@ from . import config, db
 # pipeline can refuse cleanly ("Ironside has no ESP") instead of failing deep
 # inside a publish call.
 CAPABILITIES = ("inbox", "commerce", "esp", "cms", "ads", "analytics",
-                "design", "crm")
+                "design", "crm", "gbp")
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +266,10 @@ def declared_capabilities(key: str) -> dict:
         "inbox": bool(t.gmail_alias),
         "commerce": bool(t.shopify_store),
         "esp": bool((t.esp or {}).get("provider")),
+        # Declared so `gbp_post` can gate on it and the register can see the
+        # system; nothing wires it yet — Google API access is not applied for
+        # (INITIATIVE-gbp §0), so this is False for every account until it is.
+        "gbp": False,
         "cms": bool((t.cms or {}).get("platform")),
         "ads": bool((t.ads or {}).get("meta_account_id")
                     or (t.ads or {}).get("google_customer_id")),

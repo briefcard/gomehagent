@@ -53,7 +53,7 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
 
 <!-- BEGIN GENERATED: the ten systems — scripts/gen_systems_reference.py -->
 
-## 2. The 10 systems
+## 2. The 11 systems
 
 **Generated — do not edit between the markers.** Every line below is read out of `systems.CATALOG`, `skill.REGISTRY`, `planner.PLANNERS` and `dossier.SCOPES` by `scripts/gen_systems_reference.py`. The prose sections around it are judgement and stay hand-written.
 
@@ -140,6 +140,20 @@ Checks the live site against the brand's own banned claims and reports the pages
 - **Measure:** violations per sweep, and whether they fall
 - **Brand-document scope:** identity, rules, context, gaps
 
+### `gbp_post` — Google Business Profile post
+
+Posts to the client's Business Profile. The listing IS the local ranking surface, so a post is a ranking act, not a notice.
+
+- **Connections:** `gbp`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `claim`, `entity`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one post to one profile
+- **Artifact:** gbp_post
+- **Ship:** publishes the post to the profile, on approval
+- **Measure:** views and actions per post from the Performance API, once the capability is wired
+- **Brand-document scope:** identity, rules, claims, context, catalogue, gaps
+
 ### `lead_responder` — Lead responder
 
 Answers an inbound enquiry with a grounded, approved draft.
@@ -211,6 +225,24 @@ Handles routine inbound support with a drafted, checked reply.
 - **Ship:** approving sends the draft itself
 - **Measure:** edits.py delta; sent-as-is rate
 - **Brand-document scope:** identity, rules, situations, objections, context, lookups, catalogue, gaps
+
+### 2c. The effectiveness map — what measures each system, and what learns from it
+
+Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effectiveness()`. A blank cell is a named gap, never an omission; `edits.record` wrote draft-vs-sent deltas on every reply for weeks and no generator read one, which is the defect this table exists to make visible.
+
+| system | measured by | learns into | gap |
+|---|---|---|---|
+| `ad_creative` | `meta_ads.match` | — | asset outcomes are joined per channel; ad_copy is shown no winners or losers when it drafts the next batch |
+| `blog` | `keywords.progress` | `planner.blog_rollout` | position per keyword feeds the next plan and the refresh lane |
+| `campaign_email` | `performance.sync` | — | strategy.read turns provider stats into findings; the drafter (_run_campaign_email) does not read strategy — only the FORM of recent sends, for anti-repeat |
+| `catalog_compliance` | — | — | violations per template are in each filed report; nothing reads consecutive reports to say whether they fall |
+| `content_compliance` | `compliance.scan` | — | 'whether they fall' is the declared measure and is computed across no two sweeps |
+| `gbp_post` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0) |
+| `lead_responder` | `assurance.edited_share` | — | same delta as service_desk, same absence of a reader |
+| `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |
+| `reorder_engine` | — | — | not built — no generator, no executor |
+| `reports` | `client_report.assemble` | — | the report IS the measurement and it exists; not built is the rest — render, approval, send |
+| `service_desk` | `assurance.edited_share` | — | edits.record writes what the owner changed before sending; the drafter never sees a single one of those edits |
 <!-- END GENERATED -->
 
 ## 2a. What the declarations do not carry

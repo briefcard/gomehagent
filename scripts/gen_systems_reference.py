@@ -116,6 +116,20 @@ def body() -> str:
         out.append(f"- **Brand-document scope:** "
                    + ", ".join(dossier.SCOPES[key]))
         out.append("")
+    out += ["### 2c. The effectiveness map — what measures each system, and "
+            "what learns from it", "",
+            "Read out of `systems.EFFECTIVENESS` and resolved to callables by "
+            "`systems.effectiveness()`. A blank cell is a named gap, never an "
+            "omission; `edits.record` wrote draft-vs-sent deltas on every "
+            "reply for weeks and no generator read one, which is the defect "
+            "this table exists to make visible.", "",
+            "| system | measured by | learns into | gap |",
+            "|---|---|---|---|"]
+    for r in systems.effectiveness():
+        mf = f"`{r['measure_fn']}`" + ("" if r["measure_ok"] else " ✗") if r["measure_fn"] else "—"
+        li = f"`{r['learns_into']}`" + ("" if r["learns_ok"] else " ✗") if r["learns_into"] else "—"
+        out.append(f"| `{r['system']}` | {mf} | {li} | {r['gap'] or r['how']} |")
+    out.append("")
     return "\n".join(out)
 
 

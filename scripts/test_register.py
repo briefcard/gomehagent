@@ -52,7 +52,12 @@ KNOWN = {
         "function seo_tools.py::seo_context_block \u2014 nothing references this name anywhere",
         "function systems.py::account_key \u2014 nothing references this name anywhere",
         "system reorder_engine \u2014 declared empty \u2014 nothing performs this ship (ship: marks it launch-ready \u2014 launching stays human)",
-        "system reports \u2014 declared empty \u2014 nothing performs this ship (ship: sends it to the client, on approval)"
+        "system reports \u2014 declared empty \u2014 nothing performs this ship (ship: sends it to the client, on approval)",
+        # Declared 2026-09-03 so the register, readiness and the effectiveness
+        # map all see it by name. Not built: Google API access has not been
+        # applied for, and the `gbp` capability is False for every account
+        # until it is (INITIATIVE-gbp §0).
+        "system gbp_post \u2014 declared empty \u2014 nothing performs this ship (ship: publishes the post to the profile, on approval)"
     ],
     "duplicate": [
         "table ArtifactVersion has 2 writers and no declared owner: skill_pack.py, web.py",
