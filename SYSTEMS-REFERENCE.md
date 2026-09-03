@@ -53,7 +53,7 @@ The mail path bypasses skills entirely (`triage.py` drafts in its own loop).
 
 <!-- BEGIN GENERATED: the ten systems — scripts/gen_systems_reference.py -->
 
-## 2. The 11 systems
+## 2. The 12 systems
 
 **Generated — do not edit between the markers.** Every line below is read out of `systems.CATALOG`, `skill.REGISTRY`, `planner.PLANNERS` and `dossier.SCOPES` by `scripts/gen_systems_reference.py`. The prose sections around it are judgement and stay hand-written.
 
@@ -139,6 +139,20 @@ Checks the live site against the brand's own banned claims and reports the pages
 - **Ship:** files a dated report — nothing is rewritten and nothing is sent; the report IS the deliverable
 - **Measure:** violations per sweep, and whether they fall
 - **Brand-document scope:** identity, rules, context, gaps
+
+### `gbp_listing` — Google Business Profile listing
+
+Keeps the listing complete and current — categories, description, hours, attributes, services, photos, Q&A, review responses. The listing is the local ranking surface; a post on a thin listing ranks a thin listing.
+
+- **Connections:** `gbp`
+- **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `claim`, `entity`
+- **Skill:** none — nothing generates for this system
+- **Planner:** none — plans are filed by hand or by another system
+- **Unit:** one sweep of one profile
+- **Artifact:** report
+- **Ship:** files a dated completeness report; each proposed fix goes through approval before it is written to the profile
+- **Measure:** completeness score per profile and whether it rises sweep over sweep; share of reviews answered inside the window
+- **Brand-document scope:** identity, rules, claims, context, catalogue, gaps
 
 ### `gbp_post` — Google Business Profile post
 
@@ -245,6 +259,7 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `campaign_email` | `performance.sync` | — | strategy.read turns provider stats into findings; the drafter (_run_campaign_email) does not read strategy — only the FORM of recent sends, for anti-repeat |
 | `catalog_compliance` | — | — | violations per template are in each filed report; nothing reads consecutive reports to say whether they fall |
 | `content_compliance` | `compliance.scan` | — | 'whether they fall' is the declared measure and is computed across no two sweeps |
+| `gbp_listing` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0). When built, the sweep IS the measure and the approved fixes are what it learns into — the catalog_compliance shape |
 | `gbp_post` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0) |
 | `lead_responder` | `assurance.edited_share` | — | same delta as service_desk, same absence of a reader |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |

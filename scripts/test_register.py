@@ -57,7 +57,10 @@ KNOWN = {
         # map all see it by name. Not built: Google API access has not been
         # applied for, and the `gbp` capability is False for every account
         # until it is (INITIATIVE-gbp §0).
-        "system gbp_post \u2014 declared empty \u2014 nothing performs this ship (ship: publishes the post to the profile, on approval)"
+        "system gbp_post \u2014 declared empty \u2014 nothing performs this ship (ship: publishes the post to the profile, on approval)",
+        # The other half of GBP, declared 2026-09-03 when the owner asked about
+        # optimising the listings themselves. Same gate, same queue.
+        "system gbp_listing \u2014 declared empty \u2014 nothing performs this ship (ship: files a dated completeness report; each proposed fix goes th)"
     ],
     "duplicate": [
         "table ArtifactVersion has 2 writers and no declared owner: skill_pack.py, web.py",

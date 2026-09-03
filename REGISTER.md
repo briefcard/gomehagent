@@ -18,7 +18,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - Approval kinds: **12** (9 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
-- Systems declaring a ship: **11**
+- Systems declaring a ship: **12**
 - Tables with writers: **58** (11 with more than one)
 
 **What this does NOT reach**, stated so the edges are not implied:
@@ -29,7 +29,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ---
 
-## EMPTY (16)
+## EMPTY (17)
 
 - approval kind 'privacy_request' — created in shopify_webhooks.py, no executor arm
 - approval kind 'skill_output' — created in skill.py, web.py, no executor arm
@@ -46,6 +46,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 - function propose.py::from_gap — nothing references this name anywhere
 - function seo_tools.py::seo_context_block — nothing references this name anywhere
 - function systems.py::account_key — nothing references this name anywhere
+- system gbp_listing — declared empty — nothing performs this ship (ship: files a dated completeness report; each proposed fix goes th)
 - system gbp_post — declared empty — nothing performs this ship (ship: publishes the post to the profile, on approval)
 
 ---
@@ -119,6 +120,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 | `campaign_email` | `approvals.apply_decision:push_campaign_to_esp` | yes |
 | `catalog_compliance` | `skill_pack._run_catalog_compliance` | yes |
 | `content_compliance` | `compliance.record_scan` | yes |
+| `gbp_listing` | `` | **declared empty — nothing performs this ship** |
 | `gbp_post` | `` | **declared empty — nothing performs this ship** |
 | `lead_responder` | `approvals._execute:send_email` | yes |
 | `moment_email` | `planner.campaign_rollout` | yes |

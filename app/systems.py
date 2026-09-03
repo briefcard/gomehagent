@@ -168,6 +168,11 @@ EFFECTIVENESS = {
     "gbp_post": dict(
         measure_fn="", learns_into="",
         gap="not built; Google API access not applied for (INITIATIVE-gbp §0)"),
+    "gbp_listing": dict(
+        measure_fn="", learns_into="",
+        gap="not built; Google API access not applied for (INITIATIVE-gbp §0). "
+            "When built, the sweep IS the measure and the approved fixes are "
+            "what it learns into — the catalog_compliance shape"),
 }
 
 
@@ -593,6 +598,27 @@ CATALOG = {
             ship_by="",
             measure="views and actions per post from the Performance API, "
                     "once the capability is wired")),
+    "gbp_listing": dict(
+        name="Google Business Profile listing",
+        does="Keeps the listing complete and current — categories, description, "
+             "hours, attributes, services, photos, Q&A, review responses. The "
+             "listing is the local ranking surface; a post on a thin listing "
+             "ranks a thin listing.",
+        requires=("gbp",), requires_any=(), needs_kb=True,
+        kb_needs=("tone", "banned_claims", "claim", "entity"),
+        workflow=dict(
+            unit="one sweep of one profile",
+            artifact="report",
+            ship="files a dated completeness report; each proposed fix goes "
+                 "through approval before it is written to the profile",
+            # NOTHING PERFORMS IT. The second half of GBP, declared the day the
+            # owner asked "what about making sure all the listings are
+            # optimized?" (2026-09-03) — `gbp_post` alone was the post without
+            # the surface it posts onto. Same shape as catalog_compliance: sweep,
+            # report, fixes via approval. Gated on the same Google API access.
+            ship_by="",
+            measure="completeness score per profile and whether it rises sweep "
+                    "over sweep; share of reviews answered inside the window")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",

@@ -198,6 +198,31 @@ and `gbp_post` (§4). The audit skill is the one to build first.
 
 ---
 
+## §4c Two systems, not one (owner, 2026-09-03)
+
+"So far I only see a system for posting on GMB, what about making sure that
+all the listings are optimized?" — the post is one act; the listing is the
+surface it lands on, and §4b already says the listing is the ranking surface.
+So GBP is two systems in `systems.CATALOG`, both gated on the `gbp` capability:
+
+| system | unit | shape |
+|---|---|---|
+| `gbp_post` | one post to one profile | campaign_email: draft → approval → publish |
+| `gbp_listing` | one sweep of one profile | catalog_compliance: sweep → completeness report → fixes via approval |
+
+`gbp_listing`'s rubric, when built: primary + secondary categories set;
+description present, within limits, and clean against the ban list; hours
+including special hours; attributes filled where the category allows; services
+listed from the KB's entities; photo count and recency; Q&A seeded from the
+KB's objections; reviews answered inside the window, in the brand voice. Its
+measure is the completeness score rising sweep over sweep and the answered
+share of reviews — computed, so the effectiveness map can hold it.
+
+Both are declared empty in the register's known list until Google API access
+exists (§0). Declaring them now is what lets readiness, the register and the
+effectiveness map show the gap by name instead of the initiative doc being the
+only place GBP exists.
+
 ## §5 What a post can be — derived AND native
 
 **CORRECTED 2026-08-29 after the owner pushed back.** The first version of this
