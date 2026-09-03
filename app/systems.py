@@ -745,6 +745,13 @@ CATALOG = {
             artifact="report_document",
             ship="sends it to the client, on approval",
             ship_by="approvals.apply_decision:send_report",
+            cadence=dict(horizon_days=14, reports_weekly=1),
+            plan_fields=(
+                # The one thing the planner cannot read from data. Required,
+                # so an unfilled plan says so rather than sending nowhere.
+                dict(key="to", label="Send to (client address)", required=True),
+                dict(key="days", label="Window (days)", required=False),
+            ),
             measure="none — the report IS the measurement")),
 }
 

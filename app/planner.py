@@ -134,6 +134,10 @@ KNOBS = {
     "articles_monthly": dict(
         label="articles / month", cap=30,
         why="New articles the blog planner may file per calendar month."),
+    "reports_weekly": dict(
+        label="reports / week", cap=2,
+        why="How many client reports the reports planner may file per ISO "
+            "week. One is the number; two is a mid-week and a Friday."),
     "refreshes_monthly": dict(
         label="refreshes / month", cap=12,
         why="Rewrites of pages already published. Its OWN budget, because "
@@ -168,6 +172,9 @@ def knobs_for(sysrow) -> list[dict]:
         live = cadence_for(sysrow)
         defaults = {**defaults, "segment_rest_days": SEGMENT_REST_DAYS}
         live = {**live, "segment_rest_days": rest_days_for(sysrow)}
+    elif fn is report_rollout:
+        defaults = REPORT_CADENCE
+        live = report_cadence_for(sysrow)
     else:
         return []
     return [{"key": k, "value": live.get(k, v), "default": v,
@@ -934,10 +941,64 @@ def reorder_rollout(sysrow) -> dict:
     return {"proposed": proposed, "refreshed": refreshed, "refusals": refusals}
 
 
+REPORT_CADENCE = {"horizon_days": 14, "reports_weekly": 1}
+MAX_REPORTS_WEEKLY = 2
+
+
+def report_cadence_for(sysrow) -> dict:
+    """The reports planner's cadence — the blog pattern, not the campaign one:
+    its own defaults and caps, so `knobs_for` renders the knob it reads."""
+    return _cadence(sysrow, REPORT_CADENCE,
+                    {"horizon_days": MAX_HORIZON_DAYS,
+                     "reports_weekly": MAX_REPORTS_WEEKLY})
+
+
+def report_rollout(sysrow) -> dict:
+    """One client report per ISO week, across the horizon.
+
+    The unit is the week and the ref names it (`report:<tenant>:<year>-W<nn>`),
+    so `open_plan`'s idempotence per ref is the whole calendar: a second pass
+    refreshes the week already filed and creates nothing. `to` is a required
+    plan field the planner cannot read from data, so it is left absent and
+    `plan_complete` names it — the owner fills it once on the plan.
+    """
+    import datetime as _dt
+    from . import systems
+    cad = report_cadence_for(sysrow)
+    today = db.utcnow().date()
+    horizon_end = today + _dt.timedelta(days=cad["horizon_days"])
+    per_week = int(cad.get("reports_weekly", 1) or 1)
+    proposed = refreshed = 0
+    refusals: list[str] = []
+    d = today
+    seen_weeks: set[str] = set()
+    while d <= horizon_end:
+        y, w, _ = d.isocalendar()
+        week = f"{y}-W{w:02d}"
+        if week not in seen_weeks:
+            seen_weeks.add(week)
+            for i in range(per_week):
+                ref = f"report:{sysrow.tenant}:{week}" + (f":{i + 1}" if i else "")
+                out = systems.open_plan(
+                    sysrow.tenant, sysrow.key, ref=ref,
+                    plan={"days": 7},
+                    planned_for=d.isoformat(), trigger="planner")
+                if out.get("error"):
+                    refusals.append(out["error"])
+                elif out.get("created"):
+                    proposed += 1
+                else:
+                    refreshed += 1
+        d += _dt.timedelta(days=7)
+    return {"proposed": proposed, "refreshed": refreshed, "refusals": refusals,
+            "weeks": sorted(seen_weeks)}
+
+
 PLANNERS = {
     "campaign_email": campaign_rollout,
     "blog": blog_rollout,
     "reorder_engine": reorder_rollout,
+    "reports": report_rollout,
 }
 
 

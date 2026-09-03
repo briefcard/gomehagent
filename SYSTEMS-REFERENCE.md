@@ -225,7 +225,9 @@ The weekly number, assembled from whatever is connected.
 - **Skill** `weekly_report` — produces `report`, tier 1, writes=True
   - parameters: `days`, `to`
   - constitutive (no draft without it): none
-- **Planner:** none — plans are filed by hand or by another system
+- **Planner:** `report_rollout`
+- **Cadence knobs:** `horizon_days`=14, `reports_weekly`=1
+- **Plan fields** (the plan UI; `*` required): `to`*, `days`
 - **Unit:** the weekly number, one report
 - **Artifact:** report_document
 - **Ship:** sends it to the client, on approval

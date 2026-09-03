@@ -5716,6 +5716,27 @@ SABOTAGES = [
                "ever",
     },
     {
+        "name": "a_report_plan_names_its_week_in_the_ref",
+        "file": "app/planner.py",
+        # Walking by day instead of week was MISSED: the ref still names the
+        # ISO week and `open_plan` is idempotent per ref, so the calendar held
+        # both ways. The ref IS the calendar, so the ref is what is sabotaged.
+        "find": "                ref = f\"report:{sysrow.tenant}:{week}\" + (f\":{i + 1}\" if i else \"\")",
+        "replace": "                ref = f\"report:{sysrow.tenant}:{d.isoformat()}\" + (f\":{i + 1}\" if i else \"\")  # SABOTAGE",
+        "suites": ["test_report_planner.py"],
+        "why": "the plan is keyed on a date, so the next pass on a different "
+               "weekday files a second report for the same week",
+    },
+    {
+        "name": "the_weekly_knob_binds_the_reports_planner",
+        "file": "app/planner.py",
+        "find": "            for i in range(per_week):",
+        "replace": "            for i in range(per_week + 1):  # SABOTAGE",
+        "suites": ["test_report_planner.py"],
+        "why": "the owner sets one report a week and gets two — the knob "
+               "renders, saves and changes nothing",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this
