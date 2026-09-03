@@ -1119,7 +1119,7 @@ def keyword_harvest_sharded() -> dict:
 def learning_sharded() -> dict:
     """Weekly: pre-send edits → proposed standing guidance, per account."""
     from . import learning
-    return _each_tenant("learning sweep", learning.propose_for)
+    return _each_tenant("learning sweep", learning.sweep_for)
 
 
 def performance_sharded() -> dict:

@@ -138,12 +138,48 @@ def main() -> int:
        eff and eff[0]["rule"].startswith("Never use exclamation") and eff[0]["n_before"] + eff[0]["n_after"] >= 1,
        str(eff)[:200])
 
+    # ---- retirement: a rule that changed nothing is archived ---------------
+    # The accepted rule was noted "now". Give it three sends before and three
+    # after; first the after-side is BETTER (kept), then worse sends arrive
+    # and the same judge retires it. One rule, two verdicts — the pair.
+    with db.SessionLocal() as s:
+        note_at = max(n.created_at for n in systems.notes("baci", "service_desk")
+                      if "[learned from" in (n.content or ""))
+    note_at = db.as_utc(note_at)
+    for sim, d in ((0.6, 3), (0.7, 2), (0.65, 1)):
+        _approval(row, sim, note_at - dt.timedelta(days=d))
+    for sim, h in ((0.95, 1), (0.96, 2), (0.97, 3)):
+        _approval(row, sim, note_at + dt.timedelta(hours=h))
+    kept = learning.retire_for("baci")
+    ck("a rule after which the delta fell is kept",
+       kept["kept"] == 1 and kept["retired"] == 0
+       and "exclamation marks" in systems.guidance_block("baci", "service_desk").lower(),
+       str(kept["rules"]))
+    for sim, h in ((0.4, 4), (0.45, 5), (0.5, 6), (0.42, 7)):
+        _approval(row, sim, note_at + dt.timedelta(hours=h))
+    gone = learning.retire_for("baci")
+    ck("the same rule, once the delta rose after it, is retired",
+       gone["retired"] == 1 and gone["kept"] == 0
+       and "exclamation marks" not in systems.guidance_block("baci", "service_desk").lower(),
+       str(gone["rules"]))
+    ck("  and it says which and why",
+       gone["rules"] and "did not fall" in gone["rules"][0]["verdict"], str(gone["rules"])[:120])
+
+    # ---- a retired move is not re-proposed from the same edits --------------
+    llm.ask = lambda purpose, prompt, **k: llm.Reply(text="Never use exclamation marks in a reply.", ok=True)
+    again = learning.propose_for("baci")
+    llm.ask = real_ask
+    ck("the retired move is inside its cooldown and is not proposed again",
+       again["proposed"] == 0, str(again))
+
     # ---- wired weekly, sharded -----------------------------------------------
     src = open(os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "app", "worker.py")).read()
     ck("the sweep is registered weekly and sharded per account",
        bool(re.search(r'_safe\(learning_sharded, "learning sweep", sharded=True\)', src))
        and 'day_of_week="sun"' in src)
+    ck("  and it judges what stands before proposing what recurs",
+       "learning.sweep_for" in src, "retire, then propose")
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

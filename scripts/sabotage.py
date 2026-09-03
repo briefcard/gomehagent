@@ -5696,6 +5696,26 @@ SABOTAGES = [
                "approval queue fills with things the owner already decided",
     },
     {
+        "name": "a_rule_that_shrank_the_delta_is_kept",
+        "file": "app/learning.py",
+        "find": "            if e[\"improved\"] is False:\n                move = content.split(_MARK)[1].split(\":\")[-1].strip(\" ]\")",
+        "replace": "            if True:  # SABOTAGE\n                move = content.split(_MARK)[1].split(\":\")[-1].strip(\" ]\")",
+        "suites": ["test_learning.py"],
+        "why": "every learned rule is archived the first Sunday it is judged, "
+               "whether or not it worked — the drafter never keeps what it "
+               "learned",
+    },
+    {
+        "name": "a_retired_move_waits_out_its_cooldown",
+        "file": "app/learning.py",
+        "find": "    if _retired_recently(tenant, key, move):\n        return True",
+        "replace": "    if False:  # SABOTAGE\n        return True",
+        "suites": ["test_learning.py"],
+        "why": "the Sunday after a retirement re-proposes the same sentence "
+               "from the same edits, and the owner approves and retires it for "
+               "ever",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

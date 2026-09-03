@@ -32,6 +32,15 @@ MIN_RECURRENCE = 3
 #: Sends read per system per proposal pass.
 LOOKBACK_DAYS = 30
 
+#: A rule is judged only once both sides of it have this many sends. Three
+#: after and one before is not evidence the rule changed anything.
+MIN_EFFECT_N = 3
+
+#: A retired move is not proposed again inside this window. Without it the
+#: Sunday after a retirement re-proposes the same habit from the same edits,
+#: and the owner approves and retires the same sentence for ever.
+RETIRE_COOLDOWN_DAYS = 60
+
 _GREETING = re.compile(r"^\s*[-+]\s*(hi|hello|dear|hey)\b", re.I)
 _SIGNOFF = re.compile(r"^\s*[-+]\s*(best|regards|kind regards|thanks|thank you|cheers|warmly)\b", re.I)
 _MARK = "[learned from"
@@ -78,9 +87,43 @@ def _recurring(runs: list) -> dict[str, list]:
     return {m: rs for m, rs in by.items() if len({r.id for r in rs}) >= MIN_RECURRENCE}
 
 
-def _already(tenant: str, key: str, move: str) -> bool:
-    """A pending proposal or an accepted rule for this move already exists."""
+def _retired_recently(tenant: str, key: str, move: str) -> bool:
+    """A learned rule for this move was retired inside the cooldown.
+
+    Read off the archived note itself — `retire_for` stamps `[retired <date>]`
+    on the content before archiving — rather than a Setting marker. `Setting`
+    already had eleven uncoordinated writers and the register refused a
+    twelfth; the note is the record of the rule, so it is the record of its
+    retirement too.
+    """
+    import datetime as _dt
     from . import systems
+    # By SCOPE, not tenant: `systems.note` files under `thread_key(tenant,
+    # key)` and leaves `Memory.tenant` empty — a tenant filter found nothing
+    # and the cooldown never held. The probe that showed it is in the commit.
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Memory)
+                .filter(db.Memory.scope == systems.thread_key(tenant, key),
+                        db.Memory.status == "archived",
+                        db.Memory.content.contains(f": {move}]"),
+                        db.Memory.content.contains("[retired ")).all())
+        stamps = [(r.content or "").split("[retired ", 1)[1].split("]", 1)[0]
+                  for r in rows]
+    for st in stamps:
+        try:
+            when = _dt.datetime.fromisoformat(st.strip())
+        except ValueError:
+            continue
+        if (db.utcnow() - db.as_utc(when)).days < RETIRE_COOLDOWN_DAYS:
+            return True
+    return False
+
+
+def _already(tenant: str, key: str, move: str) -> bool:
+    """A pending proposal, an accepted rule, or a recent retirement exists."""
+    from . import systems
+    if _retired_recently(tenant, key, move):
+        return True
     if any(_MARK in (n.content or "") and f": {move}]" in (n.content or "")
            for n in systems.notes(tenant, key)):
         return True
@@ -197,3 +240,57 @@ def effect(tenant: str, key: str, days: int = 14) -> list[dict]:
                     "before": b, "after": a, "n_before": len(before), "n_after": len(after),
                     "improved": (a < b) if (a is not None and b is not None) else None})
     return out
+
+
+def retire_for(tenant: str) -> dict:
+    """Archive learned rules that changed nothing. THE LOOP'S OTHER HALF.
+
+    A rule is judged by `effect`: the median change in the window after it
+    against the window before, with MIN_EFFECT_N sends on each side. One that
+    did not shrink the delta is archived — `systems.drop_note`, reversible —
+    and its move enters a cooldown so the next sweep does not re-propose the
+    same sentence from the same edits. Nothing here touches a rule a person
+    wrote by hand: only notes carrying the learned marker are candidates.
+    """
+    from . import replies, systems
+    out: dict = {"tenant": tenant, "retired": 0, "kept": 0, "unjudged": 0, "rules": []}
+    for key in sorted(set(replies.ROUTES.values()) & set(systems.CATALOG)):
+        if not systems.find(tenant, key):
+            continue
+        judged = {e["rule"]: e for e in effect(tenant, key, days=14)}
+        for n in systems.notes(tenant, key):
+            content = n.content or ""
+            if _MARK not in content:
+                continue
+            rule = content.split(_MARK)[0].strip()
+            e = judged.get(rule)
+            if not e or e["n_before"] < MIN_EFFECT_N or e["n_after"] < MIN_EFFECT_N:
+                out["unjudged"] += 1
+                continue
+            if e["improved"] is False:
+                move = content.split(_MARK)[1].split(":")[-1].strip(" ]")
+                # Stamp the retirement ON the note, then archive it: the note
+                # is the record of the rule and now of its retirement, and
+                # `_retired_recently` reads the stamp back for the cooldown.
+                with db.SessionLocal() as s:
+                    r = s.get(db.Memory, n.id)
+                    if r:
+                        r.content = f"{content} [retired {db.utcnow().isoformat()}]"
+                        s.commit()
+                systems.drop_note(n.id)
+                out["retired"] += 1
+                out["rules"].append({"system": key, "rule": rule,
+                                     "before": e["before"], "after": e["after"],
+                                     "verdict": "retired — the delta did not fall"})
+            else:
+                out["kept"] += 1
+                out["rules"].append({"system": key, "rule": rule,
+                                     "before": e["before"], "after": e["after"],
+                                     "verdict": "kept — the delta fell"})
+    return out
+
+
+def sweep_for(tenant: str) -> dict:
+    """The weekly unit: judge what stands, then propose what recurs."""
+    return {"retire": retire_for(tenant), "propose": propose_for(tenant)}
+
