@@ -190,12 +190,16 @@ Triggers replenishment prompts off purchase cadence.
 
 - **Connections:** `commerce`, `esp`
 - **Knowledge (`kb_needs`):** `entity`
-- **Skill:** none — nothing generates for this system
-- **Planner:** none — plans are filed by hand or by another system
+- **Skill** `reorder_prompt` — produces `draft`, tier 3, writes=True
+  - parameters: `revision_notes`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `segment`
+  - constitutive (no draft without it): none
+- **Planner:** `reorder_rollout`
+- **Cadence knobs:** `horizon_days`=30, `per_segment_monthly`=1, `segment_rest_days`=6
+- **Plan fields** (the plan UI; `*` required): `audience_key`* (audience), `goal`, `subject`, `entity_key` (entity), `entity_keys` (entity_list)
 - **Unit:** one replenishment prompt per cohort
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human
-- **Measure:** provider stats, once `reports` exists
+- **Measure:** provider stats per send; reorders in the 14 days after, once commerce events are joined to sends
 - **Brand-document scope:** identity, rules, context, catalogue, gaps
 
 ### `reports` — Reports
@@ -244,7 +248,7 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `gbp_post` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0) |
 | `lead_responder` | `assurance.edited_share` | — | same delta as service_desk, same absence of a reader |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |
-| `reorder_engine` | — | — | not built — no generator, no executor |
+| `reorder_engine` | `performance.sync` | — | provider stats sync per campaign; nothing reads whether a reorder prompt produced a reorder back into the cadence |
 | `reports` | `client_report.assemble` | — | sent on approval; the client's reply — the figures they send back — is not yet read into the next report |
 | `service_desk` | `assurance.edited_share` | — | edits.record writes what the owner changed before sending; the drafter never sees a single one of those edits |
 <!-- END GENERATED -->

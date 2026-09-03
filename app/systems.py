@@ -158,7 +158,9 @@ EFFECTIVENESS = {
         gap="'consumed vs expired' is the declared measure; moments.consumed_for "
             "counts per plan ref and nothing totals expiries against it"),
     "reorder_engine": dict(
-        measure_fn="", learns_into="", gap="not built — no generator, no executor"),
+        measure_fn="performance.sync", learns_into="",
+        gap="provider stats sync per campaign; nothing reads whether a reorder "
+            "prompt produced a reorder back into the cadence"),
     "reports": dict(
         measure_fn="client_report.assemble", learns_into="",
         gap="sent on approval; the client's reply — the figures they send "
@@ -598,13 +600,28 @@ CATALOG = {
         kb_needs=("entity",),
         workflow=dict(
             unit="one replenishment prompt per cohort",
+            skill="reorder_prompt",
             artifact="esp_campaign",
             ship="marks it launch-ready — launching stays human",
-            # NOTHING PERFORMS IT. Declared empty rather than left blank: this
-            # system has no generator, so there is no draft for a ship to act
-            # on, and the register says so instead of implying a mechanism.
-            ship_by="",
-            measure="provider stats, once `reports` exists")),
+            # The campaign executor, because a reorder prompt IS a campaign
+            # email whose segment is fixed; `reorder_prompt` delegates the
+            # run and files under this system.
+            ship_by="approvals.apply_decision:push_campaign_to_esp",
+            cadence=dict(horizon_days=30, per_segment_monthly=1,
+                         segment_rest_days=6),
+            plan_fields=(
+                dict(key="audience_key", label="Written for", required=True,
+                     kind="audience"),
+                dict(key="goal", label="Angle / concept (optional)",
+                     required=False),
+                dict(key="subject", label="Subject line", required=False),
+                dict(key="entity_key", label="Featured entity", required=False,
+                     kind="entity"),
+                dict(key="entity_keys", label="Also about (comma-separated)",
+                     required=False, kind="entity_list"),
+            ),
+            measure="provider stats per send; reorders in the 14 days after, "
+                    "once commerce events are joined to sends")),
     "service_desk": dict(
         name="Service desk",
         does="Handles routine inbound support with a drafted, checked reply.",

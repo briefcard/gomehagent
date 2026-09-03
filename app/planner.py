@@ -886,9 +886,58 @@ def _blog_refreshes(sysrow, cad: dict, horizon_end: dt.date) -> dict:
     return {"filed": filed, "reasons": reasons, "refusals": refusals}
 
 
+def reorder_rollout(sysrow) -> dict:
+    """One replenishment prompt a month, against the cadence knobs.
+
+    The campaign planner walks every high-value segment by neglect; this one
+    walks one segment, because the system has one. A business model with no
+    `reorder_due` segment refuses by name — reorder prompts are for
+    consumables, and filing one for a venue would be a plan nothing can run.
+    """
+    import datetime as _dt
+    from . import segments, systems
+    cad = cadence_for(sysrow)
+    got = segments.for_tenant(sysrow.tenant)
+    if not got.get("ok"):
+        return {"proposed": 0, "refreshed": 0,
+                "refusals": [got.get("error", "segments unavailable")]}
+    seg = next((x for x in got.get("segments", []) if x["key"] == "reorder_due"), None)
+    if seg is None:
+        return {"proposed": 0, "refreshed": 0,
+                "refusals": ["this business model has no reorder_due segment — "
+                             "reorder prompts are for consumables"]}
+    prefix = f"reorder:{sysrow.tenant}:reorder_due:"
+    have = _existing_by_month(sysrow, prefix)
+    today = db.utcnow().date()
+    d, horizon_end = today, today + _dt.timedelta(days=cad["horizon_days"])
+    proposed = refreshed = 0
+    refusals: list[str] = []
+    while d <= horizon_end:
+        if have.get(_month(d), 0) < cad["per_segment_monthly"]:
+            out = systems.open_plan(
+                sysrow.tenant, sysrow.key, ref=prefix + d.isoformat(),
+                # No `segment` on the plan: the system's plan_fields do not
+                # carry one because the segment is not a choice, and
+                # `open_plan` refuses a field the system does not declare —
+                # it did, on the first run. `_run_reorder` forces it.
+                plan={"goal": seg.get("angle", ""),
+                      "audience_key": _reader_for(sysrow, "reorder_due")},
+                planned_for=d.isoformat(), trigger="planner")
+            if out.get("error"):
+                refusals.append(out["error"])
+            elif out.get("created"):
+                proposed += 1
+                have[_month(d)] = have.get(_month(d), 0) + 1
+            else:
+                refreshed += 1
+        d = _next_month(d)
+    return {"proposed": proposed, "refreshed": refreshed, "refusals": refusals}
+
+
 PLANNERS = {
     "campaign_email": campaign_rollout,
     "blog": blog_rollout,
+    "reorder_engine": reorder_rollout,
 }
 
 

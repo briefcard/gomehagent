@@ -3181,7 +3181,12 @@ def _run_campaign_email(ctx: Context) -> dict:
             if _row is None:
                 s.add(_db.ArtifactBody(
                     tenant=ctx.tenant, output_id=item["output_id"],
-                    run_id=ctx.run_id or "", system_key="campaign_email",
+                    # THE SKILL'S SYSTEM, NOT A LITERAL. `reorder_prompt`
+                    # delegates to this run; with "campaign_email" written
+                    # here every reorder filed under the campaign system's
+                    # ledger, rung and metrics, and reorder_engine went on
+                    # reading as a system nothing ever ran.
+                    run_id=ctx.run_id or "", system_key=ctx.skill.system_key,
                     format="campaign_email", destination="",
                     body=final_html, draft_body=final_html, meta=_meta,
                     bytes=len(final_html), push=_push_recipe))
@@ -3787,6 +3792,48 @@ register(Skill(
     requires=("audience_key",),
     requires_when=_has_a_reader_to_pick,
     run=_run_campaign_email))
+
+
+def _run_reorder(ctx: Context) -> dict:
+    """A campaign email whose segment is not a choice.
+
+    The ONE decision this system makes is the segment: `reorder_due` — bought
+    a consumable 30–45 days ago and not since. A caller's segment is
+    overwritten, not honoured, because a reorder prompt sent to VIPs is a
+    campaign wearing the wrong system's name. Everything after that line is
+    the campaign run: brief, draft, render, validate, ESP push on approval.
+    """
+    ctx.params["segment"] = "reorder_due"
+    ctx.params.setdefault("goal", "a one-tap reorder before they run out")
+    # "offer", not "reorder": the plan's intent vocabulary is story /
+    # education / proof / offer, and the first run said so — "unknown intent
+    # 'reorder'". A one-tap reorder before they run out is bottom-of-funnel.
+    ctx.params.setdefault("intent", "offer")
+    return _run_campaign_email(ctx)
+
+
+register(Skill(
+    key="reorder_prompt",
+    name="Reorder prompt",
+    does="A replenishment email to the buyers whose consumable is about to "
+         "run out — the campaign machinery with the segment fixed to "
+         "reorder_due. Drafted into the ESP on approval; launching stays "
+         "human, in the platform.",
+    system_key="reorder_engine",
+    tier=3,
+    needs=("rules.voice_tone", "rules.positioning"),
+    params=("revision_notes", "goal", "subject", "intent", "deadline",
+            "entity_key", "entity_keys", "audience_key", "offer", "utterance",
+            "draft_visual",
+            # Accepted so a plan carrying one is not refused at the door —
+            # and then overwritten. Declaring it is what lets `_run_reorder`
+            # say so in its own body rather than in a runner error.
+            "segment"),
+    writes=True,
+    produces="draft",
+    requires=("audience_key",),
+    requires_when=_has_a_reader_to_pick,
+    run=_run_reorder))
 
 
 # ---------------------------------------------------------------------------

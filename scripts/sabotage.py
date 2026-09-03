@@ -5619,6 +5619,26 @@ SABOTAGES = [
                "as long as the payload existed",
     },
     {
+        "name": "a_reorder_prompt_goes_to_the_reorder_segment_whatever_was_asked",
+        "file": "app/skill_pack.py",
+        "find": "    ctx.params[\"segment\"] = \"reorder_due\"\n    ctx.params.setdefault(\"goal\", \"a one-tap reorder before they run out\")",
+        "replace": "    ctx.params.setdefault(\"segment\", \"reorder_due\")  # SABOTAGE\n    ctx.params.setdefault(\"goal\", \"a one-tap reorder before they run out\")",
+        "suites": ["test_reorder_skill.py"],
+        "why": "a plan carrying segment=vip_high_aov sends the reorder prompt "
+               "to the VIP list under the reorder system's name — the one "
+               "decision this system exists to make, delegated to a form field",
+    },
+    {
+        "name": "a_delegated_campaign_run_files_under_its_own_system",
+        "file": "app/skill_pack.py",
+        "find": "                    run_id=ctx.run_id or \"\", system_key=ctx.skill.system_key,",
+        "replace": "                    run_id=ctx.run_id or \"\", system_key=\"campaign_email\",  # SABOTAGE",
+        "suites": ["test_reorder_skill.py"],
+        "why": "every reorder prompt is filed as a campaign email — its rung, "
+               "guidance and metrics accrue to the wrong system and "
+               "reorder_engine reads as never having run",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this
