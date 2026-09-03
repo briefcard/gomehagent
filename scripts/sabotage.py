@@ -5668,6 +5668,34 @@ SABOTAGES = [
                "'parallel' is reported for a platform running on one",
     },
     {
+        "name": "a_rule_needs_recurrence_not_one_edit",
+        "file": "app/learning.py",
+        "find": "MIN_RECURRENCE = 3",
+        "replace": "MIN_RECURRENCE = 1  # SABOTAGE",
+        "suites": ["test_learning.py"],
+        "why": "one edit about one customer becomes standing guidance for every "
+               "reply — the drafter learns a habit the owner does not have",
+    },
+    {
+        "name": "approving_a_rule_writes_it_into_guidance",
+        "file": "app/learning.py",
+        "find": "    said = systems.note(ap.tenant or pl.get(\"tenant\", \"\"), key,",
+        "replace": "    said = \"noted\"; _ = (ap.tenant or pl.get(\"tenant\", \"\"), key,  # SABOTAGE",
+        "suites": ["test_learning.py"],
+        "why": "the owner approves a rule, the card says 'now standing "
+               "guidance', and the drafter never sees it — the loop looks "
+               "closed and is not",
+    },
+    {
+        "name": "a_move_already_proposed_or_standing_is_not_proposed_again",
+        "file": "app/learning.py",
+        "find": "            if _already(tenant, key, move):\n                continue",
+        "replace": "            if False:  # SABOTAGE\n                continue",
+        "suites": ["test_learning.py"],
+        "why": "the same rule is proposed every Sunday for ever, and the "
+               "approval queue fills with things the owner already decided",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

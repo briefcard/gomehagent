@@ -147,12 +147,15 @@ EFFECTIVENESS = {
         gap="'whether they fall' is the declared measure and is computed "
             "across no two sweeps"),
     "service_desk": dict(
-        measure_fn="assurance.edited_share", learns_into="",
-        gap="edits.record writes what the owner changed before sending; the "
-            "drafter never sees a single one of those edits"),
+        measure_fn="edits.trend", learns_into="systems.guidance_block",
+        how="pre-send edits are synthesised weekly into standing guidance the "
+            "drafter reads (learning.propose_for → approval → systems.note); "
+            "learning.effect says whether each rule shrank the delta"),
     "lead_responder": dict(
-        measure_fn="assurance.edited_share", learns_into="",
-        gap="same delta as service_desk, same absence of a reader"),
+        measure_fn="edits.trend", learns_into="systems.guidance_block",
+        how="pre-send edits are synthesised weekly into standing guidance the "
+            "drafter reads (learning.propose_for → approval → systems.note); "
+            "learning.effect says whether each rule shrank the delta"),
     "moment_email": dict(
         measure_fn="", learns_into="planner.campaign_rollout",
         gap="'consumed vs expired' is the declared measure; moments.consumed_for "

@@ -2718,6 +2718,8 @@ def _waiting_section(key: str, row) -> str:
                 says = "Approve &amp; publish"
             elif a.kind == "send_email":
                 says = "Approve — sends it"
+            elif a.kind == "guidance_rule":
+                says = "Approve — becomes standing guidance the drafter reads"
             elif a.kind == "skill_output":
                 says = "Approve — marks it reviewed, ready"
             else:

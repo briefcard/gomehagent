@@ -58,8 +58,13 @@ def main() -> int:
     ck("the catalogue names the skill",
        systems.CATALOG["lead_responder"]["workflow"].get("skill") == "lead_reply")
     row = next(r for r in systems.effectiveness() if r["system"] == "lead_responder")
-    ck("the effectiveness map still measures it",
-       row["measure_fn"] == "assurance.edited_share" and row["measure_ok"])
+    # Measured by the edit TREND since the learning axis landed (2026-09-03):
+    # the share of edited sends was the old measure, the median change per
+    # window is the one that can fall.
+    ck("the effectiveness map measures it by the edit trend, and it learns",
+       row["measure_fn"] == "edits.trend" and row["measure_ok"]
+       and row["learns_into"] == "systems.guidance_block" and row["learns_ok"],
+       str({k: row[k] for k in ("measure_fn", "learns_into")}))
 
     doc = open(os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "SYSTEMS-REFERENCE.md")).read()

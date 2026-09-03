@@ -261,11 +261,11 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `content_compliance` | `compliance.scan` | — | 'whether they fall' is the declared measure and is computed across no two sweeps |
 | `gbp_listing` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0). When built, the sweep IS the measure and the approved fixes are what it learns into — the catalog_compliance shape |
 | `gbp_post` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0) |
-| `lead_responder` | `assurance.edited_share` | — | same delta as service_desk, same absence of a reader |
+| `lead_responder` | `edits.trend` | `systems.guidance_block` | pre-send edits are synthesised weekly into standing guidance the drafter reads (learning.propose_for → approval → systems.note); learning.effect says whether each rule shrank the delta |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |
 | `reorder_engine` | `performance.sync` | — | provider stats sync per campaign; nothing reads whether a reorder prompt produced a reorder back into the cadence |
 | `reports` | `client_report.assemble` | — | sent on approval; the client's reply — the figures they send back — is not yet read into the next report |
-| `service_desk` | `assurance.edited_share` | — | edits.record writes what the owner changed before sending; the drafter never sees a single one of those edits |
+| `service_desk` | `edits.trend` | `systems.guidance_block` | pre-send edits are synthesised weekly into standing guidance the drafter reads (learning.propose_for → approval → systems.note); learning.effect says whether each rule shrank the delta |
 <!-- END GENERATED -->
 
 ## 2a. What the declarations do not carry

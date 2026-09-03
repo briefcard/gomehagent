@@ -416,7 +416,7 @@ def apply_decision(ap_id: str, decision: str) -> str:
                 return (f"Approved: {ap.summary}. Nothing was sent — this "
                         f"marks the draft reviewed. Launch it in the platform "
                         f"where it lives.")
-            _HANDLED = {"send_email", "refile_moves", "seo_update",
+            _HANDLED = {"send_email", "refile_moves", "seo_update", "guidance_rule",
                         "seo_new_collection", "seo_new_page",
                         "seo_new_article", "seo_article_revision",
                         "shopify_theme_asset", "systems_update"}
@@ -710,6 +710,12 @@ def _execute(ap: db.Approval) -> None:
                     due_date=(dt.date.today() + dt.timedelta(days=3)).isoformat(),
                 ))
                 s.commit()
+    elif ap.kind == "guidance_rule":
+        # The learning axis closes here: an edit habit, synthesised into one
+        # sentence, becomes standing guidance the drafter reads. Approving is
+        # the only way in — the model proposed it, the owner populates.
+        from . import learning
+        learning.accept(ap)
     elif ap.kind == "refile_moves":
         from . import drive_io, whatsapp
         p = ap.payload

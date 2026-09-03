@@ -1116,6 +1116,12 @@ def keyword_harvest_sharded() -> dict:
     return _each_tenant("keyword map top-up", keywords.harvest_one)
 
 
+def learning_sharded() -> dict:
+    """Weekly: pre-send edits → proposed standing guidance, per account."""
+    from . import learning
+    return _each_tenant("learning sweep", learning.propose_for)
+
+
 def performance_sharded() -> dict:
     from . import performance
     got = _each_tenant("performance sweep", performance.sync_one)
@@ -1264,6 +1270,11 @@ def main() -> None:
     # Monday, before the week's writing is planned.
     sched.add_job(_safe(keyword_harvest_sharded, "keyword map top-up", sharded=True), "cron",
                   day_of_week="mon", hour=config.SWEEP_HOUR, minute=25)
+    # Weekly, Sunday: a habit is a week's worth of edits, not a day's. Proposes
+    # only — every rule goes through the approval queue before a drafter
+    # reads it — so a sweep on a quiet account files nothing and says why.
+    sched.add_job(_safe(learning_sharded, "learning sweep", sharded=True), "cron",
+                  day_of_week="sun", hour=config.SWEEP_HOUR, minute=35)
     # Weekly and overnight: a full site crawl is the expensive kind of job, a
     # site's copy does not change hourly, and a violations queue that grows
     # every morning stops being read. After the first pass it only walks what

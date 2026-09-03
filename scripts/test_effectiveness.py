@@ -70,13 +70,17 @@ def main() -> int:
     ck("a system with no row appears as an undeclared row, not as absence",
        "undeclared" in r["gap"] and r["measure_ok"] is False, r["gap"])
 
-    # THE FINDING THIS TABLE IS FOR, held as a fact: today the systems that
-    # record an edit delta have no reader. When one gains a reader this line
-    # goes red and the gap text comes out — the test fails toward good news.
-    unread = [r["system"] for r in rows
-              if r["measure_fn"] == "assurance.edited_share" and not r["learns_into"]]
-    ck("the edit deltas still have no reader (remove when one exists)",
-       set(unread) == {"service_desk", "lead_responder"}, str(unread))
+    # THE FINDING THIS TABLE WAS BUILT ON, and its closing. Until 2026-09-03
+    # the mail systems recorded every pre-send edit and nothing read one; this
+    # line used to hold that as a fact and fail toward good news. The good
+    # news arrived: both now measure by the edit trend and learn into the
+    # guidance the drafter reads.
+    for k in ("service_desk", "lead_responder"):
+        r = next(x for x in rows if x["system"] == k)
+        ck(f"{k} measures by the edit trend and learns into the drafter's guidance",
+           r["measure_fn"] == "edits.trend" and r["measure_ok"]
+           and r["learns_into"] == "systems.guidance_block" and r["learns_ok"],
+           str({kk: r[kk] for kk in ("measure_fn", "measure_ok", "learns_into", "learns_ok")}))
 
     # It renders where somebody reads it.
     doc = open(os.path.join(os.path.dirname(os.path.dirname(

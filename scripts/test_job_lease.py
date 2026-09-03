@@ -211,7 +211,7 @@ def main() -> int:
 
     # Every sharded registration points at a wrapper that shards.
     sharded_regs = re.findall(r'_safe\((\w+), "[^"]+", sharded=True\)', src)
-    ck("every sharded registration names a wrapper", len(sharded_regs) == 3, str(sharded_regs))
+    ck("every sharded registration names a wrapper", len(sharded_regs) == 4, str(sharded_regs))
     ck("  and each wrapper calls _each_tenant",
        all(re.search(r'def ' + w + r'\(\) -> dict:\n(?:.*\n){0,3}.*_each_tenant\(', src)
            for w in sharded_regs),

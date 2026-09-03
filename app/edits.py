@@ -133,3 +133,40 @@ def record_run(run_id: str, generated: str, sent: str) -> dict:
     except Exception:                                            # noqa: BLE001
         pass          # measuring quality must never block a send
     return d
+
+
+def trend(tenant: str, system_key: str, windows: tuple = (7, 30)) -> dict:
+    """How much the owner changes before sending, per window — THE MEASURE.
+
+    Read off `Approval.payload` where `record` filed `similarity` and `as_is`
+    for every send, joined to the system through `Approval.system_id`. The
+    number to watch is the median change (1 − similarity) FALLING window over
+    window: a drafter that learns needs fewer edits, not the same edits every
+    week. `n` rides along because a median of two sends is not a trend.
+    """
+    import datetime as _dt
+    import statistics
+    from . import db, systems
+    row = systems.find(tenant, system_key)
+    if not row:
+        return {"tenant": tenant, "system": system_key, "windows": {},
+                "why": "system not installed"}
+    out: dict = {}
+    with db.SessionLocal() as s:
+        for days in windows:
+            since = db.utcnow() - _dt.timedelta(days=days)
+            aps = (s.query(db.Approval)
+                   .filter(db.Approval.system_id == row.id,
+                           db.Approval.decided_at.isnot(None),
+                           db.Approval.decided_at >= since).all())
+            sims = [float((a.payload or {}).get("similarity"))
+                    for a in aps if (a.payload or {}).get("similarity") is not None]
+            as_is = [bool((a.payload or {}).get("as_is")) for a in aps
+                     if (a.payload or {}).get("as_is") is not None]
+            out[str(days)] = {
+                "n": len(sims),
+                "median_change": (round(1 - statistics.median(sims), 3) if sims else None),
+                "as_is_rate": (round(sum(as_is) / len(as_is), 3) if as_is else None),
+            }
+    return {"tenant": tenant, "system": system_key, "windows": out}
+
