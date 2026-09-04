@@ -77,16 +77,26 @@ running record, so update it in the thread that finishes one.
 
 | # | system | skill | status |
 |---|---|---|---|
-| 1 | `blog` | `blog_article` | not walked |
+| 1 | `blog` | `blog_article` | **walked** 2026-09-02 (keyword lane: attention/refresh/rivals) |
 | 2 | `campaign_email` | `campaign_email` | **walked** 2026-08-31 — see §5 |
-| 3 | `ad_creative` | `ad_copy` | not walked |
-| 4 | `content_compliance` | — | not walked |
-| 5 | `catalog_compliance` | — | not walked |
-| 6 | `service_desk` | — (mail-owned) | not walked |
-| 7 | `lead_responder` | — (mail-owned) | not walked |
-| 8 | `moment_email` | — (a watcher) | not walked |
-| 9 | `reorder_engine` | — (declared, no generator) | not walked |
-| 10 | `reports` | — (declared, no generator) | not walked |
+| 3 | `ad_creative` | `ad_copy` | rehearsed 2026-09-04; ban list now constitutive; not walked one-issue-at-a-time |
+| 4 | `content_compliance` | — (complete by design: sweep files a report) | rehearsed 2026-09-04 |
+| 5 | `catalog_compliance` | `catalog_compliance`, `catalog_seo_rewrite` | rehearsed; own-site + named-refusal fixes 2026-09-04 |
+| 6 | `service_desk` | `inbound_reply` | rehearsed; learning axis reads its edits 2026-09-03 |
+| 7 | `lead_responder` | `lead_reply` (**built** 2026-09-03) | drafts under its own system since 2026-09-04 |
+| 8 | `moment_email` | — (a watcher, by design) | rehearsed |
+| 9 | `reorder_engine` | `reorder_prompt` (**built** 2026-09-03) | rehearsed |
+| 10 | `reports` | `weekly_report` (**built** 2026-09-03) + `report_rollout` planner | rehearsed |
+| 11 | `gbp_post` | — (declared 2026-09-03; Google API access not applied for) | blocked on the owner |
+| 12 | `gbp_listing` | — (declared 2026-09-03; same gate) | blocked on the owner |
+
+**Every system now has a computed check on all four of the owner's axes**
+(context → generator, review flow, API shape, learning) — `systems.effectiveness()`
+renders it as SYSTEMS-REFERENCE §2c. **Every system, every seeded account, is
+rehearsed in the gate** by `scripts/test_rehearse.py` (2026-09-04): it runs
+each skill, planner, executor, scheduled job and console surface offline and
+fails on a crash, a bare exception in a note, or an internal identifier in
+client-facing text. Run it first in any new thread; it is the state.
 
 Then the cross-cutting machinery, same protocol, same briefing shape:
 
@@ -213,9 +223,115 @@ input again"; read it before adding a system.
    written by `scripts/gen_systems_reference.py` and byte-compared. Start
    there: that suite is the register's first three columns already.
 
-**Left deliberately unchanged, flagged not fixed:** five CATALOG systems have
+**Left deliberately unchanged, flagged not fixed (as of 2026-08-31; three of the five have skills since 2026-09-03 — see the entry below):** five CATALOG systems have
 no skill at all (`content_compliance`, `lead_responder`, `moment_email`,
 `reorder_engine`, `reports`), so no contract reaches them.
 
 **Open question the owner has not answered:** should `blog_article` require a
 reader? It is one-to-many, but its reader is defined by search intent.
+
+### The effectiveness program — 2026-09-02..04 (commits `eec8707`..`5024d51`, 20 ships on the last day)
+
+**What it was.** The owner's standard for every system, stated 2026-09-03:
+the right context funnels in, the review flow is right, the shape pushed into
+the tool is right, and it learns with every iteration — "that's how we
+measure effectiveness." Then: complete the unfinished systems to that
+standard, run operations in parallel on workers, and "continue until you have
+verified the functionalities and the quality … if something obviously needs
+to be fixed or can improve the process, implement it."
+
+**The one root cause, again.** Two halves of a contract written in different
+places, each correct alone: `measure` was a sentence read by no code while
+`edits.record` wrote deltas no generator read; `ship_by` was empty for two
+systems; a Skill bound one `system_key` while `ROUTES` sent mail to two; 25
+crons and no lease; a catalogue finder that read the PRIMARY site whenever the
+caller named none. Every fix was a join plus a computed check that the join
+holds.
+
+**The owner's standing rules from this stretch:**
+- **"Just based on the words we're prioritizing. We don't want an expensive
+  solution that we don't actually need or use regularly."** Scope per-phrase
+  API spend to `attention()` + `next_to_write()`, capped, TTL'd, never on render.
+- **The learning axis converges only as rules.** Deltas are evidence; rules are
+  what the drafter reads; the owner is the gate. Recurrence (>=3 distinct
+  sends) is decided in code; the model writes one sentence; approving is the
+  only way in; a rule that does not shrink the delta is retired.
+- **GBP is two systems, not one** — the post, and the listing it lands on.
+- **Ads publish to Meta by hand** (the export sheet) — by design, not a gap.
+- **Unattended recurring spend on a client's quota is the owner's call** —
+  `numInstances`, weekly rival reads, auto-send: declared, never defaulted on.
+
+**Traps this stretch fell into.** Each cost a run; the harness caught every one
+before `main`:
+- The capability gate reads the WIRED view (`tenants.capabilities`), not the
+  declaration — stub the function, not `shopify_store`.
+- The validator fails closed on a bare tenant ("no ban list, nothing can be
+  sent safely") — fixtures seed `kb.ensure_brand` + `kb.add_banned` FIRST; the
+  constitutive gate fires before any site or store check.
+- A skill that SENDS must declare `writes=True` or `emit` queues no approval.
+  `apply_decision` takes `"approved"`, not `"approve"`. Emit TEXT; carry html
+  in `meta`, or the card shows `<div style=…>`.
+- An approval KIND's executor arm lives in `_execute` AND the kind in
+  `_HANDLED` — that is what `register.py` scans; an arm in `apply_decision`
+  reads as "no executor arm".
+- `knobs_for` returns knob SPECS; `cadence_for` (campaign) / `blog_cadence_for`
+  / `report_cadence_for` return VALUES — and `knobs_for` branches per planner.
+  `open_plan` refuses any plan key the system's `plan_fields` do not declare.
+  Plan briefs nest fields under `brief["plan"]`. Intent vocabulary is
+  story/education/proof/offer. `SystemRun` has `system_id`, not `system_key`;
+  `systems.start_run` returns the id.
+- `Setting` had eleven uncoordinated writers and the register refused a
+  twelfth — stamp a marker on the row it is about instead (the archived note).
+  `Memory.tenant` is EMPTY; filter by `scope == systems.thread_key(t, k)`.
+- A sign-off is the LAST line and a greeting the FIRST; a classifier that
+  matched anywhere misfiled "Thanks for reaching out" as a changed sign-off.
+- A rehearsal against a STUBBED backend produces refusals that name the real
+  provider ("omnisend has no campaign reporting"). Confirm against the real
+  module with only the transport stubbed before calling anything a gap.
+- When a loop body moves into a per-account unit, every guard anchored on it
+  goes STALE — re-anchor; never add to KNOWN_STALE. A captured docstring
+  carries its own indent. A `ship.sh` log from a previous attempt makes an
+  `until grep SHIP_EXIT` return early — wait on the process, or a fresh file.
+- In zsh, `path` IS `$PATH`. Naming a shell variable `path` erased every
+  command for that call.
+
+**Open, in the order to take them:**
+1. `test_open_defects.py`'s "systems with no skill" entry now conflates
+   by-design systems (`content_compliance`, `moment_email`) and
+   owner-blocked ones (`gbp_post`, `gbp_listing`) — split it so the ledger
+   fails on the right good news.
+2. The Omnisend `segments` count field name is unverified against the live
+   API (the adapter parses `count`; the probe returned None).
+3. `weekly_report`'s artifact carries no `format` on the item — check what
+   the Drafts index names it.
+4. Owner actions, unchanged: Google API access (both GBP systems), one real
+   Klaviyo push, the first Semrush "Read the competition" click,
+   `/health/workers` after a day at two instances, `OPENAI_API_KEY` present.
+
+**Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
+send cannot be recalled); ads are carried to Meta by hand; the reports planner
+leaves `to` for the owner (no planner can read it from data).
+
+---
+
+## 6. Next thread — paste this (the effectiveness program continues)
+
+> You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
+> (deployed at https://assistant-web-zm2d.onrender.com). Read the memory note
+> `gomehagent-systems-effectiveness` and `WALKTHROUGH-PROMPT.md` §4 (the
+> protocol) and §5 (the traps) BEFORE touching anything.
+>
+> **First move, before any reading of docs:** run
+> `python3 scripts/test_rehearse.py` and read its report. It exercises every
+> system across every seeded account and is the state of the platform; the
+> pass line is not the point — the artifacts are.
+>
+> Then take §5's "Open, in the order to take them" from the newest entry, one
+> item per ship, under §4 unchanged: reproduce first; every fix ships a
+> sabotage guard that prints `[ caught ]` (run it — two of six guards were
+> MISSED on first run this stretch and the test was what was wrong); ship via
+> `./scripts/ship.sh "<subject>" <body-file>` with the subject on the first
+> line; never edit the tree while it runs; verify on `/health`; write the
+> memory note before the thread ends.
+>
+> If the owner gives you an issue instead, do that and only that.
