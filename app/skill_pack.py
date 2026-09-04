@@ -1078,7 +1078,18 @@ An offer after the cut was not made. State it exactly as it is given to you —
 an offer worded differently in each variant reads as a different offer.
 
 NEVER manufacture urgency. No "last chance", "ends tonight", "while supplies
-last" unless a real deadline is given to you below. Code will stop it."""
+last" unless a real deadline is given to you below. Code will stop it.
+
+## The shape it is read in
+This is an INSTAGRAM CAPTION, not a paragraph. The first line is the whole of
+what most people see — the app cuts at about 125 characters and hides the rest
+behind "… more", mid-sentence if it has to. So the first line is a complete
+thought, and if there is an offer it is in that line. Below it, short lines
+with blank lines between them; a single block is not read in a feed. Then one
+ask, on its own line. Hashtags only if they earn their place — at most five,
+each one a phrase a buyer would actually search, never a word the caption
+already says. None is a perfectly good answer. All of this is measured in code
+after you write."""
 
 def _angle_brief(angle: str) -> str:
     """One angle's instruction, from the ruleset. One writer, one vocabulary."""

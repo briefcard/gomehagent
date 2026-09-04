@@ -45,6 +45,62 @@ TRUNCATION = 125
 #: A headline longer than this is cut on the placements that matter.
 HEADLINE_MAX = 40
 
+# ---------------------------------------------------------------------------
+# The caption, as Instagram actually renders it
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-09-04: *"the copy format must be optimised for Instagram."* The
+# reply format asked for "two or three short lines" and nothing about the
+# shape a caption is READ in, so the drafter produced a paragraph — correct
+# prose, and the wrong object. Everything below is a MEASUREMENT of that
+# shape, in the same spirit as `offer_position`: where the fold falls, whether
+# the text is broken, whether there is one ask, how many hashtags.
+#
+# THE FIRST LINE IS THE CAPTION. Instagram truncates at about `TRUNCATION`
+# characters and collapses everything after it behind "… more" — and it breaks
+# at the fold whether or not the sentence has finished. An opening line longer
+# than the fold is therefore not "a long first line", it is a sentence the
+# reader is shown half of.
+
+#: A caption with no break at all, longer than this, is a wall. Under it, one
+#: block is a perfectly good caption and demanding a line break would be a
+#: style rule rather than a measurement.
+CAPTION_BREAK_AT = 180
+
+#: More than this reads as reach-farming, which Instagram's own guidance and
+#: every credible test agree suppresses rather than helps. Zero is a fine
+#: answer and the format says so.
+HASHTAGS_MAX = 5
+
+#: One ask, in the reader's own verbs. Deliberately a list of ACTIONS rather
+#: than a sentiment test: "is there a call to action" is answerable by looking
+#: for the words that ask for one, and anything cleverer is a taste argument
+#: in a gate.
+CTA_MARKERS = (
+    "shop", "buy", "order", "book", "reserve", "tap", "click", "swipe up",
+    "comment", "dm", "message us", "save this", "link in bio", "in our bio",
+    "get yours", "browse", "pre-order", "sign up", "subscribe", "learn more",
+)
+
+_HASHTAG = re.compile(r"#(\w+)")
+
+
+def first_line(text: str) -> str:
+    """The line the reader is shown before "… more"."""
+    for ln in str(text or "").splitlines():
+        if ln.strip():
+            return ln.strip()
+    return ""
+
+
+def hashtags(text: str) -> list[str]:
+    return _HASHTAG.findall(str(text or ""))
+
+
+def has_cta(text: str) -> bool:
+    low = f" {str(text or '').lower()} "
+    return any(m in low for m in CTA_MARKERS)
+
 #: Words that describe how the writer feels rather than what the reader gets.
 #: Distinct from `email_craft.PLATITUDES` (empty superlatives) — these are
 #: aesthetic adjectives that are perfectly true and carry no information,
@@ -292,6 +348,47 @@ def review(*, body: str = "", headline: str = "", angle: str = "",
             "scarcity is the one thing a machine writing at scale must "
             "never do; state the real thing or drop the pressure")
 
+    # --- the caption shape, measured -------------------------------------
+    if text:
+        opener = first_line(text)
+        if len(opener) > TRUNCATION:
+            add("block", "first_line_past_the_fold",
+                f"the first line runs to {len(opener)} characters",
+                f"Instagram cuts at about {TRUNCATION} and breaks mid-sentence "
+                f"— the opening line has to be a complete thought inside the "
+                f"fold, with the rest below it")
+        if "\n" not in text.strip() and len(text) > CAPTION_BREAK_AT:
+            add("block", "one_unbroken_block",
+                f"{len(text)} characters with no line break",
+                "a caption is read in glances — break it: the hook, then the "
+                "payoff, then the ask, with blank lines between them")
+        if not has_cta(text):
+            add("block", "no_call_to_action",
+                "nothing in the caption asks the reader to do anything",
+                "give it one ask, on its own line — shop, book, tap, comment, "
+                "save. An ad with no ask is a post")
+        tags = hashtags(text)
+        if len(tags) > HASHTAGS_MAX:
+            add("block", "too_many_hashtags",
+                f"{len(tags)} hashtags",
+                f"at most {HASHTAGS_MAX}, each a phrase somebody would "
+                f"actually search. A wall of tags reads as reach-farming and "
+                f"none at all is a fine answer")
+        elif tags:
+            # LOWERCASED AND STRIPPED OF PUNCTUATION. `email_craft._words`
+            # splits on whitespace and keeps both, so "party." never matched
+            # "#party" and the check passed over every hashtag that did in
+            # fact repeat the caption — green, and reading nothing.
+            body_words = set(re.findall(r"[a-z0-9]+",
+                                        text.split("#")[0].lower()))
+            earned = [t for t in tags if t.lower() not in body_words]
+            if not earned:
+                add("nudge", "hashtags_that_earn_nothing",
+                    ", ".join("#" + t for t in tags[:3]),
+                    "every one of these repeats a word the caption already "
+                    "says, so they add no way to be found — drop them or "
+                    "make them the terms a buyer would type")
+
     # --- the angle actually used ------------------------------------------
     if angle and angle not in ANGLES:
         add("nudge", "unknown_angle", angle,
@@ -316,12 +413,20 @@ def score(findings: list[dict]) -> dict:
         "specificity": {"vague_adjectives", "platitudes", "headline_is_vague"},
         "offer": {"offer_missing", "offer_past_the_fold"},
         "value": {"not_enough_value_levers", "urgency_without_a_deadline"},
+        # THE SHAPE IT IS READ IN, scored beside what it says. A caption that
+        # is true, specific and unreadable in a feed is not a working ad.
+        "caption": {"first_line_past_the_fold", "one_unbroken_block",
+                    "no_call_to_action", "too_many_hashtags"},
     }
     points = {k: (0 if by_rule & v else 2) for k, v in criteria.items()}
     total = sum(points.values())
-    return {"total": total, "of": 2 * len(criteria), "points": points,
+    of = 2 * len(criteria)
+    # PROPORTIONAL, so the documented bar survives a sixth criterion.
+    # copy-system.md says ship at 8/10; adding a criterion and keeping the
+    # literal 8 would have quietly loosened it to 8/12.
+    return {"total": total, "of": of, "points": points,
             "blocks": len(blocks),
-            "ship": total >= 8 and not blocks}
+            "ship": total >= 0.8 * of and not blocks}
 
 
 def block_reasons(findings: list[dict]) -> list[dict]:
@@ -481,7 +586,18 @@ REPLY_FORMAT = """Answer in exactly this shape and nothing else:
 HEADLINE: <under 40 characters>
 LEVERS: <two or more of: dream_outcome, likelihood, time_delay, effort>
 ---
-<the ad itself, two or three short lines>"""
+<FIRST LINE: the hook. A complete thought in under 125 characters, because
+Instagram cuts here and everything after it is hidden behind "… more". If
+there is an offer, it belongs in this line.>
+
+<one or two short lines that pay the hook off, separated by blank lines. A
+single unbroken paragraph is not read in a feed.>
+
+<the ask, on its own line: shop, book, tap, comment, save. One ask.>
+
+<hashtags ONLY if they earn their place: at most 5, each a phrase a buyer
+would really search, none of them a word the caption already says. None at
+all is a fine answer.>"""
 
 
 def parse(raw: str) -> dict:

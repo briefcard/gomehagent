@@ -81,8 +81,14 @@ class FakeDraft:
         LOG.append(("draft", str((bundle.get("panel") or {}).get("brief") or "")))
         self.bundles.append(bundle)
         self.n += 1
+        # A VALID CAPTION, so this suite tests the PANEL and not the craft
+        # gate: since the Instagram rules landed, a bare line with no ask is
+        # blocked and redrafted once, which doubled the calls and made the
+        # brief assertion read as a failure when nothing about the panel had
+        # changed.
         return (f"HEADLINE: Which host are you\nLEVERS: dream_outcome, effort\n---\n"
-                f"Ad line {self.n}: {str(claim.get('claim') or '')[:40]}", "")
+                f"Ad line {self.n}: {str(claim.get('claim') or '')[:40]}\n\n"
+                f"Tap to shop it.", "")
 
 
 def contract(row, autonomy):

@@ -44,9 +44,19 @@ def ck(label: str, cond, detail: str = "") -> None:
         _fail.append(label)
 
 
-GOOD = ("Your Leo friend already owns 4 candles she did not ask for. "
+#: A CAPTION, not a paragraph — updated 2026-09-04 when the ruleset learned
+#: the shape Instagram renders. The old fixture was one 137-character block
+#: with no ask: true, specific, and cut in half at the fold with nothing to
+#: click. It survives below as `PARAGRAPH`, which is now a FAILING case, so
+#: the change of contract is asserted in both directions.
+GOOD = ("Your Leo friend already owns 4 candles she did not ask for.\n\n"
         "15% off with FIRST15 — the cup made for her sign, shipped from "
-        "Miami in 2 days.")
+        "Miami in 2 days.\n\n"
+        "Tap to shop the zodiac cups.")
+
+PARAGRAPH = ("Your Leo friend already owns 4 candles she did not ask for. "
+             "15% off with FIRST15 — the cup made for her sign, shipped from "
+             "Miami in 2 days.")
 
 
 def main() -> int:
@@ -59,6 +69,71 @@ def main() -> int:
        "; ".join(x["rule"] for x in f))
     ck("…and it scores full marks and ships",
        sc["total"] == sc["of"] and sc["ship"], str(sc))
+
+    print("\n— THE SHAPE IT IS READ IN: an Instagram caption, measured —")
+    para = {x["rule"] for x in ad_craft.review(
+        body=PARAGRAPH, headline="Which sign is she?", angle="gifting",
+        offer="15% off", levers=["dream_outcome", "time_delay", "effort"])}
+    ck("the old paragraph fixture is now a FAILING case",
+       {"first_line_past_the_fold", "no_call_to_action"} <= para, str(para))
+    ck("  and the finding says how far past the fold it ran",
+       any("characters" in x["detail"] for x in ad_craft.review(body=PARAGRAPH)
+           if x["rule"] == "first_line_past_the_fold"))
+    ck("a first line inside the fold passes",
+       "first_line_past_the_fold" not in {x["rule"] for x in ad_craft.review(
+           body=GOOD, levers=["dream_outcome", "effort"])},
+       f"{len(ad_craft.first_line(GOOD))} chars")
+    long_block = ("Acrylic that survives the party, the dishwasher and the "
+                  "toddler, in eleven colours that were designed in Milan, "
+                  "made for a table people stay at, and shipped from Miami in "
+                  "two days. Tap to shop the whole set today.")
+    ck("one unbroken block past the limit is blocked",
+       "one_unbroken_block" in {x["rule"] for x in ad_craft.review(
+           body=long_block, levers=["effort", "time_delay"])},
+       f"{len(long_block)} chars, no break")
+    ck("  but a SHORT single line is not — that is a caption, not a wall",
+       "one_unbroken_block" not in {x["rule"] for x in ad_craft.review(
+           body="11 colours. Tap to shop.", levers=["effort", "time_delay"])})
+    ck("a caption that asks for nothing is blocked",
+       "no_call_to_action" in {x["rule"] for x in ad_craft.review(
+           body="11 colours, designed in Milan.\n\nShipped in 2 days.",
+           levers=["effort", "time_delay"])},
+       "an ad with no ask is a post")
+    ck("  and every ask in the list satisfies it",
+       all(ad_craft.has_cta(f"11 colours.\n\n{m.title()} now.")
+           for m in ad_craft.CTA_MARKERS), "")
+    many = GOOD + "\n\n" + " ".join(f"#tag{i}" for i in range(9))
+    ck("more than five hashtags is blocked, with the count",
+       "too_many_hashtags" in {x["rule"] for x in ad_craft.review(
+           body=many, levers=["effort", "time_delay"])},
+       f"{len(ad_craft.hashtags(many))} found")
+    echoed = ("Acrylic that survives the party.\n\nTap to shop.\n\n"
+              "#acrylic #party #shop")
+    ck("hashtags that only repeat the caption are a nudge, not a block",
+       "hashtags_that_earn_nothing" in {x["rule"] for x in ad_craft.review(
+           body=echoed, levers=["effort", "time_delay"])}
+       and all(x["severity"] == "nudge" for x in ad_craft.review(
+           body=echoed, levers=["effort", "time_delay"])
+           if x["rule"] == "hashtags_that_earn_nothing"), str(ad_craft.hashtags(echoed)))
+    ck("  while a hashtag naming something the caption does not say is kept",
+       "hashtags_that_earn_nothing" not in {x["rule"] for x in ad_craft.review(
+           body="Acrylic that survives the party.\n\nTap to shop.\n\n#poolsidedinner",
+           levers=["effort", "time_delay"])})
+    ck("no hashtags at all is never a finding",
+       not [x for x in ad_craft.review(body=GOOD,
+                                       levers=["dream_outcome", "effort"])
+            if "hashtag" in x["rule"]], "none at all is a fine answer")
+    ck("the caption is its own criterion on the scorecard",
+       "caption" in ad_craft.score([])["points"]
+       and ad_craft.score([])["of"] == 12)
+    ck("  and the documented 8-in-10 bar survived the sixth criterion",
+       ad_craft.score([])["ship"] is True
+       and ad_craft.score([{"severity": "block", "rule": "no_call_to_action"}]
+                          )["ship"] is False,
+       "keeping a literal 8 would have loosened the bar to 8/12")
+    ck("the drafter is TOLD the shape, not only measured on it",
+       "125" in ad_craft.REPLY_FORMAT and "blank lines" in ad_craft.REPLY_FORMAT
+       and "at most 5" in ad_craft.REPLY_FORMAT, "")
 
     print("\n— the hook: the first five words are the whole audition —")
     ck("an ad opening on an adjective is blocked",
