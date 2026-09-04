@@ -296,17 +296,22 @@ before `main`:
   command for that call.
 
 **Open, in the order to take them:**
-1. `test_open_defects.py`'s "systems with no skill" entry now conflates
-   by-design systems (`content_compliance`, `moment_email`) and
-   owner-blocked ones (`gbp_post`, `gbp_listing`) — split it so the ledger
-   fails on the right good news.
-2. The Omnisend `segments` count field name is unverified against the live
+1. The Omnisend `segments` count field name is unverified against the live
    API (the adapter parses `count`; the probe returned None).
-3. `weekly_report`'s artifact carries no `format` on the item — check what
+2. `weekly_report`'s artifact carries no `format` on the item — check what
    the Drafts index names it.
-4. Owner actions, unchanged: Google API access (both GBP systems), one real
+3. Owner actions, unchanged: Google API access (both GBP systems), one real
    Klaviyo push, the first Semrush "Read the competition" click,
    `/health/workers` after a day at two instances, `OPENAI_API_KEY` present.
+
+**Taken 2026-09-03 (this thread):** the ledger's "no skill" entry is split —
+by-design (`ship_by` resolves; nothing to draft) is printed and never open,
+UNBUILT (`ship_by=""`) is the recorded claim `{gbp_listing, gbp_post}` and
+goes red when either names a performer. Trap found on the way: the ledger's
+own sabotage guard had printed `MISSED` since 2026-09-02 — it mutated the
+"cleared" branch entry 3 stopped measuring — so the one suite that must fail
+on good news had no guard that could make it. Re-pointed at `gbp_post`'s
+empty `ship_by`. A count (2 -> 1) stays truthy; the set is the claim.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

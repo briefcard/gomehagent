@@ -81,21 +81,71 @@ def main():
     #     gone on reporting the defect after it was fixed. A ledger that fails
     #     on good news has to be measuring the news.
 
-    # 4 — five CATALOG systems have no skill, so no contract reaches them.
+    # 4 — SPLIT 2026-09-03. "N CATALOG systems have no skill" counted three
+    #     different things as one defect, so this ledger would have gone red
+    #     on the WRONG good news and stayed green on the right one:
+    #
+    #     - BY DESIGN: `moment_email` and `content_compliance` declare no
+    #       skill because there is nothing to draft and nothing to review —
+    #       `workflow.ship_by` names the code that performs the ship and the
+    #       register resolves it. Giving one of these a skill would be a
+    #       design change, and must not read as a fix.
+    #     - UNBUILT: `gbp_post` and `gbp_listing` declare `ship_by=""` —
+    #       NOTHING performs the ship, because the `gbp` capability is wired
+    #       for no account until Google API access is applied for. THAT is
+    #       the defect, and the good news is either of them naming what
+    #       performs its ship.
+    #
+    #     The buckets are computed from the declaration (`ship_by`, resolved
+    #     by `register.system_ships`), never listed here — a thirteenth system
+    #     lands in the right bucket by what it declares. What IS written here
+    #     is the CLAIM: which systems the ledger says are unbuilt. A count
+    #     would have stayed "open" while one of the two was built (2 -> 1 is
+    #     still truthy); the set goes red the moment either moves.
     from app import skill  # noqa: E402
 
     import app.skill_pack  # noqa: F401,E402  (registers the skills)
+    import register as _reg  # noqa: E402  (scripts/ is sys.path[0] when run)
 
     skilled = {
         (getattr(s, "system", None) or getattr(s, "system_key", None))
         for s in skill.REGISTRY.values()
     }
     unskilled = sorted(k for k in systems.CATALOG if k not in skilled)
-    still_broken(
-        f"{len(unskilled)} CATALOG system(s) have no skill: {unskilled}",
-        bool(unskilled),
-        "every declared system has a generator, so the contract reaches all of them",
+    ships = {r["system"]: r for r in _reg.system_ships()}
+    unbuilt = sorted(
+        k for k in unskilled
+        if not (systems.CATALOG[k].get("workflow") or {}).get("ship_by")
     )
+    by_design = sorted(k for k in unskilled if ships[k]["ok"])
+    stray = sorted(set(unskilled) - set(unbuilt) - set(by_design))
+    print(f"  [design ] {len(by_design)} system(s) have no skill BY DESIGN — "
+          f"nothing to draft, and ship_by resolves: {by_design}")
+
+    RECORDED_UNBUILT = {"gbp_listing", "gbp_post"}
+    built = sorted(RECORDED_UNBUILT - set(unbuilt))
+    new_unbuilt = sorted(set(unbuilt) - RECORDED_UNBUILT)
+    still_broken(
+        f"{len(unbuilt)} CATALOG system(s) are UNBUILT — no skill, and nothing "
+        f"performs the ship (ship_by empty): {unbuilt}",
+        not built,
+        f"{built} now name(s) what performs its ship — delete the 'Left "
+        f"deliberately unchanged … no skill at all' paragraph under "
+        f"campaign_email and 'Google API access (both GBP systems)' from the "
+        f"effectiveness entry's owner actions, and shrink RECORDED_UNBUILT here",
+    )
+    if new_unbuilt:
+        _fail.append(
+            f"{new_unbuilt} declare(s) no skill AND no ship_by, and the ledger "
+            f"does not record it — a new unbuilt system: add it to {LEDGER} "
+            f"and to RECORDED_UNBUILT here, or declare what performs its ship"
+        )
+    if stray:
+        _fail.append(
+            f"{stray} declare(s) no skill and a ship_by the register cannot "
+            f"resolve: {[ships[k]['why'] for k in stray]} — neither by design "
+            f"nor unbuilt; fix the declaration"
+        )
 
     print(
         "\n"

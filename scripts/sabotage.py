@@ -943,9 +943,16 @@ SABOTAGES = [
     },
     {
         "name": "the_ledger_notices_a_defect_being_fixed",
-        "file": "app/skill.py",
-        "find": '    if autonomy == "auto":\n        return "cleared"',
-        "replace": '    if autonomy == "auto":\n        return "cleared" if disposition != "cleared" else "cleared"  # SABOTAGE (this is the FIX)',
+        "file": "app/systems.py",
+        # Builds HALF of what the ledger records as unbuilt: gbp_post names a
+        # real performer for its ship (the mutant is the FIX, not a break).
+        # Re-pointed 2026-09-03 — the previous target mutated a "cleared"
+        # branch that entry 3 stopped measuring on 2026-09-02, and this guard
+        # printed MISSED from then on: the one suite that must fail on good
+        # news had a guard that could not produce any. A count of unbuilt
+        # systems (2 -> 1) is still truthy, so the set is the claim.
+        "find": '            ship_by="",\n            measure="views and actions per post from the Performance API, "',
+        "replace": '            ship_by="compliance.record_scan",  # SABOTAGE (this is the FIX)\n            measure="views and actions per post from the Performance API, "',
         "suites": ["test_open_defects.py"],
         "why": "the open-defect ledger is the one suite that must fail on GOOD "
                "news. It hands the next thread the code facts this thread "
