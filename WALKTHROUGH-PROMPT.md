@@ -298,8 +298,13 @@ before `main`:
 - In zsh, `path` IS `$PATH`. Naming a shell variable `path` erased every
   command for that call.
 
-**Open, in the order to take them:**
-1. Owner actions, unchanged: Google API access (both GBP systems), one real
+**Open, in the order to take them (owner, 2026-09-04 evening — §6 carries the
+detail):** 1. UX polish, surface by surface. 2. The Plan's mix (share per tier /
+intent / branded), a recommended default computed from the map, a schedule reset,
+a refresh that installs new systems' planners. 3. Ad Creative (1)–(3): the
+Hormozi/Piliero panel BEFORE variants, claim-review tabs per variant + an Instagram
+caption format, and the pictures — no paste, no burned type, a winning-ad look.
+4. Owner actions, unchanged: Google API access (both GBP systems), one real
    Klaviyo push, the first Semrush "Read the competition" click,
    `/health/workers` after a day at two instances, `OPENAI_API_KEY` present.
 
@@ -408,24 +413,100 @@ leaves `to` for the owner (no planner can read it from data).
 
 ---
 
-## 6. Next thread — paste this (the effectiveness program continues)
+## 6. Next thread — paste this (UX polish; the plan's mix and schedule; Ad Creative rebuilt)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
-> (deployed at https://assistant-web-zm2d.onrender.com). Read the memory note
-> `gomehagent-systems-effectiveness` and `WALKTHROUGH-PROMPT.md` §4 (the
-> protocol) and §5 (the traps) BEFORE touching anything.
+> (deployed at https://assistant-web-zm2d.onrender.com). Read the memory notes
+> `gomehagent-systems-effectiveness` (its LAST section first) and
+> `gomehagent-walkthrough-handoff`, then `WALKTHROUGH-PROMPT.md` §4 (the protocol,
+> unchanged) and §5 (the owner's standing rules and the traps) BEFORE touching anything.
 >
-> **First move, before any reading of docs:** run
-> `python3 scripts/test_rehearse.py` and read its report. It exercises every
-> system across every seeded account and is the state of the platform; the
-> pass line is not the point — the artifacts are.
+> **First move:** `python3 scripts/test_rehearse.py` — read its artifacts, not the
+> pass line.
 >
-> Then take §5's "Open, in the order to take them" from the newest entry, one
-> item per ship, under §4 unchanged: reproduce first; every fix ships a
-> sabotage guard that prints `[ caught ]` (run it — two of six guards were
-> MISSED on first run this stretch and the test was what was wrong); ship via
-> `./scripts/ship.sh "<subject>" <body-file>` with the subject on the first
-> line; never edit the tree while it runs; verify on `/health`; write the
-> memory note before the thread ends.
+> Three streams, in the owner's order, one ship at a time under §4 unchanged:
+> reproduce first; every fix ships a sabotage guard that prints `[ caught ]` (run
+> it — a guard that passes with the mutation is decoration); ship via
+> `./scripts/ship.sh "<subject>" <body-file>` with the subject on the body's first
+> line; never edit the tree while it runs; `python3 scripts/register.py --write`
+> before shipping whenever a guard or a caller moved (REGISTER.md is byte-compared
+> in the gate); verify on `/health`; write the memory note before the thread ends.
+>
+> **1. UX polish.** The owner walks the console and gives the surface; take each
+> as given, one ship each, act where you report.
+>
+> **2. The Plan: refresh, reset, and a recommended mix.** Owner, 2026-09-04: *"I will
+> need to refresh the plan to add new systems and to reset the schedule if the
+> initial schedule doesn't make sense. I should be able to adjust the plan based on
+> the percent of long tail / branded / short / specific topics etc and the app should
+> recommend a base setting default based on the current status of the brand and
+> where the best opportunities lie."* Where the facts are: keyword tier
+> `head|body|long_tail` and intent `informational|commercial` on `db.KeywordTarget`
+> (db.py:1058-1059); branded tokens `keywords.brand_tokens_for` (keywords.py:178);
+> the ranking `keywords.score` (keywords.py:466); the blog planner
+> `planner.blog_rollout` (pillar before support; `LEAD_DAYS` planner.py:43); the
+> cadence knobs `planner.KNOBS` / `knobs_for` (planner.py:122 / 166) written by
+> `systems.set_cadence` (systems.py:1679) through `/admin/plan_cadence`
+> (web.py:6342); opportunities `funnel.proposals` (funnel.py:382) and
+> `strategy.read` (strategy.py:67). What does NOT exist: a MIX knob — the map is
+> planned by score, never by a declared share per tier / intent / branded; a
+> schedule RESET — `planned_for` is set once by the planner and nothing re-dates
+> open plans; a REFRESH that brings a newly declared system's planner into an
+> account's Plan (`planner.PLANNERS`, `top_up` planner.py:1147 run per system by the
+> tick). Build them on the same Plan infrastructure every system uses (the GBP
+> systems were built on it today — keep it so): the mix as declared knobs the planner
+> READS (rule 4 — never a knob the planner ignores; `_check_plan_refs`-style refusals
+> for a share that does not sum); the recommended default COMPUTED from the map's
+> current state (the share of candidates per tier / intent / branded, striking-
+> distance positions, what is already published) and shown on the Plan tab as a fact
+> WITH its control; reset as a control that re-dates open plans from today under the
+> cadence without touching owner edits (`open_plan` carries `brief["edited"]`
+> forward); refresh as the control that installs and tops up every declared system's
+> planner for the account.
+>
+> **3. Ad Creative — properly, this time.** Owner, on the latest output: *"what are
+> we using to generate them? The current output is still horrible and the copy is
+> really bad. I need you to properly implement what I asked for."* The four asks of
+> 2026-09-04; (4) Edit in Canva is shipped (`f50083c`); (1)–(3) are reproduced in the
+> memory note and NOT built:
+> - (1) every ad copy goes through the "Alex Hormozi" and "Sam Piliero" test to
+>   self-justify — show what each would say and apply the improvements BEFORE the
+>   variants are generated. Today `ad_craft.review` (ad_craft.py:186) runs AFTER each
+>   draft, one redraft on a block, and no panel exists. Build it as one model pass over
+>   the CONCEPTS (angle × claim × offer × reader) that critiques as Hormozi (the value
+>   equation, the offer) and Piliero (the hook, one idea, diversity across the batch),
+>   rewrites each variant's brief, is shown on the variant board, and only then
+>   `draft_ad` runs — a stubbable seam like `draft_ad` (skill_pack.py:1108), so the
+>   suite proves the improved brief reached the drafter before generation.
+> - (2) the claim-review section needs TABS per generated variant — `_grounding_card`
+>   (admin_ui.py:12037) concatenates every variant into one reading; and the copy
+>   format must be optimised for Instagram — `ad_craft.REPLY_FORMAT` (ad_craft.py:345)
+>   is a headline plus two or three lines with no caption shape (first line under the
+>   125 fold, line breaks, a CTA line, hashtags only if they earn it — measure it in
+>   `ad_craft.review`, the way `gbp_post.review` measures a post).
+> - (3) the pictures. WHAT GENERATES THEM: OpenAI `gpt-image-1` (`imagegen.MODEL`,
+>   imagegen.py:48). `imagegen.plate` (imagegen.py:216) paints an EMPTY scene; then
+>   `compose.product_on_scene` (compose.py:282) PASTES the product cut-out at 52% of
+>   the width with a drawn contact shadow, and `compose._draw_text` (compose.py:140)
+>   burns the headline in DejaVu or Arial (`_FONT_PATHS`, compose.py:46) — that is
+>   the "pasted onto another image" and the "embarrassing text". `imagegen.place_product`
+>   (imagegen.py:281) is the masked-edit route, measured repainting the product.
+>   `creative.batch` (creative.py:743) picks the route per framing
+>   (`NEEDS_THE_PRODUCT`, creative.py:740); `creative.assess` (creative.py:369) is a
+>   vision review that never gates; NOTHING reads winning ads — `meta_ads.live_ads`
+>   (meta_ads.py:105) returns copy and insights, no creative image URLs. THE COPY is
+>   Claude (`config.CLAUDE_MODEL`) in `_draft_ad_live` (skill_pack.py:1108) with
+>   `_AD_SYSTEM` (skill_pack.py:1047) and `ad_prompt` (skill_pack.py:1150), one call
+>   per claim. What follows from the code: type belongs in Canva now that the door
+>   works — stop burning it into frames; stop the paste for product-led frames (a
+>   reference-image generation with the real product, or a plate lit and framed for
+>   the shot, with the assessor's INTEGRATION verdict as a gate rather than a note);
+>   read the account's winning ads (add `creative{image_url,thumbnail_url}` to the
+>   Meta fields, rank by CTR/ROAS) into a "winning look" the brief cites — on the
+>   owner's click, never unattended (§5's spend rule); and hold the copy to the panel
+>   in (1). Reproduce each with the rehearsal's artifacts before building.
+>
+> Still the owner's: Google's Business Profile API approval (quota 0 until then —
+> `gbp.probe` names it), one real Klaviyo push, the first Semrush click.
 >
 > If the owner gives you an issue instead, do that and only that.
