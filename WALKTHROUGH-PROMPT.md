@@ -326,6 +326,16 @@ the one ESP in use. Two halves again: `esp.audiences` read `count`,
 is that `artifact_label` had no branch for it, so every client report in
 Review, Drafts and the held list read "report document · <date>" with the
 subject, recipient and window sitting unread in its meta. Named now.
+With that the open list above holds the owner's actions only. Two things
+the rehearsal SHOWS that are not gaps, so the next thread does not chase
+them: the catalogue skills read `failed: no Shopify store is connected for
+'x'` because the rehearsal calls below `preflight` — in production
+`systems.ready` blocks them by name before any store lookup, and the
+RuntimeError is the named second line; and `weekly_report` PRODUCES for an
+account with no ban list because `client_report` makes no model call, so
+there is nothing for a validator to check. Verification method that worked:
+the Omnisend connector in-session IS the Baci brand's live API (read-only);
+a docs-read shape is confirmed or corrected in one call.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner
