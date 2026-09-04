@@ -189,6 +189,24 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 @media(max-width:900px){.gwrap{grid-template-columns:30px minmax(0,1fr)}
   .gpanel{grid-column:1/-1;border-top:1px solid var(--rule)}
   .gread{border-right:0}}
+/* ONE READING PER AD VARIANT. CSS-only tabs: the radios are the state, so a
+   reader with no script still gets the first variant rather than a blank. The
+   panes are siblings of the inputs, which is what makes `#gv-N:checked ~ …`
+   able to reach them; five rules because `variants` is capped at five. */
+.vtabs>input{position:absolute;opacity:0;pointer-events:none}
+.vbar{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--rule);
+  margin:2px 0 12px}
+.vbar label{display:flex;align-items:center;gap:7px;padding:8px 13px;
+  font-size:.86rem;font-weight:600;color:var(--mut);cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+.vbar label:hover{color:var(--ink)}
+.vpane{display:none}
+#gv-1:checked~.vbar label[for=gv-1],#gv-2:checked~.vbar label[for=gv-2],
+#gv-3:checked~.vbar label[for=gv-3],#gv-4:checked~.vbar label[for=gv-4],
+#gv-5:checked~.vbar label[for=gv-5]{color:var(--ink);border-bottom-color:var(--acc)}
+#gv-1:checked~.vpanes>#gp-1,#gv-2:checked~.vpanes>#gp-2,
+#gv-3:checked~.vpanes>#gp-3,#gv-4:checked~.vpanes>#gp-4,
+#gv-5:checked~.vpanes>#gp-5{display:block}
 .gut{position:relative;border-right:1px solid var(--rule2)}
 .mk{position:absolute;right:4px;top:0;width:21px;height:19px;padding:0;
   display:grid;place-items:center;font-family:var(--mono);font-size:.6rem;
@@ -11575,6 +11593,8 @@ o.classList.toggle('hide',!(k==='all'||o.dataset.state===k));});
 Array.prototype.forEach.call(d.querySelectorAll('.mk'),function(m){
 m.classList.toggle('dim',!(k==='all'||m.dataset.state===k));});pick(null);});
 d.addEventListener('keydown',function(e){if(e.key==='Escape')pick(null);});
+Array.prototype.forEach.call(d.querySelectorAll('.vtabs>input'),function(i){
+i.addEventListener('change',layout);});
 addEventListener('resize',layout);locate();layout();
 if(d.fonts&&d.fonts.ready)d.fonts.ready.then(layout);setTimeout(layout,400);})();
 </script>"""
@@ -12321,18 +12341,107 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
     if not body.strip():
         return ""
     fmt = str(getattr(art, "format", "") or "")
+    variants: list = []
     if fmt == "ad_batch":
         try:
             import json as _json
-            body = "\n".join(str(v.get("text") or "")
-                              for v in (_json.loads(body) or {}).get("variants", []))
+            variants = list((_json.loads(body) or {}).get("variants") or [])
         except Exception:                                        # noqa: BLE001
             return ""
+        if not variants:
+            return ""
     claims = _claims_for_review(tenant, art)
+    if fmt == "ad_batch":
+        return _grounding_tabs(tenant, art, key, claims, variants)
+    got = _grounding_body(tenant, art, key, body, claims, fmt, live_ok=True)
+    if not got:
+        return ""
+    return f"""
+<div class="anchor" id="grounding"></div>
+<div class="card">
+  <div class="head"><h3>What here is confirmed by a claim</h3>{got["chip"]}</div>
+  {got["html"]}
+</div>{_MARGIN_JS}"""
+
+
+def _grounding_tabs(tenant: str, art, key: str, claims: list,
+                    variants: list) -> str:
+    """ONE READING PER VARIANT, in tabs. Owner, 2026-09-04: *"the claim-review
+    section needs TABS per generated variant."*
+
+    It concatenated every variant's text into one string and annotated THAT —
+    so five ads became one reading, the markers ran 1..n across a document
+    nobody wrote, and a note against variant four sat in the same gutter as
+    one against variant one. There was no way to ask "is THIS ad grounded",
+    which is the only version of the question anybody has.
+
+    NOTE NUMBERS ARE OFFSET PER VARIANT rather than restarted, because the
+    margin script joins marker to sentence to panel entry on `data-note`
+    across the whole document — three panes each numbering from 1 would make
+    clicking marker 1 select three things, two of them hidden.
+
+    CSS-only tabs: radio inputs, so switching panes needs no script and a
+    reader with none still sees the first. The script re-runs its layout on
+    change, because a pane that was `display:none` has no rectangles to
+    measure and its markers would otherwise stack at the top.
+    """
+    panes, labels, inputs = [], [], []
+    offset = 0
+    for i, v in enumerate(variants, 1):
+        text = str(v.get("text") or "")
+        got = _grounding_body(tenant, art, key, text, claims, "ad_batch",
+                              live_ok=False, offset=offset)
+        vid = f"gv-{i}"
+        inputs.append(f'<input type="radio" name="gvar" id="{vid}"'
+                      + (" checked" if i == 1 else "") + ">")
+        if not got:
+            labels.append(f'<label for="{vid}">Variant {i} '
+                          f'<span class="cnt">&mdash;</span></label>')
+            panes.append(f'<div class="vpane" id="gp-{i}">'
+                         f'<p class="mut">This variant asserts nothing '
+                         f'checkable, so there is nothing to trace.</p></div>')
+            continue
+        offset += got["notes"]
+        labels.append(f'<label for="{vid}">Variant {i} {got["chip"]}</label>')
+        panes.append(f'<div class="vpane" id="gp-{i}">{got["html"]}</div>')
+    if not panes:
+        return ""
+    return f"""
+<div class="anchor" id="grounding"></div>
+<div class="card">
+  <div class="head"><h3>What here is confirmed by a claim</h3>
+    <span class="mut">one reading per variant &mdash; a batch read as one
+    document could not answer whether THIS ad is grounded</span></div>
+  <div class="vtabs">{"".join(inputs)}
+    <div class="vbar">{"".join(labels)}</div>
+    <div class="vpanes">{"".join(panes)}</div>
+  </div>
+</div>{_MARGIN_JS}"""
+
+
+def _grounding_body(tenant: str, art, key: str, body: str, claims: list,
+                    fmt: str, *, live_ok: bool = True,
+                    offset: int = 0) -> dict:
+    """One text's reading: the meter, the filters, the gutter and the panel.
+
+    Split out of `_grounding_card` so an ad batch can render one of these per
+    variant instead of one over all of them. `offset` shifts this reading's
+    note numbers so several can share a page without their markers colliding.
+    Returns `{}` when there is nothing checkable to say.
+    """
+    from . import claim_trace
     plain = claim_trace.plain_text(body)
     rep = claim_trace.annotate(body, claims)
     if not rep.get("total"):
-        return ""
+        return {}
+    if offset:
+        # ON THE REPORT, before anything reads it: `_notes_for`, the markers
+        # and `_reading_html` all take the number from `sent["note"]`, so one
+        # shift here keeps the three views joined — which is the property
+        # `_notes_for` exists to guarantee.
+        for sent in rep.get("sentences") or []:
+            if sent.get("note"):
+                sent["note"] = int(sent["note"]) + offset
     uses = claim_trace.usage_counts(tenant)
     vocab = claim_trace.vocabulary(tenant)
     marks = claim_trace.brand_marks(tenant)
@@ -12382,7 +12491,7 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
     # Not for email (its HTML carries its own styles and belongs in the
     # sandboxed iframe above, which is why that preview stays) and not for an
     # ad batch (already flattened from JSON).
-    live = fmt not in ("ad_batch",) and not _looks_like_email(body)
+    live = live_ok and fmt not in ("ad_batch",) and not _looks_like_email(body)
     if live:
         _payload = json.dumps([{"n": n["n"], "s": n["state"],
                                 "t": n["sentence"]} for n in notes])
@@ -12391,10 +12500,7 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
     else:
         reading = _reading_html(plain, rep, states, claim_trace.headings(body))
 
-    return f"""
-<div class="anchor" id="grounding"></div>
-<div class="card">
-  <div class="head"><h3>What here is confirmed by a claim</h3>{chip}</div>
+    return {"notes": len(notes), "chip": chip, "html": f"""
   {meter}
   <p class="mut">{_esc(claim_trace.summary(rep))}</p>
   <p class="when">The reading below is the draft, unmarked &mdash; every note
@@ -12415,8 +12521,7 @@ def _grounding_card(tenant: str, art, key: str = "") -> str:
         or '<li class="gnote"><span></span><span class="mt">This output '
            'asserts nothing checkable, so there is nothing to trace.</span></li>'}</ul>
     </div>
-  </div>
-</div>{_MARGIN_JS}"""
+  </div>"""}
 
 
 def _decide_form(key: str, tenant: str, ap_id: str, output_id: str,

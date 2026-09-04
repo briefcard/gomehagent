@@ -25,6 +25,7 @@ Run: python3 scripts/test_ad_board.py
 """
 import json
 import os
+import re as _re
 import sys
 import tempfile
 
@@ -181,6 +182,32 @@ def main():
     ck("  Regenerate is offered with batch semantics",
        "Regenerate with feedback" in page and "WHOLE batch" in page)
     ck("  the grounding is on the card", "built on:" in page)
+
+    # ONE CLAIM READING PER VARIANT (owner, 2026-09-04). The card used to
+    # CONCATENATE every variant's text and annotate that — five ads read as
+    # one document, so "is THIS ad grounded" had no answer and a note against
+    # variant four sat in variant one's gutter.
+    ck("the claim review is tabbed, one pane per variant",
+       'class="vtabs"' in page
+       and all(f'id="gv-{i}"' in page and f'id="gp-{i}"' in page
+               for i in (1, 2, 3)), "")
+    ck("  the first variant is open with no script — radios are the state",
+       'id="gv-1" checked' in page or 'id="gv-1"checked' in page
+       or 'id="gv-1" checked>' in page, "")
+    ck("  each tab is labelled with its variant",
+       all(f">Variant {i} " in page for i in (1, 2, 3)), "")
+    ck("  and there is one gutter per pane, not one for the batch",
+       page.count('class="gwrap"') == 3, str(page.count('class="gwrap"')))
+    # THE NUMBERS MUST NOT COLLIDE. `_MARGIN_JS` joins marker to sentence to
+    # panel entry on `data-note` across the WHOLE document, so three panes
+    # each numbering from 1 would make one click select three things.
+    notes = _re.findall(r'class="mk" data-note="(\d+)"', page)
+    ck("  note numbers are unique across the panes, not restarted per tab",
+       len(notes) == len(set(notes)) and len(notes) >= 2, str(notes))
+    ck("  and the script re-lays out when a pane is revealed",
+       ".vtabs>input" in page and "addEventListener('change',layout)" in page,
+       "a hidden pane has no rectangles, so its markers would stack at the top")
+
     ship = c.get(f"/admin/ui?key={KEY}&tab=content&sub=ship&tenant=baci").text
     ck("the ship queue links each variant to its board",
        "review on its board" in ship)

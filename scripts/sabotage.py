@@ -3063,8 +3063,12 @@ SABOTAGES = [
     {
         "name": "the_review_shows_what_is_unbacked",
         "file": "app/admin_ui.py",
-        "find": "    return f\"\"\"\n<div class=\"anchor\" id=\"grounding\"></div>",
-        "replace": "    return \"\"  # SABOTAGE\n    return f\"\"\"\n<div class=\"anchor\" id=\"grounding\"></div>",
+        # RE-ANCHORED 2026-09-04: the card grew a SECOND return when the
+        # ad batch learned to render one reading per variant, so this
+        # matched twice and patched whichever came first. Moved onto
+        # `_grounding_body`, the one producer BOTH paths render.
+        "find": "    rep = claim_trace.annotate(body, claims)\n    if not rep.get(\"total\"):\n        return {}",
+        "replace": "    rep = claim_trace.annotate(body, claims)\n    if True:  # SABOTAGE\n        return {}",
         "suites": ["test_claim_trace.py"],
         "why": "the workroom stops showing which sentences stand on a claim, "
                "so an article that is 0% grounded looks exactly like one that "
@@ -6724,6 +6728,30 @@ SABOTAGES = [
         'replace': '<the ad itself, two or three short lines> SABOTAGE (was: the hook, because',
         'suites': ['test_ad_craft.py'],
         'why': 'the rules are measured after the fact and never stated to the writer, so every draft is rejected for a shape nobody asked it for — the prohibition-only brief this whole ruleset exists to end',
+    },
+    {
+        'name': 'each_ad_variant_gets_its_own_reading',
+        'file': 'app/admin_ui.py',
+        'find': '        return _grounding_tabs(tenant, art, key, claims, variants)',
+        'replace': '        body = "\\n".join(str(v.get("text") or "") for v in variants)  # SABOTAGE',
+        'suites': ['test_ad_board.py'],
+        'why': "five ads are annotated as one document again, so 'is THIS variant grounded' has no answer and a note against variant four sits in variant one's gutter",
+    },
+    {
+        'name': 'variant_note_numbers_do_not_collide',
+        'file': 'app/admin_ui.py',
+        'find': '        offset += got["notes"]',
+        'replace': '        offset += 0  # SABOTAGE',
+        'suites': ['test_ad_board.py'],
+        'why': 'every pane numbers its notes from 1, and the margin script joins marker to sentence to panel entry on data-note across the whole page — so one click selects three things, two of them in hidden tabs',
+    },
+    {
+        'name': 'a_revealed_pane_lays_its_markers_out',
+        'file': 'app/admin_ui.py',
+        'find': "Array.prototype.forEach.call(d.querySelectorAll('.vtabs>input'),function(i){\ni.addEventListener('change',layout);});",
+        'replace': '/* SABOTAGE */',
+        'suites': ['test_ad_board.py'],
+        'why': 'a pane that was display:none has no rectangles to measure, so switching to variant three shows every marker stacked at the top of the gutter beside the wrong sentences',
     },
 ]
 
