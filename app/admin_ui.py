@@ -6100,6 +6100,51 @@ def _frames_run(tenant: str) -> str:
     return out
 
 
+def _winning_look_card(key: str, tenant: str) -> str:
+    """WHAT THIS ACCOUNT'S BEST ADS LOOK LIKE — and the button that reads them.
+
+    Owner, 2026-09-04: read the winning ads into a look the brief cites, *"on
+    the owner's click, never unattended."* So this states what is on file,
+    when it was read and from how many ads, and carries the one control that
+    refreshes it. Nothing here calls Meta on render — the card is the stored
+    description, and the button is the spend.
+    """
+    if systems.find(tenant, "ad_creative") is None:
+        return ""
+    look = systems.winning_look(tenant)
+    btn = f"""
+      <form method="post" action="/admin/ad_winning_look" class="inl">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <button class="sec">{"Read them again" if look else
+                             "Read this account&rsquo;s winning ads"}</button>
+      </form>"""
+    if not look.get("look"):
+        body = ('<p class="mut">Nothing has been read from this account&rsquo;s '
+                'best-performing ads, so a generated frame looks like the image '
+                'model&rsquo;s taste rather than what has actually worked here. '
+                'Reading them costs a Meta read and one look at the pictures, '
+                'so it happens when you ask and never on a schedule.</p>')
+    else:
+        froms = look.get("from") or []
+        body = (f'<div class="row"><span class="chip on">read '
+                f'{_esc(str(look.get("read_at", ""))[:10])}</span>'
+                f'<span class="chip nb">{len(froms)} ad(s), ranked by '
+                f'{_esc(look.get("ranked_by", ""))}</span>'
+                f'<span class="chip nb">{look.get("considered", 0)} considered'
+                f'</span></div>'
+                f'<p class="when">{_esc(str(look.get("look"))[:900])}</p>'
+                f'<p class="when">Every ad frame is briefed on this. It is a '
+                f'description, never the pictures — a generator handed a '
+                f'finished ad reproduces it.</p>')
+    return f"""
+    <div class="card"><div class="anchor" id="winning"></div>
+      <div class="head"><h3>What has worked here</h3></div>
+      {body}
+      <div class="row">{btn}</div>
+    </div>"""
+
+
 def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
     """Every generated set as its own card, and the queue with them removed.
 
@@ -6342,7 +6387,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # AND WHAT A RUN IS DOING RIGHT NOW. Generation is minutes long and off
     # the request, so without this a failed run and a running one look
     # identical: the banner promised pictures under Pictures and none came.
-    batch_html = _frames_run(tenant) + batch_html
+    batch_html = _frames_run(tenant) + _winning_look_card(key, tenant) + batch_html
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
     # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap

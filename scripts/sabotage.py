@@ -129,8 +129,11 @@ SABOTAGES = [
     {
         "name": 'a_frame_run_reports_itself',
         "file": 'app/admin_ui.py',
-        "find": '    batch_html = _frames_run(tenant) + batch_html',
-        "replace": '    batch_html = batch_html  # SABOTAGE',
+        # RE-ANCHORED 2026-09-04: the winning-look card joined this line.
+        # The claim is unchanged — the frame RUN has to report itself — so
+        # the mutation drops `_frames_run` and leaves the new card alone.
+        "find": '    batch_html = _frames_run(tenant) + _winning_look_card(key, tenant) + batch_html',
+        "replace": '    batch_html = _winning_look_card(key, tenant) + batch_html  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": 'the minutes-long frame run reports nowhere, so a crashed one is indistinguishable from a slow one: the banner promises pictures under Pictures and none ever arrive',
     },
@@ -6799,6 +6802,54 @@ SABOTAGES = [
         'replace': '        k for k in spec["extra"] if k not in ("on_subject",)) + ("integration",)  # SABOTAGE',
         'suites': ['test_creative_batch.py'],
         'why': 'a generated scene with no product in it is asked whether its product is well integrated, so the model invents a verdict about something that is not there — a false refusal on the frames that were never at risk',
+    },
+    {
+        'name': 'the_winning_ads_creative_is_read',
+        'file': 'app/meta_ads.py',
+        'find': '                   "creative{body,object_story_spec,image_url,thumbnail_url},"',
+        'replace': '                   "creative{body,object_story_spec},"  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': "Meta is asked for the ad's words and never its picture, so nothing in this codebase can see what a winning ad looked like and every generated frame is the image model's taste on an account whose own best creative is sitting there unread",
+    },
+    {
+        'name': 'winners_are_ranked_by_what_sold',
+        'file': 'app/meta_ads.py',
+        'find': '    by_roas = any(r["roas"] for r in rows)',
+        'replace': '    by_roas = False  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': "the look is learned from the ad that got looked at rather than the one that sold, on accounts that report exactly that difference — so the frames copy the qualities of the brand's most expensive failure",
+    },
+    {
+        'name': 'a_handful_of_impressions_is_not_a_winner',
+        'file': 'app/meta_ads.py',
+        'find': '        if impressions < max(0, int(min_impressions or 0)):',
+        'replace': '        if False:  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': 'a 40% click rate on 40 impressions tops the ranking, so the winning look is learned from statistical noise — and it is precisely the row a naive sort promotes',
+    },
+    {
+        'name': 'the_brief_cites_what_has_worked',
+        'file': 'app/creative.py',
+        'find': '    if look.get("look"):',
+        'replace': '    if False:  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': 'the winning look is read, described, stored and shown to the owner, and never reaches the image brief — the two-halves defect with a UI on the front of it',
+    },
+    {
+        'name': 'an_unread_account_says_the_look_is_guesswork',
+        'file': 'app/creative.py',
+        'find': '        thin.append("nothing has been read from this account\'s best-performing "\n                    "ads, so the look is this model\'s taste rather than what "\n                    "has actually worked here")',
+        'replace': '        pass  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': 'an account whose winning ads have never been read looks identical to one briefed on them, so nobody ever presses the button and the feature is shipped and unused',
+    },
+    {
+        'name': 'the_winning_look_is_a_description_not_the_pictures',
+        'file': 'app/creative.py',
+        'find': '    look = {"look": (reply.text or "").strip(),',
+        'replace': '    look = {"look": (reply.text or "").strip(), "images": [a.get("image_url") for a in got["ads"]],  # SABOTAGE',
+        'suites': ['test_winning_look.py'],
+        'why': "the winning ads' own image URLs are stored on the account and reachable by the generator, and a generator handed a finished ad reproduces it — which is plagiarising the client's own creative back at them",
     },
 ]
 

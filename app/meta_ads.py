@@ -42,7 +42,12 @@ TIMEOUT = 45
 #: answers a question somebody actually asks of an ad, and a wide dict makes
 #: the ledger row a place to dump the API response rather than a record of
 #: what happened.
-FIELDS = ("impressions", "clicks", "spend", "ctr", "cpc", "actions")
+FIELDS = ("impressions", "clicks", "spend", "ctr", "cpc", "actions",
+          # WHAT THE PURCHASES WERE WORTH. `actions` counts them; without
+          # values there is no return on spend, only a click rate — and
+          # ranking creative on clicks alone promotes the ad that got looked
+          # at over the one that sold.
+          "action_values")
 
 
 def _cfg(tenant: str) -> tuple[dict, str]:
@@ -114,8 +119,12 @@ def live_ads(tenant: str, *, limit: int = 200) -> dict:
         return {"ok": False, "why": why, "ads": []}
     got = _get(cfg, f"{cfg['account']}/ads", {
         "limit": max(1, min(int(limit or 200), 500)),
+        # THE PICTURE, not only the words. `image_url` and `thumbnail_url`
+        # are what make "which creative worked" answerable at all — without
+        # them this module could join copy to outcomes and say nothing about
+        # the thing people actually saw.
         "fields": ("id,name,status,effective_status,"
-                   "creative{body,object_story_spec},"
+                   "creative{body,object_story_spec,image_url,thumbnail_url},"
                    "insights.date_preset(maximum){" + ",".join(FIELDS) + "}")})
     if got.get("error"):
         return {"ok": False, "why": got["error"], "ads": []}
@@ -132,14 +141,77 @@ def live_ads(tenant: str, *, limit: int = 200) -> dict:
         if not body:
             continue
         stats = ((a.get("insights") or {}).get("data") or [{}])[0]
+        cre = (a.get("creative") or {})
         out.append({"ad_id": str(a.get("id") or ""),
                     "name": str(a.get("name") or ""),
                     "status": str(a.get("effective_status")
                                   or a.get("status") or ""),
                     "body": body, "key": comparable(body),
+                    "image_url": str(cre.get("image_url") or ""),
+                    "thumbnail_url": str(cre.get("thumbnail_url") or ""),
                     "metrics": {k: stats.get(k) for k in FIELDS
                                 if stats.get(k) is not None}})
     return {"ok": True, "ads": out, "why": ""}
+
+
+def _purchase_value(metrics: dict) -> float:
+    """What the purchases attributed to an ad were worth, or 0."""
+    for row in (metrics.get("action_values") or []):
+        if str((row or {}).get("action_type") or "").endswith("purchase"):
+            try:
+                return float(row.get("value") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def winners(tenant: str, *, limit: int = 200, top: int = 3,
+            min_impressions: int = 1000) -> dict:
+    """The account's best-performing ads THAT HAVE A PICTURE, best first.
+
+    ROAS when the account reports purchase values, click-through rate when it
+    does not — ranking on clicks alone promotes the ad that got looked at over
+    the one that sold, and most accounts have both numbers. Ads under
+    `min_impressions` are excluded whatever their rate: a 12% CTR on 40
+    impressions is noise wearing a winner's number, and it is exactly the row
+    that would top a naive sort.
+
+    READ-ONLY, like everything else here, and never called on a schedule —
+    see `creative.learn_winning_look`, whose only caller is a button.
+    """
+    got = live_ads(tenant, limit=limit)
+    if not got["ok"]:
+        return {"ok": False, "why": got["why"], "ads": [], "ranked_by": ""}
+    rows = []
+    for a in got["ads"]:
+        if not a.get("image_url") and not a.get("thumbnail_url"):
+            continue
+        m = a.get("metrics") or {}
+        try:
+            impressions = int(float(m.get("impressions") or 0))
+        except (TypeError, ValueError):
+            impressions = 0
+        if impressions < max(0, int(min_impressions or 0)):
+            continue
+        try:
+            spend = float(m.get("spend") or 0)
+            ctr = float(m.get("ctr") or 0)
+        except (TypeError, ValueError):
+            spend, ctr = 0.0, 0.0
+        value = _purchase_value(m)
+        rows.append({**a, "impressions": impressions, "spend": spend,
+                     "ctr": ctr,
+                     "roas": round(value / spend, 2) if spend > 0 and value else 0.0})
+    if not rows:
+        return {"ok": False, "ads": [], "ranked_by": "",
+                "why": (f"no ad on this account has both a picture and "
+                        f"{min_impressions} impressions yet, so there is "
+                        f"nothing to learn a look from")}
+    by_roas = any(r["roas"] for r in rows)
+    rows.sort(key=lambda r: (r["roas"] if by_roas else r["ctr"]), reverse=True)
+    return {"ok": True, "ads": rows[:max(1, int(top or 3))],
+            "ranked_by": "roas" if by_roas else "ctr",
+            "considered": len(rows), "why": ""}
 
 
 def match(tenant: str, *, limit: int = 200) -> dict:

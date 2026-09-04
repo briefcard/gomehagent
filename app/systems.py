@@ -1806,6 +1806,38 @@ def set_mix(system_id: str, *, use_recommended: bool = False,
     return {"ok": True, **updates}
 
 
+def set_winning_look(system_id: str, look: dict | None) -> dict:
+    """What this account's best ads look like, onto `System.config`.
+
+    ON THE SYSTEM ROW, beside `cadence` and `mix`, because it is the same kind
+    of thing: a per-account setting the generator READS. `Setting` already had
+    eleven uncoordinated writers and the register refused a twelfth, and a
+    `Memory` note is guidance the drafter is told — this is a fact about
+    pictures that the image brief cites.
+
+    Passing None clears it, so a look that has gone stale can be removed
+    rather than corrected into something nobody chose.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if not row:
+            return {"error": "unknown system"}
+        cfg = dict(row.config or {})
+        if look is None:
+            cfg.pop("winning_look", None)
+        else:
+            cfg["winning_look"] = dict(look)
+        row.config = cfg
+        s.commit()
+    return {"ok": True, "cleared": look is None}
+
+
+def winning_look(tenant: str) -> dict:
+    """The stored look for this account's ads, or {}. One reader."""
+    row = find(tenant, "ad_creative")
+    return dict(((row.config or {}) if row else {}).get("winning_look") or {})
+
+
 #: The growth goal, per system. Every field optional individually; at least one
 #: required, because a goal with nothing in it is not a goal.
 #:

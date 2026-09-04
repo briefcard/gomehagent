@@ -3466,6 +3466,37 @@ def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
     return "\n".join(out)
 
 
+@app.post("/admin/ad_winning_look")
+async def ad_winning_look(request: Request, key: str = Depends(admin_key)):
+    """Read this account's best-performing ads and write down what they look like.
+
+    ON THE OWNER'S CLICK. It costs a Meta read, a few image fetches and one
+    vision call, and §5's standing rule is that recurring spend on a client's
+    quota is the owner's decision rather than a default — so there is no
+    schedule behind this and no caller but the button.
+
+    The description then rides every ad-frame brief (`creative.brief_for`),
+    which is the point: until now the look of a generated frame was the image
+    model's taste, and this account's own winning creative was sitting in Meta
+    unread.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import creative as _cr
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    got = _cr.learn_winning_look(tenant)
+    if not got.get("ok"):
+        return _back_to_content(tenant, msg=f"Winning look: {got.get('why', '')}"[:250],
+                                anchor="pics")
+    n = len(got.get("from") or [])
+    return _back_to_content(
+        tenant, anchor="pics",
+        msg=(f"Read {n} of this account's best ads (by "
+             f"{got.get('ranked_by', 'performance')}) — the next frames are "
+             f"briefed on what they have in common"))
+
+
 @app.post("/admin/ad_launched")
 async def ad_launched(request: Request, key: str = Depends(admin_key)):
     """Look for this copy running in the ad account, and join what is found.

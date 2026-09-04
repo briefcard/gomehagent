@@ -346,6 +346,30 @@ def brief_for(tenant: str, *, commitment: dict | None = None,
     parts.append("Photographic and real. NO text, lettering, watermark or "
                  "logo of any kind. Nothing that reads as a stock photograph.")
 
+    # WHAT HAS ALREADY WORKED ON THIS ACCOUNT. Owner, 2026-09-04: read the
+    # winning ads into a look the brief cites. It is a DESCRIPTION, never the
+    # images — a generator handed somebody's finished ad produces a copy of
+    # it, and the point is the qualities they share. Absent until the owner
+    # presses the button; `thin` says so, because "we have never looked at
+    # what worked" is a real gap in an ad brief.
+    look = {}
+    try:
+        from . import systems as _sysm
+        look = _sysm.winning_look(tenant)
+    except Exception:                                            # noqa: BLE001
+        look = {}
+    if look.get("look"):
+        parts.append(
+            f"WHAT HAS WORKED FOR THIS BRAND, from its own best-performing "
+            f"ads (ranked by {look.get('ranked_by') or 'performance'}): "
+            f"{str(look['look'])[:600]} Match those qualities — the light, "
+            f"the framing, the palette, the styling. Do NOT reproduce any "
+            f"particular one of them.")
+    elif fmt == "ad_frame":
+        thin.append("nothing has been read from this account's best-performing "
+                    "ads, so the look is this model's taste rather than what "
+                    "has actually worked here")
+
     names = ("on_subject", "claim_safe", "no_text", "craft") + tuple(
         k for k in spec["extra"] if k not in ("on_subject",)) + (
         ("integration",) if composited else ())
@@ -429,6 +453,80 @@ def assess(blob: bytes, brief: dict, tenant: str = "") -> dict:
     return {"ok": True, "verdicts": verdicts, "failed": failed,
             "overall": str(data.get("overall") or ""),
             "fix": str(data.get("fix") or ""), "why": ""}
+
+
+_LOOK = """These are the best-performing ads from one brand's own account.
+
+Describe, in one paragraph, WHAT THEY HAVE IN COMMON as photographs — the
+light (direction, hardness, colour), the framing and camera height, the
+palette, the styling and props, whether people appear and how, and the
+overall finish. Write it as direction somebody could shoot to.
+
+Say nothing about the words on them, nothing about the products themselves,
+and do not describe any single image — if they have little in common, say
+that plainly rather than inventing a shared style."""
+
+
+def learn_winning_look(tenant: str, *, top: int = 3) -> dict:
+    """Look at this account's best ads and write down what they look like.
+
+    ON THE OWNER'S CLICK, NEVER ON A SCHEDULE. It spends a Meta read, N image
+    fetches and one vision call, and §5's standing rule is that recurring
+    spend on a client's quota is declared rather than defaulted on. There is
+    no caller but the button.
+
+    IT STORES A DESCRIPTION, not the pictures. A generator handed a finished
+    ad reproduces it; what transfers is the light, the framing and the
+    palette — so the images are read once, described, and dropped.
+    """
+    from . import db, llm, meta_ads, systems as _sysm
+    row = _sysm.find(tenant, "ad_creative")
+    if row is None:
+        return {"ok": False, "why": f"no ad_creative system on {tenant}"}
+    got = meta_ads.winners(tenant, top=top)
+    if not got["ok"]:
+        return {"ok": False, "why": got["why"]}
+    blocks: list = []
+    used: list = []
+    for ad in got["ads"]:
+        url = ad.get("image_url") or ad.get("thumbnail_url")
+        blob = _fetch(url)
+        if not blob:
+            continue
+        import base64 as _b64
+        blocks.append({"type": "image",
+                       "source": {"type": "base64", "media_type": "image/jpeg",
+                                  "data": _b64.standard_b64encode(blob).decode()}})
+        used.append({"ad_id": ad["ad_id"], "name": ad["name"],
+                     "ctr": ad["ctr"], "roas": ad["roas"]})
+    if not blocks:
+        return {"ok": False,
+                "why": ("the winning ads were found but none of their images "
+                        "could be fetched, so there is nothing to look at")}
+    blocks.append({"type": "text", "text": _LOOK})
+    reply = llm.ask("creative_review", blocks, tenant=tenant, max_tokens=600)
+    if not getattr(reply, "ok", False):
+        return {"ok": False,
+                "why": (getattr(reply, "degraded", "")
+                        or getattr(reply, "error", "the reading could not run"))}
+    look = {"look": (reply.text or "").strip(),
+            "ranked_by": got["ranked_by"], "from": used,
+            "considered": got.get("considered", 0),
+            "read_at": db.utcnow().isoformat()}
+    _sysm.set_winning_look(row.id, look)
+    return {"ok": True, **look}
+
+
+def _fetch(url: str) -> bytes:
+    """One image, or nothing. A seam, so the suite never reaches the network."""
+    if not url:
+        return b""
+    import httpx
+    try:
+        r = httpx.get(url, timeout=30, follow_redirects=True)
+        return r.content if r.status_code < 400 else b""
+    except Exception:                                            # noqa: BLE001
+        return b""
 
 
 #: Commitment kinds whose artifact is ABOUT A THING in the catalogue. The
