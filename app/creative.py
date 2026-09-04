@@ -220,6 +220,16 @@ CRITERIA = {
                         "reason to stop?",
     "lands_the_positioning": "Does it argue the specific idea below, rather "
                              "than being pleasant and unrelated?",
+    # THE ONE THAT GATES. Asked only of a frame with a real photograph
+    # composited into it, because it is the only frame that can fail this way
+    # — and it is the failure the owner reported: "pasted onto another image".
+    "integration": "The product in this image is a real photograph placed "
+                   "into a generated scene. Does it look PHOTOGRAPHED THERE — "
+                   "light coming from the same direction as everything else, "
+                   "the same colour temperature, a contact shadow that agrees "
+                   "with the scene's other shadows, edges that belong? Or "
+                   "does it read as cut out and pasted on? Say FAIL if a "
+                   "person would notice.",
 }
 
 
@@ -248,7 +258,8 @@ def _subject_of(commitment: dict | None, situation: str, entity_label: str,
 def brief_for(tenant: str, *, commitment: dict | None = None,
               fmt: str = "email_hero", prominent: str = "",
               entity_key: str = "", claim: str = "", situation: str = "",
-              audience_key: str = "", positioning: str = "") -> dict:
+              audience_key: str = "", positioning: str = "",
+              composited: bool = False) -> dict:
     """Everything the picture has to do, and everything it will be judged on.
 
     STRUCTURED, not a prompt string. A video renderer needs the same subject,
@@ -336,7 +347,8 @@ def brief_for(tenant: str, *, commitment: dict | None = None,
                  "logo of any kind. Nothing that reads as a stock photograph.")
 
     names = ("on_subject", "claim_safe", "no_text", "craft") + tuple(
-        k for k in spec["extra"] if k not in ("on_subject",))
+        k for k in spec["extra"] if k not in ("on_subject",)) + (
+        ("integration",) if composited else ())
     return {"prompt": " ".join(parts), "subject": subject, "fmt": fmt,
             "shape": spec["shape"], "palette": palette, "thin": thin,
             "criteria": [{"key": k, "ask": CRITERIA[k]} for k in dict.fromkeys(names)],
@@ -803,10 +815,18 @@ def batch(tenant: str, *, commitment: dict | None = None,
         f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
     dropped = [f for f in FRAMINGS if f not in framings]
 
-    frames, errors, repeats = [], [], 0
+    # THE BRIEF A COMPOSITE IS JUDGED ON carries one extra criterion, because
+    # only a composite can fail it. Built once, beside the plain brief.
+    comp_brief = brief_for(tenant, commitment=commitment, fmt=fmt,
+                           prominent=prominent, entity_key=entity_key,
+                           claim=claim, audience_key=audience_key,
+                           positioning=positioning, composited=True)
+
+    frames, errors, repeats, pasted = [], [], 0, 0
     for cell in axes(framings=framings, limit=max(1, int(plates or 4))):
         text = base["prompt"] + _axis_brief(cell)
-        res = _plates(text, base["shape"], PER_PROMPT)
+        needs = cell["framing"] in NEEDS_THE_PRODUCT
+        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs)
         if not res.get("ok"):
             errors.append(f"{cell['angle']}/{cell['framing']}: "
                           f"{res.get('error', 'generation failed')}")
@@ -814,18 +834,20 @@ def batch(tenant: str, *, commitment: dict | None = None,
         for blob in res.get("images") or []:
             if not blob:
                 continue
-            if cell["framing"] in NEEDS_THE_PRODUCT:
-                made = _composite(tenant, product_id, blob, base["shape"],
-                                  headline=headline, subline=subline)
-                if not made.get("ok"):
-                    errors.append(f"{cell['framing']}: {made['error']}")
+            verdict = None
+            if needs:
+                got = _integrated(tenant, product_id, blob, base, comp_brief,
+                                  cell, text, review=review)
+                if got.get("error"):
+                    errors.append(f"{cell['framing']}: {got['error']}")
+                    if got.get("pasted"):
+                        pasted += 1
                     continue
-                blob = made["image"]
+                blob, verdict = got["image"], got["verdict"]
             filed = _file_frame(tenant, blob, base, cell, batch_id,
                                 entity_key=entity_key, prompt=text,
-                                review=review,
-                                product_id=product_id
-                                if cell["framing"] in NEEDS_THE_PRODUCT else "")
+                                review=review, verdict=verdict,
+                                product_id=product_id if needs else "")
             if filed.get("duplicate"):
                 repeats += 1
                 continue
@@ -845,11 +867,26 @@ def batch(tenant: str, *, commitment: dict | None = None,
             # the number is the only place that shows before somebody opens
             # twenty pictures.
             "repeats": repeats,
+            "pasted": pasted,
+            # THE LINE THE TYPE SHOULD SAY, carried rather than burned. The
+            # caller computes it from the ad's own opening line so the
+            # picture and the post argue the same thing; it now travels to
+            # the person who sets it in Canva instead of into the pixels.
+            "headline": headline,
             "note": ((f"{len(clean)} of {len(frames)} passed review"
                       + (f" — {repeats} came back identical to a picture "
                          f"already on file and were not filed twice"
-                         if repeats else ""))
-                     if frames else "nothing was generated"),
+                         if repeats else "")
+                      + (f"; {pasted} were dropped because the product still "
+                         f"read as pasted on after a second plate"
+                         if pasted else "")
+                      + ". No type is set into these — open one in Canva to "
+                        "add the headline"
+                      + (f" (“{headline[:60]}”)" if headline else ""))
+                     if frames else
+                     ("nothing was generated"
+                      + (f" — {pasted} composite(s) were dropped because the "
+                         f"product read as pasted on" if pasted else ""))),
             "held_back": (
                 f"no usable photograph of this product, so "
                 f"{', '.join(dropped)} were not attempted — a generated "
@@ -858,16 +895,78 @@ def batch(tenant: str, *, commitment: dict | None = None,
 
 
 def _composite(tenant: str, product_id: str, plate: bytes, shape: str, *,
-               headline: str, subline: str) -> dict:
-    """The photograph onto the plate, at the one shape this set is cut at."""
+               headline: str = "", subline: str = "") -> dict:
+    """The photograph onto the plate, at the one shape this set is cut at.
+
+    NO TYPE IS BURNED IN. Owner, 2026-09-04: *"type belongs in Canva now that
+    the door works — stop burning it into frames."* `compose._draw_text` set
+    the headline in DejaVu or whatever font the host happened to have, at a
+    fixed position, permanently — so a frame arrived with the brand's words
+    in a font the brand does not own and no way to move them. The Canva door
+    (`hosting.to_canva`) is per frame and shipped, so the type is set there,
+    on the picture somebody actually kept.
+
+    `headline` and `subline` stay in the signature and are deliberately
+    unused: every caller still has them, and dropping the parameters would
+    move the decision into the callers rather than stating it here.
+    """
     from . import compose
     fmt = _PLACEMENT.get(shape, "1:1")
     got = compose.product_on_scene(tenant, product_id, plate,
-                                   headline=headline, subline=subline,
+                                   headline="", subline="",
                                    formats=[fmt])
     if not got.get("ok"):
         return {"ok": False, "error": str(got.get("error") or "compositing failed")}
     return {"ok": True, "image": got["images"][fmt]}
+
+
+def _integrated(tenant: str, product_id: str, plate: bytes, base: dict,
+                comp_brief: dict, cell: dict, prompt: str, *,
+                review: bool) -> dict:
+    """Composite the photograph in, and REFUSE the frame if it reads as pasted.
+
+    Owner, 2026-09-04, on the frames: the product looked *"pasted onto another
+    image"*. It was — `compose.product_on_scene` alpha-composites the real
+    cutout onto a generated plate, which is the only route that cannot be
+    wrong about WHICH product it is, and pays for that with light that came
+    from a different room.
+
+    `assess` has been able to see this since it was written and its verdict
+    was attached to the asset as advice — the owner's instruction is that
+    INTEGRATION becomes *"a gate rather than a note"*. So it gates, and only
+    here: a person-led or context frame has no composited product and cannot
+    fail this, and gating those on a vision model's taste is exactly the false
+    refusal `assess`'s docstring refuses to build.
+
+    ONE RETRY, on a FRESH PLATE, because that is the half we can change. The
+    product photograph is fixed and correct; what fails is the scene it was
+    dropped into, and a plate lit from a different angle is a different
+    answer. A second failure drops the frame and SAYS so — a set that quietly
+    returns four frames instead of eight is the silent degradation this
+    codebase keeps closing.
+    """
+    from . import compose  # noqa: F401  (product_on_scene via _composite)
+    made = _composite(tenant, product_id, plate, base["shape"])
+    if not made.get("ok"):
+        return {"error": str(made.get("error") or "compositing failed")}
+    if not review:
+        return {"image": made["image"], "verdict": None}
+    verdict = assess(made["image"], comp_brief, tenant)
+    if "integration" not in (verdict.get("failed") or []):
+        return {"image": made["image"], "verdict": verdict}
+
+    again = _plates(prompt, base["shape"], 1, for_product=True)
+    if again.get("ok") and (again.get("images") or []):
+        retry = _composite(tenant, product_id, again["images"][0], base["shape"])
+        if retry.get("ok"):
+            v2 = assess(retry["image"], comp_brief, tenant)
+            if "integration" not in (v2.get("failed") or []):
+                return {"image": retry["image"], "verdict": v2}
+            verdict = v2
+    return {"error": (f"{cell['framing']}: the product still read as pasted "
+                      f"onto the scene after a second plate — "
+                      f"{str(verdict.get('overall') or '')[:120]}"),
+            "pasted": True}
 
 
 #: `imagegen` names shapes; `compose` names Meta placements. One mapping, here,
@@ -878,7 +977,7 @@ _PLACEMENT = {"square": "1:1", "portrait": "4:5", "landscape": "1:1"}
 
 def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 batch_id: str, *, entity_key: str, prompt: str, review: bool,
-                product_id: str = "") -> dict:
+                product_id: str = "", verdict: dict | None = None) -> dict:
     """Store the bytes, judge them, and file the asset. One frame's whole life."""
     from . import kb as kbmod, media
     put = media.put(tenant, blob, mime="image/png", origin=GENERATED_ORIGIN)
@@ -891,7 +990,11 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
     # said instead: "24 asked for, 22 distinct" is a fact about the brief.
     if put["reused"]:
         return {"duplicate": True}
-    verdict = assess(blob, base, tenant) if review else {}
+    # ALREADY JUDGED? A composited frame was assessed by the integration gate
+    # against the richer brief; asking again would be a second vision call per
+    # frame for a worse answer.
+    if verdict is None:
+        verdict = assess(blob, base, tenant) if review else {}
     kbmod.add_asset(
         tenant, put["url"], rights=GENERATED_RIGHTS,
         title=f"{base['subject'] or 'ad'} · {cell['angle']}/{cell['framing']}"[:120],
@@ -963,9 +1066,14 @@ def placements(tenant: str, asset_id: str) -> dict:
             "note": f"{len(cut)} placement(s) cut from an approved frame"}
 
 
-def _plates(text: str, shape: str, n: int) -> dict:
+def _plates(text: str, shape: str, n: int, *, for_product: bool = False) -> dict:
+    """The seam every plate goes through. `for_product` asks for a scene LIT
+    AND FRAMED to receive a real photograph — a parameter accepted and not
+    forwarded is the two-halves defect this codebase keeps finding, so it is
+    passed here and nowhere else."""
     from . import imagegen
-    return imagegen.plate(text, shape=shape, n=max(1, min(4, int(n or 1))))
+    return imagegen.plate(text, shape=shape, n=max(1, min(4, int(n or 1))),
+                          for_product=for_product)
 
 
 def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:

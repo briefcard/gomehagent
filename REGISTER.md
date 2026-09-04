@@ -431,7 +431,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`assess`**(blob, brief, tenant?) → `dict`  ·  from `test_creative_seam.py`
 - **`axes`**(angles?, levers?, framings?, limit?) → `list`  ·  from `test_creative_batch.py`
 - **`batch`**(tenant, commitment?, positioning?, entity_key?, audience_key?, claim?, prominent?, headline?, subline?, fmt?, plates?, review?) → `dict`  ·  from `test_creative_batch.py`
-- **`brief_for`**(tenant, commitment?, fmt?, prominent?, entity_key?, claim?, situation?, audience_key?, positioning?) → `dict`  ·  from `test_creative_seam.py`
+- **`brief_for`**(tenant, commitment?, fmt?, prominent?, entity_key?, claim?, situation?, audience_key?, positioning?, composited?) → `dict`  ·  from `test_creative_batch.py`, `test_creative_seam.py`
 - **`generate`**(tenant, commitment?, fmt?, prominent?, entity_key?, claim?, situation?, audience_key?, positioning?, prompt?, review?) → `dict`  ·  from `test_creative_seam.py`, `web.py`
 - **`harvest_drive`**(tenant, folder?, limit?) → `dict`  ·  from `web.py`
 - **`hero_for_campaign`**(tenant, segment_key?, entity_keys?, title?, draft_if_missing?) → `dict`  ·  from `skill_pack.py`, `test_campaign_visual.py`, `test_creative_seam.py`
@@ -707,7 +707,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `imagegen.py`
 
 - **`place_product`**(product_png, prompt, shape?, n?, inspiration?) → `dict`  ·  from `creative.py`, `test_imagegen.py`, `try_imagegen.py`, `web.py`
-- **`plate`**(prompt, shape?, n?, inspiration?) → `dict`  ·  from `creative.py`, `test_imagegen.py`
+- **`plate`**(prompt, shape?, n?, inspiration?, for_product?) → `dict`  ·  from `creative.py`, `test_imagegen.py`
 - **`scene_with_real_product`**(product_png, prompt, headline?, subline?, inspiration?, shape?, text_colour?, formats?) → `dict`  ·  **from nothing**
 - **`similarity`**(product_png, generated_png, region?) → `float`  ·  from `kb.py`, `test_claim_tagging.py`, `test_imagegen.py`, `test_provenance.py`
 

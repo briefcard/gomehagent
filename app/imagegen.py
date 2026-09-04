@@ -213,8 +213,29 @@ _PLATE_RULE = (
 )
 
 
+#: EXTRA DIRECTION WHEN A REAL PRODUCT IS GOING INTO THIS PLATE. The generic
+#: rule above only says "leave the surface empty", which produces a pretty
+#: room the product then sits on top of — the "pasted onto another image"
+#: the owner reported. A plate meant to receive a photograph has to be LIT
+#: and FRAMED for it: one dominant light with a direction a shadow can
+#: follow, a continuous surface where the object will stand, and the camera
+#: at the height the product was shot at. None of this makes the composite
+#: perfect; it is what makes it possible.
+_PLATE_FOR_PRODUCT = (
+    "A REAL PHOTOGRAPH OF A PRODUCT WILL BE PLACED INTO THIS SCENE, standing "
+    "on the surface in the centre foreground. Compose for that: leave the "
+    "middle of the frame clear across about half its width and the lower "
+    "third of its height, with the surface continuous and unpatterned there. "
+    "Light the whole scene from ONE dominant soft source, high and slightly "
+    "to the left, so everything in frame casts a shadow in the same "
+    "direction and an object added later can match it. Shoot at table "
+    "height, lens level with the surface, not looking down at it. Keep the "
+    "colour temperature neutral daylight."
+)
+
+
 def plate(prompt: str, *, shape: str = "square", n: int = 1,
-          inspiration: str = "") -> dict:
+          inspiration: str = "", for_product: bool = False) -> dict:
     """Scenery with no product in it. The safe half of the generative route.
 
     `inspiration` is a description of a reference — a Pinterest board, a shot
@@ -227,7 +248,8 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
         return {"ok": False, "error": f"unknown shape {shape!r}"}
     body = {"model": MODEL, "size": SIZES[shape], "n": max(1, min(4, n)),
             "prompt": f"{prompt}\n\n{('Styling reference: ' + inspiration) if inspiration else ''}"
-                      f"\n\n{_PLATE_RULE}".strip()}
+                      f"\n\n{_PLATE_RULE}"
+                      f"{chr(10) + chr(10) + _PLATE_FOR_PRODUCT if for_product else ''}".strip()}
     res = post("/images/generations", json_body=body)
     if not res["ok"]:
         return res

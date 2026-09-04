@@ -114,8 +114,12 @@ def main() -> int:
     print("\n— the set: N plates, one batch, every frame proposed —")
     made: list = []
 
-    def _plate(prompt, *, shape="square", n=1, inspiration=""):
+    # `for_product` mirrors the real signature — a stub that does not is a
+    # stub that hides a parameter nobody forwards, which is exactly the defect
+    # `_plates` had five minutes after it grew one.
+    def _plate(prompt, *, shape="square", n=1, inspiration="", for_product=False):
         made.append(prompt)
+        for_product_seen.append(bool(for_product))
         # Every plate DIFFERENT, because a real generator never returns the
         # same bytes twice — and identical bytes are content-addressed into
         # one row, which is its own check further down.
@@ -124,6 +128,7 @@ def main() -> int:
                                colour=(len(made) * 7 % 250, 40 + i * 30, 90, 255))
                            for i in range(n)]}
 
+    for_product_seen: list = []
     seen_briefs: list = []
 
     def _assess(blob, brief, tenant=""):
@@ -218,10 +223,118 @@ def main() -> int:
     ck("every frame in the set is its own picture",
        len({f["url"] for f in got2["frames"]}) == got2["made"])
 
+    print("\n— THE PRODUCT MUST NOT READ AS PASTED ON —")
+    # Owner, 2026-09-04: the frames looked "pasted onto another image", and
+    # `assess` had been able to see that since it was written while its
+    # verdict was attached as advice. It gates now, for composited frames
+    # only, with one retry on a fresh plate.
+    ck("a plate that will receive a photograph is asked for one, explicitly",
+       any(for_product_seen) and not all(for_product_seen),
+       "product-led and detail cells only — a person-led scene has no "
+       "photograph going into it and needs no clear foreground")
+    ck("  and the direction reaches the generator",
+       "REAL PHOTOGRAPH OF A PRODUCT WILL BE PLACED" in imagegen._PLATE_FOR_PRODUCT
+       and "same direction" in imagegen._PLATE_FOR_PRODUCT, "")
+    ck("integration is only judged where it can fail",
+       "integration" in [c["key"] for c in creative.brief_for(
+           "eien", fmt="ad_frame", composited=True)["criteria"]]
+       and "integration" not in [c["key"] for c in creative.brief_for(
+           "eien", fmt="ad_frame")["criteria"]],
+       "gating a generated scene on it would be a false refusal")
+
+    _seen_plates: list = []
+
+    def _plate2(prompt, *, shape="square", n=1, inspiration="", for_product=False):
+        _seen_plates.append(prompt)
+        # EVERY PLATE DISTINCT, or content-addressing folds them into one row
+        # and the counts below compare a number of frames against a number of
+        # assessments that never matched.
+        return {"ok": True, "shape": shape,
+                "images": [png(w=70 + len(_seen_plates) * 5 + i,
+                               colour=(9 + i, len(_seen_plates) % 250, 9, 255))
+                           for i in range(n)]}
+
+    _verdicts: list = []
+
+    def _always_pasted(blob, brief, tenant=""):
+        _verdicts.append(brief)
+        return {"ok": True, "verdicts": [], "overall": "the jug is cut out",
+                "failed": ["integration"], "fix": "light it the same way"}
+
+    imagegen.plate = _plate2
+    creative.assess = _always_pasted
+    got4 = creative.batch("eien", commitment=ent, entity_key="omega-3",
+                          fmt="ad_frame", positioning="testing beats price",
+                          plates=2)
+    prod_cells = [c for c in creative.axes(limit=2)
+                  if c["framing"] in creative.NEEDS_THE_PRODUCT]
+    ck("a frame that still reads as pasted after a second plate is DROPPED",
+       got4["pasted"] >= 1 and all(
+           f["cell"]["framing"] not in creative.NEEDS_THE_PRODUCT
+           for f in got4["frames"]),
+       f"pasted={got4['pasted']}, filed={[f['cell']['framing'] for f in got4['frames']]}")
+    ck("  and it SAYS so rather than quietly returning a short set",
+       "read as pasted" in got4["note"], got4["note"])
+    ck("  the reason names the verdict, not just the rule",
+       any("cut out" in e for e in got4["errors"]), str(got4["errors"])[:160])
+    ck("  a second plate was asked for before giving up",
+       len(_seen_plates) > len(prod_cells),
+       f"{len(_seen_plates)} plate calls for {len(prod_cells)} product cell(s)")
+
+    def _pasted_then_fine(blob, brief, tenant=""):
+        _verdicts.append(brief)
+        bad = len(_verdicts) % 2 == 1
+        return {"ok": True, "verdicts": [], "overall": "ok",
+                "failed": ["integration"] if bad else [], "fix": ""}
+
+    _verdicts.clear()
+    creative.assess = _pasted_then_fine
+    got5 = creative.batch("eien", commitment=ent, entity_key="omega-3",
+                          fmt="ad_frame", positioning="testing beats price",
+                          plates=2)
+    ck("a retry that comes back integrated is KEPT",
+       any(f["cell"]["framing"] in creative.NEEDS_THE_PRODUCT
+           for f in got5["frames"]) and got5["pasted"] == 0,
+       f"pasted={got5['pasted']}, filed={[f['cell']['framing'] for f in got5['frames']]}")
+    # JUDGED ONCE. `_file_frame` used to assess every frame itself; a
+    # composited one has already been judged by the gate against the richer
+    # brief, and asking again would be a second vision call per frame for a
+    # worse answer. Counted with an assessor that always passes, so there are
+    # no retries to account for and the number is exactly one per frame.
+    _verdicts.clear()
+    creative.assess = lambda blob, brief, tenant="": (
+        _verdicts.append(brief) or {"ok": True, "verdicts": [], "failed": [],
+                                    "overall": "fine", "fix": ""})
+    got6 = creative.batch("eien", commitment=ent, entity_key="omega-3",
+                          fmt="ad_frame", positioning="testing beats price",
+                          plates=2)
+    ck("  a composited frame is judged ONCE, not assessed twice over",
+       len(_verdicts) == got6["made"], f"{len(_verdicts)} verdicts, "
+       f"{got6['made']} frames")
+    ck("  and the composited ones were judged on the richer brief",
+       any("integration" in [c["key"] for c in b["criteria"]] for b in _verdicts),
+       "the gate's verdict is the one filed")
+
+    print("\n— NO TYPE IS BURNED INTO A FRAME —")
+    _drawn: list = []
+    _real_draw = compose._draw_text
+    compose._draw_text = lambda img, h, sub, **k: (_drawn.append((h, sub))
+                                                   or _real_draw(img, h, sub, **k))
+    creative.assess = _assess
+    imagegen.plate = _plate
+    creative.batch("eien", commitment=ent, entity_key="omega-3", fmt="ad_frame",
+                   positioning="testing beats price", plates=2,
+                   headline="Which host are you", subline="11 colours")
+    compose._draw_text = _real_draw
+    ck("the headline is never set into the picture",
+       all(not h and not sub for h, sub in _drawn), str(_drawn[:3]))
+    ck("  even though the caller still passes one",
+       bool(_drawn), "the composite ran; what it drew was nothing")
+
     print("\n— a picture we already hold is not a new variation —")
     _same = png(120, 120, colour=(3, 9, 27, 255))
 
-    def _twice(prompt, *, shape="square", n=1, inspiration=""):
+    def _twice(prompt, *, shape="square", n=1, inspiration="", for_product=False):
         return {"ok": True, "shape": shape, "images": [_same] * n}
 
     imagegen.plate = _twice
@@ -372,10 +485,22 @@ def main() -> int:
                os.path.abspath(__file__))), "app", "admin_ui.py")).read(),
        "needs_art_direction was a need stated beside no way to meet it")
     from app.web import _first_line
-    ck("words on a frame are the ad's own opening line",
+    ck("the words for a frame are the ad's own opening line",
        _first_line("## Heading\n\nTested every batch, published every result.")
        == "Heading",
        "or the picture and the post argue two different things")
+    # …AND THEY TRAVEL TO CANVA RATHER THAN INTO THE PIXELS. A headline the
+    # caller computes and nothing consumes would be a parameter that goes
+    # nowhere — the shape this codebase keeps closing.
+    imagegen.plate = _plate
+    creative.assess = _assess
+    got7 = creative.batch("eien", commitment=ent, entity_key="omega-3",
+                          fmt="ad_frame", positioning="testing beats price",
+                          plates=1, headline="Which host are you")
+    ck("  the set carries the line, and says where the type gets set",
+       got7["headline"] == "Which host are you"
+       and "in Canva" in got7["note"] and "Which host are you" in got7["note"],
+       got7["note"][:160])
 
     print()
     if _fail:

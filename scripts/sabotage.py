@@ -153,7 +153,10 @@ SABOTAGES = [
     {
         "name": 'a_product_frame_carries_the_real_photograph',
         "file": 'app/creative.py',
-        "find": '            if cell["framing"] in NEEDS_THE_PRODUCT:',
+        # RE-ANCHORED 2026-09-04: the test moved into `needs` when the
+        # integration gate landed, so the composite branch is now `if needs:`.
+        # Same claim, same consequence.
+        "find": '            if needs:',
         "replace": '            if False:  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": 'the composite is skipped and the bare plate is filed as a product frame, so an ad that is supposed to show the product shows an empty table',
@@ -6752,6 +6755,50 @@ SABOTAGES = [
         'replace': '/* SABOTAGE */',
         'suites': ['test_ad_board.py'],
         'why': 'a pane that was display:none has no rectangles to measure, so switching to variant three shows every marker stacked at the top of the gutter beside the wrong sentences',
+    },
+    {
+        'name': 'no_type_is_burned_into_a_frame',
+        'file': 'app/creative.py',
+        'find': '    got = compose.product_on_scene(tenant, product_id, plate,\n                                   headline="", subline="",\n                                   formats=[fmt])',
+        # A LITERAL, not `headline=headline`: no caller passes one any more,
+        # so re-threading the parameter is a no-op and the guard reported
+        # MISSED. What has to be provable is that the suite notices TYPE
+        # ARRIVING IN THE PIXELS, whatever put it there.
+        'replace': '    got = compose.product_on_scene(tenant, product_id, plate,\n                                   headline="SABOTAGE TYPE", subline="",\n                                   formats=[fmt])  # SABOTAGE',
+        'suites': ['test_creative_batch.py'],
+        'why': "the brand's headline is set into the pixels again, in DejaVu or whatever font the host happens to have, at a fixed position and permanently — a frame nobody can retype, which is the embarrassing type the owner reported",
+    },
+    {
+        'name': 'a_pasted_product_does_not_ship',
+        'file': 'app/creative.py',
+        'find': '    if "integration" not in (verdict.get("failed") or []):\n        return {"image": made["image"], "verdict": verdict}',
+        'replace': '    if True:  # SABOTAGE\n        return {"image": made["image"], "verdict": verdict}',
+        'suites': ['test_creative_batch.py'],
+        'why': "the assessor goes back to filing 'the jug is cut out' as a note beside a picture that ships anyway, which is the state the owner saw: the system could already see the defect and proposed the frame regardless",
+    },
+    {
+        'name': 'a_pasted_frame_gets_a_second_plate',
+        'file': 'app/creative.py',
+        'find': '    again = _plates(prompt, base["shape"], 1, for_product=True)',
+        'replace': '    again = {"ok": False}  # SABOTAGE',
+        'suites': ['test_creative_batch.py'],
+        'why': 'one bad plate kills the frame outright, so a set loses every product shot to a single unlucky lighting angle — the gate becomes a way of producing nothing rather than a way of producing better',
+    },
+    {
+        'name': 'a_plate_for_a_photograph_is_lit_for_one',
+        'file': 'app/creative.py',
+        'find': '        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs)',
+        'replace': '        res = _plates(text, base["shape"], PER_PROMPT)  # SABOTAGE',
+        'suites': ['test_creative_batch.py'],
+        'why': 'plates are generated with no room and no light direction for the product going into them, so every composite is a photograph dropped onto an unrelated scene and the integration gate rejects the lot',
+    },
+    {
+        'name': 'integration_is_judged_only_where_it_can_fail',
+        'file': 'app/creative.py',
+        'find': '        k for k in spec["extra"] if k not in ("on_subject",)) + (\n        ("integration",) if composited else ())',
+        'replace': '        k for k in spec["extra"] if k not in ("on_subject",)) + ("integration",)  # SABOTAGE',
+        'suites': ['test_creative_batch.py'],
+        'why': 'a generated scene with no product in it is asked whether its product is well integrated, so the model invents a verdict about something that is not there — a false refusal on the frames that were never at risk',
     },
 ]
 
