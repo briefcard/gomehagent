@@ -784,25 +784,6 @@ def _run_gbp_post(ctx: Context) -> dict:
               "claim_id": claim_id, "source_kind": src_kind,
               "source_label": src_label, "google_body": body_payload,
               "chars": len(text)})
-    if item.get("ok"):
-        # THE ARTIFACT IS THE HOME: `emit` files the ledger row; the body row
-        # the workroom, the label and the planner read is the skill's to
-        # file — as the article and the ad batch do.
-        with _db.SessionLocal() as s:
-            s.add(_db.ArtifactBody(
-                tenant=ctx.tenant, output_id=item.get("output_id", ""),
-                run_id=ctx.run_id or "", system_key="gbp_post",
-                format="gbp_post", destination="",
-                meta={"kind": kind, "cta": cta, "url": url, "keyword": keyword,
-                      "title": title, "basis": basis, "made_from": made_from,
-                      "derived_from": source, "objection_id": objection_id,
-                      "claim_id": claim_id, "source_kind": src_kind,
-                      "source_label": src_label, "google_body": body_payload,
-                      "subject": (title or text.strip().split("\n")[0])[:120]},
-                body=item.get("body") or text,
-                draft_body=item.get("body") or text,
-                bytes=len(item.get("body") or text)))
-            s.commit()
     if item.get("ok") and ctx.run_id:
         _appr.attach_gbp_post(ctx.run_id, {
             "tenant": ctx.tenant, "account": str(declared.get("account") or ""),
@@ -816,6 +797,170 @@ def _run_gbp_post(ctx: Context) -> dict:
                        + (f" ({basis})" if basis != "model" else ""),
             "output_id": item.get("output_id", ""), "made_from": made_from,
             "chars": len(text)}
+
+
+# ---------------------------------------------------------------------------
+# Google Business Profile listing audit — the SEO half. Sweep, score, report,
+# fixes via approval. The catalog_compliance shape.
+# ---------------------------------------------------------------------------
+
+def _draft_gbp_description_live(bundle: dict, parts: list[str]) -> tuple[str, str]:
+    """One model call for the listing description. `(text, why_not)`."""
+    from . import config
+    if not config.ANTHROPIC_API_KEY:
+        return "", "ANTHROPIC_API_KEY is not set"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=500,
+            system=("You write the description field of a Google Business "
+                    "Profile: 250-750 characters, plain sentences, naming what "
+                    "the business is and where, built only on the material "
+                    "given. No phone numbers, no links, no hashtags, no "
+                    "superlatives. Answer with the description and nothing else."
+                    "\n\n## The hard rules\n"
+                    + str((bundle.get("rules") or {}).get("block") or "")),
+            messages=[{"role": "user", "content": "\n\n".join(parts)}])
+        try:
+            from . import usage
+            usage.log_usage("gbp_description", config.CLAUDE_MODEL, msg,
+                            tenant=str(bundle.get("tenant") or ""))
+        except Exception:                                        # noqa: BLE001
+            pass
+        return msg.content[0].text.strip(), ""
+    except Exception as exc:                                     # noqa: BLE001
+        from . import model_error
+        return "", model_error.explain(exc)
+
+
+draft_gbp_description = _draft_gbp_description_live
+
+
+def _run_gbp_listing(ctx: Context) -> dict:
+    """One sweep of one profile: read, score, report, propose."""
+    import datetime as _dt
+    from . import approvals as _appr, gbp, gbp_listing as gl, keywords as _kw
+    from . import systems as _sys, tenants as _tn
+    t = _tn.get(ctx.tenant)
+    declared = dict((getattr(t, "gbp", None) or {}) if t else {})
+    account = str(declared.get("account") or "")
+    name = str(declared.get("location") or "")
+    if not account or not name:
+        ctx.note("no Business Profile declared for this account — declare it "
+                 "on the Accounts tab (advanced → gbp; the probe lists the "
+                 "account and location to copy). Nothing can be audited "
+                 "until then.")
+        return {"summary": "no profile declared — Accounts → advanced → gbp"}
+    got = gbp.location(ctx.tenant, name)
+    if not got.get("ok"):
+        ctx.note(f"the listing could not be read: {got.get('error', '')}")
+        return {"summary": f"the listing could not be read: "
+                           f"{str(got.get('error', ''))[:160]}"}
+    listing = got["location"]
+
+    def _read(fn, *a):
+        res = fn(*a)
+        if not res.get("ok"):
+            ctx.note(f"not read this sweep: {str(res.get('error', ''))[:160]}")
+            return None
+        return res
+    state = _read(gbp.voice_of_merchant, ctx.tenant, name)
+    reviews = _read(gbp.reviews, ctx.tenant, account, name)
+    posts = _read(gbp.posts, ctx.tenant, account, name)
+    media = _read(gbp.media, ctx.tenant, account, name)
+    perf = _read(gbp.performance, ctx.tenant, name)
+
+    heads = [str(r.phrase or "") for r in _kw.targets(ctx.tenant)
+             if (r.tier or "") == "head"][:8] or \
+            [str(r.phrase or "") for r in _kw.targets(ctx.tenant)][:5]
+    entities = kb_mod.entities(ctx.tenant, available_only=False)
+    open_plans = len(_sys.plans(ctx.tenant, "gbp_post"))
+    domain = str(getattr(t, "domain", "") or "")
+    rep = gl.audit(listing=listing, state=state, reviews=reviews, posts=posts,
+                   media=media, banned=list(ctx.banned), keywords=heads,
+                   entities=entities, domain=domain, open_post_plans=open_plans)
+
+    # THE ONE FIELD A DRAFTER WRITES. Proposed only when the description is a
+    # gap; through the ban list; filed as a fix like the others.
+    desc_gap = next((c for c in rep["gaps"] if c["key"] == "description"), None)
+    if desc_gap is not None:
+        loc = str(declared.get("locality") or "")
+        cat = str(declared.get("category") or listing.get("primary_category") or "")
+        parts = [f"## What the business is, and where\n{cat or 'unknown category'}"
+                 + (f" in {loc}" if loc else ""),
+                 f"## What the brand stands for\n{str(ctx.rules.get('positioning') or '')[:400]}",
+                 "## Approved claims — the ONLY facts you may state\n"
+                 + "\n".join(f"- {c.get('claim', '')}" for c in ctx.claims[:8]),
+                 "## The head terms the listing should say, in plain sentences\n"
+                 + ", ".join(heads[:5])]
+        text, why_not = draft_gbp_description(ctx.bundle, parts)
+        text = " ".join(str(text or "").split())
+        hits = [b for b in ctx.banned if b and b.lower() in text.lower()]
+        if not text:
+            ctx.note(f"no description proposed — {why_not}")
+        elif hits:
+            ctx.note(f"the drafted description was dropped: it carries a banned "
+                     f"phrase ({', '.join(hits[:2])})")
+        elif not (gl.DESCRIPTION_MIN <= len(text) <= gl.DESCRIPTION_MAX):
+            ctx.note(f"the drafted description was dropped: {len(text)} "
+                     f"characters, outside {gl.DESCRIPTION_MIN}–{gl.DESCRIPTION_MAX}")
+        else:
+            rep["fixes"].append({"field": "profile.description",
+                                 "label": "description",
+                                 "updateMask": "profile.description",
+                                 "body": {"profile": {"description": text}},
+                                 "why": desc_gap["what"]})
+
+    sysrow = _sys.find(ctx.tenant, "gbp_listing")
+    proposed = 0
+    for f in rep["fixes"]:
+        _appr.request_approval(
+            "gbp_listing_fix",
+            f"Business Profile fix — {f['label']} — {ctx.tenant}",
+            {"tenant": ctx.tenant, "account": account, "location": name,
+             "field": f["field"], "label": f["label"],
+             "updateMask": f["updateMask"], "body": f["body"], "why": f["why"]},
+            notify=False, run_id=ctx.run_id or "",
+            system_id=(sysrow.id if sysrow else ""))
+        proposed += 1
+
+    when = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    body = gl.render(rep, when=when, title=str(listing.get("title") or name),
+                     proposed=proposed)
+    if perf:
+        tot = perf.get("totals") or {}
+        body += ("\n\nLAST 28 DAYS (location-level, the only kind there is)\n"
+                 + "\n".join(f"  {k.lower().replace('_', ' ')}: {v}" for k, v in tot.items()))
+    ctx.emit(body, fmt="report", require_citation=False,
+             commitment=coherence.commit("survey", "listing",
+                                         action="audit the listing"),
+             parts=lambda _t: coherence.parts(text=_t),
+             meta={"score": rep["score"], "gaps": len(rep["gaps"]),
+                   "fixes": proposed, "missing": rep["alignment"]["missing"],
+                   "subject": body.split("\n")[2][:120]})
+    return {"summary": body.split("\n")[2], "score": rep["score"],
+            "gaps": len(rep["gaps"]), "fixes": proposed,
+            "missing": rep["alignment"]["missing"]}
+
+
+register(Skill(
+    key="gbp_listing",
+    name="Business Profile audit",
+    does="Read the live listing and score it against the fields that move "
+         "local rank — categories, description, hours, website, services, "
+         "photos, answered reviews, freshness. Files a dated report; proposes "
+         "the fixes it can write, each held for approval.",
+    system_key="gbp_listing",
+    tier=1,
+    needs=("rules.banned_claims", "rules.positioning"),
+    # Constitutive, as for catalog_compliance: an audit against an empty ban
+    # list would bless a description nothing checked.
+    constitutive=("banned_claims",),
+    params=(),
+    writes=False,
+    produces="report",
+    run=_run_gbp_listing))
 
 
 register(Skill(

@@ -223,10 +223,6 @@ input again"; read it before adding a system.
    written by `scripts/gen_systems_reference.py` and byte-compared. Start
    there: that suite is the register's first three columns already.
 
-**Left deliberately unchanged, flagged not fixed (as of 2026-08-31; three of the five have skills since 2026-09-03 — see the entry below):** five CATALOG systems have
-no skill at all (`content_compliance`, `lead_responder`, `moment_email`,
-`reorder_engine`, `reports`), so no contract reaches them.
-
 **Open question the owner has not answered:** should `blog_article` require a
 reader? It is one-to-many, but its reader is defined by search intent.
 
@@ -390,6 +386,21 @@ objection, claim — pickers, never typed ids), `knobs_for` (`posts_weekly`),
 so it SAYS posts are planned work. `gbp_post` is in the conformance suite's
 NO_SEGMENT set: its reader is whoever searched, like an article. The one
 write is `approvals.publish_gbp_post` → `gbp.create_post`, on approval only.
+GBP audit (owner: "how are they to run and review the results of each audit?
+How does it align with the overall Plan and Planned Strategy?"): `gbp_listing`
+built in catalog_compliance's shape — `app/gbp_listing.py` rubric (100 points,
+every check a measurement of a field Google returned; reads Google refused are
+scored unknown and NAMED), report filed `fmt="report"` (the ledger files the
+body row; the Reports room reads line 3), fixes as `gbp_listing_fix` approvals
+(website from the account's domain; a model-drafted description through the ban
+list) → `_execute` → `gbp.patch_location`; runs every Monday (`gbp_audit_sharded`)
+and from "Run the check now" (`/admin/system_run_now`, generic for every report
+system); ALIGNMENT = the head terms of the keyword map the listing never says +
+whether posts are planned; `gbp_listing.trend` is the `measure_fn`; the Plan tab's
+Strategy page carries a "Local presence" card from `gbp_listing.latest`. With
+that NOTHING in the catalogue is unbuilt: the ledger's RECORDED_UNBUILT is empty
+and its guard moved to the last open entry (the correspondence archive).
+`gbp_post` now rides `ledger.ARTIFACT_FORMATS` — one writer of body rows.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

@@ -626,6 +626,33 @@ def esp_probe(key: str = Depends(admin_key), tenant: str = "eien") -> dict:
             "audiences": aud}
 
 
+@app.post("/admin/system_run_now", response_class=HTMLResponse)
+async def system_run_now(request: Request, key: str = Depends(admin_key)):
+    """Run a report system's check now, off the request, and land back on
+    its Reports room. Generic: any system whose deliverable is a report and
+    which declares a skill — the Business Profile audit is the first that
+    needed a button, and the compliance sweeps get the same one for free."""
+    from . import skill as _skill, systems as _sys
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    system = str(form.get("system") or "")
+    wf = _sys.workflow(system) if system in _sys.CATALOG else {}
+    if not wf or not wf.get("skill"):
+        return _back_to_system(tenant, system, err="this system has no check to run",
+                               anchor="reports")
+    row = _sys.find(tenant, system)
+    if not (row and _sys.is_on(row)):
+        return _back_to_system(tenant, system, anchor="reports",
+                               err="turn the system on first — a check only runs "
+                                   "for a system that is on")
+    _run_bg(f"run:{system}", _skill.run, wf["skill"], tenant=tenant, trigger="manual")
+    return _back_to_system(tenant, system, anchor="reports",
+                           ok="running now — the report appears under Reports "
+                              "when it lands")
+
+
 @app.get("/admin/gbp_publish")
 def gbp_publish(key: str = Depends(admin_key), output_id: str = ""):
     """Publish an APPROVED Business Profile post whose publish failed — the

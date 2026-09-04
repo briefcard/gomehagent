@@ -10225,6 +10225,36 @@ def _strategy_section(key: str, tenant: str, days: int) -> str:
         per_system = ('<p class="mut">No systems installed on this account, '
                       'so nothing is carrying the plan yet.</p>')
 
+    # LOCAL PRESENCE — the listing audit's latest score and what it found,
+    # here because the owner asked how the audit aligns with the plan
+    # (2026-09-04): the same keyword map, the same post queue, one page.
+    local = ""
+    if systems.find(tenant, "gbp_listing") is not None:
+        from . import gbp_listing as _gl
+        lt = _gl.latest(tenant)
+        _room = (f"/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}"
+                 f"&amp;system=gbp_listing&amp;wf=reports")
+        if lt.get("audited"):
+            _miss = lt.get("missing") or []
+            local = (f'<div class="card"><h3>Local presence</h3>'
+                     f'<div class="row"><span class="chip {"on" if (lt.get("score") or 0) >= 80 else "off"}">'
+                     f'listing {lt.get("score")}/{lt.get("of", 100)}</span>'
+                     f'<span class="chip nb">{lt.get("gaps", 0)} gap(s)</span>'
+                     f'<span class="chip nb">{lt.get("fixes", 0)} fix(es) proposed</span>'
+                     f'<span class="when">audited {_esc(lt.get("when", ""))}</span></div>'
+                     + (f'<p class="when">Head terms from this map the listing never says: '
+                        f'<b>{_esc(", ".join(_miss[:5]))}</b> — the description and the '
+                        f'services should say them.</p>' if _miss else
+                        '<p class="when">Every head term from this map is on the listing.</p>')
+                     + f'<p class="when"><a href="{_room}">the reports</a> &middot; '
+                       f'<a href="/admin/work/{_esc(lt.get("output_id", ""))}?key={_esc(key)}">'
+                       f'open the latest</a></p></div>')
+        else:
+            local = (f'<div class="card"><h3>Local presence</h3>'
+                     f'<p class="mut">The listing has not been audited yet — '
+                     f'<a href="{_room}">run the check</a> and its score, and the '
+                     f'head terms it never says, appear here.</p></div>')
+
     return f"""
     <div class="card"><div class="anchor" id="strategy"></div>
       <div class="head"><h2>Strategy</h2>
@@ -10232,6 +10262,7 @@ def _strategy_section(key: str, tenant: str, days: int) -> str:
         and how often &mdash; last {max(days, 90)} days</span></div>
       {head}
       {found}
+      {local}
       <h3>What each system is doing about it</h3>
       <p class="mut">The same counts the Systems board renders, so the two
       pages cannot disagree about a system's state. Each name opens its
@@ -11150,7 +11181,8 @@ def _reports_section(key: str, row) -> str:
         # across M page(s)…" or "No banned claim found."
         _lines = [x for x in body.splitlines() if x.strip()]
         head = _lines[1] if len(_lines) > 1 else ""
-        clean = "No banned claim" in head or "No violations" in head
+        clean = ("No banned claim" in head or "No violations" in head
+                 or "no gaps" in head.lower())
         stale = "NOT CHECKED" in body
         chip = ('<span class="chip off">not checked</span>' if stale
                 else '<span class="chip on">clean</span>' if clean
@@ -11162,13 +11194,32 @@ def _reports_section(key: str, row) -> str:
             f'<a class="when" href="/admin/work/{_esc(a.output_id)}'
             f'?key={_esc(key)}">open &rarr;</a></div>'
             f'<div class="when">{_esc(head[:150])}</div></div>')
+    # HOW IT IS RUN, where its results are read (owner, 2026-09-04: "how are
+    # they to run and review the results of each audit?"). The button runs
+    # the check off the request; the schedule is said beside it.
+    wf = systems.workflow(row.key)
+    run_now = ""
+    if wf.get("skill"):
+        weekly = row.key in ("gbp_listing", "content_compliance", "catalog_compliance")
+        run_now = f"""
+  <form method="post" action="/admin/system_run_now" class="row">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+    <input type="hidden" name="system" value="{_esc(row.key)}">
+    <button class="sec"{"" if systems.is_on(row) else " disabled"}>Run the check now</button>
+    <span class="when">{"runs every Monday as well; " if weekly else ""}the report lands here when it finishes{"" if systems.is_on(row) else " — turn the system on first"}</span>
+  </form>"""
+    fixes_note = ("Each fix a report proposes waits under <b>Waiting on you</b>; "
+                  "approving one writes it to the profile." if row.key == "gbp_listing" else "")
     return f"""
 <div class="anchor" id="reports"></div>
 <div class="card">
   <div class="head"><h2>Reports</h2>
     <span class="chip nb">{len(rows)} kept</span></div>
   <p class="mut">Every check this system has run, newest first. Nothing is
-  rewritten and nothing is sent &mdash; the report is the deliverable.</p>
+  rewritten and nothing is sent &mdash; the report is the deliverable.
+  {fixes_note}</p>
+  {run_now}
   <div class="thread">{"".join(items)}</div>
 </div>"""
 

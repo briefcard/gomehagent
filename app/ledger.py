@@ -27,7 +27,10 @@ from . import db
 #: Formats whose body IS the deliverable, kept whole however short. A reply
 #: or a report is summarised by its ledger row; an article and a campaign are
 #: the thing itself, and there may be nowhere else they exist.
-ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page", "report")
+ARTIFACT_FORMATS = ("cms_article", "esp_campaign", "cms_page", "report",
+                    # A Business Profile post (2026-09-04): the workroom, the
+                    # label and the post planner read its row — one writer.
+                    "gbp_post")
 # `report` added 2026-08-31. A compliance sweep is the clearest case for this
 # table there is: it is the record that a check happened, it has to be
 # readable a month later, and both compliance systems were keeping theirs in

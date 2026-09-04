@@ -28,7 +28,7 @@ engineering:
 | The seven APIs to enable | named once, in `gbp.APIS_TO_ENABLE`; shown on the account card and in the probe |
 | `app/gbp.py` provider adapter | **read side built** — accounts, locations, listing, live state, reviews, posts, performance; named refusals; `probe` |
 | `gbp` capability + connection | **wired** — `business.manage` in the Google flow; `credentials.CAPABILITY_SCOPES` grants `gbp` only when the consent carried it; declared per account as `Tenant.gbp` |
-| `gbp_listing` system (the SEO half — build first) | declared; **skill not written** |
+| `gbp_listing` system (the SEO half) | **built 2026-09-04**: `gbp_listing` skill (rubric in `app/gbp_listing.py`, 100 points across the fields that move the pack; dated report under Reports; fixes as `gbp_listing_fix` approvals → `gbp.patch_location`); Monday sweep + "Run the check now"; `trend` is the measure; the Plan's strategy page shows "Local presence" |
 | `gbp_post` system | **built 2026-09-04**: `gbp_post` skill (derived from an approved article/email/ad, or native from an objection or a claim), the planner (`planner.gbp_post_rollout`, one a week, alternating, keyword from the map), `approvals.publish_gbp_post` (the one write, via `gbp.create_post`), the workroom preview, the retry |
 | `/admin/gbp_probe`, `/health/connections["gbp"]` | built |
 

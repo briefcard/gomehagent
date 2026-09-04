@@ -716,6 +716,24 @@ def compliance_sharded() -> dict:
     return _each_tenant("compliance sweep", _compliance_one)
 
 
+def _gbp_audit_one(key: str) -> dict:
+    """One account's Business Profile audit, gated on its switch."""
+    from . import skill, systems
+    row = systems.find(key, "gbp_listing")
+    if not (row and systems.is_on(row)):
+        return {"skipped": "gbp_listing is not on"}
+    try:
+        res = skill.run("gbp_listing", key, trigger="schedule")
+        return {"status": res.get("status", ""), "summary": str(res.get("summary", ""))[:120]}
+    except Exception:                                        # noqa: BLE001
+        log.exception("Business Profile audit failed for %s", key)
+        return {"error": "exception"}
+
+
+def gbp_audit_sharded() -> dict:
+    return _each_tenant("business profile audit", _gbp_audit_one)
+
+
 def _segments_one(key: str) -> dict:
     """One account's ESP segment read, gated on the campaign switch."""
     from . import segments as segmod, systems
@@ -1298,6 +1316,10 @@ def main() -> None:
     # changed. Monday early, clear of the other weekly jobs.
     sched.add_job(_safe(compliance_sharded, "compliance sweep", sharded=True), "cron",
                   day_of_week="mon", hour=4, minute=30)
+    # The Business Profile audit: every Monday, after compliance, before the
+    # 07:00 tick plans the week's posts against what it found.
+    sched.add_job(_safe(gbp_audit_sharded, "business profile audit", sharded=True),
+                  "cron", day_of_week="mon", hour=5, minute=45)
     # Segment upkeep: re-link and report drift before the 07:00 tick plans
     # the week's campaigns against those segments.
     sched.add_job(_safe(segments_sharded, "segments sweep", sharded=True), "cron",

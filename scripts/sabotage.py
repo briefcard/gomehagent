@@ -943,7 +943,7 @@ SABOTAGES = [
     },
     {
         "name": "the_ledger_notices_a_defect_being_fixed",
-        "file": "app/systems.py",
+        "file": "app/worker.py",
         # Builds HALF of what the ledger records as unbuilt: gbp_post names a
         # real performer for its ship (the mutant is the FIX, not a break).
         # Re-pointed 2026-09-03 — the previous target mutated a "cleared"
@@ -951,8 +951,12 @@ SABOTAGES = [
         # printed MISSED from then on: the one suite that must fail on good
         # news had a guard that could not produce any. A count of unbuilt
         # systems (2 -> 1) is still truthy, so the set is the claim.
-        "find": '            ship_by="",\n            measure="completeness score per profile and whether it rises sweep "',
-        "replace": '            ship_by="compliance.record_scan",  # SABOTAGE (this is the FIX)\n            measure="completeness score per profile and whether it rises sweep "',
+        # Re-anchored 2026-09-04 (again): both GBP systems are built, so the
+        # ledger's last open entry is the correspondence archive — this mutant
+        # makes worker.py look like it indexes our reply (the word the entry
+        # measures, inside its window), which is the FIX.
+        "find": '                # extra classification.\n                body_excerpt=(',
+        "replace": '                # extra classification. (our draft indexed)  # SABOTAGE (this is the FIX)\n                body_excerpt=(',
         "suites": ["test_open_defects.py"],
         "why": "the open-defect ledger is the one suite that must fail on GOOD "
                "news. It hands the next thread the code facts this thread "
@@ -5838,6 +5842,36 @@ SABOTAGES = [
         "why": "an account with no ban list gets send-ready marketing copy the "
                "validator could not check — 'clean' meaning 'unchecked', the "
                "one case the bundle is meant to stop",
+    },
+    {
+        "name": "the_audit_writes_nothing_without_approval",
+        "file": "app/skill_pack.py",
+        "find": '    for f in rep["fixes"]:\n        _appr.request_approval(',
+        "replace": '    for f in rep["fixes"]:\n        (lambda *_a, **_k: "")(',
+        "suites": ["test_gbp_listing.py"],
+        "why": "the audit finds the gaps and files no fix for approval, so "
+               "nothing it can write ever waits under Waiting on you and the "
+               "listing is audited for ever and repaired never",
+    },
+    {
+        "name": "a_wrong_website_is_a_gap",
+        "file": "app/gbp_listing.py",
+        "find": '    site_ok = bool(site) and (not domain or _host(site) == _host(domain))',
+        "replace": '    site_ok = bool(site)  # SABOTAGE — any site will do',
+        "suites": ["test_gbp_listing.py"],
+        "why": "a listing pointing at an old domain scores as fine, and the "
+               "one fix the audit can write on its own is never proposed",
+    },
+    {
+        "name": "the_plan_shows_local_presence",
+        "file": "app/admin_ui.py",
+        "find": '    if systems.find(tenant, "gbp_listing") is not None:\n        from . import gbp_listing as _gl',
+        "replace": '    if False:  # SABOTAGE — the audit never reaches the Plan\n        from . import gbp_listing as _gl',
+        "suites": ["test_gbp_listing.py"],
+        "why": "the audit's score and the head terms the listing never says "
+               "live only in one system's Reports room, and the Plan tab — the "
+               "page that says what we are doing and why — never mentions "
+               "local presence",
     },
     {
         "name": "a_post_opens_on_its_local_keyword",

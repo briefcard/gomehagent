@@ -146,12 +146,14 @@ Keeps the listing complete and current — categories, description, hours, attri
 
 - **Connections:** `gbp`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `claim`, `entity`
-- **Skill:** none — nothing generates for this system
+- **Skill** `gbp_listing` — produces `report`, tier 1, writes=False
+  - parameters: —
+  - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
 - **Unit:** one sweep of one profile
 - **Artifact:** report
 - **Ship:** files a dated completeness report; each proposed fix goes through approval before it is written to the profile
-- **Measure:** completeness score per profile and whether it rises sweep over sweep; share of reviews answered inside the window
+- **Measure:** completeness score per profile and whether it rises sweep over sweep (`gbp_listing.trend`); share of reviews answered
 - **Brand-document scope:** identity, rules, claims, context, catalogue, gaps
 
 ### `gbp_post` — Google Business Profile post
@@ -265,7 +267,7 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `campaign_email` | `performance.sync` | — | strategy.read turns provider stats into findings; the drafter (_run_campaign_email) does not read strategy — only the FORM of recent sends, for anti-repeat |
 | `catalog_compliance` | — | — | violations per template are in each filed report; nothing reads consecutive reports to say whether they fall |
 | `content_compliance` | `compliance.scan` | — | 'whether they fall' is the declared measure and is computed across no two sweeps |
-| `gbp_listing` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0). When built, the sweep IS the measure and the approved fixes are what it learns into — the catalog_compliance shape |
+| `gbp_listing` | `gbp_listing.trend` | — | review replies are reported, not yet drafted; services are proposed for the owner to add, not written (the API needs a category id the catalogue does not carry) |
 | `gbp_post` | `gbp.performance` | `planner.gbp_post_rollout` | location-level actions per week while the cadence holds; the planner reads what has already been posted and alternates derived (article/email/ad) with native (objection/claim) |
 | `lead_responder` | `edits.trend` | `systems.guidance_block` | pre-send edits are synthesised weekly into standing guidance the drafter reads (learning.propose_for → approval → systems.note); learning.effect says whether each rule shrank the delta |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |

@@ -476,6 +476,7 @@ def apply_decision(ap_id: str, decision: str) -> str:
                         f"marks the draft reviewed. Launch it in the platform "
                         f"where it lives.")
             _HANDLED = {"send_email", "refile_moves", "seo_update", "guidance_rule",
+                        "gbp_listing_fix",
                         "seo_new_collection", "seo_new_page",
                         "seo_new_article", "seo_article_revision",
                         "shopify_theme_asset", "systems_update"}
@@ -794,6 +795,23 @@ def _execute(ap: db.Approval) -> None:
                 failed += 1
         whatsapp.send_text(f"📁 Refile executed: {done} files moved"
                            + (f", {failed} failed (left in place)" if failed else "") + ".")
+    elif ap.kind == "gbp_listing_fix":
+        # One field of one listing, on approval — the audit proposed it and
+        # a person said yes. `patch_location` is the only listing write.
+        from . import gbp, whatsapp
+        p = ap.payload or {}
+        res = gbp.patch_location(str(p.get("tenant") or ap.tenant or ""),
+                                 str(p.get("location") or ""),
+                                 str(p.get("updateMask") or ""),
+                                 dict(p.get("body") or {}))
+        try:
+            whatsapp.send_text(
+                f"📍 Business Profile updated ({p.get('label', '')}): ok"
+                if res.get("ok") else
+                f"⛔ Business Profile NOT updated ({p.get('label', '')}): "
+                f"{str(res.get('error', ''))[:160]}")
+        except Exception:                                        # noqa: BLE001
+            pass
     elif ap.kind == "seo_update":
         from . import sites, whatsapp
         p = ap.payload

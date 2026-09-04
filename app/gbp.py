@@ -325,6 +325,36 @@ def posts(tenant: str, account: str, name: str) -> dict:
             "last": max((p["created"] for p in out), default="")}
 
 
+def media(tenant: str, account: str, name: str) -> dict:
+    """How many photos the listing carries, by category — v4 `media.list`.
+    Counted here so the audit scores a number Google returned."""
+    loc_id = name.rsplit("/", 1)[-1]
+    res = call(tenant, "GET", f"{V4}/{account}/locations/{loc_id}/media",
+               params={"pageSize": 100})
+    if not res["ok"]:
+        return res
+    items = (res["data"] or {}).get("mediaItems") or []
+    cats: dict[str, int] = {}
+    for it in items:
+        c = str((it.get("locationAssociation") or {}).get("category") or "OTHER")
+        cats[c] = cats.get(c, 0) + 1
+    return {"ok": True, "count": int((res["data"] or {}).get("totalMediaItemCount")
+                                     or len(items)), "categories": cats}
+
+
+def patch_location(tenant: str, name: str, update_mask: str, body: dict) -> dict:
+    """Write ONE field of the listing — Business Information v1 `PATCH` with
+    an `updateMask`. Called by the approval executor alone
+    (`approvals._execute`, kind gbp_listing_fix); a sweep never writes."""
+    if not name or not update_mask:
+        return {"ok": False, "error": "no location or no field to update"}
+    res = call(tenant, "PATCH", f"{INFO}/{name}",
+               params={"updateMask": update_mask}, payload=body)
+    if not res["ok"]:
+        return res
+    return {"ok": True, "location": res["data"] or {}}
+
+
 def create_post(tenant: str, account: str, name: str, body: dict) -> dict:
     """Publish one post to one listing — THE ONLY WRITE to Google in this
     module, and it is called by the approval executor alone

@@ -122,20 +122,22 @@ def main():
     print(f"  [design ] {len(by_design)} system(s) have no skill BY DESIGN — "
           f"nothing to draft, and ship_by resolves: {by_design}")
 
-    # gbp_post left this set on 2026-09-04: `ship_by` names the publish arm
-    # and the `gbp_post` skill drafts it. gbp_listing is the last one.
-    RECORDED_UNBUILT = {"gbp_listing"}
+    # EMPTY since 2026-09-04: gbp_post (the publish arm + skill) and
+    # gbp_listing (the audit + fixes) both name what performs their ship.
+    # Kept as the claim so a system declared without a performer lands
+    # here as unrecorded news rather than nowhere.
+    RECORDED_UNBUILT: set = set()
     built = sorted(RECORDED_UNBUILT - set(unbuilt))
     new_unbuilt = sorted(set(unbuilt) - RECORDED_UNBUILT)
-    still_broken(
-        f"{len(unbuilt)} CATALOG system(s) are UNBUILT — no skill, and nothing "
-        f"performs the ship (ship_by empty): {unbuilt}",
-        not built,
-        f"{built} now name(s) what performs its ship — delete the 'Left "
-        f"deliberately unchanged … no skill at all' paragraph under "
-        f"campaign_email and 'Google API access (both GBP systems)' from the "
-        f"effectiveness entry's owner actions, and shrink RECORDED_UNBUILT here",
-    )
+    if RECORDED_UNBUILT:
+        still_broken(
+            f"{len(unbuilt)} CATALOG system(s) are UNBUILT — no skill, and "
+            f"nothing performs the ship (ship_by empty): {unbuilt}",
+            not built,
+            f"{built} now name(s) what performs its ship — shrink RECORDED_UNBUILT here",
+        )
+    else:
+        print("  [ built ] every declared system names what performs its ship")
     if new_unbuilt:
         _fail.append(
             f"{new_unbuilt} declare(s) no skill AND no ship_by, and the ledger "

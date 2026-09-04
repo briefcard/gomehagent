@@ -174,10 +174,13 @@ EFFECTIVENESS = {
             "planner reads what has already been posted and alternates "
             "derived (article/email/ad) with native (objection/claim)"),
     "gbp_listing": dict(
-        measure_fn="", learns_into="",
-        gap="not built; Google API access not applied for (INITIATIVE-gbp §0). "
-            "When built, the sweep IS the measure and the approved fixes are "
-            "what it learns into — the catalog_compliance shape"),
+        measure_fn="gbp_listing.trend", learns_into="",
+        how="the sweep IS the measure: the score sweep over sweep, computed "
+            "from the filed reports; an approved fix is what raises the next "
+            "one, and the Plan tab's strategy page shows the latest",
+        gap="review replies are reported, not yet drafted; services are "
+            "proposed for the owner to add, not written (the API needs a "
+            "category id the catalogue does not carry)"),
 }
 
 
@@ -656,17 +659,26 @@ CATALOG = {
         kb_needs=("tone", "banned_claims", "claim", "entity"),
         workflow=dict(
             unit="one sweep of one profile",
+            skill="gbp_listing",
             artifact="report",
             ship="files a dated completeness report; each proposed fix goes "
                  "through approval before it is written to the profile",
-            # NOTHING PERFORMS IT. The second half of GBP, declared the day the
-            # owner asked "what about making sure all the listings are
-            # optimized?" (2026-09-03) — `gbp_post` alone was the post without
-            # the surface it posts onto. Same shape as catalog_compliance: sweep,
-            # report, fixes via approval. Gated on the same Google API access.
-            ship_by="",
+            # The second half of GBP, declared the day the owner asked "what
+            # about making sure all the listings are optimized?" (2026-09-03)
+            # and BUILT 2026-09-04 in catalog_compliance's shape: sweep,
+            # report, fixes via approval (`gbp_listing_fix` → patch_location).
+            ship_by="skill_pack._run_gbp_listing",
+            explain=("The audit runs every Monday, and on demand from the "
+                     "Reports room ('Run the check now'). Each sweep files a "
+                     "dated report there, scored out of 100 against the fields "
+                     "that move the map pack; each fix it can write waits under "
+                     "'Waiting on you', and approving one patches the profile. "
+                     "The report's ALIGNMENT section reads the same keyword map "
+                     "the blog plans read and the same post queue the post "
+                     "planner fills; the score, sweep over sweep, is the "
+                     "measure, and the Plan tab's strategy page shows it."),
             measure="completeness score per profile and whether it rises sweep "
-                    "over sweep; share of reviews answered inside the window")),
+                    "over sweep (`gbp_listing.trend`); share of reviews answered")),
     "reorder_engine": dict(
         name="Reorder engine",
         does="Triggers replenishment prompts off purchase cadence.",

@@ -211,7 +211,15 @@ def main() -> int:
 
     # Every sharded registration points at a wrapper that shards.
     sharded_regs = re.findall(r'_safe\((\w+), "[^"]+", sharded=True\)', src)
-    ck("every sharded registration names a wrapper", len(sharded_regs) == 8, str(sharded_regs))
+    # COMPUTED, not counted. This said `== 8` — a count written beside the
+    # thing it counts, which the open-defects ledger exists to refuse — and
+    # the ninth sharded job (the Business Profile audit, 2026-09-04) turned
+    # it red for being right. The claim is that every registration names a
+    # wrapper the worker defines AND every wrapper is registered.
+    wrappers = set(re.findall(r'^def (\w+_sharded)\(\) -> dict:', src, re.M))
+    ck("every sharded registration names a wrapper, and every wrapper is registered",
+       set(sharded_regs) == wrappers and len(sharded_regs) == len(set(sharded_regs)),
+       f"registered {sorted(sharded_regs)} vs defined {sorted(wrappers)}")
     ck("  and each wrapper calls _each_tenant",
        all(re.search(r'def ' + w + r'\(\) -> dict:\n(?:.*\n){0,3}.*_each_tenant\(', src)
            for w in sharded_regs),
