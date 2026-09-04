@@ -36,7 +36,11 @@ def _cfg(store: str) -> dict:
     is how one credential ended up half-resolved.
     """
     from . import credentials
-    return credentials.shopify_config(store) or {}
+    cfg = credentials.shopify_config(store) or {}
+    if not cfg.get("domain"):
+        raise RuntimeError(f"no Shopify store is connected for {store!r} — "
+                           f"connect one on the Accounts tab")
+    return cfg
 
 
 def _base(store: str) -> str:

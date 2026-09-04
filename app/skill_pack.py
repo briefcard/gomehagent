@@ -852,9 +852,10 @@ def _run_ad_copy(ctx: Context) -> dict:
     # picture and the rule for choosing one; until then this produces copy and
     # says so, rather than emitting a creative that silently has no art
     # direction attached.
-    ctx.note("copy only — no imagery. Theme and media selection need the "
-             "visual identity and media layers (build map steps 05 and 06); "
-             "until those land, art direction is a human's job.")
+    ctx.note("copy only — no imagery yet: this account has no approved "
+             "photographs and no brand theme on file. Add pictures under "
+             "Content → Pictures (or connect Canva) and the next batch carries "
+             "them.")
 
     objections = ctx.bundle.get("objections") or []
     # `offer` and `deadline` are already on the bundle — `skill.run` puts every

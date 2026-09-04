@@ -5777,6 +5777,34 @@ SABOTAGES = [
                "fine while the key is missing",
     },
     {
+        "name": "an_unconnected_store_is_refused_by_name",
+        "file": "app/shopify_seo.py",
+        "find": "    if not cfg.get(\"domain\"):\n        raise RuntimeError(f\"no Shopify store is connected for {store!r} — \"",
+        "replace": "    if False:  # SABOTAGE\n        raise RuntimeError(f\"no Shopify store is connected for {store!r} — \"",
+        "suites": ["test_rehearsal_fixes.py"],
+        "why": "the catalogue skills block on KeyError: 'domain' again — a "
+               "Python identifier where the owner needs 'connect a store'",
+    },
+    {
+        "name": "the_client_email_names_figures_not_fields",
+        "file": "app/client_report.py",
+        "find": "        lines += [f\"  • {u.get('figure', '?')}: {u.get('why', '')}\"",
+        "replace": "        lines += [f\"  • {u.get('label', '?')}: {u.get('why', '')}\"  # SABOTAGE",
+        "suites": ["test_rehearsal_fixes.py"],
+        "why": "the client's weekly email lists '?: …' for every figure not yet "
+               "measured — which is what it did until the rehearsal read one",
+    },
+    {
+        "name": "inbound_mail_is_drafted_under_its_routed_system",
+        "file": "app/web.py",
+        "find": "        _owner = replies.route(r.category or \"\")",
+        "replace": "        _owner = \"service_desk\"  # SABOTAGE",
+        "suites": ["test_rehearsal_fixes.py"],
+        "why": "every sales lead is drafted with the service desk's guidance and "
+               "rung, then re-homed — the lead responder governs nothing it "
+               "produced",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

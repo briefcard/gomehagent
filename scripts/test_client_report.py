@@ -96,8 +96,12 @@ def main() -> int:
 
     print("\n— what it cannot say, it says —")
     un = {u["figure"] for u in rep["not_yet_measured"]}
-    ck("quality change is named as unmeasured",
-       any("quality change" in f for f in un))
+    # Flipped 2026-09-04: `edits.record` writes every pre-send edit and
+    # `edits.trend` measures it, so "quality change over time" is no longer an
+    # unmeasured figure — and the entry that said so read, verbatim, in a
+    # client's email. The suite now fails toward the OLD state.
+    ck("quality change is no longer named as unmeasured — it is measured",
+       not any("quality change" in f for f in un), str(sorted(un)))
     ck("  revenue too, with the reason", any("revenue" in f for f in un))
     ck("every gap carries a fix",
        all(u.get("fix") for u in rep["not_yet_measured"]),

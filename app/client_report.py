@@ -134,15 +134,16 @@ def _unmeasured(tenant: str) -> list[dict]:
     from . import credentials as cred
 
     wired = cred.wired_capabilities(tenant)
-    out = [{"figure": "quality change over time",
-            "why": "SystemRun.edit_diff is never written, so how much a human "
-                   "changed before sending cannot be measured",
-            "fix": "capture sent-vs-draft in Gmail"}]
+    # No standing "edits are never measured" entry any more: `edits.record`
+    # writes every pre-send edit and `edits.trend` measures it (2026-09-03).
+    # That entry was stale AND read, verbatim, in a client's email.
+    out: list[dict] = []
     for cap, figure, fix in (
             ("commerce", "revenue and orders in the period",
-             "the reports system is declared in systems.CATALOG and not built"),
-            ("analytics", "sessions and search impressions", "same"),
-            ("ads", "ad spend and return", "same"),
+             "connect the store so orders can be read into the report"),
+            ("analytics", "sessions and search impressions",
+             "connect Google Analytics and Search Console"),
+            ("ads", "ad spend and return", "connect the ad account"),
             ("esp", "sends, opens and clicks", "same")):
         if cap in wired:
             out.append({"figure": figure,
@@ -217,7 +218,10 @@ def render_email(rep: dict) -> dict:
     unm = rep.get("not_yet_measured") or []
     if unm:
         lines.append("Not yet measured, and why:")
-        lines += [f"  • {u.get('label', u.get('key', '?'))}: {u.get('why', '')}"
+        # `_unmeasured` rows carry `figure` and `why`; the first render read
+        # `label`/`key` and the client saw "?: SystemRun.edit_diff…" — an
+        # internal identifier in their inbox.
+        lines += [f"  • {u.get('figure', '?')}: {u.get('why', '')}"
                   for u in unm[:6]]
         lines.append("")
     asks = rep.get("awaiting_client") or []

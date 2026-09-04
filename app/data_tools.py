@@ -31,7 +31,15 @@ def _store_cfg(store: str) -> dict:
     connected over the one pasted into the env group. Falls through to the env
     blob so accounts that never connect anything keep working unchanged."""
     from . import credentials
-    return credentials.shopify_config(store) or config.SHOPIFY_STORES[store]
+    cfg = credentials.shopify_config(store) or config.SHOPIFY_STORES.get(store) or {}
+    if not cfg:
+        # NAMED, not KeyError: 'baci'. The bare KeyError rode into owner-facing
+        # notes ("the catalogue could not be refreshed: KeyError: 'baci'") and
+        # into a skill's blocked_on as "KeyError: 'domain'". Both said nothing
+        # a person could act on.
+        raise RuntimeError(f"no Shopify store is connected for {store!r} — "
+                           f"connect one on the Accounts tab")
+    return cfg
 
 
 def _shopify_token(store: str) -> str:

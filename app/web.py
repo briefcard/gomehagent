@@ -5417,7 +5417,7 @@ def draft_test(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "need tenant="}
-    from . import responder
+    from . import replies, responder, systems
 
     with db.SessionLocal() as s:
         q = (s.query(db.EmailLog)
@@ -5437,8 +5437,15 @@ def draft_test(key: str = Depends(admin_key), tenant: str = "",
     out = []
     for r in rows:
         body = (r.body_excerpt or "").strip()
+        # DRAFT UNDER THE SYSTEM THAT OWNS THIS MAIL. `replies.route` sends a
+        # sales lead to lead_responder and order mail to service_desk; the
+        # run was re-homed afterwards, but the DRAFT was made with the service
+        # desk's guidance and rung every time. Now the lead is drafted as a
+        # lead, and inbox_triage's own mail stays with the service desk.
+        _owner = replies.route(r.category or "")
         res = responder.answer(tenant, body[:2000],
-                               system_key="service_desk",
+                               system_key=(_owner if _owner in systems.CATALOG
+                                           else "service_desk"),
                                draft_with_model=True)
         out.append({
             "thread": {"subject": r.subject, "from": r.sender,
