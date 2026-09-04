@@ -5805,6 +5805,16 @@ SABOTAGES = [
                "produced",
     },
     {
+        "name": "the_catalogue_is_read_from_the_accounts_own_site",
+        "file": "app/skill_pack.py",
+        "find": "    if not _own:\n        raise RuntimeError(f\"no site profile for {ctx.tenant!r} — connect a \"",
+        "replace": "    if False:  # SABOTAGE\n        raise RuntimeError(f\"no site profile for {ctx.tenant!r} — connect a \"",
+        "suites": ["test_rehearsal_fixes.py"],
+        "why": "an account with no site of its own is handed the primary "
+               "client's catalogue — one client's compliance findings written "
+               "against another client's store",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

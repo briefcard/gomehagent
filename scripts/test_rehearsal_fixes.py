@@ -66,6 +66,41 @@ def main() -> int:
        "KeyError" not in blocked and ("store" in blocked or got.get("status") != "failed"),
        f"status={got.get('status')} blocked_on={blocked[:100]}")
 
+    # ---- the catalogue is read from the account's OWN site, never the primary
+    from app import sites, tool_scope
+    _real_site_for, _real_get = tool_scope._site_for, sites.get
+    _fake = {"key": "baci", "domain": "bacimilanousa.com", "platform": "shopify",
+             "creds_key": "baci", "database": "us"}
+    tool_scope._site_for = lambda t: "baci" if getattr(t, "key", "") == "baci" else ""
+    sites.get = lambda k="": _fake if k == "baci" else (_ for _ in ()).throw(
+        sites.UnknownSite(f"No site profile for {k!r}"))
+    try:
+        # The constitutive gate (brand + ban list) refuses BEFORE the site is
+        # resolved — correctly — so the account under test needs its brand
+        # first, or the refusal being tested never gets its turn.
+        kb.ensure_brand("ironside", "Miami Ironside")
+        kb.add_banned("ironside", "starting at")
+        row = systems.find("ironside", "catalog_compliance") or systems.create("ironside", "catalog_compliance")
+        with db.SessionLocal() as s:
+            s.get(db.System, row.id).status = "live"
+            s.commit()
+        iron = skill.run("catalog_compliance", "ironside")
+        said = " ".join(iron.get("blocked_on") or [])
+        ck("an account with no site profile is refused by name — not handed the primary's",
+           "no site profile for 'ironside'" in said and "baci" not in said,
+           f"status={iron.get('status')} blocked_on={said[:120]}")
+        cross = skill.run("catalog_compliance", "ironside", site="baci")
+        said_x = " ".join(cross.get("blocked_on") or [])
+        ck("  and naming another account's site is refused as such",
+           "is not this account's" in said_x, said_x[:120])
+        own = skill.run("catalog_compliance", "baci")
+        said_o = " ".join(own.get("blocked_on") or [])
+        ck("  while the account that owns the site reads it — the pair",
+           "no site profile" not in said_o and "not this account" not in said_o,
+           f"status={own.get('status')} blocked_on={said_o[:100]}")
+    finally:
+        tool_scope._site_for, sites.get = _real_site_for, _real_get
+
     # ---- the client email names figures, never fields ----------------------
     rep = client_report.assemble("baci", 7)
     msg = client_report.render_email(rep)

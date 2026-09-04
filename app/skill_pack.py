@@ -159,7 +159,25 @@ def _sweep(ctx: Context) -> dict:
     quoting. `emit` has one caller per artifact, and a function that both finds
     and publishes cannot be reused by anything that only wants to find.
     """
-    profile = sites.get(str(ctx.params.get("site") or ""))
+    # THE ACCOUNT'S OWN SITE, NEVER THE PRIMARY. `sites.get("")` means "the
+    # primary site" by design, and this finder passed a blank whenever the
+    # caller named no `site` — so an account with no profile of its own read
+    # the primary client's catalogue. The dress rehearsal caught it: Ironside's
+    # catalogue check said "no Shopify store is connected for 'baci'". The site
+    # is resolved from the tenant (by key, then by domain — `_site_for` is the
+    # one resolver every scoped tool uses), a site named by the caller must be
+    # that tenant's, and an account with none is refused by name.
+    from . import tenants as _tn, tool_scope as _ts
+    _own = _ts._site_for(_tn.get(ctx.tenant)) if _tn.get(ctx.tenant) else ""
+    _asked = str(ctx.params.get("site") or "")
+    if _asked and _asked != _own:
+        raise RuntimeError(f"site {_asked!r} is not this account's — "
+                           f"{ctx.tenant}'s site is {_own or 'not set up'}")
+    if not _own:
+        raise RuntimeError(f"no site profile for {ctx.tenant!r} — connect a "
+                           f"store, or add it to SEO_SITES_JSON; the catalogue "
+                           f"is read from nowhere else")
+    profile = sites.get(_own)
     limit = int(ctx.params.get("limit") or 50)
 
     products, cov = fetch_products(profile, limit)
