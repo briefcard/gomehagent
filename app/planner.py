@@ -190,6 +190,171 @@ def knobs_for(sysrow) -> list[dict]:
             for k, v in defaults.items() if k in KNOBS]
 
 
+#: THE MIX — what share of new articles each kind of keyword gets. Declared
+#: once, like KNOBS: the planner reads it, the Plan tab renders it, and
+#: `systems.set_mix` validates against it. Owner, 2026-09-04: *"I should be
+#: able to adjust the plan based on the percent of long tail / branded / short
+#: / specific topics etc and the app should recommend a base setting default
+#: based on the current status of the brand and where the best opportunities
+#: lie."* The recommendation is `keywords.mix_recommendation`; this is the
+#: knob the owner sets from it, or over it.
+#:
+#: Three partitions. `group="tier"` is the trio that must sum to 100; the
+#: other two are each a share of the whole against its complement (branded
+#: against unbranded, buying against informational). No mix declared means
+#: the planner plans by score alone — exactly what it did before the knob
+#: existed, so an account that has set nothing behaves as it did.
+MIX = {
+    "head": dict(
+        label="head terms, % of new articles", group="tier",
+        why="Short, high-volume phrases. Won with a pillar page plus the "
+            "supports that link into it — never with one article."),
+    "body": dict(
+        label="body terms, %", group="tier",
+        why="Two- to four-word phrases with real demand. The middle of the "
+            "map, and usually the fastest to move."),
+    "long_tail": dict(
+        label="long-tail, %", group="tier",
+        why="Questions and five-word phrases. Low volume each, easy to win, "
+            "and the supports that make a head term winnable."),
+    "branded": dict(
+        label="branded phrases, %", group="branded",
+        why="Phrases that name the brand. The site ranks for its own name "
+            "with or without an article, so this is usually small."),
+    "buying": dict(
+        label="buying intent, %", group="intent",
+        why="Commercial and transactional phrases against informational ones. "
+            "Informational pages earn links and answers; buying pages "
+            "convert. Neither side should be empty."),
+}
+MIX_TIERS = tuple(k for k, v in MIX.items() if v["group"] == "tier")
+
+
+def mix_for(sysrow) -> dict:
+    """The declared mix on this system, or {} when none is set.
+
+    Only the keys MIX declares, only whole numbers 0–100, and only when the
+    tier trio sums to 100 — anything else on the row is ignored as junk, the
+    same rule `_cadence` keeps, so a bad write cannot bend the planner."""
+    cfg = ((getattr(sysrow, "config", None) or {}).get("mix") or {})
+    out: dict[str, int] = {}
+    for k in MIX:
+        try:
+            v = int(cfg.get(k))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= v <= 100:
+            out[k] = v
+    if any(k not in out for k in MIX) or sum(out[k] for k in MIX_TIERS) != 100:
+        return {}
+    return out
+
+
+def _mix_classes(tenant: str, row, brand: set) -> dict[str, str]:
+    """Which class of each partition one keyword falls in."""
+    from . import keywords as _kw
+    tier = row.tier if row.tier in MIX_TIERS else "body"
+    return {"tier": tier,
+            "branded": "branded" if _kw.is_branded(tenant, row.phrase, brand)
+            else "unbranded",
+            "intent": "buying" if (row.intent or "") in _kw.BUYING_INTENTS
+            else "informational"}
+
+
+def _mix_order(tenant: str, order: list[str], by_phrase: dict, mix: dict,
+               needs_first: dict[str, str], seed_rows: list) -> tuple[list[str], list[str]]:
+    """Re-order the planner's queue so the OPEN queue holds the declared mix.
+
+    A budget walk, not a quota walk: candidates stay in score order and each
+    is taken the first time its classes are inside their budgets — the share
+    times the items placed so far, rounded up — so the top-scoring keyword is
+    always placed first whenever its class has any share at all, and a class
+    at 0% is placed only when nothing else remains. The mix shapes WHICH
+    keywords fill the horizon; the score still decides the order within a
+    class. Seeded with the plans already open, so a daily top-up of one
+    article respects the mix over the queue rather than over itself.
+
+    A promoted pillar stays ahead of its support whatever the budgets say:
+    `needs_first` maps a support to the pillar that must precede it, and
+    taking the support takes the pillar first. The rule the walk must never
+    bend is the one `blog_rollout` exists to enforce — and every pull is
+    RETURNED as a sentence, because silently planning something other than
+    the thing the mix picked is the same unauditable helpfulness the
+    promotion rule refuses.
+
+    Returns `(order, pulled)`.
+    """
+    import math
+    from . import keywords as _kw
+    brand = _kw.brand_tokens_for(tenant)
+    shares = {
+        "tier": {t: mix[t] for t in MIX_TIERS},
+        "branded": {"branded": mix["branded"], "unbranded": 100 - mix["branded"]},
+        "intent": {"buying": mix["buying"], "informational": 100 - mix["buying"]},
+    }
+    filled: dict[str, dict[str, int]] = {d: {} for d in shares}
+    n = 0
+
+    def _take(row) -> None:
+        nonlocal n
+        for d, c in _mix_classes(tenant, row, brand).items():
+            filled[d][c] = filled[d].get(c, 0) + 1
+        n += 1
+
+    def _fits(row, dims=("tier", "branded", "intent")) -> bool:
+        for d, c in _mix_classes(tenant, row, brand).items():
+            if d not in dims:
+                continue
+            budget = math.ceil(shares[d][c] / 100.0 * (n + 1))
+            if filled[d].get(c, 0) >= budget:
+                return False
+        return True
+
+    for row in seed_rows:
+        _take(row)
+    pending = [ph for ph in order if ph in by_phrase]
+    out: list[str] = []
+    pulled: list[str] = []
+    while pending:
+        # THE TIER IS THE SPINE. Branded and buying shape the plan within it
+        # as far as the map allows: when nothing left fits all three (a map
+        # with few buying phrases, a queue already full of informational
+        # ones), the tier budgets alone decide, and only when nothing fits
+        # those either does score order resume. The mix is a preference
+        # among what exists, never a refusal to plan — and a share that the
+        # map cannot supply bends the two secondary dimensions before it
+        # bends the one the owner named first.
+        pick = next((ph for ph in pending if _fits(by_phrase[ph])), None)
+        if pick is None:
+            pick = next((ph for ph in pending
+                         if _fits(by_phrase[ph], dims=("tier",))), None)
+        if pick is None:
+            pick = pending[0]
+        pillar = needs_first.get(pick)
+        if pillar and pillar in pending:
+            pending.remove(pillar)
+            out.append(pillar)
+            _take(by_phrase[pillar])
+            pulled.append(f"{pillar!r} goes first — the mix picked "
+                          f"{pick!r}, which supports it and would have "
+                          f"nothing to link to")
+        pending.remove(pick)
+        out.append(pick)
+        _take(by_phrase[pick])
+    return out, pulled
+
+
+def _open_article_rows(sysrow) -> list:
+    """The keyword rows behind this system's open article plans — what the
+    mix walk is seeded with."""
+    from . import keywords as _kw
+    phrases = set()
+    for p in systems.plans(sysrow.tenant, sysrow.key):
+        if str(p.ref or "").startswith(f"article:{sysrow.tenant}:"):
+            phrases.add(str(((p.brief or {}).get("plan") or {}).get("keyword") or ""))
+    return [r for r in _kw.targets(sysrow.tenant) if r.phrase in phrases]
+
+
 BLOG_CADENCE = {"horizon_days": 45, "articles_monthly": 4,
                 # REFRESHES DO NOT SHARE THE ARTICLE BUDGET. Under one cap the
                 # two compete, and the loser is always the refresh: a new
@@ -768,6 +933,7 @@ def blog_rollout(sysrow) -> dict:
     # instead of it.
     order: list[str] = []
     by_phrase = {r.phrase: r for r in rows}
+    needs_first: dict[str, str] = {}
     # A SUPPORT WHOSE PILLAR HAS A REAL URL COMES FIRST. Owner, 2026-09-01:
     # *"Lets prioritize linked support articles."* The pillar-before-support
     # rule below handles the pillar that has not been WRITTEN; this handles the
@@ -792,8 +958,22 @@ def blog_rollout(sysrow) -> dict:
                 promoted.append(f"{pillar.phrase!r} goes first — "
                                 f"{row.phrase!r} supports it and would have "
                                 f"nothing to link to")
+            if pillar is not None and pillar.status == "candidate":
+                needs_first[row.phrase] = pillar.phrase
         if row.phrase not in order:
             order.append(row.phrase)
+
+    # THE MIX, IF ONE IS DECLARED. Read here, on the order the rules above
+    # produced, so the pillar-before-support rule and the linkable-first rule
+    # hold inside every class and the owner's shares decide only which classes
+    # fill the horizon. No mix means the score order stands — an account that
+    # has set nothing plans exactly as it did before the knob existed.
+    mix = mix_for(sysrow)
+    if mix:
+        order, pulled = _mix_order(sysrow.tenant, order, by_phrase, mix,
+                                   needs_first, _open_article_rows(sysrow))
+        promoted.extend(p for p in pulled if p not in promoted)
+    filed_mix: dict[str, dict[str, int]] = {"tier": {}, "branded": {}, "intent": {}}
 
     for phrase in order:
         target = by_phrase[phrase]
@@ -824,6 +1004,9 @@ def blog_rollout(sysrow) -> dict:
             # Marked so the next run does not re-rank something already
             # queued, and so `score` stops offering it as available work.
             keywords.upsert(sysrow.tenant, target.phrase, status="planned")
+            for d, c in _mix_classes(sysrow.tenant, target,
+                                     keywords.brand_tokens_for(sysrow.tenant)).items():
+                filed_mix[d][c] = filed_mix[d].get(c, 0) + 1
         else:
             refreshed += 1
             slot += dt.timedelta(days=max(1, 30 // cad["articles_monthly"]))
@@ -833,7 +1016,11 @@ def blog_rollout(sysrow) -> dict:
     return {"ok": True, "proposed": proposed, "refreshed": refreshed,
             "pillar_first": promoted, "refusals": refusals,
             "refresh_plans": ref_out["filed"],
-            "refresh_reasons": ref_out["reasons"]}
+            "refresh_reasons": ref_out["reasons"],
+            # What this pass filed, by class, beside what was declared — so
+            # the run can say the mix took effect rather than leaving it to
+            # be inferred from the queue.
+            "mix": {"declared": mix, "filed": filed_mix}}
 
 
 def _blog_refreshes(sysrow, cad: dict, horizon_end: dt.date) -> dict:
@@ -1158,3 +1345,137 @@ def top_up(sysrow):
                              f"{sysrow.status or 'off'} — nothing is proposed "
                              f"for a system that is off"]}
     return fn(sysrow)
+
+
+# ---------------------------------------------------------------------------
+# Reset and refresh — the two controls the Plan lacked (owner, 2026-09-04:
+# "I will need to refresh the plan to add new systems and to reset the
+# schedule if the initial schedule doesn't make sense.")
+# ---------------------------------------------------------------------------
+
+#: Which planners lay their plans on a schedule that can be re-laid. Each
+#: entry is (ref prefix, how the lane is paced): the knob and the period it
+#: is per, so the step between plans is `period // knob`. The calendar
+#: planners are absent ON PURPOSE — a Business Profile post and a client
+#: report are planned PER WEEK and the week IS the ref, so moving one to
+#: another date would leave the next pass filing that week again. Changing
+#: their cadence is the reset: the next pass follows it.
+RESETTABLE = {
+    "blog": (("article", "articles_monthly", 30),
+             ("refresh", "refreshes_monthly", 30)),
+    "campaign_email": (("campaign", "per_segment_monthly", 30),),
+    "reorder_engine": (("reorder", "per_segment_monthly", 30),),
+}
+NOT_RESETTABLE_WHY = ("planned on the calendar — the week is the item, so "
+                      "its date is not re-laid; change the cadence and the "
+                      "next pass follows it")
+
+
+def resettable(sysrow) -> bool:
+    return sysrow is not None and sysrow.key in RESETTABLE
+
+
+def _lane_cadence(sysrow) -> dict:
+    fn = PLANNERS.get(sysrow.key)
+    if fn is blog_rollout:
+        return blog_cadence_for(sysrow)
+    return cadence_for(sysrow)
+
+
+def reset_schedule(sysrow) -> dict:
+    """Re-date every OPEN plan of this system from today, under its cadence.
+
+    The items stay; only their dates move. Walked in the order they were
+    already in (soonest first), from `LEAD_DAYS` out, `period // knob` apart
+    — the pacing the planner itself uses — so a queue laid down against a
+    cadence the owner has since changed comes out laid against the one they
+    have now. Campaign plans are re-laid PER SEGMENT, `SPACING_DAYS` apart,
+    the way the calendar pass lays them, and their ref follows the date
+    because the ref carries it.
+
+    NEVER OVER THE OWNER. A plan whose date the owner set (`planned_for` in
+    `brief["edited"]`) keeps it and is named in `kept` — the carry-forward
+    rule `open_plan` keeps, applied to the one field this touches.
+    """
+    if sysrow is None:
+        return {"error": "unknown system"}
+    if not resettable(sysrow):
+        return {"error": f"{sysrow.key}: {NOT_RESETTABLE_WHY}"}
+    cad = _lane_cadence(sysrow)
+    today = dt.date.today()
+    start = today + dt.timedelta(days=LEAD_DAYS)
+    opened = systems.plans(sysrow.tenant, sysrow.key)
+    redated, kept, moved = 0, [], []
+    with db.SessionLocal() as s:
+        for prefix, knob, period in RESETTABLE[sysrow.key]:
+            lane = [p for p in opened
+                    if str(p.ref or "").startswith(f"{prefix}:{sysrow.tenant}:")]
+            if not lane:
+                continue
+            rate = max(1, int(cad.get(knob) or 1))
+            step = max(1, period // rate)
+            # Campaigns and reorders run one lane per SEGMENT, each paced by
+            # the month; articles run one lane for the account. Grouping on
+            # the ref's third field gives the segment for the first two and
+            # one group for the third, so one walk serves all.
+            groups: dict[str, list] = {}
+            for p in lane:
+                parts = str(p.ref).split(":")
+                gkey = parts[2] if prefix in ("campaign", "reorder") and len(parts) > 3 else ""
+                groups.setdefault(gkey, []).append(p)
+            for gi, (gkey, items) in enumerate(groups.items()):
+                base = start + dt.timedelta(days=gi * SPACING_DAYS if gkey else 0)
+                k = 0
+                for p in items:
+                    row = s.get(db.SystemRun, p.id)
+                    brief = dict(row.brief or {})
+                    if "planned_for" in (brief.get("edited") or []):
+                        kept.append(str(row.ref or ""))
+                        continue
+                    when = base + dt.timedelta(days=k * step)
+                    k += 1
+                    before = str(brief.get("planned_for") or "")
+                    brief["planned_for"] = when.isoformat()
+                    row.brief = brief
+                    if prefix in ("campaign", "reorder") and before:
+                        # The ref carries the date for these lanes; a ref
+                        # that names a day the plan no longer sits on would
+                        # let the next pass file that day again.
+                        row.ref = str(row.ref).rsplit(":", 1)[0] + ":" + when.isoformat()
+                    redated += 1
+                    moved.append((str(row.ref or ""), before, when.isoformat()))
+        s.commit()
+    return {"ok": True, "redated": redated, "kept": kept, "moved": moved,
+            "cadence": cad}
+
+
+def refresh(tenant: str) -> dict:
+    """Bring every declared planner into this account's Plan, now.
+
+    For each system in `PLANNERS`: install it when it is absent and its
+    prerequisites are met (a system whose needs are unmet is NAMED with the
+    need, never installed blind); then run the planner for every one that is
+    on. A system that is installed and off is named as off — the switch is
+    the owner's, and a refresh that turned systems on would be a planner
+    deciding what runs.
+    """
+    installed, off, unmet, topped = [], [], [], {}
+    for key in PLANNERS:
+        row = systems.find(tenant, key)
+        if row is None:
+            pre = systems.prerequisites(tenant, key)
+            if not pre["ready"]:
+                unmet.append(f"{key}: needs "
+                             + ", ".join(i["name"] for i in pre["missing"])[:120])
+                continue
+            row = systems.create(tenant, key)
+            installed.append(key)
+        if not systems.is_on(row):
+            off.append(key)
+            continue
+        got = top_up(row) or {}
+        topped[key] = {"proposed": int(got.get("proposed") or 0),
+                       "refreshed": int(got.get("refreshed") or 0),
+                       "refusals": list(got.get("refusals") or [])}
+    return {"ok": True, "installed": installed, "off": off, "unmet": unmet,
+            "topped": topped}

@@ -2054,6 +2054,204 @@ def next_to_write(tenant: str, *, top: int = 12) -> list:
             and r.status == "candidate"][:top]
 
 
+# ---------------------------------------------------------------------------
+# The mix — what the map is made of, and what share of it to plan
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-09-04: *"I should be able to adjust the plan based on the
+# percent of long tail / branded / short / specific topics etc and the app
+# should recommend a base setting default based on the current status of the
+# brand and where the best opportunities lie."*
+#
+# Three dimensions, each a PARTITION of the candidates, each read off the row:
+# tier (head | body | long_tail — `classify_tier`), branded (the phrase names
+# the brand — `brand_tokens_for`), and intent (buying — commercial or
+# transactional — against informational; `classify_intent`). "Specific topics"
+# are clusters, and pinning already does that: a pinned keyword sorts above
+# the arithmetic and the mix never moves it.
+#
+# The RECOMMENDATION is arithmetic over the map as it stands — the share of
+# candidates in each class, weighted toward striking distance (a page already
+# on page two is the biggest single lever, so the tier it sits in gets more of
+# the plan), with two rules a share cannot express: a head term is won with a
+# pillar PLUS supports, so head never carries more than HEAD_CAP of the plan;
+# and a cluster whose supports are published while its pillar is not is a head
+# term half-won, so head never falls below HEAD_FLOOR while one exists. Every
+# number comes with the sentence that produced it, because a recommendation
+# nobody can argue with is one nobody can correct — the same rule `score`
+# keeps with `priority_parts`.
+
+#: The intents that mean the searcher is choosing what to buy.
+BUYING_INTENTS = ("commercial", "transactional")
+
+#: Head terms never carry more than this share of new articles. A head term is
+#: won with a pillar and the supports that link into it, so the supports must
+#: outnumber the pillars whatever the map says.
+HEAD_CAP = 40
+
+#: …and never less than this while a cluster has published supports and no
+#: published pillar — those supports link to nothing until the pillar exists.
+HEAD_FLOOR = 15
+
+#: Striking distance counts this many times over in the recommendation: a
+#: candidate already ranking 4–20 is the opportunity, and the tier it sits in
+#: is where the plan should lean.
+STRIKING_WEIGHT = 3
+
+#: Branded phrases are navigational — the site ranks for its own name with or
+#: without an article — so the recommendation caps them low, and lower once
+#: the brand already ranks for one.
+BRANDED_CAP = 20
+BRANDED_WHEN_WON = 5
+
+#: Buying intent: floor and cap. Informational pages are what earns links and
+#: answer-engine citations; buying pages are what converts. Neither side of a
+#: plan should be empty.
+BUYING_FLOOR = 20
+BUYING_CAP = 60
+
+
+def _round5(x: float) -> int:
+    return int(5 * round(float(x) / 5))
+
+
+def _sum_to_100(shares: dict) -> dict:
+    """Round each share to a multiple of 5 and make the trio sum to 100 by
+    adjusting the largest — the one where five points is least visible."""
+    out = {k: _round5(v) for k, v in shares.items()}
+    diff = 100 - sum(out.values())
+    if diff and out:
+        top = max(out, key=lambda k: out[k])
+        out[top] += diff
+    return out
+
+
+def is_branded(tenant: str, phrase: str, brand: set | None = None) -> bool:
+    """Does this phrase name the brand? Read from the phrase, not from the
+    stored intent, so a keyword harvested before the account had a domain is
+    still counted as branded once it does."""
+    toks = set(tokens(phrase))
+    return bool(toks & (brand if brand is not None else brand_tokens_for(tenant)))
+
+
+def mix_recommendation(tenant: str) -> dict:
+    """The recommended mix, computed from the map as it stands, with its why.
+
+    Returns `counts` (what the map holds), `recommended` (head / body /
+    long_tail summing to 100, plus branded and buying as shares of the whole)
+    and `why` (one sentence per number). `recommended` is None when the map
+    has no candidates — nothing to recommend from is said, never defaulted.
+    """
+    brand = brand_tokens_for(tenant)
+    positions = _latest_positions(tenant)
+    state = cluster_state(tenant)
+    rows = targets(tenant)
+    cands = [r for r in rows if r.status == "candidate"
+             and (r.owner_priority or "") != "muted"]
+    tiers = ("head", "body", "long_tail")
+    counts = {"candidates": len(cands),
+              "tier": {t: 0 for t in tiers},
+              "striking": {t: 0 for t in tiers},
+              "published": {t: 0 for t in tiers},
+              "branded": 0, "branded_won": 0, "buying": 0}
+    weight = {t: 0.0 for t in tiers}
+    buying_w = total_w = 0.0
+    for r in rows:
+        t = r.tier if r.tier in tiers else "body"
+        pos = positions.get(r.phrase)
+        done = r.status in ("published", "won")
+        if done:
+            counts["published"][t] += 1
+        # Won once per phrase, whichever way it was won: a page that shipped,
+        # or a reading in the top three.
+        if is_branded(tenant, r.phrase, brand) and (
+                done or (pos is not None and pos <= WON_POSITION)):
+            counts["branded_won"] += 1
+    for r in cands:
+        t = r.tier if r.tier in tiers else "body"
+        pos = positions.get(r.phrase)
+        striking = pos is not None and 3 < pos <= 20
+        counts["tier"][t] += 1
+        if striking:
+            counts["striking"][t] += 1
+        w = STRIKING_WEIGHT if striking else 1
+        weight[t] += w
+        total_w += w
+        if is_branded(tenant, r.phrase, brand):
+            counts["branded"] += 1
+        if r.intent in BUYING_INTENTS:
+            counts["buying"] += 1
+            buying_w += w
+    why: list[str] = []
+    if not cands:
+        return {"counts": counts, "recommended": None,
+                "why": ["no candidate keywords in the map — build the map "
+                        "first; there is nothing to recommend a mix from"]}
+
+    shares = {t: 100.0 * weight[t] / total_w for t in tiers}
+    n = len(cands)
+    why.append("of the %d candidates: %s" % (n, " · ".join(
+        f"{counts['tier'][t]} {t.replace('_', '-')}" for t in tiers)))
+    struck = sum(counts["striking"].values())
+    if struck:
+        why.append(f"{struck} already rank on page one or two (positions 4–20) "
+                   f"and count {STRIKING_WEIGHT}× — that is where the plan "
+                   f"should lean: " + ", ".join(
+                       f"{counts['striking'][t]} {t.replace('_', '-')}"
+                       for t in tiers if counts["striking"][t]))
+    half_won = [c for c in state.values()
+                if c.get("supports_published") and not c.get("pillar_published")
+                and c.get("pillar")]
+    if shares["head"] > HEAD_CAP:
+        why.append(f"head terms capped at {HEAD_CAP}% — a head term is won with "
+                   f"a pillar plus the supports that link into it, so the "
+                   f"supports must outnumber the pillars")
+        shares["head"] = float(HEAD_CAP)
+    if half_won and counts["tier"]["head"] and shares["head"] < HEAD_FLOOR:
+        why.append(f"head terms held at {HEAD_FLOOR}% — {len(half_won)} "
+                   f"cluster(s) have published supports and no published "
+                   f"pillar ({half_won[0]['pillar']!r}), and those supports "
+                   f"link to nothing until it exists")
+        shares["head"] = float(HEAD_FLOOR)
+    rest = sum(v for t, v in shares.items() if t != "head")
+    if rest > 0:
+        scale = (100.0 - shares["head"]) / rest
+        for t in ("body", "long_tail"):
+            shares[t] *= scale
+    else:
+        shares["head"] = 100.0
+    tier_rec = _sum_to_100(shares)
+
+    if not counts["branded"]:
+        branded = 0
+        why.append("no branded phrases among the candidates — 0% branded")
+    elif counts["branded_won"]:
+        branded = BRANDED_WHEN_WON
+        why.append(f"the brand already ranks for its own name — branded held "
+                   f"at {BRANDED_WHEN_WON}%; a page each is enough")
+    else:
+        branded = min(BRANDED_CAP, _round5(100.0 * counts["branded"] / n))
+        why.append(f"{counts['branded']} branded phrase(s) and nothing branded "
+                   f"ranks yet — {branded}% branded, capped at {BRANDED_CAP}% "
+                   f"because a site ranks for its own name with or without an "
+                   f"article")
+
+    if not counts["buying"]:
+        buying = 0
+        why.append("no buying-intent phrases among the candidates — 0% buying")
+    else:
+        raw = 100.0 * buying_w / total_w
+        buying = max(BUYING_FLOOR, min(BUYING_CAP, _round5(raw)))
+        why.append(f"{counts['buying']} phrase(s) carry buying intent "
+                   f"({raw:.0f}% by weight) — {buying}% buying, held between "
+                   f"{BUYING_FLOOR}% and {BUYING_CAP}% so neither the pages "
+                   f"that earn links nor the pages that convert go missing")
+
+    return {"counts": counts,
+            "recommended": {**tier_rec, "branded": branded, "buying": buying},
+            "why": why}
+
+
 #: How deep a SERP we capture. Ten names everyone a page-one contender has to
 #: pass; past that the domains are not competitors yet, and Semrush bills by
 #: the LINE returned, so depth is half the cost of this feature.

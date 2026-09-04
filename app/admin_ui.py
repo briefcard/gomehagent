@@ -2875,7 +2875,27 @@ def _cadence_form(key: str, row, lead: str, propose: str) -> str:
             <button class="sec">Set cadence</button>
           </form>
           {"" if lead else propose}
+          {_reset_form(key, row)}
         </details>"""
+
+
+def _reset_form(key: str, row) -> str:
+    """Re-lay this system's open plans from today under the cadence just set
+    — beside the cadence, because that is the fact it acts on. Absent for the
+    calendar planners, whose week is the item."""
+    from . import planner as _pl
+    if not _pl.resettable(row) or not systems.plans(row.tenant, row.key):
+        return ""
+    return f"""
+          <form method="get" action="/admin/plan_reset" class="row" style="margin-top:8px">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(row.tenant)}">
+            <input type="hidden" name="system" value="{_esc(row.key)}">
+            <input type="hidden" name="back" value="system">
+            <button class="sec">Reset the schedule from today</button>
+            <span class="mut">re-dates every open plan under the cadence above;
+            a date you set yourself is kept</span>
+          </form>"""
 
 
 def _waiting_section(key: str, row) -> str:
@@ -10388,14 +10408,16 @@ def _schedule_section(key: str, tenant: str, sort: str = "",
     # not a departure from the plan — it was never on it.
     items = [r for r in runs
              if (getattr(r, "brief", None) or {}).get("plan") is not None]
+    controls = _schedule_controls(key, tenant)
     if not items:
-        return """
+        return f"""
     <div class="card"><div class="anchor" id="schedule"></div>
       <div class="head"><h2>Schedule</h2></div>
       <p class="mut">Nothing has been planned on any system for this account.
       Each system's own Plan queue is where work is declared, and its Propose
       button is what fills it. Once something is planned, this is where you
       see what became of it.</p>
+      {controls}
     </div>"""
 
     by_id = {r.id: r for r in systems.for_tenant(tenant)}
@@ -10448,6 +10470,7 @@ def _schedule_section(key: str, tenant: str, sort: str = "",
         <span class="mut">{len(items)} planned item(s) across every system —
         what was planned, and what became of it</span></div>
       {stuck_note}
+      {controls}
       <div class="tblwrap"><table class="tbl">
         <tr>{_sort_headers(key, tenant, sort, desc)}</tr>
         {"".join(_tr(*e) for e in rows[:60])}
@@ -10455,6 +10478,52 @@ def _schedule_section(key: str, tenant: str, sort: str = "",
       <p class="when">A direct run is not listed: it carries no plan, so it
       is not a departure from one.</p>
     </div>"""
+
+
+def _schedule_controls(key: str, tenant: str) -> str:
+    """Refresh the plan, and reset each schedule that can be reset.
+
+    Owner, 2026-09-04: *"I will need to refresh the plan to add new systems
+    and to reset the schedule if the initial schedule doesn't make sense."*
+    Refresh installs every declared planner's system this account is ready
+    for and tops up every one that is on; Reset re-dates one system's open
+    plans from today under its cadence, keeping any date the owner set. The
+    calendar planners (posts, reports) have no Reset — their week is the item
+    — and the control says so rather than offering a button that refuses.
+    """
+    from . import planner as _pl
+    resets = ""
+    for r in systems.for_tenant(tenant):
+        if r.key not in _pl.PLANNERS or not systems.is_on(r):
+            continue
+        n = len(systems.plans(tenant, r.key))
+        if not n:
+            continue
+        if _pl.resettable(r):
+            resets += f"""
+          <form method="get" action="/admin/plan_reset" class="inl">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="system" value="{_esc(r.key)}">
+            <button class="sec">Reset {_esc(r.name)} — {n} open, from today</button>
+          </form>"""
+        else:
+            resets += (f'<span class="mut">{_esc(r.name)}: {n} open — '
+                       f'{_esc(_pl.NOT_RESETTABLE_WHY.split(" — ")[0])}</span>')
+    return f"""
+      <div class="row" style="margin:6px 0 10px">
+        <form method="get" action="/admin/plan_refresh" class="inl">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <button>Refresh the plan</button>
+        </form>
+        <span class="mut">installs every system that plans work and is ready
+        for this account, and runs every planner that is on — now, not on the
+        next tick</span>
+      </div>
+      <div class="row" style="margin:0 0 10px">{resets or
+        '<span class="mut">Nothing to reset — no open plans on a system whose schedule is re-laid.</span>'}
+      </div>"""
 
 
 def _plan_window(key: str, tenant: str, days: int) -> str:
@@ -11117,7 +11186,8 @@ def _progress_section(key: str, tenant: str, days: int,
       <p class="mut">Set once a quarter. Changing it does not re-baseline
       what has already been measured.</p>
       {form}
-    </details>"""
+    </details>
+    {_mix_card(key, tenant)}"""
 
     return f"""
     <div class="anchor" id="progress"></div>
@@ -11135,6 +11205,101 @@ def _progress_section(key: str, tenant: str, days: int,
       {moves}
     </table></div>
     {aeo_html}"""
+
+
+def _mix_card(key: str, tenant: str) -> str:
+    """THE MIX — what the map is made of, what the app recommends planning
+    from it, what is declared, and the boxes that set it. One card, because
+    the fact and its control belong together (owner, 2026-09-04: "the app
+    should recommend a base setting default based on the current status of
+    the brand and where the best opportunities lie").
+
+    The recommendation is `keywords.mix_recommendation` — arithmetic over the
+    map, every number with the sentence that produced it — and the planner
+    reads only what `planner.mix_for` returns, so a share set here is a share
+    the next pass obeys, and "not set" means the score order the planner has
+    always used.
+    """
+    from . import keywords as _kw, planner as _pl
+    row = systems.find(tenant, "blog")
+    rec = _kw.mix_recommendation(tenant)
+    counts = rec.get("counts") or {}
+    n = int(counts.get("candidates") or 0)
+    tiers = counts.get("tier") or {}
+
+    def _pct(k: int) -> str:
+        return f"{100 * k // n}%" if n else "—"
+
+    fact = ("<p class=\"mut\">No candidate keywords in the map yet — Architecture "
+            "is where the map gets built, and the recommendation follows it.</p>"
+            if not n else
+            f'<div class="stat">'
+            f'<span><b>{n}</b> candidates</span>'
+            + "".join(f'<span><b>{_pct(tiers.get(t, 0))}</b> {t.replace("_", "-")}</span>'
+                      for t in _pl.MIX_TIERS)
+            + f'<span><b>{_pct(int(counts.get("branded") or 0))}</b> branded</span>'
+            f'<span><b>{_pct(int(counts.get("buying") or 0))}</b> buying intent</span>'
+            f'</div>')
+    recd = rec.get("recommended") or {}
+    declared = _pl.mix_for(row) if row else {}
+    why = "".join(f"<li>{_esc(w)}</li>" for w in (rec.get("why") or []))
+    rec_line = (" · ".join(f'{k.replace("_", "-")} {v}%' for k, v in recd.items())
+                if recd else "nothing to recommend from yet")
+    if declared:
+        state = ("Declared: " + " · ".join(
+            f'{k.replace("_", "-")} {v}%' for k, v in declared.items())
+            + (" — this is the recommendation." if declared == recd
+               else " — set by you; the recommendation is shown for comparison."))
+    else:
+        state = ("Not set — the planner plans by score alone. Use the "
+                 "recommendation, or set your own shares.")
+    if not row:
+        control = ('<p class="mut">The blog system is not installed for this '
+                   'account — Refresh the plan on the Schedule room installs it, '
+                   'and the mix is set here after.</p>')
+    else:
+        boxes = "".join(f"""
+            <div class="f" style="max-width:190px">
+              <label>{_esc(spec["label"])}</label>
+              <input name="{_esc(k)}" inputmode="numeric"
+                     value="{_esc(str(declared.get(k, "")))}"
+                     placeholder="{_esc(str(recd.get(k, "")))}">
+              <div class="when">{_esc(spec["why"])}</div>
+            </div>""" for k, spec in _pl.MIX.items())
+        control = f"""
+        <form method="get" action="/admin/plan_mix" class="row">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          {boxes}
+          <button class="sec">Set the mix</button>
+        </form>
+        <div class="row" style="margin-top:6px">
+          <form method="get" action="/admin/plan_mix" class="inl">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="use_recommended" value="1">
+            <button{"" if recd else " disabled"}>Use the recommended mix</button>
+          </form>
+          <form method="get" action="/admin/plan_mix" class="inl">
+            <input type="hidden" name="key" value="{_esc(key)}">
+            <input type="hidden" name="tenant" value="{_esc(tenant)}">
+            <input type="hidden" name="clear" value="1">
+            <button class="sec"{"" if declared else " disabled"}>Clear — plan by score alone</button>
+          </form>
+          <span class="mut">head + body + long-tail must add to 100; branded and
+          buying are each a share of the whole. Blank a box to leave it.</span>
+        </div>"""
+    return f"""
+    <div class="anchor" id="mix"></div>
+    <h3>The mix</h3>
+    <p class="mut">What share of new articles each kind of keyword gets. The
+    planner holds it over the open queue; pinned keywords still go first,
+    and a pillar still goes ahead of its supports.</p>
+    {fact}
+    <p><b>Recommended:</b> {_esc(rec_line)}</p>
+    <ul class="when" style="margin:0 0 8px;padding-left:18px">{why}</ul>
+    <p>{_esc(state)}</p>
+    {control}"""
 
 
 def _reports_section(key: str, row) -> str:

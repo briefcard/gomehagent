@@ -2975,14 +2975,16 @@ def _plan_days(raw) -> int:
         return 28
 
 
-def _plan_back(tenant: str, key: str, msg: str = "", err: str = ""):
+def _plan_back(tenant: str, key: str, msg: str = "", err: str = "",
+               sub: str = ""):
     from fastapi.responses import RedirectResponse
     from urllib.parse import urlencode
     # `ok`, not `msg` — the name every other tab's redirect already uses. A
     # second name for one thing is how a message silently stops appearing.
+    # `sub` lands the reader back in the room the control was pressed in.
     return RedirectResponse("/admin/ui?" + urlencode(
         {k: v for k, v in {"key": key, "tab": "plan", "tenant": tenant,
-                           "ok": msg, "err": err}.items() if v}), 303)
+                           "sub": sub, "ok": msg, "err": err}.items() if v}), 303)
 
 
 @app.get("/admin/blog_set")
@@ -6366,6 +6368,94 @@ async def plan_cadence(request: Request, key: str = Depends(admin_key),
     said = ", ".join(f"{k} = {v}" for k, v in out.items() if k != "ok")
     return _back_to_system(tenant, system, ok=f"Cadence set — {said}",
                            anchor="planned")
+
+
+@app.get("/admin/plan_mix")
+async def plan_mix(request: Request, key: str = Depends(admin_key),
+                   tenant: str = "", use_recommended: str = "",
+                   clear: str = ""):
+    """The owner's mix for the blog planner — set, take the recommendation,
+    or clear. The knobs are read off `planner.MIX` so a share added there is
+    accepted here without a route change; the sum rule lives in `set_mix`."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import planner as _pl, systems
+    row = systems.find(tenant, "blog")
+    if not row:
+        return _plan_back(tenant, key, sub="goal",
+                          err="the blog system is not installed for this "
+                              "account — Refresh the plan installs it")
+    q = request.query_params
+    out = systems.set_mix(row.id, use_recommended=bool(use_recommended),
+                          clear=bool(clear),
+                          **{k: q.get(k, "") for k in _pl.MIX if k in q})
+    if out.get("error"):
+        return _plan_back(tenant, key, sub="goal", err=out["error"])
+    if out.get("cleared"):
+        return _plan_back(tenant, key, sub="goal",
+                          msg="Mix cleared — the planner plans by score alone")
+    said = " · ".join(f"{k.replace('_', '-')} {v}%" for k, v in out.items()
+                      if k != "ok")
+    return _plan_back(tenant, key, sub="goal",
+                      msg=("Mix set from the recommendation — " if use_recommended
+                           else "Mix set — ") + said
+                      + ". The next pass plans against it")
+
+
+@app.get("/admin/plan_reset")
+def plan_reset(key: str = Depends(admin_key), tenant: str = "",
+               system: str = "", back: str = ""):
+    """Re-date one system's open plans from today under its cadence.
+
+    Owner's edits to a date are kept and named. `back=system` returns to the
+    system's Planned section; anything else to the Plan tab's Schedule."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import planner as _pl, systems
+    row = systems.find(tenant, system)
+
+    def _land(ok: str = "", err: str = ""):
+        if back == "system":
+            return _back_to_system(tenant, system, ok=ok, err=err, anchor="planned")
+        return _plan_back(tenant, key, sub="schedule", msg=ok, err=err)
+
+    if not row:
+        return _land(err=f"no {system} system on this account")
+    out = _pl.reset_schedule(row)
+    if out.get("error"):
+        return _land(err=out["error"])
+    said = (f"Schedule reset — {out['redated']} plan(s) re-dated from today "
+            f"under the cadence")
+    if out.get("kept"):
+        said += (f"; {len(out['kept'])} kept the date you set")
+    if not out["redated"] and not out.get("kept"):
+        said = "Nothing to reset — no open plans on this system"
+    return _land(ok=said)
+
+
+@app.get("/admin/plan_refresh")
+def plan_refresh(key: str = Depends(admin_key), tenant: str = ""):
+    """Install every declared planner's system this account is ready for, and
+    top up every one that is on — now, rather than on the next tick."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import planner as _pl
+    if not tenant:
+        return {"error": "tenant is required"}
+    out = _pl.refresh(tenant)
+    bits = []
+    if out["installed"]:
+        bits.append("installed " + ", ".join(out["installed"])
+                    + " — off until you turn them on (Systems tab)")
+    for k, t in out["topped"].items():
+        bits.append(f"{k}: {t['proposed']} proposed, {t['refreshed']} refreshed"
+                    + (f" — {t['refusals'][0][:120]}" if t["refusals"] else ""))
+    if out["off"]:
+        bits.append("off, so not planned: " + ", ".join(out["off"]))
+    if out["unmet"]:
+        bits.append("not installed — " + "; ".join(out["unmet"]))
+    return _plan_back(tenant, key, sub="schedule",
+                      msg="Plan refreshed — " + " · ".join(bits)[:600])
 
 
 # ---------------------------------------------------------------------------

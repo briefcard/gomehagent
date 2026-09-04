@@ -857,9 +857,17 @@ def prerequisites(tenant: str, key: str) -> dict:
     needs = tuple(sp.get("kb_needs") or ())
     if needs:
         absent = set(kb.needs_met(tenant, needs))
+        # A BARE ACCOUNT MEETS NOTHING. `needs_met` answers "kb_brand row"
+        # when there is no knowledge base at all — a token that matches no
+        # declared field, so every need read as met and an account with no
+        # brand row was offered every system as ready. Found 2026-09-04 by
+        # the Plan's refresh, which would have installed the blog for an
+        # account that cannot yet say one true thing.
+        bare = "kb_brand row" in absent
         for f in needs:
             items.append({"kind": "knowledge", "name": f,
-                          "met": f not in absent, "note": ""})
+                          "met": (not bare) and f not in absent,
+                          "note": "no knowledge base yet" if bare else ""})
     elif sp["needs_kb"]:
         c = kb.completeness(tenant)
         items.append({"kind": "knowledge", "name": "knowledge base",
@@ -1725,6 +1733,74 @@ def set_cadence(system_id: str, **values) -> dict:
         cad = dict(cfg.get("cadence") or {})
         cad.update(updates)
         cfg["cadence"] = cad
+        row.config = cfg
+        s.commit()
+    return {"ok": True, **updates}
+
+
+def set_mix(system_id: str, *, use_recommended: bool = False,
+            clear: bool = False, **values) -> dict:
+    """The owner's mix, onto `System.config["mix"]` — or the recommendation.
+
+    Validated at the knob like `set_cadence`: every key must be one
+    `planner.MIX` declares, a whole number 0–100, and the tier trio must sum
+    to 100 AFTER the write — the blank-is-leave-it rule means a box left
+    empty reads the stored value, and the sum is checked over what would be
+    stored, so a mix that does not add up is refused by name rather than
+    stored and ignored (`planner.mix_for` treats a bad trio as no mix at all,
+    which would be a knob the planner silently ignores — rule 4).
+
+    `use_recommended` writes `keywords.mix_recommendation` wholesale; `clear`
+    removes the mix, and the planner returns to score order.
+    """
+    from . import planner as _pl
+    with db.SessionLocal() as s:
+        row = s.get(db.System, system_id)
+        if not row:
+            return {"error": "unknown system"}
+        cfg = dict(row.config or {})
+        if clear:
+            cfg.pop("mix", None)
+            row.config = cfg
+            s.commit()
+            return {"ok": True, "cleared": True}
+        if use_recommended:
+            from . import keywords as _kw
+            rec = _kw.mix_recommendation(row.tenant)
+            if not rec.get("recommended"):
+                return {"error": "; ".join(rec.get("why") or ["nothing to recommend"])}
+            cfg["mix"] = dict(rec["recommended"])
+            row.config = cfg
+            s.commit()
+            return {"ok": True, **cfg["mix"]}
+        unknown = sorted(k for k in values if k not in _pl.MIX)
+        if unknown:
+            return {"error": "no mix knob called " + ", ".join(unknown)}
+        current = dict(cfg.get("mix") or {})
+        updates: dict[str, int] = {}
+        for name in _pl.MIX:
+            val = values.get(name)
+            if val is None or str(val).strip() == "":
+                continue
+            try:
+                n = int(str(val).strip())
+            except (TypeError, ValueError):
+                return {"error": f"{name} must be a whole number, got {val!r}"}
+            if not 0 <= n <= 100:
+                return {"error": f"{name} must be between 0 and 100, got {n}"}
+            updates[name] = n
+        if not updates:
+            return {"error": "nothing to set — every box was blank"}
+        merged = {**current, **updates}
+        missing = [k for k in _pl.MIX if k not in merged]
+        if missing:
+            return {"error": "every share is needed the first time: missing "
+                             + ", ".join(missing)}
+        total = sum(merged[t] for t in _pl.MIX_TIERS)
+        if total != 100:
+            return {"error": f"head + body + long_tail must sum to 100, got "
+                             f"{total} ({', '.join(f'{t} {merged[t]}' for t in _pl.MIX_TIERS)})"}
+        cfg["mix"] = {k: merged[k] for k in _pl.MIX}
         row.config = cfg
         s.commit()
     return {"ok": True, **updates}
