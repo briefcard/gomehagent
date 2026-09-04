@@ -5828,6 +5828,20 @@ SABOTAGES = [
                "one case the bundle is meant to stop",
     },
     {
+        "name": "the_rehearsal_reads_the_artifacts_not_the_pass_line",
+        "file": "app/data_tools.py",
+        # Puts the bare KeyError back on an unconnected store. Every suite
+        # stays green (they stub the store); the rehearsal reads the
+        # catalogue skill's blocked_on for the accounts that have no store and
+        # finds a Python identifier where the owner needs a sentence.
+        "find": "    if not cfg:\n        # NAMED, not KeyError: 'baci'.",
+        "replace": "    if False:  # SABOTAGE\n        # NAMED, not KeyError: 'baci'.",
+        "suites": ["test_rehearse.py"],
+        "why": "an owner-facing note reads 'KeyError: baci' again and no suite "
+               "notices, because every suite stubs the store — which is exactly "
+               "why the rehearsal reads what the systems produce",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this
