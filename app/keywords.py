@@ -1371,10 +1371,18 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
             sites.backend(profile)
             blog_id = (t.cms or {}).get("blog_id") or ""
             if profile.get("platform") != "wordpress" and not blog_id:
-                pub["detail"] = "connected, but no blog_id"
-                pub["fix"] = ("a store can hold several blogs and the "
-                              "skill refuses to guess — press 'Find the blogs "
-                              "on this store' beside this line and pick one")
+                # NOT A BLOCKER ANY MORE, and saying it was is what sent
+                # people to a picker before anything could be published.
+                # `sites.ensure_blog` publishes into the store's own blog
+                # when it holds one and otherwise into a blog of ours, made
+                # once — so this states the destination and offers the
+                # choice, rather than withholding the work until one is made.
+                from . import sites as _st
+                pub.update(ok=True, choose=True,
+                           detail=(f"{profile['platform']} via {caps['cms']} "
+                                   f"— no blog chosen, so articles go to the "
+                                   f"store's own blog, or to "
+                                   f"{_st.FALLBACK_BLOG_TITLE}"))
             else:
                 pub.update(ok=True, detail=f"{profile['platform']} via {caps['cms']}")
         except sites.UnknownSite as exc:

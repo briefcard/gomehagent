@@ -78,10 +78,18 @@ def main() -> int:
     org("noblog", "noblog.example", cms={"platform": "shopify"})
     connect("noblog")
     r = keywords.readiness("noblog")
-    ck("a connected store with no blog_id is NOT ready",
-       r["publish"]["ok"] is False and "blog_id" in r["publish"]["detail"],
-       str(r["publish"])[:110])
-    ck("and says why guessing is refused", "several blogs" in r["publish"]["fix"])
+    # NO BLOG CHOSEN IS NOT A FAULT ANY MORE (owner, 2026-09-04). It was, and
+    # the consequence was a connected store sitting "not ready" while every
+    # article it wrote was filed and never queued. `sites.ensure_blog` answers
+    # the question now — the store's own blog when it holds one, ours
+    # otherwise — so readiness states the destination and keeps the choice.
+    from app import sites as _sites
+    ck("a connected store with no blog chosen is READY, and says where it goes",
+       r["publish"]["ok"] is True
+       and _sites.FALLBACK_BLOG_TITLE in r["publish"]["detail"],
+       str(r["publish"])[:150])
+    ck("and it still asks for the choice, so the control is not lost",
+       r["publish"].get("choose") is True, str(r["publish"])[:110])
 
     org("sq", "sq.example", cms={"platform": "squarespace"}, model="local_venue")
     r = keywords.readiness("sq")

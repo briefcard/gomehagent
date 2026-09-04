@@ -2355,7 +2355,8 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                msg=request.query_params.get("ok", ""),
                                err=request.query_params.get("err", ""),
                                derive_voice=bool(
-                                   request.query_params.get("derive_voice")))
+                                   request.query_params.get("derive_voice")),
+                               pick=bool(request.query_params.get("pick")))
     if tab == "assurance":
         try:
             days = int(request.query_params.get("days", "30"))
@@ -2989,26 +2990,42 @@ def _plan_back(tenant: str, key: str, msg: str = "", err: str = "",
 
 @app.get("/admin/blog_set")
 def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
-                   blog_id: str = ""):
+                   blog_id: str = "", back: str = ""):
     """Set which blog on the store articles publish into.
 
     MERGES into `cms` rather than replacing it. `/admin/tenant_set` takes a
     whole JSON blob for that column, so setting one key by hand meant
     rewriting `platform` and `creds_key` too — and getting one of them wrong
     silently unwires the account.
+
+    `back` returns the reader to the tab the picker was pressed on — the
+    setting now lives on Brand as well as beside the Plan tab's readiness
+    line, and a control that lands somewhere else is a control that reads as
+    broken.
     """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
     from . import tenants
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+
+    def _land(msg: str = "", err: str = ""):
+        if back == "brand":
+            return RedirectResponse("/admin/ui?" + "&".join(
+                f"{k}={quote(v)}" for k, v in
+                (("key", key), ("tab", "brand"), ("tenant", tenant),
+                 ("ok", msg), ("err", err)) if v) + "#blog", 303)
+        return _plan_back(tenant, key, msg=msg, err=err)
+
     blog_id = (blog_id or "").strip()
     if not blog_id.isdigit():
-        return _plan_back(tenant, key, err="a blog id is a number")
+        return _land(err="a blog id is a number")
     t = tenants.get(tenant)
     if not t:
-        return _plan_back(tenant, key, err=f"unknown account {tenant!r}")
+        return _land(err=f"unknown account {tenant!r}")
     tenants.set_blog(tenant, blog_id)
-    return _plan_back(tenant, key,
-                      msg=f"articles for {tenant} will publish into blog {blog_id}")
+    return _land(msg=f"articles for {tenant} will publish into blog {blog_id}")
 
 
 # ---------------------------------------------------------------------------

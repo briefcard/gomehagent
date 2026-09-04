@@ -28,7 +28,31 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ["SEO_SITES_JSON"] = "{}"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import db, kb, keywords, planner, skill, skill_pack, systems, tenants  # noqa: E402
+from app import db, kb, keywords, planner, shopify_seo, skill, skill_pack, systems, tenants  # noqa: E402
+
+# THE STORE, STUBBED AT THE TRANSPORT. Since `sites.ensure_blog` (2026-09-04) a
+# run with no blog chosen ASKS the store what blogs it has rather than
+# refusing, so an offline suite that leaves `_get` alone would attempt a real
+# Shopify call. Stubbed here so the real resolver runs against a store this
+# file controls.
+_STORE: dict = {"blogs": [], "readable": True}
+
+
+def _fake_get(store, path, params=None):
+    if not _STORE["readable"]:
+        raise RuntimeError("401 Unauthorized")
+    return {"blogs": list(_STORE["blogs"])} if path == "blogs.json" else {}
+
+
+def _fake_send(store, method, path, body):
+    new = {"id": 900 + len(_STORE["blogs"]),
+           "title": (body.get("blog") or {}).get("title", ""), "handle": "made"}
+    _STORE["blogs"].append(new)
+    return {"blog": new}
+
+
+shopify_seo._get = _fake_get
+shopify_seo._send = _fake_send
 
 _fail: list[str] = []
 
@@ -334,14 +358,40 @@ def main() -> int:
         row_t = s.get(db.Tenant, "acme")
         row_t.cms = {"platform": "shopify", "creds_key": "acme"}   # blog_id gone
         s.commit()
+    # NO BLOG CHOSEN IS NO LONGER A DEAD END (owner, 2026-09-04: work must not
+    # get stuck in publishing because nobody picked one). Two stores, two
+    # different right answers, and the old code gave the same refusal to both.
+    _STORE["blogs"] = [{"id": 100, "title": "News", "handle": "news"},
+                       {"id": 101, "title": "Guides", "handle": "guides"}]
+    _STORE["readable"] = True
     r_noid = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
-    ck("no blog_id is NOT reported as a success",
-       r_noid["summary"].startswith("DRAFTED"), r_noid["summary"][:90])
-    ck("the reason is in the summary, not only in a note",
-       "blog_id" in r_noid["summary"], r_noid["summary"][:120])
+    ck("two blogs and no choice no longer strands the article — it queues",
+       not r_noid["summary"].startswith("DRAFTED"), r_noid["summary"][:120])
+    ck("  into a blog of ours, created on the store rather than guessed at",
+       any(b["title"] == "MarketingThatWorks.co" for b in _STORE["blogs"]),
+       str([b["title"] for b in _STORE["blogs"]]))
+    ck("  and the run SAYS where it went and how to change it",
+       any("MarketingThatWorks.co" in n and "Brand tab" in n
+           for n in r_noid.get("notes") or []),
+       str([n for n in r_noid.get("notes") or [] if "blog" in n.lower()])[:200])
     ck("and it is still filed in the ledger, so nothing is lost",
        len(r_noid.get("items") or []) == 1,
        "the draft is real work; what is false is calling it published")
+
+    # A STORE THAT CANNOT BE READ still refuses — and names the connection,
+    # not a picker. Creating a blog to repair a credential would be a write on
+    # somebody else's shop for a problem a write cannot fix.
+    with db.SessionLocal() as s:
+        s.get(db.Tenant, "acme").cms = {"platform": "shopify", "creds_key": "acme"}
+        s.commit()
+    _STORE["readable"] = False
+    r_dead = skill.run("blog_article", "acme", keyword="acrylic jug", role="pillar")
+    ck("an unreadable store is NOT reported as a success",
+       r_dead["summary"].startswith("DRAFTED"), r_dead["summary"][:90])
+    ck("  and the reason names the connection, not a missing choice",
+       "could not be read" in r_dead["summary"]
+       and "blog_id" not in r_dead["summary"], r_dead["summary"][:160])
+    _STORE["readable"] = True
     with db.SessionLocal() as s:
         s.get(db.Tenant, "acme").cms = {"platform": "shopify", "creds_key": "acme",
                                         "blog_id": "77"}

@@ -3396,10 +3396,15 @@ SABOTAGES = [
     {
         "name": 'an_unambiguous_store_needs_no_picker',
         "file": 'app/shopify_seo.py',
-        "find": '    return str(blogs[0].get("id") or "") if len(blogs) == 1 else ""',
+        # RE-ANCHORED 2026-09-04: `sole_blog_id` now reads the one structured
+        # `blogs()` rather than fetching and unpacking its own, and the
+        # consequence of losing it changed with `sites.ensure_blog` — it is no
+        # longer "the article is stranded", it is "a second blog appears on
+        # the client's storefront".
+        "find": '    return str(rows[0]["id"]) if rows and len(rows) == 1 else ""',
         "replace": '    return ""  # SABOTAGE',
-        "suites": ['test_article_image.py'],
-        "why": 'a store with exactly one blog is refused for having no blog_id, so the commonest account drafts articles that can never be queued until somebody finds a picker on another tab',
+        "suites": ['test_article_image.py', 'test_blog_destination.py'],
+        "why": "a store with exactly one blog is not recognised as unambiguous, so a MarketingThatWorks.co blog is created beside the News blog it already had — a second blog on a client's storefront that nobody asked for",
     },
     {
         "name": 'where_articles_go_has_one_writer',
@@ -6611,6 +6616,66 @@ SABOTAGES = [
         'replace': '                claim_line += ""  # SABOTAGE',
         'suites': ['test_ad_panel.py'],
         'why': 'the owner asked to SEE what each reviewer would say, and the critique that shaped the copy is invisible on the only page where the copy is judged',
+    },
+    {
+        'name': 'an_unreadable_store_gets_no_blog_made',
+        'file': 'app/sites.py',
+        # RE-ANCHORED the same day: the None branch grew a second arm (a
+        # recorded blog is used unconfirmed rather than discarded), so the
+        # mutation moved to the one line that makes an unreadable store
+        # indistinguishable from an empty one — which is the whole defect.
+        'find': '    rows = back.blogs(profile)',
+        'replace': '    rows = back.blogs(profile) or []  # SABOTAGE',
+        'suites': ['test_blog_destination.py', 'test_blog_skill.py'],
+        'why': "an expired token reads as an empty store, so the repair for a broken credential is a blog created on the client's live shop — a write on somebody else's storefront for a problem no write can fix",
+    },
+    {
+        'name': 'a_missing_blog_never_strands_an_article',
+        'file': 'app/sites.py',
+        'find': '    made = back.create_blog(profile, FALLBACK_BLOG_TITLE)',
+        'replace': '    made = {"ok": False, "error": "SABOTAGE"}',
+        'suites': ['test_blog_destination.py', 'test_blog_skill.py'],
+        'why': 'a store with two blogs and no choice goes back to stranding every article it writes — written, filed, and never queued, which is the state the owner reported',
+    },
+    {
+        'name': 'a_stale_blog_id_is_not_a_destination',
+        'file': 'app/sites.py',
+        'find': '    if recorded and recorded in by_id:',
+        'replace': '    if recorded:  # SABOTAGE',
+        'suites': ['test_blog_destination.py'],
+        'why': 'a blog deleted on the store is still published into, so the article 404s at the approval — the one moment the owner is watching and the one they cannot retry from the console',
+    },
+    {
+        'name': 'the_fallback_blog_is_made_once',
+        'file': 'app/sites.py',
+        'find': '    mine = next((b for b in rows\n                 if b["title"].strip().lower() == FALLBACK_BLOG_TITLE.lower()), None)',
+        'replace': '    mine = None  # SABOTAGE',
+        'suites': ['test_blog_destination.py'],
+        'why': "every run with no blog chosen creates another MarketingThatWorks.co, so a client's storefront navigation fills with duplicate blogs nobody asked for",
+    },
+    {
+        'name': 'the_publish_arm_confirms_the_blog',
+        'file': 'app/approvals.py',
+        'find': '        _blog = sites.ensure_blog(_bt) if _bt else {}',
+        'replace': '        _blog = {}  # SABOTAGE',
+        'suites': ['test_blog_destination.py'],
+        'why': 'publishing trusts the id chosen when the article was DRAFTED, so anything that changed on the store in between — the commonest being a blog deleted — fails the publish instead of resolving it',
+    },
+    {
+        'name': 'an_automatic_blog_is_said_out_loud',
+        'file': 'app/skill_pack.py',
+        'find': '        _said = sites.blog_note(_blog)\n        if _said:\n            ctx.note(_said)',
+        'replace': '        _said = ""  # SABOTAGE',
+        'suites': ['test_blog_skill.py'],
+        'why': "a blog is created on the client's store and published into and the run says nothing, so the first anybody hears of it is a stranger finding the page — an automatic destination nobody can see is worse than the question it replaced",
+    },
+    {
+        'name': 'the_blog_setting_is_on_the_brand_page',
+        'file': 'app/admin_ui.py',
+        'find': '  {_blog_destination_card(key, tenant, pick)}',
+        'replace': "  {''}",
+        'suites': ['test_blog_destination.py'],
+        'why': "the one setting that decides where a client's articles land is back to living only on the keyword tab, which is what the owner asked to fix",
     },
 ]
 

@@ -849,8 +849,19 @@ def _execute(ap: db.Approval) -> None:
         # promise ("the push uses exactly this") is true by construction
         # instead of by two copies staying in step, which they did not: an
         # edit made with no pending approval never reached the payload at all.
+        # RE-RESOLVED AT PUBLISH TIME, not trusted from the payload. The id
+        # was chosen when the article was drafted, and a blog deleted between
+        # then and the approval is a 404 at the only moment that matters —
+        # the "or doesn't exist" half of the owner's 2026-09-04 issue.
+        # `ensure_blog` confirms it, or supplies one, or says why it could
+        # not; a store it cannot READ keeps the payload's id rather than
+        # inventing a destination.
+        _bt = seo_guard.tenant_for(profile) or (ap.tenant or "")
+        _blog = sites.ensure_blog(_bt) if _bt else {}
+        _blog_id = _blog.get("blog_id") or p.get("blog_id") or None
+        _blog_said = sites.blog_note(_blog) if _blog else ""
         res = sites.backend(profile).create_article(
-            profile, p.get("blog_id") or None,
+            profile, _blog_id,
             _fields_from_artifact(p.get("output_id") or "", p["fields"]))
         if _published(res):
             # CLOSE THE LOOP, which this arm never did: the 2026-08-26 audit
@@ -883,9 +894,10 @@ def _execute(ap: db.Approval) -> None:
                 except Exception:                                # noqa: BLE001
                     pass
         whatsapp.send_text(
-            f"📝 Article created ({p.get('site')}): {res}"
-            if _published(res)
-            else f"⛔ Article NOT created ({p.get('site')}): {res}")
+            (f"📝 Article created ({p.get('site')}): {res}"
+             if _published(res)
+             else f"⛔ Article NOT created ({p.get('site')}): {res}")
+            + (f"\n{_blog_said}" if _blog_said else ""))
     elif ap.kind == "seo_article_revision":
         from . import keywords, seo_guard, sites, whatsapp
         p = ap.payload

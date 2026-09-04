@@ -5225,6 +5225,7 @@ def _run_blog_article(ctx: Context) -> dict:
     # a store that does not exist. `backend()` already refuses by name for
     # both cases — nothing connected, and a platform with no backend built —
     # and its refusal is the sentence worth showing.
+    blog_ok, blog_why = True, ""
     try:
         sites.backend(profile)
         can_push = True
@@ -5236,21 +5237,26 @@ def _run_blog_article(ctx: Context) -> dict:
             f"NOT queued — {why_no_cms} The article is written and kept; "
             f"paste it in from its review page, then record the live URL "
             f"there.")
-    elif profile.get("platform") != "wordpress" and not blog_id:
-        # NOTHING TO GUESS IS NOT A CHOICE. A store with exactly one blog was
-        # being refused by a rule written for stores with several, so the
-        # commonest account drafted articles that could never be queued until
-        # somebody found the picker on another tab. Resolve it, RECORD it —
-        # an auto-chosen destination the owner cannot see is worse than the
-        # question — and only ask when there is a real ambiguity.
-        try:
-            blog_id = sites.backend(profile).sole_blog_id(profile) or ""
-        except Exception:                                        # noqa: BLE001
-            blog_id = ""
-        if blog_id:
-            tenants.set_blog(ctx.tenant, blog_id)
-            ctx.note(f"this store has one blog ({blog_id}); articles will "
-                     f"publish into it. Change it on the Plan tab.")
+    else:
+        # NOTHING TO GUESS IS NOT A CHOICE, AND NEITHER IS NOTHING TO PUBLISH
+        # INTO. `sites.ensure_blog` resolves the destination the same way for
+        # the run and for the publish arm — the recorded blog if it still
+        # exists, the store's own if it holds one, otherwise a blog of ours,
+        # created once. Owner, 2026-09-04: work must not get stuck in
+        # publishing because nobody has chosen a blog.
+        #
+        # RECORDED AND SAID, always. An automatic destination the owner cannot
+        # see is worse than the question it replaced, which is why every
+        # branch that is not "the blog you already chose" writes a note.
+        _blog = sites.ensure_blog(ctx.tenant)
+        blog_id = _blog.get("blog_id") or blog_id
+        _said = sites.blog_note(_blog)
+        if _said:
+            ctx.note(_said)
+        if not _blog.get("ok"):
+            blog_ok, blog_why = False, _blog.get("why", "")
+        else:
+            blog_ok, blog_why = True, ""
 
     if not can_push:
         # SAY WHAT IS MISSING — AND STILL SAY WHERE THE ARTICLE IS.
@@ -5274,11 +5280,14 @@ def _run_blog_article(ctx: Context) -> dict:
                 + (" " + _gap["fix"] if _gap["fix"] else "")
                 + " The article is written and kept; paste it in from its "
                   "review page, then record the live URL there.")
-    elif profile.get("platform") != "wordpress" and not blog_id:
+    elif not blog_ok:
+        # THE ONLY REMAINING WAY A BLOG STOPS A PUBLISH: the store could not
+        # be read, or refused the blog we tried to make. Never "you have not
+        # chosen one" — that is answered now, and saying it here sent people
+        # to a picker for a problem a picker cannot fix.
         publish["detail"] = (
-            f"NOT queued — no blog_id set for {ctx.tenant}. This store holds "
-            f"more than one blog and guessing writes to the wrong place. "
-            f"Pick one on the console&#39;s Plan tab, then re-run.")
+            f"NOT queued — {blog_why} The article is written and kept; paste "
+            f"it in from its review page, then record the live URL there.")
     else:
         # REVISE THE PAGE THAT RANKS; NEVER PUBLISH A SECOND BESIDE IT.
         # Owner, 2026-09-01: *"when a Needs Attention is addressed, do we have

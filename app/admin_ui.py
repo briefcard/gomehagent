@@ -3987,7 +3987,7 @@ def _theme_preview(theme: dict) -> str:
 
 
 def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
-                 derive_voice: bool = False) -> str:
+                 derive_voice: bool = False, pick: bool = False) -> str:
     """One account's brand, whole: WHO they are and how they SOUND (identity —
     positioning, elevator, voice, hard rules) and how their email LOOKS (the
     derived, owner-approved theme).
@@ -4495,10 +4495,57 @@ and hand-set fields survive future re-derives.</p>
   campaign email once approved. What may be ASSERTED (claims, objections, the
   catalogue) lives on Knowledge.</p>
   {identity}
+  {_blog_destination_card(key, tenant, pick)}
   {sources_card}
   <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
   <div class="card"><div class="head"><h2>Proposed</h2></div>{prop_body}{actions}</div>
 </div>""")
+
+
+def _blog_destination_card(key: str, tenant: str, pick: bool) -> str:
+    """WHERE THIS ACCOUNT'S ARTICLES PUBLISH — on Brand, with its control.
+
+    Owner, 2026-09-04: *"we dont have that setting to set it in our brand
+    page."* It existed only on the Plan tab, folded beside a readiness line
+    that named it as a failure — so the one setting standing between a
+    finished article and a live page was on the page about keywords.
+
+    It states the destination WITHOUT calling the store, because this page
+    renders on every visit; asking the store is what the button does. When
+    nothing is recorded it says what will happen rather than what is missing:
+    since `sites.ensure_blog`, an unset blog is a resolved destination, not a
+    blocked publish.
+    """
+    from . import sites as _st, tenants as _tn
+    t = _tn.get(tenant)
+    cms = dict(getattr(t, "cms", None) or {}) if t else {}
+    platform = str(cms.get("platform") or "").strip().lower()
+    bid = str(cms.get("blog_id") or "")
+    if platform == "wordpress":
+        state = ('<p class="mut">This site is on WordPress, which posts to the '
+                 'site itself — there is no blog to choose.</p>')
+        control = ""
+    else:
+        if bid:
+            state = (f'<div class="row"><span class="chip on">blog '
+                     f'{_esc(bid)}</span><span class="mut">articles publish '
+                     f'here. If it is deleted on the store, the next publish '
+                     f'moves to {_esc(_st.FALLBACK_BLOG_TITLE)} rather than '
+                     f'failing.</span></div>')
+        else:
+            state = (f'<div class="row"><span class="chip nb">not chosen'
+                     f'</span><span class="mut">articles publish into this '
+                     f'store&#39;s own blog when it has exactly one, and '
+                     f'otherwise into <b>{_esc(_st.FALLBACK_BLOG_TITLE)}</b>, '
+                     f'created on the store the first time. Nothing waits on '
+                     f'this.</span></div>')
+        control = _blog_picker(key, tenant, pick, tab="brand")
+    return f"""
+<div class="card"><div class="anchor" id="blog"></div>
+  <div class="head"><h2>Where articles publish</h2></div>
+  {state}
+  {control}
+</div>"""
 
 
 def _pager(base: str, page: int, total: int, per: int, what: str) -> str:
@@ -10123,7 +10170,7 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                   head=refresh, suffix=f"&amp;days={days}&amp;sub={view}")
 
 
-def _blog_picker(key: str, tenant: str, pick: bool) -> str:
+def _blog_picker(key: str, tenant: str, pick: bool, tab: str = "plan") -> str:
     """Choose which blog on the store articles publish into.
 
     The alternative, until now, was hand-building a percent-encoded JSON blob
@@ -10137,9 +10184,16 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
     broken on a slow morning.
     """
     from . import sites
-    ask = (f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant='
-           f'{_esc(tenant)}&amp;pick=1"><button class="sec" type="button">'
-           f'Find the blogs on this store</button></a>')
+    # A FORM, NOT A BUTTON INSIDE A LINK. `<a><button></a>` is invalid and the
+    # anchor swallows the click — the same class of defect as a control inside
+    # a <label> — and the Brand tab refuses it outright, which is what caught
+    # this when the picker moved there.
+    ask = (f'<form method="get" action="/admin/ui" class="inl">'
+           f'<input type="hidden" name="key" value="{_esc(key)}">'
+           f'<input type="hidden" name="tab" value="{_esc(tab)}">'
+           f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+           f'<input type="hidden" name="pick" value="1">'
+           f'<button class="sec">Find the blogs on this store</button></form>')
     if not pick:
         return f'<p>{ask}</p>'
     try:
@@ -10154,9 +10208,12 @@ def _blog_picker(key: str, tenant: str, pick: bool) -> str:
             bid, title = parts[0].strip(), parts[1].strip()
             rows.append(
                 f'<li>{_esc(title)} <code>{_esc(bid)}</code> '
-                f'<a href="/admin/blog_set?key={_esc(key)}&amp;tenant='
-                f'{_esc(tenant)}&amp;blog_id={_esc(bid)}">'
-                f'<button type="button">Use this one</button></a></li>')
+                f'<form method="get" action="/admin/blog_set" class="inl">'
+                f'<input type="hidden" name="key" value="{_esc(key)}">'
+                f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                f'<input type="hidden" name="blog_id" value="{_esc(bid)}">'
+                f'<input type="hidden" name="back" value="{_esc(tab)}">'
+                f'<button>Use this one</button></form></li>')
     if not rows:
         # `list_blogs` returns a SENTENCE on failure and on an empty store —
         # showing it beats rendering an empty list that looks like a bug.
@@ -13483,7 +13540,12 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
                       f'<button class="sec" type="button">Check Search Console '
                       f'now</button></a>')
     _fix_blog = ""
-    if _pub.get("ok") is not True and "blog_id" in str(_pub.get("detail", "")):
+    # `choose` rather than a substring of the verdict: a missing blog no
+    # longer makes publishing not-ok (`ensure_blog` supplies one), so keying
+    # the picker on `ok is not True` hid the control the moment the fact
+    # stopped being a failure — the fact and its control must travel together
+    # whichever way the fact reads.
+    if _pub.get("choose"):
         _fix_blog = " " + _blog_picker(key, tenant, pick)
 
     downstream_html = (

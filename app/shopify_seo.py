@@ -395,19 +395,64 @@ def create_page(profile: dict, fields: dict) -> str:
 # actually lives, so the whole content half of the plan had no publish path.
 # ---------------------------------------------------------------------------
 
+def blogs(profile: dict) -> list | None:
+    """Every blog on the store as `{id, title, handle}` — or None.
+
+    NONE IS NOT AN EMPTY STORE, and the difference decides a write. A store
+    with no blog should get one made; a store whose token expired should not,
+    because creating a blog to repair a credential is the wrong repair and it
+    happens on somebody else's shop. Both used to arrive here as a falsy
+    value: `list_blogs` returns a SENTENCE on failure and on emptiness alike,
+    and `sole_blog_id` swallowed every exception into "".
+
+    One reader for the three callers that ask what blogs exist.
+    """
+    if _ok(profile):
+        return None
+    try:
+        raw = _get(_store(profile), "blogs.json").get("blogs") or []
+    except Exception:                                            # noqa: BLE001
+        return None
+    return [{"id": str(b.get("id") or ""), "title": str(b.get("title") or ""),
+             "handle": str(b.get("handle") or "")} for b in raw]
+
+
+def create_blog(profile: dict, title: str) -> dict:
+    """Make a blog on the store. The one write in this module that is not an
+    article, and it exists so a missing blog cannot strand finished work —
+    see `sites.ensure_blog`, which is the only caller and which names what it
+    did on the run."""
+    if (why := _ok(profile)):
+        return {"ok": False, "error": why}
+    title = str(title or "").strip()
+    if not title:
+        return {"ok": False, "error": "a blog needs a title"}
+    try:
+        got = _send(_store(profile), "POST", "blogs.json",
+                    {"blog": {"title": title}})
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False,
+                "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+    bid = str(((got or {}).get("blog") or {}).get("id") or "")
+    if not bid:
+        return {"ok": False, "error": "Shopify accepted the call and named no blog"}
+    return {"ok": True, "blog_id": bid, "title": title}
+
+
 def list_blogs(profile: dict) -> str:
     """A store can have several blogs ("News", "Guides"); the id is needed for
     everything else here, and guessing it publishes into the wrong one."""
     if (why := _ok(profile)):
         return why
-    store = _store(profile)
-    blogs = _get(store, "blogs.json").get("blogs", [])
-    if not blogs:
+    rows = blogs(profile)
+    if rows is None:
+        return "This store could not be read, so its blogs are unknown."
+    if not rows:
         return ("This store has no blog. Shopify creates one named 'News' by "
                 "default — if it was deleted, add one in admin before "
                 "publishing articles.")
     return "\n".join(f"{b['id']}  {b['title']}  /blogs/{b['handle']}"
-                      for b in blogs)
+                      for b in rows)
 
 
 def sole_blog_id(profile: dict) -> str:
@@ -425,13 +470,8 @@ def sole_blog_id(profile: dict) -> str:
     unreachable store still means ask. This only removes the step that was
     never a choice.
     """
-    try:
-        if _ok(profile):
-            return ""
-        blogs = _get(_store(profile), "blogs.json").get("blogs", [])
-    except Exception:                                            # noqa: BLE001
-        return ""
-    return str(blogs[0].get("id") or "") if len(blogs) == 1 else ""
+    rows = blogs(profile)
+    return str(rows[0]["id"]) if rows and len(rows) == 1 else ""
 
 
 def list_articles(profile: dict, blog_id, limit: int = 20) -> str:

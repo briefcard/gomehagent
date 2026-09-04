@@ -356,14 +356,144 @@ def publish_gap(tenant: str) -> dict:
                         f"lesser version of one."),
                 "fix": "Paste it in, then record the address below.",
                 "where": ""}
-    blog_id = ((getattr(t, "cms", None) or {}).get("blog_id") or "")
-    if not blog_id and platform != "wordpress":
-        return {"ok": False,
-                "why": ("This store can hold several blogs, and guessing which "
-                        "one writes the article to the wrong place."),
-                "fix": "Choose the blog for this account.",
-                "where": "/admin/ui?tab=plan"}
+    # A MISSING BLOG IS NO LONGER A GAP. It was, for as long as the only
+    # answer to "which of this store's blogs" was the owner's; `ensure_blog`
+    # below now has an answer that is never a guess — the store's own blog
+    # when it holds exactly one, and otherwise a blog of our own, created
+    # once and named. Owner, 2026-09-04: work must not get stuck in
+    # publishing because nobody has chosen one.
     return {"ok": True, "why": "", "fix": "", "where": ""}
+
+
+#: The blog we publish into when the store names none of its own. Owner,
+#: 2026-09-04: *"if it's not set or doesn't exist we should create a blog
+#: called MarketingThatWorks.co and publish to that so that it doesn't get
+#: stuck in publishing due to a missing blog."*
+#:
+#: A literal, not the agency tenant's name read at runtime: the destination of
+#: a client's published pages should not change because a row was renamed.
+FALLBACK_BLOG_TITLE = "MarketingThatWorks.co"
+
+
+def ensure_blog(tenant: str) -> dict:
+    """Where this account's articles publish — resolved, and CREATED if need be.
+
+    THE ONE RESOLVER. Two callers need the same answer and used to compute
+    different halves of it: the drafting run asked `sole_blog_id` and gave up
+    on anything else, and the publish arm trusted whatever id the payload
+    happened to carry — so a blog deleted between drafting and approval was a
+    404 at the only moment that matters, and a store with two blogs and no
+    choice made stranded every article it ever wrote.
+
+    The order, and why each step is where it is:
+
+      1. the recorded id, IF IT STILL EXISTS on the store. An id that no
+         longer resolves is the "or doesn't exist" half of the owner's issue
+         and is treated as absent, not as a destination.
+      2. the store's own blog when it holds exactly one — nothing to guess
+         between, and publishing into somebody's existing News blog is more
+         natural than making a second one beside it.
+      3. a blog already titled `FALLBACK_BLOG_TITLE`, so this creates one
+         once per store rather than one per run.
+      4. otherwise, create it.
+
+    A STORE THAT CANNOT BE READ CREATES NOTHING. `blogs()` answers None for an
+    unreadable store and `[]` for an empty one, and only the second is a
+    reason to write. Repairing a credential by making a blog on a client's
+    shop is the failure this distinction exists to prevent.
+
+    Returns `{ok, blog_id, source, created, why}`; `source` is one of
+    `recorded | sole | fallback_found | fallback_created | not_needed`.
+    """
+    from . import tenants
+    t = tenants.get(tenant)
+    profile = get(tenant)
+    platform = (profile.get("platform") or "").strip().lower()
+    try:
+        back = backend(profile)
+    except UnknownSite as exc:
+        return {"ok": False, "blog_id": "", "source": "", "created": False,
+                "why": str(exc)}
+    # A backend with no notion of blogs needs none — WordPress posts to the
+    # site itself. Asked of the BACKEND, not of a platform string, so a
+    # backend added later inherits the answer instead of a name in a list.
+    if not hasattr(back, "blogs"):
+        return {"ok": True, "blog_id": "", "source": "not_needed",
+                "created": False, "why": ""}
+
+    recorded = str(((getattr(t, "cms", None) or {}) if t else {}).get("blog_id") or "")
+    rows = back.blogs(profile)
+    if rows is None:
+        # A READ FAILURE NEVER DOWNGRADES A WORKING SETUP. Confirming the
+        # recorded blog is worth a call; making that call the thing the
+        # publish DEPENDS on would let a slow morning at Shopify strand an
+        # article on an account that has been publishing for months. So the
+        # owner's own choice is used unconfirmed, and only an account that
+        # never had one is held — found by `test_refresh_lands` and
+        # `test_article_review`, both of which publish against a recorded
+        # blog and a store no offline suite can reach.
+        if recorded:
+            return {"ok": True, "blog_id": recorded, "source": "recorded",
+                    "created": False,
+                    "why": (f"{platform or 'the store'} could not be read, so "
+                            f"the blog you chose was used unconfirmed")}
+        return {"ok": False, "blog_id": "", "source": "",
+                "created": False,
+                "why": (f"{platform or 'the store'} could not be read, so the "
+                        f"blog could not be confirmed. Nothing was created — "
+                        f"a blog is not the repair for a connection.")}
+
+    by_id = {b["id"]: b for b in rows}
+    if recorded and recorded in by_id:
+        return {"ok": True, "blog_id": recorded, "source": "recorded",
+                "created": False, "why": ""}
+    gone = bool(recorded and recorded not in by_id)
+
+    def _take(bid: str, source: str, created: bool) -> dict:
+        tenants.set_blog(tenant, bid)
+        return {"ok": True, "blog_id": bid, "source": source,
+                "created": created,
+                "why": (f"the blog this account was set to ({recorded}) is no "
+                        f"longer on the store" if gone else "")}
+
+    if len(rows) == 1:
+        return _take(rows[0]["id"], "sole", False)
+    mine = next((b for b in rows
+                 if b["title"].strip().lower() == FALLBACK_BLOG_TITLE.lower()), None)
+    if mine is not None:
+        return _take(mine["id"], "fallback_found", False)
+    made = back.create_blog(profile, FALLBACK_BLOG_TITLE)
+    if not made.get("ok"):
+        return {"ok": False, "blog_id": "", "source": "", "created": False,
+                "why": (f"this store names no blog to publish into and one "
+                        f"could not be created: {made.get('error', '')}")}
+    return _take(made["blog_id"], "fallback_created", True)
+
+
+def blog_note(got: dict) -> str:
+    """One sentence saying where the articles are going and why — so an
+    automatic destination is never a silent one."""
+    src, bid = got.get("source", ""), got.get("blog_id", "")
+    if not got.get("ok"):
+        return str(got.get("why") or "")
+    lead = (str(got["why"]) + "; ") if got.get("why") else ""
+    if src == "recorded":
+        # Silent when it was simply confirmed — nothing was decided for them.
+        # NOT silent when it could not be confirmed: publishing into a blog
+        # nobody has looked at is exactly the case worth a sentence.
+        return (f"{got['why']}." if got.get("why") else "")
+    if src == "not_needed":
+        return ""
+    if src == "sole":
+        return (f"{lead}this store has one blog ({bid}); articles publish "
+                f"into it. Change it on the Brand tab.")
+    if src == "fallback_found":
+        return (f"{lead}no blog was chosen, so articles publish into "
+                f"{FALLBACK_BLOG_TITLE} ({bid}), which is already on this "
+                f"store. Change it on the Brand tab.")
+    return (f"{lead}no blog was chosen and this store named none to use, so "
+            f"{FALLBACK_BLOG_TITLE} ({bid}) was created on it and articles "
+            f"publish there. Change it on the Brand tab.")
 
 
 def backend(profile: dict):

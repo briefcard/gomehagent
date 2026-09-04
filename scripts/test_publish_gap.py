@@ -105,10 +105,13 @@ def main() -> int:
     print("— a store with several blogs and none chosen —")
     _tenant("storeco", domain="storeco.com", cms={"platform": "shopify"})
     g2 = sites.publish_gap("storeco")
-    ck("it says which decision is missing",
-       g2["ok"] is False and "several blogs" in g2["why"], g2["why"])
-    ck("  and it is a CHOICE, not a connection problem",
-       "Choose" in g2["fix"] and "connect" not in g2["fix"].lower(), g2["fix"])
+    # NOT A GAP ANY MORE. `sites.ensure_blog` has an answer that is never a
+    # guess — the store's own blog when it holds exactly one, and otherwise a
+    # blog of ours, created once and named — so reporting this as a blocker
+    # withheld finished work for a decision nothing was waiting on.
+    ck("no blog chosen is no longer a publishing gap", g2["ok"] is True, str(g2))
+    ck("  and nothing is asked for, because nothing is owed",
+       not g2["why"] and not g2["fix"], str(g2))
 
     print()
     print("— no address on file at all —")
