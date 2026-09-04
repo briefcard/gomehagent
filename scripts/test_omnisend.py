@@ -180,6 +180,30 @@ def main() -> int:
                           str(_seen.get("Omnisend-Version", "")))),
        str(_seen.get("Omnisend-Version")))
 
+    print("\n— a segment's count is read from /statistics —")
+    # The live body, recorded 2026-09-03 (Baci, "Repeat buyers"). The list
+    # endpoint has no count field at all; this is the only place it lives.
+    omnisend.call = _fake({"/statistics": {"ok": True,
+                                           "data": {"contactsCount": 65}}})
+    _sent.clear()
+    got = omnisend.segment_count("baci", "6a8a27d561da0421f84b8b21")
+    ck("contactsCount is the count", got == {"ok": True, "count": 65}, str(got))
+    ck("…read from GET /api/segments/{id}/statistics, not from the list",
+       _sent[-1]["method"] == "GET" and _sent[-1]["path"]
+       == "/api/segments/6a8a27d561da0421f84b8b21/statistics",
+       str(_sent[-1]))
+    omnisend.call = _fake({"/statistics": {"ok": True, "data": {}}})
+    ck("a body without the field is None, never zero",
+       omnisend.segment_count("baci", "x") == {"ok": True, "count": None})
+    omnisend.call = _fake({"/statistics": {"ok": False,
+                                           "error": "429: too many requests"}})
+    r = omnisend.segment_count("baci", "x")
+    ck("a refusal passes through with the API's own words",
+       not r["ok"] and "429" in r["error"], str(r))
+    _sent.clear()
+    ck("no id is a refusal, not a call",
+       not omnisend.segment_count("baci", "")["ok"] and not _sent)
+
     print()
     if _fails:
         print(f"{len(_fails)} FAILED:")

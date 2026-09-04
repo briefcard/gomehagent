@@ -69,6 +69,9 @@ PROFILES: dict[str, dict] = {
         name="Omnisend",
         adapter="omnisend",
         audience_fn="segments", audience_key="segments",
+        # The segment LIST carries no count (proven live 2026-09-03); the
+        # number is a second call per segment. `audience_count` asks this.
+        count_fn="segment_count",
         # VERIFIED against Omnisend's own docs on 2026-08-21 (support
         # articles 1061845 "Use Personalization" + 11197418 "Liquid
         # Templating"), after the first live draft rendered the previous
@@ -251,10 +254,41 @@ def audiences(tenant: str) -> dict:
     return {"ok": True, "kind": kind,
             "audiences": [{"id": r.get("id", ""), "name": r.get("name", ""),
                            # None when the provider sent none — Omnisend's
-                           # segment list carries no counts, and collapsing
-                           # that absence to 0 made every one of its segments
+                           # segment list carries no counts (proven live
+                           # 2026-09-03: a row is segmentID, name, status,
+                           # conditionGroups and dates), and collapsing that
+                           # absence to 0 made every one of its segments
                            # read as empty (the zero-members drift check
                            # would have fired on ALL of them). Absence is a
-                           # third state and survives to the output.
+                           # third state and survives to the output; a
+                           # caller that needs the number for a LINKED
+                           # audience asks `audience_count`.
                            "count": r.get("count", r.get("membership_count"))}
                           for r in rows]}
+
+
+def audience_count(tenant: str, audience_id: str):
+    """Members in ONE audience, from wherever the provider keeps it — or None.
+
+    Omnisend's segment list carries no count and the number is a per-segment
+    call on ``/statistics`` (``contactsCount``, proven live 2026-09-03), so
+    `audiences` cannot fill it without one call per segment on the whole
+    list. This asks for one audience, and the caller asks only for the ones
+    it is linked to. Constant Contact's list rows carry `membership_count`
+    already, so `audiences` fills those and this is never needed.
+
+    None means the provider has no reader for it, the segment id is empty, or
+    the read refused — a third state, not zero. The zero-members drift check
+    reads None as "not sent" and stays quiet.
+    """
+    if not audience_id:
+        return None
+    mod, refusal = backend(tenant)
+    if refusal:
+        return None
+    fn = getattr(mod, profile(tenant).get("count_fn", ""), None)
+    if not fn:
+        return None
+    got = fn(tenant, audience_id) or {}
+    n = got.get("count") if got.get("ok") else None
+    return n if isinstance(n, (int, float)) else None

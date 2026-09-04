@@ -263,6 +263,49 @@ def main() -> int:
        "will remember it",
        got["id"] == "ca9" and got["via"] == "name-match" and "Sync" in got["why"])
 
+    print("\n— a count the list never sends is read from statistics —")
+    # Omnisend's list carries no count and /segments/{id}/statistics carries
+    # `contactsCount` — both proven live 2026-09-03 (65 on "Repeat buyers").
+    # Through the REAL esp.audiences AND the real esp.audience_count, with
+    # only the backend module stubbed: the adapter's job is the two reads,
+    # reconcile's job is asking for LINKED segments only.
+    asked: list = []
+
+    class _CountedMod:
+        @staticmethod
+        def segments(tenant):
+            return {"ok": True, "segments": [
+                {"id": "rd1", "name": "Reorder due"},
+                {"id": "rb1", "name": "Repeat buyers"},
+                {"id": "zz9", "name": "Somebody else's segment"}]}
+
+        @staticmethod
+        def segment_count(tenant, segment_id):
+            asked.append(segment_id)
+            return {"ok": True, "count": {"rd1": 65, "rb1": 0}.get(segment_id)}
+
+        @staticmethod
+        def draft_from_html(**kw):
+            return {"ok": True}
+    _sb, _sa = esp.backend, esp.audiences
+    esp.audiences = _REAL_AUDIENCES
+    esp.backend = lambda t: (_CountedMod, "")
+    try:
+        rec_c = segments.reconcile("baci")
+    finally:
+        esp.backend, esp.audiences = _sb, _sa
+    rd = next(s for s in rec_c["segments"] if s["key"] == "reorder_due")
+    ck("a linked segment's count is the statistics number — 65, not blank",
+       rec_c["ok"] and rd["state"] == "exists" and rd["esp_count"] == 65,
+       f"state={rd['state']} count={rd['esp_count']!r}")
+    ck("…so the zero-members drift can finally fire on Omnisend",
+       any("zero members" in d["what"] and d["key"] == "repeat_buyers"
+           for d in rec_c["drift"]),
+       str([d["what"][:40] for d in rec_c["drift"]]))
+    ck("statistics is asked for LINKED segments only, once each — never "
+       "for the account's whole list",
+       sorted(asked) == ["rb1", "rd1"], str(asked))
+
     print("\n— omnisend reads EVERY page, by cursor —")
     import app.omnisend as om
     real_call = om.call

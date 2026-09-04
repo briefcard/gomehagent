@@ -138,6 +138,28 @@ def segments(tenant: str) -> dict:
                                       "name": s.get("name", "")} for s in rows]}
 
 
+def segment_count(tenant: str, segment_id: str) -> dict:
+    """How many contacts one segment holds right now: ``{ok, count}``.
+
+    The list carries no count (see `segments`); this is where Omnisend keeps
+    it — ``GET /api/segments/{id}/statistics`` → ``{"contactsCount": 65}``,
+    proven live 2026-09-03 on the Baci brand's "Repeat buyers". One call per
+    segment, so a caller asks for the segments it is LINKED to and never for
+    the whole list: the weekly sweep reads at most the catalogue's worth per
+    account. The count reflects current rules only while the segment is
+    ``ready``; one still ``building`` reports a stale number. A body without
+    the field yields ``count: None`` — absence stays absence, never zero.
+    """
+    if not segment_id:
+        return {"ok": False, "error": "no segment id to read statistics for"}
+    res = call(tenant, "GET", f"/api/segments/{segment_id}/statistics")
+    if not res.get("ok"):
+        return res
+    n = (res.get("data") or {}).get("contactsCount")
+    return {"ok": True,
+            "count": int(n) if isinstance(n, (int, float)) else None}
+
+
 # ---------------------------------------------------------------------------
 # Building segments — Omnisend's native conditions for the generic catalog.
 #

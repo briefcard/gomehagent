@@ -5835,6 +5835,17 @@ SABOTAGES = [
                "one case the bundle is meant to stop",
     },
     {
+        "name": "a_linked_segments_count_comes_from_statistics",
+        "file": "app/segments.py",
+        "find": '            count = esp.audience_count(tenant, str(match.get("id") or ""))',
+        "replace": '            count = None  # SABOTAGE — the list said nothing and nothing asks further',
+        "suites": ["test_segments.py"],
+        "why": "every Omnisend segment reports no members for ever, so the "
+               "zero-members drift — a cohort whose conditions match nobody — "
+               "can never fire on the one ESP in use, and the Segments card "
+               "shows no number beside any linked cohort",
+    },
+    {
         "name": "every_page_of_segments_is_read_by_cursor",
         "file": "app/omnisend.py",
         # Page one only — what the docs-read `paging.next` follower did on the

@@ -574,6 +574,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `esp.py`
 
+- **`audience_count`**(tenant, audience_id) → `—`  ·  from `segments.py`
 - **`audiences`**(tenant) → `dict`  ·  from `admin_ui.py`, `assurance.py`, `creative.py`, `planner.py`, `resolve.py`, `segments.py`, `skill_pack.py`, `systems.py`, `test_audience_entities.py`, `test_esp.py`, `test_funnel.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `web.py`
 - **`backend`**(tenant) → `—`  ·  from `admin_ui.py`, `approvals.py`, `hosting.py`, `keywords.py`, `performance.py`, `segments.py`, `seo_tools.py`, `skill_pack.py`, `test_esp.py`, `test_klaviyo.py`, `test_new_organization.py`, `test_site_resolution.py`
 - **`caps`**(tenant) → `dict`  ·  from `skill_pack.py`, `test_esp.py`
@@ -998,6 +999,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`draft_from_html`**(tenant, name?, subject?, sender_name?, html?, preheader?, include_segments?) → `dict`  ·  from `skill_pack.py`, `test_constant_contact.py`, `test_klaviyo.py`, `test_omnisend.py`
 - **`import_template`**(tenant, name, html) → `dict`  ·  from `test_omnisend.py`
 - **`segment_conditions_for`**(key) → `list[dict] | None`  ·  **from nothing**
+- **`segment_count`**(tenant, segment_id) → `dict`  ·  from `test_omnisend.py`
 - **`segments`**(tenant) → `dict`  ·  from `test_omnisend.py`, `test_segments.py`
 - **`send_campaign`**(tenant, campaign_id, confirm?) → `dict`  ·  from `test_constant_contact.py`, `test_omnisend.py`
 - **`send_test`**(tenant, campaign_id, emails) → `dict`  ·  **from nothing**

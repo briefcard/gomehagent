@@ -341,6 +341,14 @@ def reconcile(tenant: str) -> dict:
                           "what": (f"renamed in the ESP to {esp_name!r} — "
                                    f"still linked by its remembered id")})
         count = (match or {}).get("count")
+        if match is not None and count is None:
+            # The provider's list sent no count — Omnisend's never does
+            # (proven live 2026-09-03). Ask where it keeps it, for THIS
+            # linked segment only: bounded by the catalogue, not by the
+            # account's segment list, and on the weekly sweep, never on
+            # render. Still None means the provider has no reader, and the
+            # zero-members check below stays quiet.
+            count = esp.audience_count(tenant, str(match.get("id") or ""))
         if match is not None and isinstance(count, (int, float)) and count == 0:
             drift.append({"key": s["key"], "name": s["name"],
                           "what": "exists in the ESP and reports zero "

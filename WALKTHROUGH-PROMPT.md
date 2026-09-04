@@ -296,11 +296,9 @@ before `main`:
   command for that call.
 
 **Open, in the order to take them:**
-1. The Omnisend `segments` count field name is unverified against the live
-   API (the adapter parses `count`; the probe returned None).
-2. `weekly_report`'s artifact carries no `format` on the item — check what
+1. `weekly_report`'s artifact carries no `format` on the item — check what
    the Drafts index names it.
-3. Owner actions, unchanged: Google API access (both GBP systems), one real
+2. Owner actions, unchanged: Google API access (both GBP systems), one real
    Klaviyo push, the first Semrush "Read the competition" click,
    `/health/workers` after a day at two instances, `OPENAI_API_KEY` present.
 
@@ -316,6 +314,15 @@ Omnisend segment paging is CURSORS — `paging.hasMore` + `cursors.after`,
 same path `?after=` — proven live 2026-09-03 on the Baci brand; the adapter
 followed a `paging.next` the API never sends, so page two was never read.
 Re-anchored the path-keyed paging test to the recorded live body.
+The segment COUNT: there is no count field on a list row at all (the probe
+returned None because the adapter forwarded only id and name, and the API
+sends none) — it is `contactsCount` on `GET /segments/{id}/statistics`,
+proven live (65 on Baci's "Repeat buyers"). `omnisend.segment_count` →
+`esp.audience_count` (profile `count_fn`) → `reconcile` asks for LINKED
+segments only, on the weekly sweep, so the zero-members drift can fire on
+the one ESP in use. Two halves again: `esp.audiences` read `count`,
+`omnisend.segments` never supplied it, and the comment between them said
+"carries no counts" as a guess.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner
