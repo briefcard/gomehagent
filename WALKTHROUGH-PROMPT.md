@@ -360,6 +360,13 @@ Google's access approval (quota 0 until then), and nothing writes to Google
 until the skills exist. Trap: a test fixture that deletes and re-adds a
 credential in one session hits the UNIQUE(tenant, provider, site) — update
 the row, as `store_oauth` does.
+Picker grouping is the account's choice (owner: "one might need to do it by
+collection, another by entity type"): `KbBrand.selection.entity_grouping` ∈
+`admin_ui.GROUPINGS` (type | collection), written by `/admin/brand_update`
+merged into `selection`, the control on the Knowledge tab beside the
+selection line; `collection` groups by `parent_keys` (the ranges
+`sync_collections(adopt=…)` wrote), ranges first, the rest "Not in a
+collection", a member of two ranges under both.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

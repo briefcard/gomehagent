@@ -5870,6 +5870,17 @@ SABOTAGES = [
                "form to fill in and the project number to quote",
     },
     {
+        "name": "the_picker_groups_the_way_the_account_says",
+        "file": "app/admin_ui.py",
+        "find": '    grouping = str(kb.selection_config(tenant).get("entity_grouping") or "type")\n    opts: list[str] = []',
+        "replace": '    grouping = "type"  # SABOTAGE — the account\'s choice is read by nothing\n    opts: list[str] = []',
+        "suites": ["test_entity_selectors.py"],
+        "why": "an account that chose to see its catalogue by collection keeps "
+               "getting it by type — the control saves, the setting is on the "
+               "row, and every picker ignores it: a fact with a control that "
+               "changes nothing",
+    },
+    {
         "name": "an_entity_is_picked_from_the_table_never_typed",
         "file": "app/admin_ui.py",
         "find": '    return f\'<select name="{_esc(name)}"{attrs}>{"".join(opts)}</select>\'',

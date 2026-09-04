@@ -717,15 +717,35 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
             changed_voice = True
     if changed_voice:
         fields["voice"] = voice
+    # How the entity pickers group the catalogue — per account, MERGED into
+    # `selection` (rewriting a JSON column to set one key is how an account
+    # gets silently unwired). Owner, 2026-09-04: "one might need to do it by
+    # collection, another by entity type."
+    from_kb = form.get("entity_grouping") is not None
+    if from_kb:
+        g = str(form.get("entity_grouping", "")).strip().lower()
+        from . import admin_ui as _aui
+        if g not in _aui.GROUPINGS:
+            return RedirectResponse(
+                f"/admin/ui?tab=kb&tenant={quote(tenant)}"
+                f"&err={quote(f'{g!r} is not a grouping — one of ' + ', '.join(_aui.GROUPINGS))}",
+                303)
+        fields["selection"] = {**dict(b.selection or {}), "entity_grouping": g}
 
     msgs = []
     if fields:
         res = kbm.set_brand(tenant, **fields)
         if not res.startswith("Updated"):
             return RedirectResponse(
-                f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+                f"/admin/ui?tab={'kb' if from_kb else 'brand'}&tenant={quote(tenant)}"
                 f"&err={quote(res[:200])}#identity", 303)
-        msgs.append("identity saved")
+        msgs.append(f"pickers now group by {fields['selection']['entity_grouping']}"
+                    if from_kb else "identity saved")
+    if from_kb:
+        # Back to the tab the control lives on, not the Brand tab.
+        return RedirectResponse(
+            f"/admin/ui?tab=kb&tenant={quote(tenant)}"
+            f"&ok={quote(' · '.join(msgs) or 'nothing to change')}", 303)
     rule = str(form.get("add_banned", "")).strip()
     if rule:
         msgs.append(kbm.add_banned(tenant, rule)[:120])

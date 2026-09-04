@@ -2307,6 +2307,52 @@ _ENTITY_TYPE_LABELS = {"product": "Products", "collection": "Collections",
                        "service": "Services", "program": "Programs"}
 
 
+GROUPINGS = ("type", "collection")
+
+
+def _entity_groups(rows: list, grouping: str) -> list[tuple[str, list]]:
+    """The picker's optgroups, the way THIS account reads its catalogue.
+
+    `type` (the default): Products, Collections, Spaces… — the vocabulary of
+    `KbEntity.type`. `collection`: one group per collection the account has
+    adopted as a range (`catalog_sync.sync_collections(adopt=…)` writes the
+    membership onto `parent_keys`), the collections themselves first so a
+    fact can be scoped to a whole range, and whatever belongs to none last,
+    named as such. A product in two ranges is listed under both — that is
+    how a shopper thinks of it, and a select tolerates a repeated value.
+    Chosen per account on the Knowledge tab (owner, 2026-09-04: "one might
+    need to do it by collection, another by entity type").
+    """
+    if grouping == "collection":
+        colls = {r.key: r for r in rows if (r.type or "") == "collection"}
+        groups: dict[str, list] = {}
+        loose: list = []
+        for r in rows:
+            if r.key in colls:
+                continue
+            parents = [str(p) for p in (r.parent_keys or []) if p]
+            if not parents:
+                loose.append(r)
+            for p in parents:
+                groups.setdefault(p, []).append(r)
+        out: list[tuple[str, list]] = []
+        if colls:
+            out.append(("Collections", list(colls.values())))
+        for p in sorted(groups, key=lambda k: ((colls[k].name or k) if k in colls
+                                               else k).lower()):
+            out.append(((colls[p].name or p) if p in colls else p, groups[p]))
+        if loose:
+            out.append(("Not in a collection", loose))
+        return out
+    order = list(_ENTITY_TYPE_LABELS)
+    by_type: dict[str, list] = {}
+    for r in rows:
+        by_type.setdefault(r.type or "", []).append(r)
+    return [(_ENTITY_TYPE_LABELS.get(t, (t or "other").title()), by_type[t])
+            for t in sorted(by_type, key=lambda t: (order.index(t) if t in order
+                                                    else len(order), t))]
+
+
 def entity_select(tenant: str, current="", *, name: str = "entity_key",
                   blank: str = "— the whole brand —",
                   multiple: bool = False) -> str:
@@ -2342,20 +2388,15 @@ def entity_select(tenant: str, current="", *, name: str = "entity_key",
             not in ("draft", "archived", "unpublished")]
     rows.sort(key=lambda r: ((r.availability or "available") != "available",
                              (r.name or "").lower()))
-    order = list(_ENTITY_TYPE_LABELS)
-    groups: dict[str, list] = {}
-    for r in rows:
-        groups.setdefault(r.type or "", []).append(r)
+    grouping = str(kb.selection_config(tenant).get("entity_grouping") or "type")
     opts: list[str] = []
     if not multiple:
         opts.append(f'<option value=""{"" if cur else " selected"}>'
                     f'{_esc(blank)}</option>')
     seen: set[str] = set()
-    for typ in sorted(groups, key=lambda t: (order.index(t) if t in order
-                                            else len(order), t)):
-        group_label = _ENTITY_TYPE_LABELS.get(typ, (typ or "other").title())
+    for group_label, members in _entity_groups(rows, grouping):
         opts.append(f'<optgroup label="{_esc(group_label)}">')
-        for r in groups[typ]:
+        for r in members:
             on = r.key in cur
             if on:
                 seen.add(r.key)
@@ -3742,6 +3783,8 @@ def _selection_line(cfg: dict) -> str:
     bits = []
     if cfg.get("primary_type"):
         bits.append(f'ranks <code>{_esc(cfg["primary_type"])}</code>')
+    if cfg.get("entity_grouping") == "collection":
+        bits.append("pickers grouped by <b>collection</b>")
     for m in cfg.get("modes") or []:
         mode = m.get("mode", "")
         if not mode:
@@ -5202,6 +5245,21 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
     # The substance, one clearly-named card per kind (owner, 2026-08-21: one
     # "What is in there" card mixing claims, audiences, objections and the
     # catalogue read as a single undifferentiated pile). Identity detail rides
+    # The picker's grouping, as a fact WITH its control (§4), beside the
+    # selection line it changes. One writer: `/admin/brand_update`, merging
+    # into `KbBrand.selection` the way every other key there is written.
+    grouping = str(kb.selection_config(tenant).get("entity_grouping") or "type")
+    grouping_form = f"""
+    <form class="row" method="post" action="/admin/brand_update"
+          style="align-items:center;gap:8px;margin-top:8px">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <label class="mut">Entity pickers group the catalogue by</label>
+      <select name="entity_grouping">
+        <option value="type"{" selected" if grouping == "type" else ""}>entity type &mdash; products, collections, spaces&hellip;</option>
+        <option value="collection"{" selected" if grouping == "collection" else ""}>collection &mdash; the ranges adopted from the store</option>
+      </select>
+      <button class="sec">Save</button>
+    </form>"""
     # folded under the stat strip — state first, prose on request.
     return _shell(key, "kb", "Knowledge", tenant=tenant, body=f"""
 {warn}
@@ -5234,6 +5292,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
       ("selection", _selection_line(kb.selection_config(tenant))),
       ("next steps", _next_steps_line((b.next_steps or {}) if b else {})),
     ])}
+    {grouping_form}
     {_approval_policy_html((b.approval_policy or {}) if b else {})}
     <p class="mut">Positioning, voice and the hard-rule list moved to the
     <a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;tenant={_esc(tenant)}">Brand

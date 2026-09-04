@@ -194,6 +194,69 @@ def main() -> int:
        len(got) == 1 and got[0].entity_key == ent.key,
        str([(o.entity_key) for o in got]))
 
+    print("\n— 5. grouping is the account's choice: by type, or by collection —")
+    # Two spaces adopted into one range, one of them into a second range,
+    # one in none — the shapes `catalog_sync.sync_collections(adopt=…)`
+    # writes onto `parent_keys`.
+    kb.add_entity(rich, "collection", "downtown", "Downtown venues",
+                  origin="store_sync")
+    kb.add_entity(rich, "collection", "rooftops", "Rooftops",
+                  origin="store_sync")
+    spaces = [e.key for e in kb.entities(rich, available_only=False)
+              if e.type != "collection"]
+    kb.join_group(rich, spaces[0], "downtown")
+    kb.join_group(rich, spaces[1], "downtown")
+    kb.join_group(rich, spaces[1], "rooftops")
+    loose = spaces[2]
+    kb_url = f"/admin/ui?key={KEY}&tab=kb&tenant={rich}"
+
+    def _groups(html):
+        sel = re.search(r'<select name="entity_key">(.*?)</select>', html, re.S)
+        body = sel.group(1) if sel else ""
+        out = {}
+        for lab, inner in re.findall(r'<optgroup label="([^"]*)">(.*?)</optgroup>',
+                                     body, re.S):
+            out[lab] = re.findall(r'<option value="([^"]*)"', inner)
+        return out
+    page = c.get(kb_url).text
+    g = _groups(page)
+    ck("by default the picker groups by entity type — Spaces and Collections",
+       set(g) == {"Spaces", "Collections"} and "downtown" in g["Collections"],
+       str({k: len(v) for k, v in g.items()}))
+    ck("…and the control shows that choice, selected",
+       'name="entity_grouping"' in page
+       and re.search(r'<option value="type" selected', page) is not None)
+    r = c.post(f"/admin/brand_update?key={KEY}",
+               data={"tenant": rich, "entity_grouping": "collection"},
+               follow_redirects=False)
+    ck("saving the choice lands back on the Knowledge tab, and merges into "
+       "selection without touching the rest",
+       r.status_code in (302, 303) and "tab=kb" in (r.headers.get("location") or "")
+       and kb.selection_config(rich).get("entity_grouping") == "collection"
+       and kb.selection_config(rich).get("primary_type"),
+       str(kb.selection_config(rich)))
+    page = c.get(kb_url).text
+    g = _groups(page)
+    ck("by collection: a group per adopted range, the ranges themselves "
+       "first, the rest under 'Not in a collection'",
+       list(g)[0] == "Collections" and set(g["Downtown venues"]) == {spaces[0], spaces[1]}
+       and g["Rooftops"] == [spaces[1]] and loose in g["Not in a collection"]
+       and spaces[0] not in g["Not in a collection"],
+       str({k: v for k, v in g.items()}))
+    ck("a space in two ranges is listed under both",
+       spaces[1] in g["Downtown venues"] and spaces[1] in g["Rooftops"])
+    ck("…and the control now shows collection, selected",
+       re.search(r'<option value="collection" selected', page) is not None)
+    r = c.post(f"/admin/brand_update?key={KEY}",
+               data={"tenant": rich, "entity_grouping": "colour"},
+               follow_redirects=False)
+    ck("a grouping the picker does not know is refused by name",
+       "not a grouping" in unquote(r.headers.get("location") or "")
+       and kb.selection_config(rich).get("entity_grouping") == "collection")
+    ck("every option under every group is still a key the table holds",
+       all(v in {e.key for e in kb.entities(rich, available_only=False)}
+           for vals in g.values() for v in vals))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
