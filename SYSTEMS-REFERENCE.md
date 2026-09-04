@@ -160,12 +160,16 @@ Posts to the client's Business Profile. The listing IS the local ranking surface
 
 - **Connections:** `gbp`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `claim`, `entity`
-- **Skill:** none — nothing generates for this system
-- **Planner:** none — plans are filed by hand or by another system
+- **Skill** `gbp_post` — produces `draft`, tier 1, writes=True
+  - parameters: `source`, `objection_id`, `claim_id`, `kind`, `cta`, `url`, `keyword`, `offer_terms`, `event_title`, `event_start`, `event_end`, `revision_notes`
+  - constitutive (no draft without it): `banned_claims`
+- **Planner:** `gbp_post_rollout`
+- **Cadence knobs:** `horizon_days`=21, `posts_weekly`=1
+- **Plan fields** (the plan UI; `*` required): `source` (artifact), `objection_id` (objection), `claim_id` (claim), `kind` (choice, update|offer|event), `cta` (choice, learn_more|book|order|shop|sign_up|call), `url`, `keyword`, `offer_terms` (text), `event_title`, `event_start`, `event_end`, `revision_notes` (text)
 - **Unit:** one post to one profile
 - **Artifact:** gbp_post
 - **Ship:** publishes the post to the profile, on approval
-- **Measure:** views and actions per post from the Performance API, once the capability is wired
+- **Measure:** views and actions per LOCATION from the Performance API, week over week while the cadence holds — never per post (INITIATIVE-gbp §3)
 - **Brand-document scope:** identity, rules, claims, context, catalogue, gaps
 
 ### `lead_responder` — Lead responder
@@ -262,7 +266,7 @@ Read out of `systems.EFFECTIVENESS` and resolved to callables by `systems.effect
 | `catalog_compliance` | — | — | violations per template are in each filed report; nothing reads consecutive reports to say whether they fall |
 | `content_compliance` | `compliance.scan` | — | 'whether they fall' is the declared measure and is computed across no two sweeps |
 | `gbp_listing` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0). When built, the sweep IS the measure and the approved fixes are what it learns into — the catalog_compliance shape |
-| `gbp_post` | — | — | not built; Google API access not applied for (INITIATIVE-gbp §0) |
+| `gbp_post` | `gbp.performance` | `planner.gbp_post_rollout` | location-level actions per week while the cadence holds; the planner reads what has already been posted and alternates derived (article/email/ad) with native (objection/claim) |
 | `lead_responder` | `edits.trend` | `systems.guidance_block` | pre-send edits are synthesised weekly into standing guidance the drafter reads (learning.propose_for → approval → systems.note); learning.effect says whether each rule shrank the delta |
 | `moment_email` | — | `planner.campaign_rollout` | 'consumed vs expired' is the declared measure; moments.consumed_for counts per plan ref and nothing totals expiries against it |
 | `reorder_engine` | `performance.sync` | — | provider stats sync per campaign; nothing reads whether a reorder prompt produced a reorder back into the cadence |

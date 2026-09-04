@@ -567,6 +567,279 @@ def _run_weekly_report(ctx: Context) -> dict:
             "output_id": item.get("output_id", ""), "subject": msg["subject"]}
 
 
+# ---------------------------------------------------------------------------
+# Google Business Profile post — derived from an approved artifact, or native
+# from an objection or a claim. Held for approval; approving publishes.
+# ---------------------------------------------------------------------------
+
+def _draft_gbp_post_live(bundle: dict, parts: list[str]) -> tuple[str, str]:
+    """One model call for one post. Returns `(text, why_not)`."""
+    from . import config, gbp_post as gp
+    if not config.ANTHROPIC_API_KEY:
+        return "", "ANTHROPIC_API_KEY is not set"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL, max_tokens=700,
+            system=gp.SYSTEM + "\n\n## The hard rules\n"
+                   + str((bundle.get("rules") or {}).get("block") or ""),
+            messages=[{"role": "user", "content": "\n\n".join(parts)}])
+        try:
+            from . import usage
+            usage.log_usage("gbp_post_draft", config.CLAUDE_MODEL, msg,
+                            tenant=str(bundle.get("tenant") or ""))
+        except Exception:                                        # noqa: BLE001
+            pass
+        return msg.content[0].text.strip(), ""
+    except Exception as exc:                                     # noqa: BLE001
+        from . import model_error
+        return "", model_error.explain(exc)
+
+
+# Replaceable so the offline suite drives both halves.
+draft_gbp_post = _draft_gbp_post_live
+
+
+def _run_gbp_post(ctx: Context) -> dict:
+    """One Business Profile post, made FROM something — an approved article,
+    email or ad (derived), or an objection or a claim (native). Refuses by
+    name when given none, saying where a plan is made."""
+    from . import approvals as _appr, claim_trace as _ct, db as _db, gbp_post as gp
+    from . import tenants as _tn
+    source = str(ctx.params.get("source") or "").strip()
+    objection_id = str(ctx.params.get("objection_id") or "").strip()
+    claim_id = str(ctx.params.get("claim_id") or "").strip()
+    kind = str(ctx.params.get("kind") or "update").strip().lower() or "update"
+    if kind not in gp.KINDS:
+        ctx.note(f"unknown post type {kind!r} — one of "
+                 f"{', '.join(gp.KINDS)}; writing an update")
+        kind = "update"
+    cta = str(ctx.params.get("cta") or "learn_more").strip().upper() or "LEARN_MORE"
+    if cta not in gp.CTAS:
+        ctx.note(f"unknown button {cta!r} — one of {', '.join(gp.CTAS)}; "
+                 f"using Learn more")
+        cta = "LEARN_MORE"
+    t = _tn.get(ctx.tenant)
+    declared = dict((getattr(t, "gbp", None) or {}) if t else {})
+    domain = str(getattr(t, "domain", "") or "") if t else ""
+    url = str(ctx.params.get("url") or "").strip() or (
+        domain if domain.startswith("http") else (f"https://{domain}" if domain else ""))
+    place = str(declared.get("locality") or "")
+    keyword = str(ctx.params.get("keyword") or "").strip()
+    if not keyword:
+        cat, loc = str(declared.get("category") or ""), str(declared.get("locality") or "")
+        keyword = f"{cat} in {loc}".strip() if cat and loc else (cat or loc)
+    if not keyword:
+        ctx.thin.append("gbp:local_keyword")
+        ctx.note("no local keyword — pass keyword=, or declare the listing's "
+                 "category and locality on the Accounts tab (the probe lists "
+                 "them). Without one the post cannot be matched to the search "
+                 "it should win.")
+
+    # WHAT IT IS MADE FROM — one of three, or a named refusal.
+    src_text = src_kind = src_label = ""
+    src_claims: list = []
+    objection = claim = None
+    if source:
+        with _db.SessionLocal() as s:
+            out = s.get(_db.Output, source)
+            art = (s.query(_db.ArtifactBody)
+                   .filter(_db.ArtifactBody.output_id == source).first())
+            if out is None or (out.tenant or "") != ctx.tenant:
+                ctx.note(f"no artifact keyed {source!r} on this account")
+                return {"summary": f"no approved artifact keyed {source!r}"}
+            src_kind = str((getattr(art, "format", None) if art else None)
+                           or out.format or "")
+            body = str((art.body if art else "") or out.body or "")
+            src_claims = list(out.claim_ids or [])
+            meta = dict((getattr(art, "meta", None) or {}))
+            src_label = str(meta.get("title") or meta.get("subject") or "")
+            s.expunge_all()
+        if src_kind == "ad_batch":
+            try:
+                import json as _json
+                body = "\n\n".join(str(v.get("text") or "")
+                                    for v in (_json.loads(body) or {}).get("variants", [])
+                                    if not v.get("dropped"))
+            except Exception:                                    # noqa: BLE001
+                pass
+        src_text = _ct.plain_text(body)[:6000].strip()
+        if not src_text:
+            return {"summary": f"the source {source!r} has no text to make a post from"}
+    elif objection_id:
+        objection = next((o for o in kb_mod.objections(ctx.tenant, any_entity=True)
+                          if o.id == objection_id), None)
+        if objection is None:
+            ctx.note(f"no approved objection keyed {objection_id!r}")
+            return {"summary": f"no approved objection keyed {objection_id!r}"}
+    elif claim_id:
+        # THE APPROVED TABLE, not the run's resolved slice: the plan picker
+        # offered every approved claim, and `ctx.claims` is the relevance-
+        # narrowed few — a claim the owner chose must not be "not in scope".
+        _row = next((c for c in kb_mod.claims(ctx.tenant) if c.id == claim_id), None)
+        if _row is None:
+            ctx.note(f"claim {claim_id!r} is not an approved claim on this account")
+            return {"summary": f"no approved claim keyed {claim_id!r}"}
+        claim = {"claim_id": _row.id, "claim": str(_row.claim or ""),
+                 "evidence": str(getattr(_row, "evidence", "") or ""),
+                 "scope": str(getattr(_row, "entity_key", "") or "brand-wide")}
+    else:
+        ctx.note("nothing to make a post from. On this system's Plan queue, "
+                 "'Plan one by hand' takes an approved article, email or ad to "
+                 "convert, or an objection to answer, or a claim to reinforce "
+                 "— or the planner files one a week from what is approved.")
+        return {"summary": "no source — a post is made FROM an approved "
+                           "artifact, an objection, or a claim"}
+
+    offer_terms = str(ctx.params.get("offer_terms") or "").strip()
+    ev_title = str(ctx.params.get("event_title") or "").strip()
+    ev_start = str(ctx.params.get("event_start") or "").strip()
+    ev_end = str(ctx.params.get("event_end") or "").strip()
+    voice = str(ctx.rules.get("voice_tone") or "")
+    parts = gp.brief(
+        keyword=keyword, kind=kind, cta=cta, url=url, source_kind=src_kind,
+        source_text=src_text, source_label=src_label,
+        objection=str(getattr(objection, "objection", "") or ""),
+        response=str(getattr(objection, "response", "") or ""),
+        claim=str((claim or {}).get("claim") or ""),
+        evidence=str((claim or {}).get("evidence") or ""),
+        offer_terms=offer_terms, event_title=ev_title, event_start=ev_start,
+        event_end=ev_end, place=place, voice=voice,
+        positioning=str(ctx.rules.get("positioning") or ""),
+        revision_notes=str(ctx.bundle.get("revision_notes") or ""))
+    raw, why_not = draft_gbp_post(ctx.bundle, parts)
+    title, basis = "", "model"
+    if raw:
+        got = gp.parse(raw)
+        text, title = got["body"], got["title"]
+        findings = gp.review(text, keyword=keyword, kind=kind,
+                             offer_terms=offer_terms, event_start=ev_start,
+                             urgency_backed_by=(offer_terms or ev_start))
+        if gp.block_reasons(findings):
+            retry, _ = draft_gbp_post(ctx.bundle, parts + [gp.as_prompt(findings)])
+            if retry:
+                r = gp.parse(retry)
+                left = gp.review(r["body"], keyword=keyword, kind=kind,
+                                 offer_terms=offer_terms, event_start=ev_start,
+                                 urgency_backed_by=(offer_terms or ev_start))
+                if len(gp.block_reasons(left)) < len(gp.block_reasons(findings)):
+                    text, title, findings = r["body"], r["title"] or title, left
+                    ctx.note("craft: redrafted once and came back better")
+        for f in findings:
+            ctx.note(f"post ({f['severity']}): {f['detail']} → {f['fix']}")
+    else:
+        text = gp.compose(keyword=keyword, cta=cta, source_text=src_text,
+                          response=str(getattr(objection, "response", "") or ""),
+                          claim=str((claim or {}).get("claim") or ""), place=place)
+        basis = f"composed ({why_not})"
+        ctx.note(f"the model did not write this — {why_not}. What is filed is "
+                 f"a grounded restatement, not a post: basis='composed'.")
+
+    if source:
+        claim_ids = list(src_claims)
+    elif claim is not None:
+        claim_ids = [claim_id]
+    else:
+        # An objection post is grounded by the objection's APPROVED ANSWER,
+        # not by claims — citing claims it did not build on would also spend
+        # them against the ledger's repetition window for nothing.
+        claim_ids = []
+
+    def _repair(previous: str, failures: list) -> str:
+        """Hand the draft its own failures and ask once more — the model's
+        job, so a composed fallback returns the same string and `emit`
+        reads that as nothing more to give."""
+        if basis != "model":
+            return previous
+        note = "\n".join(f"- {f.get('detail', '')} → {f.get('fix', '')}"
+                         for f in failures)
+        fixed, _ = draft_gbp_post(ctx.bundle, parts + [
+            f"## Your previous attempt was rejected\n{previous}\n\n"
+            f"## Why, and what to change\n{note}\nRewrite it so none of "
+            f"these apply. Do not argue with the rules."])
+        return gp.parse(fixed)["body"] if fixed else previous
+    made_from = (f"{src_kind or 'artifact'} {source}" if source else
+                 f"objection {objection_id}" if objection is not None else
+                 f"claim {claim_id}")
+    body_payload = gp.payload(text, kind=kind, cta=cta, url=url, title=title,
+                              offer_terms=offer_terms, event_start=ev_start,
+                              event_end=ev_end)
+    item = ctx.emit(
+        text, claim_ids=claim_ids, fmt="gbp_post", destination="",
+        entity_key=str(getattr(objection, "entity_key", "") or ""),
+        # A DERIVED post inherits a source already reviewed; an OBJECTION post
+        # builds on the objection's APPROVED ANSWER — human-approved knowledge
+        # the validator's citation check does not know, because it knows
+        # claims only. Both are grounded by what they were made from, and the
+        # ban list still binds. A claim post cites its claim.
+        require_citation=False if (source or objection is not None) else None,
+        commitment=coherence.commit("topic", keyword or made_from,
+                                    action=f"one post: {kind}"),
+        parts=lambda _t: coherence.parts(text=_t),
+        redraft=_repair,
+        meta={"kind": kind, "cta": cta, "url": url, "keyword": keyword,
+              "title": title, "basis": basis, "made_from": made_from,
+              "derived_from": source, "objection_id": objection_id,
+              "claim_id": claim_id, "source_kind": src_kind,
+              "source_label": src_label, "google_body": body_payload,
+              "chars": len(text)})
+    if item.get("ok"):
+        # THE ARTIFACT IS THE HOME: `emit` files the ledger row; the body row
+        # the workroom, the label and the planner read is the skill's to
+        # file — as the article and the ad batch do.
+        with _db.SessionLocal() as s:
+            s.add(_db.ArtifactBody(
+                tenant=ctx.tenant, output_id=item.get("output_id", ""),
+                run_id=ctx.run_id or "", system_key="gbp_post",
+                format="gbp_post", destination="",
+                meta={"kind": kind, "cta": cta, "url": url, "keyword": keyword,
+                      "title": title, "basis": basis, "made_from": made_from,
+                      "derived_from": source, "objection_id": objection_id,
+                      "claim_id": claim_id, "source_kind": src_kind,
+                      "source_label": src_label, "google_body": body_payload,
+                      "subject": (title or text.strip().split("\n")[0])[:120]},
+                body=item.get("body") or text,
+                draft_body=item.get("body") or text,
+                bytes=len(item.get("body") or text)))
+            s.commit()
+    if item.get("ok") and ctx.run_id:
+        _appr.attach_gbp_post(ctx.run_id, {
+            "tenant": ctx.tenant, "account": str(declared.get("account") or ""),
+            "location": str(declared.get("location") or ""),
+            "output_id": item.get("output_id", ""), "body": body_payload})
+        if not declared.get("location"):
+            ctx.note("no profile declared for this account (Accounts → "
+                     "advanced → gbp) — the post can be approved but not "
+                     "published until it is")
+    return {"summary": f"one {kind} post drafted, made from {made_from}"
+                       + (f" ({basis})" if basis != "model" else ""),
+            "output_id": item.get("output_id", ""), "made_from": made_from,
+            "chars": len(text)}
+
+
+register(Skill(
+    key="gbp_post",
+    name="Business Profile post",
+    does="One Google Business Profile post — converted from an approved "
+         "article, email or ad, or written from scratch to answer an "
+         "objection or reinforce a claim. The local keyword opens it. Held "
+         "for approval; approving publishes it to the profile.",
+    system_key="gbp_post",
+    tier=1,
+    needs=("rules.banned_claims", "rules.voice_tone", "rules.positioning"),
+    # CONSTITUTIVE, like catalog_compliance's: a 1,500-character post has
+    # nowhere to hedge, and an empty ban list is how a banned claim reaches a
+    # Google-hosted surface the brand does not control.
+    constitutive=("banned_claims",),
+    params=("source", "objection_id", "claim_id", "kind", "cta", "url",
+            "keyword", "offer_terms", "event_title", "event_start",
+            "event_end", "revision_notes"),
+    writes=True,
+    produces="draft",
+    run=_run_gbp_post))
+
+
 register(Skill(
     key="weekly_report",
     name="Weekly report",

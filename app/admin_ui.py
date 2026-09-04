@@ -2535,6 +2535,39 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
                 + entity_select(tenant, systems.entity_list(value),
                                 name=f["key"], multiple=True)
                 + '</div>')
+    if f.get("kind") in ("artifact", "objection", "claim"):
+        # WHAT A BUSINESS PROFILE POST IS MADE FROM — each a reference into
+        # a table, never free text, the rule every other picker keeps.
+        cur = str(value or "").strip()
+        if f["kind"] == "artifact":
+            rows = [(x["id"], f'{x["format"].replace("_", " ")} · {x["label"]}'
+                             + (f' · {x["when"]}' if x["when"] else ""))
+                    for x in systems.approved_sources(tenant)]
+            blank = "— from scratch (name an objection or a claim below) —"
+        elif f["kind"] == "objection":
+            rows = [(o.id, (o.objection or "")[:90]
+                     + (f" · {o.entity_key}" if o.entity_key else ""))
+                    for o in kb.objections(tenant, any_entity=True)]
+            blank = "— none —"
+        else:
+            rows = [(c.id, (c.claim or "")[:90]
+                     + (f" · {c.entity_key}" if getattr(c, "entity_key", "") else ""))
+                    for c in kb.claims(tenant)]
+            blank = "— none —"
+        opts = [f'<option value=""{"" if cur else " selected"}>{_esc(blank)}</option>']
+        seen = False
+        for vid, lab in rows:
+            seen = seen or vid == cur
+            opts.append(f'<option value="{_esc(vid)}"{" selected" if vid == cur else ""}>'
+                        f'{_esc(lab)}</option>')
+        if cur and not seen:
+            opts.append(f'<option value="{_esc(cur)}" selected>{_esc(cur)} '
+                        f'(unknown)</option>')
+        note = ("" if rows or f["kind"] != "artifact" else
+                '<div class="what">nothing approved to convert yet — approve '
+                'an article, an email or an ad first, or write from scratch</div>')
+        return (f'<div class="f"><label>{label}</label>{req}{note}'
+                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select></div>')
     if f.get("kind") == "choice":
         # A fixed vocabulary the skill understands. Rendered as a select for
         # the same reason segment is: a typo in a free-text field would read
@@ -3362,6 +3395,11 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     ship_note = (f'<p class="mut">One item is {_esc(wfd["unit"])}. '
                  f'Approving {_esc(wfd["ship"] or "ships it")}.</p>'
                  if wfd["unit"] else "")
+    if wfd.get("explain"):
+        # HOW THIS SYSTEM IS USED, on its page (owner, 2026-09-04: the GBP
+        # systems had "no front-facing UI that allows the user to actually
+        # use the system functionalities").
+        ship_note += f'<div class="note">{_esc(wfd["explain"])}</div>'
 
     # The gate, on the page whose queue it holds shut. A Planned list on a
     # system that cannot produce reads as "will run on its date" — when the
@@ -11895,6 +11933,55 @@ def _claims_for_review(tenant: str, art) -> list:
     return list(seen.values())
 
 
+def _gbp_post_card(key: str, tenant: str, art, out, run, ap) -> str:
+    """A Business Profile post as Google will show it: the snippet, the
+    length against the limit, the button, what it was made from — and its
+    publish state, with the retry beside it when publishing failed."""
+    from . import gbp_post as gp
+    meta = dict((getattr(art, "meta", None) or {}))
+    body = str(art.body or "")
+    n = len(body)
+    kind = str(meta.get("kind") or "update")
+    cta = str(meta.get("cta") or "LEARN_MORE")
+    made = str(meta.get("made_from") or "")
+    src = str(meta.get("derived_from") or "")
+    src_link = (f'<a href="/admin/work/{_esc(src)}?key={_esc(key)}">'
+                f'{_esc(meta.get("source_label") or made)}</a>' if src
+                else _esc(made))
+    dest = str(getattr(out, "destination", "") or "")
+    decided = str(getattr(run, "decision", "") or "") if run is not None else ""
+    if dest.startswith("gbp:"):
+        state = (f'<div class="ok">Published to the profile — '
+                 f'<code>{_esc(dest[4:])}</code></div>')
+    elif decided == "approved":
+        state = (f'<div class="note">Approved, not yet on the profile. '
+                 f'<form class="inl" method="get" action="/admin/gbp_publish">'
+                 f'<input type="hidden" name="key" value="{_esc(key)}">'
+                 f'<input type="hidden" name="output_id" '
+                 f'value="{_esc(getattr(art, "output_id", "") or "")}">'
+                 f'<button class="sec">Publish to the profile now</button>'
+                 f'</form> <span class="when">the retry for an approved '
+                 f'publish that failed — never the first path</span></div>')
+    else:
+        state = ('<p class="when">Approving publishes it to the Business '
+                 'Profile. Nothing reaches Google before that.</p>')
+    snippet = body.strip().split("\n")[0][:gp.SNIPPET]
+    return f"""
+<div class="card">
+  <h3>As Google shows it</h3>
+  <div class="row">
+    <span class="chip nb">{_esc(kind)}</span>
+    <span class="chip nb">button: {_esc(gp.CTA_WORDS.get(cta, cta))}</span>
+    <span class="chip {"on" if n <= gp.SUMMARY_MAX else "off"}">{n} / {gp.SUMMARY_MAX} characters</span>
+    {('<span class="chip nb">keyword: ' + _esc(str(meta.get("keyword"))) + '</span>') if meta.get("keyword") else ''}
+  </div>
+  <p class="when">made from {src_link}</p>
+  <div class="msg"><b>{_esc(snippet)}</b>{'…' if len(body.strip()) > len(snippet) else ''}</div>
+  <pre class="msg" style="white-space:pre-wrap">{_esc(body)}</pre>
+  {state}
+</div>"""
+
+
 def _grounding_card(tenant: str, art, key: str = "") -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
@@ -12782,7 +12869,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         # reads as a double Preview section" (owner, 2026-08-29). The margin
         # renders the REAL HTML now, so it is the preview, and a second copy
         # of the same words is just a second copy.
-        preview_card = ""
+        preview_card = (_gbp_post_card(key, tenant, art, out, run, ap)
+                        if (art.format or "") == "gbp_post" else "")
         edit_card = f"""
 <div class="card">
   <h3>Edit</h3>

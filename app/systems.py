@@ -169,8 +169,10 @@ EFFECTIVENESS = {
         gap="sent on approval; the client's reply — the figures they send "
             "back — is not yet read into the next report"),
     "gbp_post": dict(
-        measure_fn="", learns_into="",
-        gap="not built; Google API access not applied for (INITIATIVE-gbp §0)"),
+        measure_fn="gbp.performance", learns_into="planner.gbp_post_rollout",
+        how="location-level actions per week while the cadence holds; the "
+            "planner reads what has already been posted and alternates "
+            "derived (article/email/ad) with native (objection/claim)"),
     "gbp_listing": dict(
         measure_fn="", learns_into="",
         gap="not built; Google API access not applied for (INITIATIVE-gbp §0). "
@@ -591,19 +593,59 @@ CATALOG = {
         kb_needs=("tone", "banned_claims", "claim", "entity"),
         workflow=dict(
             unit="one post to one profile",
+            skill="gbp_post",
             artifact="gbp_post",
             ship="publishes the post to the profile, on approval",
-            # NOTHING PERFORMS IT YET, and declared here rather than left out
-            # so the register, readiness and the effectiveness map all see the
-            # gap by name. Since 2026-09-04 the `gbp` capability is DECLARED
-            # per account (`Tenant.gbp.location`) and WIRED when the Google
-            # connection carries business.manage; `gbp.probe` proves it. The
-            # critical path is still not engineering: Google must approve API
-            # access (INITIATIVE-gbp §0; `gbp.APIS_TO_ENABLE`). The skill that
-            # performs this ship is the next build.
-            ship_by="",
-            measure="views and actions per post from the Performance API, "
-                    "once the capability is wired")),
+            # The approval executor's arm — the one write to Google. Built
+            # 2026-09-04 (owner: "a post generator which can either take
+            # existing blogs, emails or ads and convert them … or generate a
+            # new one from scratch to address company objections or reinforce
+            # company claims"). Still gated on the `gbp` capability: declared
+            # per account (`Tenant.gbp`), wired by the Google consent, and
+            # answered by Google only once the project is approved.
+            ship_by="approvals.apply_decision:publish_gbp_post",
+            cadence={"horizon_days": 21, "posts_weekly": 1},
+            # SAID ON THE PAGE (owner: "if posts are now part of the Plan then
+            # it needs to be clear that they need to set up a plan").
+            explain=("Posts are PLANNED work. Each week the planner files one "
+                     "made from something already approved — an article, a "
+                     "campaign, an ad — and, the weeks between, one written "
+                     "from scratch that answers an objection or reinforces a "
+                     "claim. 'Plan one by hand' below does the same on "
+                     "demand: pick what the post is made from, the type and "
+                     "the button. Approving a post is what publishes it to "
+                     "the profile; nothing reaches Google before that."),
+            one_of=("source", "objection_id", "claim_id"),
+            plan_fields=(
+                dict(key="source", label="Made from — an approved article, "
+                     "email or ad (blank = from scratch)", required=False,
+                     kind="artifact"),
+                dict(key="objection_id", label="…or answer this hesitation",
+                     required=False, kind="objection"),
+                dict(key="claim_id", label="…or reinforce this claim",
+                     required=False, kind="claim"),
+                dict(key="kind", label="Post type", required=False,
+                     kind="choice", choices=("update", "offer", "event")),
+                dict(key="cta", label="The button under the post",
+                     required=False, kind="choice",
+                     choices=("learn_more", "book", "order", "shop",
+                              "sign_up", "call")),
+                dict(key="url", label="Where the button goes (blank = the "
+                     "website)", required=False),
+                dict(key="keyword", label="Local keyword (blank = the "
+                     "listing's category in its locality)", required=False),
+                dict(key="offer_terms", label="Offer terms — required for an "
+                     "offer, from you", required=False, kind="text"),
+                dict(key="event_title", label="Event title", required=False),
+                dict(key="event_start", label="Event start (YYYY-MM-DD)",
+                     required=False),
+                dict(key="event_end", label="Event end (YYYY-MM-DD)",
+                     required=False),
+                dict(key="revision_notes", label="What this redraft must fix",
+                     required=False, kind="text")),
+            measure="views and actions per LOCATION from the Performance API, "
+                    "week over week while the cadence holds — never per post "
+                    "(INITIATIVE-gbp §3)")),
     "gbp_listing": dict(
         name="Google Business Profile listing",
         does="Keeps the listing complete and current — categories, description, "
@@ -1617,6 +1659,8 @@ def workflow(key: str) -> dict:
     wf.setdefault("ship", "")
     wf.setdefault("measure", "")
     wf.setdefault("cadence", {})
+    wf.setdefault("one_of", ())
+    wf.setdefault("explain", "")
     return wf
 
 
@@ -1766,8 +1810,17 @@ def plan_complete(row_or_brief, key: str) -> dict:
     brief = (row_or_brief if isinstance(row_or_brief, dict)
              else (getattr(row_or_brief, "brief", None) or {}))
     plan = brief.get("plan") or {}
-    missing = [f["label"] or f["key"] for f in workflow(key)["plan_fields"]
+    wf = workflow(key)
+    missing = [f["label"] or f["key"] for f in wf["plan_fields"]
                if f.get("required") and not str(plan.get(f["key"], "") or "").strip()]
+    # ONE OF SEVERAL. A post is made FROM something — an artifact, an
+    # objection or a claim — and any one will do, so none is `required`
+    # alone; a plan naming none of them is not an instruction yet.
+    one_of = tuple(wf.get("one_of") or ())
+    if one_of and not any(str(plan.get(k, "") or "").strip() for k in one_of):
+        labels = {f["key"]: (f.get("label") or f["key"]) for f in wf["plan_fields"]}
+        missing.append("one of: " + " / ".join(labels.get(k, k).split(" — ")[0]
+                                              for k in one_of))
     if not _valid_date(str(brief.get("planned_for", "") or "")):
         missing.append("planned date")
     return {"complete": not missing, "missing": missing}
@@ -1856,6 +1909,66 @@ def _entity_list_check(tenant: str, value: str) -> str:
     return ""
 
 
+def approved_sources(tenant: str) -> list[dict]:
+    """What a derived Business Profile post may be made FROM: this account's
+    approved or published articles, campaigns and ad copy, newest first.
+
+    Approved means a person said so — the run's decision, a published page,
+    a pushed campaign — never merely produced. `[{id, format, label, when}]`;
+    the same list feeds the plan picker and the planner, so the two cannot
+    disagree about what is eligible."""
+    out: list[dict] = []
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Output)
+                .filter(db.tenant_filter(db.Output, tenant),
+                        db.Output.format.in_(("cms_article", "campaign_email",
+                                              "ad_copy")))
+                .order_by(db.Output.created_at.desc()).limit(200).all())
+        runs = {r.run_id for r in rows if r.run_id}
+        decided = {r.id: (r.decision or "") for r in
+                   s.query(db.SystemRun).filter(db.SystemRun.id.in_(runs)).all()}             if runs else {}
+        arts = {a.output_id: a for a in s.query(db.ArtifactBody).filter(
+            db.ArtifactBody.output_id.in_([r.id for r in rows])).all()} if rows else {}
+        for r in rows:
+            approved = ((r.status or "") in ("published", "approved")
+                        or bool(getattr(r, "published_at", None))
+                        or bool((r.destination or "").strip())
+                        or decided.get(r.run_id or "", "") == "approved")
+            if not approved:
+                continue
+            art = arts.get(r.id)
+            meta = dict((getattr(art, "meta", None) or {}))
+            head = (str(meta.get("title") or meta.get("subject") or "").strip()
+                    or " ".join(str(r.body or "").split())[:80])
+            out.append({"id": r.id, "format": str(r.format or ""),
+                        "label": head[:100],
+                        "when": str(getattr(r, "created_at", "") or "")[:10],
+                        "claim_ids": list(r.claim_ids or [])})
+        s.expunge_all()
+    return out
+
+
+def _artifact_check(tenant: str, value: str) -> str:
+    if value in {x["id"] for x in approved_sources(tenant)}:
+        return ""
+    return (f"unknown source {value!r} — a post is made from one of this "
+            f"account's APPROVED articles, emails or ads; pick one from the "
+            f"list, or leave it blank and name an objection or a claim")
+
+
+def _objection_check(tenant: str, value: str) -> str:
+    if value in {o.id for o in kb.objections(tenant, any_entity=True)}:
+        return ""
+    return (f"unknown objection {value!r} — pick one of this account's "
+            f"approved objections")
+
+
+def _claim_check(tenant: str, value: str) -> str:
+    if value in {c.id for c in kb.claims(tenant)}:
+        return ""
+    return f"unknown claim {value!r} — pick one of this account's approved claims"
+
+
 def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
     """Reference-kind plan fields must point at something real. Blank stays
     allowed — completeness owns 'required'; this owns 'genuine'."""
@@ -1866,7 +1979,11 @@ def _check_plan_refs(tenant: str, key: str, values: dict) -> str:
               # `_check_plan_refs` falling through on an unknown kind is
               # exactly how `audience_key` accepted a persona nobody had
               # approved for a fortnight.
-              "entity_list": _entity_list_check}
+              "entity_list": _entity_list_check,
+              # What a Business Profile post is made from — each a reference
+              # into a table, refused by name when it is not there.
+              "artifact": _artifact_check, "objection": _objection_check,
+              "claim": _claim_check}
     for f in workflow(key)["plan_fields"]:
         v = str(values.get(f["key"], "") or "").strip()
         if not v:

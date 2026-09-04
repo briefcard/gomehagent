@@ -951,8 +951,8 @@ SABOTAGES = [
         # printed MISSED from then on: the one suite that must fail on good
         # news had a guard that could not produce any. A count of unbuilt
         # systems (2 -> 1) is still truthy, so the set is the claim.
-        "find": '            ship_by="",\n            measure="views and actions per post from the Performance API, "',
-        "replace": '            ship_by="compliance.record_scan",  # SABOTAGE (this is the FIX)\n            measure="views and actions per post from the Performance API, "',
+        "find": '            ship_by="",\n            measure="completeness score per profile and whether it rises sweep "',
+        "replace": '            ship_by="compliance.record_scan",  # SABOTAGE (this is the FIX)\n            measure="completeness score per profile and whether it rises sweep "',
         "suites": ["test_open_defects.py"],
         "why": "the open-defect ledger is the one suite that must fail on GOOD "
                "news. It hands the next thread the code facts this thread "
@@ -4301,8 +4301,10 @@ SABOTAGES = [
     {
         "name": "a_several_entity_field_is_a_reference",
         "file": "app/systems.py",
-        "find": '              "entity_list": _entity_list_check}',
-        "replace": '              }  # SABOTAGE',
+        # Re-anchored 2026-09-04: the checks dict grew three reference kinds
+        # (artifact, objection, claim) for Business Profile posts.
+        "find": '              "entity_list": _entity_list_check,\n              # What a Business Profile post is made from',
+        "replace": '              # SABOTAGE — entity_list unchecked\n              # What a Business Profile post is made from',
         "suites": ["test_entity_scope.py"],
         "why": "a venue nobody approved passes the plan check and reads "
                "downstream as no scope at all, so a typo silently narrows an "
@@ -5836,6 +5838,36 @@ SABOTAGES = [
         "why": "an account with no ban list gets send-ready marketing copy the "
                "validator could not check — 'clean' meaning 'unchecked', the "
                "one case the bundle is meant to stop",
+    },
+    {
+        "name": "a_post_opens_on_its_local_keyword",
+        "file": "app/gbp_post.py",
+        "find": '    if keyword and not _keyword_in(text[:SNIPPET], keyword):',
+        "replace": '    if False:  # SABOTAGE — the snippet may say anything',
+        "suites": ["test_gbp_post.py"],
+        "why": "a post whose first sentence never names the category or the "
+               "place ships, and the listing is matched on nothing — the one "
+               "thing that made it an SEO post rather than a notice",
+    },
+    {
+        "name": "approving_a_post_publishes_it",
+        "file": "app/skill_pack.py",
+        "find": '        _appr.attach_gbp_post(ctx.run_id, {',
+        "replace": '        (lambda *_a, **_k: 0)(ctx.run_id, {  # SABOTAGE — nothing rides the approval',
+        "suites": ["test_gbp_post.py"],
+        "why": "the approval carries no post, so approving records a decision "
+               "and publishes nothing — the owner approves posts that never "
+               "reach the profile",
+    },
+    {
+        "name": "the_post_planner_alternates_derived_and_native",
+        "file": "app/planner.py",
+        "find": '                want_native = (n % 2 == 1)',
+        "replace": '                want_native = False  # SABOTAGE — only ever converts',
+        "suites": ["test_gbp_post.py"],
+        "why": "every planned post converts an old artifact and none answers "
+               "an objection or reinforces a claim — the from-scratch half the "
+               "owner asked for never runs unless somebody plans it by hand",
     },
     {
         "name": "the_google_flow_asks_for_business_profile",

@@ -122,7 +122,9 @@ def main():
     print(f"  [design ] {len(by_design)} system(s) have no skill BY DESIGN — "
           f"nothing to draft, and ship_by resolves: {by_design}")
 
-    RECORDED_UNBUILT = {"gbp_listing", "gbp_post"}
+    # gbp_post left this set on 2026-09-04: `ship_by` names the publish arm
+    # and the `gbp_post` skill drafts it. gbp_listing is the last one.
+    RECORDED_UNBUILT = {"gbp_listing"}
     built = sorted(RECORDED_UNBUILT - set(unbuilt))
     new_unbuilt = sorted(set(unbuilt) - RECORDED_UNBUILT)
     still_broken(

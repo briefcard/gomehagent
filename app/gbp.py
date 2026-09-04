@@ -325,6 +325,25 @@ def posts(tenant: str, account: str, name: str) -> dict:
             "last": max((p["created"] for p in out), default="")}
 
 
+def create_post(tenant: str, account: str, name: str, body: dict) -> dict:
+    """Publish one post to one listing — THE ONLY WRITE to Google in this
+    module, and it is called by the approval executor alone
+    (`approvals.publish_gbp_post`), never by a skill. `body` is
+    `gbp_post.payload`'s shape, built once so the preview and the publish
+    cannot disagree. v4 `localPosts.create`; VERIFY on the first live post."""
+    loc_id = name.rsplit("/", 1)[-1]
+    if not account or not loc_id:
+        return {"ok": False, "error": "no account or location to post to — "
+                                      "declare the profile on the Accounts tab"}
+    res = call(tenant, "POST", f"{V4}/{account}/locations/{loc_id}/localPosts",
+               payload=body)
+    if not res["ok"]:
+        return res
+    d = res["data"] or {}
+    return {"ok": True, "name": d.get("name", ""), "state": d.get("state", ""),
+            "search_url": d.get("searchUrl", "")}
+
+
 def probe(tenant: str) -> dict:
     """Prove the connection END TO END, read only: the connection, the
     accounts it manages, the locations under the declared (or only) account,
@@ -362,8 +381,11 @@ def probe(tenant: str) -> dict:
     name = str(declared.get("location") or "")
     if not name:
         out["next"] = ("declare the profile on the Accounts tab (advanced → "
-                       "gbp) as {\"account\": \"…\", \"location\": \"…\"}, "
-                       "copied from the list above")
+                       "gbp) as {\"account\": \"…\", \"location\": \"…\", "
+                       "\"category\": \"<primary category>\", "
+                       "\"locality\": \"<city>\"}, copied from the list "
+                       "above — category and locality are the local keyword "
+                       "every post opens on")
         return out
     for label, fn in (("state", lambda: voice_of_merchant(tenant, name)),
                       ("listing", lambda: location(tenant, name)),

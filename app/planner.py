@@ -34,6 +34,7 @@ that does not exist).
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from . import db, moments, segments, systems
 
@@ -134,6 +135,10 @@ KNOBS = {
     "articles_monthly": dict(
         label="articles / month", cap=30,
         why="New articles the blog planner may file per calendar month."),
+    "posts_weekly": dict(
+        label="Business Profile posts / week", cap=3,
+        why="How many posts the Business Profile planner files per ISO week. "
+            "One keeps the listing fresh; three is a campaign week."),
     "reports_weekly": dict(
         label="reports / week", cap=2,
         why="How many client reports the reports planner may file per ISO "
@@ -175,6 +180,9 @@ def knobs_for(sysrow) -> list[dict]:
     elif fn is report_rollout:
         defaults = REPORT_CADENCE
         live = report_cadence_for(sysrow)
+    elif fn is gbp_post_rollout:
+        defaults = GBP_CADENCE
+        live = gbp_cadence_for(sysrow)
     else:
         return []
     return [{"key": k, "value": live.get(k, v), "default": v,
@@ -994,11 +1002,145 @@ def report_rollout(sysrow) -> dict:
             "weeks": sorted(seen_weeks)}
 
 
+GBP_CADENCE = {"horizon_days": 21, "posts_weekly": 1}
+MAX_POSTS_WEEKLY = 3
+
+
+def gbp_cadence_for(sysrow) -> dict:
+    return _cadence(sysrow, GBP_CADENCE,
+                    {"horizon_days": MAX_HORIZON_DAYS,
+                     "posts_weekly": MAX_POSTS_WEEKLY})
+
+
+def gbp_sources(tenant: str, key: str = "gbp_post") -> dict:
+    """What is left to post — derived and native — with what has already been
+    used taken out, so the planner never files the same source twice.
+
+    Used = an existing post artifact made from it, or an open plan naming it.
+    """
+    from . import kb, systems
+    used: set[str] = set()
+    with db.SessionLocal() as s:
+        for a in (s.query(db.ArtifactBody)
+                  .filter(db.tenant_filter(db.ArtifactBody, tenant),
+                          db.ArtifactBody.format == "gbp_post").all()):
+            m = dict(a.meta or {})
+            for k in ("derived_from", "objection_id", "claim_id"):
+                if m.get(k):
+                    used.add(str(m[k]))
+        # A claim a post already CITED — inherited from an article, say — is
+        # spent too: the ledger's repetition window would refuse it, so the
+        # planner must not propose it.
+        for o in (s.query(db.Output)
+                  .filter(db.tenant_filter(db.Output, tenant),
+                          db.Output.format == "gbp_post").all()):
+            used.update(str(c) for c in (o.claim_ids or []))
+    for p in systems.plans(tenant, key):
+        plan = dict(((p.brief or {}).get("plan") or {}))
+        for k in ("source", "objection_id", "claim_id"):
+            if plan.get(k):
+                used.add(str(plan[k]))
+    derived = [x for x in systems.approved_sources(tenant) if x["id"] not in used]
+    objections = [o for o in kb.objections(tenant, any_entity=True)
+                  if o.id not in used and (o.response or "").strip()]
+    claims = [c for c in kb.claims(tenant) if c.id not in used]
+    return {"derived": derived, "objections": objections, "claims": claims}
+
+
+def _local_keyword(tenant: str, declared: dict) -> str:
+    """The post's local keyword, from the SAME keyword map the blog plans
+    read: the highest-priority target whose phrase names the locality or the
+    listing's category. '' when the map has none — the skill then falls back
+    to 'category in locality' from the declared profile."""
+    from . import keywords
+    loc = str(declared.get("locality") or "").strip().lower()
+    cat = str(declared.get("category") or "").strip().lower()
+    cat_words = [w for w in re.findall(r"[a-z0-9]+", cat) if len(w) > 3]
+    for r in keywords.targets(tenant):
+        if (getattr(r, "owner_priority", "") or "") == "muted":
+            continue
+        phrase = str(r.phrase or "").lower()
+        if (loc and loc in phrase) or (cat_words and all(w in phrase for w in cat_words)):
+            return str(r.phrase or "")
+    return ""
+
+
+def gbp_post_rollout(sysrow) -> dict:
+    """One Business Profile post per ISO week across the horizon, alternating
+    what it is made from: an approved artifact one week (the newest not yet
+    posted), an objection or a claim the next (INITIATIVE-gbp §5's two
+    producers). The ref names the week, so `open_plan`'s idempotence per ref
+    is the calendar — a second pass refreshes, never doubles. A week with
+    nothing left to make a post from is SAID, not filled with a blank."""
+    import datetime as _dt
+    from . import systems
+    from . import tenants as _tn
+    cad = gbp_cadence_for(sysrow)
+    today = db.utcnow().date()
+    horizon_end = today + _dt.timedelta(days=cad["horizon_days"])
+    posts_per_week = int(cad.get("posts_weekly", 1) or 1)
+    pool = gbp_sources(sysrow.tenant, sysrow.key)
+    _t = _tn.get(sysrow.tenant)
+    local = _local_keyword(sysrow.tenant,
+                           dict((getattr(_t, "gbp", None) or {}) if _t else {}))
+    existing = {p.ref for p in systems.plans(sysrow.tenant, sysrow.key)}
+    proposed = refreshed = 0
+    refusals: list[str] = []
+    d, n = today, 0
+    seen_weeks: set[str] = set()
+    while d <= horizon_end:
+        y, w, _ = d.isocalendar()
+        week = f"{y}-W{w:02d}"
+        if week not in seen_weeks:
+            seen_weeks.add(week)
+            for i in range(posts_per_week):
+                ref = f"gbp:{sysrow.tenant}:{week}" + (f":{i + 1}" if i else "")
+                if ref in existing:
+                    # A week already filed keeps its source; refreshing it
+                    # would re-pick and double what the owner edited.
+                    refreshed += 1
+                    n += 1
+                    continue
+                plan: dict = {"kind": "update", "cta": "learn_more"}
+                if local:
+                    # SEO is the plan's spine: the keyword comes from the map.
+                    plan["keyword"] = local
+                want_native = (n % 2 == 1)
+                if not want_native and pool["derived"]:
+                    plan["source"] = pool["derived"].pop(0)["id"]
+                elif pool["objections"]:
+                    plan["objection_id"] = pool["objections"].pop(0).id
+                elif pool["claims"]:
+                    plan["claim_id"] = pool["claims"].pop(0).id
+                elif pool["derived"]:
+                    plan["source"] = pool["derived"].pop(0)["id"]
+                else:
+                    refusals.append(f"{week}: nothing left to make a post "
+                                    f"from — approve an article, an email or "
+                                    f"an ad, or add an objection or a claim")
+                    n += 1
+                    continue
+                out = systems.open_plan(sysrow.tenant, sysrow.key, ref=ref,
+                                        plan=plan, planned_for=d.isoformat(),
+                                        trigger="planner")
+                n += 1
+                if out.get("error"):
+                    refusals.append(out["error"])
+                elif out.get("created"):
+                    proposed += 1
+                else:
+                    refreshed += 1
+        d += _dt.timedelta(days=7)
+    return {"proposed": proposed, "refreshed": refreshed, "refusals": refusals,
+            "weeks": sorted(seen_weeks)}
+
+
 PLANNERS = {
     "campaign_email": campaign_rollout,
     "blog": blog_rollout,
     "reorder_engine": reorder_rollout,
     "reports": report_rollout,
+    "gbp_post": gbp_post_rollout,
 }
 
 

@@ -29,7 +29,7 @@ engineering:
 | `app/gbp.py` provider adapter | **read side built** — accounts, locations, listing, live state, reviews, posts, performance; named refusals; `probe` |
 | `gbp` capability + connection | **wired** — `business.manage` in the Google flow; `credentials.CAPABILITY_SCOPES` grants `gbp` only when the consent carried it; declared per account as `Tenant.gbp` |
 | `gbp_listing` system (the SEO half — build first) | declared; **skill not written** |
-| `gbp_post` system | declared; **skill not written**; no write to Google exists yet |
+| `gbp_post` system | **built 2026-09-04**: `gbp_post` skill (derived from an approved article/email/ad, or native from an objection or a claim), the planner (`planner.gbp_post_rollout`, one a week, alternating, keyword from the map), `approvals.publish_gbp_post` (the one write, via `gbp.create_post`), the workroom preview, the retry |
 | `/admin/gbp_probe`, `/health/connections["gbp"]` | built |
 
 **The owner's order of operations** is the docstring of `app/gbp.py`: apply,

@@ -367,6 +367,21 @@ merged into `selection`, the control on the Knowledge tab beside the
 selection line; `collection` groups by `parent_keys` (the ranges
 `sync_collections(adopt=…)` wrote), ranges first, the rest "Not in a
 collection", a member of two ranges under both.
+Ad Creative issue (4), "Edit in Canva": fixed and verified (route → the
+editor in a new tab; no twin design row; harvest onto the frame), but the
+owner stopped the ship — it is parked as a git stash, awaiting their word.
+GBP posts (owner: "a post generator … convert existing blogs, emails or ads
+… or from scratch to address objections or reinforce claims"; "if posts are
+part of the Plan it needs to be clear they need to set up a plan"): built
+ON the existing Plan infrastructure — `plan_fields` on the CATALOG row,
+`planner.PLANNERS["gbp_post"]` (one a week, derived/native alternating, the
+local keyword from the SAME keyword map the blog reads), `open_plan` /
+`save_plan` / `_check_plan_refs` with three new reference kinds (artifact,
+objection, claim — pickers, never typed ids), `knobs_for` (`posts_weekly`),
+`plan_complete` gaining `one_of`. The system page carries `workflow.explain`
+so it SAYS posts are planned work. `gbp_post` is in the conformance suite's
+NO_SEGMENT set: its reader is whoever searched, like an article. The one
+write is `approvals.publish_gbp_post` → `gbp.create_post`, on approval only.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

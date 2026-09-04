@@ -626,6 +626,38 @@ def esp_probe(key: str = Depends(admin_key), tenant: str = "eien") -> dict:
             "audiences": aud}
 
 
+@app.get("/admin/gbp_publish")
+def gbp_publish(key: str = Depends(admin_key), output_id: str = ""):
+    """Publish an APPROVED Business Profile post whose publish failed — the
+    retry, never the first path (the approval is). Reads the approval that
+    carries the post; refuses if none was approved."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import approvals as _appr
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        ap = None
+        if art is not None and art.run_id:
+            ap = (s.query(db.Approval)
+                  .filter(db.Approval.run_id == art.run_id,
+                          db.Approval.status.in_(("approved", "executed")))
+                  .order_by(db.Approval.created_at.desc()).first())
+        s.expunge_all()
+    if ap is None or not (ap.payload or {}).get("gbp_post"):
+        said = "nothing approved to publish — approve the post first"
+    else:
+        said = _appr.publish_gbp_post(ap)
+    ok = said.startswith("Approved and published")
+    return RedirectResponse(
+        f"/admin/work/{quote(output_id)}?key={quote(key)}"
+        f"&{'ok' if ok else 'err'}={quote(said[:300])}", 303)
+
+
 @app.get("/admin/gbp_probe")
 def gbp_probe(key: str = Depends(admin_key), tenant: str = "") -> dict:
     """Prove a client's Business Profile connection end to end — READ ONLY.

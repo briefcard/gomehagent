@@ -54,7 +54,10 @@ ONE_TO_ONE = {"inbound_reply", "lead_reply"}
 #: Draft/proposal skills that legitimately have no reader to name. An article
 #: is read by whoever searched, so its subject comes from the keyword rather
 #: than from a segment somebody chose.
-NO_SEGMENT = {"blog_article", "catalog_seo_rewrite"}
+#: A Business Profile post joins them (2026-09-04): it is shown to whoever
+#: searched the local pack, so its reader is the local keyword — the category
+#: in the locality — not a persona somebody chose.
+NO_SEGMENT = {"blog_article", "catalog_seo_rewrite", "gbp_post"}
 
 
 def ck(label, cond, detail=""):

@@ -203,6 +203,60 @@ def attach_send(run_id: str, send: dict) -> int:
     return n
 
 
+def attach_gbp_post(run_id: str, post: dict) -> int:
+    """Stash what publishing a Business Profile post needs on the approval.
+
+    The sibling of `attach_send`: the approval IS the authorisation, so it
+    carries the account, the location, the output and the exact body Google
+    receives (`gbp_post.payload`), and `publish_gbp_post` reads nothing else.
+    Account and location may be EMPTY here — the profile is declared on the
+    Accounts tab and may not be yet; the publish arm refuses by name then,
+    which is better than a skill that cannot even file a draft.
+    """
+    if not run_id or not post.get("output_id") or not post.get("body"):
+        return 0
+    n = 0
+    with db.SessionLocal() as s:
+        rows = (s.query(db.Approval)
+                .filter(db.Approval.run_id == run_id,
+                        db.Approval.status == "pending").all())
+        for ap in rows:
+            ap.payload = {**(ap.payload or {}), "gbp_post": dict(post)}
+            n += 1
+        s.commit()
+    return n
+
+
+def publish_gbp_post(ap: "db.Approval") -> str:
+    """The approval executor's arm for a Business Profile post — the one
+    write to Google. Named, so `ship_by` resolves to it and the register can
+    join the system to what performs its ship."""
+    from . import gbp
+    p = dict((ap.payload or {}).get("gbp_post") or {})
+    tenant = ap.tenant or str(p.get("tenant") or "")
+    account, location = str(p.get("account") or ""), str(p.get("location") or "")
+    if not account or not location:
+        return ("Approved — but this account declares no Business Profile "
+                "(Accounts → advanced → gbp), so there is nowhere to publish "
+                "it. Declare the profile, then publish from the workroom.")
+    got = gbp.create_post(tenant, account, location, p.get("body") or {})
+    if not got.get("ok"):
+        return (f"Approved — but Google refused the post: "
+                f"{str(got.get('error', ''))[:240]}. Nothing is on the "
+                f"profile; publish from the workroom once it is fixed.")
+    with db.SessionLocal() as s:
+        out = s.get(db.Output, str(p.get("output_id") or ""))
+        if out is not None:
+            out.destination = f"gbp:{got.get('name', '')}"
+            out.status = "published"
+            if hasattr(out, "published_at"):
+                out.published_at = db.utcnow()
+            s.commit()
+    state = str(got.get("state") or "").lower() or "submitted"
+    return (f"Approved and published to the Business Profile — post "
+            f"{got.get('name', '')} is {state}.")
+
+
 def send_report(ap: "db.Approval") -> str:
     """Send the message an approval carries. The `reports` executor.
 
@@ -370,6 +424,11 @@ def apply_decision(ap_id: str, decision: str) -> str:
             # that actually sent something, which is how approving a campaign
             # read as sending it and left the owner looking for an email that
             # nothing had promised to move.
+            if ap.kind == "skill_output" and (ap.payload or {}).get("gbp_post"):
+                # A Business Profile post leaves through Google's API —
+                # approving IS the publish, and the approval carries the
+                # exact body (`gbp_post.payload`) the preview showed.
+                return publish_gbp_post(ap)
             if ap.kind == "skill_output" and (ap.payload or {}).get("send_mail"):
                 # A report leaves as mail, not as a platform draft. Same rule
                 # as the ESP push: approving IS the send, and the approval
