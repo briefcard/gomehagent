@@ -150,8 +150,11 @@ def main() -> int:
     ck("the queue renders its bulk bar", 'id="bulk"' in html)
     ck("  with a checkbox per card bound to it",
        'name="claim_ids"' in html and 'form="bulk"' in html)
-    ck("  and the entity list is searchable by name",
-       "— Aqua Dinner Plate" in html)
+    # Was the datalist's "key — name" label; the picker is a select whose
+    # option TEXT is the name (2026-09-04), so a reviewer never sees the slug.
+    ck("  and the entity is picked by name, from a select",
+       '<select name="entity_key">' in html
+       and ">Aqua Dinner Plate</option>" in html)
 
     installer()
     connecting()

@@ -708,7 +708,12 @@ CATALOG = {
             unit="one ad batch for one audience × entity",
             skill="ad_copy",
             plan_fields=(
-                dict(key="entity_key", label="Entity", required=True),
+                # kind="entity" is what BOTH the picker and `_check_plan_refs`
+                # key on. Declared without it (2026-09-04), the ad plan drew
+                # a bare text box for the slug AND skipped the reference
+                # check — two halves of one contract, missing together.
+                dict(key="entity_key", label="Entity", required=True,
+                     kind="entity"),
                 # A REFERENCE, not free text. This was `required=True` with
                 # no `kind`, so `_check_plan_refs` fell straight through and
                 # any string at all satisfied it — a plan could name a persona

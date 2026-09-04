@@ -2261,6 +2261,78 @@ def _plan_fields_split(key_: str, get, tenant: str) -> str:
     return out
 
 
+#: Optgroup labels per entity type — the vocabulary is `KbEntity.type`'s.
+_ENTITY_TYPE_LABELS = {"product": "Products", "collection": "Collections",
+                       "space": "Spaces", "offer": "Offers",
+                       "service": "Services", "program": "Programs"}
+
+
+def entity_select(tenant: str, current="", *, name: str = "entity_key",
+                  blank: str = "— the whole brand —",
+                  multiple: bool = False) -> str:
+    """THE entity picker. Every place the console asks which entity a thing
+    is about renders this, and nothing renders a text box.
+
+    Owner, 2026-09-04: "All the Entity selectors should be drop downs … we
+    should not have to know the slug. It should sync with the entity table
+    and make sure to associate them." Five forms typed a slug into a
+    datalist — a reviewer who knows "aqua" and "plate" was left to find
+    `bm-aq-din-25` — and the ad-creative plan form was a bare text box
+    because its field declared no `kind`. What is offered is what
+    `kb.entities` holds RIGHT NOW, so the picker is synced by construction;
+    what is submitted is the key, so the row is associated with a real
+    entity or refused on write (`kb.resolve_entity_ref`,
+    `systems._check_plan_refs`, `kb.update_objection`).
+
+    Draft, archived and unpublished products are NOT offered (owner,
+    2026-08-27: "draft products shouldn't even be accessible to the
+    system"); out of stock stays listed with its label, because stock is
+    temporary and a claim about an out-of-stock product is still true. A
+    stored key the table no longer has renders as itself, marked unknown —
+    the truth, not a silent snap to something else. Grouped by type: eight
+    spaces and three hundred products are different lists to scan.
+    `multiple` is the several-entities field; it submits one value per pick.
+    """
+    if isinstance(current, (list, tuple, set)):
+        cur = [str(v).strip() for v in current if str(v).strip()]
+    else:
+        cur = [str(current).strip()] if str(current or "").strip() else []
+    rows = [r for r in kb.entities(tenant, available_only=False)
+            if (r.availability or "available")
+            not in ("draft", "archived", "unpublished")]
+    rows.sort(key=lambda r: ((r.availability or "available") != "available",
+                             (r.name or "").lower()))
+    order = list(_ENTITY_TYPE_LABELS)
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r.type or "", []).append(r)
+    opts: list[str] = []
+    if not multiple:
+        opts.append(f'<option value=""{"" if cur else " selected"}>'
+                    f'{_esc(blank)}</option>')
+    seen: set[str] = set()
+    for typ in sorted(groups, key=lambda t: (order.index(t) if t in order
+                                            else len(order), t)):
+        group_label = _ENTITY_TYPE_LABELS.get(typ, (typ or "other").title())
+        opts.append(f'<optgroup label="{_esc(group_label)}">')
+        for r in groups[typ]:
+            on = r.key in cur
+            if on:
+                seen.add(r.key)
+            oos = " · out of stock" if (r.availability or "") == "oos" else ""
+            opts.append(f'<option value="{_esc(r.key)}"'
+                        f'{" selected" if on else ""}>'
+                        f'{_esc(r.name or r.key)}{oos}</option>')
+        opts.append("</optgroup>")
+    for k in cur:
+        if k not in seen:
+            opts.append(f'<option value="{_esc(k)}" selected>{_esc(k)} '
+                        f'(unknown key)</option>')
+    attrs = (f' multiple size="{min(8, max(3, len(rows) + 1))}"'
+             if multiple else "")
+    return f'<select name="{_esc(name)}"{attrs}>{"".join(opts)}</select>'
+
+
 def _plan_field_input(f: dict, value, tenant: str = "") -> str:
     """One declared plan field as a prefilled control — rule 13: nothing the
     owner can see is display-only, and the control shows what IS before
@@ -2357,23 +2429,7 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         # temporary state a plan may legitimately wait out; draft is a
         # decision the store owner has not made yet.
         cur = str(value or "").strip()
-        rows = sorted((r for r in kb.entities(tenant, available_only=False)
-                       if (r.availability or "available")
-                       not in ("draft", "archived", "unpublished")),
-                      key=lambda r: ((r.availability or "available") != "available",
-                                     (r.name or "").lower()))
-        opts = [f'<option value=""{"" if cur else " selected"}>— none — the '
-                f'top catalogue items are featured —</option>']
-        seen = False
-        for r in rows:
-            seen = seen or r.key == cur
-            oos = " · out of stock" if (r.availability or "") == "oos" else ""
-            opts.append(f'<option value="{_esc(r.key)}"'
-                        f'{" selected" if r.key == cur else ""}>'
-                        f'{_esc(r.name or r.key)}{oos}</option>')
-        if cur and not seen:
-            opts.append(f'<option value="{_esc(cur)}" selected>{_esc(cur)} '
-                        f'(unknown key)</option>')
+        rows = kb.entities(tenant, available_only=False)
         note = ("" if rows else
                 '<div class="what">the catalogue is empty — run the '
                 # No key= on purpose: this renders inside a helper the key
@@ -2383,8 +2439,21 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
                 f'&amp;tenant={_esc(tenant)}">catalogue '
                 'sync on the Review tab</a> first</div>')
         return (f'<div class="f"><label>{label}</label>{req}{note}'
-                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
-                f'</div>')
+                + entity_select(tenant, cur, name=f["key"],
+                                blank="— none — the top catalogue items are "
+                                      "featured —")
+                + '</div>')
+    if f.get("kind") == "entity_list":
+        # SEVERAL entities — the same picker, multiple. This kind had no
+        # branch, so "also about" was a box of comma-separated slugs. The
+        # value on file is whatever `systems.entity_list` reads (a list or a
+        # comma string); `web._plan_fields_from` joins the select's repeated
+        # values back into that.
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<div class="what">hold ctrl / cmd to pick several</div>'
+                + entity_select(tenant, systems.entity_list(value),
+                                name=f["key"], multiple=True)
+                + '</div>')
     if f.get("kind") == "choice":
         # A fixed vocabulary the skill understands. Rendered as a select for
         # the same reason segment is: a typo in a free-text field would read
@@ -4551,9 +4620,7 @@ def _claim_editor_form(key: str, tenant: str, r, vocab,
             <input name="evidence" value="{_esc(r.evidence or '')}"
                    placeholder="what makes this checkable">
             <label>True of — blank means the whole brand</label>
-            <input name="entity_key" list="objents"
-                   value="{_esc(r.entity_key or '')}"
-                   placeholder="brand-level (used in any content)">
+            {entity_select(tenant, r.entity_key or '', blank='— the whole brand (used in any content) —')}
             <label>Who said it — required before a testimonial or
 review can be QUOTED</label>
             <input name="attributed_to" value="{_esc(r.attributed_to or '')}"
@@ -4670,9 +4737,7 @@ def _objection_row(key: str, tenant: str, r, cat: dict,
               <label>The approved answer</label>
               <textarea name="response" rows="3">{_esc(r.response or '')}</textarea>
               <label>True of &mdash; blank claims it of everything they sell</label>
-              <input name="entity_key" list="objents"
-                     value="{_esc(r.entity_key or '')}"
-                     placeholder="leave blank only if it really is brand-wide">
+              {entity_select(tenant, r.entity_key or '', blank='— everything they sell (only if it really is brand-wide) —')}
               <div class="row"><button class="sec">Save</button></div>
             </form>
             </details>""")
@@ -4921,9 +4986,6 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
                          for r in obj_rows],
                         "None. This is human-authored and it is half of the "
                         "intake.", open=len(obj_rows) <= 12)
-    obj_html += ('<datalist id="objents">'
-                 + "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
-                           for k, v in obj_cat.items()) + "</datalist>")
 
     ents = kb.entities(tenant, available_only=False)
     ent_html = _kb_list("All items", [
@@ -6025,15 +6087,6 @@ def render_content(key: str, tenant: str = "", started: str = "",
     vocab = sorted(kbm.situations(tenant))
     cat = sorted(((e.key, e.name) for e in
                   kbm.entities(tenant, available_only=False)), key=lambda p: p[1])
-    # The option VALUE is what a datalist filters on, so a list of bare slugs
-    # could only ever be searched by slug — and a reviewer looking at a claim
-    # about the Aqua dinner plate knows "aqua", not `bm-aq-din-25`. Putting
-    # both in the value makes either searchable; `kb.resolve_entity_ref` splits
-    # it back apart and also accepts a plain key, a plain name, or a unique
-    # partial of either.
-    catlist = ('<datalist id="ents">'
-               + "".join(f'<option value="{_esc(k + kbm.LABEL_SEP + n)}">'
-                         f'</option>' for k, n in cat) + "</datalist>")
     # Where the reader lands after deciding one, so approving walks down the
     # queue rather than returning to the top of it every time. Computed over
     # the PAGE being shown — the next card must be one that is on screen.
@@ -6167,11 +6220,10 @@ def render_content(key: str, tenant: str = "", started: str = "",
           <option value="reference">reference — inspiration only</option>
         </select>
         <label>Product or space it shows (optional)</label>
-        <input name="entity_key" list="ents" placeholder="leave blank for brand-wide">
+        {entity_select(tenant, '', blank='— brand-wide —')}
         <div class="row"><button>Add to library</button></div>
       </form>
       </details>
-      {catlist}
     </div>"""
 
     # Named only when there is more than one site to tell apart: on a
@@ -6281,8 +6333,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
               <input name="evidence" value="{_esc(p.evidence or '')}"
                      placeholder="what makes this checkable">
               <label>True of &mdash; blank means the whole brand</label>
-              <input name="entity_key" list="ents" value="{_esc(p.entity_key or '')}"
-                     placeholder="brand-level (used in any content)">
+              {entity_select(tenant, p.entity_key or '', blank='— the whole brand (used in any content) —')}
               <div class="when">{
                   "Scoped to " + _esc(dict(cat).get(p.entity_key, p.entity_key))
                   if p.entity_key else "Brand-level"
@@ -6440,7 +6491,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
           customer's own words — the wording is the evidence and cannot be
           reworded. An untagged claim can never be selected.</p>
         </details>"""
-        proposals = (catlist + legend + bulk
+        proposals = (legend + bulk
                      + '<div class="grid" style="grid-template-columns:1fr">'
                      + "".join(_card(p) for p in shown) + "</div>" + pager)
     else:
@@ -6523,13 +6574,11 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
             # wrong ones are approved.
             scope = ""
             if kind == "objection":
-                # The datalist renders ONCE for the section (spec §4) — it
-                # was rebuilt inside every objection card.
+                # The picker, per card, fed from the table (the shared
+                # datalist it replaced was typed-slug search).
                 scope = f"""
               <label>True of &mdash; which item is this answer about?</label>
-              <input name="entity_key" list="pents"
-                     value="{_esc(getattr(r, 'entity_key', '') or '')}"
-                     placeholder="start typing a product name">
+              {entity_select(tenant, getattr(r, 'entity_key', '') or '', blank='— everything they sell —')}
               <label class="row" style="gap:6px">
                 <input type="checkbox" name="brand_wide" value="1">
                 <span>No item &mdash; this is true of everything they sell</span>
@@ -6569,9 +6618,6 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
             f"/admin/ui?tab=content&amp;sub=other&amp;tenant={_esc(tenant)}"
             + (f"&amp;key={_esc(key)}" if key else ""),
             _opage, len(_flat), 15, "proposals")
-        _pents_opts = "".join(
-            f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>'
-            for e in kbm.entities(tenant, available_only=False))
         from urllib.parse import quote as _oq
         _oth_chips = '<div class="filters">' + "".join(
             f'<a class="{"on" if _of == v else ""}" '
@@ -6592,8 +6638,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
       <button class="sec">Search</button>
     </form>"""
         others_html = (
-            f'<datalist id="pents">{_pents_opts}</datalist>'
-            + f'<div class="row">{_oth_chips}{_oth_search}</div>'
+            f'<div class="row">{_oth_chips}{_oth_search}</div>'
             + (f'<div class="when">showing {len(_flat)} of {n_other} '
                f'(filtered)</div>' if (q and sub == "other") or _of else '')
             + '<details class="sec"><summary>How scope works</summary>'
@@ -8146,9 +8191,6 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
         return _dl_search(key, tenant, sub, q_, st, what, tab)
     ents = kb.entities(tenant, available_only=False)
     cat = {e.key: e.name for e in ents}
-    datalist = ('<datalist id="objents">'
-                + "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
-                          for k, v in cat.items()) + "</datalist>")
 
     def _page_slice(rows_):
         total = len(rows_)
@@ -8262,7 +8304,6 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
   <div class="thread">{body or f'<p class="mut">{_esc(empty)}{" Nothing matches the filter." if q else ""}</p>'}</div>
   {pager}
   {add}
-  {datalist}
 </div>"""
 
     if sub == "objections":
@@ -8283,7 +8324,7 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
     <label>The approved answer</label>
     <textarea name="response" rows="3"></textarea>
     <label>True of — blank claims it of everything they sell</label>
-    <input name="entity_key" list="objents">
+    {entity_select(tenant, '', blank='— everything they sell —')}
     <label>Situations</label>
     <div class="tags">{"".join(
         f'<label class="tag"><input type="checkbox" name="situations" '
@@ -8299,7 +8340,6 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
   <div class="thread">{body or '<p class="mut">None. This is human-authored and it is half of the intake.</p>'}</div>
   {pager}
   {add}
-  {datalist}
 </div>"""
 
     if sub == "audiences":

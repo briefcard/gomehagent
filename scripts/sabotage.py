@@ -1941,12 +1941,15 @@ SABOTAGES = [
     {
         "name": "draft_products_never_offered",
         "file": "app/admin_ui.py",
-        "find": "        rows = sorted((r for r in kb.entities(tenant, available_only=False)\n"
-                "                       if (r.availability or \"available\")\n"
-                "                       not in (\"draft\", \"archived\", \"unpublished\")),",
-        "replace": "        rows = sorted(kb.entities(tenant, available_only=False),  # SABOTAGE",
+        # Re-anchored 2026-09-04: the filter moved from the plan branch into
+        # `entity_select`, the one picker every entity control now renders —
+        # so this guards every picker, not only the plan's.
+        "find": "    rows = [r for r in kb.entities(tenant, available_only=False)\n"
+                "            if (r.availability or \"available\")\n"
+                "            not in (\"draft\", \"archived\", \"unpublished\")]",
+        "replace": "    rows = list(kb.entities(tenant, available_only=False))  # SABOTAGE",
         "suites": ["test_render_smoke.py"],
-        "why": "the plan's entity picker offers draft and archived products "
+        "why": "every entity picker offers draft and archived products "
                "again — inviting the owner to plan a campaign around a "
                "product no customer can buy, which is the CitroBurn failure "
                "wearing a select element",
@@ -5833,6 +5836,36 @@ SABOTAGES = [
         "why": "an account with no ban list gets send-ready marketing copy the "
                "validator could not check — 'clean' meaning 'unchecked', the "
                "one case the bundle is meant to stop",
+    },
+    {
+        "name": "an_entity_is_picked_from_the_table_never_typed",
+        "file": "app/admin_ui.py",
+        "find": '    return f\'<select name="{_esc(name)}"{attrs}>{"".join(opts)}</select>\'',
+        "replace": '    return f\'<input name="{_esc(name)}" value="{_esc(cur[0] if cur else str())}">\'  # SABOTAGE',
+        "suites": ["test_entity_selectors.py"],
+        "why": "every entity picker in the console is a text box again — the "
+               "reviewer has to know the slug, and a typo scopes a claim to "
+               "nothing or files a plan the run must refuse",
+    },
+    {
+        "name": "the_ad_plans_entity_is_a_reference",
+        "file": "app/systems.py",
+        "find": '                dict(key="entity_key", label="Entity", required=True,\n                     kind="entity"),',
+        "replace": '                dict(key="entity_key", label="Entity", required=True),  # SABOTAGE',
+        "suites": ["test_entity_selectors.py"],
+        "why": "the ad-creative plan form draws a bare text box for the "
+               "entity AND the reference check skips the field, so a slug "
+               "that matches nothing files a plan the run refuses on its day",
+    },
+    {
+        "name": "an_objection_scoped_to_nothing_is_refused",
+        "file": "app/web.py",
+        "find": '    if ent_problem:\n        return _back_to_kb(tenant, ok="", err=ent_problem[:300],',
+        "replace": '    if False:  # SABOTAGE\n        return _back_to_kb(tenant, ok="", err=ent_problem[:300],',
+        "suites": ["test_entity_selectors.py"],
+        "why": "an answer typed against an unknown entity lands brand-level "
+               "or scoped to nothing, and the next draft about that product "
+               "does not find it",
     },
     {
         "name": "a_client_report_has_its_real_name",

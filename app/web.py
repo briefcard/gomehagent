@@ -4199,10 +4199,22 @@ async def objection_add(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant") or "")
     sits = [str(t).strip() for t in form.getlist("situations")
             if str(t).strip()]
+    # The scope is a REFERENCE into the catalogue, resolved and refused here
+    # the way claims and assets already are. `kb.add_objection` writes the
+    # key through as given, so an unknown one landed as an answer scoped to
+    # nothing — unreachable by selection, and invisible until the draft that
+    # should have used it did not. The write-side half of "make sure to
+    # associate them" (owner, 2026-09-04).
+    ent_key, ent_problem = kbm.resolve_entity_ref(
+        tenant, str(form.get("entity_key") or ""))
+    if ent_problem:
+        return _back_to_kb(tenant, ok="", err=ent_problem[:300],
+                           back=_back_parts(form) or {"sub": "queue", "state": "",
+                                                      "page": "", "q": ""})
     got = kbm.add_objection(
         tenant, str(form.get("objection") or "").strip(),
         str(form.get("response") or "").strip(),
-        entity_key=str(form.get("entity_key") or "").strip(),
+        entity_key=ent_key,
         situations=sits, origin="human")
     ok = str(got).startswith(("Added", "Updated", "Recorded"))
     return _back_to_kb(tenant,
@@ -5933,8 +5945,20 @@ def _plan_fields_from(request: Request, syskey: str) -> dict:
     do, and get the named refusal.
     """
     from . import systems
-    declared = {f["key"] for f in systems.workflow(syskey)["plan_fields"]}
-    return {k: v for k, v in request.query_params.items() if k in declared}
+    declared = {f["key"]: f for f in systems.workflow(syskey)["plan_fields"]}
+    out: dict = {}
+    for k in request.query_params.keys():
+        if k not in declared:
+            continue
+        if declared[k].get("kind") == "entity_list":
+            # A multi-select submits one value per pick; the plan stores the
+            # list the way `systems.entity_list` reads it.
+            out[k] = ", ".join(str(v).strip()
+                               for v in request.query_params.getlist(k)
+                               if str(v).strip())
+        else:
+            out[k] = request.query_params.get(k)
+    return out
 
 
 @app.get("/admin/plan_new")

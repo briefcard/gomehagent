@@ -284,7 +284,7 @@ def main() -> int:
     ck("and says what that restricts it to",
        "appears in content about that" in page)
     ck("the scope is editable against the account's own catalogue",
-       'name="entity_key"' in page and 'list="ents"' in page)
+       '<select name="entity_key">' in page and 'list="ents"' not in page)
     scoped = [c for c in kb.pending_claims("baci")
               if c.entity_key == "cake-stand-cover"]
     ck("a product-page claim is attached at capture, not left brand-level",

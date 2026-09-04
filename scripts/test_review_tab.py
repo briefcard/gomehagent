@@ -151,8 +151,8 @@ def main():
     # literal string.
     ck("…and page 2 reaches #61", h2.count('name="asset_ids"') == 6,
        str(h2.count('name="asset_ids"')))
-    ck("the add-form folds, with the ents datalist",
-       "Add a photograph by URL" in h and 'list="ents"' in h)
+    ck("the add-form folds, with the entity picker as a select",
+       "Add a photograph by URL" in h and '<select name="entity_key">' in h)
 
     print("\n--- 4 · everything else pages, one datalist, legend once ---")
     for i in range(20):
@@ -160,8 +160,10 @@ def main():
                          origin="crawl", review=prov.PROPOSED)
     h = page("other")
     ck("the queue pages at 15", "proposals 1&ndash;15 of 20" in h)
-    ck("…with ONE pents datalist, not one per card",
-       h.count('<datalist id="pents">') == 1)
+    ck("…every card carrying the entity picker as a select fed from the "
+       "table — no datalist, no typed slug",
+       h.count('<select name="entity_key">') >= 15 and "<datalist" not in h,
+       str(h.count('<select name="entity_key">')))
     ck("…and kind chips narrow it",
        ">objections</a>" in h
        and page("other", "&flt=objection").count("proposal_review") >= 1)

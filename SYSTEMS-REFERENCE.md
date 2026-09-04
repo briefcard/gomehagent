@@ -67,7 +67,7 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
   - parameters: `entity_key`, `entity_keys`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
-- **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `entity_keys` (entity_list), `variants`
+- **Plan fields** (the plan UI; `*` required): `entity_key`* (entity), `audience_key`* (audience), `entity_keys` (entity_list), `variants`
 - **Unit:** one ad batch for one audience × entity
 - **Artifact:** proposal_rows
 - **Ship:** approving marks the batch ready, then the copy is carried to the platform by hand and the join finds it again

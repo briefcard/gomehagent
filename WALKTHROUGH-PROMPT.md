@@ -260,6 +260,13 @@ holds.
 - **Ads publish to Meta by hand** (the export sheet) — by design, not a gap.
 - **Unattended recurring spend on a client's quota is the owner's call** —
   `numInstances`, weekly rival reads, auto-send: declared, never defaulted on.
+- **Every reference into the knowledge base is picked from its table, never
+  typed, and refused on write when it is not there** — segment, audience,
+  entity (2026-09-04: "All the Entity selectors should be drop downs … we
+  should not have to know the slug. It should sync with the entity table and
+  make sure to associate them"). `admin_ui.entity_select` is the one entity
+  picker; `scripts/test_entity_selectors.py` walks every console page and
+  every plan declaration to prove no text box and no unknown key survives.
 
 **Traps this stretch fell into.** Each cost a run; the harness caught every one
 before `main`:
@@ -336,6 +343,12 @@ account with no ban list because `client_report` makes no model call, so
 there is nothing for a validator to check. Verification method that worked:
 the Omnisend connector in-session IS the Baci brand's live API (read-only);
 a docs-read shape is confirmed or corrected in one call.
+Owner's issue 2026-09-04, entity pickers: five KB forms typed a slug into a
+datalist; the ad-creative plan field declared no `kind`, so it was a bare
+text box AND `_check_plan_refs` skipped it (keyed on `kind`); `entity_list`
+("also about") had no renderer branch at all; `/admin/objection_add` wrote
+an unknown key through. One helper now renders every picker; the objection
+writer resolves and refuses; multi-select values are joined for `entity_list`.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner
