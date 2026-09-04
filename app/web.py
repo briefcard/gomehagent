@@ -536,6 +536,10 @@ def health_connections(key: str = Depends(admin_key)):
     # Semrush?" had NO answer on any surface a person could reach without the
     # console secret, while Search Console, which IS per-account, sat right
     # here. Reported as what it is: global, and set or not.
+    # The image key. Absent, every ad batch degrades to a placeholder and
+    # every article goes out without pictures — and nothing said so.
+    from . import imagegen as _ig
+    report["images"] = _ig._key()[1] or "ok — OPENAI_API_KEY is set"
     report["semrush"] = (
         {"all accounts (one shared key)": "key set"} if config.SEMRUSH_API_KEY
         else {"all accounts (one shared key)":

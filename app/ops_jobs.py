@@ -1017,7 +1017,31 @@ def reconcile_mail() -> dict:
     return approvals.reconcile_drafts()
 
 
+def learning_sweep() -> str:
+    """The Sunday learning sweep, on demand: judge standing rules, propose
+    what recurs. Proposals land on the approval queue; nothing is sent."""
+    import json as _json
+    from . import worker
+    return _json.dumps(worker.learning_sharded(), default=str)[:4000]
+
+
+def report_plans() -> str:
+    """File the weekly report plans for every account with reports on."""
+    from . import planner, systems, tenants
+    lines = []
+    for t in tenants.all_tenants():
+        row = systems.find(t.key, "reports")
+        if not (row and systems.is_on(row)):
+            continue
+        got = planner.report_rollout(row)
+        lines.append(f"{t.key}: {got.get('proposed', 0)} proposed, "
+                     f"{got.get('refreshed', 0)} refreshed"
+                     + (f", refused: {'; '.join(got['refusals'])}" if got.get("refusals") else ""))
+    return "\n".join(lines) or "no account has the reports system switched on"
+
+
 JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
+        "learning_sweep": learning_sweep, "report_plans": report_plans,
         "reconcile_mail": reconcile_mail,
         "shipment_audit": shipment_audit, "refile_intake": refile_intake,
         "build_onboarding_packet": build_onboarding_packet, "organize": organize,

@@ -5758,6 +5758,25 @@ SABOTAGES = [
                "on, the daily-noise defect wearing a new name",
     },
     {
+        "name": "a_failed_image_call_is_in_the_ledger",
+        "file": "app/imagegen.py",
+        "find": "    key, why = _key()\n    if why:\n        _log(False, why)\n        return {\"ok\": False, \"error\": why}",
+        "replace": "    key, why = _key()\n    if why:\n        return {\"ok\": False, \"error\": why}  # SABOTAGE",
+        "suites": ["test_imagegen.py"],
+        "why": "a missing image key degrades every ad to a placeholder and "
+               "every article to no pictures, and Diagnostics shows a clean "
+               "bill — which is what it did for as long as the key was missing",
+    },
+    {
+        "name": "the_connections_probe_names_the_image_key",
+        "file": "app/web.py",
+        "find": "    report[\"images\"] = _ig._key()[1] or \"ok — OPENAI_API_KEY is set\"",
+        "replace": "    report[\"images\"] = \"ok\"  # SABOTAGE",
+        "suites": ["test_ops_added.py"],
+        "why": "the one probe the owner can hit with the key says images are "
+               "fine while the key is missing",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

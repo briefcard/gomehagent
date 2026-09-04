@@ -67,8 +67,25 @@ def _key() -> tuple[str, str]:
 
 def _post(path: str, *, json_body: dict | None = None,
           files: list | None = None, data: dict | None = None) -> dict:
+    """One image-API call, RECORDED. This is the single door, and until
+    2026-09-04 nothing that went through it was written to the ledger: a
+    missing key or a failing model degraded to a placeholder with `basis`
+    saying so inside the batch, and no surface anywhere said "images are
+    failing". Same defect the Semrush client was fixed for, and the same fix —
+    every call lands in `db.ToolCall` under provider `openai_images`, the
+    refusal included, so Diagnostics shows it as a failing provider."""
+    import time as _clock
+    from . import toolcalls as _tc
+    _t0 = _clock.monotonic()
+
+    def _log(ok: bool, err: str = "", size: int = 0) -> None:
+        _tc.record("", f"images{path}", source="creative", provider="openai_images",
+                   ok=ok, error=err, ms=int((_clock.monotonic() - _t0) * 1000),
+                   bytes_back=size)
+
     key, why = _key()
     if why:
+        _log(False, why)
         return {"ok": False, "error": why}
     import httpx
     try:
@@ -76,17 +93,23 @@ def _post(path: str, *, json_body: dict | None = None,
                        headers={"Authorization": f"Bearer {key}"},
                        json=json_body, files=files, data=data)
     except Exception as exc:                                     # noqa: BLE001
+        _log(False, exc.__class__.__name__)
         return {"ok": False, "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
     if r.status_code >= 400:
         try:
             msg = (r.json().get("error") or {}).get("message", "")
         except Exception:                                        # noqa: BLE001
             msg = r.text[:200]
+        _log(False, f"{r.status_code}: {msg}"[:160])
         return {"ok": False, "error": f"{r.status_code}: {msg}"[:300]}
     try:
         body = r.json()
     except Exception:                                            # noqa: BLE001
+        _log(False, "no JSON")
         return {"ok": False, "error": "the image API returned no JSON"}
+    # Size from whatever the response object has: the spend suite stubs the
+    # transport with an object that carries `.json()` and no `.content`.
+    _log(True, size=len(getattr(r, "content", b"") or b""))
     out = []
     for item in body.get("data") or []:
         b64 = item.get("b64_json")

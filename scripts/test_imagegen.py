@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageDraw  # noqa: E402
 
-from app import config, imagegen  # noqa: E402
+from app import config, db, imagegen  # noqa: E402
 
 _fails: list[str] = []
 _sent: list[dict] = []
@@ -56,11 +56,27 @@ def _scene_with(product, bg=(226, 214, 196)):
 
 def main() -> int:
     print("— it refuses rather than pretending —")
+    def _ledger(provider="openai_images"):
+        from sqlalchemy import select
+        tbl = db.Base.metadata.tables["tool_calls"]
+        with db.SessionLocal() as s:
+            return [dict(r._mapping) for r in s.execute(
+                select(tbl).where(tbl.c.provider == provider)).all()]
+
+    _before = len(_ledger())
     config.OPENAI_API_KEY = ""
     imagegen.post = imagegen._post
     r = imagegen.plate("a table")
     ck("with no key it names the key, and the one it shares with embeddings",
        not r["ok"] and "OPENAI_API_KEY" in r["error"], r.get("error", "")[:70])
+    # THE REFUSAL IS IN THE LEDGER. Until 2026-09-04 nothing through the
+    # image door was recorded: a missing key degraded every ad to a
+    # placeholder and Diagnostics showed a clean bill.
+    _rows = _ledger()
+    ck("  and the refusal lands in the ledger as a failed provider call",
+       len(_rows) == _before + 1 and _rows[-1]["ok"] == "no"
+       and "OPENAI_API_KEY" in (_rows[-1]["error"] or ""),
+       f"{len(_rows) - _before} new row(s); last: {(_rows[-1] if _rows else {}).get('error', '')[:60]}")
     config.OPENAI_API_KEY = "sk-test"
 
     print("\n— a plate is scenery, and says so —")
