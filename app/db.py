@@ -1431,6 +1431,10 @@ class Tenant(Base):
     esp = Column(JSON, default=dict)    # {provider, credential_ref, from_name, reply_to}
     ads = Column(JSON, default=dict)    # {meta_account_id, google_customer_id}
     analytics = Column(JSON, default=dict)  # {ga4_property, gsc_site, semrush_db}
+    # The Business Profile this account IS: {account: "accounts/…",
+    # location: "locations/…"} — copied from `gbp.probe`, never typed. Declared
+    # here; WIRED when the Google connection carries business.manage.
+    gbp = Column(JSON, default=dict)
     design = Column(JSON, default=dict)     # {canva_brand_id, drive_folder}
     crm = Column(JSON, default=dict)        # {provider, creds_key}
 

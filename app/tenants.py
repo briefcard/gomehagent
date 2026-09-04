@@ -266,10 +266,11 @@ def declared_capabilities(key: str) -> dict:
         "inbox": bool(t.gmail_alias),
         "commerce": bool(t.shopify_store),
         "esp": bool((t.esp or {}).get("provider")),
-        # Declared so `gbp_post` can gate on it and the register can see the
-        # system; nothing wires it yet — Google API access is not applied for
-        # (INITIATIVE-gbp §0), so this is False for every account until it is.
-        "gbp": False,
+        # The profile the account declared (Accounts → advanced → gbp). It is
+        # WIRED only when the Google connection carried business.manage —
+        # `credentials.CAPABILITY_SCOPES` — and reaches Google only once the
+        # project is approved (INITIATIVE-gbp §0; `gbp.APIS_TO_ENABLE`).
+        "gbp": bool((t.gbp or {}).get("location")),
         "cms": bool((t.cms or {}).get("platform")),
         "ads": bool((t.ads or {}).get("meta_account_id")
                     or (t.ads or {}).get("google_customer_id")),

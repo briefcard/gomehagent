@@ -89,6 +89,18 @@ FIELD_HELP = {
         "Search Console: the property exactly as verified, including the "
         "sc-domain: prefix if it's a domain property. "
         "semrush_db is the country database, usually 'us'."),
+    "gbp": (
+        "The Google Business Profile this account is — listing, reviews, posts",
+        "A JSON literal {\"account\": \"accounts/…\", \"location\": "
+        "\"locations/…\"}, COPIED from the probe beside this field, which "
+        "lists them. Before it can list anything: Google must approve API "
+        "access for the Cloud project (a form, quoting the project number, "
+        "from an owner/manager email on the profile; quota is 0 until then), "
+        "all seven Business Profile APIs must be enabled in that project, "
+        "and Google must be connected for this account on the Connections "
+        "tab AFTER 2026-09-04, when the flow began asking for "
+        "business.manage — an older connection shows 'not granted' on its "
+        "card and re-connecting once is the fix."),
     "crm": (
         "Deal and contact context on inbound",
         "Salesforce: a Connected App with API access; store the credentials in "
@@ -1454,6 +1466,34 @@ def _field(t, key: str, name: str) -> str:
     </form>"""
 
 
+def _gbp_line(t, key: str) -> str:
+    """Business Profile, as a fact with its control (§4): what the account
+    declares, whether the Google connection can reach it, the probe that
+    lists what to declare, and the two things only the owner can do."""
+    from . import gbp, tenants
+    d = dict(t.gbp or {})
+    wired = tenants.capabilities(t.key).get("gbp", False)
+    declared = (f'declared <code>{_esc(str(d.get("location")))}</code>'
+                if d.get("location") else "no profile declared yet")
+    state = ("the Google connection carries business.manage" if wired else
+             "not wired — connect Google for this account on the Connections "
+             "tab (a connection older than 2026-09-04 shows "
+             "&ldquo;not granted: business.manage&rdquo;; re-connect once)")
+    apis = "".join(f"<li>{_esc(a)}</li>" for a in gbp.APIS_TO_ENABLE)
+    return f"""
+    <div class="note"><strong>Business Profile.</strong> {declared} &middot; {state}.
+      <a href="/admin/gbp_probe?tenant={_esc(t.key)}&amp;key={_esc(key)}">Prove
+      the connection</a> &mdash; read-only; it lists the accounts and locations
+      to copy into <code>gbp</code> below, and names what refuses.
+      <details><summary class="mut">Before Google answers at all</summary>
+        <p>Apply for API access at <a href="{_esc(gbp.ACCESS_FORM)}">the GBP
+        API form</a> quoting the Cloud project number, from an owner/manager
+        email on the profile (a verified profile, 60+ days, with a live
+        website). Quota is 0 until approval, 300/min after. Then enable, in
+        that project:</p><ul class="bl">{apis}</ul></details>
+    </div>"""
+
+
 def _intake_links(tenant: str, key: str) -> str:
     """Intake links — mint, list, revoke, on the page that owns client access.
 
@@ -1661,13 +1701,13 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
   </details>
 </div>"""
     elif sub == "advanced":
-        fields = "".join(_field(t, key, f) for f in
+        fields = _gbp_line(t, key) + "".join(_field(t, key, f) for f in
                          # `domain` FIRST — the most load-bearing field on
                          # the row: `harvest` and `compliance` refuse
                          # without it, `sites` builds no profile, and
                          # `seo_guard` joins on it.
                          ("domain", "gmail_alias", "shopify_store", "esp",
-                          "cms", "ads", "analytics", "crm", "design",
+                          "cms", "ads", "analytics", "gbp", "crm", "design",
                           "systems"))
         body = f"""
 <div class="card">

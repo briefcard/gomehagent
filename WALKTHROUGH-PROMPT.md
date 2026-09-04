@@ -349,6 +349,17 @@ text box AND `_check_plan_refs` skipped it (keyed on `kind`); `entity_list`
 ("also about") had no renderer branch at all; `/admin/objection_add` wrote
 an unknown key through. One helper now renders every picker; the objection
 writer resolves and refuses; multi-select values are joined for `entity_list`.
+GBP platform half (owner: "what are all the APIs … implement it correctly"):
+`app/gbp.py` read adapter + `probe`; `business.manage` in the Google flow, the
+CLI and the privacy page (a suite proves the three agree); `gbp` DECLARED as
+`Tenant.gbp.location` and WIRED only when the consent carried the scope
+(`CAPABILITY_SCOPES`, compared on the scope's leaf); `/admin/gbp_probe`;
+`/health/connections["gbp"]`. The seven APIs are named once
+(`gbp.APIS_TO_ENABLE`) and shown on the account card. Still the owner's:
+Google's access approval (quota 0 until then), and nothing writes to Google
+until the skills exist. Trap: a test fixture that deletes and re-adds a
+credential in one session hits the UNIQUE(tenant, provider, site) — update
+the row, as `store_oauth` does.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

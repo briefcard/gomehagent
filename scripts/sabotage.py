@@ -5838,6 +5838,38 @@ SABOTAGES = [
                "one case the bundle is meant to stop",
     },
     {
+        "name": "the_google_flow_asks_for_business_profile",
+        "file": "app/oauth.py",
+        "find": '            "https://www.googleapis.com/auth/business.manage",\n        ],\n        extra={"access_type": "offline", "prompt": "consent",',
+        "replace": '        ],  # SABOTAGE — the scope is no longer asked for\n        extra={"access_type": "offline", "prompt": "consent",',
+        "suites": ["test_gbp.py"],
+        "why": "every Google connection is made without business.manage, so "
+               "no account can ever wire gbp and the two GBP systems stay "
+               "impossible for ever, while the privacy page still promises "
+               "the scope",
+    },
+    {
+        "name": "a_declared_profile_is_declared",
+        "file": "app/tenants.py",
+        "find": '        "gbp": bool((t.gbp or {}).get("location")),',
+        "replace": '        "gbp": False,  # SABOTAGE',
+        "suites": ["test_gbp.py"],
+        "why": "the onboarding checklist reads 'no Business Profile' on an "
+               "account whose location is on the row, so the connect-page "
+               "backlog can never show the one gap that is the owner's to "
+               "close",
+    },
+    {
+        "name": "an_unapproved_project_is_named_as_such",
+        "file": "app/gbp.py",
+        "find": '    if status == 429 or "quota" in low or "resource_exhausted" in low:',
+        "replace": '    if False:  # SABOTAGE — a quota refusal reads as a bare status code',
+        "suites": ["test_gbp.py"],
+        "why": "the first live call on an unapproved project comes back as "
+               "'429: Quota exceeded' — a number, where the owner needs the "
+               "form to fill in and the project number to quote",
+    },
+    {
         "name": "an_entity_is_picked_from_the_table_never_typed",
         "file": "app/admin_ui.py",
         "find": '    return f\'<select name="{_esc(name)}"{attrs}>{"".join(opts)}</select>\'',

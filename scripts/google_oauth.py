@@ -48,6 +48,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",       # scheduling, shipment ETAs as events
     "https://www.googleapis.com/auth/webmasters.readonly",  # SEO agent: Search Console (real rankings/clicks)
     "https://www.googleapis.com/auth/analytics.readonly",   # SEO agent: GA4 (real traffic/conversions)
+    "https://www.googleapis.com/auth/business.manage",      # Business Profile: listing, reviews, posts, performance (app/gbp.py)
 ]
 
 ACCOUNTS = [

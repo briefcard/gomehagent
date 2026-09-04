@@ -19,16 +19,22 @@ started immediately, independently of the build.
 
 ## §0 Where this stands
 
-Nothing is built. The critical path is not engineering:
+The platform half is built (2026-09-04). The critical path is still not
+engineering:
 
 | | state |
 |---|---|
-| Google API access | **NOT APPLIED FOR — do this first, it is a queue** |
-| `app/gbp.py` provider adapter | not written |
-| `gbp_listing_audit` skill (the SEO half — build first) | not written |
-| `gbp_post` skill in `app/skill_pack.py` | not written |
-| `gbp_post` system in `systems.SPECS` | not declared |
-| `gbp` capability + connection | not wired |
+| Google API access | **APPLY — it is a queue.** `gbp.ACCESS_FORM`, quoting the Cloud project number, from an owner/manager email on the profile. Quota is 0 until approved. |
+| The seven APIs to enable | named once, in `gbp.APIS_TO_ENABLE`; shown on the account card and in the probe |
+| `app/gbp.py` provider adapter | **read side built** — accounts, locations, listing, live state, reviews, posts, performance; named refusals; `probe` |
+| `gbp` capability + connection | **wired** — `business.manage` in the Google flow; `credentials.CAPABILITY_SCOPES` grants `gbp` only when the consent carried it; declared per account as `Tenant.gbp` |
+| `gbp_listing` system (the SEO half — build first) | declared; **skill not written** |
+| `gbp_post` system | declared; **skill not written**; no write to Google exists yet |
+| `/admin/gbp_probe`, `/health/connections["gbp"]` | built |
+
+**The owner's order of operations** is the docstring of `app/gbp.py`: apply,
+enable the seven, connect Google (again, once, for the scope), declare the
+profile from what the probe lists.
 
 ---
 

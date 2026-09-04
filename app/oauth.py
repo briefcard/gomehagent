@@ -233,6 +233,12 @@ FLOWS: dict[str, dict] = {
             "https://www.googleapis.com/auth/calendar",
             "https://www.googleapis.com/auth/webmasters.readonly",
             "https://www.googleapis.com/auth/analytics.readonly",
+            # Business Profile (2026-09-04). One scope covers the whole API
+            # family — listing, reviews, posts, performance. A connection
+            # made before this line shows "not granted: business.manage" on
+            # its card (`credentials._dark`), and re-connecting once is the
+            # fix; `gbp.py` refuses by name until then.
+            "https://www.googleapis.com/auth/business.manage",
         ],
         extra={"access_type": "offline", "prompt": "consent",
                "include_granted_scopes": "true"},

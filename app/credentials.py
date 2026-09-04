@@ -197,11 +197,23 @@ SITE_SCOPED = tuple(k for k, v in PROVIDERS.items() if "site" in (v.get("also") 
 #: works today. Known-and-missing refuses; unknown grants and says how it knows.
 CAPABILITY_SCOPES: dict[tuple[str, str], str] = {
     ("shopify", "cms"): "write_content",
+    # Business Profile rides the Google connection, and ONLY when that consent
+    # carried the scope — a Google connected for the inbox alone must not read
+    # as able to reach a listing (2026-09-04).
+    ("google", "gbp"): "https://www.googleapis.com/auth/business.manage",
 }
 
 
+def _scope_in(need: str, have) -> bool:
+    """Compared on the last path segment, the way `oauth._missing_scopes`
+    does: Google records full URLs, Shopify bare names, and a provider moving
+    to a versioned URL must not silently un-grant everything."""
+    leaf = need.rsplit("/", 1)[-1]
+    return any(str(h).rsplit("/", 1)[-1] == leaf for h in have)
+
+
 GRANTS: dict[str, tuple[str, ...]] = {
-    "google": ("inbox", "analytics"),
+    "google": ("inbox", "analytics", "gbp"),
     # `cms` because a Shopify store HAS a blog and this codebase writes to it.
     # Without it a client who connects their store is told the blog system is
     # not ready, forever, and the only cure is an operator hand-writing
@@ -450,7 +462,7 @@ def wired_capabilities(tenant: str) -> dict[str, str]:
             for cap in GRANTS.get(prov, ()):
                 need = CAPABILITY_SCOPES.get((prov, cap))
                 have = granted.get(prov)
-                if need and have is not None and need not in have:
+                if need and have is not None and not _scope_in(need, have):
                     continue          # known, and this scope was not granted
                 out.setdefault(cap, f"client:{prov}")
     for prov, caps in ENV_GRANTS.items():

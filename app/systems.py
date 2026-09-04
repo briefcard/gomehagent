@@ -593,11 +593,14 @@ CATALOG = {
             unit="one post to one profile",
             artifact="gbp_post",
             ship="publishes the post to the profile, on approval",
-            # NOTHING PERFORMS IT, and declared here rather than left out so
-            # the register, readiness and the effectiveness map all see the
-            # gap by name. The critical path is not engineering: Google API
-            # access has not been applied for (INITIATIVE-gbp §0), and the
-            # `gbp` capability is False for every account until it is.
+            # NOTHING PERFORMS IT YET, and declared here rather than left out
+            # so the register, readiness and the effectiveness map all see the
+            # gap by name. Since 2026-09-04 the `gbp` capability is DECLARED
+            # per account (`Tenant.gbp.location`) and WIRED when the Google
+            # connection carries business.manage; `gbp.probe` proves it. The
+            # critical path is still not engineering: Google must approve API
+            # access (INITIATIVE-gbp §0; `gbp.APIS_TO_ENABLE`). The skill that
+            # performs this ship is the next build.
             ship_by="",
             measure="views and actions per post from the Performance API, "
                     "once the capability is wired")),

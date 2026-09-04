@@ -480,7 +480,25 @@ def health_connections(key: str = Depends(admin_key)):
             status_code=401)
     from . import data_tools, gmail_client  # lazy: avoid slowing basic health
 
-    report: dict = {"shopify": {}, "google": {}}
+    report: dict = {"shopify": {}, "google": {}, "gbp": {}}
+    # Business Profile: declared vs wired, per account — no live call here
+    # (the probe is the live one, and a 0-quota project would only say so
+    # five times over). A row appears for every account so "not declared"
+    # is visible, not absent.
+    try:
+        from . import tenants as _tn
+        with db.SessionLocal() as s:
+            _rows = [(t.key, dict(t.gbp or {})) for t in s.query(db.Tenant).all()]
+        for _k, _g in _rows:
+            _wired = _tn.capabilities(_k).get("gbp", False)
+            report["gbp"][_k] = (
+                (f"declared {_g.get('location')}" if _g.get("location")
+                 else "not declared — Accounts → advanced → gbp")
+                + (" · wired" if _wired else
+                   " · not wired — connect Google with business.manage")
+                + f" · probe: /admin/gbp_probe?tenant={_k}")
+    except Exception as exc:                                     # noqa: BLE001
+        report["gbp"] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:120]}"
     for store in config.SHOPIFY_STORES:
         try:
             shop = data_tools._shopify(store, "shop.json")["shop"]
@@ -606,6 +624,25 @@ def esp_probe(key: str = Depends(admin_key), tenant: str = "eien") -> dict:
     aud = esp.audiences(tenant)   # read-only: GET segments / lists
     return {"tenant": tenant, "provider": provider, "connected": True,
             "audiences": aud}
+
+
+@app.get("/admin/gbp_probe")
+def gbp_probe(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """Prove a client's Business Profile connection end to end — READ ONLY.
+
+    Admin-gated: it lists the accounts and locations the connected Google
+    user manages. It is the first real call against the Business Profile
+    family, so it doubles as the setup checklist: the same JSON names the
+    seven APIs to enable, the access form, and — at whichever step refuses —
+    exactly what the owner does next. Reached from the account's card on the
+    Accounts tab (advanced), beside the `gbp` field it fills.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "say which account: ?tenant=<key>"}
+    from . import gbp
+    return gbp.probe(tenant)
 
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1163,10 @@ following, and use each only as stated:</p>
       (queries, clicks, impressions, positions). Read-only.</li>
   <li><code>analytics.readonly</code> — read Google Analytics traffic reports
       and list the properties available. Read-only.</li>
+  <li><code>business.manage</code> — read a connected Business Profile
+      listing, its reviews, posts and performance; change the listing or
+      publish a post only after a human operator has reviewed and approved
+      that specific change.</li>
 </ul>
 
 <h2>How we use it</h2>
@@ -1966,7 +2007,8 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import tenants
-    JSON_FIELDS = {"esp", "ads", "cms", "analytics", "design", "crm", "systems"}
+    JSON_FIELDS = {"esp", "ads", "cms", "analytics", "design", "crm", "systems",
+                   "gbp"}
     SCALAR = {"name", "kind", "status", "domain", "timezone",
               "gmail_alias", "shopify_store", "notes", "business_model"}
     if field not in JSON_FIELDS | SCALAR:
