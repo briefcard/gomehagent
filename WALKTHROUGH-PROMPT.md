@@ -312,6 +312,10 @@ own sabotage guard had printed `MISSED` since 2026-09-02 — it mutated the
 "cleared" branch entry 3 stopped measuring — so the one suite that must fail
 on good news had no guard that could make it. Re-pointed at `gbp_post`'s
 empty `ship_by`. A count (2 -> 1) stays truthy; the set is the claim.
+Omnisend segment paging is CURSORS — `paging.hasMore` + `cursors.after`,
+same path `?after=` — proven live 2026-09-03 on the Baci brand; the adapter
+followed a `paging.next` the API never sends, so page two was never read.
+Re-anchored the path-keyed paging test to the recorded live body.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

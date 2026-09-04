@@ -105,25 +105,35 @@ def segments(tenant: str) -> dict:
     The first version read page one and stopped — on an account with more
     segments than one page, `segments.reconcile` would have missed the rest
     and `materialize(apply=1)` would have DUPLICATED them in the live
-    account. Paging follows the response's own `paging.next` (absolute or
-    relative — the path half is kept either way; VERIFY on the first
-    multi-page account, the shape is docs-read). A mid-pagination failure
-    fails the WHOLE read: a partial list is exactly the duplicate risk the
-    full read exists to remove.
+    account. A mid-pagination failure fails the WHOLE read: a partial list is
+    exactly the duplicate risk the full read exists to remove.
+
+    **Paging is CURSORS, proven live 2026-09-03** (GET /api/segments on the
+    Baci brand): the response carries ``paging: {cursors: {after, before},
+    hasMore, limit}`` and the next page is the SAME path with
+    ``?after=<cursor>``; ``limit`` is 1–50. The docs-read version followed a
+    ``paging.next`` link the API does not send, so on the first account with
+    more than one page it would have stopped after page one — silently, the
+    exact failure the paragraph above says the full read exists to remove.
+
+    A row carries NO member count: ``segmentID, name, status, conditionGroups,
+    createdAt, updatedAt, archivedAt, isStarred`` — the count lives on
+    ``GET /api/segments/{id}/statistics`` as ``contactsCount``.
     """
     rows: list = []
-    path, pages = "/api/segments", 0
-    while path and pages < 20:
-        res = call(tenant, "GET", path)
+    after, pages = "", 0
+    while pages < 20:
+        params = {"limit": 50, **({"after": after} if after else {})}
+        res = call(tenant, "GET", "/api/segments", params=params)
         if not res["ok"]:
             return res
         data = res["data"] or {}
         rows += data.get("segments") or []
         pages += 1
-        nxt = str((data.get("paging") or {}).get("next") or "")
-        if nxt and "://" in nxt:
-            nxt = "/" + nxt.split("://", 1)[1].split("/", 1)[-1]
-        path = nxt
+        paging = data.get("paging") or {}
+        after = str((paging.get("cursors") or {}).get("after") or "")
+        if not paging.get("hasMore") or not after:
+            break
     return {"ok": True, "segments": [{"id": s.get("segmentID") or s.get("id"),
                                       "name": s.get("name", "")} for s in rows]}
 

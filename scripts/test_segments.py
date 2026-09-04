@@ -263,28 +263,76 @@ def main() -> int:
        "will remember it",
        got["id"] == "ca9" and got["via"] == "name-match" and "Sync" in got["why"])
 
-    print("\n— omnisend reads EVERY page —")
+    print("\n— omnisend reads EVERY page, by cursor —")
     import app.omnisend as om
-    pages = {
-        "/api/segments": {"ok": True, "data": {
-            "segments": [{"segmentID": "p1", "name": "One"}],
-            "paging": {"next": "https://api.omnisend.com/api/segments?page=2"}}},
-        "/api/segments?page=2": {"ok": True, "data": {
-            "segments": [{"segmentID": "p2", "name": "Two"}]}},
-    }
-    calls: list = []
     real_call = om.call
-    om.call = lambda t, m, p, **kw: calls.append(p) or pages[p]
+    calls: list = []
+
+    # THE LIVE SHAPE, recorded 2026-09-03 from GET /api/segments on the Baci
+    # brand (five segments, one page; two kept here, condition groups
+    # trimmed). Paging is cursors + hasMore, and a row carries no count. The
+    # previous version of this check fed a `paging.next` link — a shape the
+    # API never sends — so it proved the adapter followed something the
+    # live account would never hand it.
+    LIVE = {"ok": True, "data": {
+        "paging": {"cursors": {"after": None, "before": None},
+                   "hasMore": False, "limit": 50},
+        "segments": [
+            {"archivedAt": None, "conditionGroups": [{"conditions": [
+                {"entity": "event", "filters": [
+                    {"count": "atLeast", "name": "placed order",
+                     "operator": "has", "origin": "shopify", "value": 2}],
+                 "junction": "and"}]}],
+             "createdAt": "2026-08-22T22:51:01Z", "isStarred": False,
+             "name": "Repeat buyers", "segmentID": "6a8a27d561da0421f84b8b21",
+             "status": "ready", "updatedAt": "2026-08-22T22:51:01Z"},
+            {"archivedAt": None, "conditionGroups": [],
+             "createdAt": "2026-08-22T22:51:00Z", "isStarred": False,
+             "name": "Lapsed (60–90 days)",
+             "segmentID": "6a8a27d461da0421f84b8b20",
+             "status": "ready", "updatedAt": "2026-08-22T22:51:00Z"}]}}
+    om.call = lambda t, m, p, **kw: (
+        calls.append((p, dict(kw.get("params") or {}))) or LIVE)
     try:
         got = om.segments("baci")
     finally:
         om.call = real_call
-    ck("both pages returned — the next link is followed as a path",
+    ck("the live single-page shape returns every row and stops — one call, "
+       "the segment path, no cursor",
+       got["ok"] and [s["id"] for s in got["segments"]]
+       == ["6a8a27d561da0421f84b8b21", "6a8a27d461da0421f84b8b20"]
+       and calls == [("/api/segments", {"limit": 50})], str(calls))
+    ck("a live row carries no member count and the adapter invents none",
+       "count" not in got["segments"][0], str(got["segments"][0]))
+
+    def _paged(t, m, p, **kw):
+        after = str((kw.get("params") or {}).get("after") or "")
+        calls.append((p, after))
+        if not after:
+            return {"ok": True, "data": {
+                "segments": [{"segmentID": "p1", "name": "One"}],
+                "paging": {"cursors": {"after": "cur-2", "before": None},
+                           "hasMore": True, "limit": 50}}}
+        if after == "cur-2":
+            return {"ok": True, "data": {
+                "segments": [{"segmentID": "p2", "name": "Two"}],
+                "paging": {"cursors": {"after": None, "before": "cur-1"},
+                           "hasMore": False, "limit": 50}}}
+        return {"ok": False, "error": f"unexpected cursor {after!r}"}
+    calls.clear()
+    om.call = _paged
+    try:
+        got = om.segments("baci")
+    finally:
+        om.call = real_call
+    ck("both pages returned — the SAME path, the second call carrying "
+       "after=<the cursor page one handed back>",
        got["ok"] and [s["id"] for s in got["segments"]] == ["p1", "p2"]
-       and calls == ["/api/segments", "/api/segments?page=2"], str(calls))
-    om.call = lambda t, m, p, **kw: (pages["/api/segments"]
-                                     if p == "/api/segments"
-                                     else {"ok": False, "error": "500"})
+       and calls == [("/api/segments", ""), ("/api/segments", "cur-2")],
+       str(calls))
+    om.call = lambda t, m, p, **kw: (
+        _paged(t, m, p, **kw) if not (kw.get("params") or {}).get("after")
+        else {"ok": False, "error": "500"})
     try:
         got = om.segments("baci")
     finally:

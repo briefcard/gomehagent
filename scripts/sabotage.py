@@ -5835,6 +5835,21 @@ SABOTAGES = [
                "one case the bundle is meant to stop",
     },
     {
+        "name": "every_page_of_segments_is_read_by_cursor",
+        "file": "app/omnisend.py",
+        # Page one only — what the docs-read `paging.next` follower did on the
+        # live shape (proven 2026-09-03: the API sends cursors + hasMore and
+        # never a `next` link).
+        "find": '        if not paging.get("hasMore") or not after:\n            break',
+        "replace": '        break  # SABOTAGE — page one only',
+        "suites": ["test_segments.py"],
+        "why": "on the first account with more than fifty segments, reconcile "
+               "reads page one, marks the rest 'to build', and "
+               "materialize(apply=1) creates duplicates in the client's live "
+               "Omnisend account — the duplicate risk the full read exists "
+               "to remove",
+    },
+    {
         "name": "the_rehearsal_reads_the_artifacts_not_the_pass_line",
         "file": "app/data_tools.py",
         # Puts the bare KeyError back on an unconnected store. Every suite
