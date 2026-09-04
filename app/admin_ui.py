@@ -6063,13 +6063,14 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
                     f'{_esc(f.canva_design_id)}/edit">open in Canva &rarr;</a>'
                     if where == "editable" else f"""
             <form id="canva-{_esc(f.id)}" method="post"
-                  action="/admin/asset_canva">
+                  action="/admin/asset_canva" target="_blank">
               <input type="hidden" name="key" value="{_esc(key)}">
               <input type="hidden" name="tenant" value="{_esc(tenant)}">
               <input type="hidden" name="asset_id" value="{_esc(f.id)}">
-              <button class="sec" title="Hand it to Canva so the type and
-                layout can be changed. The picture itself stays exactly as it
-                is, and nothing is published.">edit in Canva</button>
+              <button class="sec" title="Opens Canva's editor in a new tab so
+                the type and layout can be changed. The picture itself stays
+                exactly as it is; Harvest brings the edited version back onto
+                this same frame. Nothing is published.">edit in Canva</button>
             </form>""")
             cells += f"""
         <div class="frame">

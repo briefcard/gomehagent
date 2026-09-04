@@ -285,12 +285,12 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `canva.py`
 
 - **`brand_kit`**(tenant) → `dict`  ·  from `brand_theme.py`
-- **`create_design`**(tenant, title?, design_type?, asset_id?, entity_key?, width?, height?) → `dict`  ·  from `creative.py`, `test_canva.py`, `verify_canva.py`
-- **`editable_from_image`**(tenant, blob, title?, entity_key?, design_type?) → `dict`  ·  from `hosting.py`, `test_canva.py`
+- **`create_design`**(tenant, title?, design_type?, asset_id?, entity_key?, width?, height?, record?) → `dict`  ·  from `creative.py`, `test_canva.py`, `verify_canva.py`
+- **`editable_from_image`**(tenant, blob, title?, entity_key?, design_type?, record?) → `dict`  ·  from `hosting.py`, `test_canva.py`
 - **`export`**(tenant, design_id, fmt?) → `dict`  ·  from `data_tools.py`
 - **`export_result`**(tenant, job_id) → `dict`  ·  **from nothing**
 - **`folder`**(tenant) → `dict`  ·  from `test_canva.py`, `verify_canva.py`
-- **`harvest`**(tenant, design_id?, entity_key?, wait?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
+- **`harvest`**(tenant, design_id?, entity_key?, wait?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_hosting.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
 - **`mcp_call`**(tenant, tool, arguments?) → `dict`  ·  **from nothing**
 - **`mcp_session`**(tenant) → `—`  ·  **from nothing**
 - **`mcp_tools`**(tenant) → `dict`  ·  from `web.py`
@@ -679,7 +679,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `harvest.py`
 
 - **`forget_pages`**(tenant) → `str`  ·  from `test_harvest.py`, `web.py`
-- **`harvest`**(tenant, limit?, apply?, use_model?, recrawl?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
+- **`harvest`**(tenant, limit?, apply?, use_model?, recrawl?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_hosting.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
 - **`harvest_all`**(limit?, apply?) → `dict`  ·  from `test_harvest.py`, `web.py`
 
 ### `hosting.py`
@@ -830,7 +830,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`cluster`**(tenant) → `dict`  ·  from `skill_pack.py`, `test_article_review.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keywords.py`, `web.py`
 - **`cluster_state`**(tenant) → `dict[str, dict]`  ·  **from nothing**
 - **`cluster_support`**(tenant, cluster_key, rows?) → `dict`  ·  from `test_support_links.py`, `web.py`
-- **`harvest`**(tenant, seeds?, sources?, days?, limit?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
+- **`harvest`**(tenant, seeds?, sources?, days?, limit?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_hosting.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
 - **`harvest_all`**(limit?) → `dict`  ·  from `test_harvest.py`, `web.py`
 - **`harvest_due`**(tenant) → `bool`  ·  from `test_keyword_progress.py`
 - **`harvest_one`**(tenant, limit?) → `dict`  ·  **from nothing**
@@ -1011,7 +1011,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `offers.py`
 
 - **`applicable`**(tenant, segment?, entity_keys?) → `dict`  ·  from `skill_pack.py`, `test_offers.py`
-- **`harvest`**(tenant, days?, apply?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
+- **`harvest`**(tenant, days?, apply?) → `dict`  ·  from `sources.py`, `test_brand_sources.py`, `test_harvest.py`, `test_hosting.py`, `test_keywords.py`, `test_offers.py`, `test_pointer_fixes.py`, `test_rivals.py`, `web.py`
 - **`known`**(tenant, include_proposed?) → `list`  ·  from `test_offers.py`
 - **`phrases`**(text) → `list[str]`  ·  from `test_offers.py`
 

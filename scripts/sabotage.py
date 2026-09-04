@@ -5902,6 +5902,34 @@ SABOTAGES = [
                "form to fill in and the project number to quote",
     },
     {
+        "name": "edit_in_canva_opens_canva",
+        "file": "app/web.py",
+        "find": '    from fastapi.responses import RedirectResponse\n    url = str(got.get("edit_url") or "")\n    if not url:',
+        "replace": '    return _back_to_content(tenant, anchor="pics", msg="opened in Canva")  # SABOTAGE\n    url = str(got.get("edit_url") or "")\n    if not url:',
+        "suites": ["test_hosting.py"],
+        "why": "the button that promises Canva's editor lands the owner back "
+               "on the pictures queue with a flash message, and nothing opens",
+    },
+    {
+        "name": "a_frame_sent_to_canva_files_no_twin",
+        "file": "app/hosting.py",
+        "find": '        record=False)',
+        "replace": '        record=True)  # SABOTAGE',
+        "suites": ["test_hosting.py"],
+        "why": "every frame opened in Canva gets a second row of kind=design "
+               "with the same thumbnail, which the review queue shows as "
+               "another picture to judge",
+    },
+    {
+        "name": "a_frame_comes_back_from_canva_as_itself",
+        "file": "app/canva.py",
+        "find": '        frame = r.kind == "image" and "exported from Canva" not in str(r.source or "")',
+        "replace": '        frame = False  # SABOTAGE — the export is filed as a new row',
+        "suites": ["test_hosting.py"],
+        "why": "the edited picture comes back as a third copy in the review "
+               "queue while the frame that went keeps its old pixels",
+    },
+    {
         "name": "the_picker_groups_the_way_the_account_says",
         "file": "app/admin_ui.py",
         "find": '    grouping = str(kb.selection_config(tenant).get("entity_grouping") or "type")\n    opts: list[str] = []',

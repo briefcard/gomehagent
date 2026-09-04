@@ -367,9 +367,17 @@ merged into `selection`, the control on the Knowledge tab beside the
 selection line; `collection` groups by `parent_keys` (the ranges
 `sync_collections(adopt=…)` wrote), ranges first, the rest "Not in a
 collection", a member of two ranges under both.
-Ad Creative issue (4), "Edit in Canva": fixed and verified (route → the
-editor in a new tab; no twin design row; harvest onto the frame), but the
-owner stopped the ship — it is parked as a git stash, awaiting their word.
+Owner's Ad Creative issues 2026-09-04 (four). (4) "Edit in Canva doesn't
+open Canva; it duplicates the image": the route redirected back to Content
+with a flash; `create_design` filed a second `kind="design"` row for the
+frame; `harvest` skipped the frame as "already an image" and filed the export
+as a third. Now: 303 to the editor in a new tab; `record=False` from
+`to_canva`; harvest lands the export ON the frame (`source` gains "edited in
+Canva"); a named `design_id` re-harvests.
+Shipped on the owner's word after the GBP post ship. Issues (1)-(3) — the
+Hormozi/Piliero panel before variants, claim-review tabs per variant with an
+Instagram caption format, the frames (cut-out paste, burned PIL type, no
+winning-ad reference) — are REPRODUCED in the memory note, not started.
 GBP posts (owner: "a post generator … convert existing blogs, emails or ads
 … or from scratch to address objections or reinforce claims"; "if posts are
 part of the Plan it needs to be clear they need to set up a plan"): built

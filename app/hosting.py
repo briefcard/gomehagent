@@ -102,13 +102,18 @@ def to_canva(tenant: str, asset_id: str) -> dict:
         return {"ok": False, "error": "no such picture"}
     if row.canva_design_id:
         return {"ok": True, "design_id": row.canva_design_id, "reused": True,
+                "edit_url": f"https://www.canva.com/design/{row.canva_design_id}/edit",
                 "note": "it is already open in Canva"}
     blob, why = _bytes(row)
     if why:
         return {"ok": False, "error": why}
     made = canva.editable_from_image(
         tenant, blob, title=(row.title or "Ad frame")[:120],
-        entity_key=row.entity_key or "")
+        entity_key=row.entity_key or "",
+        # The frame IS the record: the design id lands on it below. A second
+        # row of kind="design" with the same thumbnail read as another
+        # picture to review.
+        record=False)
     if not made.get("ok"):
         return made
     design_id = str(made.get("design_id") or "")

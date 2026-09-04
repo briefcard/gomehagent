@@ -298,12 +298,19 @@ def upload_asset(tenant: str, url: str, name: str, *,
 
 def create_design(tenant: str, *, title: str, design_type: str = "",
                   asset_id: str = "", entity_key: str = "",
-                  width: int = 0, height: int = 0) -> dict:
+                  width: int = 0, height: int = 0, record: bool = True) -> dict:
     """Create a design, file it in this account's folder, record it.
 
     All three, or it says which part did not happen. A design sitting in Canva
     that nothing in the library names is invisible to every skill — it cannot
     be selected, cannot be credited when it is used, and cannot carry a result.
+
+    `record=False` when the caller ALREADY holds the row the design belongs
+    to — a frame handed to Canva by `hosting.to_canva` records the design id
+    on itself. Recording it here as well filed a second row of
+    `kind="design"` with the same thumbnail, which the pictures queue showed
+    as another picture to review (owner, 2026-09-04: "it just duplicates the
+    same image to be reviewed").
 
     `width`/`height` (px) create a CUSTOM-sized design instead of a preset —
     what an email hero needs, since no preset is 1200×600. VERIFY on first
@@ -333,9 +340,9 @@ def create_design(tenant: str, *, title: str, design_type: str = "",
         source="generated in Canva", entity_key=entity_key,
         canva_design_id=did,
         thumbnail_url=(d.get("thumbnail") or {}).get("url", ""),
-        origin="human")
+        origin="human") if record else "not recorded — the caller's row carries it"
     return {"ok": True, "design_id": did,
-            "edit_url": urls.get("edit_url", ""),
+            "edit_url": urls.get("edit_url", "") or f"https://www.canva.com/design/{did}/edit",
             "view_url": urls.get("view_url", ""),
             "filed": filed.get("ok", False),
             "filed_error": "" if filed.get("ok") else filed.get("error", ""),
@@ -559,7 +566,8 @@ def upload_bytes(tenant: str, blob: bytes, name: str, *,
 
 def editable_from_image(tenant: str, blob: bytes, *, title: str,
                         entity_key: str = "",
-                        design_type: str = "instagram-post") -> dict:
+                        design_type: str = "instagram-post",
+                        record: bool = True) -> dict:
     """A rendered base image, handed to Canva as something still editable.
 
     This is the join between the two halves. Everything upstream exists to make
@@ -579,7 +587,8 @@ def editable_from_image(tenant: str, blob: bytes, *, title: str,
     if not up["ok"]:
         return {**up, "stage": "upload"}
     made = create_design(tenant, title=title, design_type=design_type,
-                         asset_id=up["asset_id"], entity_key=entity_key)
+                         asset_id=up["asset_id"], entity_key=entity_key,
+                         record=record)
     if not made["ok"]:
         return {**made, "stage": "design", "asset_id": up["asset_id"],
                 "orphan": f"asset {up['asset_id']} is in Canva and no design "
@@ -617,21 +626,32 @@ def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
     re-files nothing.
     """
     import time as _time
-    rows = [r for r in kb.assets(tenant, publishable_only=False)
+    every = kb.assets(tenant, publishable_only=False)
+    rows = [r for r in every
             if r.canva_design_id and (not design_id
                                       or r.canva_design_id == design_id)]
     if not rows:
         return {"ok": True, "filed": 0, "pending": [], "failed": [],
                 "note": "no Canva designs are recorded for this account"}
 
-    # A design that has ALREADY produced an image is finished with. Matching on
-    # the design id keeps this from re-exporting the same canvas every sweep.
-    done = {r.canva_design_id for r in kb.assets(tenant, publishable_only=False)
-            if r.kind == "image" and r.canva_design_id}
+    # A design that has ALREADY come back is finished with — an export row,
+    # or a frame whose source says it was edited — so the sweep does not
+    # re-export the same canvas every hour. Naming a design id is the
+    # owner's "bring it back again" and overrides that.
+    done = set() if design_id else {
+        r.canva_design_id for r in every
+        if r.kind == "image" and r.canva_design_id
+        and ("Canva" in str(r.source or ""))}
     filed, pending, failed = 0, [], []
     for r in rows:
-        if r.kind == "image" or r.canva_design_id in done:
+        if r.canva_design_id in done:
             continue
+        # A FRAME THAT WENT TO CANVA COMES BACK AS ITSELF. `hosting.to_canva`
+        # records the design on the frame precisely so the finished design is
+        # the same picture; filing the export as a new row — which this did,
+        # and then skipped the frame as "already an image" — made it a third
+        # copy of one picture in the review queue.
+        frame = r.kind == "image" and "exported from Canva" not in str(r.source or "")
         started = export(tenant, r.canva_design_id, "png")
         if not started.get("ok"):
             failed.append(f"{r.title or r.canva_design_id}: "
@@ -652,6 +672,16 @@ def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
         if not urls:
             pending.append({"design_id": r.canva_design_id, "job_id": job,
                             "title": r.title or ""})
+            continue
+        if frame:
+            with db.SessionLocal() as s:
+                got = s.get(db.KbAsset, r.id)
+                if got is not None:
+                    got.url = urls[0]
+                    got.source = ((got.source or "generated")
+                                  + " · edited in Canva")
+                    s.commit()
+                    filed += 1
             continue
         said = kb.add_asset(
             tenant, urls[0], rights=kb.OWNED,

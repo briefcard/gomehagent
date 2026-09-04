@@ -278,8 +278,10 @@ def main() -> int:
 
     print("\n— and Canva is the editable stage, on demand —")
     from app import canva
+    _real_editable = canva.editable_from_image
     canva.editable_from_image = lambda t, b, **kw: {
-        "ok": True, "design_id": "DAF123", "edit_url": "https://canva/DAF123"}
+        "ok": True, "design_id": "DAF123",
+        "edit_url": "https://www.canva.com/design/DAF123/edit"}
     did, _ = _frame("eien", blob=png(45))
     made = hosting.to_canva("eien", did)
     ck("a frame can be opened in Canva", made["ok"] and not made["reused"])
@@ -294,12 +296,60 @@ def main() -> int:
     ck("nothing is published by opening it",
        "Nothing is published" in made["note"])
 
+    # THE BUTTON OPENS CANVA (owner, 2026-09-04: "pressing Edit in Canva
+    # doesn't open the images in Canva. It just duplicates the same image").
+    # The route redirected back to the Content tab with a flash; and
+    # `create_design` filed a second row of kind="design" for the same picture.
+    from fastapi.testclient import TestClient
+    from app import web
+    _c = TestClient(web.app, raise_server_exceptions=False)
+    _r = _c.post("/admin/asset_canva?key=s3cret",
+                 data={"tenant": "eien", "asset_id": did}, follow_redirects=False)
+    ck("pressing edit in Canva sends the browser TO Canva's editor",
+       _r.status_code == 303
+       and "canva.com/design/DAF123/edit" in (_r.headers.get("location") or ""),
+       f"{_r.status_code} {_r.headers.get('location', '')[:80]}")
+    # Through the REAL editable_from_image / create_design, with only the
+    # transport stubbed: the frame must be the only row carrying the design.
+    canva.editable_from_image = _real_editable
+    canva.upload_bytes = lambda t, b, name, **kw: {"ok": True, "asset_id": "AST9"}
+    _saved_call = canva.call
+    canva.call = lambda t, m, p, **kw: (
+        {"ok": True, "data": {"design": {"id": "DAF999", "urls": {
+            "edit_url": "https://www.canva.com/design/DAF999/edit"}}}}
+        if p == "/designs" else {"ok": True, "data": {}})
+    _fresh2, _ = _frame("eien", blob=png(47))
+    _n_before = len(kb.assets("eien", publishable_only=False))
+    made2 = hosting.to_canva("eien", _fresh2)
+    _n_after = len(kb.assets("eien", publishable_only=False))
+    _carriers = [a for a in kb.assets("eien", publishable_only=False)
+                 if a.canva_design_id == "DAF999"]
+    ck("opening a frame in Canva files NO second picture — the frame is the "
+       "record", made2["ok"] and _n_after == _n_before and len(_carriers) == 1
+       and _carriers[0].id == _fresh2 and _carriers[0].kind == "image",
+       f"rows {_n_before}->{_n_after}, carriers={[(a.kind, a.id[:6]) for a in _carriers]}")
+    # …AND IT COMES BACK AS ITSELF. Harvest used to skip the frame ("already
+    # an image") and file the export as a third row.
+    canva.export = lambda t, d, fmt="png": {"ok": True, "job_id": "",
+                                           "urls": ["https://export/DAF999.png"]}
+    hv = canva.harvest("eien", design_id="DAF999")
+    _back = next(a for a in kb.assets("eien", publishable_only=False) if a.id == _fresh2)
+    ck("harvest lands the edited picture ON the frame that went — same row, "
+       "new pixels, no third copy",
+       hv["filed"] == 1 and _back.url == "https://export/DAF999.png"
+       and "edited in Canva" in (_back.source or "")
+       and len(kb.assets("eien", publishable_only=False)) == _n_after,
+       f"{hv} url={_back.url}")
+    canva.call = _saved_call
+
     print("\n— and every one of those states is visible where the frames are —")
     from app import admin_ui as ui
     _fresh, _ = _frame("eien", blob=png(46))          # never opened in Canva
     card, _rest = ui._batch_cards("s3cret", "eien", kb.proposed_assets("eien"))
     ck("an unopened frame offers Canva",
        "/admin/asset_canva" in card and "edit in Canva" in card)
+    ck("…in a new tab, so the frames page stays where it was",
+       'action="/admin/asset_canva" target="_blank"' in card)
     ck("…and one already open links to it instead of offering again",
        "canva.com/design/DAF123" in card and card.count("edit in Canva") == 1,
        "two proposed frames, one opened — offering to open what is already "

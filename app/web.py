@@ -6706,11 +6706,16 @@ async def asset_canva(request: Request, key: str = Depends(admin_key)):
     if not got.get("ok"):
         return _back_to_content(tenant, msg=f"Canva: {got.get('error', '')}"[:200],
                                 anchor="pics")
-    return _back_to_content(
-        tenant, anchor="pics",
-        msg=("already open in Canva" if got.get("reused")
-             else "opened in Canva — edit it there, then run Harvest to bring "
-                  "the finished version back"))
+    # TO CANVA, not back to the Content tab. This returned to the pictures
+    # queue with "opened in Canva — edit it there", and nothing had opened:
+    # the button's whole promise was the editor, and the owner got a flash
+    # message and a second copy of the picture (2026-09-04). The form targets
+    # a new tab, so the frames page stays where it was.
+    from fastapi.responses import RedirectResponse
+    url = str(got.get("edit_url") or "")
+    if not url:
+        url = f"https://www.canva.com/design/{got.get('design_id', '')}/edit"
+    return RedirectResponse(url, 303)
 
 
 @app.post("/admin/asset_add", response_class=HTMLResponse)
