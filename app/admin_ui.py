@@ -2718,6 +2718,8 @@ def _waiting_section(key: str, row) -> str:
                 says = "Approve &amp; publish"
             elif a.kind == "send_email":
                 says = "Approve — sends it"
+            elif (pl.get("send_mail") or {}).get("to"):
+                says = f"Approve — sends it to {_esc(pl['send_mail']['to'])}"
             elif a.kind == "guidance_rule":
                 says = "Approve — becomes standing guidance the drafter reads"
             elif a.kind == "skill_output":
@@ -6773,8 +6775,15 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         # each summary's wording honest; the button now says what approving
         # DOES, per kind, instead of one word meaning five things.
         prov = (pl.get("esp_push") or {}).get("provider", "")
+        _mail = pl.get("send_mail") or {}
         if prov:
             says = f"Approve — pushes the draft to {_esc(prov)}"
+        elif _mail:
+            # A report leaves as mail. "Marks it reviewed" on a card whose
+            # approval SENDS is the one lie a button must not tell.
+            says = f"Approve — sends it to {_esc(_mail.get('to', ''))}"
+        elif a.kind == "guidance_rule":
+            says = "Approve — becomes standing guidance the drafter reads"
         elif a.kind == "seo_new_article":
             says = "Approve &amp; publish"
         elif a.kind == "send_email":

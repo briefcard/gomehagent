@@ -5815,6 +5815,19 @@ SABOTAGES = [
                "against another client's store",
     },
     {
+        "name": "campaign_copy_needs_a_ban_list_like_the_blog_does",
+        "file": "app/skill_pack.py",
+        # Anchored on the campaign's own system_key: the comment block above
+        # the gate is word-for-word the reorder prompt's too, and an anchor
+        # matching twice patches whichever comes first.
+        "find": "    system_key=\"campaign_email\",\n    tier=3,\n    # CONSTITUTIVE, like the blog and the catalogue check: with no ban list\n    # the validator has nothing to check, \"clean\" means \"unchecked\", and the\n    # dress rehearsal (2026-09-04) showed this skill producing send-ready\n    # copy for an account in exactly that state while the blog refused.\n    constitutive=(\"banned_claims\",),",
+        "replace": "    system_key=\"campaign_email\",\n    tier=3,\n    # CONSTITUTIVE, like the blog and the catalogue check: with no ban list\n    # the validator has nothing to check, \"clean\" means \"unchecked\", and the\n    # dress rehearsal (2026-09-04) showed this skill producing send-ready\n    # copy for an account in exactly that state while the blog refused.\n    constitutive=(),  # SABOTAGE",
+        "suites": ["test_rehearsal_fixes.py"],
+        "why": "an account with no ban list gets send-ready marketing copy the "
+               "validator could not check — 'clean' meaning 'unchecked', the "
+               "one case the bundle is meant to stop",
+    },
+    {
         "name": "the_rivals_read_stays_out_of_the_eager_half",
         "file": "app/admin_ui.py",
         # A default argument is evaluated when the lambda is DEFINED, so this

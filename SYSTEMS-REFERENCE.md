@@ -65,7 +65,7 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`, `entity`
 - **Skill** `ad_copy` — produces `draft`, tier 3, writes=False
   - parameters: `entity_key`, `entity_keys`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
-  - constitutive (no draft without it): none
+  - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
 - **Plan fields** (the plan UI; `*` required): `entity_key`*, `audience_key`* (audience), `entity_keys` (entity_list), `variants`
 - **Unit:** one ad batch for one audience × entity
@@ -100,7 +100,7 @@ Builds and schedules campaign sends from the catalogue and calendar.
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `entity`, `claim`, `objection`, `audience`, `asset`
 - **Skill** `campaign_email` — produces `draft`, tier 3, writes=True
   - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`
-  - constitutive (no draft without it): none
+  - constitutive (no draft without it): `banned_claims`
 - **Planner:** `campaign_rollout`
 - **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
 - **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag)
@@ -206,7 +206,7 @@ Triggers replenishment prompts off purchase cadence.
 - **Knowledge (`kb_needs`):** `entity`
 - **Skill** `reorder_prompt` — produces `draft`, tier 3, writes=True
   - parameters: `revision_notes`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `segment`
-  - constitutive (no draft without it): none
+  - constitutive (no draft without it): `banned_claims`
 - **Planner:** `reorder_rollout`
 - **Cadence knobs:** `horizon_days`=30, `per_segment_monthly`=1, `segment_rest_days`=6
 - **Plan fields** (the plan UI; `*` required): `audience_key`* (audience), `goal`, `subject`, `entity_key` (entity), `entity_keys` (entity_list)

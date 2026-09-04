@@ -110,9 +110,12 @@ def main() -> int:
        "every output unverified")
     ck("…and a claim is overridable",
        systems.NEEDS["claim"]["overridable"] is True)
+    # ad_creative gained `banned_claims` as constitutive on 2026-09-04: the
+    # rehearsal showed marketing copy producing with "the validator has
+    # nothing to check" while the blog refused. The pin follows the skill.
     ck("blocking is read from the SKILL, never re-declared",
        systems._constitutive_for("blog") == ("banned_claims",)
-       and systems._constitutive_for("ad_creative") == (),
+       and systems._constitutive_for("ad_creative") == ("banned_claims",),
        "a second list would be a second opinion, and they would disagree the "
        "first time one changed")
 

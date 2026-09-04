@@ -1189,6 +1189,7 @@ register(Skill(
          "audience. Copy only — imagery waits on the media layer, and each "
          "variant is flagged as needing art direction.",
     system_key="ad_creative",
+    constitutive=("banned_claims",),   # same reason as campaign_email
     tier=3,
     needs=("rules.banned_claims",),
     # `revision_notes` + `into_batch` are the board's regenerate loop (3.4):
@@ -3779,6 +3780,11 @@ register(Skill(
          "(when connected) set up as a draft ready to launch pending approval.",
     system_key="campaign_email",
     tier=3,
+    # CONSTITUTIVE, like the blog and the catalogue check: with no ban list
+    # the validator has nothing to check, "clean" means "unchecked", and the
+    # dress rehearsal (2026-09-04) showed this skill producing send-ready
+    # copy for an account in exactly that state while the blog refused.
+    constitutive=("banned_claims",),
     needs=("rules.voice_tone", "rules.positioning"),
     # `offer` and `deadline` are OWNER_INPUT — `skill.run` puts them on the
     # bundle for every skill. `offer` was READ by `_campaign_craft` and never
@@ -3840,6 +3846,11 @@ register(Skill(
          "human, in the platform.",
     system_key="reorder_engine",
     tier=3,
+    # CONSTITUTIVE, like the blog and the catalogue check: with no ban list
+    # the validator has nothing to check, "clean" means "unchecked", and the
+    # dress rehearsal (2026-09-04) showed this skill producing send-ready
+    # copy for an account in exactly that state while the blog refused.
+    constitutive=("banned_claims",),
     needs=("rules.voice_tone", "rules.positioning"),
     params=("revision_notes", "goal", "subject", "intent", "deadline",
             "entity_key", "entity_keys", "audience_key", "offer", "utterance",

@@ -101,6 +101,26 @@ def main() -> int:
     finally:
         tool_scope._site_for, sites.get = _real_site_for, _real_get
 
+    # ---- no ban list: marketing copy refuses like the blog does -------------
+    kb.ensure_brand("coverings", "Coverings Etc")        # a brand, no ban list
+    for key in ("campaign_email", "reorder_engine", "ad_creative"):
+        row = systems.find("coverings", key) or systems.create("coverings", key)
+        with db.SessionLocal() as s:
+            s.get(db.System, row.id).status = "live"
+            s.commit()
+    blocked = {}
+    for sk_key, params in (("campaign_email", {"segment": "reorder_due"}),
+                           ("reorder_prompt", {}), ("ad_copy", {})):
+        got = skill.run(sk_key, "coverings", **params)
+        blocked[sk_key] = " ".join(got.get("blocked_on") or [])
+    ck("with no ban list, campaign copy is refused by name, not produced unchecked",
+       all("banned_claims" in v for v in blocked.values()), str(blocked)[:200])
+    kb.add_banned("coverings", "lifetime guarantee")
+    after = skill.run("campaign_email", "coverings", segment="reorder_due")
+    ck("  and with one on file that gate opens — the pair",
+       "banned_claims" not in " ".join(after.get("blocked_on") or []),
+       f"status={after.get('status')} blocked_on={after.get('blocked_on')}")
+
     # ---- the client email names figures, never fields ----------------------
     rep = client_report.assemble("baci", 7)
     msg = client_report.render_email(rep)
