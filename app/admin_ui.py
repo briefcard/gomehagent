@@ -12199,6 +12199,37 @@ def _gbp_post_card(key: str, tenant: str, art, out, run, ap) -> str:
 </div>"""
 
 
+def _panel_fold(panel: dict) -> str:
+    """What Hormozi and Piliero said about THIS concept, and the brief the
+    drafter was then held to — on the variant card, beside the copy. Owner,
+    2026-09-04: "show what each would say". Absent when the panel did not
+    sit; the batch line above says why."""
+    if not panel or not str(panel.get("brief") or "").strip():
+        return ""
+    return (f'<details class="sec" open><summary>The panel — what Hormozi and '
+            f'Piliero said before this was written</summary>'
+            f'<div class="when"><b>Hormozi:</b> {_esc(panel.get("hormozi", ""))}</div>'
+            f'<div class="when"><b>Piliero:</b> {_esc(panel.get("piliero", ""))}</div>'
+            f'<div class="when"><b>The brief it was written to:</b> '
+            f'{_esc(panel["brief"])}</div></details>')
+
+
+def _panel_batch_line(panel: dict) -> str:
+    """Piliero on the BATCH — distinct entries or restatements — or the named
+    reason the panel did not sit."""
+    if not panel:
+        return ""
+    if not panel.get("sat"):
+        return (f'<p class="when"><b>The panel did not sit</b> — '
+                f'{_esc(panel.get("why_not") or "no reason recorded")}; these '
+                f'were drafted on the ruleset alone.</p>')
+    verdict = str(panel.get("verdict") or "")
+    return (f'<div class="row"><span class="chip {"on" if verdict == "distinct" else "off"}">'
+            f'batch: {_esc(verdict or "no verdict")}</span>'
+            f'<span class="when"><b>Piliero on the batch:</b> '
+            f'{_esc(panel.get("piliero") or "")}</span></div>')
+
+
 def _grounding_card(tenant: str, art, key: str = "") -> str:
     """WHAT PART OF THIS OUTPUT IS CONFIRMED BY A CLAIM (owner, 2026-08-29).
 
@@ -12968,6 +12999,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                               f'&ldquo;{_esc(str(v.get("claim") or "")[:180])}'
                               f'&rdquo;</div>'
                               if v.get("claim") else "")
+                claim_line += _panel_fold(v.get("panel") or {})
                 if dropped:
                     act_forms = f"""
       <form method="post" action="/admin/ad_variant_drop" class="row">
@@ -13028,6 +13060,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                            f'</div>{claim_line}{act_forms}</div>')
             preview_card = (f'<div class="card"><h3>The variant board</h3>'
                             f'<div class="row">{head_bits}</div>'
+                            f'{_panel_batch_line(batch.get("panel") or {})}'
                             f'<div class="thread">{vcards}</div>'
                             f'{src_link}</div>')
         # Per-variant editors live on the cards; a whole-body editor over

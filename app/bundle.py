@@ -176,6 +176,15 @@ PARTS: dict[str, dict] = {
     "positioning": dict(tier=2, absent=SITUATIONAL, supplies="skill_pack (the run)",
                         what="the hypothesis a batch is testing, so every "
                              "variant is one idea rather than five"),
+    # ONE CONCEPT'S REWRITTEN BRIEF. The panel (`skill_pack.panel_ad`) sits on
+    # the whole batch before a word is drafted and rewrites each concept's
+    # instruction; the run puts THIS variant's row on the package it hands the
+    # drafter, because `ad_prompt` reads the package and nothing else. Absent
+    # when the panel could not sit — the run and the board both say so by
+    # name, and the variant is drafted on the ruleset's brief alone.
+    "panel": dict(tier=2, absent=SITUATIONAL, supplies="skill_pack (the run)",
+                  what="what Hormozi and Piliero said about this concept, and "
+                       "the brief the writer must follow because of it"),
     # -- the refusal --------------------------------------------------------
     "error": dict(tier=1, absent=SITUATIONAL, supplies="resolve.resolve",
                   what="this package could not be built at all — an unknown "

@@ -1205,6 +1205,11 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
             + "\nEvery variant must be an expression of THIS idea. Variants "
               "that argue different things cannot be compared, and a batch "
               "that tests nothing teaches nothing.")
+    # THE PANEL'S BRIEF, before the angle — because the angle is the ruleset's
+    # generic instruction and this is the one written for THIS concept, by
+    # the two reviewers who sat on it before a word existed. Absent when the
+    # panel did not sit, and the run says so.
+    parts.append(ad_craft.panel_brief(bundle.get("panel") or {}))
     parts.append(f"\n## Angle\n{_angle_brief(angle)}")
     # The offer, once, exactly as it will be stated everywhere else, plus
     # where it has to land. `ad_craft` measures both after the fact.
@@ -1223,6 +1228,37 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
 # Replaceable so the offline suite can drive both halves — including a model
 # that returns a banned phrase, which must still be blocked by the validator.
 draft_ad = _draft_ad_live
+
+
+def _panel_ad_live(bundle: dict, concepts: list[dict]) -> tuple[dict, str]:
+    """One model call over the batch's CONCEPTS, before any draft. Returns
+    `(panel, why_not)` — the panel parsed by `ad_craft.panel_parse`, or {}
+    with the named reason it did not sit.
+
+    ONE CALL FOR THE BATCH, not one per variant: Piliero's question — are
+    these N different entries or one idea N ways — has no answer per variant.
+    """
+    from . import llm
+    if not concepts:
+        return {}, "nothing to sit on"
+    parts = ad_craft.panel_prompt(bundle, concepts)
+    # `purpose` selects the model AND is the usage tag — `llm.model_for` falls
+    # through to CLAUDE_MODEL for a purpose with no row, which is the right
+    # model here and is now a visible choice rather than a hardcoded one.
+    reply = llm.ask("ad_panel", "\n".join(parts), system=ad_craft.PANEL_SYSTEM,
+                    tenant=str(bundle.get("tenant") or ""), max_tokens=2200)
+    if not getattr(reply, "ok", False):
+        return {}, (getattr(reply, "degraded", "") or getattr(reply, "error", "")
+                    or "the panel could not run")
+    got = ad_craft.panel_parse(reply.text)
+    if not got:
+        return {}, "the panel did not answer in the shape asked"
+    return got, ""
+
+
+# Replaceable like `draft_ad`, so the suite can prove the panel's brief reached
+# the drafter BEFORE generation — the claim, not the call.
+panel_ad = _panel_ad_live
 
 
 def _has_a_reader_to_pick(tenant: str) -> bool:
@@ -1432,10 +1468,34 @@ def _run_ad_copy(ctx: Context) -> dict:
                 " (gifting is not offered — nothing in this account's "
                 "knowledge base says people buy this for somebody else)"))
 
+    # THE PANEL SITS FIRST. Owner, 2026-09-04: "show what each would say and
+    # apply the improvements BEFORE the variants are generated." The concepts
+    # — angle x claim x offer x reader — go to Hormozi and Piliero in one
+    # pass; each variant is then drafted against ITS rewritten brief, which
+    # rides the bundle into `ad_prompt`. `ad_craft.review` still measures the
+    # words afterwards; this is the instruction, that is the inspection.
+    concepts = [{"n": i + 1, "claim": claim, "angle": angles[i % len(angles)],
+                 "objection": (objections[0]["objection"]
+                               if angles[i % len(angles)] == "objection" and objections
+                               else "")}
+                for i, claim in enumerate(ctx.claims[:want])]
+    panel, _panel_why = panel_ad(ctx.bundle, concepts)
+    if panel:
+        _pb = panel.get("batch") or {}
+        ctx.note(f"the panel sat on {len(panel.get('variants') or {})} concept(s) "
+                 f"before drafting — Piliero on the batch: "
+                 f"{_pb.get('verdict') or 'no verdict'}"
+                 + (f" — {_pb['piliero'][:200]}" if _pb.get("piliero") else ""))
+    else:
+        ctx.note(f"the panel did not sit — {_panel_why}; the variants were "
+                 f"drafted on the ruleset's brief alone")
+
     for i, claim in enumerate(ctx.claims[:want]):
         angle = angles[i % len(angles)]
+        _panel_row = (panel.get("variants") or {}).get(i + 1, {}) if panel else {}
+        _bundle_i = {**ctx.bundle, "panel": _panel_row}
 
-        raw, why_not = draft_ad(ctx.bundle, claim, angle, objections)
+        raw, why_not = draft_ad(_bundle_i, claim, angle, objections)
         headline, levers, craft_findings = "", [], []
         text = raw
         if raw:
@@ -1459,7 +1519,7 @@ def _run_ad_copy(ctx: Context) -> dict:
                 # threw away a retry that fixed the blocking problem and added
                 # a nudge.
                 retry_raw, _ = draft_ad(
-                    {**ctx.bundle,
+                    {**_bundle_i,
                      "rules": {**ctx.bundle.get("rules", {}),
                                "block": ctx.bundle.get("rules", {}).get("block", "")
                                + ad_craft.as_prompt(craft_findings)}},
@@ -1499,7 +1559,8 @@ def _run_ad_copy(ctx: Context) -> dict:
 
         by_basis[basis.split(" (")[0]] = by_basis.get(basis.split(" (")[0], 0) + 1
 
-        def _repair(previous: str, failures: list, _c=claim, _a=angle) -> str:
+        def _repair(previous: str, failures: list, _c=claim, _a=angle,
+                    _b=_bundle_i) -> str:
             """Hand the draft its own failures and ask again.
 
             Only the model can repair — the composer is deterministic and would
@@ -1509,7 +1570,7 @@ def _run_ad_copy(ctx: Context) -> dict:
             """
             note = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
             fixed, _ = draft_ad(
-                {**ctx.bundle,
+                {**_b,
                  "rules": {**ctx.bundle.get("rules", {}),
                            "block": ctx.bundle.get("rules", {}).get("block", "")
                            + f"\n\n## Your previous attempt was rejected\n"
@@ -1551,7 +1612,10 @@ def _run_ad_copy(ctx: Context) -> dict:
                 "needs_art_direction": True,
                 "claim_ids": list(item["claim_ids"]),
                 "claim": str(claim.get("claim") or ""),
-                "text": item["body"], "dropped": False})
+                "text": item["body"], "dropped": False,
+                # What the panel said about THIS concept, on the row, so the
+                # board shows the critique beside the copy it produced.
+                "panel": dict(_panel_row or {})})
 
     if degraded_note:
         ctx.note(f"the model did not write these — {degraded_note}. What is "
@@ -1577,6 +1641,9 @@ def _run_ad_copy(ctx: Context) -> dict:
             {"kind": "ad_batch", "entity_key": entity_key,
              "entity_label": _label, "audience_key": audience_key,
              "blocked_at_emit": len(ctx.items) - len(board_rows),
+             "panel": {"sat": bool(panel),
+                       "why_not": "" if panel else _panel_why,
+                       **((panel or {}).get("batch") or {})},
              "variants": board_rows}, ensure_ascii=False, indent=1)
         from . import db as _db
         with _db.SessionLocal() as s:

@@ -337,6 +337,140 @@ def as_prompt(findings: list[dict]) -> str:
             + "\n".join(f"- {f['detail']} → {f['fix']}" for f in findings))
 
 
+# ---------------------------------------------------------------------------
+# The panel — Hormozi and Piliero, BEFORE the variants are written
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-09-04: *"every ad copy goes through the 'Alex Hormozi' and 'Sam
+# Piliero' test to self-justify — show what each would say and apply the
+# improvements BEFORE the variants are generated."* `review` above runs AFTER
+# a draft, on the words, one variant at a time, and can only say what is wrong
+# with a line already written. This sits before the drafter, on the CONCEPTS —
+# angle x claim x offer x reader — and rewrites each variant's brief, so the
+# improvement is in the instruction the writer receives rather than in a
+# repair of what they wrote. One pass over the whole batch, because Piliero's
+# question is about the batch: are these N genuinely different psychological
+# entries, or one idea five ways.
+#
+# Nothing here is a taste argument. The two reviewers are the two halves of
+# `copy-system.md`: Hormozi for WHAT the copy must contain (the value
+# equation, the offer stated once and early), Piliero for HOW MANY and HOW
+# DIFFERENT (the hook, one idea, no two variants that Meta would fold into one
+# Entity ID). The model plays both; the code decides what they are shown and
+# where their answer goes.
+
+PANEL_SYSTEM = """You are two reviewers sitting on a batch of ad concepts BEFORE
+the copy is written. Speak as each in turn, in the first person, briefly, and
+then rewrite the brief the writer will follow. You never write the ad.
+
+ALEX HORMOZI — the value equation and the offer. For each concept: which of
+the four levers (dream outcome, perceived likelihood, time delay, effort and
+sacrifice) this claim can honestly pull for THIS reader, which one it should
+lead with, and whether the offer (if any) is stated once, early, and exactly.
+A concept that can pull fewer than two levers is a mood board — say so and
+say which lever the claim's evidence could add.
+
+SAM PILIERO — the hook, one idea, and diversity across the batch. For each
+concept: what the first five words must do (open on a concrete noun, a number
+or the reader; never an adjective, never an announcement), the ONE idea it
+carries, and what to cut. For the BATCH: are these genuinely different
+psychological entries, or restatements Meta would fold into one? Name any two
+that overlap and say what one of them should become instead.
+
+THE REWRITTEN BRIEF, per concept: one paragraph of plain instruction the
+writer must follow — the lever to lead with, the hook shape, the one idea,
+where the offer sits, what to avoid — specific to this claim and this reader.
+Never invent a fact, a number, a price, an origin or a deadline that is not
+in the concept; the hard rules are enforced in code after the copy is written.
+
+Answer in JSON only, in exactly this shape:
+{"variants": [{"n": 1, "hormozi": "<2-4 sentences>", "piliero": "<2-4 sentences>",
+               "brief": "<one paragraph>"}],
+ "batch": {"piliero": "<2-4 sentences on diversity across the batch>",
+           "verdict": "distinct" | "overlapping"}}"""
+
+
+def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
+    """Everything the panel is shown, as inspectable parts — the concepts, not
+    the copy. Split out for the same reason `ad_prompt` is: a brief nobody
+    can read without spending money is a brief nobody checks."""
+    parts = ["## The batch — concepts, before a word is written"]
+    aud = bundle.get("audience") or {}
+    reader = (aud.get("name") or aud.get("key") or "") if isinstance(aud, dict) else ""
+    if reader:
+        pains = "; ".join(list(aud.get("pains") or [])[:3]) if isinstance(aud, dict) else ""
+        parts.append(f"READER: {reader}" + (f" — cares about: {pains}" if pains else ""))
+    else:
+        parts.append("READER: not named — write the brief for the most likely "
+                     "buyer the claim implies, and say that you had to")
+    if str(bundle.get("positioning") or "").strip():
+        parts.append(f"POSITIONING UNDER TEST: {str(bundle['positioning']).strip()}")
+    fun = bundle.get("funnel") or {}
+    if isinstance(fun, dict) and fun.get("label"):
+        parts.append(f"FUNNEL STAGE: {fun['label']} — the reader {fun.get('reader', '')}")
+    offer = str(bundle.get("offer") or "").strip()
+    parts.append(f"OFFER: {offer}" if offer else "OFFER: none — no discount, no code; do not invent one")
+    deadline = str(bundle.get("deadline") or "").strip()
+    parts.append(f"REAL DEADLINE: {deadline}" if deadline else "DEADLINE: none — urgency is not available")
+    ents = bundle.get("entities") or []
+    if ents:
+        parts.append("ADVERTISED: " + "; ".join(
+            f"{e.get('name', '')} — {str(e.get('description') or '')[:160]}"
+            for e in ents[:3]))
+    for c in concepts:
+        a = ANGLES.get(c.get("angle", ""), {})
+        cl = c.get("claim") or {}
+        parts.append(
+            f"\n### Concept {c.get('n')}\n"
+            f"angle: {a.get('label', c.get('angle', ''))} — {a.get('brief', '')}\n"
+            f"claim: {str(cl.get('claim') or '').strip()}"
+            + (f"\nevidence: {str(cl.get('evidence') or '').strip()}" if cl.get("evidence") else "")
+            + (f"\nhesitation it answers: {c['objection']}" if c.get("objection") else ""))
+    parts.append("\nSpeak as Hormozi, then as Piliero, per concept; then Piliero on "
+                 "the batch; then the rewritten brief for each. JSON only.")
+    return parts
+
+
+def panel_parse(raw: str) -> dict:
+    """The panel's answer as `{variants: {n: {hormozi, piliero, brief}}, batch:
+    {piliero, verdict}}`, or {} when it did not answer in the shape asked —
+    the run then says the panel did not sit, which is the honest outcome."""
+    import json as _json
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = _json.loads(text[text.index("{"):text.rindex("}") + 1])
+    except Exception:                                            # noqa: BLE001
+        return {}
+    out: dict = {"variants": {}, "batch": {}}
+    for v in (data.get("variants") or []):
+        if not isinstance(v, dict):
+            continue
+        try:
+            n = int(v.get("n"))
+        except (TypeError, ValueError):
+            continue
+        out["variants"][n] = {"hormozi": str(v.get("hormozi") or "").strip(),
+                              "piliero": str(v.get("piliero") or "").strip(),
+                              "brief": str(v.get("brief") or "").strip()}
+    b = data.get("batch") or {}
+    if isinstance(b, dict):
+        out["batch"] = {"piliero": str(b.get("piliero") or "").strip(),
+                        "verdict": str(b.get("verdict") or "").strip().lower()}
+    return out if out["variants"] else {}
+
+
+def panel_brief(panel_row: dict) -> str:
+    """The panel's verdicts and rewritten brief, written for the drafter."""
+    if not panel_row or not str(panel_row.get("brief") or "").strip():
+        return ""
+    return ("\n## The panel sat on this concept before you — follow its brief\n"
+            f"Hormozi: {panel_row.get('hormozi', '')}\n"
+            f"Piliero: {panel_row.get('piliero', '')}\n"
+            f"THE BRIEF: {panel_row['brief']}")
+
+
 #: The format the drafter answers in. Two labelled lines and the ad, because a
 #: headline and the value levers cannot be inferred from prose — the levers
 #: especially: see `levers_present` on why they are DECLARED rather than
