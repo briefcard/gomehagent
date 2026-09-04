@@ -114,6 +114,22 @@ def main() -> int:
            meta={"entity_label": "Aqua set", "audience_key": "hosts",
                  "variants": 3})))
 
+    # weekly_report emits fmt="report_document" with subject, to and days in
+    # meta (skill_pack._run_weekly_report), and the index named every one
+    # of them "report document · <date>" — reproduced 2026-09-03.
+    rep = admin_ui.artifact_label(_A(
+        format="report_document", created_at="2026-09-03",
+        meta={"subject": "Week of 25 Aug: orders up, one stockout",
+              "to": "owner@example.com", "days": 7, "html": "<div>x</div>"}))
+    ck("a client report is named by its subject, recipient and window — "
+       "never 'report document · date'",
+       rep.startswith("Week of 25 Aug") and "to owner@example.com" in rep
+       and "7 days" in rep and "report document" not in rep, rep)
+    ck("…and one with no subject still falls back rather than rendering blank",
+       admin_ui.artifact_label(_A(format="report_document",
+                                  created_at="2026-09-03"))
+       .startswith("report document"))
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

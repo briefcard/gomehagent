@@ -296,9 +296,7 @@ before `main`:
   command for that call.
 
 **Open, in the order to take them:**
-1. `weekly_report`'s artifact carries no `format` on the item — check what
-   the Drafts index names it.
-2. Owner actions, unchanged: Google API access (both GBP systems), one real
+1. Owner actions, unchanged: Google API access (both GBP systems), one real
    Klaviyo push, the first Semrush "Read the competition" click,
    `/health/workers` after a day at two instances, `OPENAI_API_KEY` present.
 
@@ -323,6 +321,11 @@ segments only, on the weekly sweep, so the zero-members drift can fire on
 the one ESP in use. Two halves again: `esp.audiences` read `count`,
 `omnisend.segments` never supplied it, and the comment between them said
 "carries no counts" as a guess.
+`weekly_report`: the ArtifactBody row DOES carry `format="report_document"`
+(the emitted item dict does not, and nothing reads it there); what was wrong
+is that `artifact_label` had no branch for it, so every client report in
+Review, Drafts and the held list read "report document · <date>" with the
+subject, recipient and window sitting unread in its meta. Named now.
 
 **Left deliberately unchanged:** `campaign_email` is not in `AUTO_SHIPS` (a
 send cannot be recalled); ads are carried to Meta by hand; the reports planner

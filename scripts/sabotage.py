@@ -5835,6 +5835,17 @@ SABOTAGES = [
                "one case the bundle is meant to stop",
     },
     {
+        "name": "a_client_report_has_its_real_name",
+        "file": "app/admin_ui.py",
+        "find": '    elif fmt == "report_document":',
+        "replace": '    elif fmt == "report_document" and False:  # SABOTAGE',
+        "suites": ["test_artifact_identity.py"],
+        "why": "every weekly client report in Review, the Drafts index and the "
+               "held list reads 'report document · <date>', so four reports "
+               "to four clients are four identical rows and the only way to "
+               "tell whose is whose is to open each one",
+    },
+    {
         "name": "a_linked_segments_count_comes_from_statistics",
         "file": "app/segments.py",
         "find": '            count = esp.audience_count(tenant, str(match.get("id") or ""))',

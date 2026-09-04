@@ -5624,6 +5624,18 @@ def artifact_label(art) -> str:
             return _dated(f"Ads — {who}" if who else "Ads",
                           f"to {aud}" if aud else "",
                           f"{n} variants" if n else "")
+    elif fmt == "report_document":
+        # The weekly client report. Its subject, recipient and window were
+        # all on the artifact's meta from the day the skill shipped, and the
+        # index still said "report document · 2026-09-03" — the generic
+        # fallback this function exists to retire (found 2026-09-03 by
+        # reading the rehearsal's artifacts, not its pass line).
+        subject = str(meta.get("subject") or "").strip()
+        to = str(meta.get("to") or "").strip()
+        days = meta.get("days")
+        if subject:
+            return _dated(subject, f"to {to}" if to else "",
+                          f"{days} days" if days else "")
     generic = (fmt or "artifact").replace("_", " ")
     return f"{generic} · {when}" if when else generic
 
