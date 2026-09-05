@@ -407,7 +407,7 @@ that NOTHING in the catalogue is unbuilt: the ledger's RECORDED_UNBUILT is empty
 and its guard moved to the last open entry (the correspondence archive).
 `gbp_post` now rides `ledger.ARTIFACT_FORMATS` — one writer of body rows.
 
-**2026-09-04/05, the §6 thread (`c1b607e`..`0c69cb4`, nine ships).** Streams 2
+**2026-09-04/05, the §6 thread (`c1b607e`..`48ea9d7`, ten ships).** Streams 2
 and 3 are DONE; stream 1 (UX polish) needs the owner at the console.
 
 *The Plan* now has the three controls it lacked. `planner.MIX` declares shares
@@ -452,6 +452,20 @@ Nothing emits inside the drafting loop any more — drafts are held, checked,
 corrected, then filed. A rewrite that obeys the brief and breaks the craft
 rules is REFUSED and the first draft stands, said out loud.
 
+**Then the whole ad system turned out to ship nothing.** Ads are carried to Meta
+by hand BY DESIGN, so `/admin/ad_export` is the declared ship for `ad_creative`
+— and it read `headline`, `primary_text`, `description` and `cta` off each
+variant. A variant row carries `n`, `output_id`, `angle`, `basis`, `claim_ids`,
+`claim`, `text` and `dropped`. `primary_text` matched ONE line in the whole
+repository: the reader. Every export anyone has ever run was variant headers,
+blank lines and the closing instruction — the copy was drafted, craft-checked,
+panel-checked, redrafted and approved, then not exported. The suite passed
+because it asserted `"variant 1" in txt` and counted marker lines: it checked
+the header and never the copy. `text` is now the single writer of the body,
+`headline` is written when the drafter produced one, and a variant carrying no
+copy at all SAYS so and is counted in the summary line rather than exporting as
+a silent blank.
+
 **The standing rules this stretch added:**
 - **A critique that is shown and not applied is a task list, not a system.**
   The panel is evidence behind an ad that already follows it; the board leads
@@ -465,6 +479,12 @@ rules is REFUSED and the first draft stands, said out loud.
 - **Key a control on the FACT, never on the fault.** The blog picker was shown
   when publishing was `ok is not True`; the moment a missing blog stopped being
   a failure the control vanished. It hangs off `publish["choose"]` now.
+- **Assert on the PAYLOAD, never on the frame around it.** The export suite
+  checked headers and marker counts, both of which survive an empty body; the
+  new assertion blanks a stored batch and demands the export say so.
+- **One field, one writer.** My first export fix wrote the body twice (`text`
+  and a new `primary_text`); the second copy goes stale the moment an owner
+  edits a variant. The assertion that caught it is now the rule.
 - **A gate is allowed where only one thing can fail it.** `integration` gates
   composited frames and is not even ASKED of a generated scene — gating those
   would be the false refusal `assess` was written to avoid.
