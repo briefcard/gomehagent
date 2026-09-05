@@ -553,13 +553,31 @@ read is on a button and on no schedule.
 >   ranking of three providers. The "mostly approach" weighting is
 >   introspection, and three weeks of renderer rests on it.
 >
-> Cheapest real wins, none of them in the old plan: pass `prominent` and
-> `commitment` into `batch` (one line — it is why the frame and the copy
-> disagree); put a frames block in `ad_export` (the copy↔frame binding dies
-> when `batch()` returns, so the owner hand-pairs 24 unlabelled frames);
-> unhardcode `record_asset_outcome`'s channel (`pick`'s top rung has never
-> fired on the ad path, so which photograph goes into a Baci frame is decided
-> by insertion order); and stop the integration gate failing open.
+> **SHIPPED 2026-09-05 on the owner's go-ahead** (`fb00ed1`, `5a95333`,
+> `a054632`, `6b93601`, `493b7ac` — 18 guards, rehearsal clean across five
+> accounts): the ad's own words and situation reach the picture brief and its
+> frames ride back on the export tagged `output:<id>`; a review that did not
+> run is no longer counted as a pass and an ad's result reaches the pictures
+> that ran in it; "Photographic and real" is off the ad path and the treatment
+> lives on the FORMAT with the craft question following it; `_PLATE_RULE` is
+> split three ways; every criterion is positive-polarity with the pass-line
+> stated; and a WordPress article carries its featured image.
+>
+> **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
+> Two direction rows (Baci, Ironside) — hand them a filled draft to strike
+> through. ~40 frames they label horrible/fine, without which any gate you
+> build stops broken files and calls itself a quality bar. A ~$20 blind
+> ranking of three providers, because the "mostly approach" weighting is
+> introspection and the renderer rests on it.
+>
+> **AND THE ONE THAT IS A DECISION, NOT A TASK.** Ironside and Coverings need
+> `compose.photo_with_headline` — the no-generation path, their own photograph
+> cropped and typed, already written with zero callers. It SETS TYPE INTO A
+> FRAME, which reverses the owner's 2026-09-04 call and collides with the
+> guard `no_type_is_burned_into_a_frame`. DO NOT SHIP IT UNILATERALLY. Re-put
+> it as *type we control, in your font, positioned by measurement, with Canva
+> kept as an override* — a different proposal from the baked DejaVu at a fixed
+> position they rejected.
 >
 > **2. UX polish — the other open stream, and it needs the owner.** They walk the
 > console and give you the surface; take each as given, one ship each, act where
