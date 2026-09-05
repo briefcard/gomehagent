@@ -439,23 +439,87 @@ def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
     return [], ""
 
 
+#: THE FIELDS THE VIOLATIONS ARE ACTUALLY IN. `_clean` narrows to <main> and
+#: then strips every tag with `_HTML`, which deletes attributes — so the page
+#: title, the meta description and every `alt` were gone before a single
+#: phrase was matched. Baci's own audit found ~110 banned claims store-wide
+#: and 96 of them were one SEO-meta template, so the scan could return "No
+#: banned claim found" about a store whose violations it structurally could
+#: not see. Reproduced before this was written: the identical phrase in a meta
+#: description scores clean and in a paragraph scores a hit.
+_META = re.compile(r"<meta\b[^>]*>", re.I)
+_ATTR = re.compile(r"""(\w[\w:-]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""")
+_ALT_OF = re.compile(r"""<(?:img|area|input)\b[^>]*?\balt\s*=\s*("([^"]*)"|'([^']*)')""",
+                     re.I | re.S)
+
+
+def _attrs(tag: str) -> dict:
+    out = {}
+    for m in _ATTR.finditer(tag):
+        out[m.group(1).lower()] = m.group(3) or m.group(4) or m.group(5) or ""
+    return out
+
+
+def named_fields(html_text: str) -> list[tuple[str, str]]:
+    """Every readable field a page carries that `_clean` throws away.
+
+    Returned as (WHERE, text) pairs and matched separately, because a finding
+    that says only "on this page" cannot be acted on: the words are not on the
+    page when you open it. "in the meta description" is a place somebody can
+    go and fix.
+    """
+    import html as _htmllib
+    raw = html_text or ""
+    out: list[tuple[str, str]] = []
+    if (m := _TITLE.search(raw)):
+        title = " ".join(_htmllib.unescape(_HTML.sub(" ", m.group(1))).split())
+        if title:
+            out.append(("page title", title))
+    for tag in _META.findall(raw):
+        a = _attrs(tag)
+        key = (a.get("name") or a.get("property") or "").lower()
+        content = " ".join(_htmllib.unescape(a.get("content", "")).split())
+        if not content:
+            continue
+        if key in ("description", "og:description", "twitter:description"):
+            out.append(("meta description", content))
+        elif key in ("og:title", "twitter:title"):
+            out.append(("social title", content))
+    seen = set()
+    for m in _ALT_OF.finditer(raw):
+        alt = " ".join(_htmllib.unescape(m.group(2) or m.group(3) or "").split())
+        if alt and alt.lower() not in seen:
+            seen.add(alt.lower())
+            out.append(("image alt text", alt))
+    return out
+
+
 def check_page(tenant: str, url: str, html: str = "") -> dict:
     """Check one page. Uses `html` when discovery already supplied it."""
     import httpx
     if html:
-        text = _clean(html)
+        source = html
     else:
         try:
             r = httpx.get(url, timeout=25, follow_redirects=True, headers=HEADERS)
             if r.status_code != 200:
                 return {"url": url, "status": f"HTTP {r.status_code}",
                         "phrases": [], "questions": []}
-            text = _clean(r.text)
+            source = r.text
         except Exception as exc:  # noqa: BLE001
             return {"url": url, "status": exc.__class__.__name__,
                     "phrases": [], "questions": []}
 
+    text = _clean(source)
     hits, questions = _match(tenant, text)
+    for where, value in named_fields(source):
+        more, more_q = _match(tenant, value)
+        for h in more:
+            h["where"] = where
+        for q in more_q:
+            q["where"] = where
+        hits += more
+        questions += more_q
     return {"url": url, "status": "ok", "phrases": hits,
             "questions": questions, "words": len(text.split())}
 

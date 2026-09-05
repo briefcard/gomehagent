@@ -7039,6 +7039,30 @@ SABOTAGES = [
         'suites': ['test_wordpress_carries_its_hero.py'],
         'why': 'a hero that failed to fetch or upload vanishes without a word, which replaces one silent drop with another and is no fix at all',
     },
+    {
+        'name': 'the_banned_phrase_on_the_store_is_on_the_list',
+        'file': 'app/kb_seed.py',
+        'find': '        "hand-decorated", "hand decorated", "handdecorated",',
+        'replace': '        # SABOTAGE',
+        'suites': ['test_the_ban_list_reaches_the_fields.py'],
+        'why': "the one phrase 96 of Baci's ~110 live violations actually use drops off the list again, so the scan reports clean about the template it was written to catch and twenty-one test scripts go on proving the machinery on a phrase production does not enforce",
+    },
+    {
+        'name': 'the_scan_reads_the_fields_it_cannot_display',
+        'file': 'app/compliance.py',
+        'find': '    for where, value in named_fields(source):',
+        'replace': '    for where, value in []:  # SABOTAGE',
+        'suites': ['test_the_ban_list_reaches_the_fields.py'],
+        'why': "the page title, the meta description and every alt go back to being stripped before matching, so content_compliance returns 'No banned claim found' about a store whose violations sit entirely in the fields it cannot read",
+    },
+    {
+        'name': 'the_alt_text_meets_the_ban_list',
+        'file': 'app/seo_guard.py',
+        'find': '    for outer, inner in NESTED_PROSE:',
+        'replace': '    for outer, inner in []:  # SABOTAGE',
+        'suites': ['test_the_ban_list_reaches_the_fields.py'],
+        'why': 'alt text publishes unchecked beside six prose fields that are checked — copy that is read aloud by a screen reader and indexed by Google, going out through the one field nobody gated',
+    },
 ]
 
 

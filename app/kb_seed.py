@@ -128,6 +128,13 @@ def seed_baci() -> None:
         # production method — not handcraft
         "handmade", "hand-made", "hand crafted", "hand-crafted", "handcrafted",
         "hand-painted", "hand painted", "artisan", "artisanal", "craftsmanship",
+        # THE ONE THAT WAS ACTUALLY ON THE STORE. The 2026-08 audit found ~110
+        # violations and 96 of them were a single "Hand-decorated" SEO-meta
+        # template — the phrase this list did not contain, while twenty-one
+        # test scripts used it as their canonical example. The machinery was
+        # proven end to end on a phrase production never enforced.
+        "hand-decorated", "hand decorated", "handdecorated",
+        "hand-finished", "hand finished", "hand-glazed", "hand glazed",
         # physical customisation is not offered
         "monogram", "monogrammed", "engraved", "engraving", "made-to-order",
         "made to order", "custom-made", "bespoke",

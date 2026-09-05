@@ -29,6 +29,13 @@ from __future__ import annotations
 PROSE_FIELDS = ("title", "body_html", "content", "summary_html",
                 "seo_title", "seo_description", "excerpt")
 
+#: NESTED, so it cannot be a name in the tuple above. `fields["image"]` is
+#: `{src, alt}` and the alt is copy — it ships beside the picture, it is read
+#: aloud by a screen reader, and Google indexes it. It went out unchecked
+#: while every other string on the same payload was gated, which is how a
+#: banned claim reaches a page through the one field nobody was reading.
+NESTED_PROSE = (("image", "alt"),)
+
 
 def tenant_for(profile: dict) -> str:
     """Which account this site belongs to, by domain.
@@ -61,6 +68,10 @@ def check(profile: dict, fields: dict, *, what: str = "") -> str:
                 f"to a tenant before publishing to it.")
 
     parts = [str(fields.get(f) or "") for f in PROSE_FIELDS]
+    for outer, inner in NESTED_PROSE:
+        block = fields.get(outer)
+        if isinstance(block, dict):
+            parts.append(str(block.get(inner) or ""))
     body = "\n".join(p for p in parts if p.strip())
     if not body.strip():
         return ""            # nothing to say means nothing to check
