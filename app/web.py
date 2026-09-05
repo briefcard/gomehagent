@@ -3415,6 +3415,43 @@ async def ad_variant_drop(request: Request, key: str = Depends(admin_key)):
                    f"approving the batch denies it")
 
 
+
+def _variant_frames(tenant: str, output_id: str) -> list[str]:
+    """The pictures this variant asked for, beside its words.
+
+    THE BINDING EXISTED ONLY INSIDE `batch()`. Frames are filed with
+    `tags=[angle, lever, moment, framing]` — the grid cell, not the argument —
+    so which picture belongs to which variant was destroyed the moment the run
+    returned, and the owner was hand-pairing twenty-four unlabelled frames
+    against N copy variants in Ads Manager. A meaningful share of "the product
+    in the ad is not the product in the photo" is that handoff, and no model,
+    prompt or renderer touches it.
+
+    `batch` now tags each frame `output:<id>`, so this reads the tag back.
+    A variant whose frames have not been made SAYS so rather than exporting
+    copy that looks complete.
+    """
+    from . import kb as kbm
+    if not output_id:
+        return ["Frames: (this variant predates frame tagging — open the "
+                "board and make a set)"]
+    rows = [a for a in kbm.assets(tenant, publishable_only=False)
+            if f"output:{output_id}" in list(a.tags or [])]
+    if not rows:
+        return ["Frames: none made yet — open the board and make a set"]
+    lines = [f"Frames ({len(rows)}):"]
+    for a in rows:
+        cell = " / ".join(str(x) for x in list(a.tags or [])
+                          if not str(x).startswith("output:"))
+        flagged = ""
+        try:
+            failed = list((a.assessment or {}).get("failed") or [])
+            if failed:
+                flagged = f"  [review flagged: {', '.join(failed)}]"
+        except Exception:                                        # noqa: BLE001
+            pass
+        lines.append(f"  {a.url}   ({cell}){flagged}")
+    return lines
 @app.get("/admin/ad_export", response_class=PlainTextResponse)
 def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
     """The approved copy, as text a person can paste into Meta.
@@ -3456,8 +3493,8 @@ def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
         # names below were read from a row that carried none of them, so every
         # export was headers and nothing else — and `test_ad_board` passed
         # because it asserted "variant 1" appears, not that any copy did.
-        # `primary_text` is written now and `text` stays as the fallback for
-        # every batch filed before it was.
+        # ONE FIELD, ONE WRITER: `text` is the only body, because a second
+        # copy goes stale the moment an owner edits a variant.
         body = str(v.get("text") or "").strip()
         wrote = False
         for label, val in (("Headline", str(v.get("headline") or "").strip()),
@@ -3473,6 +3510,7 @@ def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
             out.append("(this variant carries no copy — open the board and "
                        "regenerate it)")
             empty += 1
+        out.extend(_variant_frames(art.tenant, str(v.get("output_id") or "")))
         out.append("")
     if empty:
         out.append(f"WARNING: {empty} of {len(live)} variant(s) exported no "
@@ -6832,9 +6870,20 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
             return _back_to_content(tenant, msg="no such ad variant")
         tenant = row.tenant or tenant
         claim_ids = list(row.claim_ids or [])
+        # THE AD'S OWN WORDS AND ITS SITUATION, both of which this row has
+        # carried all along and neither of which was ever sent. `headline`
+        # reaches the return note and nothing else; `prominent` is the
+        # parameter written to carry exactly this — its clause tells the
+        # generator the picture "sits beside these words, and must not repeat
+        # them literally" — and it had never fired in production. And
+        # `_subject_of` reads `situation` FIRST, so an ad about a circumstance
+        # had nothing to be of and fell through to the entity name. That is
+        # why the frame and the copy did not agree.
         args = dict(entity_key=row.entity_key or "",
                     audience_key=row.audience_key or "",
                     positioning=row.positioning or "",
+                    situation=row.situation or "",
+                    prominent=_first_line(row.body or ""),
                     headline=_first_line(row.body or ""))
     # THE CLAIM AS TEXT. `brief_for` puts it in the prompt as the thing the
     # picture must not contradict, and a claim id in a prompt is a string of
@@ -6844,7 +6893,8 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
         got = [c for c in kbm.claims(tenant, entity_key=args["entity_key"] or None)
                if c.id == claim_ids[0]]
         claim = str(getattr(got[0], "claim", "") or "") if got else ""
-    _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates, **args)
+    _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,
+            output_id=output_id, **args)
     return _back_to_content(
         tenant, msg=(f"making {plates * cr.PER_PROMPT} frames — they appear "
                      f"under Pictures as one set when they land"),

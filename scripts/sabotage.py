@@ -6907,6 +6907,38 @@ SABOTAGES = [
         'suites': ['test_ad_board.py'],
         'why': 'a variant that exports nothing looks identical to one the owner simply has not written yet, so a broken batch is pasted into Meta as blank ads instead of being sent back to the board',
     },
+    {
+        'name': 'the_ad_s_own_words_reach_the_picture',
+        'file': 'app/web.py',
+        'find': '                    prominent=_first_line(row.body or ""),',
+        'replace': '                    # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': 'the picture is briefed with no idea what the ad it sits beside actually says, so the frame and the copy argue different things — the owner\'s "the ad visuals are still horrible", one line up from the pixels',
+    },
+    {
+        'name': 'the_picture_is_about_the_ad_s_situation',
+        'file': 'app/web.py',
+        'find': '                    situation=row.situation or "",',
+        'replace': '                    # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': '_subject_of reads situation FIRST, so without it an ad about a circumstance falls through to the entity name and the picture is of a product rather than of the moment the ad is about',
+    },
+    {
+        'name': 'a_frame_is_filed_under_the_variant_that_asked_for_it',
+        'file': 'app/creative.py',
+        'find': '              + ([f"output:{output_id}"] if output_id else [])))',
+        'replace': '              ))  # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': "the binding between a copy variant and its pictures exists only inside batch()'s stack frame and dies when it returns, so the export ships copy with no pictures and the owner hand-pairs twenty-four unlabelled frames in Ads Manager",
+    },
+    {
+        'name': 'the_export_carries_the_pictures_it_made',
+        'file': 'app/web.py',
+        'find': '        out.extend(_variant_frames(art.tenant, str(v.get("output_id") or "")))',
+        'replace': '        pass  # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': 'THIS IS THE SHIP and it would carry words only — a variant whose frames were never made looks exactly like one whose frames are fine',
+    },
 ]
 
 

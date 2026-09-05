@@ -853,7 +853,7 @@ NEEDS_THE_PRODUCT = ("product_led", "detail")
 def batch(tenant: str, *, commitment: dict | None = None,
           positioning: str = "", entity_key: str = "", audience_key: str = "",
           claim: str = "", prominent: str = "", headline: str = "",
-          subline: str = "", fmt: str = "ad_frame",
+          subline: str = "", fmt: str = "ad_frame", output_id: str = "",
           plates: int = 4, review: bool = True) -> dict:
     """A set of frames for one ad, filed together under one batch id.
 
@@ -945,6 +945,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
             filed = _file_frame(tenant, blob, base, cell, batch_id,
                                 entity_key=entity_key, prompt=text,
                                 review=review, verdict=verdict,
+                                output_id=output_id,
                                 product_id=product_id if needs else "")
             if filed.get("duplicate"):
                 repeats += 1
@@ -1075,8 +1076,19 @@ _PLACEMENT = {"square": "1:1", "portrait": "4:5", "landscape": "1:1"}
 
 def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 batch_id: str, *, entity_key: str, prompt: str, review: bool,
-                product_id: str = "", verdict: dict | None = None) -> dict:
-    """Store the bytes, judge them, and file the asset. One frame's whole life."""
+                product_id: str = "", output_id: str = "",
+                verdict: dict | None = None) -> dict:
+    """Store the bytes, judge them, and file the asset. One frame's whole life.
+
+    THE TAGS NAMED THE GRID AND NOT THE ARGUMENT. `[angle, lever, moment,
+    framing]` says where on the walk a frame came from, which is what a
+    reviewer wants and not what a SHIP wants: the export lists copy variants,
+    and nothing filed here said which variant a picture was made for. That
+    binding lived in this function's caller's stack frame and died when it
+    returned, so the owner paired twenty-four unlabelled frames by eye.
+    `output:<id>` is written alongside the cell so `/admin/ad_export` can put
+    each variant's pictures under its words.
+    """
     from . import kb as kbmod, media
     put = media.put(tenant, blob, mime="image/png", origin=GENERATED_ORIGIN)
     if not put["ok"]:
@@ -1099,7 +1111,8 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
         kind="image", subject=base["subject"][:200], source="generated",
         prompt=prompt[:2000], entity_key=entity_key,
         origin=GENERATED_ORIGIN, batch=batch_id,
-        tags=[cell["angle"], cell["lever"], cell["moment"], cell["framing"]])
+        tags=([cell["angle"], cell["lever"], cell["moment"], cell["framing"]]
+              + ([f"output:{output_id}"] if output_id else [])))
     row = next((a for a in kbmod.assets(tenant, publishable_only=False)
                 if (a.url or "") == put["url"]), None)
     if row is None:
