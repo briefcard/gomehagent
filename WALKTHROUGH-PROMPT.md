@@ -407,7 +407,7 @@ that NOTHING in the catalogue is unbuilt: the ledger's RECORDED_UNBUILT is empty
 and its guard moved to the last open entry (the correspondence archive).
 `gbp_post` now rides `ledger.ARTIFACT_FORMATS` — one writer of body rows.
 
-**2026-09-04, the §6 thread (`c1b607e`..`b20e6f2`, seven ships).** Streams 2
+**2026-09-04/05, the §6 thread (`c1b607e`..`0c69cb4`, nine ships).** Streams 2
 and 3 are DONE; stream 1 (UX polish) needs the owner at the console.
 
 *The Plan* now has the three controls it lacked. `planner.MIX` declares shares
@@ -434,7 +434,31 @@ publish arm — recorded-if-it-exists, then the store's sole blog, then
 nothing; a store it cannot read with a blog already chosen publishes into it
 unconfirmed rather than stranding an account that has been working for months.
 
+**The panel had to be made BINDING, not advisory** (owner, 2026-09-05: *"it
+leaves us with a need to apply the edits provided and summarized"*). Two
+defects, both reproduced. `ad_prompt` put the rewritten brief BEFORE the
+ruleset's `## Angle`, and the two contradict by design — the panel's job is to
+say what a concept should stop doing, and the commonest thing it says is to
+drop the angle's own mechanic. A brief reading "drop the identity-quiz angle"
+sat 190 characters above a heading ordering "which one are you", so the generic
+instruction was last, under a heading, and won. The angle is now demoted to
+where the concept STARTED and the brief comes last saying it overrides. Second:
+nothing verified the brief landed. `ad_craft.review` measures the SHAPE and a
+draft passes all of it while keeping the mechanic it was told to drop, because
+that is not a character count. `skill_pack.panel_check` asks the same two
+reviewers, ONCE for the batch, whether each draft did what its brief said;
+anything named as ignored is written again with the objection in front of it.
+Nothing emits inside the drafting loop any more — drafts are held, checked,
+corrected, then filed. A rewrite that obeys the brief and breaks the craft
+rules is REFUSED and the first draft stands, said out loud.
+
 **The standing rules this stretch added:**
+- **A critique that is shown and not applied is a task list, not a system.**
+  The panel is evidence behind an ad that already follows it; the board leads
+  with what was applied and folds the reviewers' words behind that.
+- **The specific instruction must be the LAST word.** Where a generic rule and
+  a brief written about this particular subject disagree, ordering decides
+  which one the model obeys, and a heading beats a paragraph.
 - **A knob the generator ignores is not a knob** — the mix is refused at the
   writer when the shares do not sum, checked against what would be STORED, so
   a partial write cannot leave a mix the planner silently discards.
