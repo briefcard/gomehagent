@@ -7023,6 +7023,22 @@ SABOTAGES = [
         'suites': ['test_the_review_answers_one_question.py'],
         'why': 'the reviewer is left to guess what `pass` means across eight differently-shaped questions, which is the state that let two inverted criteria go unnoticed',
     },
+    {
+        'name': 'a_wordpress_article_carries_its_hero',
+        'file': 'app/wordpress_seo.py',
+        'find': '    if media_id:\n        body["featured_media"] = media_id',
+        'replace': '    if False:  # SABOTAGE\n        body["featured_media"] = media_id',
+        'suites': ['test_wordpress_carries_its_hero.py'],
+        'why': 'the featured image goes back to being computed, rights-checked, handed over and dropped — every WordPress article publishes with no hero, silently, which is why nobody found it by reading a post',
+    },
+    {
+        'name': 'a_hero_that_did_not_arrive_is_said',
+        'file': 'app/wordpress_seo.py',
+        'find': '        + note,',
+        'replace': '        + "",  # SABOTAGE',
+        'suites': ['test_wordpress_carries_its_hero.py'],
+        'why': 'a hero that failed to fetch or upload vanishes without a word, which replaces one silent drop with another and is no fix at all',
+    },
 ]
 
 

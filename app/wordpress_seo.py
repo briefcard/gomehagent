@@ -319,14 +319,65 @@ def create_article(profile: dict, blog_id=None, fields: dict | None = None) -> s
         body["slug"] = fields["handle"]
     if fields.get("seo_description") is not None:
         body["excerpt"] = fields["seo_description"]
+    media_id, note = _featured_media(profile, fields)
+    if media_id:
+        body["featured_media"] = media_id
     obj = _send(profile, "POST", "posts", body)
     _apply_plugin_meta(profile, "posts", obj.get("id"), fields)
     from . import sites
     return sites.with_article_id(
         f"{obj.get('link', '(created)')} — "
         + ("published" if fields.get("published") else
-           "saved as a draft (pass published=true to publish)"),
+           "saved as a draft (pass published=true to publish)")
+        + note,
         obj.get("id"))
+
+
+def _featured_media(profile: dict, fields: dict) -> tuple[int, str]:
+    """The article's hero, re-hosted in the client's library, as an id.
+
+    THE WORD "image" DID NOT APPEAR IN THIS MODULE'S ARTICLE WRITER.
+    `approvals._article_image_for` computes the hero, rights-checks it and
+    hands it over in `fields["image"]`; `shopify_seo` writes it; this built a
+    payload of title, content, status, slug and excerpt and dropped it. Every
+    WordPress article this platform has ever published went out with a
+    featured image chosen, cleared and discarded — silently, which is why
+    nobody found it by looking at a post.
+
+    WordPress will not take a URL. `featured_media` is an ATTACHMENT ID, so a
+    hero that exists as a URL — which is exactly what the field carries, and
+    what Shopify accepts directly — has to be fetched and re-hosted first.
+    `put_image` already does the hard half.
+
+    Returns `(id, note)`. A picture that fails NEVER fails the article: the
+    prose is the article, and refusing to publish it over a hero is a worse
+    outcome than publishing without one. But it is always SAID — a hero that
+    quietly did not arrive is the defect this function exists about, and
+    replacing a silent drop with a different silent drop would be no fix.
+    """
+    img = fields.get("image")
+    if isinstance(img, str):
+        img = {"src": img.strip()} if img.strip() else None
+    if not isinstance(img, dict):
+        return 0, ""
+    src = str(img.get("src") or img.get("url") or "").strip()
+    if not src:
+        return 0, ""
+    alt = str(img.get("alt") or fields.get("title") or "").strip()
+    try:
+        r = httpx.get(src, timeout=30, follow_redirects=True)
+        r.raise_for_status()
+        blob = r.content
+    except Exception as exc:                                     # noqa: BLE001
+        return 0, (f" — the featured image could not be fetched from "
+                   f"{src[:60]} ({exc.__class__.__name__}), so the post has "
+                   f"no hero")
+    name = (src.rsplit("/", 1)[-1].split("?")[0] or "hero.png")[:96]
+    got = put_image(profile, blob, filename=name, alt=alt)
+    if not got.get("ok") or not got.get("id"):
+        return 0, (f" — the featured image did not upload "
+                   f"({got.get('error', 'unknown')}), so the post has no hero")
+    return int(got["id"]), ""
 
 
 def update_article(profile: dict, blog_id=None, article_id=None,
