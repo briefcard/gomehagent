@@ -533,12 +533,40 @@ read is on a button and on no schedule.
 > scripts/register.py --write` before shipping whenever a guard or a caller moved;
 > verify on `/health`; write the memory note before the thread ends.
 >
-> **1. UX polish — the open stream, and it needs the owner.** They walk the
+> **1. THE CREATIVE QUALITY GAP — the owner's live thread, and it outranks the
+> rest.** 2026-09-05: *"we still have not defined how we will improve the output
+> of the actual generated content. Is it a model difference? Is it an approach?
+> an input? A tool that must be used?"* Answered and published; the analysis is
+> in the memory note `gomehagent-creative-substrate` and the artifact it names.
+> **Read that note before touching any generator** — it carries 70 verified
+> findings and, more importantly, four traps that will bite whoever starts:
+>
+> - `_PLATE_RULE` must be split into THREE constants. Moving the whole string
+>   behind `for_product` re-introduces invented products for 100% of Ironside
+>   and Coverings frames — the failure this architecture was built after.
+> - Phase 3 REOPENS the owner's 2026-09-04 "type belongs in Canva" decision.
+>   Do not reverse it unilaterally; re-put it as *type we control, in your
+>   font, positioned by measurement, with Canva kept as an override.*
+> - No deterministic gate can fail the ad the owner calls horrible. Get ~40
+>   labelled frames from them FIRST; ship only the measures that separate.
+> - Week 0 is two owner tasks, not code: two direction rows, and a blind
+>   ranking of three providers. The "mostly approach" weighting is
+>   introspection, and three weeks of renderer rests on it.
+>
+> Cheapest real wins, none of them in the old plan: pass `prominent` and
+> `commitment` into `batch` (one line — it is why the frame and the copy
+> disagree); put a frames block in `ad_export` (the copy↔frame binding dies
+> when `batch()` returns, so the owner hand-pairs 24 unlabelled frames);
+> unhardcode `record_asset_outcome`'s channel (`pick`'s top rung has never
+> fired on the ad path, so which photograph goes into a Baci frame is decided
+> by insertion order); and stop the integration gate failing open.
+>
+> **2. UX polish — the other open stream, and it needs the owner.** They walk the
 > console and give you the surface; take each as given, one ship each, act where
 > you report. There is no list to work from: asking them to open the console and
 > name what is wrong IS the first move of this stream.
 >
-> **2. If the owner gives you an issue instead, do that and only that.**
+> **3. If the owner gives you an issue instead, do that and only that.**
 >
 > **What is already done, so you do not rebuild it** (2026-09-04, `c1b607e`..`b20e6f2`):
 > the Plan's mix / recommendation / reset / refresh; Ad Creative's Hormozi–Piliero
