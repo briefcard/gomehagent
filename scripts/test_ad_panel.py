@@ -179,8 +179,23 @@ def main() -> int:
     ck("the brief reaches the drafter's prompt",
        "PANELBRIEF-1" in prompt and "HORMOZI-1" in prompt and "PILIERO-1" in prompt,
        prompt[-300:])
-    ck("  ahead of the ruleset's angle — the specific before the generic",
-       prompt.index("The panel sat") < prompt.index("## Angle"))
+    # THE BRIEF IS THE LAST WORD, and the angle above it says so. It used to
+    # come BEFORE `## Angle` and the two contradict by design: reproduced
+    # 2026-09-05 with a brief saying "drop the identity-quiz angle entirely"
+    # sitting above a heading telling the model to open with "which one are
+    # you". The generic instruction was last, under a heading, so it won.
+    ck("  AFTER the ruleset's angle, because the brief has to be the last word",
+       prompt.index("## Angle") < prompt.index("WRITE THIS"),
+       "the panel's whole job is to say what this concept should stop doing")
+    ck("  and it says outright that it overrides the angle",
+       "OVERRIDES the angle" in prompt and "the brief wins" in prompt)
+    ck("  while the angle above says it is where the concept STARTED",
+       "This is where the concept STARTED" in prompt)
+    plain = "\n".join(skill_pack.ad_prompt(
+        {**b1, "panel": {}}, claim, "identity", []))
+    ck("  a concept with no brief keeps the angle as its instruction",
+       "STARTED" not in plain and "## Angle" in plain,
+       "demoting it with nothing to replace it would leave no instruction")
     ck("the run says the panel sat, with Piliero's verdict on the batch",
        any("the panel sat on 3 concept(s)" in n and "distinct" in n for n in r["notes"]),
        str([n for n in r["notes"] if "panel" in n])[:200])
@@ -196,10 +211,135 @@ def main() -> int:
     c = TestClient(web.app, base_url="https://testserver")
     page = c.get(f"/admin/work/{anchor}?key={KEY}").text
     ck("the board renders the panel beside each variant",
-       "what Hormozi and Piliero said" in page and "PANELBRIEF-2" in page
+       "The reviewers" in page and "PANELBRIEF-2" in page
        and "HORMOZI-3" in page, "")
+    # SECONDARY EVIDENCE, not the headline. Owner, 2026-09-05.
+    ck("  folded, because the ad is the product and this is the working",
+       "<details class=\"sec\"><summary>The reviewers" in page
+       and "<details class=\"sec\" open><summary>The reviewers" not in page, "")
+    ck("  and a variant they passed says so in one line",
+       "they read it back and passed it" in page, "")
     ck("  and Piliero on the batch", "batch: distinct" in page
        and "three distinct entries" in page)
+
+    print("\n— AND THE REVIEWERS READ THEIR OWN DRAFTS BACK —")
+    # Owner, 2026-09-05: "it leaves us with a need to apply the edits provided
+    # and summarized … check against their opinions when you generate the
+    # first draft." The brief was an instruction and nothing verified it
+    # landed; `ad_craft.review` measures the SHAPE and a draft can pass all of
+    # it while keeping the mechanic the brief told it to drop.
+    LOG.clear()
+    seen_checks: list = []
+    redrafts: list = []
+
+    class _Drafter:
+        def __init__(self):
+            self.n = 0
+
+        def __call__(self, bundle, claim, angle, objections):
+            self.n += 1
+            rules = str((bundle.get("rules") or {}).get("block") or "")
+            if "DID NOT FOLLOW THE BRIEF" in rules:
+                redrafts.append(rules)
+                return ("HEADLINE: The bowl that survived\nLEVERS: effort, dream_outcome\n---\n"
+                        "FIXED DRAFT: no quiz, leads with effort.\n\nTap to shop.", "")
+            return ("HEADLINE: Which host are you\nLEVERS: effort, dream_outcome\n---\n"
+                    "IGNORED THE BRIEF: which one are you?\n\nTap to shop.", "")
+
+    def _check(bundle, drafts):
+        seen_checks.append(list(drafts))
+        return ({d["n"]: {"followed": d["n"] != 1,
+                          "ignored": ["kept the identity quiz the brief said to drop"],
+                          "fix": "open on the moment of worry, not a quiz"}
+                 for d in drafts}, "")
+
+    skill_pack.panel_ad = FakePanel()
+    skill_pack.draft_ad = _Drafter()
+    skill_pack.panel_check = _check
+    r3 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=3)
+    ck("the reviewers are given the drafts with the briefs they were written to",
+       len(seen_checks) == 1 and len(seen_checks[0]) == 3
+       and seen_checks[0][0]["brief"] == "PANELBRIEF-1"
+       and "IGNORED THE BRIEF" in seen_checks[0][0]["text"],
+       "one call for the batch, not one per variant")
+    ck("  and it is ONE call, after the drafting, not before",
+       len(seen_checks) == 1, str(len(seen_checks)))
+    ck("a variant that ignored its brief is WRITTEN AGAIN",
+       len(redrafts) == 1 and "kept the identity quiz" in redrafts[0],
+       f"{len(redrafts)} redraft(s)")
+    ck("  with the reviewers' own objection in front of it",
+       "DID NOT FOLLOW THE BRIEF" in redrafts[0]
+       and "open on the moment of worry" in redrafts[0], "")
+    _, b3 = board(r3["items"][0]["output_id"])
+    v1 = b3["variants"][0]
+    ck("  and the AD THAT IS FILED is the corrected one",
+       "FIXED DRAFT" in v1["text"] and "IGNORED THE BRIEF" not in v1["text"],
+       v1["text"][:80])
+    ck("  the row records what was applied, not just what was said",
+       v1["panel_applied"] == ["kept the identity quiz the brief said to drop"]
+       and v1["panel_followed"] is True, str(v1.get("panel_applied")))
+    ck("a variant that DID follow is left alone",
+       "IGNORED THE BRIEF" in b3["variants"][1]["text"]
+       and not b3["variants"][1]["panel_applied"],
+       "rewriting work that was already right is how a good draft gets worse")
+    page3 = c.get(f"/admin/work/{r3['items'][0]['output_id']}?key={KEY}").text
+    ck("the board LEADS with what was applied, not with the critique",
+       "Applied from the panel" in page3
+       and "kept the identity quiz" in page3, "")
+    ck("the run says which variant was rewritten and why",
+       any("did not follow its brief" in n and "Written again" in n
+           for n in r3["notes"]),
+       str([n for n in r3["notes"] if "did not follow" in n])[:200])
+
+    print("\n— a rewrite that obeys the brief and breaks the craft is refused —")
+    # Following the brief is the point; trading a blocked hook for it is not.
+    # Without this case nothing exercises the comparison, and the guard that
+    # protects it reported MISSED.
+    class _WorseDrafter:
+        def __call__(self, bundle, claim, angle, objections):
+            rules = str((bundle.get("rules") or {}).get("block") or "")
+            if "DID NOT FOLLOW THE BRIEF" in rules:
+                # Obeys the brief, and opens on an adjective with no ask:
+                # `hook_is_vague` plus `no_call_to_action`.
+                return ("HEADLINE: Elegant\nLEVERS: effort, dream_outcome\n---\n"
+                        "Elegant acrylic that follows the brief exactly.", "")
+            return ("HEADLINE: The bowl that survived\nLEVERS: effort, dream_outcome\n---\n"
+                    "A first draft that reads fine.\n\nTap to shop.", "")
+
+    skill_pack.draft_ad = _WorseDrafter()
+    skill_pack.panel_check = lambda b, d: (
+        {x["n"]: {"followed": False, "ignored": ["kept the quiz"],
+                  "fix": "open on the worry"} for x in d}, "")
+    r5 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=1)
+    _, b5 = board(r5["items"][0]["output_id"])
+    ck("the first draft stands when the rewrite breaks the craft rules",
+       "A first draft that reads fine" in b5["variants"][0]["text"]
+       and "Elegant acrylic" not in b5["variants"][0]["text"],
+       b5["variants"][0]["text"][:80])
+    ck("  and the row says the change was asked for and not made",
+       b5["variants"][0]["panel_followed"] is False
+       and b5["variants"][0]["panel_applied"] == ["kept the quiz"],
+       str(b5["variants"][0].get("panel_applied")))
+    ck("  the run says why, rather than silently keeping the first draft",
+       any("broke the craft rules" in n for n in r5["notes"]),
+       str([n for n in r5["notes"] if "craft rules" in n])[:160])
+    page5 = c.get(f"/admin/work/{r5['items'][0]['output_id']}?key={KEY}").text
+    ck("  and the board says the change is still owed",
+       "did not make" in page5 and "Request changes" in page5, "")
+
+    print("\n— a check that cannot run says so, and files the first draft —")
+    skill_pack.draft_ad = _Drafter()
+    skill_pack.panel_check = lambda b, d: ({}, "ANTHROPIC_API_KEY is not set")
+    r4 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=2)
+    ck("the run names why the drafts were not read back",
+       any("did not read the drafts back" in n and "ANTHROPIC_API_KEY" in n
+           for n in r4["notes"]),
+       str([n for n in r4["notes"] if "read the drafts" in n])[:200])
+    ck("  and the first draft is filed rather than nothing",
+       len(r4["items"]) == 2)
 
     print("\n— when the panel cannot sit, the run says so and drafts anyway —")
     LOG.clear()

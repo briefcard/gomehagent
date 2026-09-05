@@ -177,6 +177,9 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`angles_for`**(evidence?) → `tuple`  ·  from `skill_pack.py`, `test_ad_craft.py`
 - **`as_prompt`**(findings) → `str`  ·  from `skill_pack.py`
 - **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
+- **`check_as_prompt`**(row) → `str`  ·  from `skill_pack.py`
+- **`check_parse`**(raw) → `dict`  ·  from `skill_pack.py`
+- **`check_prompt`**(drafts) → `str`  ·  from `skill_pack.py`
 - **`first_line`**(text) → `str`  ·  from `test_ad_craft.py`
 - **`has_cta`**(text) → `bool`  ·  from `test_ad_craft.py`
 - **`hashtags`**(text) → `list[str]`  ·  from `test_ad_craft.py`

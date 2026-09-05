@@ -12321,19 +12321,39 @@ def _gbp_post_card(key: str, tenant: str, art, out, run, ap) -> str:
 </div>"""
 
 
-def _panel_fold(panel: dict) -> str:
-    """What Hormozi and Piliero said about THIS concept, and the brief the
-    drafter was then held to — on the variant card, beside the copy. Owner,
-    2026-09-04: "show what each would say". Absent when the panel did not
-    sit; the batch line above says why."""
+def _panel_fold(panel: dict, applied: list | None = None,
+                followed: bool = True) -> str:
+    """The panel as EVIDENCE BEHIND the ad, not a note to go and act on.
+
+    Owner, 2026-09-05: *"instead of just showing me the feedback — use this as
+    a secondary evidence."* It opened by default and led with the critique, so
+    the reading was "here is what is wrong with this ad" when the ad had
+    already been rewritten to fix it. Now: the applied edits are stated in one
+    line ON the card, and the full reviewers' text is FOLDED behind it. The ad
+    is the product; this is the working.
+    """
     if not panel or not str(panel.get("brief") or "").strip():
         return ""
-    return (f'<details class="sec" open><summary>The panel — what Hormozi and '
-            f'Piliero said before this was written</summary>'
-            f'<div class="when"><b>Hormozi:</b> {_esc(panel.get("hormozi", ""))}</div>'
-            f'<div class="when"><b>Piliero:</b> {_esc(panel.get("piliero", ""))}</div>'
-            f'<div class="when"><b>The brief it was written to:</b> '
-            f'{_esc(panel["brief"])}</div></details>')
+    applied = [a for a in (applied or []) if str(a).strip()]
+    if applied and followed:
+        head = (f'<div class="when"><b>Applied from the panel:</b> '
+                f'{_esc("; ".join(applied)[:220])} — this copy was written '
+                f'again to fix that.</div>')
+    elif applied:
+        head = (f'<div class="when"><b>The panel asked for a change this draft '
+                f'did not make:</b> {_esc("; ".join(applied)[:220])} — the '
+                f'rewrite came back worse or not at all, so the first draft '
+                f'stands. Request changes to try again.</div>')
+    else:
+        head = ('<div class="when">Written to the panel&rsquo;s brief, and '
+                'they read it back and passed it.</div>')
+    return (head
+            + f'<details class="sec"><summary>The reviewers&rsquo; own words'
+              f'</summary>'
+              f'<div class="when"><b>Hormozi:</b> {_esc(panel.get("hormozi", ""))}</div>'
+              f'<div class="when"><b>Piliero:</b> {_esc(panel.get("piliero", ""))}</div>'
+              f'<div class="when"><b>The brief it was written to:</b> '
+              f'{_esc(panel["brief"])}</div></details>')
 
 
 def _panel_batch_line(panel: dict) -> str:
@@ -13206,7 +13226,9 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                               f'&ldquo;{_esc(str(v.get("claim") or "")[:180])}'
                               f'&rdquo;</div>'
                               if v.get("claim") else "")
-                claim_line += _panel_fold(v.get("panel") or {})
+                claim_line += _panel_fold(v.get("panel") or {},
+                                          v.get("panel_applied") or [],
+                                          v.get("panel_followed", True))
                 if dropped:
                     act_forms = f"""
       <form method="post" action="/admin/ad_variant_drop" class="row">

@@ -1091,10 +1091,22 @@ each one a phrase a buyer would actually search, never a word the caption
 already says. None is a perfectly good answer. All of this is measured in code
 after you write."""
 
-def _angle_brief(angle: str) -> str:
-    """One angle's instruction, from the ruleset. One writer, one vocabulary."""
+def _angle_brief(angle: str, *, superseded: bool = False) -> str:
+    """One angle's instruction, from the ruleset. One writer, one vocabulary.
+
+    `superseded` is set when the panel has rewritten this concept's brief. The
+    angle is then WHERE THE CONCEPT STARTED rather than what to write — the
+    panel's whole job is to say what this particular claim should stop doing,
+    and the commonest thing it says is to drop the angle's own mechanic.
+    Presenting both as instructions is how a draft ends up ignoring the edit.
+    """
     a = ad_craft.ANGLES.get(angle) or {}
-    return f"{a.get('label', angle)} — {a.get('brief', '')}"
+    body = f"{a.get('label', angle)} — {a.get('brief', '')}"
+    if superseded:
+        return (f"{body}\n(This is where the concept STARTED. The brief below "
+                f"was written about this claim afterwards and replaces it "
+                f"wherever the two disagree.)")
+    return body
 
 
 def _compose_ad(claim: dict, angle: str, objections: list, entity_key: str) -> str:
@@ -1216,12 +1228,17 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
             + "\nEvery variant must be an expression of THIS idea. Variants "
               "that argue different things cannot be compared, and a batch "
               "that tests nothing teaches nothing.")
-    # THE PANEL'S BRIEF, before the angle — because the angle is the ruleset's
-    # generic instruction and this is the one written for THIS concept, by
-    # the two reviewers who sat on it before a word existed. Absent when the
-    # panel did not sit, and the run says so.
-    parts.append(ad_craft.panel_brief(bundle.get("panel") or {}))
-    parts.append(f"\n## Angle\n{_angle_brief(angle)}")
+    # THE ANGLE, THEN THE PANEL'S BRIEF — in that order, because the brief is
+    # the one written about THIS claim and it has to be the last word. It was
+    # the other way round and the two contradict by design: reproduced
+    # 2026-09-05 with a brief saying "drop the identity-quiz angle entirely"
+    # sitting 190 characters above a heading called "## Angle" telling the
+    # model to open with "which one are you". The generic instruction was last
+    # and under a heading, so it won.
+    _panel = bundle.get("panel") or {}
+    _has_brief = bool(str(_panel.get("brief") or "").strip())
+    parts.append(f"\n## Angle\n{_angle_brief(angle, superseded=_has_brief)}")
+    parts.append(ad_craft.panel_brief(_panel))
     # The offer, once, exactly as it will be stated everywhere else, plus
     # where it has to land. `ad_craft` measures both after the fact.
     offer = str(bundle.get("offer") or "").strip()
@@ -1270,6 +1287,39 @@ def _panel_ad_live(bundle: dict, concepts: list[dict]) -> tuple[dict, str]:
 # Replaceable like `draft_ad`, so the suite can prove the panel's brief reached
 # the drafter BEFORE generation — the claim, not the call.
 panel_ad = _panel_ad_live
+
+
+def _panel_check_live(bundle: dict, drafts: list[dict]) -> tuple[dict, str]:
+    """Did each draft do what its brief said? One call for the whole batch.
+
+    Owner, 2026-09-05: the panel's edits were shown and not applied — *"check
+    against their opinions when you generate the first draft."* `ad_craft.review`
+    measures the SHAPE and a draft can pass all of it while ignoring the one
+    edit that mattered, because "you kept the identity quiz the brief told you
+    to drop" is not a character count.
+
+    One call for the batch, like the panel itself: the reviewers are the same
+    two, they already hold the batch in mind, and asking per variant would be
+    N calls for a worse answer.
+    """
+    from . import llm
+    if not drafts:
+        return {}, "nothing to check"
+    reply = llm.ask("ad_panel", ad_craft.check_prompt(drafts),
+                    system=ad_craft.CHECK_SYSTEM,
+                    tenant=str(bundle.get("tenant") or ""), max_tokens=1400)
+    if not getattr(reply, "ok", False):
+        return {}, (getattr(reply, "degraded", "") or getattr(reply, "error", "")
+                    or "the check could not run")
+    got = ad_craft.check_parse(reply.text)
+    if not got:
+        return {}, "the reviewers did not answer in the shape asked"
+    return got, ""
+
+
+# Replaceable, so the suite can prove a draft that ignored its brief is
+# redrafted rather than filed.
+panel_check = _panel_check_live
 
 
 def _has_a_reader_to_pick(tenant: str) -> bool:
@@ -1352,6 +1402,13 @@ def _run_ad_copy(ctx: Context) -> dict:
     #: post-repair text. Collected at emit because `angle` and the claim's
     #: wording live here and nowhere on the item.
     board_rows: list[dict] = []
+    #: Drafts held between the loop and `emit`, so the reviewers can read the
+    #: whole batch back in ONE call before anything is filed. Nothing is
+    #: emitted inside the loop any more: a variant filed before its own
+    #: reviewers had seen it is exactly the "shown and not applied" the owner
+    #: reported on 2026-09-05.
+    _pending: list[dict] = []
+    _to_check: list[dict] = []
 
     # ONE AD, ONE SUBJECT — the same contract the campaign runs under, with a
     # different referent shape. An ad has no imagery yet (see the note above),
@@ -1553,6 +1610,17 @@ def _run_ad_copy(ctx: Context) -> dict:
                                  f"came back better — "
                                  f"{len(blocked) - len(now)} blocking "
                                  f"problem(s) resolved")
+            # AND DID IT DO WHAT THE PANEL SAID? Owner, 2026-09-05: the
+            # edits were shown and not applied. The craft rules above measure
+            # the SHAPE and a draft can pass every one of them while keeping
+            # the mechanic the brief told it to drop — so the reviewers read
+            # their own draft back, once for the batch, and anything they say
+            # was ignored is written again with their objection in front of
+            # it. Collected here; the check and the redraft happen after the
+            # loop, because one call for the batch beats one per variant.
+            if _panel_row.get("brief"):
+                _to_check.append({"n": i + 1, "brief": _panel_row["brief"],
+                                  "text": text, "idx": len(_pending)})
             sc = ad_craft.score(craft_findings)
             ctx.note(f"craft: variant {i + 1} ({angle}) scores "
                      f"{sc['total']}/{sc['of']}"
@@ -1596,22 +1664,88 @@ def _run_ad_copy(ctx: Context) -> dict:
                    if entity_key else
                    coherence.commit("audience", audience_key or "everyone",
                                     action=angle))
+        # HELD, NOT FILED. See `_pending` above: the reviewers read the whole
+        # batch back before anything is emitted.
+        _pending.append({"n": i + 1, "claim": claim, "angle": angle,
+                         "text": text, "basis": basis, "commit": _commit,
+                         "repair": _repair, "panel": dict(_panel_row or {}),
+                         "applied": []})
+
+    # THE REVIEWERS READ THEIR OWN DRAFTS BACK. Owner, 2026-09-05: *"ensure
+    # that all ad copy is generated first with the mind of hormozi and
+    # pilleros and then check against their opinions when you generate the
+    # first draft."* The brief above is the first half; this is the second.
+    # A draft that ignored its brief is written AGAIN with the objection in
+    # front of it, and what changed is recorded on the row — so the panel is
+    # evidence behind an ad that already follows it, rather than a note
+    # somebody has to apply by hand.
+    if _to_check:
+        _checked, _check_why = panel_check(ctx.bundle, _to_check)
+        if not _checked:
+            ctx.note(f"the reviewers did not read the drafts back — "
+                     f"{_check_why}; what is filed is the first draft")
+        for _c in _to_check:
+            _row = _checked.get(_c["n"]) or {}
+            if not _row or _row.get("followed"):
+                continue
+            _held = _pending[_c["idx"]]
+            ctx.note(f"panel: variant {_c['n']} did not follow its brief — "
+                     + "; ".join(_row.get("ignored") or [])[:220]
+                     + ". Written again.")
+            _fixed, _why2 = draft_ad(
+                {**ctx.bundle, "panel": _held["panel"],
+                 "rules": {**ctx.bundle.get("rules", {}),
+                           "block": ctx.bundle.get("rules", {}).get("block", "")
+                           + ad_craft.check_as_prompt(_row)}},
+                _held["claim"], _held["angle"], objections)
+            if not _fixed:
+                ctx.note(f"panel: the rewrite of variant {_c['n']} did not "
+                         f"come back ({_why2 or 'no reason given'}) — the "
+                         f"first draft stands")
+                _held["applied"] = list(_row.get("ignored") or [])
+                _held["followed"] = False
+                continue
+            _p2 = ad_craft.parse(_fixed)
+            _left = ad_craft.review(
+                body=_p2["body"], headline=_p2["headline"],
+                angle=_held["angle"], offer=str(ctx.bundle.get("offer") or ""),
+                levers=_p2["levers"],
+                urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
+                proof=str(_held["claim"].get("evidence") or ""))
+            # KEEP IT UNLESS IT BROKE THE CRAFT RULES WORSE. Following the
+            # brief is the point; trading a blocked hook for it is not.
+            if len(ad_craft.block_reasons(_left)) <= len(
+                    ad_craft.block_reasons(ad_craft.review(
+                        body=_held["text"], angle=_held["angle"],
+                        offer=str(ctx.bundle.get("offer") or "")))):
+                _held["text"] = _p2["body"]
+                _held["applied"] = list(_row.get("ignored") or [])
+                _held["followed"] = True
+            else:
+                ctx.note(f"panel: the rewrite of variant {_c['n']} followed "
+                         f"the brief and broke the craft rules — the first "
+                         f"draft stands")
+                _held["applied"] = list(_row.get("ignored") or [])
+                _held["followed"] = False
+
+    for _h in _pending:
         item = ctx.emit(
-            text, claim_ids=[claim["claim_id"]], entity_key=entity_key,
-            audience_key=audience_key, angle=angle, fmt="ad_copy",
+            _h["text"], claim_ids=[_h["claim"]["claim_id"]],
+            entity_key=entity_key,
+            audience_key=audience_key, angle=_h["angle"], fmt="ad_copy",
             # ON EVERY VARIANT, not on the batch. The batch is not a row —
             # the variants are — so recording the hypothesis once somewhere
             # else would mean joining through the run to answer the only
             # question worth asking of it.
             positioning=positioning, funnel_stage=stage,
-            commitment=_commit,
-            parts=lambda _t, _c=claim: coherence.parts(
+            commitment=_h["commit"],
+            parts=lambda _t, _c=_h["claim"]: coherence.parts(
                 text=_t,
                 claims=[{"claim_id": _c.get("claim_id", ""),
                          "text": _c.get("claim", ""),
                          "scope": _c.get("scope", "brand-wide")}]),
-            redraft=_repair if basis == "model" else None,
-            meta={"needs_art_direction": True, "basis": basis})
+            redraft=_h["repair"] if _h["basis"] == "model" else None,
+            meta={"needs_art_direction": True, "basis": _h["basis"]})
         if item["ok"]:
             # `item["body"]` and not `text`: a repair replaces the body, and
             # a board row built from the pre-repair draft would show the
@@ -1619,14 +1753,18 @@ def _run_ad_copy(ctx: Context) -> dict:
             # callable exists to prevent.
             board_rows.append({
                 "n": len(board_rows) + 1, "output_id": item["output_id"],
-                "angle": angle, "basis": basis,
+                "angle": _h["angle"], "basis": _h["basis"],
                 "needs_art_direction": True,
                 "claim_ids": list(item["claim_ids"]),
-                "claim": str(claim.get("claim") or ""),
+                "claim": str(_h["claim"].get("claim") or ""),
                 "text": item["body"], "dropped": False,
                 # What the panel said about THIS concept, on the row, so the
-                # board shows the critique beside the copy it produced.
-                "panel": dict(_panel_row or {})})
+                # board shows the critique beside the copy it produced —
+                # plus WHAT WAS APPLIED, which is the difference between
+                # evidence and a note somebody still has to act on.
+                "panel": dict(_h["panel"] or {}),
+                "panel_applied": list(_h.get("applied") or []),
+                "panel_followed": _h.get("followed", True)})
 
     if degraded_note:
         ctx.note(f"the model did not write these — {degraded_note}. What is "

@@ -567,13 +567,116 @@ def panel_parse(raw: str) -> dict:
 
 
 def panel_brief(panel_row: dict) -> str:
-    """The panel's verdicts and rewritten brief, written for the drafter."""
+    """The panel's rewritten brief — THE instruction, stated last and binding.
+
+    It used to be placed BEFORE the ruleset's `## Angle` section, and the two
+    contradict each other by design: the panel's whole job is to say what this
+    concept should stop doing, and the commonest thing it says is to drop the
+    angle's own mechanic. Reproduced 2026-09-05 — the brief read "Drop the
+    identity-quiz angle entirely" and one hundred and ninety characters later a
+    heading called "## Angle" said "open with 'which one are you'". Two orders,
+    the generic one last and under a heading, so the specific one lost.
+
+    So it comes last now and says outright that it wins. The angle above it is
+    demoted by `_angle_brief` to where the concept STARTED, which is what an
+    angle is once somebody has thought about this particular claim.
+    """
     if not panel_row or not str(panel_row.get("brief") or "").strip():
         return ""
-    return ("\n## The panel sat on this concept before you — follow its brief\n"
-            f"Hormozi: {panel_row.get('hormozi', '')}\n"
-            f"Piliero: {panel_row.get('piliero', '')}\n"
-            f"THE BRIEF: {panel_row['brief']}")
+    return ("\n## YOUR BRIEF — this is what to write, and it OVERRIDES the "
+            "angle above\n"
+            "Two reviewers read this concept before you and rewrote its "
+            "instruction. Where their brief and the angle disagree, the brief "
+            "wins: the angle is a generic starting point and this was written "
+            "about THIS claim, for THIS reader.\n"
+            f"Hormozi said: {panel_row.get('hormozi', '')}\n"
+            f"Piliero said: {panel_row.get('piliero', '')}\n"
+            f"WRITE THIS: {panel_row['brief']}")
+
+
+# ---------------------------------------------------------------------------
+# Did the draft actually do what the panel said?
+# ---------------------------------------------------------------------------
+#
+# Owner, 2026-09-05: *"it leaves us with a need to apply the edits provided and
+# summarized … use this as a secondary evidence and ensure that all ad copy is
+# generated first with the mind of hormozi and pilleros and then check against
+# their opinions when you generate the first draft."*
+#
+# The panel was an instruction and nothing verified it landed. `review` below
+# measures the SHAPE — the hook, the levers, the fold, the caption — and a
+# draft can pass every one of those while quietly ignoring the one edit that
+# mattered ("drop the identity quiz", "lead with effort not likelihood").
+# Those are not measurable in the way a character count is, so this asks the
+# reviewers themselves, once for the whole batch, and what comes back is a
+# REDRAFT INSTRUCTION rather than a score.
+
+CHECK_SYSTEM = """You are the same two reviewers who briefed these ads before
+they were written. Each draft below is shown with the brief it was supposed to
+follow. For each one, answer one question: DID IT DO WHAT THE BRIEF SAID?
+
+Be specific and be hard to please. A draft that kept a mechanic the brief told
+it to drop has not followed it. A draft that led with the wrong lever has not
+followed it. A draft that is merely good, but is not the ad the brief
+described, has not followed it.
+
+Ignore spelling, length, hashtags and formatting — those are measured in code
+and are not your job. Judge only whether the brief was carried out.
+
+Answer in JSON only:
+{"variants": [{"n": 1, "followed": true|false,
+               "ignored": ["<what the brief asked for that the draft did not do>"],
+               "fix": "<one instruction that would make the next draft follow it>"}]}"""
+
+
+def check_prompt(drafts: list[dict]) -> str:
+    """What the reviewers are shown: each brief, and the draft that claims to
+    follow it. Split out so a suite can read it without spending a call."""
+    parts = ["## The drafts, each against the brief it was given"]
+    for d in drafts:
+        parts.append(
+            f"\n### Variant {d.get('n')}\n"
+            f"THE BRIEF: {str(d.get('brief') or '').strip()}\n"
+            f"THE DRAFT:\n{str(d.get('text') or '').strip()}")
+    parts.append("\nJSON only.")
+    return "\n".join(parts)
+
+
+def check_parse(raw: str) -> dict:
+    """`{n: {followed, ignored, fix}}`, or {} when the answer was not the shape
+    asked — in which case the run says the check did not run rather than
+    treating silence as approval."""
+    import json as _json
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = _json.loads(text[text.index("{"):text.rindex("}") + 1])
+    except Exception:                                            # noqa: BLE001
+        return {}
+    out: dict = {}
+    for v in (data.get("variants") or []):
+        if not isinstance(v, dict):
+            continue
+        try:
+            n = int(v.get("n"))
+        except (TypeError, ValueError):
+            continue
+        out[n] = {"followed": bool(v.get("followed")),
+                  "ignored": [str(x) for x in (v.get("ignored") or []) if str(x).strip()],
+                  "fix": str(v.get("fix") or "").strip()}
+    return out
+
+
+def check_as_prompt(row: dict) -> str:
+    """The reviewers' objection, written for the next attempt."""
+    if not row or row.get("followed"):
+        return ""
+    bits = "\n".join(f"- {x}" for x in (row.get("ignored") or []))
+    return ("\n\n## THE REVIEWERS READ YOUR DRAFT AND IT DID NOT FOLLOW THE "
+            "BRIEF\nWhat you were asked for and did not do:\n" + bits
+            + (f"\nDo this instead: {row['fix']}" if row.get("fix") else "")
+            + "\nWrite it again. Keep everything that was already right.")
 
 
 #: The format the drafter answers in. Two labelled lines and the ad, because a

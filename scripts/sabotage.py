@@ -3326,7 +3326,7 @@ SABOTAGES = [
     {
         "name": 'a_batch_records_what_it_tested',
         "file": 'app/skill_pack.py',
-        "find": '            positioning=positioning, funnel_stage=stage,\n            commitment=_commit,',
+        "find": '            positioning=positioning, funnel_stage=stage,\n            commitment=_h["commit"],',
         "replace": '            funnel_stage=stage,\n            commitment=_commit,  # SABOTAGE',
         "suites": ['test_funnel.py'],
         "why": "the hypothesis a batch was testing is stated in the brief and recorded nowhere, so 'which positioning did better' has to be reconstructed from memory — which means it never gets asked",
@@ -6598,7 +6598,7 @@ SABOTAGES = [
     {
         'name': 'the_prompt_carries_the_panels_brief',
         'file': 'app/skill_pack.py',
-        'find': '    parts.append(ad_craft.panel_brief(bundle.get("panel") or {}))',
+        'find': '    parts.append(ad_craft.panel_brief(_panel))',
         'replace': '    parts.append("")  # SABOTAGE',
         'suites': ['test_ad_panel.py'],
         'why': 'the rewritten brief is computed, stored and rendered, and dropped on the floor between the bundle and the model — a two-halves defect inside one function call',
@@ -6622,7 +6622,7 @@ SABOTAGES = [
     {
         'name': 'the_board_shows_what_the_panel_said',
         'file': 'app/admin_ui.py',
-        'find': '                claim_line += _panel_fold(v.get("panel") or {})',
+        'find': '                claim_line += _panel_fold(v.get("panel") or {},\n                                          v.get("panel_applied") or [],\n                                          v.get("panel_followed", True))',
         'replace': '                claim_line += ""  # SABOTAGE',
         'suites': ['test_ad_panel.py'],
         'why': 'the owner asked to SEE what each reviewer would say, and the critique that shaped the copy is invisible on the only page where the copy is judged',
@@ -6850,6 +6850,46 @@ SABOTAGES = [
         'replace': '    look = {"look": (reply.text or "").strip(), "images": [a.get("image_url") for a in got["ads"]],  # SABOTAGE',
         'suites': ['test_winning_look.py'],
         'why': "the winning ads' own image URLs are stored on the account and reachable by the generator, and a generator handed a finished ad reproduces it — which is plagiarising the client's own creative back at them",
+    },
+    {
+        'name': 'the_panels_brief_outranks_the_angle',
+        'file': 'app/skill_pack.py',
+        'find': '    parts.append(f"\\n## Angle\\n{_angle_brief(angle, superseded=_has_brief)}")\n    parts.append(ad_craft.panel_brief(_panel))',
+        'replace': '    parts.append(ad_craft.panel_brief(_panel))\n    parts.append(f"\\n## Angle\\n{_angle_brief(angle)}")  # SABOTAGE',
+        'suites': ['test_ad_panel.py'],
+        'why': "the generic angle is stated last and under a heading while the brief written about this claim sits above it, so a brief saying 'drop the identity quiz' loses to an angle saying 'open with which one are you' — the drafts ignore the panel and the owner applies the edits by hand",
+    },
+    {
+        'name': 'a_draft_is_checked_against_the_panel',
+        'file': 'app/skill_pack.py',
+        'find': '        _checked, _check_why = panel_check(ctx.bundle, _to_check)',
+        'replace': '        _checked, _check_why = {}, "SABOTAGE"',
+        'suites': ['test_ad_panel.py'],
+        'why': 'nothing verifies the brief was carried out, so a draft that quietly kept the mechanic it was told to drop is filed and shown with a critique of itself beside it — the state the owner reported',
+    },
+    {
+        'name': 'a_draft_that_ignored_its_brief_is_written_again',
+        'file': 'app/skill_pack.py',
+        'find': '            if not _row or _row.get("followed"):\n                continue',
+        'replace': '            if True:  # SABOTAGE\n                continue',
+        'suites': ['test_ad_panel.py'],
+        'why': 'the reviewers say the brief was ignored and the copy is filed unchanged anyway, which is the difference between a system that applies its own edits and one that reports them',
+    },
+    {
+        'name': 'the_board_says_what_was_applied',
+        'file': 'app/admin_ui.py',
+        'find': '                claim_line += _panel_fold(v.get("panel") or {},\n                                          v.get("panel_applied") or [],\n                                          v.get("panel_followed", True))',
+        'replace': '                claim_line += _panel_fold(v.get("panel") or {})  # SABOTAGE',
+        'suites': ['test_ad_panel.py'],
+        'why': 'the board shows the critique with no sign the copy was already rewritten to answer it, so the owner reads it as a list of edits still to make and does them by hand',
+    },
+    {
+        'name': 'a_rewrite_that_breaks_the_craft_rules_is_refused',
+        'file': 'app/skill_pack.py',
+        'find': '            if len(ad_craft.block_reasons(_left)) <= len(',
+        'replace': '            if True or len(ad_craft.block_reasons(_left)) <= len(  # SABOTAGE',
+        'suites': ['test_ad_panel.py'],
+        'why': 'following the brief is allowed to cost a blocked hook or a buried offer, so the panel pass can make an ad worse and the craft ruleset stops binding the second draft',
     },
 ]
 
