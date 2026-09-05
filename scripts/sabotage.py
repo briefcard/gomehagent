@@ -6891,6 +6891,22 @@ SABOTAGES = [
         'suites': ['test_ad_panel.py'],
         'why': 'following the brief is allowed to cost a blocked hook or a buried offer, so the panel pass can make an ad worse and the craft ruleset stops binding the second draft',
     },
+    {
+        'name': 'the_export_carries_the_copy_not_the_headers',
+        'file': 'app/web.py',
+        'find': '        body = str(v.get("text") or "").strip()',
+        'replace': '        body = str(v.get("primary_text") or "").strip()  # SABOTAGE',
+        'suites': ['test_ad_board.py'],
+        'why': 'the declared ship of the ad system exports variant headers and no words, which is what it did for months: it read headline/primary_text/description/cta from a row that carried none of them, and the suite passed because it asserted the header appeared rather than the copy',
+    },
+    {
+        'name': 'an_empty_variant_export_says_so',
+        'file': 'app/web.py',
+        'find': '        if not wrote:',
+        'replace': '        if False:  # SABOTAGE',
+        'suites': ['test_ad_board.py'],
+        'why': 'a variant that exports nothing looks identical to one the owner simply has not written yet, so a broken batch is pasted into Meta as blank ads instead of being sent back to the board',
+    },
 ]
 
 

@@ -3449,16 +3449,34 @@ def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
     if not live:
         return "every variant on this batch was dropped — nothing to carry"
     out = []
+    empty = 0
     for i, v in enumerate(live, 1):
         out.append(f"--- variant {i} ---")
-        for label, field in (("Headline", "headline"),
-                             ("Primary text", "primary_text"),
-                             ("Description", "description"),
-                             ("Call to action", "cta")):
-            val = str(v.get(field) or "").strip()
+        # `text` IS THE AD, and it was the one field this never read. The four
+        # names below were read from a row that carried none of them, so every
+        # export was headers and nothing else — and `test_ad_board` passed
+        # because it asserted "variant 1" appears, not that any copy did.
+        # `primary_text` is written now and `text` stays as the fallback for
+        # every batch filed before it was.
+        body = str(v.get("text") or "").strip()
+        wrote = False
+        for label, val in (("Headline", str(v.get("headline") or "").strip()),
+                           ("Primary text", body),
+                           ("Description", str(v.get("description") or "").strip()),
+                           ("Call to action", str(v.get("cta") or "").strip())):
             if val:
                 out.append(f"{label}: {val}")
+                wrote = True
+        if not wrote:
+            # NEVER A SILENT BLANK. A variant that exports nothing is the
+            # defect this comment exists about; say so on the row.
+            out.append("(this variant carries no copy — open the board and "
+                       "regenerate it)")
+            empty += 1
         out.append("")
+    if empty:
+        out.append(f"WARNING: {empty} of {len(live)} variant(s) exported no "
+                   f"copy at all. That is a fault, not an empty batch.")
     out.append("Paste these into Meta Ads Manager as they are. Editing the "
                "copy breaks the join: `meta_ads.match` finds these rows again "
                "by comparing the text, and that is what fills in how each one "

@@ -1667,7 +1667,9 @@ def _run_ad_copy(ctx: Context) -> dict:
         # HELD, NOT FILED. See `_pending` above: the reviewers read the whole
         # batch back before anything is emitted.
         _pending.append({"n": i + 1, "claim": claim, "angle": angle,
-                         "text": text, "basis": basis, "commit": _commit,
+                         "text": text, "headline": headline,
+                         "levers": list(levers or []),
+                         "basis": basis, "commit": _commit,
                          "repair": _repair, "panel": dict(_panel_row or {}),
                          "applied": []})
 
@@ -1719,6 +1721,7 @@ def _run_ad_copy(ctx: Context) -> dict:
                         body=_held["text"], angle=_held["angle"],
                         offer=str(ctx.bundle.get("offer") or "")))):
                 _held["text"] = _p2["body"]
+                _held["headline"] = _p2["headline"] or _held["headline"]
                 _held["applied"] = list(_row.get("ignored") or [])
                 _held["followed"] = True
             else:
@@ -1758,6 +1761,18 @@ def _run_ad_copy(ctx: Context) -> dict:
                 "claim_ids": list(item["claim_ids"]),
                 "claim": str(_h["claim"].get("claim") or ""),
                 "text": item["body"], "dropped": False,
+                # WHAT A META AD IS MADE OF. `ad_export` — this system's
+                # declared ship — read `headline`, `primary_text`,
+                # `description` and `cta`, and a variant row carried NONE of
+                # them: `primary_text` matched exactly one line in the whole
+                # codebase, the reader. So every exported batch was variant
+                # headers and no words, and the suite passed because it
+                # asserted on the header rather than on the copy.
+                # `text` above IS the primary text; there is deliberately no
+                # second copy of it, because `ad_variant_save` writes `text`
+                # and a duplicate would ship the pre-edit words.
+                "headline": _h.get("headline", ""),
+                "levers": list(_h.get("levers") or []),
                 # What the panel said about THIS concept, on the row, so the
                 # board shows the critique beside the copy it produced —
                 # plus WHAT WAS APPLIED, which is the difference between

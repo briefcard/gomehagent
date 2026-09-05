@@ -343,6 +343,42 @@ def main():
     print("\n--- 5b · the copy comes out paste-ready, dropped ones excluded ---")
     txt = c.get(f"/admin/ad_export?key={KEY}&output_id={anchor}").text
     ck("the export names its variants", "variant 1" in txt, txt[:70])
+    # THE COPY, NOT THE HEADER. This suite asserted "variant 1" appears and
+    # counted "--- variant " markers, and passed for months while the export
+    # emitted headers and NOTHING ELSE: it read headline/primary_text/
+    # description/cta and a variant row carried none of them. `primary_text`
+    # matched exactly one line in the whole codebase — this reader. Asserting
+    # on the label instead of the thing is how a declared ship shipped empty.
+    _kept = [v for v in b6["variants"] if not v.get("dropped")]
+    ck("  AND THE ACTUAL COPY, which is the whole point of an export",
+       all(str(v.get("text") or "")[:40] in txt for v in _kept),
+       txt[:200])
+    ck("  with the headline the drafter wrote",
+       all(str(v.get("headline") or "") in txt for v in _kept if v.get("headline")),
+       str([v.get("headline") for v in _kept]))
+    ck("  and a variant that carries no copy is NAMED, never a silent blank",
+       "no copy at all" not in txt and "(this variant carries no copy" not in txt,
+       "these variants have copy; the warning path is for when they do not")
+    # THE EMPTY PATH, exercised. Without this the warning is unreachable code
+    # and its guard reports MISSED — which is how the original defect lived:
+    # nothing ever asked what an export with no copy in it looks like.
+    with db.SessionLocal() as _s:
+        _row = (_s.query(db.ArtifactBody)
+                .filter(db.ArtifactBody.output_id == anchor).first())
+        _doc = json.loads(_row.body)
+        for _v in _doc["variants"]:
+            _v["text"] = ""
+        _row.body = json.dumps(_doc)
+        _s.commit()
+    blank = c.get(f"/admin/ad_export?key={KEY}&output_id={anchor}").text
+    ck("an export with no copy REFUSES to look normal",
+       "carries no copy" in blank and "WARNING" in blank
+       and "exported no copy at all" in blank, blank[:180])
+    with db.SessionLocal() as _s:
+        _row = (_s.query(db.ArtifactBody)
+                .filter(db.ArtifactBody.output_id == anchor).first())
+        _row.body = json.dumps(b6)
+        _s.commit()
     _live_n = len([v for v in b6["variants"] if not v.get("dropped")])
     ck("  and carries the KEPT variants only",
        txt.count("--- variant ") == _live_n and _live_n < len(b6["variants"]),
