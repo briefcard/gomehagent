@@ -258,6 +258,40 @@ BACKENDS = {"shopify": "shopify_seo", "wordpress": "wordpress_seo"}
 _ID_MARK = " · id "
 
 
+#: WRITTEN IS NOT PUBLISHED, and one reply had to carry both facts.
+#: `approvals._published` asks "did the write happen?" and answers it with
+#: `startswith("http")` — correct for that question, and a DRAFT returns a URL
+#: too. So `mark_published` fired for a page nobody outside the client can
+#: open: `KeywordTarget.status` became "published", `published_at` was stamped,
+#: the 30-day refresh clock started, and `progress` fed the planner and the
+#: monthly client report with rank readings for URLs that were never public.
+#: Every article this platform writes lands as a draft — `skill_pack` sets
+#: `"published": False` and it is the only writer of that field — so this was
+#: not an edge case, it was every row.
+#:
+#: Only the STAGED case is marked. An unmarked reply is treated as live, which
+#: keeps every backend this does not touch behaving exactly as it does now:
+#: failing closed here would re-starve `progress`, which is the defect the
+#: 2026-08-26 audit existed to fix.
+_STAGED_MARK = " · staged"
+
+
+def with_state(sentence: str, *, live: bool) -> str:
+    """Say whether the page is PUBLIC or merely written."""
+    return sentence if live else f"{sentence}{_STAGED_MARK}"
+
+
+def is_live(reply: str) -> bool:
+    """Did that write put a page the public can open?
+
+    Deliberately narrower than `approvals._published`, which asks whether the
+    write happened at all. Both are true of a live page; only the first is
+    true of a draft.
+    """
+    text = str(reply or "")
+    return text.startswith("http") and _STAGED_MARK not in text
+
+
 def with_article_id(sentence: str, article_id) -> str:
     """Append the platform's id to a backend reply, once, in the one form."""
     aid = str(article_id or "").strip()

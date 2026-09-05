@@ -872,7 +872,15 @@ def _execute(ap: db.Approval) -> None:
             # first token by both backends' convention (`_published` already
             # depends on it); the write-back joins on the output_id the
             # payload now carries.
-            if p.get("output_id"):
+            # WRITTEN IS NOT PUBLISHED. `_published` above asks whether the
+            # write happened; a draft answers yes, because it returns a URL.
+            # Marking it published stamped `status="published"`, started the
+            # 30-day refresh clock and fed `progress` — so the planner chose
+            # next month's work, and the monthly client report reported SEO
+            # progress, from rank readings for pages nobody outside the client
+            # can open. Every article lands as a draft by default, so this was
+            # every row rather than an edge case.
+            if p.get("output_id") and sites.is_live(res):
                 keywords.mark_published(
                     seo_guard.tenant_for(profile) or (ap.tenant or ""),
                     p["output_id"], url=res.split()[0].rstrip(".,"),
@@ -897,6 +905,12 @@ def _execute(ap: db.Approval) -> None:
             (f"📝 Article created ({p.get('site')}): {res}"
              if _published(res)
              else f"⛔ Article NOT created ({p.get('site')}): {res}")
+            # SAID, not merely not-recorded. A staged page is real work that
+            # is not yet earning, and the person reading this is the only one
+            # who can ask the client to press publish.
+            + ("\nStaged, not live — nothing is recorded as ranking until it "
+               "is published on the client's site."
+               if _published(res) and not sites.is_live(res) else "")
             + (f"\n{_blog_said}" if _blog_said else ""))
     elif ap.kind == "seo_article_revision":
         from . import keywords, seo_guard, sites, whatsapp

@@ -596,7 +596,8 @@ def create_article(profile: dict, blog_id, fields: dict) -> str:
             else f"blogs/{res.get('handle')}")
     from . import sites
     return sites.with_article_id(
-        f"{_store_url(store)}/{path} — {state}"
+        sites.with_state(f"{_store_url(store)}/{path} — {state}",
+                         live=bool(res.get("published_at")))
         + ("" if res.get("published_at") else
            " (publish it from admin, or pass published=true)"),
         res.get("id"))

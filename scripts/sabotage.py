@@ -226,7 +226,7 @@ SABOTAGES = [
     {
         "name": "approving_writes_back",
         "file": "app/approvals.py",
-        "find": "            if p.get(\"output_id\"):\n                keywords.mark_published(",
+        "find": "            if p.get(\"output_id\") and sites.is_live(res):\n                keywords.mark_published(",
         "replace": "            if False:  # SABOTAGE\n                keywords.mark_published(",
         "suites": ["test_article_review.py"],
         "why": "the publish loop reopens: the live URL is discarded again, "
@@ -7062,6 +7062,30 @@ SABOTAGES = [
         'replace': '    for outer, inner in []:  # SABOTAGE',
         'suites': ['test_the_ban_list_reaches_the_fields.py'],
         'why': 'alt text publishes unchecked beside six prose fields that are checked — copy that is read aloud by a screen reader and indexed by Google, going out through the one field nobody gated',
+    },
+    {
+        'name': 'a_draft_is_not_recorded_as_published',
+        'file': 'app/approvals.py',
+        'find': 'if p.get("output_id") and sites.is_live(res):',
+        'replace': 'if p.get("output_id") or sites.is_live(res):  # SABOTAGE',
+        'suites': ['test_written_is_not_published.py'],
+        'why': "a draft is stamped status=published with a refresh clock started, so planner.blog_rollout chooses next month's work and the monthly client report reports SEO progress from rank readings for pages nobody outside the client can open — and since every article lands as a draft, that is every row",
+    },
+    {
+        'name': 'a_staged_wordpress_post_says_so',
+        'file': 'app/wordpress_seo.py',
+        'find': '            live=bool(fields.get("published"))),',
+        'replace': '            live=True),  # SABOTAGE',
+        'suites': ['test_written_is_not_published.py'],
+        'why': 'the reply claims a draft is live, so the one signal that separates written work from published work is lost at the source and every downstream reader is wrong together',
+    },
+    {
+        'name': 'a_staged_shopify_article_says_so',
+        'file': 'app/shopify_seo.py',
+        'find': '                         live=bool(res.get("published_at")))',
+        'replace': '                         live=True)  # SABOTAGE',
+        'suites': ['test_written_is_not_published.py'],
+        'why': 'same defect on the other backend — and two vocabularies for one idea is how this was missed the first time',
     },
 ]
 
