@@ -214,8 +214,8 @@ FORMATS = {
             "the SAME idea the copy argues — a frame that says something else "
             "splits the ad in two and neither half lands.",
         treatment=_TREATMENT_DESIGNED,
-        craft="Would this stop a stranger mid-scroll, and does it look like "
-              "somebody DESIGNED it for this brand — or is it a pleasant "
+        craft="Would this stop a stranger mid-scroll, and does it look "
+              "deliberately DESIGNED for this brand rather than a pleasant "
               "picture any brand could have run? Judge it as an ad, not as a "
               "photograph: a graphic, built frame is a good answer here.",
         extra=("on_subject", "audience_fit", "stops_the_scroll",
@@ -232,14 +232,23 @@ CRITERIA = {
     "on_subject": "Does the picture depict what this piece is ABOUT? "
                   "Not the brand, not the product for its own sake — the "
                   "subject named below.",
-    "claim_safe": "Does it show anything that would contradict, or imply "
-                  "more than, the claim quoted below?",
-    "no_text": "Is there any text, lettering, watermark or logo in the "
-               "image? Any at all counts as a failure.",
+    # POLARITY IS UNIFORM AND IT WAS NOT. `_ASSESS` never said what `pass`
+    # meant, and two of these were written so that the honest answer to the
+    # question sets `pass: true` ON A FAILURE — "does it show anything that
+    # would contradict the claim" answered yes is a picture that contradicts
+    # the claim, filed as passing. Every question below is now phrased so YES
+    # is the good answer, and `_ASSESS` says so. Changing one without the
+    # others is worse than changing none: the number gets less trustworthy
+    # while looking more so.
+    "claim_safe": "Is everything the picture shows consistent with the claim "
+                  "quoted below — nothing that contradicts it, and nothing "
+                  "that implies more than it says?",
+    "no_text": "Is the image completely free of text, lettering, watermarks "
+               "and logos? Any at all means no.",
     "audience_fit": "Would the audience described below recognise "
                     "themselves, or the moment they are in?",
-    "craft": "Does it look like a photograph somebody was paid to take, or "
-             "like generic stock?",
+    "craft": "Does it look like a photograph somebody was paid to take, "
+             "rather than like generic stock?",
     "stops_the_scroll": "In one glance and at thumbnail size, is there a "
                         "reason to stop?",
     "lands_the_positioning": "Does it argue the specific idea below, rather "
@@ -251,8 +260,8 @@ CRITERIA = {
                    "into a generated scene. Does it look PHOTOGRAPHED THERE — "
                    "light coming from the same direction as everything else, "
                    "the same colour temperature, a contact shadow that agrees "
-                   "with the scene's other shadows, edges that belong? Or "
-                   "does it read as cut out and pasted on? Say FAIL if a "
+                   "with the scene's other shadows, edges that belong? "
+                   "Answer no if it reads as cut out and pasted on, or if a "
                    "person would notice.",
 }
 
@@ -432,6 +441,10 @@ THE SUBJECT IT MUST DEPICT: {subject}
 Answer each question about the image, honestly and without flattery. A picture
 that is technically fine and about the wrong thing FAILS — that is the whole
 reason this check exists.
+
+EVERY QUESTION BELOW IS WRITTEN SO THAT **YES** IS THE GOOD ANSWER. Set
+"pass": true when the honest answer to the question is yes, and false when it
+is no. Do not reverse this for any question, however it is phrased.
 
 {questions}
 

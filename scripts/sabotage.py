@@ -6999,6 +6999,30 @@ SABOTAGES = [
         'suites': ['test_an_ad_may_look_like_an_ad.py'],
         'why': "the cell briefed 'a person is the subject' returns an empty room, because merely dropping the no-people prohibition is not the same as asking for the person the brief wants",
     },
+    {
+        'name': 'claim_safe_asks_for_consistency_not_contradiction',
+        'file': 'app/creative.py',
+        'find': '    "claim_safe": "Is everything the picture shows consistent with the claim "',
+        'replace': '    "claim_safe": "Does it show anything that would contradict the claim "  # SABOTAGE',
+        'suites': ['test_the_review_answers_one_question.py'],
+        'why': 'the question is answered honestly and the honest answer sets pass=true on a picture that CONTRADICTS the claim — a compliance failure filed as a clean review, which for Baci means a made-in-Italy implication shipping with a green tick',
+    },
+    {
+        'name': 'no_text_asks_whether_it_is_free_of_lettering',
+        'file': 'app/creative.py',
+        'find': '    "no_text": "Is the image completely free of text, lettering, watermarks "',
+        'replace': '    "no_text": "Is there any text, lettering, watermark or logo? "  # SABOTAGE',
+        'suites': ['test_the_review_answers_one_question.py'],
+        'why': 'every clean frame is marked as failing and every frame with burned-in lettering passes, so the failure count inverts and the owner reads the opposite of the truth',
+    },
+    {
+        'name': 'the_assessor_is_told_which_way_pass_points',
+        'file': 'app/creative.py',
+        'find': 'EVERY QUESTION BELOW IS WRITTEN SO THAT **YES** IS THE GOOD ANSWER. Set',
+        'replace': 'SABOTAGE. Set',
+        'suites': ['test_the_review_answers_one_question.py'],
+        'why': 'the reviewer is left to guess what `pass` means across eight differently-shaped questions, which is the state that let two inverted criteria go unnoticed',
+    },
 ]
 
 
