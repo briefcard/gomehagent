@@ -237,6 +237,7 @@ def match(tenant: str, *, limit: int = 200) -> dict:
         by_key.setdefault(ad["key"], ad)
 
     joined, seen_keys = 0, set()
+    outcomes: list[tuple[str, dict]] = []
     with db.SessionLocal() as s:
         rows = (s.query(db.Output)
                 .filter(db.tenant_filter(db.Output, tenant),
@@ -252,13 +253,32 @@ def match(tenant: str, *, limit: int = 200) -> dict:
             row.destination = f"meta:{ad['ad_id']}"
             row.outcome = {"source": "meta_ads", "status": ad["status"],
                            **ad["metrics"]}
+            # AND ONTO THE PICTURES THAT RAN IN IT. `record_asset_outcome`
+            # had exactly one caller — the ESP publish arm, hardcoded to
+            # "email" — so `proven_assets(channel="meta")` scored every row
+            # 0.0 and `creative.pick`'s top rung, "it has carried this product
+            # before and the result was recorded", had never once fired on the
+            # ad path. Which photograph went into a frame was insertion order.
+            # It could not be fixed until a frame knew which variant it was
+            # made for, which is what `output:<id>` now says.
+            outcomes.append((row.id, dict(ad["metrics"])))
             joined += 1
         if joined:
             s.commit()
 
+    # OUTSIDE THE SESSION, because `record_asset_outcome` opens its own and
+    # nesting them is how the lock fix in `1e9a1a6` was earned.
+    from . import kb as kbm
+    scored = 0
+    for out_id, metrics in outcomes:
+        for a in kbm.assets(tenant, publishable_only=False):
+            if f"output:{out_id}" in list(a.tags or []):
+                kbm.record_asset_outcome(a.id, "meta", metrics)
+                scored += 1
+
     theirs = [a for k, a in by_key.items() if k not in seen_keys]
     return {"ok": True, "matched": joined, "live": len(by_key),
-            "unmatched_live": len(theirs),
+            "frames_scored": scored, "unmatched_live": len(theirs),
             "note": (f"{len(theirs)} ad(s) are running copy this system did "
                      f"not write" if theirs else ""),
             "why": ""}

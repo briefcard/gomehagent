@@ -955,7 +955,11 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 continue
             frames.append(filed["frame"])
 
-    clean = [f for f in frames if not f["failed"]]
+    # THREE STATES, NOT TWO. A frame the reviewer could not read is not
+    # a frame that passed; counting it clean is how an outage arrives
+    # looking like a good batch.
+    clean = [f for f in frames if not f["failed"] and f.get("reviewed")]
+    unreviewed = [f for f in frames if not f.get("reviewed")]
     return {"ok": bool(frames), "batch": batch_id, "frames": frames,
             "made": len(frames), "clean": len(clean),
             "subject": base["subject"], "thin": base["thin"],
@@ -972,7 +976,13 @@ def batch(tenant: str, *, commitment: dict | None = None,
             # picture and the post argue the same thing; it now travels to
             # the person who sets it in Canva instead of into the pixels.
             "headline": headline,
+            "unreviewed": len(unreviewed),
             "note": ((f"{len(clean)} of {len(frames)} passed review"
+                      + (f" — {len(unreviewed)} could NOT be reviewed, so "
+                         f"nothing has judged them; open those before you "
+                         f"run them" if unreviewed and review else "")
+                      + (f" — review was not asked for on this run"
+                         if unreviewed and not review else "")
                       + (f" — {repeats} came back identical to a picture "
                          f"already on file and were not filed twice"
                          if repeats else "")
@@ -1051,7 +1061,13 @@ def _integrated(tenant: str, product_id: str, plate: bytes, base: dict,
     if not review:
         return {"image": made["image"], "verdict": None}
     verdict = assess(made["image"], comp_brief, tenant)
-    if "integration" not in (verdict.get("failed") or []):
+    # A REVIEW THAT DID NOT RUN IS NOT A PASS. `assess` returns
+    # {"ok": False, "why": ...} with NO `failed` key on every failure
+    # path — no model, no JSON, nothing to assess — so `"integration"
+    # not in []` was True and a vision outage passed every composited
+    # frame. The batch then reported "N of N passed review". Not a
+    # silent failure: a MISREPORTED one, which is worse.
+    if verdict.get("ok") and "integration" not in (verdict.get("failed") or []):
         return {"image": made["image"], "verdict": verdict}
 
     again = _plates(prompt, base["shape"], 1, for_product=True)
@@ -1059,7 +1075,7 @@ def _integrated(tenant: str, product_id: str, plate: bytes, base: dict,
         retry = _composite(tenant, product_id, again["images"][0], base["shape"])
         if retry.get("ok"):
             v2 = assess(retry["image"], comp_brief, tenant)
-            if "integration" not in (v2.get("failed") or []):
+            if v2.get("ok") and "integration" not in (v2.get("failed") or []):
                 return {"image": retry["image"], "verdict": v2}
             verdict = v2
     return {"error": (f"{cell['framing']}: the product still read as pasted "
@@ -1125,6 +1141,8 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
     return {"frame": {"asset_id": row.id, "url": put["url"], "cell": cell,
                       "reused": put["reused"], "product": product_id,
                       "failed": list(verdict.get("failed") or []),
+                      # WHETHER THE JUDGE SPOKE, kept apart from what it said.
+                      "reviewed": bool(verdict.get("ok")),
                       "overall": verdict.get("overall", "")}}
 
 

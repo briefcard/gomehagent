@@ -6774,7 +6774,7 @@ SABOTAGES = [
     {
         'name': 'a_pasted_product_does_not_ship',
         'file': 'app/creative.py',
-        'find': '    if "integration" not in (verdict.get("failed") or []):\n        return {"image": made["image"], "verdict": verdict}',
+        'find': '    if verdict.get("ok") and "integration" not in (verdict.get("failed") or []):\n        return {"image": made["image"], "verdict": verdict}',
         'replace': '    if True:  # SABOTAGE\n        return {"image": made["image"], "verdict": verdict}',
         'suites': ['test_creative_batch.py'],
         'why': "the assessor goes back to filing 'the jug is cut out' as a note beside a picture that ships anyway, which is the state the owner saw: the system could already see the defect and proposed the frame regardless",
@@ -6938,6 +6938,30 @@ SABOTAGES = [
         'replace': '        pass  # SABOTAGE',
         'suites': ['test_ad_arrives_whole.py'],
         'why': 'THIS IS THE SHIP and it would carry words only — a variant whose frames were never made looks exactly like one whose frames are fine',
+    },
+    {
+        'name': 'an_outage_is_not_a_clean_composite',
+        'file': 'app/creative.py',
+        'find': '    if verdict.get("ok") and "integration" not in (verdict.get("failed") or []):',
+        'replace': '    if "integration" not in (verdict.get("failed") or []):  # SABOTAGE',
+        'suites': ['test_review_is_honest.py'],
+        'why': 'assess returns no `failed` key when it cannot run, so a vision outage passes every composited frame and the batch reports them as judged and fine — a misreported failure, not a silent one',
+    },
+    {
+        'name': 'an_unjudged_frame_is_not_counted_clean',
+        'file': 'app/creative.py',
+        'find': '    clean = [f for f in frames if not f["failed"] and f.get("reviewed")]',
+        'replace': '    clean = [f for f in frames if not f["failed"]]  # SABOTAGE',
+        'suites': ['test_review_is_honest.py'],
+        'why': 'the count is the only thing an owner reads before opening twenty pictures, and a frame nothing judged would be counted in the same number as one that passed',
+    },
+    {
+        'name': 'an_ads_result_reaches_its_pictures',
+        'file': 'app/meta_ads.py',
+        'find': '                kbm.record_asset_outcome(a.id, "meta", metrics)',
+        'replace': '                pass  # SABOTAGE',
+        'suites': ['test_review_is_honest.py'],
+        'why': "proven_assets(channel='meta') scores every row 0.0, so creative.pick's top rung never fires on the ad path and which photograph goes into a frame is decided by insertion order",
     },
 ]
 
