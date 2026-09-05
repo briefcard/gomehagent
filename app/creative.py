@@ -158,6 +158,25 @@ GENERATED_ORIGIN = "generated"
 #:
 #: The three do different work and a prompt that does not say so gets the
 #: average of the three, which is a stock photograph.
+#: The default, and it is the right one for a hero that has to read as a
+#: photograph somebody took.
+_TREATMENT_PHOTOGRAPHIC = (
+    "Photographic and real. NO text, lettering, watermark or logo of any "
+    "kind. Nothing that reads as a stock photograph.")
+
+#: An ad is a made thing and may look like one. This does NOT choose a style —
+#: the brand's own direction does that, and it arrives after this line so it
+#: has the last word. What this does is stop demanding a documentary
+#: photograph from a format whose job is to argue.
+_TREATMENT_DESIGNED = (
+    "THIS IS AN ADVERTISEMENT AND MAY LOOK LIKE ONE. Do not imitate a candid "
+    "documentary photograph. A designed frame is fully legitimate here — a "
+    "flat colour ground, a graphic field, a bold crop, one object treated as "
+    "the hero with deliberate space around it. Compose it: decide where the "
+    "eye lands first and give that thing room. Keep one clear band free of "
+    "busy detail where a headline will be set afterwards. NO text, lettering, "
+    "watermark or logo of any kind — the words are set later, by hand.")
+
 FORMATS = {
     "email_hero": dict(
         shape="landscape",
@@ -194,6 +213,11 @@ FORMATS = {
             "one idea before anybody reads the copy beside it. It must argue "
             "the SAME idea the copy argues — a frame that says something else "
             "splits the ad in two and neither half lands.",
+        treatment=_TREATMENT_DESIGNED,
+        craft="Would this stop a stranger mid-scroll, and does it look like "
+              "somebody DESIGNED it for this brand — or is it a pleasant "
+              "picture any brand could have run? Judge it as an ad, not as a "
+              "photograph: a graphic, built frame is a good answer here.",
         extra=("on_subject", "audience_fit", "stops_the_scroll",
                "lands_the_positioning")),
 }
@@ -343,8 +367,16 @@ def brief_for(tenant: str, *, commitment: dict | None = None,
         thin.append("no brand theme colours on file, so the palette is the "
                     "model's taste rather than the brand's")
 
-    parts.append("Photographic and real. NO text, lettering, watermark or "
-                 "logo of any kind. Nothing that reads as a stock photograph.")
+    # THE TREATMENT, PER FORMAT — and this line was the single most damaging
+    # string in the pipeline. "Photographic and real" was appended to EVERY
+    # brief including `ad_frame`, so the owner's "everything is trying to
+    # pretend to be a real photo instead of an ad" was not a description of a
+    # model's failure; it was a restatement of our own instruction. It is
+    # correct for an article hero, which must read as journalism, and exactly
+    # backwards for an ad. The no-lettering rule stays everywhere: a model
+    # rendering type is still bad type, and the type layer is a person's or a
+    # renderer's job.
+    parts.append(spec.get("treatment") or _TREATMENT_PHOTOGRAPHIC)
 
     # WHAT HAS ALREADY WORKED ON THIS ACCOUNT. Owner, 2026-09-04: read the
     # winning ads into a look the brief cites. It is a DESCRIPTION, never the
@@ -370,12 +402,20 @@ def brief_for(tenant: str, *, commitment: dict | None = None,
                     "ads, so the look is this model's taste rather than what "
                     "has actually worked here")
 
+    # AND THE GATE STOPS ENFORCING WHAT THE BRIEF STOPPED ASKING FOR. `craft`
+    # asked "does it look like a photograph somebody was paid to take, or like
+    # generic stock?" — both answers are photographs, so a frame that looked
+    # like an AD was marked down by our own reviewer. The prompt and the gate
+    # agreed with each other and both disagreed with the owner.
     names = ("on_subject", "claim_safe", "no_text", "craft") + tuple(
         k for k in spec["extra"] if k not in ("on_subject",)) + (
         ("integration",) if composited else ())
+    asks = dict(CRITERIA)
+    if spec.get("craft"):
+        asks["craft"] = spec["craft"]
     return {"prompt": " ".join(parts), "subject": subject, "fmt": fmt,
             "shape": spec["shape"], "palette": palette, "thin": thin,
-            "criteria": [{"key": k, "ask": CRITERIA[k]} for k in dict.fromkeys(names)],
+            "criteria": [{"key": k, "ask": asks[k]} for k in dict.fromkeys(names)],
             "claim": claim, "positioning": positioning,
             "audience": getattr(aud, "name", "") if aud else ""}
 
@@ -849,6 +889,11 @@ def _axis_brief(cell: dict) -> str:
 #: has been able to do since it was written and has never been asked to.
 NEEDS_THE_PRODUCT = ("product_led", "detail")
 
+#: AND THE OTHER HALF, which had no name because the prohibition was global.
+#: `person_led` is briefed "a person is the subject" and was then told, in the
+#: same prompt, that there must be no people in the frame.
+PEOPLE_ARE_THE_SUBJECT = ("person_led",)
+
 
 def batch(tenant: str, *, commitment: dict | None = None,
           positioning: str = "", entity_key: str = "", audience_key: str = "",
@@ -924,7 +969,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
     for cell in axes(framings=framings, limit=max(1, int(plates or 4))):
         text = base["prompt"] + _axis_brief(cell)
         needs = cell["framing"] in NEEDS_THE_PRODUCT
-        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs)
+        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs,
+                      with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
         if not res.get("ok"):
             errors.append(f"{cell['angle']}/{cell['framing']}: "
                           f"{res.get('error', 'generation failed')}")
@@ -1195,14 +1241,15 @@ def placements(tenant: str, asset_id: str) -> dict:
             "note": f"{len(cut)} placement(s) cut from an approved frame"}
 
 
-def _plates(text: str, shape: str, n: int, *, for_product: bool = False) -> dict:
+def _plates(text: str, shape: str, n: int, *, for_product: bool = False,
+            with_people: bool = False) -> dict:
     """The seam every plate goes through. `for_product` asks for a scene LIT
     AND FRAMED to receive a real photograph — a parameter accepted and not
     forwarded is the two-halves defect this codebase keeps finding, so it is
     passed here and nowhere else."""
     from . import imagegen
     return imagegen.plate(text, shape=shape, n=max(1, min(4, int(n or 1))),
-                          for_product=for_product)
+                          for_product=for_product, with_people=with_people)
 
 
 def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:

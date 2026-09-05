@@ -91,9 +91,35 @@ def main() -> int:
     r = imagegen.plate("A sunlit Mediterranean table", inspiration="linen, lemons")
     ck("it generates", r["ok"])
     sent = _sent[-1]["json"]["prompt"]
-    ck("  THE EMPTY-SURFACE RULE IS ALWAYS ATTACHED — a plate with a jug "
-       "already in it is the failure this whole route avoids",
-       "COMPLETELY EMPTY" in sent and "no pitcher" in sent)
+    # WHAT IS ACTUALLY ALWAYS TRUE. This assertion used to read "THE
+    # EMPTY-SURFACE RULE IS ALWAYS ATTACHED", and "always" was the defect: one
+    # string carried two prohibitions with opposite scopes, so the cell
+    # briefed "a person is the subject" was told in the same prompt that there
+    # are no people, and Miami Ironside — which gets only the person-led and
+    # context cells — had every frame commissioned as an empty room with
+    # nobody in it. The rule that must never be relaxed is the other half.
+    ck("  THE INVENT-NO-PRODUCT RULE IS ALWAYS ATTACHED — a generated pitcher "
+       "is not this client's pitcher, whatever the framing",
+       "Do not invent" in sent and "no pitcher" in sent)
+    ck("  and a plain plate is NOT emptied of people or of its foreground",
+       "COMPLETELY EMPTY" not in sent and "no people in the frame" not in sent,
+       "that belongs to a plate about to receive a photograph, and only there")
+    _sent.clear()
+    imagegen.plate("A sunlit Mediterranean table", for_product=True)
+    for_shot = _sent[-1]["json"]["prompt"]
+    ck("  a plate that WILL receive one is emptied, and of people",
+       "COMPLETELY EMPTY" in for_shot and "no people in the frame" in for_shot)
+    ck("  and it still may not invent a product",
+       "Do not invent" in for_shot)
+    _sent.clear()
+    imagegen.plate("A sunlit Mediterranean table", with_people=True)
+    peopled = _sent[-1]["json"]["prompt"]
+    ck("  and a person-led frame is ASKED for the person, not merely allowed",
+       "A PERSON IS THE SUBJECT" in peopled
+       and "no people in the frame" not in peopled)
+    _sent.clear()
+    imagegen.plate("A sunlit Mediterranean table", inspiration="linen, lemons")
+    sent = _sent[-1]["json"]["prompt"]
     ck("  the inspiration is carried as WORDS, not an uploaded photograph",
        "linen, lemons" in sent and not _sent[-1]["files"],
        "a scene generated from someone else's image is a derivative of it")

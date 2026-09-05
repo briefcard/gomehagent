@@ -5286,13 +5286,17 @@ SABOTAGES = [
                "says — the one guarantee the extractor makes is gone",
     },
     {
-        "name": "the_empty_surface_rule_is_always_attached",
+        "name": "a_plate_that_receives_a_photograph_is_emptied",
         "file": "app/imagegen.py",
-        "find": "    \"The surface in the centre foreground must be COMPLETELY EMPTY — no \"",
+        "find": "    \"The surface in the centre foreground must be COMPLETELY EMPTY, and there \"",
         "replace": "    \"\"  # SABOTAGE",
         "suites": ["test_imagegen.py"],
         "why": "the generated background arrives with a jug already on the "
-               "table, and the client's product is composited on top of it",
+               "table, and the client's product is composited on top of it. "
+               "RENAMED from the_empty_surface_rule_is_always_attached: "
+               "'always' was the defect — attaching it to every framing is "
+               "what commissioned every Ironside frame as an empty room with "
+               "nobody in it",
     },
     {
         "name": "collections_are_offered_as_groups",
@@ -6790,8 +6794,8 @@ SABOTAGES = [
     {
         'name': 'a_plate_for_a_photograph_is_lit_for_one',
         'file': 'app/creative.py',
-        'find': '        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs)',
-        'replace': '        res = _plates(text, base["shape"], PER_PROMPT)  # SABOTAGE',
+        'find': '        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs,',
+        'replace': '        res = _plates(text, base["shape"], PER_PROMPT,  # SABOTAGE',
         'suites': ['test_creative_batch.py'],
         'why': 'plates are generated with no room and no light direction for the product going into them, so every composite is a photograph dropped onto an unrelated scene and the integration gate rejects the lot',
     },
@@ -6962,6 +6966,38 @@ SABOTAGES = [
         'replace': '                pass  # SABOTAGE',
         'suites': ['test_review_is_honest.py'],
         'why': "proven_assets(channel='meta') scores every row 0.0, so creative.pick's top rung never fires on the ad path and which photograph goes into a frame is decided by insertion order",
+    },
+    {
+        'name': 'an_ad_is_not_told_to_be_a_photograph',
+        'file': 'app/creative.py',
+        'find': '    parts.append(spec.get("treatment") or _TREATMENT_PHOTOGRAPHIC)',
+        'replace': '    parts.append(_TREATMENT_PHOTOGRAPHIC)  # SABOTAGE',
+        'suites': ['test_an_ad_may_look_like_an_ad.py'],
+        'why': "every ad frame is instructed to be a documentary photograph again, which is the owner's 'everything is trying to pretend to be a real photo instead of an ad' written by us, in our own prompt",
+    },
+    {
+        'name': 'the_craft_question_follows_the_treatment',
+        'file': 'app/creative.py',
+        'find': '        asks["craft"] = spec["craft"]',
+        'replace': '        pass  # SABOTAGE',
+        'suites': ['test_an_ad_may_look_like_an_ad.py'],
+        'why': 'the reviewer goes back to asking whether an ad looks like a paid photograph or like stock — both answers are photographs, so a designed frame is marked down by our own gate while the brief asks for one',
+    },
+    {
+        'name': 'no_frame_may_invent_a_product',
+        'file': 'app/imagegen.py',
+        'find': '    rules = [_NO_INVENTED_PRODUCT]',
+        'replace': '    rules = []  # SABOTAGE',
+        'suites': ['test_an_ad_may_look_like_an_ad.py'],
+        'why': "THE REGRESSION THIS SPLIT EXISTS TO PREVENT: moving the whole plate rule behind for_product frees the model to invent a product in every non-composited frame — 100% of Ironside's and Coverings' — and a generated pitcher is not this client's pitcher, which is the failure the composite architecture was built after",
+    },
+    {
+        'name': 'a_person_led_frame_gets_a_person',
+        'file': 'app/imagegen.py',
+        'find': '        rules.append(_PEOPLE_ARE_THE_SUBJECT)',
+        'replace': '        pass  # SABOTAGE',
+        'suites': ['test_an_ad_may_look_like_an_ad.py'],
+        'why': "the cell briefed 'a person is the subject' returns an empty room, because merely dropping the no-people prohibition is not the same as asking for the person the brief wants",
     },
 ]
 

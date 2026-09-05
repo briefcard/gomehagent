@@ -117,9 +117,11 @@ def main() -> int:
     # `for_product` mirrors the real signature — a stub that does not is a
     # stub that hides a parameter nobody forwards, which is exactly the defect
     # `_plates` had five minutes after it grew one.
-    def _plate(prompt, *, shape="square", n=1, inspiration="", for_product=False):
+    def _plate(prompt, *, shape="square", n=1, inspiration="",
+               for_product=False, with_people=False):
         made.append(prompt)
         for_product_seen.append(bool(for_product))
+        with_people_seen.append(bool(with_people))
         # Every plate DIFFERENT, because a real generator never returns the
         # same bytes twice — and identical bytes are content-addressed into
         # one row, which is its own check further down.
@@ -129,6 +131,7 @@ def main() -> int:
                            for i in range(n)]}
 
     for_product_seen: list = []
+    with_people_seen: list = []
     seen_briefs: list = []
 
     def _assess(blob, brief, tenant=""):
@@ -244,7 +247,8 @@ def main() -> int:
 
     _seen_plates: list = []
 
-    def _plate2(prompt, *, shape="square", n=1, inspiration="", for_product=False):
+    def _plate2(prompt, *, shape="square", n=1, inspiration="", for_product=False,
+               with_people=False):
         _seen_plates.append(prompt)
         # EVERY PLATE DISTINCT, or content-addressing folds them into one row
         # and the counts below compare a number of frames against a number of
@@ -334,7 +338,8 @@ def main() -> int:
     print("\n— a picture we already hold is not a new variation —")
     _same = png(120, 120, colour=(3, 9, 27, 255))
 
-    def _twice(prompt, *, shape="square", n=1, inspiration="", for_product=False):
+    def _twice(prompt, *, shape="square", n=1, inspiration="", for_product=False,
+               with_people=False):
         return {"ok": True, "shape": shape, "images": [_same] * n}
 
     imagegen.plate = _twice

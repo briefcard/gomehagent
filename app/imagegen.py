@@ -205,11 +205,39 @@ def similarity(product_png: bytes, generated_png: bytes,
 # The two jobs
 # ---------------------------------------------------------------------------
 
-_PLATE_RULE = (
-    "The surface in the centre foreground must be COMPLETELY EMPTY — no "
-    "tableware, no jug, no pitcher, no glass, no bowl, no plate, no product of "
-    "any kind, and no people. This image is a background onto which a product "
-    "will be placed afterwards; anything already standing there ruins it."
+#: ONE STRING WAS CARRYING TWO UNRELATED PROHIBITIONS, and they have opposite
+#: scopes. "Invent no product" must hold for EVERY frame — a generated pitcher
+#: is not this client's pitcher, and that is the failure this whole
+#: architecture was built after. "No people, the foreground is empty" is true
+#: only of a plate that is about to RECEIVE a photograph. Concatenating them
+#: unconditionally meant `'no people' in prompt` was 8/8 across the grid,
+#: including the `person_led` cell whose own brief says a person is the
+#: subject — and Miami Ironside, which gets only the person-led and context
+#: cells, had every single frame commissioned as an empty room with nobody in
+#: it. Splitting them is the fix; merging them again is the regression.
+_NO_INVENTED_PRODUCT = (
+    "Do not invent or depict any branded or identifiable product — no "
+    "tableware, no jug, no pitcher, no glass, no bowl, no plate, no bottle, "
+    "no packaging, no product of any kind. Any product in the finished piece "
+    "is a real photograph placed by hand; one you invent is the wrong one."
+)
+
+#: Only when a photograph is going INTO this frame afterwards.
+_EMPTY_FOR_PLACEMENT = (
+    "The surface in the centre foreground must be COMPLETELY EMPTY, and there "
+    "must be no people in the frame. This image is a background onto which a "
+    "product will be placed afterwards; anything already standing there ruins "
+    "it."
+)
+
+#: And the positive half. Deleting a prohibition is not the same as asking for
+#: the thing — a cell briefed "a person is the subject" that merely stops
+#: being told "no people" still tends to return an empty room, because the
+#: rest of the prompt describes a place.
+_PEOPLE_ARE_THE_SUBJECT = (
+    "A PERSON IS THE SUBJECT of this frame. Show them using, holding, "
+    "choosing or living with the thing the piece is about — hands, posture "
+    "and attention doing the work. Not a portrait, and not an empty room."
 )
 
 
@@ -235,7 +263,8 @@ _PLATE_FOR_PRODUCT = (
 
 
 def plate(prompt: str, *, shape: str = "square", n: int = 1,
-          inspiration: str = "", for_product: bool = False) -> dict:
+          inspiration: str = "", for_product: bool = False,
+          with_people: bool = False) -> dict:
     """Scenery with no product in it. The safe half of the generative route.
 
     `inspiration` is a description of a reference — a Pinterest board, a shot
@@ -246,10 +275,16 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
     """
     if shape not in SIZES:
         return {"ok": False, "error": f"unknown shape {shape!r}"}
+    rules = [_NO_INVENTED_PRODUCT]
+    if for_product:
+        rules += [_EMPTY_FOR_PLACEMENT, _PLATE_FOR_PRODUCT]
+    if with_people:
+        rules.append(_PEOPLE_ARE_THE_SUBJECT)
     body = {"model": MODEL, "size": SIZES[shape], "n": max(1, min(4, n)),
-            "prompt": f"{prompt}\n\n{('Styling reference: ' + inspiration) if inspiration else ''}"
-                      f"\n\n{_PLATE_RULE}"
-                      f"{chr(10) + chr(10) + _PLATE_FOR_PRODUCT if for_product else ''}".strip()}
+            "prompt": "\n\n".join(
+                [prompt]
+                + (["Styling reference: " + inspiration] if inspiration else [])
+                + rules).strip()}
     res = post("/images/generations", json_body=body)
     if not res["ok"]:
         return res
