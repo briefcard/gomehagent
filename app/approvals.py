@@ -880,6 +880,17 @@ def _execute(ap: db.Approval) -> None:
             # progress, from rank readings for pages nobody outside the client
             # can open. Every article lands as a draft by default, so this was
             # every row rather than an edge case.
+            if p.get("output_id") and not sites.is_live(res):
+                # STAGED, AND STILL RECORDED. `mark_published` is the only
+                # writer of `cms_article_id`, so gating it on `is_live` also
+                # stopped capturing the id — and without the id the next run
+                # proposes a CREATE, which is how a duplicate lands beside the
+                # page that ranks. The address and the id are true whether or
+                # not the page is public; only the ranking claims are not.
+                keywords.mark_staged(
+                    seo_guard.tenant_for(profile) or (ap.tenant or ""),
+                    p["output_id"], url=res.split()[0].rstrip(".,"),
+                    article_id=sites.article_id_in(res))
             if p.get("output_id") and sites.is_live(res):
                 keywords.mark_published(
                     seo_guard.tenant_for(profile) or (ap.tenant or ""),

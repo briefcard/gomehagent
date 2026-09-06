@@ -188,7 +188,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`panel_brief`**(panel_row) → `str`  ·  from `skill_pack.py`, `test_ad_panel.py`
 - **`panel_parse`**(raw) → `dict`  ·  from `skill_pack.py`, `test_ad_panel.py`
 - **`panel_prompt`**(bundle, concepts) → `list[str]`  ·  from `skill_pack.py`, `test_ad_panel.py`
-- **`parse`**(raw) → `dict`  ·  from `bundle.py`, `register.py`, `skill_pack.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_skill_conformance.py`, `test_spend_complete.py`
+- **`parse`**(raw) → `dict`  ·  from `bundle.py`, `register.py`, `skill_pack.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_written_is_not_published.py`
 - **`review`**(body?, headline?, angle?, offer?, levers?, urgency_backed_by?, proof?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_gbp_post.py`, `test_positioning.py`
 - **`score`**(findings) → `dict`  ·  from `skill_pack.py`, `test_ad_craft.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_plan_mix.py`, `web.py`
 
@@ -647,7 +647,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
 - **`brief`**(keyword?, kind?, cta?, url?, source_kind?, source_text?, source_label?, objection?, response?, claim?, evidence?, offer_terms?, event_title?, event_start?, event_end?, place?, voice?, positioning?, revision_notes?) → `list[str]`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`
 - **`compose`**(keyword?, cta?, source_text?, response?, claim?, place?) → `str`  ·  from `skill_pack.py`
-- **`parse`**(raw) → `dict`  ·  from `bundle.py`, `register.py`, `skill_pack.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_skill_conformance.py`, `test_spend_complete.py`
+- **`parse`**(raw) → `dict`  ·  from `bundle.py`, `register.py`, `skill_pack.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_written_is_not_published.py`
 - **`payload`**(body, kind?, cta?, url?, title?, offer_terms?, coupon?, event_start?, event_end?, media_url?, language?) → `dict`  ·  from `skill_pack.py`, `test_gbp_post.py`
 - **`review`**(body, keyword?, kind?, offer_terms?, event_start?, urgency_backed_by?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_gbp_post.py`, `test_positioning.py`
 
@@ -860,6 +860,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`latest_serp`**(tenant, phrase) → `—`  ·  from `test_rivals.py`
 - **`map_for`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_keywords.py`, `web.py`
 - **`mark_published`**(tenant, output_id, url?, article_id?) → `dict`  ·  from `approvals.py`, `test_refresh_lands.py`, `web.py`
+- **`mark_staged`**(tenant, output_id, url?, article_id?) → `dict`  ·  from `approvals.py`
 - **`mix_recommendation`**(tenant) → `dict`  ·  from `admin_ui.py`, `systems.py`, `test_plan_mix.py`
 - **`mute_effect`**(tenant, phrase, before, top?) → `dict`  ·  from `test_mute_replacement.py`, `web.py`
 - **`mute_lessons`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_console_controls.py`, `test_keywords.py`
@@ -880,6 +881,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`set_priority`**(tenant, phrase, mode) → `dict`  ·  from `test_console_controls.py`, `test_keywords.py`, `web.py`
 - **`settle`**(tenant) → `dict`  ·  from `test_conversation.py`, `test_keyword_attention.py`
 - **`slug`**(phrase) → `str`  ·  from `planner.py`, `skill_pack.py`, `test_plan_mix.py`
+- **`staged`**(tenant) → `list`  ·  **from nothing**
 - **`sync`**(tenant, days?, limit?) → `dict`  ·  from `test_keyword_progress.py`, `test_segments.py`, `test_strategy.py`, `web.py`, `worker.py`
 - **`sync_all`**(days?) → `dict`  ·  from `test_job_lease.py`, `web.py`
 - **`sync_one`**(tenant, days?) → `dict`  ·  from `test_job_lease.py`

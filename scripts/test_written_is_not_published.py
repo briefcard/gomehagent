@@ -133,6 +133,46 @@ def main() -> int:
        "Staged, not live" in src,
        "real work that is not yet earning, and only a person can chase it")
 
+    print("\n— a staged page is still RECORDED, which the first fix broke —")
+    from app import keywords
+    wrote = {}
+    keywords.mark_staged = keywords.mark_staged  # named, so a rename is caught
+    ck("there is a writer for the staged case at all",
+       callable(getattr(keywords, "mark_staged", None)),
+       "gating mark_published also gated the only writer of cms_article_id")
+    ck("  and the arm calls it when the write happened but the page is not live",
+       'keywords.mark_staged(' in src and 'not sites.is_live(res)' in src, "")
+    ck("  passing the id, which is what stops the next run proposing a CREATE",
+       "article_id=sites.article_id_in(res)" in
+       src.split("keywords.mark_staged(")[1][:300],
+       "without it a refresh publishes a second page beside the one that ranks")
+    ck("staged is DERIVED, not a new status value",
+       callable(getattr(keywords, "staged", None))
+       and 'published_at is None' in open(os.path.join(
+           os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+           "app", "keywords.py")).read(),
+       "a new status would ripple through every `status in (...)` branch")
+    kw_src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "app", "keywords.py")).read()
+    # THE CODE, NOT THE PROSE. The first version of this check read the whole
+    # function and failed on its own docstring, which names `published_at`
+    # while explaining that it does not write it. A check that cannot tell
+    # a comment from a statement is measuring the wrong thing.
+    import ast as _ast
+    fn = next(n for n in _ast.walk(_ast.parse(kw_src))
+              if isinstance(n, _ast.FunctionDef) and n.name == "mark_staged")
+    assigned = {_ast.unparse(tgt) for st in _ast.walk(fn)
+                if isinstance(st, _ast.Assign) for tgt in st.targets}
+    called = {_ast.unparse(c.func) for c in _ast.walk(fn)
+              if isinstance(c, _ast.Call)}
+    ck("  it writes the two facts that are true either way",
+       {"row.target_url", "row.cms_article_id"} <= assigned, str(sorted(assigned)))
+    ck("  and claims nothing that depends on being public",
+       "row.status" not in assigned and "row.published_at" not in assigned
+       and "row.refreshed_at" not in assigned
+       and not any("ledger.publish" in c for c in called),
+       f"assigned={sorted(assigned)} called={sorted(called)}")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

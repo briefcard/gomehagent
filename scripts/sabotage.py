@@ -7119,6 +7119,14 @@ SABOTAGES = [
         'suites': ['test_the_harvest_reads_the_folder.py'],
         'why': "a ceiling nobody can see: the caller cannot tell 'that was everything' from 'that was the first 40', and reads the smaller number as the answer",
     },
+    {
+        'name': 'a_staged_page_still_records_its_id',
+        'file': 'app/approvals.py',
+        'find': '                keywords.mark_staged(',
+        'replace': '                _ = lambda *a, **k: None  # SABOTAGE\n                _(',
+        'suites': ['test_written_is_not_published.py'],
+        'why': 'the fix for one defect reopens another: gating mark_published also gated the ONLY writer of cms_article_id, so a staged article records no id and the next run proposes a CREATE — which on a connected store publishes a second page beside the one that ranks, the exact scar this module already carries',
+    },
 ]
 
 

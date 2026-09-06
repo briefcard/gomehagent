@@ -2694,6 +2694,57 @@ def mute_lessons(tenant: str) -> dict:
 # ---------------------------------------------------------------------------
 # The publish write-back — the loop's missing wire
 # ---------------------------------------------------------------------------
+def mark_staged(tenant: str, output_id: str, url: str = "",
+                article_id: str = "") -> dict:
+    """The page exists but nobody outside the client can open it.
+
+    WRITTEN BECAUSE THE FIX FOR ONE DEFECT MADE ANOTHER. Gating
+    `mark_published` on `sites.is_live` (6d52cf6) correctly stopped a draft
+    being counted as a ranking page — and, because that is the only function
+    that records `cms_article_id`, it also stopped recording the id. This
+    module already carries the scar: without the id "a refresh can only
+    propose a create, which on a connected store publishes a second page
+    beside the one that ranks."
+
+    So the FACTS that are true whatever the page's visibility get written —
+    where it is, and which post it is — and the CLAIMS that depend on being
+    public do not: no `status="published"`, no `published_at`, no refresh
+    clock, no `ledger.publish`. Staged is then derivable rather than a new
+    status value: `target_url` set with `published_at` still None. That keeps
+    it out of every `status in (...)` branch it has no business entering, and
+    `done` stays False, which is the honest answer for a page nobody can read.
+    """
+    out: dict = {"tenant": tenant, "output_id": output_id, "url": url,
+                 "staged": True}
+    with db.SessionLocal() as s:
+        row = (s.query(db.KeywordTarget)
+               .filter(db.KeywordTarget.tenant == tenant,
+                       db.KeywordTarget.output_id == output_id).first())
+        if row is not None:
+            if url:
+                row.target_url = url
+            if article_id:
+                row.cms_article_id = str(article_id)
+            out["phrase"] = row.phrase
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        if art is not None and url:
+            art.destination = url
+        s.commit()
+    return out
+
+
+def staged(tenant: str) -> list:
+    """Articles written and sitting in the client's CMS, unread by the public.
+
+    Derived, not stored: an address and no publication date. Before this
+    existed the state had no name — first it was wrongly `published`, then
+    correctly not-published and indistinguishable from never-written.
+    """
+    return [r for r in targets(tenant)
+            if (r.target_url or "") and r.published_at is None]
+
+
 def mark_published(tenant: str, output_id: str, url: str = "",
                    article_id: str = "") -> dict:
     """An article went live: tell every table that has been waiting to hear.
