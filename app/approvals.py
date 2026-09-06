@@ -939,10 +939,20 @@ def _execute(ap: db.Approval) -> None:
         # The URL is deliberately NOT re-sent: a revision keeps the address,
         # that is most of the point, and `mark_published` leaves `target_url`
         # alone when it is given none.
-        if _published(res) and p.get("output_id"):
-            keywords.mark_published(
-                seo_guard.tenant_for(profile) or (ap.tenant or ""),
-                p["output_id"])
+        # THE MIRROR OF THE CREATE ARM, and it was missed when that one was
+        # gated. `_published` is true of a draft, so a revision of a page that
+        # is still staged stamped it published — starting the refresh clock
+        # and feeding the client report for a page nobody outside the client
+        # can open. `d35b6c8` made this path REACHABLE for a staged article by
+        # recording `cms_article_id`, so gating one arm and not the other did
+        # not leave the bug where it was; it moved it here.
+        if p.get("output_id"):
+            _who = seo_guard.tenant_for(profile) or (ap.tenant or "")
+            if sites.is_live(res):
+                keywords.mark_published(_who, p["output_id"])
+            elif _published(res):
+                keywords.mark_staged(_who, p["output_id"],
+                                     article_id=sites.article_id_in(res))
         whatsapp.send_text(
             f"✏️ Article revised ({p.get('site')}): {res}"
             if _published(res)

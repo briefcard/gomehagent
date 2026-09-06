@@ -961,7 +961,13 @@ def batch(tenant: str, *, commitment: dict | None = None,
     # WHICH PHOTOGRAPH, asked once. `pick` is the one ladder every system
     # uses, so the frame that carries the product carries the same one the
     # email hero would have — and `rung` says why it was that one.
+    # THE CHANNEL, WITHOUT WHICH THE OUTCOME LOOP IS DEAD. `5a95333` started
+    # recording ad results onto the assets that ran in them, under the `meta`
+    # channel — and `pick` defaults `channel=""`, so `proven_assets` scored on
+    # raw use count and never read them. A fact recorded and never read is the
+    # same defect as one never recorded, wearing a commit message.
     shot = pick(tenant, commitment=commitment, fmt=fmt, entity_key=entity_key,
+                channel="meta" if fmt == "ad_frame" else "",
                 audience_key=audience_key, claim=claim, prominent=prominent,
                 positioning=positioning)
     product_id = (shot.get("asset_id") or "") if not shot.get("should_generate") \

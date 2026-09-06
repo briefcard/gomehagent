@@ -7122,10 +7122,26 @@ SABOTAGES = [
     {
         'name': 'a_staged_page_still_records_its_id',
         'file': 'app/approvals.py',
-        'find': '                keywords.mark_staged(',
-        'replace': '                _ = lambda *a, **k: None  # SABOTAGE\n                _(',
+        'find': '                keywords.mark_staged(\n',
+        'replace': '                _ = lambda *a, **k: None  # SABOTAGE\n                _(\n',
         'suites': ['test_written_is_not_published.py'],
         'why': 'the fix for one defect reopens another: gating mark_published also gated the ONLY writer of cms_article_id, so a staged article records no id and the next run proposes a CREATE — which on a connected store publishes a second page beside the one that ranks, the exact scar this module already carries',
+    },
+    {
+        'name': 'a_revision_of_a_staged_page_is_not_a_publication',
+        'file': 'app/approvals.py',
+        'find': '            if sites.is_live(res):\n                keywords.mark_published(_who, p["output_id"])',
+        'replace': '            if _published(res):  # SABOTAGE\n                keywords.mark_published(_who, p["output_id"])',
+        'suites': ['test_written_is_not_published.py'],
+        'why': 'the mirror of the create arm: revising a page that is still a draft stamps it published, starts the refresh clock and feeds the client report for a page nobody outside the client can open — and d35b6c8 made this path reachable, so gating one arm and not the other moved the bug here rather than fixing it',
+    },
+    {
+        'name': 'the_ad_path_ranks_on_the_channel_it_records',
+        'file': 'app/creative.py',
+        'find': '                channel="meta" if fmt == "ad_frame" else "",',
+        'replace': '                channel="",  # SABOTAGE',
+        'suites': ['test_review_is_honest.py'],
+        'why': 'the meta outcomes written onto assets are never read: proven_assets falls back to raw use count, so which photograph goes into a frame is insertion order again and the loop closed in 5a95333 is dead',
     },
 ]
 

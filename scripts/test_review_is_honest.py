@@ -141,6 +141,18 @@ def main() -> int:
        "outcome" in inspect.getsource(kb.proven_assets)
        and "channel" in inspect.getsource(kb.proven_assets), "")
 
+    print("\n— and the score it records is the one `pick` asks for —")
+    import inspect
+    bsrc = inspect.getsource(creative.batch)
+    ck("the ad path asks for the META channel, not the default",
+       'channel="meta" if fmt == "ad_frame" else ""' in bsrc,
+       "pick defaults channel='' and proven_assets then scores on raw use "
+       "count, so the outcome written above is never read")
+    ck("  and a non-ad format still asks for no channel",
+       'else ""' in bsrc, "an email hero must not be ranked by ad CTR")
+    ck("  pick accepts it, so the argument is not merely passed into a void",
+       "channel" in inspect.signature(creative.pick).parameters, "")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

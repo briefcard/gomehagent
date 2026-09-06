@@ -140,11 +140,17 @@ def main() -> int:
     ck("there is a writer for the staged case at all",
        callable(getattr(keywords, "mark_staged", None)),
        "gating mark_published also gated the only writer of cms_article_id")
-    ck("  and the arm calls it when the write happened but the page is not live",
-       'keywords.mark_staged(' in src and 'not sites.is_live(res)' in src, "")
+    # SCOPED TO THE CREATE ARM. There are two `mark_staged` call sites now
+    # (create and revision), so an unscoped `in src` check passes while the
+    # create arm is disabled — which the harness reported as MISSED, correctly.
+    create = src.split('elif ap.kind == "seo_article_revision"')[0]
+    create = create.split('res = sites.backend(profile).create_article')[1]
+    ck("  and the CREATE arm calls it when the write happened but is not live",
+       "keywords.mark_staged(" in create and "not sites.is_live(res)" in create,
+       "two call sites make an unscoped check hollow")
     ck("  passing the id, which is what stops the next run proposing a CREATE",
        "article_id=sites.article_id_in(res)" in
-       src.split("keywords.mark_staged(")[1][:300],
+       create.split("keywords.mark_staged(")[1][:300],
        "without it a refresh publishes a second page beside the one that ranks")
     ck("staged is DERIVED, not a new status value",
        callable(getattr(keywords, "staged", None))
@@ -172,6 +178,24 @@ def main() -> int:
        and "row.refreshed_at" not in assigned
        and not any("ledger.publish" in c for c in called),
        f"assigned={sorted(assigned)} called={sorted(called)}")
+
+    print("\n— and the REVISION arm is gated the same way, which it was not —")
+    # Bound the arm by the NEXT arm, not by a character count — the first
+    # version took 1400 chars and stopped inside the opening comment block.
+    rev = src.split('elif ap.kind == "seo_article_revision"')[1]
+    rev = rev.split('elif ap.kind ==')[0]
+    ck("a revision only marks published when the page is live",
+       "sites.is_live(res)" in rev and "keywords.mark_published(" in rev, "")
+    ck("  and a revision of a STAGED page records staged, not published",
+       "keywords.mark_staged(" in rev, "")
+    ck("  which matters because d35b6c8 made that path reachable",
+       "cms_article_id" in kw_src,
+       "recording the id is what lets a refresh address a staged draft at all")
+    unguarded = src.count("keywords.mark_published(")
+    ck("every mark_published call site sits behind an is_live check",
+       src.count("sites.is_live(res)") >= unguarded,
+       f"{unguarded} call sites, {src.count('sites.is_live(res)')} gates — "
+       f"gating one arm and not its mirror moves a bug, it does not fix it")
 
     print()
     if _fail:
