@@ -7103,6 +7103,22 @@ SABOTAGES = [
         'suites': ['test_the_image_model_is_a_setting.py'],
         'why': 'ranking three models against one fixed brief becomes three deploys and a wait instead of a script, which is the experiment this parameter exists for',
     },
+    {
+        'name': 'the_harvest_reads_past_the_first_page',
+        'file': 'app/creative.py',
+        'find': '            token = resp.get("nextPageToken")',
+        'replace': '            token = None  # SABOTAGE',
+        'suites': ['test_the_harvest_reads_the_folder.py'],
+        'why': 'a brand with 400 photographs in Drive is harvested down to the newest 40 and told `seen: 40`, so the library the whole creative path selects from is silently a fraction of what the client already owns — manufacturing the asset scarcity this platform concluded was never its problem',
+    },
+    {
+        'name': 'a_harvest_that_stopped_early_says_so',
+        'file': 'app/creative.py',
+        'find': '        more = bool(token)',
+        'replace': '        more = False  # SABOTAGE',
+        'suites': ['test_the_harvest_reads_the_folder.py'],
+        'why': "a ceiling nobody can see: the caller cannot tell 'that was everything' from 'that was the first 40', and reads the smaller number as the answer",
+    },
 ]
 
 

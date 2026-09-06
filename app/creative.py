@@ -1265,6 +1265,20 @@ def _plates(text: str, shape: str, n: int, *, for_product: bool = False,
                           for_product=for_product, with_people=with_people)
 
 
+def _drive_service(alias: str):
+    """The seam every Drive read goes through.
+
+    Built inline before, which meant the paging loop below could only be
+    exercised against Google. `_plates` already carries this lesson for the
+    image generator — a step with no seam is a step whose logic is tested by
+    hoping.
+    """
+    from googleapiclient.discovery import build
+    from . import gmail_client
+    return build("drive", "v3", credentials=gmail_client.creds_for(alias),
+                 cache_discovery=False)
+
+
 def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:
     """File the client's own Drive photographs into the pictures queue.
 
@@ -1288,20 +1302,36 @@ def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:
     if not alias:
         return {"ok": False, "error": f"{tenant} has no Google account wired"}
     try:
-        from googleapiclient.discovery import build
-        from . import gmail_client
-        svc = build("drive", "v3", credentials=gmail_client.creds_for(alias),
-                    cache_discovery=False)
+        svc = _drive_service(alias)
         q = ["trashed=false",
              "(" + " or ".join(f"mimeType='{m}'" for m in _DRIVE_IMAGE_TYPES) + ")"]
         if folder:
             q.append(f"'{folder}' in parents")
-        resp = svc.files().list(
-            q=" and ".join(q), pageSize=min(int(limit or 40), 100),
-            orderBy="modifiedTime desc",
-            fields="files(id,name,mimeType,webViewLink,imageMediaMetadata/width,"
-                   "imageMediaMetadata/height)").execute()
-        files = resp.get("files") or []
+        # ONE PAGE WAS READ AND REPORTED AS THE SET. Drive returns at most
+        # 100 files per call and this asked once, so a brand with 400
+        # photographs in the folder was harvested down to the newest 40 and
+        # the reply said `seen: 40` — a number that looks like an answer.
+        # Asset scarcity was never this platform's problem; a harvest that
+        # stops early and does not say so manufactures it.
+        want = max(1, int(limit or 40))
+        files, token = [], None
+        while len(files) < want:
+            resp = svc.files().list(
+                q=" and ".join(q), pageSize=min(want - len(files), 100),
+                orderBy="modifiedTime desc", pageToken=token,
+                fields="nextPageToken,files(id,name,mimeType,webViewLink,"
+                       "imageMediaMetadata/width,"
+                       "imageMediaMetadata/height)").execute()
+            files.extend(resp.get("files") or [])
+            token = resp.get("nextPageToken")
+            if not token:
+                break
+        # A CEILING THAT SAYS SO. `limit` is a real bound and hitting it is
+        # not an error — but a caller that cannot tell "that was everything"
+        # from "that was the first 40" has been given a number it will read
+        # as the former.
+        more = bool(token)
+        files = files[:want]
     except Exception as exc:                                     # noqa: BLE001
         return {"ok": False,
                 "error": f"Drive not readable for {alias} ({exc.__class__.__name__})"}
@@ -1346,10 +1376,15 @@ def harvest_drive(tenant: str, *, folder: str = "", limit: int = 40) -> dict:
             guessed += 1 if hit else 0
     return {"ok": True, "seen": len(files), "filed": filed,
             "skipped_small": skipped, "matched_to_a_product": guessed,
+            "more_in_drive": more,
             "note": ("filed as REFERENCE and awaiting review — Drive carries "
                      "no proof of who owns a picture, so each needs 'Approve "
                      "for use' in the pictures queue before an email can "
                      "select it. Where the filename named a product, that "
                      "product is suggested on the row; check it before "
                      "approving, since a wrong match puts the wrong "
-                     "photograph on that product's emails.")}
+                     "photograph on that product's emails."
+                     + (f" There are MORE than {len(files)} pictures in this "
+                        f"folder — this read the newest {len(files)}; raise "
+                        f"the limit to take more."
+                        if more else ""))}
