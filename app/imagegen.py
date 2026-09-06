@@ -44,8 +44,8 @@ import io
 
 from . import config
 
-BASE = "https://api.openai.com/v1"
-MODEL = "gpt-image-1"
+BASE = config.IMAGE_API_BASE
+MODEL = config.IMAGE_MODEL
 TIMEOUT = 180
 
 # What the model will actually return. Asking it for 9:16 gets a refusal or a
@@ -264,7 +264,7 @@ _PLATE_FOR_PRODUCT = (
 
 def plate(prompt: str, *, shape: str = "square", n: int = 1,
           inspiration: str = "", for_product: bool = False,
-          with_people: bool = False) -> dict:
+          with_people: bool = False, model: str = "") -> dict:
     """Scenery with no product in it. The safe half of the generative route.
 
     `inspiration` is a description of a reference — a Pinterest board, a shot
@@ -280,7 +280,8 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
         rules += [_EMPTY_FOR_PLACEMENT, _PLATE_FOR_PRODUCT]
     if with_people:
         rules.append(_PEOPLE_ARE_THE_SUBJECT)
-    body = {"model": MODEL, "size": SIZES[shape], "n": max(1, min(4, n)),
+    body = {"model": model or MODEL, "size": SIZES[shape],
+            "n": max(1, min(4, n)),
             "prompt": "\n\n".join(
                 [prompt]
                 + (["Styling reference: " + inspiration] if inspiration else [])

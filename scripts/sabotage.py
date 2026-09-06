@@ -7087,6 +7087,22 @@ SABOTAGES = [
         'suites': ['test_written_is_not_published.py'],
         'why': 'same defect on the other backend — and two vocabularies for one idea is how this was missed the first time',
     },
+    {
+        'name': 'the_image_model_is_a_setting',
+        'file': 'app/imagegen.py',
+        'find': 'MODEL = config.IMAGE_MODEL',
+        'replace': 'MODEL = "gpt-image-1"  # SABOTAGE',
+        'suites': ['test_the_image_model_is_a_setting.py'],
+        'why': 'the one generator the owner is unhappy with goes back to being the only model on the platform that cannot be compared, ranked or replaced without a deploy — while every text model stays overridable',
+    },
+    {
+        'name': 'one_run_can_use_a_different_image_model',
+        'file': 'app/imagegen.py',
+        'find': '    body = {"model": model or MODEL, "size": SIZES[shape],',
+        'replace': '    body = {"model": MODEL, "size": SIZES[shape],  # SABOTAGE',
+        'suites': ['test_the_image_model_is_a_setting.py'],
+        'why': 'ranking three models against one fixed brief becomes three deploys and a wait instead of a script, which is the experiment this parameter exists for',
+    },
 ]
 
 

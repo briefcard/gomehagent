@@ -166,6 +166,20 @@ SWEEP_MODEL = os.environ.get("SWEEP_MODEL", "claude-haiku-4-5-20251001")
 # somebody will want to change without a deploy.
 CREATIVE_REVIEW_MODEL = os.environ.get("CREATIVE_REVIEW_MODEL",
                                        "claude-sonnet-4-6")
+# THE PICTURE GENERATOR. Every text model on this platform has been
+# overridable for months — CLAUDE_MODEL, CLASSIFY_MODEL, SWEEP_MODEL,
+# SEO_MODEL, CREATIVE_REVIEW_MODEL — and the one call the owner is actually
+# unhappy with was the only one hardcoded, so comparing it against anything
+# else needed a deploy. The reviewer's row above already argues this exact
+# case: "the frontier moves and this is the one call whose model choice
+# somebody will want to change without a deploy." It is truer of the
+# generator than of the judge.
+IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gpt-image-1")
+# The endpoint the generator talks to. A row, not an abstraction: swapping to
+# a provider with a different request shape needs more than a URL, and
+# pretending otherwise would be a seam that fails at the first real use.
+IMAGE_API_BASE = os.environ.get("IMAGE_API_BASE", "https://api.openai.com/v1")
+
 SWEEP_HOUR = int(os.environ.get("SWEEP_HOUR", "20"))
 BUCKET_BACKFILL_DAYS = int(os.environ.get("BUCKET_BACKFILL_DAYS", "30"))
 
