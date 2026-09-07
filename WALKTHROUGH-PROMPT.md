@@ -784,6 +784,49 @@ upload name is 50 characters unencoded, not 120.
 is indistinguishable, to a "folder gone" check, from a folder that does not
 exist — a recreate-on-404 must sit behind a call known to be right.
 
+### The product is judged against its own photographs — 2026-09-07 (one ship; hash in the memory note)
+
+**The owner's question:** *"the photos are better but they are still not
+recreating the product photos exactly. How can we improve this?"* — and
+*"Lets follow your advice."* Reproduced: a drawn frame was filed as it came,
+two candidates both kept, neither compared to the photographs it was drawn
+from; the prompt said "reproduce exactly" and named nothing; four look pins
+rode beside the product; a cutout went up mostly margin.
+
+**Standing rules it adds:**
+- **The judge ranks; it never vetoes.** Four candidates per drawn cell,
+  every one compared to the product's photographs with the differences
+  NAMED, the closest filed with its match; a set with no faithful candidate
+  still files its closest and says so
+  (`every_candidate_is_judged_against_the_photographs`,
+  `the_closest_candidate_is_the_one_kept`).
+- **What is wrong is corrected once, by name.** Below `FIDELITY_KEEP` with
+  differences named, one redraft with "CORRECT exactly these", kept only if
+  closer (`a_wrong_product_is_redrawn_once_with_its_differences_named`).
+- **The same checklist on both sides.** Derived once per product from its
+  photographs (cached by their fingerprint), it is what the prompt is told
+  to keep and what the judge holds as its rubric
+  (`the_checklist_reaches_the_prompt`, `the_checklist_is_derived_once_and_cached`,
+  `the_judge_holds_the_same_checklist_as_the_prompt`).
+- **The look yields to the product; a product input is trimmed.** Two look
+  pins when the product is in the request; a cutout cropped to its alpha
+  (`the_look_yields_to_the_product`, `a_product_input_is_trimmed_to_the_product`).
+- **Fidelity is said on the frame** — "product match 72 · the glyph is a
+  star, not the Cancer crab · best of 4" — where the frame is kept or
+  rejected (`fidelity_is_said_on_the_frame`).
+- **A rendering is not the photograph.** Where exactness is non-negotiable —
+  a catalogue-accurate hero — the composite route stays the rule. And
+  exact reproduction of a specific object is a provider capability:
+  `scripts/bakeoff.py` runs the same product through several models as
+  numbered sets for the owner's blind ranking
+  (`a_bakeoff_model_reaches_the_request`).
+
+**Traps this stretch fell into.** A trim check on "product-1" passed for
+the wrong reason: `pick`'s choice leads the product inputs, and which
+photograph that is depends on creation order — find the input by its
+property (transparency), never by position. `id(blob)` keys a per-blob
+record safely only within one loop iteration; the dict is rebuilt per cell.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -876,6 +919,13 @@ exist — a recreate-on-404 must sit behind a call known to be right.
 > fix starts at its published contract, encoded as a suite with the URLs).
 > Frames are custom designs at their own size; filing uses /folders/move;
 > upload names fit 50 characters.
+>
+> **SHIPPED 2026-09-07, SIXTH: THE PRODUCT IS JUDGED AGAINST ITS OWN
+> PHOTOGRAPHS** (10 guards, §5 has the record). Best of four per drawn cell,
+> the differences named and corrected once, the product's checklist on both
+> sides, the look yielding to the product, trimmed inputs, fidelity on the
+> frame. `scripts/bakeoff.py --tenant baci --entity <key> --models a,b` for
+> the owner's blind ranking; `--reveal` afterwards.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

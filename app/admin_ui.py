@@ -6186,6 +6186,23 @@ def _viewer() -> str:
     </script>"""
 
 
+def _fidelity_line(assessment: dict) -> str:
+    """WHAT THE JUDGE SAID about the product in this frame — the match
+    against its own photographs and the differences it named. On the card,
+    because that is where the frame is kept or rejected; a verdict in a run
+    log is a verdict nobody reads."""
+    fid = (assessment or {}).get("fidelity") if isinstance(assessment, dict) else None
+    if not isinstance(fid, dict):
+        return ""
+    diffs = [str(d) for d in (fid.get("differences") or [])][:2]
+    return (f'<br><span class="{"okt" if int(fid.get("match") or 0) >= 85 else "gapt"}">'
+            f'product match {_esc(str(fid.get("match", "")))}</span>'
+            + (f' &middot; {_esc("; ".join(diffs))}' if diffs else "")
+            + (f' &middot; best of {_esc(str(fid.get("candidates")))}'
+               if fid.get("candidates") else "")
+            + (" &middot; redrawn once" if fid.get("redrafted") else ""))
+
+
 def _drawn_from(frames) -> str:
     """What a set was drawn from, off the frames themselves — `derived_from`
     is the board's record on each one, so the card cannot claim a board the
@@ -6424,7 +6441,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
             <img src="{_esc(f.url or '')}" loading="lazy" alt="">
             <span class="picmeta">{_esc(' · '.join(tags))}
               {('<b class="gapt">' + _esc(', '.join(failed)) + '</b>')
-               if failed else '<span class="okt">reads right</span>'}</span>
+               if failed else '<span class="okt">reads right</span>'}{_fidelity_line(ass)}</span>
           </label>
           <div class="framebar">{view}{edit}</div>
         </div>"""

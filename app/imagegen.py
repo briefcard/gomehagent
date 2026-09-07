@@ -342,17 +342,51 @@ def _fidelity_for(model: str) -> str:
     return "" if "mini" in (model or "") else INPUT_FIDELITY
 
 
-def input_image(blob: bytes, max_side: int = INPUT_MAX_SIDE) -> tuple[bytes, str]:
+def _trim_margins(im, pad: float = 0.04):
+    """The picture cropped to its subject: the alpha's bounding box for a
+    cutout, the non-white box for a shot on white. A catalogue cutout is
+    mostly margin, and the margin was what the model spent its attention
+    matching. Left alone when nothing can be found or the box is the whole
+    picture."""
+    from PIL import ImageChops
+    box = None
+    try:
+        if im.mode in ("RGBA", "LA", "P"):
+            a = im.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 16 else 0)
+            box = a.getbbox()
+        else:
+            rgb = im.convert("RGB")
+            from PIL import Image as _I
+            diff = ImageChops.difference(rgb, _I.new("RGB", rgb.size, (255, 255, 255)))
+            box = diff.convert("L").point(lambda v: 255 if v > 24 else 0).getbbox()
+    except Exception:                                            # noqa: BLE001
+        return im
+    if not box:
+        return im
+    w, h = im.size
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    if bw * bh < 0.01 * w * h or (bw >= 0.96 * w and bh >= 0.96 * h):
+        return im
+    px, py = int(bw * pad) + 1, int(bh * pad) + 1
+    return im.crop((max(0, box[0] - px), max(0, box[1] - py),
+                    min(w, box[2] + px), min(h, box[3] + py)))
+
+
+def input_image(blob: bytes, max_side: int = INPUT_MAX_SIDE,
+                trim: bool = False) -> tuple[bytes, str]:
     """One input at a size the API takes quickly: `(bytes, mime)`, or
     `(b"", "")` if the bytes are not an image — a caller drops that one and
     SAYS so, rather than sending it. A cutout keeps its alpha (PNG); a
-    photograph goes as JPEG, which halves the upload."""
+    photograph goes as JPEG, which halves the upload. `trim` crops to the
+    subject first — for a product input, never for a look pin."""
     from PIL import Image
     try:
         im = Image.open(io.BytesIO(blob))
         im.load()
     except Exception:                                            # noqa: BLE001
         return b"", ""
+    if trim:
+        im = _trim_margins(im)
     im.thumbnail((max_side, max_side))
     buf = io.BytesIO()
     if im.mode in ("RGBA", "LA", "P"):
@@ -368,7 +402,8 @@ def _mime(blob: bytes) -> str:
 
 def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
                     shape: str = "square", n: int = 1,
-                    with_people: bool = False, model: str = "") -> dict:
+                    with_people: bool = False, model: str = "",
+                    checklist: list | None = None) -> dict:
     """A frame generated FROM the brand's own pictures.
 
     `product` is the thing itself, photographed; `look` is the board. Both go
@@ -390,6 +425,13 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
     rules = []
     if product:
         rules.append(_this_exact_product(len(product)))
+        # WHAT TO PRESERVE, IN WORDS. "Reproduce exactly" names nothing; the
+        # checklist a careful observer would use does — and it is the same
+        # list the judge holds afterwards (`creative.compare_product`).
+        if checklist:
+            rules.append("WHAT A CAREFUL OBSERVER CHECKS ON THIS PRODUCT — keep "
+                         "every one exactly as the reference images show it:\n"
+                         + "\n".join(f"- {c}" for c in checklist))
         if look:
             rules.append(_THE_LOOK)
     else:

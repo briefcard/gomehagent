@@ -985,7 +985,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
           claim: str = "", prominent: str = "", headline: str = "",
           subline: str = "", fmt: str = "ad_frame", output_id: str = "",
           situation: str = "", plates: int = 4, review: bool = True,
-          boards: tuple | list = ()) -> dict:
+          boards: tuple | list = (), image_model: str = "") -> dict:
     """A set of frames for one ad, filed together under one batch id.
 
     Owner, 2026-08-30: *"each ad will need a carousel of images - potentially
@@ -1069,6 +1069,14 @@ def batch(tenant: str, *, commitment: dict | None = None,
     # reference pins it was NOT allowed to send, named. Asked once per set.
     refs = board_inputs(tenant, entity_key, product_id, boards=boards)
     drawn = bool(refs["product"])
+    # THE PRODUCT'S CHECKLIST, once per set: what a careful observer checks,
+    # read off the photographs. It reaches the prompt and is the judge's
+    # rubric — the same words on both sides of the comparison.
+    feats = (product_features(tenant, entity_key, refs["product"]) if drawn
+             else {"ok": False, "features": [], "cached": False, "why": ""})
+    checklist = list(feats.get("features") or [])
+    fidelity = {"judged": 0, "kept": 0, "dropped": 0, "redrafted": 0,
+                "checklist": bool(checklist), "why": ""}
     framings = tuple(FRAMINGS) if (product_id or drawn) else tuple(
         f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
     dropped = [f for f in FRAMINGS if f not in framings]
@@ -1092,8 +1100,9 @@ def batch(tenant: str, *, commitment: dict | None = None,
         direct = drawn or bool(refs["look"] and not needs)
         if direct:
             res = _with_references(
-                text, base["shape"], PER_PROMPT, refs,
-                with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
+                text, base["shape"], CANDIDATES if drawn else PER_PROMPT, refs,
+                with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
+                checklist=checklist, model=image_model)
         else:
             res = _plates(text, base["shape"], PER_PROMPT, for_product=needs,
                           with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
@@ -1101,9 +1110,47 @@ def batch(tenant: str, *, commitment: dict | None = None,
             errors.append(f"{cell['angle']}/{cell['framing']}: "
                           f"{res.get('error', 'generation failed')}")
             continue
-        for blob in res.get("images") or []:
-            if not blob:
-                continue
+        images = [b for b in (res.get("images") or []) if b]
+        fids: dict = {}
+        if drawn and images:
+            # JUDGED AGAINST THE PHOTOGRAPHS; THE CLOSEST IS KEPT. Four came
+            # back; one is filed. A kept candidate still wrong is redrawn
+            # ONCE with its differences named, and kept only if closer.
+            pick_ = _closest(images, refs["product"], checklist, tenant)
+            if pick_["ok"]:
+                fidelity["judged"] += pick_["judged"]
+                best_b, best_v = pick_["blob"], pick_["verdict"]
+                redrafted = False
+                if (best_v.get("match", 0) < FIDELITY_KEEP
+                        and best_v.get("differences")):
+                    again = _with_references(
+                        text + "\n\nTHE PREVIOUS ATTEMPT GOT THE PRODUCT WRONG "
+                               "— CORRECT exactly these, and change nothing "
+                               "else about it:\n"
+                        + "\n".join(f"- {d}" for d in best_v["differences"]),
+                        base["shape"], PER_PROMPT, refs,
+                        with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
+                        checklist=checklist, model=image_model)
+                    again_imgs = [b for b in (again.get("images") or []) if b]
+                    if again.get("ok") and again_imgs:
+                        pick2 = _closest(again_imgs, refs["product"], checklist, tenant)
+                        if pick2["ok"]:
+                            fidelity["judged"] += pick2["judged"]
+                            if pick2["verdict"].get("match", 0) > best_v.get("match", 0):
+                                best_b, best_v, redrafted = pick2["blob"], pick2["verdict"], True
+                                fidelity["redrafted"] += 1
+                fidelity["dropped"] += len(images) - 1
+                images = [best_b]
+                fids[id(best_b)] = {"match": best_v.get("match", 0),
+                                    "differences": list(best_v.get("differences") or []),
+                                    "candidates": pick_["judged"],
+                                    "redrafted": redrafted}
+            else:
+                # NOT JUDGED, NOT PRETENDED. The usual two are kept and the
+                # set says fidelity was not judged, and why.
+                fidelity["why"] = fidelity["why"] or pick_.get("why", "")
+                images = images[:PER_PROMPT]
+        for blob in images:
             verdict = None
             if needs and not direct:
                 got = _integrated(tenant, product_id, blob, base, comp_brief,
@@ -1119,7 +1166,10 @@ def batch(tenant: str, *, commitment: dict | None = None,
                                 review=review, verdict=verdict,
                                 output_id=output_id,
                                 product_id=product_id if (needs or drawn) else "",
-                                derived_from=refs["pins"] if direct else [])
+                                derived_from=refs["pins"] if direct else [],
+                                fidelity=fids.get(id(blob)))
+            if not filed.get("duplicate") and not filed.get("error") and fids.get(id(blob)):
+                fidelity["kept"] += 1
             if filed.get("duplicate"):
                 repeats += 1
                 continue
@@ -1149,6 +1199,22 @@ def batch(tenant: str, *, commitment: dict | None = None,
     if refs["unknown"]:
         board_said += ("; no board named " + ", ".join(refs["unknown"])
                        + " — nothing was pulled from it")
+    # WHAT THE JUDGE DID, SAID. "Four candidates, one kept" is a fact about
+    # the set; "fidelity was not judged" is a different fact and must not
+    # look like the first.
+    if drawn:
+        if fidelity["judged"]:
+            board_said += (f"; {fidelity['judged']} candidate(s) judged against "
+                           f"the product's photographs, {fidelity['kept']} kept — "
+                           f"closest to the product"
+                           + (f", {fidelity['redrafted']} redrawn once with its "
+                              f"differences named" if fidelity["redrafted"] else "")
+                           + ("" if checklist else "; no checklist could be derived"
+                              + (f" ({feats.get('why')})" if feats.get("why") else "")))
+        else:
+            board_said += ("; fidelity was not judged"
+                           + (f" — {fidelity['why']}" if fidelity["why"] else "")
+                           + ", so the usual two per cell were kept unranked")
     return {"ok": bool(frames), "batch": batch_id, "frames": frames,
             "made": len(frames), "clean": len(clean),
             "subject": base["subject"], "thin": base["thin"],
@@ -1159,6 +1225,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
                       "pins": list(refs["pins"]), "excluded": refs["excluded"],
                       "boards": list(refs["boards"]),
                       "unknown": list(refs["unknown"])},
+            "fidelity": fidelity,
+            "checklist": checklist,
             # SAID, not left to be counted. A set where nineteen of twenty
             # frames failed their review is a set with a brief problem, and
             # the number is the only place that shows before somebody opens
@@ -1289,8 +1357,13 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 batch_id: str, *, entity_key: str, prompt: str, review: bool,
                 product_id: str = "", output_id: str = "",
                 verdict: dict | None = None,
-                derived_from: list | None = None) -> dict:
+                derived_from: list | None = None,
+                fidelity: dict | None = None) -> dict:
     """Store the bytes, judge them, and file the asset. One frame's whole life.
+
+    `fidelity` is the judge's verdict against the product's photographs —
+    the match, the named differences, how many candidates it beat — kept on
+    the frame's record beside the brief review, and said on the card.
 
     `derived_from` is the board: the ids of the pictures this frame was drawn
     from, recorded on the frame so the set can say so and the outcome loop
@@ -1321,6 +1394,8 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
     # frame for a worse answer.
     if verdict is None:
         verdict = assess(blob, base, tenant) if review else {}
+    if fidelity:
+        verdict = {**(verdict or {}), "fidelity": dict(fidelity)}
     kbmod.add_asset(
         tenant, put["url"], rights=GENERATED_RIGHTS,
         title=f"{base['subject'] or 'ad'} · {cell['angle']}/{cell['framing']}"[:120],
@@ -1341,6 +1416,7 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
             pass
     return {"frame": {"asset_id": row.id, "url": put["url"], "cell": cell,
                       "reused": put["reused"], "product": product_id,
+                      "fidelity": dict(fidelity) if fidelity else None,
                       "failed": list(verdict.get("failed") or []),
                       # WHETHER THE JUDGE SPOKE, kept apart from what it said.
                       "reviewed": bool(verdict.get("ok")),
@@ -1408,12 +1484,185 @@ def _plates(text: str, shape: str, n: int, *, for_product: bool = False,
 
 
 def _with_references(text: str, shape: str, n: int, refs: dict, *,
-                     with_people: bool = False) -> dict:
+                     with_people: bool = False, checklist: list | None = None,
+                     model: str = "") -> dict:
     """The seam every board-drawn frame goes through; `_plates` says why."""
     from . import imagegen
     return imagegen.with_references(
         text, product=refs["product"], look=refs["look"], shape=shape,
-        n=max(1, min(4, int(n or 1))), with_people=with_people)
+        n=max(1, min(4, int(n or 1))), with_people=with_people,
+        checklist=list(checklist or []), model=model)
+
+
+# ---------------------------------------------------------------------------
+# THE PRODUCT, JUDGED AGAINST ITS OWN PHOTOGRAPHS. Owner, 2026-09-07: *"the
+# photos are better but they are still not recreating the product photos
+# exactly. How can we improve this?"* A frame drawn from the photographs was
+# filed as it came — two candidates, both kept, neither compared to what it
+# was drawn from — and the prompt said "reproduce exactly" and named nothing.
+# Three moves: the product's CHECKLIST (what a careful observer would check,
+# derived once from the photographs) reaches the prompt and is the judge's
+# rubric; every candidate is JUDGED against the photographs with the
+# differences NAMED and the closest is the one kept, four asked for so there
+# is a choice; a kept candidate still wrong is redrawn ONCE with its
+# differences in the prompt and kept only if closer. The judge ranks; it
+# never vetoes — a set with no faithful candidate still files its closest,
+# and says so.
+# ---------------------------------------------------------------------------
+
+#: Candidates per drawn cell. The API returns up to four in one call; four
+#: is a choice, two was a coin toss.
+CANDIDATES = 4
+#: Below this match the kept candidate is redrawn once with its differences.
+FIDELITY_KEEP = 85
+#: Look pins that ride along when the product is in the request. Four
+#: against four split the model's attention evenly; the product is the
+#: subject, so the look yields.
+LOOK_INPUTS_WITH_PRODUCT = 2
+
+_FEATURES_PROMPT = """These are photographs of ONE product. Write the checklist a
+careful observer would use to tell THIS product from a look-alike: material and
+finish, form and proportions, colours, pattern, any marks, glyphs, text or
+hardware, and how the parts meet. Six to ten items, each a short phrase that is
+TRUE OF THE PHOTOGRAPHS — nothing inferred, nothing about the setting.
+Answer in JSON only: {"features": ["…", "…"]}"""
+
+_COMPARE_PROMPT = """The FIRST image is a generated picture. The images after it are
+photographs of the real product it was meant to show. Judge ONLY the product:
+is the object in the first image this exact product?
+
+CHECKLIST — what a careful observer checks on this product:
+{checklist}
+
+Answer in JSON only:
+{{"match": <0-100, 100 = indistinguishable from the photographs>,
+  "differences": ["<one concrete difference the observer would notice>", …],
+  "same_product": <true|false>}}
+Name only differences on the PRODUCT itself (shape, pattern, marks, colours,
+proportions, finish) — not the setting, the light, or the crop. An empty
+differences list means it is the product."""
+
+
+def _fingerprint(blobs: list) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    for b in blobs:
+        h.update(hashlib.sha256(b or b"").digest())
+    return h.hexdigest()[:24]
+
+
+def _product_features_live(tenant: str, entity_key: str, product: list,
+                           **_ignored) -> dict:
+    """The product's checklist, derived ONCE from its photographs and cached
+    on a Setting keyed by the photographs themselves — a changed shot
+    re-derives, an unchanged one costs nothing. `{ok, features, cached, why}`.
+    Descriptive, not a claim: it says what the photographs show, and it is
+    never asserted to a buyer."""
+    import base64 as _b64
+    import json as _json
+    from . import db as _db, llm
+    blobs = [b for b in (product or []) if b]
+    if not entity_key or not blobs:
+        return {"ok": False, "features": [], "cached": False,
+                "why": "no product photographs to read"}
+    key = f"features:{tenant}:{entity_key}"
+    fp = _fingerprint(blobs)
+    with _db.SessionLocal() as s:
+        row = s.get(_db.Setting, key)
+        if row is not None and row.value:
+            try:
+                kept = _json.loads(row.value)
+            except Exception:                                    # noqa: BLE001
+                kept = {}
+            if kept.get("fingerprint") == fp and kept.get("features"):
+                return {"ok": True, "features": list(kept["features"]),
+                        "cached": True, "why": ""}
+    content = [{"type": "image", "source": {
+        "type": "base64", "media_type": "image/png",
+        "data": _b64.standard_b64encode(b).decode()}} for b in blobs[:4]]
+    content.append({"type": "text", "text": _FEATURES_PROMPT})
+    reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=500)
+    if not getattr(reply, "ok", False):
+        return {"ok": False, "features": [], "cached": False,
+                "why": getattr(reply, "degraded", "") or getattr(reply, "error", "")
+                or "the checklist could not be derived"}
+    raw = (reply.text or "").strip()
+    try:
+        data = _json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    except Exception:                                            # noqa: BLE001
+        return {"ok": False, "features": [], "cached": False,
+                "why": "the checklist did not come back as JSON"}
+    feats = [str(f).strip() for f in (data.get("features") or []) if str(f).strip()][:10]
+    if not feats:
+        return {"ok": False, "features": [], "cached": False,
+                "why": "the checklist came back empty"}
+    with _db.SessionLocal() as s:
+        s.merge(_db.Setting(key=key, value=_json.dumps(
+            {"features": feats, "fingerprint": fp})))
+        s.commit()
+    return {"ok": True, "features": feats, "cached": False, "why": ""}
+
+
+product_features = _product_features_live      # replaceable, so the suite can drive every path
+
+
+def _compare_product_live(candidate: bytes, product: list, features: list,
+                          tenant: str = "") -> dict:
+    """One candidate against the photographs, with the checklist as the
+    rubric. `{ok, match, differences, same, why}`. Ranks; never vetoes."""
+    import base64 as _b64
+    import json as _json
+    from . import llm
+    refs = [b for b in (product or []) if b][:4]
+    if not candidate or not refs:
+        return {"ok": False, "match": 0, "differences": [], "same": False,
+                "why": "nothing to compare"}
+    content = [{"type": "image", "source": {
+        "type": "base64", "media_type": "image/png",
+        "data": _b64.standard_b64encode(b).decode()}} for b in [candidate] + refs]
+    content.append({"type": "text", "text": _COMPARE_PROMPT.format(
+        checklist="\n".join(f"- {f}" for f in (features or [])) or "- (none derived)")})
+    reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=500)
+    if not getattr(reply, "ok", False):
+        return {"ok": False, "match": 0, "differences": [], "same": False,
+                "why": getattr(reply, "degraded", "") or getattr(reply, "error", "")
+                or "the judge could not run"}
+    raw = (reply.text or "").strip()
+    try:
+        data = _json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+    except Exception:                                            # noqa: BLE001
+        return {"ok": False, "match": 0, "differences": [], "same": False,
+                "why": "the judge did not answer in JSON"}
+    try:
+        match = max(0, min(100, int(data.get("match") or 0)))
+    except (TypeError, ValueError):
+        match = 0
+    diffs = [str(d).strip() for d in (data.get("differences") or []) if str(d).strip()][:6]
+    return {"ok": True, "match": match, "differences": diffs,
+            "same": bool(data.get("same_product")) or (match >= FIDELITY_KEEP and not diffs),
+            "why": ""}
+
+
+compare_product = _compare_product_live        # replaceable, so the suite can drive every path
+
+
+def _closest(candidates: list, product: list, features: list, tenant: str) -> dict:
+    """Every candidate judged; the closest returned with its verdict.
+    `{ok, blob, verdict, judged, why}` — `ok` False when the judge could not
+    run, in which case nothing has been ranked and the caller must say so."""
+    verdicts = []
+    for blob in candidates:
+        v = compare_product(blob, product, features, tenant)
+        if not v.get("ok"):
+            return {"ok": False, "blob": b"", "verdict": v, "judged": 0,
+                    "why": v.get("why", "")}
+        verdicts.append((v, blob))
+    if not verdicts:
+        return {"ok": False, "blob": b"", "verdict": {}, "judged": 0, "why": "no candidates"}
+    # HIGHEST MATCH WINS; a tie goes to the first, which is the API's own
+    # first choice.
+    best_v, best_b = max(verdicts, key=lambda vb: vb[0].get("match", 0))
+    return {"ok": True, "blob": best_b, "verdict": best_v, "judged": len(verdicts), "why": ""}
 
 
 #: How many pictures of each kind go into one request. The API takes sixteen;
@@ -1473,14 +1722,22 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
         rest.sort(key=lambda r: 0 if r.id == product_id else 1)
         product_rows += rest
     for role, rows in (("product", product_rows), ("look", sel["look"])):
+        # THE LOOK YIELDS TO THE PRODUCT. With the product in the request the
+        # look pins are direction, not the subject; four of each split the
+        # model's attention evenly, which is where the product's marks went.
+        cap = (LOOK_INPUTS_WITH_PRODUCT if (role == "look" and product_rows)
+               else BOARD_INPUTS)
         for r in rows:
-            if len(out[role]) >= BOARD_INPUTS:
+            if len(out[role]) >= cap:
                 break
             ok, why = kbmod.may_publish(r.id)
             if not ok:
                 out["excluded"].append({"asset_id": r.id, "role": role, "why": why})
                 continue
-            blob, _mime = imagegen.input_image(_fetch(r.url or ""))
+            # A PRODUCT INPUT IS TRIMMED TO THE PRODUCT: a catalogue cutout is
+            # mostly margin, and the margin is what the model was matching.
+            blob, _mime = imagegen.input_image(_fetch(r.url or ""),
+                                               trim=(role == "product"))
             if not blob:
                 out["excluded"].append({"asset_id": r.id, "role": role,
                                         "why": "the picture could not be fetched"})
