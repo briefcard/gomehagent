@@ -103,7 +103,7 @@ def _bearer(tenant: str) -> tuple[str, str]:
         return "", (f"{tenant}'s Google connection was made before Business "
                     f"Profile was asked for — not granted: business.manage. "
                     f"Re-connect Google once on the Connections tab.")
-    tok = oauth.access_token("google", c["secret"])
+    tok = cred.bearer(tenant, "google")
     if not tok.get("ok"):
         return "", f"Google refused to mint a token: {tok.get('error', '')}"
     return tok["token"], ""

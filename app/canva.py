@@ -85,8 +85,13 @@ def _token(tenant: str) -> tuple[str, str]:
     c = cred.resolve(tenant, "canva")
     secret = (c or {}).get("secret", "")
     if secret:
-        from . import oauth
-        got = oauth.access_token("canva", secret)
+        # THROUGH THE ONE DOOR. Minting here from the stored token on every
+        # call spent Canva's single-use refresh token twice per edit and
+        # took the lineage with it (owner, 2026-09-07: "Refresh token used
+        # twice. All access tokens granted from this flow are now revoked").
+        # `cred.bearer` caches the access token on the row for its lifetime
+        # and stores each rotation before the token it bought is used.
+        got = cred.bearer(tenant, "canva")
         if got.get("ok"):
             return got["token"], ""
         err = str(got.get("error", ""))
@@ -106,7 +111,7 @@ def _token(tenant: str) -> tuple[str, str]:
             cred.record_failure(tenant, "canva", err)
             shared = cred.resolve(tenant, "canva") or {}
             if shared.get("secret") and shared.get("source") == "agency":
-                again = oauth.access_token("canva", shared["secret"])
+                again = cred.bearer(tenant, "canva")
                 if again.get("ok"):
                     return again["token"], ""
                 return "", (f"{tenant}'s own Canva connection was revoked "

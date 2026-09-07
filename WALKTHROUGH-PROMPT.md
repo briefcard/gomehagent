@@ -713,6 +713,44 @@ refused by `test_register` as an empty connection, rightly: recreate-once
 already covers an owner who reorganised by hand. The `/folders` counter in a fake counts the ROOT first: "the first
 client folder" is the second id.
 
+### A rotating refresh token is spent once — 2026-09-07 (one ship; hash in the memory note)
+
+**The defect, in the owner's words, minutes after reconnecting Canva:**
+*"Sign-in was rejected: Refresh token used twice. All access tokens granted
+from this flow are now revoked."* — the second lineage in a day, and the
+root of the first. Canva's refresh tokens are SINGLE-USE; `oauth.access_token`
+hands the successor back (its own comment predicted this failure to the
+word) and no caller kept it. `canva._token` minted from the stored token on
+EVERY API call, so one edit (upload, poll, design, folder) spent the same
+token twice by its second call. Reproduced with a single-use fake endpoint:
+the second `_token()` call returns the owner's exact message. Constant
+Contact minted the same way; Google survived only because its tokens do not
+rotate. The agency fallback shipped earlier that day would have burned the
+agency's lineage identically.
+
+**Standing rules it adds:**
+- **One door mints.** `credentials.bearer(tenant, provider)` is where an
+  access token comes from — Canva, Constant Contact, Google. A caller that
+  mints anywhere else spends a single-use token the row does not know about
+  (`canva_mints_through_the_one_door`, `constant_contact_mints_through_the_one_door`).
+- **The rotation is stored before the token it bought is used.** A crash
+  between the two cannot leave a spent token on file
+  (`a_refresh_rotation_is_stored_before_the_token_is_used`).
+- **One refresh per lifetime, cached ON THE ROW.** Ciphertext in `meta`
+  with its expiry, so every worker shares it; a revoked or failed row is
+  never read by the resolver, so Disconnect still takes effect — the reason
+  `oauth` cached nothing, kept (`an_access_token_is_reused_for_its_lifetime`,
+  `the_access_token_is_cached_on_the_row_not_in_the_process`).
+- **A caller that waited for the lock re-reads the row.** The secret it
+  read before waiting may have rotated
+  (`a_caller_that_waited_for_the_lock_rereads_the_row`).
+
+**Traps this stretch fell into.** A fake token endpoint that names every
+successor `r<n>` regardless of the seed made a correct rotation read as a
+failure — derive the successor from the seed. "Nothing cached" is a rule
+about WHERE, not WHETHER: the cache belongs on the row the status gates,
+never in a process.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -793,6 +831,12 @@ client folder" is the second id.
 > step before concepts, then a review harvest for verbatims, then results
 > feeding hooks. The owner's move first: 5 exceptional ads + 5 they would
 > never run. Memory note `gomehagent-creative-substrate` carries it.
+>
+> **SHIPPED 2026-09-07, FOURTH: A ROTATING REFRESH TOKEN IS SPENT ONCE**
+> (6 guards, §5 has the record). `credentials.bearer` is the one door: the
+> access token cached on the row for its lifetime, one refresh under a lock,
+> the rotation stored first. Canva, Constant Contact and Google mint through
+> it. The owner reconnects Canva once more and the lineage holds.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

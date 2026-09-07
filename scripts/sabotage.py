@@ -7479,6 +7479,55 @@ SABOTAGES = [
         'suites': ['test_canva_falls_back_to_the_agency.py'],
         'why': "the only view of a 1024px frame before 'edit in Canva' is a 112px tile — the owner's ask, 'view and zoom into the image before editing', has nowhere to happen",
     },
+    {
+        'name': 'a_refresh_rotation_is_stored_before_the_token_is_used',
+        'file': 'app/credentials.py',
+        'find': '        if new_refresh:\n            row.secret = _encrypt(new_refresh)',
+        'replace': '        if False:  # SABOTAGE\n            row.secret = _encrypt(new_refresh)',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': "the next refresh after a token lifetime is made with a token Canva already spent, and the whole lineage is revoked — the 'Refresh token used twice' the owner saw, one lifetime later instead of one call later",
+    },
+    {
+        'name': 'an_access_token_is_reused_for_its_lifetime',
+        'file': 'app/credentials.py',
+        # The decision that matters is `_cached`: with it gone, every call refreshes.
+        'find': '    if tok and exp - ACCESS_MARGIN > _now():\n        try:\n            return _decrypt(tok)',
+        'replace': '    if False:  # SABOTAGE\n        try:\n            return _decrypt(tok)',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': 'every API call refreshes — four rotations per edit, a race on every one of them, and a token endpoint that rate-limits or hiccups once revokes the lineage',
+    },
+    {
+        'name': 'a_caller_that_waited_for_the_lock_rereads_the_row',
+        'file': 'app/credentials.py',
+        'find': '        fresh = resolve(tenant, provider, site)\n        if not fresh.get("secret"):',
+        'replace': '        fresh = c  # SABOTAGE\n        if not fresh.get("secret"):',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': "two callers arriving together both refresh — the second with the token the first just spent — and the lineage is revoked by our own concurrency, not the provider's",
+    },
+    {
+        'name': 'the_access_token_is_cached_on_the_row_not_in_the_process',
+        'file': 'app/credentials.py',
+        'find': '        meta["access_token"] = _encrypt(token)\n        meta["access_expires_at"] = int(_now() + (expires_in or 3600))',
+        'replace': '        pass  # SABOTAGE',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': 'nothing is cached, so every call refreshes; and a cache kept in memory instead would be refreshed by the next worker with a token the first worker already spent',
+    },
+    {
+        'name': 'canva_mints_through_the_one_door',
+        'file': 'app/canva.py',
+        'find': '        got = cred.bearer(tenant, "canva")\n        if got.get("ok"):\n            return got["token"], ""',
+        'replace': '        from . import oauth\n        got = oauth.access_token("canva", secret)  # SABOTAGE\n        if got.get("ok"):\n            return got["token"], ""',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': 'Canva mints from the stored token on every call again: the second call of one edit spends it twice and the lineage is revoked — the exact failure of 2026-09-07',
+    },
+    {
+        'name': 'constant_contact_mints_through_the_one_door',
+        'file': 'app/constant_contact.py',
+        'find': '    got = cred.bearer(tenant, "constant_contact")',
+        'replace': '    from . import oauth\n    got = oauth.access_token("constant_contact", c["secret"])  # SABOTAGE',
+        'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
+        'why': 'Constant Contact, which rotates too, spends its refresh token twice on the first draft that makes two calls and dies the way Canva did',
+    },
 ]
 
 

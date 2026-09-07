@@ -734,11 +734,13 @@ def _meta_long_lived(short: str, cid: str, secret: str) -> tuple[str, int, str]:
 def access_token(provider: str, refresh_token: str) -> dict:
     """A short-lived access token from the long-lived one we stored.
 
-    `exchange` deliberately keeps only the refresh token — an access token that
-    expires in an hour is not worth a database row — so every caller that
-    actually talks to a provider needs this step. Nothing cached: a cached
-    token outlives the revocation that was supposed to end it, and the whole
-    point of the Disconnect button is that it takes effect.
+    `exchange` deliberately keeps only the refresh token, so every caller
+    that actually talks to a provider needs this step — and takes it through
+    `credentials.bearer`, never here directly. Nothing is cached HERE; the
+    access token is cached on the credential ROW, where a revoked or failed
+    row is never read, so the Disconnect button still takes effect. Calling
+    this per request from a stored token is what spent Canva's single-use
+    refresh tokens twice and revoked two lineages in a day (2026-09-07).
 
     Uses the flow's own `token_style`, so a provider whose token endpoint wants
     Basic auth is not sent its client secret as a form field.

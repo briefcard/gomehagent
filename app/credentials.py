@@ -1383,6 +1383,131 @@ def _dark(row, provider: str) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# THE ONE DOOR TO A LIVE ACCESS TOKEN.
+#
+# Owner, 2026-09-07, minutes after reconnecting Canva: *"Sign-in was rejected:
+# Refresh token used twice. All access tokens granted from this flow are now
+# revoked."* — the second lineage in a day. Canva's refresh tokens are
+# SINGLE-USE: every refresh returns a successor and spends the one it was
+# given. `oauth.access_token` hands the successor back — its own comment says
+# dropping it "would mean the connection works once and then dies, which
+# looks exactly like a revocation" — and no caller kept it. `canva._token`
+# minted from the STORED token on every call, so one "edit in Canva" (upload,
+# poll, design, folder) spent the same token twice by its second call.
+#
+# So: ONE refresh per token lifetime, the rotation STORED before the access
+# token it bought is used, the access token CACHED ON THE ROW (ciphertext in
+# `meta`) so every worker shares it, and refreshes SERIALISED per account.
+# The cache is on the row and the resolver reads active rows only, which is
+# how Disconnect and `record_failure` still take effect at once — the reason
+# `oauth.access_token` cached nothing was exactly that, and it holds.
+#
+# Across processes (two Render instances) the row is the shared truth, so two
+# workers refresh at the same instant only when both find the cache expired
+# in the same second; a refresh happens once per lifetime, so that window is
+# seconds every few hours rather than every call.
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+import time as _time
+
+_now = _time.time                 # a seam: the suite moves the clock forward
+ACCESS_MARGIN = 60                # seconds before expiry a cached token is no longer trusted
+_LOCKS: dict = {}
+_LOCKS_GUARD = _threading.Lock()
+
+
+def _lock_for(owner: str, provider: str):
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault((owner, provider), _threading.Lock())
+
+
+def _cached(c: dict) -> str:
+    """The access token on this credential, if its lifetime has not ended."""
+    tok = c.get("access_token") or ""
+    exp = int(c.get("access_expires_at") or 0)
+    if tok and exp - ACCESS_MARGIN > _now():
+        try:
+            return _decrypt(tok)
+        except Exception:                                        # noqa: BLE001
+            return ""
+    return ""
+
+
+def _keep_rotation(owner: str, provider: str, site: str, *, used: str,
+                   new_refresh: str, token: str, expires_in: int) -> None:
+    """Store what one refresh bought, in one transaction, on the row that
+    owns the refresh token: the successor refresh token (when the provider
+    rotated) and the access token with its expiry. Written BEFORE the caller
+    uses the access token, so a crash between the two cannot leave a spent
+    token on file."""
+    site = _site_key(provider, site)
+    with db.SessionLocal() as s:
+        q = (s.query(db.Credential)
+             .filter(db.Credential.tenant == owner,
+                     db.Credential.provider == provider,
+                     db.Credential.status == "active"))
+        if site:
+            q = q.filter(db.Credential.site == site)
+        row = q.order_by(db.Credential.granted_at).first()
+        if row is None:
+            return                     # an env-pasted token: nothing to rotate onto
+        if new_refresh:
+            row.secret = _encrypt(new_refresh)
+        meta = dict(row.meta or {})
+        meta["access_token"] = _encrypt(token)
+        meta["access_expires_at"] = int(_now() + (expires_in or 3600))
+        row.meta = meta
+        row.last_verified = db.utcnow()
+        row.last_error = ""
+        s.commit()
+
+
+def bearer(tenant: str, provider: str, site: str = "") -> dict:
+    """A live access token for this account and provider.
+
+    `{ok, token, source, refreshed}` or `{ok: False, error, source}`. Every
+    provider that mints from a stored refresh token comes through here —
+    Canva and Constant Contact rotate theirs, Google does not, and the one
+    door serves all three the same way: the cached token for its lifetime,
+    otherwise one refresh under the account's lock with the rotation stored
+    first. A caller that mints anywhere else spends a single-use token the
+    row does not know about, and the next call kills the lineage.
+    """
+    c = resolve(tenant, provider, site)
+    if c.get("error"):
+        return {"ok": False, "error": c["error"], "source": ""}
+    if not c.get("secret"):
+        return {"ok": False, "error": f"{tenant} has no {provider} connection.",
+                "source": ""}
+    source = str(c.get("source") or "")
+    owner = AGENCY_TENANT if source == "agency" else tenant
+    tok = _cached(c)
+    if tok:
+        return {"ok": True, "token": tok, "source": source, "refreshed": False}
+    with _lock_for(owner, provider):
+        # RE-READ INSIDE THE LOCK. A caller that waited here may find the
+        # refresh already done by the one ahead of it; using the secret it
+        # read before waiting would spend a token that has since rotated.
+        fresh = resolve(tenant, provider, site)
+        if not fresh.get("secret"):
+            return {"ok": False, "error": f"{tenant} has no {provider} connection.",
+                    "source": source}
+        tok = _cached(fresh)
+        if tok:
+            return {"ok": True, "token": tok, "source": source, "refreshed": False}
+        from . import oauth
+        got = oauth.access_token(provider, fresh["secret"])
+        if not got.get("ok"):
+            return {"ok": False, "error": str(got.get("error", "")), "source": source}
+        _keep_rotation(owner, provider, site, used=fresh["secret"],
+                       new_refresh=str(got.get("new_refresh") or ""),
+                       token=got["token"], expires_in=int(got.get("expires_in") or 0))
+        return {"ok": True, "token": got["token"], "source": source,
+                "refreshed": True}
+
+
 def record_failure(tenant: str, provider: str, error: str, *,
                    site: str = "") -> int:
     """Mark this account's ACTIVE connection(s) for a provider FAILED, with the

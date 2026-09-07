@@ -49,10 +49,10 @@ FORMAT_CUSTOM_CODE = 5
 def _token(tenant: str) -> tuple[str, str]:
     """A live access token for this account, or why there is not one.
 
-    The stored secret is a refresh token — `oauth` deliberately never keeps the
-    hour-long access token — so every call mints one. `oauth.access_token`
-    already does that for Google and Canva and caches nothing, which is right:
-    a cached token outlives a revocation.
+    The stored secret is a refresh token. `credentials.bearer` mints the
+    access token ONCE per lifetime and caches it on the credential row —
+    where a revoked or failed row is never read — because Constant Contact's
+    refresh tokens are single-use and minting per call spent them twice.
     """
     c = cred.resolve(tenant, "constant_contact")
     if c.get("error"):
@@ -61,10 +61,11 @@ def _token(tenant: str) -> tuple[str, str]:
         return "", (f"{tenant} has no Constant Contact connection — connect it "
                     f"on the Accounts tab before anything can be drafted "
                     f"into it.")
-    from . import oauth
-    got = oauth.access_token("constant_contact", c["secret"])
+    # THROUGH THE ONE DOOR. Constant Contact rotates its refresh tokens like
+    # Canva does; minting here on every call spent them twice (2026-09-07).
+    got = cred.bearer(tenant, "constant_contact")
     if not got.get("ok"):
-        return "", got.get("error", "Constant Contact would not renew the token.")
+        return "", got.get("error") or "Constant Contact would not renew the token."
     return got["token"], ""
 
 
