@@ -563,6 +563,75 @@ send cannot be recalled); ads are carried to Meta by hand; the reports planner
 leaves `to` for the owner (no planner can read it from data); the winning-look
 read is on a button and on no schedule.
 
+### The visual boards — 2026-09-07 (one ship; hash in the memory note `gomehagent-creative-substrate`)
+
+**The defect, reproduced in numbers.** Two photographs of the product on
+file; four generation calls; none carried an image. Every request was a JSON
+body, and the only thing the model was ever told about the product was "do
+not invent one". The frame the owner saw — *"a nameless white mug"* — was a
+person-led cell that could not carry the product by construction: framing
+"incidental or absent", a moment "without the product anywhere", and the
+invent-nothing rule. Three ways one grid kept the product out.
+
+**What the owner asked for, in their words, and what each became:**
+- *"a visual board similar to a pinterest board from which the AI should
+  mimic styling and positioning"* → the brand's own pictures go INTO the
+  request as `image[]` inputs on `/images/edits` with `input_fidelity=high`
+  (`imagegen.with_references`); the prompt says which inputs are the product
+  ("reproduced EXACTLY") and which the look ("not the contents").
+- *"different looks per brand - studio vs lifestyle vs specific collections
+  … create these references and optionally select which to pull from for
+  each run"* → boards are NAMED (`kb.add_board`, stored in
+  `KbBrand.visual["boards"]` — the art-direction column, first reader); a
+  pin is `board:<slug>:<role>` on the asset; `batch(boards=)`,
+  `generate(boards=)`, `pick(boards=)` and the two forms carry the choice;
+  none chosen means all; a name that is not a board is refused where it can
+  be read and named in the result, never widened to everything.
+- *"accessible by the other systems as well not just ads"* →
+  `creative.board_inputs` is THE seam: the ad set and the article hero draw
+  through it; `pick` gains `pinned_product` (above the newest photograph)
+  and `pinned_look` (above brand-wide), both below `proven`;
+  `hero_for_campaign` prefers pins within each rung.
+
+**Standing rules it adds:**
+- **The boards are the switch.** Nothing pinned → yesterday's route,
+  unchanged. The day a route ships must not be the day every account's
+  pictures quietly change (`the_board_is_the_switch`).
+- **A reference pin is words, never pixels.** Kept out by `may_publish` at
+  the one place bytes are fetched — the gate a composite already uses — and
+  NAMED in `excluded` and in the set's note. Kept out and said, not kept out
+  and silent. A reference may be pinned as the look; never as the product.
+- **With the product in the request, no cell excludes it.** `DRAWN_MOMENTS`
+  drops `before`; `FRAMINGS_DRAWN` puts the product in the person's hands.
+  The old vocabulary is right when a generated product can only be the
+  wrong one, and wrong the moment the model has been handed the right one.
+- **What a picture was drawn from is on the picture.** `derived_from` holds
+  the pin ids, so the set can say "drawn from N of the brand's own pictures"
+  from the frames themselves, and an outcome can one day reach the pins.
+- **The pinned product shot IS a photograph of the product.** `batch` treats
+  `pinned_product` like `photograph`; `pinned_look` is not one.
+
+**Traps this stretch fell into.** The suite's fake image bytes were keyed on
+`len(sent)` — after `sent.clear()` the second set duplicated the first and
+content-addressing filed zero frames; the counter must be run-wide. Twice the
+suite encoded MY expectation rather than the design: "front first" when the
+collector promises pick's choice first, and "look-only means no product"
+when the design says the board being on means the product's photographs are
+used without pinning each one. Read the docstring you wrote before asserting
+against it. `sabotage.py` entries are mixed-quoted (`"name": '…'` beside
+`'find': '…'`): rewrite a `find`/`replace` by matching the line on its own,
+never by its neighbour. Editing `batch`'s loop and signature moved FIVE
+existing guards; the anchors test caught them and one matched twice once
+`with_references` appended the same rule as `plate`.
+
+**Left for the next ship, in order:** derive-and-confirm a direction row
+from a board's pins (the words a reference pin contributes; the
+`KbBoard.note` is its seed); an image-embedding distance judge that RANKS a
+set against its board and never vetoes; `generate` still fetches its product
+source by "newest publishable row + httpx" rather than `pick`; the Pictures
+page's "select all" script ticks every `asset_ids` box on the page,
+including the boards' and the sets'.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -614,6 +683,16 @@ read is on a button and on no schedule.
 > lives on the FORMAT with the craft question following it; `_PLATE_RULE` is
 > split three ways; every criterion is positive-polarity with the pass-line
 > stated; and a WordPress article carries its featured image.
+>
+> **SHIPPED 2026-09-07: THE VISUAL BOARDS** (one ship, 19 new guards, 5
+> re-anchored — §5 has the record). Per brand, named boards of the brand's own
+> pictures; the product's photographs and the owned look pins go into the
+> request as image inputs; a run selects its boards; the article hero, `pick`
+> and the campaign hero reach the same boards through `creative.board_inputs`.
+> The owner's next move is not code: create Baci's boards (Studio, Lifestyle,
+> the zodiac collection) and pin — the switch is theirs. Then: derive a
+> direction row from a board's pins and confirm it; the distance judge that
+> ranks and never vetoes; `generate`'s source via `pick`.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

@@ -64,7 +64,8 @@ def _usable(rows: list, entity_keys) -> list:
 
 def hero_for_campaign(tenant: str, *, segment_key: str = "",
                       entity_keys: list[str] | None = None,
-                      title: str = "", draft_if_missing: bool = False) -> dict:
+                      title: str = "", draft_if_missing: bool = False,
+                      boards: tuple | list = ()) -> dict:
     """The hero image for one campaign email, or the governed path to one.
 
     Returns one of:
@@ -85,6 +86,11 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
                           entity_key=ek or "")
     seen: set[str] = set()
     rows = [r for r in rows if not (r.id in seen or seen.add(r.id))]
+    # THE BOARD FIRST, within each rung. `_usable` keeps this order inside its
+    # scoped-then-brand-wide split, so a pinned photograph of the product
+    # beats an unpinned one and a pinned look beats a shelf shot — the email
+    # hero reaches the boards the ad set reaches (owner, 2026-09-06).
+    rows.sort(key=lambda r: 0 if kb.pinned(r, boards) else 1)
     pick = next(iter(_usable(rows, ordered)), None)
     if pick is not None:
         # Belt to the braces `kb.assets` already provides: the use-gate names
@@ -612,9 +618,15 @@ def _about(asset, subject: str) -> bool:
 def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero",
          entity_key: str = "", audience_key: str = "", claim: str = "",
          prominent: str = "", positioning: str = "", channel: str = "",
-         situation: str = "") -> dict:
+         situation: str = "", boards: tuple | list = ()) -> dict:
     """The best picture this account already has for this piece, or the brief
     to make one.
+
+    THE BOARDS ARE ON THIS LADDER TOO. A picture the owner pinned as the
+    product's own shot outranks whichever photograph of it sorted first; a
+    picture pinned as the brand's look outranks an arbitrary brand-wide one.
+    Both sit below `proven`, because a recorded result beats an opinion, and
+    both are still `may_publish`-gated: a reference pin is never a hero.
 
     ONE LADDER, THREE SYSTEMS. The email hero, the article image and the ad
     frame were each going to grow their own selection rule, and three rules
@@ -675,11 +687,23 @@ def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero"
             if (r.entity_key or "") == ent and ent:
                 return _out(r, "proven", "it has carried this product before "
                                          "and the result was recorded")
+        usable = {r.id: r for r in heroes}
+        pins = kbmod.board(tenant, boards)
+        for r in pins["product"]:
+            if (r.entity_key or "") == ent and ent and r.id in usable:
+                return _out(usable[r.id], "pinned_product",
+                            "pinned on the board as this product's own shot")
         for r in heroes:
             if (r.entity_key or "") == ent and ent:
                 return _out(r, "photograph",
                             "a real photograph of the thing being sold, which "
                             "beats anything generated")
+        for r in pins["look"]:
+            if (r.entity_key or "") in ("", ent) and r.id in usable:
+                return _out(usable[r.id], "pinned_look",
+                            "no photograph of this product, so the picture "
+                            "pinned as the brand's look — on brand by "
+                            "definition, and not a picture of this product")
         for r in heroes:
             if not (r.entity_key or ""):
                 return _out(r, "brand_wide",
@@ -723,8 +747,15 @@ def generate(tenant: str, *, commitment: dict | None = None,
              fmt: str = "email_hero", prominent: str = "",
              entity_key: str = "", claim: str = "", situation: str = "",
              audience_key: str = "", positioning: str = "",
-             prompt: str = "", review: bool = True) -> dict:
+             prompt: str = "", review: bool = True,
+             boards: tuple | list = ()) -> dict:
     """Make one image, check it did the job, and FILE IT so something can use it.
+
+    DRAWN FROM THE BOARDS when the account has them (owner, 2026-09-06:
+    *"accessible by the other systems as well not just ads"*): the same
+    `board_inputs` the ad set uses, so an article hero and an ad frame are
+    drawn from the same pictures under the same rights gate. Without a board,
+    the masked-product route of before, unchanged.
 
     DRAFT, CHECK, REPAIR ONCE — the same shape the copy path already runs,
     deliberately, because it is the shape that works there and a second
@@ -764,7 +795,18 @@ def generate(tenant: str, *, commitment: dict | None = None,
             f"no usable photograph of {entity_key!r} on file, so the frame is "
             f"scenery and the product is not in it")
 
-    res, blob, basis = _render(tenant, text, brief["shape"], source)
+    refs = board_inputs(tenant, entity_key, source_id, boards=boards)
+    from_board = bool(refs["product"] or refs["look"])
+
+    def _draw(text_: str) -> tuple:
+        if from_board:
+            got_ = _with_references(text_, brief["shape"], 1, refs)
+            return got_, ((got_.get("images") or [b""])[0] if got_.get("ok") else b""), (
+                f"drawn from the brand's own pictures — {len(refs['product'])} of "
+                f"the product, {len(refs['look'])} of the look")
+        return _render(tenant, text_, brief["shape"], source)
+
+    res, blob, basis = _draw(text)
     if not res.get("ok") or not blob:
         return {"ok": False, "error": res.get("error", "generation failed"),
                 "thin": brief["thin"]}
@@ -778,7 +820,7 @@ def generate(tenant: str, *, commitment: dict | None = None,
     if verdict.get("ok") and verdict.get("failed") and verdict.get("fix"):
         again_text = (text + "\n\nThe previous attempt was rejected for: "
                       + ", ".join(verdict["failed"]) + ". " + verdict["fix"])
-        res2, blob2, basis2 = _render(tenant, again_text, brief["shape"], source)
+        res2, blob2, basis2 = _draw(again_text)
         if res2.get("ok") and blob2:
             attempts = 2
             v2 = assess(blob2, brief, tenant)
@@ -794,7 +836,8 @@ def generate(tenant: str, *, commitment: dict | None = None,
         title=(f"Generated: {brief['subject'] or fmt}")[:120],
         kind="image", subject=brief["subject"][:200], source="generated",
         prompt=text[:2000], entity_key=entity_key,
-        derived_from=[source_id] if source_id else [],
+        derived_from=(list(refs["pins"]) if from_board
+                      else [source_id] if source_id else []),
         origin=GENERATED_ORIGIN)
 
     asset_id = ""
@@ -817,6 +860,11 @@ def generate(tenant: str, *, commitment: dict | None = None,
             "reused": put["reused"], "basis": basis, "said": said,
             "prompt": text, "thin": brief["thin"], "subject": brief["subject"],
             "attempts": attempts, "assessment": verdict,
+            "board": {"on": refs["on"], "drawn": bool(refs["product"]),
+                      "product": len(refs["product"]), "look": len(refs["look"]),
+                      "pins": list(refs["pins"]), "excluded": refs["excluded"],
+                      "boards": list(refs["boards"]),
+                      "unknown": list(refs["unknown"])},
             "review": "proposed — it cannot be used until somebody approves "
                       "it on Review · Pictures"}
 
@@ -851,9 +899,25 @@ FRAMINGS = {
 #: real diversity has to come from the grid above, which needs a call each.
 PER_PROMPT = 2
 
+#: THE SAME GRID WITH THE PRODUCT IN EVERY CELL, for a set drawn from the
+#: product's own photographs. Two entries of the vocabulary above put the
+#: product OUT of frame — "incidental or absent", "without the product
+#: anywhere" — which was right when a generated product could only be the
+#: wrong one, and is the "nameless white mug" once the model has been handed
+#: the right one. No cell excludes the product here, and `before` is not
+#: walked at all.
+FRAMINGS_DRAWN = {
+    **FRAMINGS,
+    "person_led": "a person is the subject, and they are using or holding "
+                  "the product — it is recognisably in their hands or in "
+                  "front of them",
+    "context": "wide, the whole setting, the product clearly present within it",
+}
+DRAWN_MOMENTS = ("during", "after")
+
 
 def axes(*, angles: tuple = (), levers: tuple = (), framings: tuple = (),
-         limit: int = 8) -> list:
+         limit: int = 8, moments: tuple = ()) -> list:
     """The grid, as a list of `{angle, lever, moment, framing}`.
 
     Walked diagonally rather than nested, so the first four entries differ on
@@ -864,7 +928,7 @@ def axes(*, angles: tuple = (), levers: tuple = (), framings: tuple = (),
     from . import ad_craft
     a = tuple(angles or ad_craft.UNIVERSAL_ANGLES)
     lv = tuple(levers or tuple(ad_craft.VALUE_LEVERS))
-    mo = tuple(MOMENTS)
+    mo = tuple(moments or MOMENTS)
     fr = tuple(framings or FRAMINGS)
     if not fr:
         return []
@@ -887,14 +951,15 @@ def axes(*, angles: tuple = (), levers: tuple = (), framings: tuple = (),
     return out
 
 
-def _axis_brief(cell: dict) -> str:
+def _axis_brief(cell: dict, *, drawn: bool = False) -> str:
     from . import ad_craft
+    framings = FRAMINGS_DRAWN if drawn else FRAMINGS
     return (f"\n\nTHIS FRAME'S APPROACH — one of several, and it must be "
             f"visibly different from the others:\n"
             f"- angle: {ad_craft.ANGLES.get(cell['angle'], {}).get('brief', cell['angle'])}\n"
             f"- what it dramatises: {ad_craft.VALUE_LEVERS.get(cell['lever'], cell['lever'])}\n"
             f"- moment: {MOMENTS.get(cell['moment'], '')}\n"
-            f"- framing: {FRAMINGS.get(cell['framing'], '')}")
+            f"- framing: {framings.get(cell['framing'], '')}")
 
 
 #: Framings that need the REAL product in the frame, and therefore cannot be
@@ -905,6 +970,9 @@ def _axis_brief(cell: dict) -> str:
 #: composite the photograph onto it, which is what `compose.product_on_scene`
 #: has been able to do since it was written and has never been asked to.
 NEEDS_THE_PRODUCT = ("product_led", "detail")
+#: …UNLESS THE MODEL IS HANDED THE PRODUCT. With the account's board on,
+#: `batch` sends the product's own photographs as image inputs and every
+#: framing is drawn, this pair included — see `board_inputs`.
 
 #: AND THE OTHER HALF, which had no name because the prohibition was global.
 #: `person_led` is briefed "a person is the subject" and was then told, in the
@@ -916,7 +984,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
           positioning: str = "", entity_key: str = "", audience_key: str = "",
           claim: str = "", prominent: str = "", headline: str = "",
           subline: str = "", fmt: str = "ad_frame", output_id: str = "",
-          situation: str = "", plates: int = 4, review: bool = True) -> dict:
+          situation: str = "", plates: int = 4, review: bool = True,
+          boards: tuple | list = ()) -> dict:
     """A set of frames for one ad, filed together under one batch id.
 
     Owner, 2026-08-30: *"each ad will need a carousel of images - potentially
@@ -944,6 +1013,14 @@ def batch(tenant: str, *, commitment: dict | None = None,
     AND IF THERE IS NO PHOTOGRAPH, THOSE FRAMINGS ARE DROPPED AND SAID. Not
     quietly swapped for a generated stand-in — that is the one failure this
     whole route exists to prevent, and it would be invisible in the output.
+
+    A THIRD ROUTE, CHOSEN BY THE BOARD (owner, 2026-09-06: *"each brand
+    should be able to share a visual board … from which the AI should mimic
+    styling and positioning"*). With anything pinned, the product's own
+    photographs and the board's owned pins go INTO the request as images,
+    and every cell is drawn from them — the product-led ones included, so no
+    composite, and the person-led ones included, so no nameless mug. A
+    reference pin is never sent; `board_inputs` keeps it out and names it.
 
     EVERY FRAME IS FILED AND EVERY FRAME IS PROPOSED. The owner asked to see
     all of them and reject individually or reject the set, so nothing here
@@ -981,10 +1058,18 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 situation=situation,
                 audience_key=audience_key, claim=claim, prominent=prominent,
                 positioning=positioning)
+    # A PINNED PRODUCT SHOT IS A PHOTOGRAPH OF THE PRODUCT — the one the owner
+    # chose. `pinned_look` is not: it is the brand's look, and a set that
+    # composited the look as if it were the product would be the wrong
+    # picture with a confident file name.
     product_id = (shot.get("asset_id") or "") if not shot.get("should_generate") \
-        and shot.get("rung") in ("proven", "photograph") else ""
+        and shot.get("rung") in ("proven", "photograph", "pinned_product") else ""
 
-    framings = tuple(FRAMINGS) if product_id else tuple(
+    # THE BOARD, if the account has one — its own pictures as bytes, and the
+    # reference pins it was NOT allowed to send, named. Asked once per set.
+    refs = board_inputs(tenant, entity_key, product_id, boards=boards)
+    drawn = bool(refs["product"])
+    framings = tuple(FRAMINGS) if (product_id or drawn) else tuple(
         f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
     dropped = [f for f in FRAMINGS if f not in framings]
 
@@ -997,11 +1082,21 @@ def batch(tenant: str, *, commitment: dict | None = None,
                            composited=True)
 
     frames, errors, repeats, pasted = [], [], 0, 0
-    for cell in axes(framings=framings, limit=max(1, int(plates or 4))):
-        text = base["prompt"] + _axis_brief(cell)
+    for cell in axes(framings=framings, limit=max(1, int(plates or 4)),
+                     moments=DRAWN_MOMENTS if drawn else ()):
+        text = base["prompt"] + _axis_brief(cell, drawn=drawn)
         needs = cell["framing"] in NEEDS_THE_PRODUCT
-        res = _plates(text, base["shape"], PER_PROMPT, for_product=needs,
-                      with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
+        # THE ROUTE. Drawn from the brand's pictures when it has the product
+        # to draw from; a look-only board styles the cells that carry no
+        # product; otherwise the plate-and-composite of before, unchanged.
+        direct = drawn or bool(refs["look"] and not needs)
+        if direct:
+            res = _with_references(
+                text, base["shape"], PER_PROMPT, refs,
+                with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
+        else:
+            res = _plates(text, base["shape"], PER_PROMPT, for_product=needs,
+                          with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT)
         if not res.get("ok"):
             errors.append(f"{cell['angle']}/{cell['framing']}: "
                           f"{res.get('error', 'generation failed')}")
@@ -1010,7 +1105,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
             if not blob:
                 continue
             verdict = None
-            if needs:
+            if needs and not direct:
                 got = _integrated(tenant, product_id, blob, base, comp_brief,
                                   cell, text, review=review)
                 if got.get("error"):
@@ -1023,7 +1118,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
                                 entity_key=entity_key, prompt=text,
                                 review=review, verdict=verdict,
                                 output_id=output_id,
-                                product_id=product_id if needs else "")
+                                product_id=product_id if (needs or drawn) else "",
+                                derived_from=refs["pins"] if direct else [])
             if filed.get("duplicate"):
                 repeats += 1
                 continue
@@ -1037,11 +1133,32 @@ def batch(tenant: str, *, commitment: dict | None = None,
     # looking like a good batch.
     clean = [f for f in frames if not f["failed"] and f.get("reviewed")]
     unreviewed = [f for f in frames if not f.get("reviewed")]
+    # WHAT THE BOARD CONTRIBUTED, SAID — including what it was not allowed
+    # to. A reference pin kept out silently is a pin the owner thinks is
+    # working.
+    board_said = ""
+    if refs["on"]:
+        board_said = (f" — drawn from {len(refs['product'])} photograph(s) of "
+                      f"the product and {len(refs['look'])} board pin(s)"
+                      if (refs["product"] or refs["look"]) else
+                      " — the board is on, but none of its pictures could be used")
+        if refs["excluded"]:
+            board_said += (f"; {len(refs['excluded'])} pin(s) kept out of the "
+                           "request: " + "; ".join(
+                               str(e["why"])[:90] for e in refs["excluded"][:3]))
+    if refs["unknown"]:
+        board_said += ("; no board named " + ", ".join(refs["unknown"])
+                       + " — nothing was pulled from it")
     return {"ok": bool(frames), "batch": batch_id, "frames": frames,
             "made": len(frames), "clean": len(clean),
             "subject": base["subject"], "thin": base["thin"],
             "errors": errors, "product_asset": product_id,
             "shape": base["shape"],
+            "board": {"on": refs["on"], "drawn": drawn,
+                      "product": len(refs["product"]), "look": len(refs["look"]),
+                      "pins": list(refs["pins"]), "excluded": refs["excluded"],
+                      "boards": list(refs["boards"]),
+                      "unknown": list(refs["unknown"])},
             # SAID, not left to be counted. A set where nineteen of twenty
             # frames failed their review is a set with a brief problem, and
             # the number is the only place that shows before somebody opens
@@ -1066,11 +1183,12 @@ def batch(tenant: str, *, commitment: dict | None = None,
                       + (f"; {pasted} were dropped because the product still "
                          f"read as pasted on after a second plate"
                          if pasted else "")
+                      + board_said
                       + ". No type is set into these — open one in Canva to "
                         "add the headline"
                       + (f" (“{headline[:60]}”)" if headline else ""))
                      if frames else
-                     ("nothing was generated"
+                     ("nothing was generated" + board_said
                       + (f" — {pasted} composite(s) were dropped because the "
                          f"product read as pasted on" if pasted else ""))),
             "held_back": (
@@ -1170,8 +1288,13 @@ _PLACEMENT = {"square": "1:1", "portrait": "4:5", "landscape": "1:1"}
 def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 batch_id: str, *, entity_key: str, prompt: str, review: bool,
                 product_id: str = "", output_id: str = "",
-                verdict: dict | None = None) -> dict:
+                verdict: dict | None = None,
+                derived_from: list | None = None) -> dict:
     """Store the bytes, judge them, and file the asset. One frame's whole life.
+
+    `derived_from` is the board: the ids of the pictures this frame was drawn
+    from, recorded on the frame so the set can say so and the outcome loop
+    can one day say which pins made the frames that worked.
 
     THE TAGS NAMED THE GRID AND NOT THE ARGUMENT. `[angle, lever, moment,
     framing]` says where on the walk a frame came from, which is what a
@@ -1204,6 +1327,7 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
         kind="image", subject=base["subject"][:200], source="generated",
         prompt=prompt[:2000], entity_key=entity_key,
         origin=GENERATED_ORIGIN, batch=batch_id,
+        derived_from=list(derived_from or []),
         tags=([cell["angle"], cell["lever"], cell["moment"], cell["framing"]]
               + ([f"output:{output_id}"] if output_id else [])))
     row = next((a for a in kbmod.assets(tenant, publishable_only=False)
@@ -1281,6 +1405,89 @@ def _plates(text: str, shape: str, n: int, *, for_product: bool = False,
     from . import imagegen
     return imagegen.plate(text, shape=shape, n=max(1, min(4, int(n or 1))),
                           for_product=for_product, with_people=with_people)
+
+
+def _with_references(text: str, shape: str, n: int, refs: dict, *,
+                     with_people: bool = False) -> dict:
+    """The seam every board-drawn frame goes through; `_plates` says why."""
+    from . import imagegen
+    return imagegen.with_references(
+        text, product=refs["product"], look=refs["look"], shape=shape,
+        n=max(1, min(4, int(n or 1))), with_people=with_people)
+
+
+#: How many pictures of each kind go into one request. The API takes sixteen;
+#: four of the product and four of the look is plenty to fix a product's form
+#: and a board's palette, and every extra one is upload time on a call that
+#: already takes a minute.
+BOARD_INPUTS = 4
+
+
+def board_inputs(tenant: str, entity_key: str, product_id: str = "",
+                 boards: tuple | list = ()) -> dict:
+    """The brand's own pictures, as bytes, for one piece — or nothing, and why.
+
+    THE ONE SEAM TO THE BOARDS, for every system that makes a picture: the
+    ad set, the article hero, and whatever comes next. Owner, 2026-09-06:
+    *"make sure this is accessible by the other systems as well not just
+    ads."* A generator that reaches the boards any other way has built a
+    second rights check, or none.
+
+    THE BOARDS ARE THE SWITCH. An account with nothing pinned gets the route
+    it had yesterday, because the day this shipped must not have been the day
+    every account's frames quietly changed. Pin one thing and the account's
+    pictures are drawn from its own: the LOOK from the `look` pins of the
+    boards this run selected (all of them, unless it said), the PRODUCT from
+    its photographs — the `product` pins for this item first, then every
+    photograph of it on file, because a catalogue shot is a photograph of the
+    product and the owner should not have to pin each one. A piece about no
+    product in particular carries no product.
+
+    A board named that does not exist is returned under `unknown` and pulled
+    from not at all — never quietly widened to every board.
+
+    RIGHTS, at the one place bytes are fetched. Every row goes through
+    `kb.may_publish` — the gate `compose._guard` uses — so a reference pin is
+    not fetched, not sent, and is NAMED in `excluded` with the reason. Kept
+    out and said; not kept out and silent.
+    """
+    from . import imagegen, kb as kbmod
+    every = kbmod.board(tenant)
+    on = bool(every["look"] or every["product"])
+    sel = kbmod.board(tenant, boards) if boards else every
+    out = {"product": [], "look": [], "pins": [], "excluded": [], "on": on,
+           "boards": list(sel["boards"]), "unknown": list(sel["unknown"])}
+    if not on:
+        return out
+    ent = entity_key or ""
+    product_rows = []
+    if ent:
+        product_rows = [r for r in sel["product"] if (r.entity_key or "") == ent]
+        seen = {r.id for r in product_rows}
+        rest = [r for r in kbmod.assets(tenant, publishable_only=True, kind="image")
+                if (r.entity_key or "") == ent and r.id not in seen
+                and (r.origin or "") != GENERATED_ORIGIN
+                and (r.subject or "") != kbmod.LOGO]
+        # `pick`'s choice first among the photographs: the one the rest of
+        # the system would have used is the one the model should match most.
+        rest.sort(key=lambda r: 0 if r.id == product_id else 1)
+        product_rows += rest
+    for role, rows in (("product", product_rows), ("look", sel["look"])):
+        for r in rows:
+            if len(out[role]) >= BOARD_INPUTS:
+                break
+            ok, why = kbmod.may_publish(r.id)
+            if not ok:
+                out["excluded"].append({"asset_id": r.id, "role": role, "why": why})
+                continue
+            blob, _mime = imagegen.input_image(_fetch(r.url or ""))
+            if not blob:
+                out["excluded"].append({"asset_id": r.id, "role": role,
+                                        "why": "the picture could not be fetched"})
+                continue
+            out[role].append(blob)
+            out["pins"].append(r.id)
+    return out
 
 
 def _drive_service(alias: str):

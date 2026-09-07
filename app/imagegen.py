@@ -294,6 +294,133 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
                     "nothing here that could be the wrong product"}
 
 
+# ---------------------------------------------------------------------------
+# Drawn FROM the brand's own pictures. Owner, 2026-09-06, on a set of frames:
+# *"just some generic photo of someone drinking out of a nameless white mug…
+# We have photos of this product for examples and existing product assets to
+# reference for vibe and quality. So why are we doing this so poorly?"*
+#
+# Because the model had never seen them. Every generation went out as a JSON
+# body — prompt, size, n — and the only thing it was ever told about the
+# product was "do not invent one". This is the route where it is HANDED the
+# product and the look, as image inputs, and the prompt says which is which
+# because the API does not.
+# ---------------------------------------------------------------------------
+
+def _this_exact_product(k: int) -> str:
+    """THE OTHER HALF OF `_NO_INVENTED_PRODUCT`. "Invent nothing" was the
+    right rule when the model had never seen this product; given its
+    photographs, the rule is the opposite — draw exactly this, and nothing
+    like it."""
+    return (f"THE PRODUCT IN THIS FRAME IS THE ONE IN THE FIRST {k} REFERENCE "
+            f"IMAGE{'S' if k != 1 else ''}, reproduced EXACTLY: its shape, "
+            "proportions, colours, pattern, material and finish. Do not "
+            "redesign, simplify, recolour or restyle it, and do not substitute "
+            "a generic item of the same type. Show it once, and make it the "
+            "thing the eye lands on.")
+
+
+_THE_LOOK = (
+    "The remaining reference images are THE LOOK, not the contents: match "
+    "their styling, lighting, palette, surfaces, props, camera height and "
+    "framing. Nothing from inside them — no object, person, room or text — is "
+    "copied into this frame; they say how it should feel, not what is in it.")
+
+#: How hard the model is asked to match its inputs. `high` is what makes a
+#: reference a reference rather than a mood — at `low`, the API's default, a
+#: hand-painted cup comes back as "a cup". Only the full gpt-image models take
+#: the parameter; the mini refuses the whole request, so it is left off there
+#: rather than sent and refused.
+INPUT_FIDELITY = "high"
+#: Longest side of an input. The API takes far larger; a Shopify master is
+#: 4000px and five of them is a slow upload on a call that already takes a
+#: minute, and nothing above this size reaches the model anyway.
+INPUT_MAX_SIDE = 1536
+
+
+def _fidelity_for(model: str) -> str:
+    return "" if "mini" in (model or "") else INPUT_FIDELITY
+
+
+def input_image(blob: bytes, max_side: int = INPUT_MAX_SIDE) -> tuple[bytes, str]:
+    """One input at a size the API takes quickly: `(bytes, mime)`, or
+    `(b"", "")` if the bytes are not an image — a caller drops that one and
+    SAYS so, rather than sending it. A cutout keeps its alpha (PNG); a
+    photograph goes as JPEG, which halves the upload."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(blob))
+        im.load()
+    except Exception:                                            # noqa: BLE001
+        return b"", ""
+    im.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    if im.mode in ("RGBA", "LA", "P"):
+        im.convert("RGBA").save(buf, format="PNG")
+        return buf.getvalue(), "image/png"
+    im.convert("RGB").save(buf, format="JPEG", quality=90)
+    return buf.getvalue(), "image/jpeg"
+
+
+def _mime(blob: bytes) -> str:
+    return "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
+
+
+def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
+                    shape: str = "square", n: int = 1,
+                    with_people: bool = False, model: str = "") -> dict:
+    """A frame generated FROM the brand's own pictures.
+
+    `product` is the thing itself, photographed; `look` is the board. Both go
+    into the request as image inputs — the one route where the model sees
+    pixels — under one field name, because the API takes a list.
+
+    RIGHTS ARE NOT CHECKED HERE, and cannot be: this function takes bytes.
+    Every byte string reaching it came through `creative.board_inputs`,
+    which fetches nothing `kb.may_publish` refuses — the gate that keeps a
+    reference photograph out of a composite. A reference pin therefore never
+    arrives here, and the guard on that gate is what says so.
+    """
+    if shape not in SIZES:
+        return {"ok": False, "error": f"unknown shape {shape!r}"}
+    product = [b for b in (product or []) if b]
+    look = [b for b in (look or []) if b]
+    if not product and not look:
+        return {"ok": False, "error": "No reference images supplied."}
+    rules = []
+    if product:
+        rules.append(_this_exact_product(len(product)))
+        if look:
+            rules.append(_THE_LOOK)
+    else:
+        # A look with no product: the setting is drawn from the board and
+        # the product rule is the old one, because the model still has not
+        # seen the product and must not make one up.
+        rules += [_NO_INVENTED_PRODUCT,
+                  _THE_LOOK.replace("The remaining reference images",
+                                    "The reference images")]
+    if with_people:
+        rules.append(_PEOPLE_ARE_THE_SUBJECT)
+    files = ([("image[]", (f"product-{i + 1}", b, _mime(b)))
+              for i, b in enumerate(product)]
+             + [("image[]", (f"look-{i + 1}", b, _mime(b)))
+                for i, b in enumerate(look)])
+    model = model or MODEL
+    data = {"model": model, "size": SIZES[shape],
+            "n": str(max(1, min(4, n))),
+            "prompt": "\n\n".join([prompt] + rules).strip()}
+    fid = _fidelity_for(model)
+    if fid:
+        data["input_fidelity"] = fid
+    res = post("/images/edits", files=files, data=data)
+    if not res["ok"]:
+        return res
+    return {"ok": True, "images": res["images"], "shape": shape,
+            "inputs": {"product": len(product), "look": len(look)},
+            "note": "drawn from the brand's own pictures — the product from "
+                    "its photographs, the setting from the board"}
+
+
 def _protect_mask(product_png: bytes, canvas: tuple[int, int]) -> tuple[bytes, bytes]:
     """The base frame and the mask that keeps the product out of the model's hands.
 

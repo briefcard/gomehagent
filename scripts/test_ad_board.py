@@ -172,9 +172,15 @@ def main():
     ck("a variant's own id 303s to the board", r2.status_code == 303
        and f"/admin/work/{anchor}" in r2.headers.get("location", ""),
        f"{r2.status_code} -> {r2.headers.get('location', '')}")
+    # A BOARD TO CHOOSE FROM, so the frames form has something to offer.
+    # Owner, 2026-09-06: "optionally select which to pull from for each run".
+    kb.add_board("baci", "Studio", note="on white")
     page = c.get(f"/admin/work/{anchor}?key={KEY}").text
     ck("the board renders, framed", 'class="side"' in page
        and "The variant board" in page)
+    ck("  and the Make-frames form offers the visual boards to draw from",
+       'name="boards" multiple' in page and ">Studio<" in page,
+       "the choice the owner asked for is made where the run is started")
     ck("  variant cards with the amber chip",
        "Variant 1" in page and "needs art direction" in page)
     ck("  honest in every state: no ad-platform write is wired",

@@ -6145,6 +6145,160 @@ def _winning_look_card(key: str, tenant: str) -> str:
     </div>"""
 
 
+def _drawn_from(frames) -> str:
+    """What a set was drawn from, off the frames themselves — `derived_from`
+    is the board's record on each one, so the card cannot claim a board the
+    frames do not carry."""
+    n = max((len(f.derived_from or []) for f in frames), default=0)
+    return (f" &middot; drawn from {n} of the brand&#39;s own pictures"
+            if n else "")
+
+
+def boards_select(tenant: str, *, name: str = "boards") -> str:
+    """The boards a run may pull from, as a multi-select — or nothing, when
+    the brand has none. Every form that starts a picture carries this, so
+    the choice the owner asked for is made where the run is started."""
+    have = kb.boards(tenant)
+    if not have:
+        return ""
+    opts = "".join(f'<option value="{_esc(slug)}">{_esc(b.get("name") or slug)}'
+                   f'</option>' for slug, b in have.items())
+    return (f'<select name="{_esc(name)}" multiple size="{min(4, len(have))}" '
+            f'title="Which boards to draw from. None chosen means all of them.">'
+            f'{opts}</select><span class="when">boards to draw from &mdash; '
+            f'none chosen means all</span>')
+
+
+def _board_card(key: str, tenant: str) -> str:
+    """THE BRAND'S VISUAL BOARDS — what its pictures are drawn from.
+
+    Owner, 2026-09-06: *"each brand should be able to share a visual board
+    similar to a pinterest board from which the AI should mimic styling and
+    positioning"*, then *"we may have different looks per brand - studio vs
+    lifestyle vs specific collections. So please allow us to create these
+    references and optionally select which to pull from for each run."*
+
+    So: boards are created by name here; pins go on a board with a role; and
+    the run that draws a picture chooses its boards on its own form. The
+    rights column decides what a pin may do: an OWNED pin goes into the
+    request as pixels; a REFERENCE pin is inspiration — read for direction,
+    never sent — and says so on the tile, so a board of Pinterest saves does
+    not look like a board that is working.
+    """
+    from . import provenance as prov
+    have = kb.boards(tenant)
+    every = kb.board(tenant)
+    n_pins = len({r.id for rows in (every["look"], every["product"]) for r in rows})
+    pool = [a for a in kb.assets(tenant, publishable_only=False, kind="image")
+            if (a.review or "") != prov.PROPOSED
+            and (a.subject or "") != kb.LOGO]
+    on_boards = {a.id: kb.pinned(a) for a in pool}
+    POOL = 48
+    shown = [a for a in pool if not on_boards[a.id]][:POOL]
+    loose = len([a for a in pool if not on_boards[a.id]])
+
+    def _tile(a, roles: list) -> str:
+        owned = (a.rights or kb.REFERENCE) == kb.OWNED
+        use = ("owned &mdash; sent to the model as pixels" if owned
+               else "reference &mdash; words only, never sent")
+        role = (("<b>" + _esc(" + ".join(roles)) + "</b> &middot; ")
+                if roles else "")
+        return f"""
+        <label class="pic">
+          <input type="checkbox" name="asset_ids" value="{_esc(a.id)}"
+                 form="boardform">
+          <img src="{_esc(a.url or '')}" loading="lazy" alt="">
+          <span class="picmeta">{role}{use}<br>{_esc((a.title or '')[:38])}</span>
+        </label>"""
+
+    sections = ""
+    for slug, b in have.items():
+        mine = [a for a in pool if any(sl == slug for sl, _r in on_boards[a.id])]
+        tiles = "".join(_tile(a, [r for sl, r in on_boards[a.id] if sl == slug])
+                        for a in mine)
+        note = f'<p class="mut">{_esc(b.get("note") or "")}</p>' if b.get("note") else ""
+        sections += f"""
+      <div class="anchor" id="board-{_esc(slug)}"></div>
+      <h3>{_esc(b.get("name") or slug)} <span class="mut">&middot; {len(mine)}
+        pinned &middot; <code>{_esc(slug)}</code></span>
+        <form method="post" action="/admin/board_remove" class="inl"
+              onsubmit="return confirm('Remove this board and its pins?')">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="board" value="{_esc(slug)}">
+          <button class="sec">remove</button>
+        </form></h3>
+      {note}
+      <div class="picgrid">{tiles if tiles else
+        '<span class="mut">nothing pinned here yet — tick pictures below and pin them</span>'}</div>"""
+
+    board_opts = "".join(f'<option value="{_esc(slug)}">{_esc(b.get("name") or slug)}'
+                         f'</option>' for slug, b in have.items())
+    state = (f'<span class="chip on">{len(have)} board(s) &middot; {n_pins} pinned</span>'
+             if n_pins else
+             f'<span class="chip off">{len(have)} board(s), nothing pinned</span>'
+             if have else '<span class="chip off">no boards</span>')
+    says = ((f"Pictures for this account are <b>drawn from the boards</b>: the "
+             f"product from its own photographs, the setting from the look "
+             f"pins of whichever boards a run selects (all of them unless it "
+             f"says). An owned pin is sent to the model as pixels; a reference "
+             f"pin is read for direction, in words, and never sent.")
+            if n_pins else
+            ("Nothing is pinned, so pictures are generated <b>from words "
+             "alone</b> &mdash; the model has never seen this brand&#39;s "
+             "product or its look. Create a board for each look this brand "
+             "has (studio, lifestyle, a collection), then pin what it should "
+             "mimic: the product&#39;s own photographs as the product, the "
+             "brand&#39;s photography as the look. A Pinterest save can be "
+             "added by URL below as reference; it guides in words and is "
+             "never sent."))
+    create = f"""
+      <details class="sec"><summary>New board</summary>
+      <form class="f" method="post" action="/admin/board_add">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <label>Name</label>
+        <input name="name" placeholder="Studio · Lifestyle · Zodiac collection" required>
+        <label>What this look is (optional)</label>
+        <input name="note" placeholder="on white, hard shadow, no props we do not sell">
+        <div class="row"><button>Create board</button></div>
+      </form></details>"""
+    controls = (f"""
+      <form id="boardform" method="post" action="/admin/board_pin"></form>
+      <input type="hidden" name="key" value="{_esc(key)}" form="boardform">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}" form="boardform">
+      <div class="bulkbar">
+        <span class="mut">tick pictures, choose a board, then</span>
+        <select name="board" form="boardform">{board_opts}</select>
+        <span class="grow"></span>
+        <button form="boardform" name="action" value="unpin" class="sec">Unpin</button>
+        <button form="boardform" name="action" value="pin_product" class="sec"
+          title="The model is handed this as the product and told to draw
+                 exactly it. Owned pictures only.">Pin as the product</button>
+        <button form="boardform" name="action" value="pin_look"
+          title="The model mimics this picture&#39;s styling, lighting and
+                 framing &mdash; sent as pixels if owned, read in words if
+                 reference">Pin as the look</button>
+      </div>""" if have else "")
+    more = (f'<p class="mut">The newest {len(shown)} of {loose} unpinned '
+            f'pictures on file.</p>' if loose > len(shown) else "")
+    pool_tiles = "".join(_tile(a, []) for a in shown)
+    return f"""
+    <div class="anchor" id="board"></div>
+    <div class="card">
+      <div class="head"><h2>Visual boards</h2>{state}
+        <span class="mut">{len(every['product'])} pinned as the product &middot;
+        {len(every['look'])} as the look</span></div>
+      <p class="mut">{says}</p>
+      {create}
+      {sections}
+      {controls}
+      <h3>Library <span class="mut">&middot; not on a board</span></h3>{more}
+      <div class="picgrid">{pool_tiles if pool_tiles else
+        '<span class="mut">no reviewed pictures on file yet</span>'}</div>
+    </div>"""
+
+
 def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
     """Every generated set as its own card, and the queue with them removed.
 
@@ -6223,7 +6377,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
       <div class="head"><h2>Ad set{(' &middot; ' + _esc(g['subject'][:60]))
                                    if g.get('subject') else ''}</h2>
         <span class="mut">{g['made']} frames &middot; {g['clean']} read right
-        to the reviewer</span></div>
+        to the reviewer{_drawn_from(g['frames'])}</span></div>
       <p class="mut">One ad, approached {g['made']} ways &mdash; a different
       angle, lever, moment and framing each time. <b>Keep the ones that
       work.</b> The note under each frame is the model&#39;s own read of it
@@ -6387,7 +6541,8 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # AND WHAT A RUN IS DOING RIGHT NOW. Generation is minutes long and off
     # the request, so without this a failed run and a running one look
     # identical: the banner promised pictures under Pictures and none came.
-    batch_html = _frames_run(tenant) + _winning_look_card(key, tenant) + batch_html
+    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)
+                  + _board_card(key, tenant) + batch_html)
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
     # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap
@@ -6489,6 +6644,13 @@ def render_content(key: str, tenant: str = "", started: str = "",
         </select>
         <label>Product or space it shows (optional)</label>
         {entity_select(tenant, '', blank='— brand-wide —')}
+        <label>Pin it on a board (optional)</label>
+        <select name="board">
+          <option value="">— not pinned —</option>
+          {''.join(f'<option value="{_esc(slug)}:look">{_esc(b.get("name") or slug)} — as the look</option>'
+                   f'<option value="{_esc(slug)}:product">{_esc(b.get("name") or slug)} — as the product (owned only)</option>'
+                   for slug, b in kbm.boards(tenant).items())}
+        </select>
         <div class="row"><button>Add to library</button></div>
       </form>
       </details>
@@ -13126,10 +13288,12 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
               action="/admin/article_picture?key={_esc(key)}"
               style="margin-top:8px">
           <input type="hidden" name="output_id" value="{_esc(output_id)}">
+          {boards_select(getattr(art, "tenant", "") or "")}
           <button class="btn sec" type="submit">Generate the picture</button>
           <span class="when">no approved photograph fitted this piece, so
           nothing was attached. This briefs one from what the article is
-          about &mdash; it arrives on <b>Review &middot; Pictures</b> as
+          about &mdash; drawn from the brand&#39;s boards when it has any
+          &mdash; and it arrives on <b>Review &middot; Pictures</b> as
           proposed, and cannot be used until you approve it there.</span>
         </form>"""
 
@@ -13282,6 +13446,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           <option value="8">16 frames</option>
           <option value="12">24 frames</option>
         </select>
+        {boards_select(tenant)}
         <button type="submit" class="sec">Make frames</button>
         <span class="when">the carousel for THIS variant — one angle, lever,
         moment and framing each, built on its own positioning and claim. They

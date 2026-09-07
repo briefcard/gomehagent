@@ -6838,6 +6838,88 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
         anchor="pics")
 
 
+@app.post("/admin/board_add", response_class=HTMLResponse)
+async def board_add(request: Request, key: str = Depends(admin_key)):
+    """Create a named board. Owner, 2026-09-06: *"we may have different looks
+    per brand - studio vs lifestyle vs specific collections. So please allow
+    us to create these references and optionally select which to pull from
+    for each run."* The board is the reference; a run selects by its slug."""
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    said = kbm.add_board(tenant, str(form.get("name", "")),
+                         note=str(form.get("note", "")))
+    ok = said.startswith("Created")
+    return _back_to_content(tenant, msg=said if ok else "",
+                            err="" if ok else said, anchor="board")
+
+
+@app.post("/admin/board_remove", response_class=HTMLResponse)
+async def board_remove(request: Request, key: str = Depends(admin_key)):
+    """Remove a board and every pin on it — said in the message, not silent."""
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    said = kbm.remove_board(tenant, str(form.get("board", "")))
+    ok = said.startswith("Removed")
+    return _back_to_content(tenant, msg=said if ok else "",
+                            err="" if ok else said, anchor="board")
+
+
+@app.post("/admin/board_pin", response_class=HTMLResponse)
+async def board_pin(request: Request, key: str = Depends(admin_key)):
+    """Pin or unpin pictures on one of the brand's boards, many at a time.
+
+    The boards are read by `creative.board_inputs` — pinned pictures go INTO
+    the generation request, for the ad set and the article hero alike — so
+    this is the switch that changes what the next picture looks like, and it
+    lives where the pictures are reviewed.
+    """
+    from . import kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", ""))
+    board = str(form.get("board", "")).strip()
+    ids = [str(i) for i in form.getlist("asset_ids") if str(i).strip()]
+    if not ids:
+        return _back_to_content(tenant, msg="no pictures were selected",
+                                anchor="board")
+    if action not in ("pin_look", "pin_product", "unpin"):
+        return _back_to_content(tenant, err=f"unknown board action {action!r}",
+                                anchor="board")
+    if board not in kbm.boards(tenant):
+        return _back_to_content(tenant, err=(f"no board named {board!r} — "
+                                             "choose one, or create it first"),
+                                anchor="board")
+    done, refused = 0, []
+    for aid in ids:
+        if action == "unpin":
+            for role in kbm.BOARD_ROLES:
+                kbm.set_board_role(aid, board, role, False)
+            done += 1
+            continue
+        said = kbm.set_board_role(aid, board, action[4:], True)
+        if said.startswith("Pinned"):
+            done += 1
+        else:
+            # THE REFUSAL REACHES THE PAGE. A reference picture pinned as the
+            # product is refused for a reason the owner has to read, not a
+            # button that silently did nothing.
+            refused.append(said)
+    name = kbm.boards(tenant)[board].get("name") or board
+    verb = (f"unpinned from “{name}”" if action == "unpin"
+            else f"pinned as the {action[4:]} on “{name}”")
+    return _back_to_content(
+        tenant, msg=f"{verb}: {done} picture(s)" if done else "",
+        err="; ".join(refused[:2]), anchor="board")
+
+
 @app.post("/admin/ad_frames", response_class=HTMLResponse)
 async def ad_frames(request: Request, key: str = Depends(admin_key)):
     """Make the carousel for one ad variant.
@@ -6893,11 +6975,20 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
         got = [c for c in kbm.claims(tenant, entity_key=args["entity_key"] or None)
                if c.id == claim_ids[0]]
         claim = str(getattr(got[0], "claim", "") or "") if got else ""
+    # WHICH BOARDS, when the owner chose. Unknown names are refused HERE,
+    # where the refusal can be read, rather than carried into a background
+    # run whose note nobody opens until the pictures look wrong.
+    boards = [str(b) for b in form.getlist("boards") if str(b).strip()]
+    unknown = [b for b in boards if b not in kbm.boards(tenant)]
+    if unknown:
+        return _back_to_content(
+            tenant, err=f"no board named {', '.join(unknown)}", anchor="board")
     _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,
-            output_id=output_id, **args)
+            output_id=output_id, boards=tuple(boards), **args)
     return _back_to_content(
         tenant, msg=(f"making {plates * cr.PER_PROMPT} frames — they appear "
-                     f"under Pictures as one set when they land"),
+                     f"under Pictures as one set when they land"
+                     + (f", drawn from {', '.join(boards)}" if boards else "")),
         anchor="pics")
 
 
@@ -6999,8 +7090,25 @@ async def asset_add(request: Request, key: str = Depends(admin_key)):
                          subject=subject, entity_key=ent,
                          source=str(form.get("source", "")), origin="human")
     bad = said.lower().startswith(("an asset needs", "rights must"))
+    # STRAIGHT ONTO THE BOARD, when asked. A picture pasted in from a
+    # Pinterest board is a picture the owner wants mimicked, and making them
+    # find it again in the library to pin it is the second click that never
+    # happens.
+    pin = str(form.get("board", "")).strip()          # "<slug>:<role>"
+    pinned = ""
+    if pin and not bad:
+        row = next((a for a in kbm.assets(tenant, publishable_only=False)
+                    if (a.url or "") == url), None)
+        slug, _, role = pin.rpartition(":")
+        pinned = (kbm.set_board_role(row.id, slug, role, True)
+                  if row is not None else "")
+        if pinned and not pinned.startswith("Pinned"):
+            return _back_to_content(tenant, err=pinned, msg=f"{said} ({subject})",
+                                    anchor="board")
     return _back_to_content(tenant, err=said if bad else "",
-                            msg="" if bad else f"{said} ({subject})")
+                            msg="" if bad else f"{said} ({subject})"
+                            + (f" — {pinned}" if pinned else ""),
+                            anchor="board" if pinned else "")
 
 
 @app.get("/admin/creative_assets")
@@ -7836,10 +7944,14 @@ async def article_picture(request: Request, key: str = Depends(admin_key)):
         claim = (rows[0].claim if rows else "")
     except Exception:                                            # noqa: BLE001
         claim = ""
+    boards = [str(b) for b in form.getlist("boards") if str(b).strip()]
+    unknown = [b for b in boards if b not in kbm.boards(tenant)]
+    if unknown:
+        return _back(f"no board named {', '.join(unknown)}")
     got = creative.generate(
         tenant, commitment=about, fmt="article_hero",
         entity_key=entity_key, prominent=str(meta.get("title") or keyword),
-        claim=claim)
+        claim=claim, boards=tuple(boards))
     if not got.get("ok"):
         # NAME THE REFUSAL. A generator that fails silently is the state this
         # replaced, one layer down.
@@ -7980,7 +8092,8 @@ def _summarise(result) -> str:
         return f"error: {result['error']}"
     keep = ("proposed_count", "pages_read", "pages_unchanged", "pages_remaining",
             "faqs_filed_as_objections", "claims_count", "objections_count",
-            "threads_seen", "added", "updated", "violations", "extractor")
+            "threads_seen", "added", "updated", "violations", "extractor",
+            "made", "clean")
     bits = [f"{k} {result[k]}" for k in keep if result.get(k) not in (None, "")]
     empty = [r.get("label") or r.get("url", "")
              for r in (result.get("sources") or [])
@@ -7990,8 +8103,12 @@ def _summarise(result) -> str:
     lost = _losses(result)
     if lost:
         bits.append("LOST: " + " · ".join(lost))
-    note = result.get("extractor_note") or ""
-    return " · ".join(bits) + (f" — {note[:200]}" if note else "")
+    # A set's own `note` is where it says what it was drawn from and what
+    # was kept out of the request; a strip that only counted frames would
+    # show a board of reference pins as a board that is working.
+    note = result.get("extractor_note") or (
+        result.get("note") if isinstance(result.get("note"), str) else "") or ""
+    return " · ".join(bits) + (f" — {note[:300]}" if note else "")
 
 
 #: What a run REFUSED, SKIPPED or DROPPED, by the key each producer already

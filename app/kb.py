@@ -2830,6 +2830,180 @@ def logos(tenant: str) -> list[db.KbAsset]:
             if (a.subject or "") == LOGO and a.status == "active"]
 
 
+# ---------------------------------------------------------------------------
+# The visual boards. Owner, 2026-09-06: *"each brand should be able to share a
+# visual board similar to a pinterest board from which the AI should mimic
+# styling and positioning"* — and then: *"we may have different looks per
+# brand - studio vs lifestyle vs specific collections. So please allow us to
+# create these references and optionally select which to pull from for each
+# run."*
+#
+# A BOARD IS A NAMED THING the owner creates — "Studio", "Lifestyle", "Zodiac
+# collection" — and it lives in `KbBrand.visual`, the column whose own
+# docstring says it exists for art direction and which had no reader until
+# this. A PIN is an asset on a board with a ROLE, kept as a tag
+# (`board:<slug>:<role>`) rather than a column because one picture can
+# honestly be on two boards and be both things: the product, photographed in
+# the look.
+#
+# What a pin may be USED for is decided by `rights`, exactly as everywhere
+# else — an owned pin goes into the generation request as pixels; a reference
+# pin is inspiration and never leaves the building. The boards do not relax
+# that rule. `creative.board_inputs` enforces it through `may_publish`, the
+# same gate that keeps a reference shot out of a composite, and names what it
+# kept out.
+# ---------------------------------------------------------------------------
+
+BOARD_ROLES = ("look", "product")
+_BOARD_TAG = "board:"
+
+
+def _board_tag(slug: str, role: str) -> str:
+    return f"{_BOARD_TAG}{slug}:{role}"
+
+
+def boards(tenant: str) -> dict:
+    """The brand's boards, `{slug: {"name", "note", "created_at"}}`."""
+    row = brand(tenant)
+    got = dict((row.visual or {}).get("boards") or {}) if row is not None else {}
+    return {str(k): dict(v or {}) for k, v in got.items()}
+
+
+def add_board(tenant: str, name: str, note: str = "") -> str:
+    """Create one board. Returns a sentence naming its slug, or a refusal.
+
+    The slug is what a run selects by and what a pin's tag carries, so it is
+    derived once here and never re-derived from the name — renaming a board
+    must not orphan its pins.
+    """
+    from . import keywords
+    name = (name or "").strip()
+    if not name:
+        return "A board needs a name."
+    slug = keywords.slug(name)
+    have = boards(tenant)
+    if slug in have:
+        return f"There is already a board called “{have[slug].get('name') or slug}” ({slug})."
+    ensure_brand(tenant)
+    row = brand(tenant)
+    visual = dict(row.visual or {})
+    have[slug] = {"name": name, "note": (note or "").strip(),
+                  "created_at": db.utcnow().isoformat()}
+    visual["boards"] = have
+    set_brand(tenant, visual=visual)
+    return f"Created the board “{name}” ({slug})."
+
+
+def remove_board(tenant: str, slug: str) -> str:
+    """Take a board away, and every pin on it with it — a pin to a board that
+    no longer exists is a tag nothing reads, which is worse than none."""
+    have = boards(tenant)
+    if slug not in have:
+        return f"No board called {slug!r}."
+    name = have[slug].get("name") or slug
+    unpinned = 0
+    with db.SessionLocal() as s:
+        for r in s.query(db.KbAsset).filter(db.KbAsset.tenant == tenant).all():
+            tags = [str(t) for t in (r.tags or [])]
+            kept = [t for t in tags if not t.startswith(f"{_BOARD_TAG}{slug}:")]
+            if len(kept) != len(tags):
+                r.tags = kept
+                unpinned += 1
+        s.commit()
+    row = brand(tenant)
+    visual = dict(row.visual or {})
+    have.pop(slug, None)
+    visual["boards"] = have
+    set_brand(tenant, visual=visual)
+    return f"Removed the board “{name}”" + (f" and its {unpinned} pin(s)." if unpinned else ".")
+
+
+def pinned(row, boards_: tuple | list = ()) -> list:
+    """`[(slug, role)]` this picture is pinned as — restricted to `boards_`
+    when given. Reads the tags only; the caller decides what a slug means."""
+    want = {str(b) for b in (boards_ or ())}
+    out = []
+    for t in (row.tags or []):
+        t = str(t)
+        if not t.startswith(_BOARD_TAG):
+            continue
+        parts = t[len(_BOARD_TAG):].rsplit(":", 1)
+        if len(parts) != 2 or parts[1] not in BOARD_ROLES:
+            continue
+        if want and parts[0] not in want:
+            continue
+        out.append((parts[0], parts[1]))
+    return out
+
+
+def board(tenant: str, boards_: tuple | list = ()) -> dict:
+    """The pins to pull from, by role, for one run.
+
+    `boards_` names the boards a run selected; empty means every board the
+    brand has. A name that is not a board is returned under `unknown` rather
+    than quietly widened to everything — a run that asked for "studio" and
+    got the lifestyle set would look like the board not working.
+
+    Reviewed pictures only. A crawler candidate nobody has looked at cannot
+    be pinned into the brief any more than it can be published — the review
+    gate is one gate, and a board is not a way round it.
+    """
+    known = boards(tenant)
+    asked = [str(b) for b in (boards_ or ()) if str(b)]
+    want = [b for b in asked if b in known]
+    unknown = [b for b in asked if b not in known]
+    use = want if asked else list(known)
+    out = {"look": [], "product": [], "unknown": unknown, "boards": use}
+    if not use:
+        return out
+    rows = [r for r in assets(tenant, publishable_only=False, kind="image")
+            if (r.review or "") != prov.PROPOSED]
+    for r in rows:
+        roles = {role for _slug, role in pinned(r, use)}
+        for role in BOARD_ROLES:
+            if role in roles:
+                out[role].append(r)
+    return out
+
+
+def set_board_role(asset_id: str, board_slug: str, role: str,
+                   on: bool = True) -> str:
+    """Pin or unpin one picture on one board. The one writer of `board:*` tags.
+
+    A REFERENCE picture may be pinned as the LOOK — it is read for direction,
+    in words — and may NOT be pinned as the PRODUCT: the model would then
+    draw the product from someone else's photograph, which is the derivative
+    the rights gate exists to prevent, arriving with no marker saying so.
+    """
+    if role not in BOARD_ROLES:
+        return (f"No such board role {role!r} — it is one of "
+                f"{', '.join(BOARD_ROLES)}.")
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if not row:
+            return "No such asset."
+        have = boards(row.tenant)
+        if board_slug not in have:
+            return f"No board called {board_slug!r} — create it first."
+        if on and (row.review or "") == prov.PROPOSED:
+            return ("Review this picture before pinning it — a candidate is "
+                    "not a licence.")
+        if on and role == "product" and (row.rights or REFERENCE) != OWNED:
+            return ("A reference picture cannot be the product — the model "
+                    "would draw the product from someone else's photograph. "
+                    "Pin it as the look, or approve it for use first.")
+        tag = _board_tag(board_slug, role)
+        tags = [str(t) for t in (row.tags or []) if str(t) != tag]
+        if on:
+            tags.append(tag)
+        row.tags = tags
+        s.commit()
+        title = row.title or row.url or ""
+        name = have[board_slug].get("name") or board_slug
+    return (f"Pinned as the {role} on “{name}”: {title[:60]}" if on
+            else f"Unpinned from “{name}”: {title[:60]}")
+
+
 def detect_subject(png_bytes: bytes) -> str:
     """Guess object / surface / scene from the pixels. A default, not a verdict.
 
