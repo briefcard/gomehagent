@@ -927,6 +927,18 @@ record safely only within one loop iteration; the dict is rebuilt per cell.
 > frame. `scripts/bakeoff.py --tenant baci --entity <key> --models a,b` for
 > the owner's blind ranking; `--reveal` afterwards.
 >
+> **NEXT SHIP, GATED ON A PROBE: TEXT + CTA LAYERS IN CANVA** (owner,
+> 2026-09-07: *"text layers and CTA layers in Canva according to branding and
+> the photos/palettes in the references … so we can edit the output"*). The
+> facts are in the memory note `gomehagent-creative-substrate` (section
+> "TEXT + CTA LAYERS"): Connect REST cannot place elements; Autofill is
+> Enterprise-only; the Canva MCP `edit-design` can (`add_text`, `format_text`,
+> `insert_shape`, `insert_fill`, commit) and takes the Brand Kit's fonts as
+> the design default. FIRST MOVE: with Baci's Canva reconnected, probe
+> `canva.mcp_tools("baci")` — does Canva's MCP accept the Connect token or
+> want its own grant? Surface the answer on Connections. Then the layers
+> ship; if it wants its own grant, that OAuth flow first.
+>
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike
 > through. ~40 frames they label horrible/fine, without which any gate you
