@@ -6727,6 +6727,9 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
         <div class="bulkbar">
           <label class="pick"><input type="checkbox" id="allbox"> select all
             {len(shown)} on this page</label>
+          <label class="pick" title="Only needed for a claim a machine filed with no item. A person ticking this is the scope decision.">
+            <input type="checkbox" name="brand_wide" value="1" form="bulk"> approve as true of everything they sell
+          </label>
           <span class="grow"></span>
           {covered_btn}
           <button form="bulk" name="action" value="reject" class="sec">Reject

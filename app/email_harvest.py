@@ -70,6 +70,54 @@ _CUT = re.compile(
     r"This email and any attachments|CONFIDENTIAL)", re.I | re.M)
 
 
+
+def entity_for(tenant: str, text: str) -> str:
+    """The approved entity a piece of text names, or "" — never a guess.
+
+    Longest name wins, so "Zodiac Vibe cup" beats "cup". Only approved,
+    active entities count: a proposal cannot scope a proposal. Nothing here
+    is fuzzy on purpose — a wrong product is worse than no product, because
+    no product is asked about at approval and a wrong one is believed.
+    """
+    import re as _re
+    from . import kb as _kb
+    words = set(_re.findall(r"[a-z0-9]+", str(text or "").lower()))
+    if not words:
+        return ""
+    # TOKENS, NOT THE WHOLE NAME. A customer writes "the zodiac cup" or "my
+    # Libra cup", never "Cup with Lid/Saucer - Libra - Zodiac Vibe". Score an
+    # entity by how many of its DISTINCTIVE name tokens the text contains —
+    # generic tableware words score nothing, or "cup" would match every cup.
+    # THE WINNER MUST BE UNIQUE. "Zodiac Vibe cup" scores the same for all
+    # twelve signs, and resolving it to one of them would file a claim about
+    # Libra on a thread about Cancer. A tie is "", and "" means the approver
+    # is asked — which is the whole point of scoping on entry.
+    scored: list[tuple[int, str]] = []
+    for ent in _kb.entities(tenant):
+        toks = set(_re.findall(r"[a-z0-9]+", f"{getattr(ent, 'name', '') or ''} "
+                                             f"{getattr(ent, 'key', '') or ''}".lower()))
+        toks = {t_ for t_ in toks if len(t_) >= 4 and t_ not in _GENERIC}
+        hit = len(toks & words)
+        if hit:
+            scored.append((hit, ent.key))
+    if not scored:
+        return ""
+    scored.sort(reverse=True)
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return ""                          # ambiguous → asked, never guessed
+    return scored[0][1]
+
+
+#: Words that name a KIND of thing rather than a thing. Matching on these would
+#: resolve "is the cup dishwasher safe" to whichever cup was filed first.
+_GENERIC = {"with", "and", "the", "for", "set", "sets", "only", "small", "large",
+            "medium", "cup", "cups", "mug", "mugs", "plate", "plates", "bowl",
+            "bowls", "glass", "glasses", "tray", "trays", "box", "boxes", "lid",
+            "saucer", "white", "blue", "red", "black", "clear", "taupe", "green",
+            "pink", "orange", "porcelain", "melamine", "acrylic", "piece",
+            "pieces", "b2b", "stock", "italian", "designed", "milan", "baci",
+            "milano", "collection", "cover", "round", "square", "oval"}
+
 def _own_words(body: str) -> str:
     """Only what this sender actually typed, with the quoted thread removed."""
     m = _CUT.search(body or "")
@@ -318,10 +366,20 @@ def mine(tenant: str, days: int = 365, limit: int = 80,
                 # loss on the only derivable source of objections this platform
                 # has — a backfill could report hundreds of claims mined and
                 # have written none of them.
+                # WHAT THE THREAD WAS ABOUT rides onto the proposal. Filed
+                # with no entity, a support reply became a BRAND-WIDE claim
+                # the moment someone approved it — "yes. it is shatterproof"
+                # about acrylic glassware, then promised of a porcelain cup.
+                # Best-effort here; the approval gate now refuses an unscoped
+                # machine proposal anyway, so a miss is asked about, not
+                # silently believed of everything.
+                _ent = entity_for(tenant, " ".join(str(x) for x in (
+                    (th.get("subject") if isinstance(th, dict) else ""),
+                    body, c.get("evidence", "")) if x))
                 said = kb.add_claim(tenant, body, c.get("evidence", ""),
                                     guess["tags"], proof_type=c["proof_type"],
                                     source=f"said in {ref}", status="pending",
-                                    origin="email")
+                                    origin="email", entity_key=_ent)
                 if said.startswith("Unknown tags"):
                     write_refused.append({"text": body[:160], "why": said})
                 elif said.startswith("Already on file"):

@@ -144,6 +144,48 @@ def main() -> int:
        all(c != "creative.batch" or "situation" in a for _, c, _, a in sites),
        "batch must name its parameters; a **kwargs sink would hide this class forever")
 
+    print("\n— the inverse: parameters a generator DECLARES that the paths which need "
+          "them actually PASS —")
+    # The owner's phrase: "fill the technical gaps that are preventing execution
+    # due to missing parameters". A kwarg the callee takes but no caller sends
+    # is a default silently standing in for a fact — `situation` was one
+    # (creative.py never forwarded it), `channel` was one (pick never got it),
+    # `entity_key` on the mail harvester was one (every reply filed brand-wide).
+    REQUIRED = {
+        ("app/web.py", "batch"): {"situation", "prominent", "output_id", "entity_key"},
+        ("app/creative.py", "pick"): {"situation", "channel", "entity_key"},
+        ("app/creative.py", "brief_for"): {"situation", "prominent", "entity_key"},
+        ("app/resolve.py", "claims"): {"entity_keys"},
+        ("app/email_harvest.py", "add_claim"): {"entity_key"},
+    }
+    for (path, callee), need in REQUIRED.items():
+        src = open(os.path.join(ROOT, path)).read()
+        tree = ast.parse(src)
+        fns = [f_ for f_ in ast.walk(tree) if isinstance(f_, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        passed = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            ft = ast.unparse(node.func)
+            # `_run_bg(label, fn, *args, **kw)` IS a call to fn — the forward
+            # walker above already treats it so; the first version of this
+            # inverse check did not, and reported web.py never passing
+            # anything to batch when batch is the second positional of _run_bg.
+            is_it = (ft.split(".")[-1] == callee) or (
+                ft.endswith("_run_bg") and len(node.args) >= 2
+                and ast.unparse(node.args[1]).split(".")[-1] == callee)
+            if is_it:
+                passed |= {kw.arg for kw in node.keywords if kw.arg}
+                for kw in node.keywords:
+                    if kw.arg is None and isinstance(kw.value, ast.Name):
+                        owner = next((f_ for f_ in fns if any(n_ is node for n_ in ast.walk(f_))), None)
+                        ks = _literal_keys(owner, kw.value.id) if owner else None
+                        if ks:
+                            passed |= ks
+        missing = sorted(need - passed)
+        ck(f"{path} -> {callee}() is passed {sorted(need)}", not missing,
+           f"NEVER PASSED: {missing} — a default is standing in for a fact")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

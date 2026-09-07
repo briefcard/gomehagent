@@ -1542,11 +1542,25 @@ def _run_ad_copy(ctx: Context) -> dict:
     # pass; each variant is then drafted against ITS rewritten brief, which
     # rides the bundle into `ad_prompt`. `ad_craft.review` still measures the
     # words afterwards; this is the instruction, that is the inspection.
+    # THE ENTITY'S OWN CLAIMS LEAD. `claims()` now keeps specificity through
+    # rotation, and this is the belt to that brace: concept 1 is built on a
+    # claim ABOUT the thing the ad is for whenever one exists. Stable, so
+    # rotation still decides the order within a tier.
+    _lead = sorted(ctx.claims[:want],
+                   key=lambda c: 0 if (c.get("scope") or "brand-wide") != "brand-wide" else 1)
+    if entity_key and _lead and all((c.get("scope") or "brand-wide") == "brand-wide"
+                                    for c in _lead):
+        # SAID, not silently a mood piece: variant 2 of the zodiac batch was
+        # "designed in Milan" with no cup in it, and nothing on the board
+        # said the cup had no claim of its own to be built on.
+        ctx.note(f"no claim on file about {_label or entity_key} — every concept "
+                 f"here is built on brand-wide proof, so the copy will be about "
+                 f"the brand rather than this item until a claim is added for it")
     concepts = [{"n": i + 1, "claim": claim, "angle": angles[i % len(angles)],
                  "objection": (objections[0]["objection"]
                                if angles[i % len(angles)] == "objection" and objections
                                else "")}
-                for i, claim in enumerate(ctx.claims[:want])]
+                for i, claim in enumerate(_lead)]
     panel, _panel_why = panel_ad(ctx.bundle, concepts)
     if panel:
         _pb = panel.get("batch") or {}

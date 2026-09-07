@@ -172,7 +172,7 @@ def main() -> int:
     ck("and the count that landed is reported separately from the count mined",
        r2["filed_count"] == len(pending), f"filed={r2['filed_count']}")
     ck("approving one makes it selectable",
-       "Approved" in kb.review_claim(pending[0].id, approve=True)
+       "Approved" in kb.review_claim(pending[0].id, approve=True, brand_wide=True)
        and len(kb.claims("baci")) == before_selectable + 1)
 
     # ---- idempotent -------------------------------------------------------
@@ -189,6 +189,9 @@ def main() -> int:
     ck("an untagged claim CAN be proposed", "review" in untagged.lower(), untagged[:60])
     row = [c for c in kb.pending_claims("baci")
            if c.claim.startswith("A claim no pattern")][0]
+    # A PERSON'S OWN PROPOSAL needs no box: `scope_unconfirmed` is about a
+    # machine that never decided, and a human filing a claim has decided. The
+    # machine case is asserted below, on the bare account's harvested row.
     msg = kb.review_claim(row.id, approve=True)
     # Approval no longer refuses an untagged claim. The old rule rested on
     # "an untagged claim can never be selected", which `claims()` contradicts:
@@ -280,7 +283,16 @@ def main() -> int:
     # An account with no vocabulary is the case the old approve-time gate hurt
     # most: nothing could ever be tagged, so nothing could ever be approved,
     # so a brand-new client's own website could not seed its knowledge base.
-    approved = kb.review_claim(bare_pending[0].id, approve=True)
+    # THE CONTRACT CHANGED HERE, 2026-09-07. This suite used to assert that an
+    # unscoped harvested proof, approved, "lands as brand-wide, which is the
+    # honest description". The zodiac batch showed it was not honest: "yes. it
+    # is shatterproof" about acrylic, approved brand-wide, was promised of a
+    # porcelain cup. Approving IS the scope decision now, made out loud — and
+    # this row is the machine-filed, no-item case, so a bare approve is refused.
+    bare = kb.review_claim(bare_pending[0].id, approve=True)
+    ck("a machine-filed claim with no item is NOT approved by a bare approve",
+       "true of" in str(bare).lower() and "brand" in str(bare).lower(), str(bare)[:80])
+    approved = kb.review_claim(bare_pending[0].id, approve=True, brand_wide=True)
     ck("an account with NO vocabulary can still approve its proof",
        "Approved" in approved, approved[:80])
     ck("and it lands as brand-wide, which is the honest description",

@@ -1212,8 +1212,8 @@ SABOTAGES = [
     {
         "name": "claims_rotate_so_every_one_is_reachable",
         "file": "app/kb.py",
-        "find": "            out.sort(key=lambda r: last.get(r.id, never))",
-        "replace": "            pass  # SABOTAGE",
+        "find": '                                    last.get(r.id, never)))',
+        "replace": '                                    never))  # SABOTAGE',
         "suites": ["test_claim_rotation.py"],
         "why": "a campaign, an article and an ad have no question to rank on, "
                "so every ranking key ties and a stable sort falls back to "
@@ -7166,6 +7166,46 @@ SABOTAGES = [
         'replace': '    brief = brief_for(tenant, commitment=commitment, fmt=fmt,  # SABOTAGE',
         'suites': ['test_ad_arrives_whole.py'],
         'why': 'the frame is briefed on the moment while the photograph under it is chosen blind to it, so an ad about a long lunch carries whichever product shot was filed first',
+    },
+    {
+        'name': 'an_unscoped_claim_is_not_approved_brand_wide',
+        'file': 'app/kb.py',
+        'find': '        if approve and not brand_wide and scope_unconfirmed(row):',
+        'replace': '        if False:  # SABOTAGE',
+        'suites': ['test_a_claim_knows_what_it_is_about.py'],
+        'why': "a harvested support reply with no entity is approved as true of the whole catalogue with nobody asked what it is true of — 'yes. it is shatterproof' about acrylic becomes a promise about porcelain, which is the zodiac batch",
+    },
+    {
+        'name': 'rotation_rotates_within_a_tier_never_across',
+        'file': 'app/kb.py',
+        'find': '            out.sort(key=lambda r: ((-depth_by.get(r.id, 0)) if wanted else 0,',
+        'replace': '            out.sort(key=lambda r: (0,  # SABOTAGE',
+        'suites': ['test_a_claim_knows_what_it_is_about.py'],
+        'why': "the entity's own claim, used once, sorts behind any never-used brand-wide claim, so concept 1 of an entity-led ad is about something else",
+    },
+    {
+        'name': 'a_harvested_reply_carries_its_product',
+        'file': 'app/email_harvest.py',
+        'find': '                                    origin="email", entity_key=_ent)',
+        'replace': '                                    origin="email")  # SABOTAGE',
+        'suites': ['test_a_claim_knows_what_it_is_about.py', 'test_the_route_sends_what_the_callee_takes.py'],
+        'why': 'every mined support reply is filed brand-wide again, and the approval gate has to catch each one by hand instead of confirming a scope already on the row',
+    },
+    {
+        'name': 'an_entity_with_no_claim_is_said',
+        'file': 'app/skill_pack.py',
+        'find': '        ctx.note(f"no claim on file about {_label or entity_key} — every concept "',
+        'replace': '        pass  # SABOTAGE\n        _unused = (f"no claim on file about {_label or entity_key} — every concept "',
+        'suites': ['test_a_claim_knows_what_it_is_about.py'],
+        'why': 'an ad for an item with no claim of its own is quietly built on brand-wide proof and ships as a mood piece with nothing on the board saying the item was never actually in it',
+    },
+    {
+        'name': 'the_queue_can_say_brand_wide',
+        'file': 'app/web.py',
+        'find': '        res = kbm.review_claim(cid, approve=approve,\n                               brand_wide=bool(form.get("brand_wide")))',
+        'replace': '        res = kbm.review_claim(cid, approve=approve)  # SABOTAGE',
+        'suites': ['test_a_claim_knows_what_it_is_about.py'],
+        'why': 'the console shows the refusal and has no way to answer it — every unscoped machine claim has to be edited item by item before it can be approved, which is the dead end the refusal was not meant to be',
     },
 ]
 

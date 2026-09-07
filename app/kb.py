@@ -264,7 +264,17 @@ def claims(tenant: str, situations: list[str] | None = None,
             from . import ledger as _led
             last = _led.claims_last_used(tenant)
             never = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
-            out.sort(key=lambda r: last.get(r.id, never))
+            # WITHIN A TIER, NEVER ACROSS ONE. This re-sort used to key on
+            # last-used alone, which threw away the specificity order
+            # computed above: a cup's own claim, used once, sorted behind a
+            # never-used brand-wide acrylic answer, and concept 1 of the
+            # zodiac-cup ad became "shatterproof". Rotation is right where
+            # there is no subject; where there is one, it rotates the
+            # entity's own claims among themselves, then the group's, then
+            # the brand's.
+            depth_by = {tt[-1].id: -tt[1] for tt in scored}
+            out.sort(key=lambda r: ((-depth_by.get(r.id, 0)) if wanted else 0,
+                                    last.get(r.id, never)))
         except Exception:                                        # noqa: BLE001
             pass        # rotation is an improvement, never a dependency
     return out[:limit] if limit else out
@@ -2355,7 +2365,8 @@ def restore(tenant: str, kind: str, row_id: str, by: str = "owner") -> dict:
             "said": f"Restored {kind} {name!r}."}
 
 
-def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
+def review_claim(claim_id: str, approve: bool, by: str = "owner",
+                 brand_wide: bool = False) -> str:
     """Approve or reject a claim, and record who did it.
 
     Approval is the moment a row becomes final: from here no crawl, upload or
@@ -2367,6 +2378,23 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner") -> str:
         row = s.get(db.KbClaim, claim_id)
         if not row:
             return "No such claim."
+        # TWO APPROVAL PATHS, ONE GATE. Objections are approved through the
+        # generic reviewer, which refuses an unscoped machine-origin answer
+        # ("dishwasher safe" read off one product page is not true of the
+        # porcelain). Claims are approved HERE, and this function never asked.
+        # So "yes. it is shatterproof and suited to indoor & outdoor use" —
+        # harvested from a thread about acrylic glassware, no entity — was
+        # approved as true of the whole catalogue, and the next zodiac-cup ad
+        # promised a porcelain cup would not break. Approving IS the scope
+        # decision; it has to be made out loud. `brand_wide=True` is a person
+        # saying so.
+        if approve and not brand_wide and scope_unconfirmed(row):
+            return ("Say what this claim is true of before approving it. A "
+                    "claim approved with no scope is claimed of everything "
+                    "this account sells — \u201cshatterproof\u201d answered "
+                    "about acrylic glassware becomes a promise about the "
+                    "porcelain too. Pick the item, or tick that it really is "
+                    "true brand-wide.")
         inferred = ""
         if approve and not (row.situations or []):
             # Infer rather than refuse — same reasoning as `add_claim`. The old
@@ -4102,7 +4130,7 @@ def approve(kind: str, row_id: str, by: str = "owner",
         row = s.get(model, row_id)
         if not row:
             return f"No such {kind}."
-        if (approve_it and kind == "objection" and not brand_wide
+        if (approve_it and kind in ("objection", "claim") and not brand_wide
                 and scope_unconfirmed(row)):
             return ("Say what this answer is true of before approving it. A "
                     "product answer approved with no scope is claimed of "

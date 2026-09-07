@@ -85,8 +85,13 @@ def main() -> int:
     # `key` goes in the query string, not the body: `admin_key` resolves it
     # from query, `x-admin-key`, or the session cookie a browser already has.
     r = client.post("/admin/claims_decide", params={"key": KEY},
+                    # `brand_wide` is now REQUIRED to approve a machine-filed
+                    # proposal with no item: approving is the scope decision
+                    # and it is made out loud (the zodiac batch). This suite
+                    # tests the bulk mechanics, so it says so.
                     data={"tenant": "baci", "action": "approve",
-                          "claim_ids": ids[:3]}, follow_redirects=False)
+                          "claim_ids": ids[:3], "brand_wide": "1"},
+                    follow_redirects=False)
     ck("a batch approve is accepted", r.status_code == 303, str(r.status_code))
     ck("  three decided in ONE request, not three",
        len(_pending()) == 1, f"{len(_pending())} still pending")
@@ -99,7 +104,8 @@ def main() -> int:
     ck("a batch reject works the same way", len(_pending()) == 0,
        f"{len(_pending())} left")
     r = client.post("/admin/claims_decide", params={"key": KEY},
-                    data={"tenant": "baci", "action": "approve"},
+                    data={"tenant": "baci", "action": "approve",
+                          "brand_wide": "1"},
                     follow_redirects=False)
     ck("selecting nothing says so rather than silently succeeding",
        "nothing+was+selected" in r.headers.get("location", "")

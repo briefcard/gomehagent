@@ -8525,7 +8525,13 @@ async def claims_decide(request: Request, key: str = Depends(admin_key)):
     approve = action == "approve"
     done, refused = 0, []
     for cid in ids:
-        res = kbm.review_claim(cid, approve=approve)
+        # THE ESCAPE HATCH THE REFUSAL NEEDS. `review_claim` now refuses an
+        # unscoped machine-origin claim unless a person says it really is true
+        # brand-wide — the same rule the objection path has had, with the
+        # same box. Without this line the console had the refusal and no way
+        # to answer it except editing every claim's item first.
+        res = kbm.review_claim(cid, approve=approve,
+                               brand_wide=bool(form.get("brand_wide")))
         # `review_claim` refuses an untagged claim, and that refusal is the
         # point of the whole review step — surfacing the count without the
         # reasons would look like a partial success with no explanation.
