@@ -164,6 +164,9 @@ def _call(tenant: str, method: str, path: str, *, payload: dict | None = None,
         return {"ok": True, "data": {}}
 
 
+UPLOAD_NAME_MAX = 50
+
+
 def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
     """Upload raw bytes. Canva takes the name base64'd in a header, not a form.
 
@@ -178,7 +181,9 @@ def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
     if why:
         return {"ok": False, "error": why}
     import httpx
-    meta = _b64.b64encode(name[:120].encode()).decode()
+    # `name_base64` is capped at 50 characters UNENCODED —
+    # https://www.canva.dev/docs/connect/api-reference/assets/create-asset-upload-job/
+    meta = _b64.b64encode(name[:UPLOAD_NAME_MAX].encode()).decode()
     try:
         r = httpx.post(f"{BASE}{path}", timeout=TIMEOUT, content=blob,
                        headers={"Authorization": f"Bearer {secret}",
@@ -378,8 +383,13 @@ def _file_into_folder(tenant: str, item_id: str) -> dict:
     f = folder(tenant)
     if not f.get("ok"):
         return f
-    res = call(tenant, "POST", f"/folders/{f['folder_id']}/items",
-                payload={"item_id": item_id})
+    # THE DOCUMENTED CALL is POST /v1/folders/move with `to_folder_id` and
+    # `item_id` (204 on success) —
+    # https://www.canva.dev/docs/connect/api-reference/folders/move-folder-item/
+    # `POST /folders/{id}/items` was a path this code invented; every design
+    # it filed came back with a `filed_error` nobody read (2026-09-07).
+    res = call(tenant, "POST", "/folders/move",
+               payload={"to_folder_id": f["folder_id"], "item_id": item_id})
     if res.get("ok") or not _gone(str(res.get("error", ""))):
         return res
     # A REMEMBERED FOLDER THAT IS GONE — deleted by hand in Canva, or made in
@@ -389,8 +399,8 @@ def _file_into_folder(tenant: str, item_id: str) -> dict:
     f2 = folder(tenant)
     if not f2.get("ok"):
         return f2
-    res2 = call(tenant, "POST", f"/folders/{f2['folder_id']}/items",
-                payload={"item_id": item_id})
+    res2 = call(tenant, "POST", "/folders/move",
+                payload={"to_folder_id": f2["folder_id"], "item_id": item_id})
     return {**res2, "recreated": True}
 
 
@@ -427,6 +437,35 @@ def upload_asset(tenant: str, url: str, name: str, *,
             "recorded": said, "smart_tags": (asset.get("tags") or [])}
 
 
+#: THE DOCUMENTED CONTRACT for POST /v1/designs — read from
+#: https://www.canva.dev/docs/connect/api-reference/designs/create-design/
+#: on 2026-09-07, after a live 400: *"'name' must be one of the following:
+#: doc, email, presentation, whiteboard, but was instagram-post"*. There is
+#: no social preset; anything else is a CUSTOM design in pixels. Owner:
+#: *"make sure you're referencing the api docs when you fix issues associated
+#: with a specific tool."* — the URL is here so the next reader can.
+PRESETS = ("doc", "email", "presentation", "whiteboard")
+CUSTOM_MIN, CUSTOM_MAX, CUSTOM_AREA = 40, 8000, 25_000_000
+DESIGNS_DOC = "https://www.canva.dev/docs/connect/api-reference/designs/create-design/"
+
+
+def design_type_for(*, design_type: str = "", width: int = 0, height: int = 0) -> tuple:
+    """The `design_type` object Canva documents, or `(None, why)`."""
+    if width or height:
+        w, h = int(width or 0), int(height or 0)
+        if not (CUSTOM_MIN <= w <= CUSTOM_MAX and CUSTOM_MIN <= h <= CUSTOM_MAX
+                and w * h <= CUSTOM_AREA):
+            return None, (f"Canva takes custom designs from {CUSTOM_MIN} to "
+                          f"{CUSTOM_MAX} px a side and at most {CUSTOM_AREA:,} px "
+                          f"of area; {w}×{h} is outside that ({DESIGNS_DOC}).")
+        return {"type": "custom", "width": w, "height": h}, ""
+    if design_type in PRESETS:
+        return {"type": "preset", "name": design_type}, ""
+    return None, (f"Canva has no preset {design_type!r} — its presets are "
+                  f"{', '.join(PRESETS)}; anything else is a custom design, so "
+                  f"pass width and height in pixels ({DESIGNS_DOC}).")
+
+
 def create_design(tenant: str, *, title: str, design_type: str = "",
                   asset_id: str = "", entity_key: str = "",
                   width: int = 0, height: int = 0, record: bool = True) -> dict:
@@ -448,11 +487,10 @@ def create_design(tenant: str, *, title: str, design_type: str = "",
     live call, like everything Canva: the custom design_type shape is from
     public docs and has never met the API.
     """
-    if width and height:
-        dt: dict = {"type": "custom", "width": int(width), "height": int(height)}
-    else:
-        dt = {"type": "preset", "name": design_type or "instagram-post"}
-    payload: dict = {"design_type": dt, "title": title[:255]}
+    dt, why = design_type_for(design_type=design_type, width=width, height=height)
+    if why:
+        return {"ok": False, "error": why}
+    payload: dict = {"design_type": dt, "title": (title or "Design")[:255]}
     if asset_id:
         payload["asset_id"] = asset_id
     res = call(tenant, "POST", "/designs", payload=payload)
@@ -696,8 +734,7 @@ def upload_bytes(tenant: str, blob: bytes, name: str, *,
 
 
 def editable_from_image(tenant: str, blob: bytes, *, title: str,
-                        entity_key: str = "",
-                        design_type: str = "instagram-post",
+                        entity_key: str = "", design_type: str = "",
                         record: bool = True) -> dict:
     """A rendered base image, handed to Canva as something still editable.
 
@@ -714,10 +751,22 @@ def editable_from_image(tenant: str, blob: bytes, *, title: str,
     the things a human will want to change. `compose.photo_with_headline` with
     an empty headline gives exactly that.
     """
+    # AT THE PICTURE'S OWN SIZE. Canva has no social preset (its four are
+    # doc, email, presentation, whiteboard — see PRESETS), so a frame is a
+    # CUSTOM design measured off the pixels it carries; "instagram-post" was
+    # a name this code made up, and Canva refused it with a 400 on the first
+    # live edit (2026-09-07).
+    width, height = _size_of(blob)
+    if not (width and height) and not design_type:
+        return {"ok": False, "stage": "measure",
+                "error": "the picture could not be measured, so no design "
+                         "size could be chosen"}
     up = upload_bytes(tenant, blob, title)
     if not up["ok"]:
         return {**up, "stage": "upload"}
     made = create_design(tenant, title=title, design_type=design_type,
+                         width=width if not design_type else 0,
+                         height=height if not design_type else 0,
                          asset_id=up["asset_id"], entity_key=entity_key,
                          record=record)
     if not made["ok"]:
@@ -727,6 +776,17 @@ def editable_from_image(tenant: str, blob: bytes, *, title: str,
     return {**made, "stage": "done", "asset_id": up["asset_id"],
             "note": "the image is fixed and correct; the text and layout are "
                     "editable in Canva. Nothing here is published."}
+
+
+def _size_of(blob: bytes) -> tuple:
+    """`(width, height)` of an image, or `(0, 0)`."""
+    import io as _io
+    try:
+        from PIL import Image
+        im = Image.open(_io.BytesIO(blob))
+        return int(im.width), int(im.height)
+    except Exception:                                            # noqa: BLE001
+        return 0, 0
 
 
 # ---------------------------------------------------------------------------

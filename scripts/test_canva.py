@@ -169,11 +169,18 @@ def main() -> int:
                                "view_url": "https://canva/v"},
         "thumbnail": {"url": "https://canva/t"}}}}})
     canva.call = fn
+    # A SIZE, because Canva has no social preset: the old default here was
+    # "instagram-post", a name this code made up and Canva refused live.
     d = canva.create_design("baci", title="Aqua pitchers ad",
-                            entity_key="white-acrylic-pitcher-aqua")
+                            entity_key="white-acrylic-pitcher-aqua",
+                            width=1080, height=1080)
     ck("the design is created", d["ok"] and d["design_id"] == "DES1")
+    ck("  as a CUSTOM design of the size asked — the only kind Canva takes for social",
+       any((s_.get("payload") or {}).get("design_type") == {"type": "custom", "width": 1080, "height": 1080}
+           for s_ in _sent if s_["path"] == "/designs"), "")
     ck("  and filed into this account's folder", d["filed"], d.get("filed_error", ""))
-    filed = [s for s in _sent if s["path"].endswith("/items")]
+    # THE DOCUMENTED CALL: POST /folders/move with to_folder_id + item_id.
+    filed = [s for s in _sent if s["path"] == "/folders/move"]
     ck("  by posting it to that folder, not to a caller-supplied one",
        filed and filed[0]["payload"]["item_id"] == "DES1", str(filed[:1]))
 

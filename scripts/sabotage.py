@@ -7528,6 +7528,38 @@ SABOTAGES = [
         'suites': ['test_a_rotating_refresh_token_is_used_once.py'],
         'why': 'Constant Contact, which rotates too, spends its refresh token twice on the first draft that makes two calls and dies the way Canva did',
     },
+    {
+        'name': 'a_frame_becomes_a_custom_design_at_its_own_size',
+        'file': 'app/canva.py',
+        'find': '                         width=width if not design_type else 0,\n                         height=height if not design_type else 0,',
+        'replace': '                         width=0, height=0,  # SABOTAGE',
+        'suites': ['test_canva_calls_are_the_documented_ones.py'],
+        'why': "every frame's design creation fails — with no size and no documented preset there is nothing valid to send, which is the 400 the owner saw on the first live edit",
+    },
+    {
+        'name': 'only_a_documented_preset_is_sent',
+        'file': 'app/canva.py',
+        'find': '    if design_type in PRESETS:\n        return {"type": "preset", "name": design_type}, ""',
+        'replace': '    if design_type:  # SABOTAGE\n        return {"type": "preset", "name": design_type}, ""',
+        'suites': ['test_canva_calls_are_the_documented_ones.py'],
+        'why': "a preset name this code makes up reaches Canva and is refused with a 400 — 'instagram-post' again, or the next invented name",
+    },
+    {
+        'name': 'a_design_is_filed_with_the_documented_move_call',
+        'file': 'app/canva.py',
+        'find': '    res = call(tenant, "POST", "/folders/move",\n               payload={"to_folder_id": f["folder_id"], "item_id": item_id})\n    if res.get("ok") or not _gone(str(res.get("error", ""))):',
+        'replace': '    res = call(tenant, "POST", f"/folders/{f[\'folder_id\']}/items",\n               payload={"item_id": item_id})  # SABOTAGE\n    if res.get("ok") or not _gone(str(res.get("error", ""))):',
+        'suites': ['test_canva_calls_are_the_documented_ones.py'],
+        'why': 'every design is filed through a path Canva does not document, fails with a filed_error nobody reads, and the recreate-once logic reads that 404 as a folder gone and mints duplicates',
+    },
+    {
+        'name': 'an_upload_name_fits_canvas_limit',
+        'file': 'app/canva.py',
+        'find': 'UPLOAD_NAME_MAX = 50',
+        'replace': 'UPLOAD_NAME_MAX = 120  # SABOTAGE',
+        'suites': ['test_canva_calls_are_the_documented_ones.py'],
+        'why': 'an upload named after a long frame title is refused by Canva for a name over 50 characters, and the design behind it is never made',
+    },
 ]
 
 

@@ -751,6 +751,39 @@ failure — derive the successor from the seed. "Nothing cached" is a rule
 about WHERE, not WHETHER: the cache belongs on the row the status gates,
 never in a process.
 
+### Every Canva call is the documented one — 2026-09-07 (one ship; hash in the memory note)
+
+**The defect, in the owner's words:** *"Canva: 400: 'name' must be one of the
+following: doc, email, presentation, whiteboard, but was instagram-post."*
+and the directive: *"make sure you're referencing the api docs when you fix
+issues associated with a specific tool."* Read against the published
+contracts: there is no social preset — a frame is a CUSTOM design in pixels;
+filing is `POST /v1/folders/move` with `to_folder_id` + `item_id`, not the
+`/folders/{id}/items` path this code invented (so every design's filing had
+been failing as the `filed_error` nobody read, and the recreate-once logic
+from earlier that day would have minted duplicate folders on that 404); an
+upload name is 50 characters unencoded, not 120.
+
+**Standing rules it adds:**
+- **A provider fix starts at the provider's published contract, and the
+  contract becomes a suite.** `test_canva_calls_are_the_documented_ones.py`
+  carries the URLs it was read from in its docstring, so the next reader
+  checks the docs, not the code's memory of them. Every Canva call's shape
+  is now a check with a guard (`a_frame_becomes_a_custom_design_at_its_own_size`,
+  `only_a_documented_preset_is_sent`, `a_design_is_filed_with_the_documented_move_call`,
+  `an_upload_name_fits_canvas_limit`).
+- **A refusal names the contract.** `design_type_for` refuses an undocumented
+  preset or an out-of-range size with the four presets, the limits and the
+  URL — before the call is made.
+- **A name this code made up is a bug waiting for its first live call.**
+  "instagram-post" and `/folders/{id}/items` survived because no Canva call
+  had ever been made for real; the docstrings said "VERIFY on first live
+  call" and nobody did. The verify is now the suite.
+
+**Traps this stretch fell into.** A 404 from an endpoint that does not exist
+is indistinguishable, to a "folder gone" check, from a folder that does not
+exist — a recreate-on-404 must sit behind a call known to be right.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -837,6 +870,12 @@ never in a process.
 > access token cached on the row for its lifetime, one refresh under a lock,
 > the rotation stored first. Canva, Constant Contact and Google mint through
 > it. The owner reconnects Canva once more and the lineage holds.
+>
+> **SHIPPED 2026-09-07, FIFTH: EVERY CANVA CALL IS THE DOCUMENTED ONE**
+> (4 guards, §5 has the record and the owner's standing rule: a provider
+> fix starts at its published contract, encoded as a suite with the URLs).
+> Frames are custom designs at their own size; filing uses /folders/move;
+> upload names fit 50 characters.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

@@ -136,8 +136,8 @@ def main() -> int:
         if path == "/folders":
             n[0] += 1
             return {"ok": True, "data": {"folder": {"id": f"folder-{n[0]}"}}}
-        if path.startswith("/folders/") and path.endswith("/items"):
-            fid = path.split("/")[2]
+        if path == "/folders/move":
+            fid = str((payload or {}).get("to_folder_id") or "")
             # `/folders` makes the ROOT first (folder-1), then the client's
             # folder (folder-2) — and that one is deleted by hand in Canva
             # before anything is filed in it: the folder that is gone.
@@ -166,12 +166,11 @@ def main() -> int:
     got = hosting.to_canva("baci", aid)
     ck("the frame opens in Canva through the agency's connection",
        got.get("ok") and got.get("design_id") == "des-1", str(got)[:200])
-    filed = [c for c in calls if c[2].endswith("/items")]
+    filed = [(c[3] or {}).get("to_folder_id", "") for c in calls if c[2] == "/folders/move"]
     ck("  Baci's own remembered folder is never tried through the agency's account",
-       not any("stale-baci-folder" in c[2] for c in filed), str([c[2] for c in filed]))
+       "stale-baci-folder" not in filed, str(filed))
     ck("  a folder that is gone is recreated once and the design filed in the new one",
-       len(filed) == 2 and "folder-2" in filed[0][2] and "folder-3" in filed[1][2]
-       and not got.get("filed_error"), str([c[2] for c in filed]))
+       filed == ["folder-2", "folder-3"] and not got.get("filed_error"), str(filed))
     ck("  without a second root — the root is remembered for the agency's account",
        sum(1 for c in calls if c[2] == "/folders" and (c[3] or {}).get("parent_folder_id") == "root") == 1,
        str([c[3] for c in calls if c[2] == "/folders"]))
