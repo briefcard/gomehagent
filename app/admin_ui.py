@@ -12521,6 +12521,19 @@ def _panel_fold(panel: dict, applied: list | None = None,
               f'{_esc(panel["brief"])}</div></details>')
 
 
+def _declined_line(items: list) -> str:
+    """WHAT THE DRAFTER ASKED FOR instead of writing. A declined variant is
+    not on the board as copy; this is where its ask is read, beside the
+    variants that were written, so the owner can answer it — add the claim,
+    fix the entity — rather than discover a message filed as an ad."""
+    if not items:
+        return ""
+    return "".join(
+        f'<p class="when"><b>Variant {_esc(str(d.get("n") or ""))} declined</b> '
+        f'({_esc(str(d.get("angle") or ""))}) &mdash; the drafter asked for: '
+        f'{_esc(str(d.get("asked") or ""))}</p>' for d in items)
+
+
 def _panel_batch_line(panel: dict) -> str:
     """Piliero on the BATCH — distinct entries or restatements — or the named
     reason the panel did not sit."""
@@ -13369,7 +13382,9 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                    if batch.get("blocked_at_emit") else "")
                 + (f' <span class="chip nb">last regenerate: '
                    f'{regen.get("cleared", 0)} of {regen.get("asked", 0)} '
-                   f'cleared</span>' if regen else ""))
+                   f'cleared</span>' if regen else "")
+                + (f' <span class="chip off">{len(batch["declined"])} '
+                   f'declined</span>' if batch.get("declined") else ""))
             vcards = ""
             for v in batch["variants"]:
                 n = v.get("n")
@@ -13457,6 +13472,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                            f'</div>{claim_line}{act_forms}</div>')
             preview_card = (f'<div class="card"><h3>The variant board</h3>'
                             f'<div class="row">{head_bits}</div>'
+                            f'{_declined_line(batch.get("declined") or [])}'
                             f'{_panel_batch_line(batch.get("panel") or {})}'
                             f'<div class="thread">{vcards}</div>'
                             f'{src_link}</div>')

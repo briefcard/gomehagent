@@ -1197,10 +1197,19 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
 
     ents = bundle.get("entities") or []
     if ents:
-        parts.append("\n## What is being advertised")
+        # THE CHOSEN PRODUCT, WITH ITS OWN CATALOGUE FACTS. These are the
+        # "confirmed product details" a drafter may build on without a claim
+        # — a store-synced row is approved data — and until 2026-09-07 the
+        # attributes never reached it, so a drafter with "sold as a set of 6"
+        # in front of it and nothing else declined to write.
+        parts.append("\n## What is being advertised — its own catalogue facts, "
+                     "which you may state as they are")
         for e in ents[:3]:
-            parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"
-                         [:300])
+            facts = "; ".join(f"{k}: {v}" for k, v in
+                              list((e.get("attributes") or {}).items())[:10]
+                              if str(v).strip())
+            parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"[:600]
+                         + (f" ({facts})" if facts else ""))
     aud = bundle.get("audiences") or []
     if aud:
         parts.append("\n## Who is reading")
@@ -1409,6 +1418,10 @@ def _run_ad_copy(ctx: Context) -> dict:
     #: reported on 2026-09-05.
     _pending: list[dict] = []
     _to_check: list[dict] = []
+    #: Variants the drafter DECLINED to write — kept apart from `_pending`
+    #: because they are not drafts. Said on the run and carried onto the
+    #: board with what was asked for.
+    declined: list[dict] = []
 
     # ONE AD, ONE SUBJECT — the same contract the campaign runs under, with a
     # different referent shape. An ad has no imagery yet (see the note above),
@@ -1435,6 +1448,16 @@ def _run_ad_copy(ctx: Context) -> dict:
                       for a in kb_mod.ancestors(ctx.tenant, k)])
     _commit_base = dict(label=_label, audience=audience_key,
                         proof_scopes=_scopes)
+    # AN AD SHOWS ONE THING — the product the owner chose, and what they
+    # said it also features. `resolve` hands every consumer the named
+    # entities PLUS the catalogue's companions, each marked by role, because
+    # an EMAIL may show several and argue one. An ad that shows a stranger
+    # argues it: owner, 2026-09-07 — *"I choose a Sagrada familia head
+    # product. Why is joke being referenced? Why is baroque & rock?"* — so
+    # the companions are dropped HERE, by role, before the panel or the
+    # drafter see the bundle.
+    ctx.bundle["entities"] = [e for e in (ctx.bundle.get("entities") or [])
+                              if e.get("role", "named") != "companion"]
 
     # WHICH ANGLES THIS ACCOUNT MAY USE, from its own knowledge base rather
     # than a fixed list. `gifting` is the one that does not generalise — an
@@ -1578,6 +1601,22 @@ def _run_ad_copy(ctx: Context) -> dict:
         _bundle_i = {**ctx.bundle, "panel": _panel_row}
 
         raw, why_not = draft_ad(_bundle_i, claim, angle, objections)
+        # A REPLY THAT SPEAKS TO THE OPERATOR IS NOT A DRAFT. Owner,
+        # 2026-09-07: the variant on the board opened "I need to stop here
+        # and be honest with you" and ended "Which of these can you confirm?"
+        # — filed as copy, basis=model, because `parse` is forgiving and
+        # nothing asked whether an ad had arrived at all. It is a DECLINE:
+        # not filed, said on the run with what was asked for, and carried
+        # onto the board beside the variants that were written.
+        _asked = ad_craft.declined(raw) if raw else ""
+        if _asked:
+            declined.append({"n": i + 1, "angle": angle,
+                             "claim": str(claim.get("claim") or "")[:160],
+                             "asked": _asked})
+            by_basis["declined"] = by_basis.get("declined", 0) + 1
+            ctx.note(f"variant {i + 1} ({angle}): the drafter DECLINED to write "
+                     f"it and asked for — {_asked}")
+            continue
         headline, levers, craft_findings = "", [], []
         text = raw
         if raw:
@@ -1822,6 +1861,7 @@ def _run_ad_copy(ctx: Context) -> dict:
              "panel": {"sat": bool(panel),
                        "why_not": "" if panel else _panel_why,
                        **((panel or {}).get("batch") or {})},
+             "declined": declined,
              "variants": board_rows}, ensure_ascii=False, indent=1)
         from . import db as _db
         with _db.SessionLocal() as s:
@@ -1840,8 +1880,12 @@ def _run_ad_copy(ctx: Context) -> dict:
                  "regenerate it there")
 
     return {"summary": f"{len(ctx.items)} variant(s) ({', '.join(
-                f'{n} {b}' for b, n in sorted(by_basis.items()))}), no imagery",
+                f'{n} {b}' for b, n in sorted(by_basis.items()))}), no imagery"
+                       + (f" — {len(declined)} declined: the drafter asked for "
+                          + " | ".join(d["asked"][:120] for d in declined[:2])
+                          if declined else ""),
             "by_basis": by_basis, "angles": list(_ANGLES[:len(ctx.items)]),
+            "declined": declined,
             "board_rows": board_rows}
 
 

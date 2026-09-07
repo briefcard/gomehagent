@@ -632,6 +632,47 @@ source by "newest publishable row + httpx" rather than `pick`; the Pictures
 page's "select all" script ticks every `asset_ids` box on the page,
 including the boards' and the sets'.
 
+### The ad is about the thing you chose — 2026-09-07 (one ship; hash in the memory note)
+
+**The defect, in the owner's words:** *"I choose a Sagrada familia head
+product. Why is joke being referenced? Why is baroque & rock? Your wiring is
+all messed up."* Reproduced: for a Sagrada ad the panel and the drafter were
+handed `['sagrada-head', 'baroque-rock-tumbler', 'joke-melamine-18']`.
+`resolve`'s catalogue branch opened on the named entity and, with no buyer
+requirements to rank on, `kb.match_entities` returned the catalogue's first
+rows; the 2026-08 fix that made the named entity LEAD that window kept the
+strangers behind it. The zodiac cup's "18-piece gift" came the same way. And
+the refusal the owner pasted was filed as copy: `ad_craft.parse` is forgiving
+by design and nothing asked whether an ad had arrived at all.
+
+**Standing rules it adds:**
+- **A named entity is the instruction, and every row says what it is.**
+  `resolve` supplies the named entities first (hero, then "also features",
+  by key, in order) and marks each row's ROLE — `named`, `matched` (fits
+  stated requirements) or `companion` (the ranker's shelf, which with no
+  requirements is the catalogue in sort order). The contract is
+  per-consumer: an EMAIL may show several and argue one, so it keeps the
+  shelf (`test_campaign_variety` holds that line); an AD shows one thing,
+  so `_run_ad_copy` drops companions by role before the panel or the
+  drafter see the bundle (`a_named_entity_brings_no_strangers`). The first
+  cut of this ship made the named list exact for everyone and the campaign
+  suite refused it at the gate — the shelf is a feature there.
+- **The product's own catalogue facts are the confirmed details.** A
+  store-synced row is approved data; its description and attributes reach
+  the panel and the drafter as "facts you may state as they are". A drafter
+  told to invent nothing and handed "set: 6" alone will decline — and did.
+- **A reply that speaks to the operator is a decline, not a draft.** No
+  `HEADLINE:`/`LEVERS:`/`---` plus a phrase like "I need to stop here" or
+  "can you confirm" → `ad_craft.declined()` returns the ask; the variant is
+  not filed, the run and the summary say it, the board record carries it,
+  and the board shows the chip and the ask. A real ad is never read as one:
+  any marker makes it an ad; a caption asking its READER a question is not
+  a decline.
+
+**Left deliberately unchanged:** a decline is not retried — the model said
+what it needs and the honest answer is to show that; the fix is upstream
+(the claim, the entity), not a louder prompt.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -693,6 +734,11 @@ including the boards' and the sets'.
 > the zodiac collection) and pin — the switch is theirs. Then: derive a
 > direction row from a board's pins and confirm it; the distance judge that
 > ranks and never vetoes; `generate`'s source via `pick`.
+>
+> **SHIPPED 2026-09-07, SECOND: THE AD IS ABOUT THE THING YOU CHOSE** (7
+> guards, §5 has the record). A named entity is exactly the brief's entity
+> list; the product's own catalogue facts reach the panel and the drafter; a
+> reply that speaks to the operator is a decline the board shows, never copy.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

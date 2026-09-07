@@ -519,8 +519,16 @@ def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
     parts.append(f"REAL DEADLINE: {deadline}" if deadline else "DEADLINE: none — urgency is not available")
     ents = bundle.get("entities") or []
     if ents:
+        # The chosen product and its OWN catalogue facts. The reviewers
+        # wrote a brief demanding "one confirmed product detail" for a piece
+        # whose row carried five, because only 160 characters of description
+        # and none of the attributes reached them (2026-09-07).
         parts.append("ADVERTISED: " + "; ".join(
-            f"{e.get('name', '')} — {str(e.get('description') or '')[:160]}"
+            f"{e.get('name', '')} — {str(e.get('description') or '')[:400]}"
+            + ((" (" + "; ".join(f"{k}: {v}" for k, v in
+                                 list((e.get("attributes") or {}).items())[:8]
+                                 if str(v).strip()) + ")")
+               if e.get("attributes") else "")
             for e in ents[:3]))
     for c in concepts:
         a = ANGLES.get(c.get("angle", ""), {})
@@ -534,6 +542,54 @@ def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
     parts.append("\nSpeak as Hormozi, then as Piliero, per concept; then Piliero on "
                  "the batch; then the rewritten brief for each. JSON only.")
     return parts
+
+
+#: Phrases a drafter uses when it is talking to the OPERATOR rather than
+#: writing the ad. A reply with none of the reply format's markers and one of
+#: these is a message, not copy.
+_DECLINE_MARKS = (
+    "i need to stop", "be honest with you", "i can't write", "i cannot write",
+    "i can't do", "i cannot do", "i'm unable", "i am unable", "i'm not able",
+    "i am not able", "before i can write", "before i write", "i'll need",
+    "what i need", "can you confirm", "which of these can you",
+    "please confirm", "let me know which", "once one of those is confirmed",
+    "i won't write", "i will not write")
+
+
+def declined(raw: str) -> str:
+    """What the drafter asked for instead of writing — or "" when it wrote.
+
+    `parse` is forgiving by design: a reply with no markers is all body, so a
+    model that ignores the format loses its headline and not its ad. The
+    cost of that forgiveness arrived on 2026-09-07: a reply that opened *"I
+    need to stop here and be honest with you"* and ended *"Which of these can
+    you confirm?"* was filed as the variant, basis=model, and shown on the
+    board as copy. This is the other half of `parse`: a reply with NO marker
+    of the reply format AND a phrase addressed to the operator is a decline,
+    and what it returns is the ask — the bullet points and the closing
+    question — so the run and the board can say what the drafter needed.
+
+    A real ad is never read as one: any `HEADLINE:`/`LEVERS:` line or a
+    `---` rule makes it an ad, whatever it says; and a bare caption that
+    merely asks the READER a question carries none of these phrases.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if (re.search(r"^\s*(HEADLINE|LEVERS)\s*:", text, re.I | re.M)
+            or re.search(r"^\s*---\s*$", text, re.M)):
+        return ""
+    low = text.lower()
+    if not any(m in low for m in _DECLINE_MARKS):
+        return ""
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    asks = [re.sub(r"\*+", "", ln).strip("-•* ").strip()
+            for ln in lines if ln.startswith(("-", "•", "*"))]
+    # A bold heading ("**What I need:**") parses as a bullet and is not an ask.
+    asks = [a for a in asks if a and not a.endswith(":")]
+    questions = [ln for ln in lines if ln.endswith("?") and ln not in asks]
+    picked = asks[:3] + questions[-1:] if asks else questions[:2] or [text]
+    return "; ".join(p[:160] for p in picked)[:480]
 
 
 def panel_parse(raw: str) -> dict:

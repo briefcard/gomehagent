@@ -253,6 +253,15 @@ def _situated(tenant: str, utterance: str, entity_key: str,
     return detected, out, support
 
 
+def _entity_dict(r) -> dict:
+    """A catalogue row as the bundle carries it — the same shape
+    `kb.match_entities` returns, so a named entity and a ranked one read
+    alike downstream."""
+    return {"key": r.key, "name": r.name, "type": r.type, "price": r.price,
+            "description": r.description, "attributes": r.attributes or {},
+            "availability": r.availability or ""}
+
+
 def resolve(tenant: str, system: str = "", utterance: str = "",
             contact_id: str = "", entity_key: str = "",
             entity_keys: list | None = None, audience_key: str = "",
@@ -563,35 +572,45 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
     # --- tier 3 ---------------------------------------------------------
     entities, convo = [], {"exists": False, "why": "not requested"}
     if tier >= 3:
-        if requirements or entity_key:
-            entities = kb.match_entities(tenant, requirements or {},
-                                         limit=limit, include_unavailable=True)
-            # A NAMED entity is an INSTRUCTION, not a ranking hint. `entity_key`
-            # only ever opened this branch — it was never passed to the ranker —
-            # so with no `requirements` (which is every campaign) the caller got
-            # whatever `match_entities` ranks first with nothing to rank on:
-            # alphabetical order. An owner who set "Featured entity: Firenze" on
-            # a plan got the catalogue's first three rows and no way to tell.
-            # The named one leads; a ranked window that missed it is not a
-            # reason to drop it, so it is fetched directly.
-            if entity_key:
-                rest = [e for e in entities if e.get("key") != entity_key]
-                named = [e for e in entities if e.get("key") == entity_key]
-                if not named:
-                    named = [{"key": r.key, "name": r.name, "type": r.type,
-                              "price": r.price, "description": r.description,
-                              "attributes": r.attributes or {},
-                              "availability": r.availability or ""}
-                             for r in kb.entities(tenant, available_only=False)
-                             if r.key == entity_key]
-                if named:
-                    entities = named + rest
-                else:
-                    gaps.append({"missing": f"the entity {entity_key!r}",
+        _named_keys = [k for k in ([entity_key] if entity_key else [])
+                       + list(entity_keys or []) if k]
+        if _named_keys or requirements:
+            # A NAMED ENTITY IS AN INSTRUCTION, AND THE LIST IS EXACTLY THE
+            # INSTRUCTION: the hero first, then whatever else the owner said
+            # the piece also features, fetched by key and in that order. A
+            # ranked window is appended ONLY when there are buyer
+            # REQUIREMENTS to rank on. With none, `match_entities` returns the
+            # catalogue in whatever order it sorts — and the 2026-08 fix that
+            # made the named entity LEAD that window kept the strangers
+            # behind it. So an ad for a Sagrada Família head was briefed on
+            # the Joke Melamine set and the Baroque & Rock acrylics (owner,
+            # 2026-09-07: *"I choose a Sagrada familia head product. Why is
+            # joke being referenced? Why is baroque & rock?"*), and the
+            # zodiac cup's ad on an "18-piece gift", by the same path.
+            _by_key = {r.key: r for r in kb.entities(tenant, available_only=False)}
+            named = [{**_entity_dict(_by_key[k]), "role": "named"}
+                     for k in _named_keys if k in _by_key]
+            for k in _named_keys:
+                if k not in _by_key:
+                    gaps.append({"missing": f"the entity {k!r}",
                                  "means": "it was named but is not in the "
                                           "catalogue under that key",
                                  "fix": "re-run catalog_sync, or pick the "
                                         "entity again from the list"})
+            # COMPANIONS, MARKED AS SUCH. An email may SHOW several products
+            # and argue one (`test_campaign_variety`: "companions are still
+            # offered — this is not a one-entity rule"); the ranker's window
+            # is that shelf, and with no requirements it is the catalogue in
+            # sort order. So every row says what it is — `named` is the
+            # instruction, `matched` fits stated requirements, `companion` is
+            # the shelf — and a consumer that shows ONE thing (the ad) keeps
+            # the named ones and drops the rest by reading the role, not by
+            # guessing which row the owner meant.
+            ranked = kb.match_entities(tenant, requirements or {}, limit=limit,
+                                       include_unavailable=True)
+            _role = "matched" if requirements else "companion"
+            entities = named + [{**e, "role": _role} for e in ranked
+                                if e.get("key") not in _named_keys]
             searched.append("entities")
             if not entities:
                 gaps.append({"missing": "a matching entity",
