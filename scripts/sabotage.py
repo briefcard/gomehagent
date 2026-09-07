@@ -7148,7 +7148,7 @@ SABOTAGES = [
         'file': 'app/creative.py',
         'find': '          situation: str = "", plates: int = 4, review: bool = True) -> dict:',
         'replace': '          plates: int = 4, review: bool = True) -> dict:  # SABOTAGE',
-        'suites': ['test_ad_arrives_whole.py'],
+        'suites': ['test_ad_arrives_whole.py', 'test_the_route_sends_what_the_callee_takes.py'],
         'why': 'every Make-frames click raises TypeError inside _run_bg and the button still returns 303 — the exact production failure of 2026-09-05 17:03, invisible to a test that spies on the sender',
     },
     {
