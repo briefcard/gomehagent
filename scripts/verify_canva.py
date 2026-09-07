@@ -102,7 +102,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     # ---- 3. the folder, which is the actual question --------------------
-    before = (t.design or {}).get("canva_folder_id") or ""
+    before = (((t.design or {}).get("canva_folders") or {}).get("agency")
+              or (t.design or {}).get("canva_folder_id") or "")
     _line("a folder was already remembered" if before else
           "no folder remembered yet — this run should create one",
           before or "", None)
@@ -123,7 +124,8 @@ def main(argv: list[str]) -> int:
 
     with db.SessionLocal() as s:
         row = s.get(db.Tenant, tenant)
-        stored = (row.design or {}).get("canva_folder_id") or ""
+        stored = (((row.design or {}).get("canva_folders") or {}).get("agency")
+                  or (row.design or {}).get("canva_folder_id") or "")
     _line("…and it is written back to the tenant, so the next process agrees",
           stored or "(nothing stored)", stored == res["folder_id"])
 

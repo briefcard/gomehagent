@@ -122,10 +122,18 @@ def to_canva(tenant: str, asset_id: str) -> dict:
         if got is not None:
             got.canva_design_id = design_id
             s.commit()
+    # WHOSE CANVA IT WENT INTO, when that is not the obvious answer. A frame
+    # that opened in the agency's Canva because the client's own connection
+    # was revoked is a fact the person editing it needs, and the design's
+    # folder is the only place it would otherwise show.
+    acct = canva.which_account(tenant)
     return {"ok": True, "design_id": design_id, "reused": False,
             "edit_url": made.get("edit_url", ""),
+            "account": acct.get("source", ""),
             "note": "the picture is fixed; the text and layout are editable. "
-                    "Nothing is published."}
+                    "Nothing is published."
+                    + (f" It went to the agency's Canva, in this account's "
+                       f"folder — {acct['note']}" if acct.get("note") else "")}
 
 
 def publish(tenant: str, asset_id: str) -> dict:

@@ -31,6 +31,46 @@ TIMEOUT = 60
 ROOT_NAME = "Client work — gomehagent"
 
 
+#: What a DEFINITIVE refusal of a stored token says. The provider said no —
+#: not the network, not a timeout.
+_REJECTED = ("revoked", "invalid_grant", "invalid grant", "sign-in was rejected",
+             "rejected", "expired")
+
+
+def _rejected(err: str) -> bool:
+    low = (err or "").lower()
+    if "connecterror" in low or "timeout" in low or "timed out" in low:
+        return False
+    return any(m in low for m in _REJECTED)
+
+
+def which_account(tenant: str) -> dict:
+    """Whose Canva serves this account right now — `client`, `agency` or
+    "" — and, when it is the agency's BECAUSE the client's own connection
+    failed, the sentence that says so. Read off durable state (the failed
+    row, the resolver), so the frame, the run and the Accounts tab all say
+    the same thing."""
+    c = cred.resolve(tenant, "canva") or {}
+    source = str(c.get("source") or "") if c.get("secret") else ""
+    note = ""
+    if source == "agency":
+        with db.SessionLocal() as s:
+            own = (s.query(db.Credential)
+                   .filter(db.Credential.tenant == tenant,
+                           db.Credential.provider == "canva",
+                           db.Credential.status == "failed")
+                   .order_by(db.Credential.granted_at.desc()).first())
+            why = (own.last_error or "") if own is not None else ""
+            had = own is not None
+        if had:
+            t = tenants.get(tenant)
+            name = (getattr(t, "name", "") or tenant) if t else tenant
+            note = (f"{name}'s own Canva connection was revoked ({why[:80]}); "
+                    f"designs go to the agency's Canva, in the {name} folder. "
+                    f"Reconnect theirs on the Accounts tab to switch back.")
+    return {"source": source, "note": note}
+
+
 def _token(tenant: str) -> tuple[str, str]:
     """A live access token, minted from the refresh token we stored.
 
@@ -47,11 +87,37 @@ def _token(tenant: str) -> tuple[str, str]:
     if secret:
         from . import oauth
         got = oauth.access_token("canva", secret)
-        if not got.get("ok"):
-            return "", (f"Canva would not renew the token for {tenant}: "
-                        f"{got.get('error', '')} — reconnect it on the "
-                        f"Accounts tab.")
-        return got["token"], ""
+        if got.get("ok"):
+            return got["token"], ""
+        err = str(got.get("error", ""))
+        # A REVOKED CONNECTION IS NOT A CONNECTION. Owner, 2026-09-07: *"Canva
+        # would not renew the token for baci: Sign-in was rejected: Token
+        # lineage has been revoked"* — returned as an error one line above
+        # the text that promises the agency's connection serves every
+        # account. `resolve` already falls through to the agency for a
+        # client with no ACTIVE row; a revoked lineage left the row active
+        # and failing, so the fallback that existed was never reached. A
+        # DEFINITIVE rejection therefore marks the row failed — where the
+        # Accounts tab shows it and says reconnect — and re-resolves. A
+        # transient error does not: switching a client's designs into the
+        # agency's Canva on a timeout is how "why is our design in their
+        # Canva" starts.
+        if (c or {}).get("source") == "client" and _rejected(err):
+            cred.record_failure(tenant, "canva", err)
+            shared = cred.resolve(tenant, "canva") or {}
+            if shared.get("secret") and shared.get("source") == "agency":
+                again = oauth.access_token("canva", shared["secret"])
+                if again.get("ok"):
+                    return again["token"], ""
+                return "", (f"{tenant}'s own Canva connection was revoked "
+                            f"({err[:80]}) and the agency's would not renew "
+                            f"either: {str(again.get('error', ''))[:80]} — "
+                            f"reconnect on the Accounts tab.")
+            return "", (f"{tenant}'s own Canva connection was revoked "
+                        f"({err[:80]}) and the agency has no Canva connection "
+                        f"to fall back to — connect one on the Accounts tab.")
+        return "", (f"Canva would not renew the token for {tenant}: {err} — "
+                    f"reconnect it on the Accounts tab.")
     if not secret:
         return "", (f"{tenant} has no Canva connection, and neither has the "
                     f"agency — connect one on the Accounts tab. The agency's "
@@ -186,7 +252,7 @@ def mcp_call(tenant: str, tool: str, arguments: dict | None = None) -> dict:
 # Where a tenant's work lives
 # ---------------------------------------------------------------------------
 
-def _remember_folder(tenant: str, folder_id: str) -> None:
+def _remember_folder(tenant: str, folder_id: str, source: str = "agency") -> None:
     """Keep the folder id on the tenant row so it is found, not searched for.
 
     Searching by name every time would eventually match a folder somebody
@@ -199,9 +265,52 @@ def _remember_folder(tenant: str, folder_id: str) -> None:
         if not row:
             return
         design = dict(row.design or {})
-        design["canva_folder_id"] = folder_id
+        # PER ACCOUNT. A folder made in Baci's own Canva does not exist in the
+        # agency's; remembering one id for both is how the fallback made the
+        # design and failed to file it (2026-09-07). The legacy key is left
+        # as it was — `_remembered_folder` says whose it is.
+        folders = dict(design.get("canva_folders") or {})
+        folders[source] = folder_id
+        design["canva_folders"] = folders
         row.design = design
         s.commit()
+
+
+def _forget_folder(tenant: str, source: str) -> None:
+    with db.SessionLocal() as s:
+        row = s.get(db.Tenant, tenant)
+        if not row:
+            return
+        design = dict(row.design or {})
+        folders = dict(design.get("canva_folders") or {})
+        folders.pop(source, None)
+        design["canva_folders"] = folders
+        row.design = design
+        s.commit()
+
+
+def _remembered_folder(tenant: str, design: dict, source: str) -> str:
+    """The folder remembered for THIS account, or "". A folder remembered
+    before accounts were told apart belongs to the account that made it: the
+    client's if this client ever connected their own Canva, else the
+    agency's."""
+    known = dict(design.get("canva_folders") or {})
+    if known.get(source):
+        return str(known[source])
+    legacy = str(design.get("canva_folder_id") or "")
+    if not legacy:
+        return ""
+    with db.SessionLocal() as s:
+        had_own = (s.query(db.Credential)
+                   .filter(db.Credential.tenant == tenant,
+                           db.Credential.provider == "canva").first()) is not None
+    return legacy if (source == "client") == had_own else ""
+
+
+def _root_key(tenant: str, source: str) -> str:
+    """The agency's root is the legacy setting; a client's own Canva gets a
+    root of its own, in their account."""
+    return "canva_root_folder" if source == "agency" else f"canva_root_folder:{tenant}"
 
 
 def folder(tenant: str) -> dict:
@@ -212,9 +321,12 @@ def folder(tenant: str) -> dict:
     t = tenants.get(tenant)
     if not t:
         return {"ok": False, "error": f"unknown tenant {tenant!r}"}
-    known = (t.design or {}).get("canva_folder_id") or ""
+    # WHOSE ACCOUNT, first: the folder is remembered per account, because a
+    # folder made in the client's own Canva does not exist in the agency's.
+    source = which_account(tenant).get("source") or "agency"
+    known = _remembered_folder(tenant, dict(t.design or {}), source)
     if known:
-        return {"ok": True, "folder_id": known, "created": False}
+        return {"ok": True, "folder_id": known, "created": False, "source": source}
 
     # The root first, then the account inside it. Two levels, so a Canva team
     # that also works by hand is not looking at a flat list of client names at
@@ -230,7 +342,7 @@ def folder(tenant: str) -> dict:
     # tenant row.
     root_id = ""
     with db.SessionLocal() as _s:
-        _row = _s.get(db.Setting, "canva_root_folder")
+        _row = _s.get(db.Setting, _root_key(tenant, source))
         root_id = (_row.value if _row else "") or ""
     if not root_id:
         root = call(tenant, "POST", "/folders",
@@ -241,7 +353,7 @@ def folder(tenant: str) -> dict:
         if not root_id:
             return {"ok": False, "error": "Canva created no root folder id."}
         with db.SessionLocal() as _s:
-            _s.merge(db.Setting(key="canva_root_folder", value=root_id))
+            _s.merge(db.Setting(key=_root_key(tenant, source), value=root_id))
             _s.commit()
 
     made = call(tenant, "POST", "/folders",
@@ -252,21 +364,35 @@ def folder(tenant: str) -> dict:
     fid = ((made["data"] or {}).get("folder") or {}).get("id", "")
     if not fid:
         return {"ok": False, "error": "Canva created no folder id."}
-    _remember_folder(tenant, fid)
-    return {"ok": True, "folder_id": fid, "created": True, "root_id": root_id}
+    _remember_folder(tenant, fid, source)
+    return {"ok": True, "folder_id": fid, "created": True, "root_id": root_id,
+            "source": source}
 
 
 def _file_into_folder(tenant: str, item_id: str) -> dict:
     f = folder(tenant)
-    if not f["ok"]:
+    if not f.get("ok"):
         return f
-    return call(tenant, "POST", f"/folders/{f['folder_id']}/items",
+    res = call(tenant, "POST", f"/folders/{f['folder_id']}/items",
                 payload={"item_id": item_id})
+    if res.get("ok") or not _gone(str(res.get("error", ""))):
+        return res
+    # A REMEMBERED FOLDER THAT IS GONE — deleted by hand in Canva, or made in
+    # another account — is forgotten and made again, ONCE. Failing the
+    # design over a folder id is the "filed_error" nobody reads.
+    _forget_folder(tenant, str(f.get("source") or "agency"))
+    f2 = folder(tenant)
+    if not f2.get("ok"):
+        return f2
+    res2 = call(tenant, "POST", f"/folders/{f2['folder_id']}/items",
+                payload={"item_id": item_id})
+    return {**res2, "recreated": True}
 
 
-# ---------------------------------------------------------------------------
-# Assets and designs
-# ---------------------------------------------------------------------------
+def _gone(err: str) -> bool:
+    low = (err or "").lower()
+    return low.startswith("404") or "not found" in low
+
 
 def upload_asset(tenant: str, url: str, name: str, *,
                  entity_key: str = "", tags: list[str] | None = None,

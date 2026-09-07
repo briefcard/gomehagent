@@ -397,6 +397,13 @@ button.sec{background:transparent;color:var(--acc)}
   border:1px solid var(--rule);border-radius:5px;overflow:hidden;
   background:var(--panel)}
 .frame .pic{border:0;border-radius:0;background:none}
+.lbbtn{font-size:12px;padding:3px 9px;border:1px solid var(--rule);border-radius:4px;background:none;color:inherit;cursor:zoom-in}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:60;overflow:auto}
+#lb[hidden]{display:none}
+.lbbar{position:sticky;top:0;display:flex;gap:10px;align-items:center;padding:10px 14px;background:rgba(0,0,0,.65);color:#eee;font-size:13px}
+.lbbar .sec{color:#eee;border-color:#666}
+#lb img{display:block;margin:3vh auto;max-width:94vw;max-height:84vh;cursor:zoom-in;background:#111}
+#lb.zoomed img{max-width:none;max-height:none;margin:2vh auto;cursor:zoom-out}
 .frame:has(input:checked){outline:2px solid var(--acc);outline-offset:-2px}
 .framebar{display:flex;gap:6px;align-items:center;padding:0 7px 6px;
   font-size:.66rem}
@@ -6145,6 +6152,40 @@ def _winning_look_card(key: str, tenant: str) -> str:
     </div>"""
 
 
+def _viewer() -> str:
+    """The frame viewer: one overlay for the page, opened by any `.lbbtn`.
+    Fit to the screen first; a click on the picture shows it at its own
+    pixels (a real zoom, scrollable), another click fits it again. The edit
+    control rides inside, so the decision is made where the picture is
+    looked at. Events are delegated, so it binds whatever renders after it."""
+    return """
+    <div id="lb" hidden>
+      <div class="lbbar"><span id="lbcap"></span><span class="grow"></span>
+        <button type="button" id="lbedit" class="sec">edit in Canva</button>
+        <button type="button" id="lbclose" class="sec">close</button></div>
+      <img id="lbimg" alt="">
+    </div>
+    <script>
+    (function(){
+      var lb=document.getElementById('lb'),img=document.getElementById('lbimg'),
+          cap=document.getElementById('lbcap'),edit=document.getElementById('lbedit'),
+          ref='';
+      function open(b){img.src=b.dataset.full||'';cap.textContent=b.dataset.cap||'';
+        ref=b.dataset.edit||'';edit.hidden=!ref;lb.classList.remove('zoomed');lb.hidden=false;}
+      function close(){lb.hidden=true;img.src='';}
+      document.addEventListener('click',function(e){
+        var b=e.target.closest&&e.target.closest('.lbbtn');if(b){open(b);}});
+      img.addEventListener('click',function(){lb.classList.toggle('zoomed');});
+      lb.addEventListener('click',function(e){if(e.target===lb){close();}});
+      document.getElementById('lbclose').addEventListener('click',close);
+      edit.addEventListener('click',function(){
+        if(/^https?:/.test(ref)){window.open(ref,'_blank');return;}
+        var f=document.getElementById(ref);if(f){f.requestSubmit?f.requestSubmit():f.submit();}});
+      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!lb.hidden){close();}});
+    })();
+    </script>"""
+
+
 def _drawn_from(frames) -> str:
     """What a set was drawn from, off the frames themselves — `derived_from`
     is the board's record on each one, so the card cannot claim a board the
@@ -6329,6 +6370,14 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
     in_sets = {f.id for g in sets for f in g["frames"]}
     rest = [a for a in waiting if a.id not in in_sets]
 
+    # WHOSE CANVA THE EDITS OPEN IN, read once and said on every set. A frame
+    # that opens in the agency's Canva because this client's own connection
+    # was revoked is a fact for the person clicking "edit" — and the design's
+    # folder was the only place it would otherwise show (owner, 2026-09-07).
+    from . import canva as _canva
+    _acct = _canva.which_account(tenant)
+    _acct_line = (f'<p class="when"><b>Edits open in the agency&#39;s Canva.</b> '
+                  f'{_esc(_acct["note"])}</p>' if _acct.get("note") else "")
     html = ""
     for g in sets:
         fid = "b" + _esc(str(g["batch"])[:12])
@@ -6342,6 +6391,17 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
             # opened again, and the link to it is the useful thing at that
             # point.
             where = _hostmod().stage(f)
+            # LOOK BEFORE EDITING (owner, 2026-09-07: "view and zoom into the
+            # image before editing from the app"). The tile is 112px of a
+            # 1024px frame; the viewer shows it whole and at full size, with
+            # the same edit control inside it, so looking and deciding happen
+            # in one place.
+            view = (f'<button type="button" class="lbbtn" '
+                    f'data-full="{_esc(f.url or "")}" '
+                    f'data-cap="{_esc(" · ".join(tags))}'
+                    f'{(" — " + _esc(", ".join(failed))) if failed else ""}" '
+                    f'data-edit="{("https://www.canva.com/design/" + _esc(f.canva_design_id) + "/edit") if where == "editable" else "canva-" + _esc(f.id)}"'
+                    f'>view</button>')
             edit = (f'<a class="mut" target="_blank" rel="noopener" '
                     f'href="https://www.canva.com/design/'
                     f'{_esc(f.canva_design_id)}/edit">open in Canva &rarr;</a>'
@@ -6366,7 +6426,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
               {('<b class="gapt">' + _esc(', '.join(failed)) + '</b>')
                if failed else '<span class="okt">reads right</span>'}</span>
           </label>
-          <div class="framebar">{edit}</div>
+          <div class="framebar">{view}{edit}</div>
         </div>"""
         # THE COUNT IS SAID. A set where nineteen of twenty failed their own
         # review is a brief problem, and that shows here or after somebody has
@@ -6383,6 +6443,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
       work.</b> The note under each frame is the model&#39;s own read of it
       against the brief; it is advice, not a filter, and a frame it disliked
       is still yours to keep.</p>
+      {_acct_line}
       <form id="{fid}" method="post" action="/admin/assets_decide"></form>
       <input type="hidden" name="tenant" value="{_esc(tenant)}" form="{fid}">
       <input type="hidden" name="batch" value="{_esc(g['batch'])}" form="{fid}">
@@ -6542,7 +6603,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # the request, so without this a failed run and a running one look
     # identical: the banner promised pictures under Pictures and none came.
     batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)
-                  + _board_card(key, tenant) + batch_html)
+                  + _board_card(key, tenant) + batch_html + _viewer())
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
     # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap

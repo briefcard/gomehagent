@@ -673,6 +673,46 @@ by design and nothing asked whether an ad had arrived at all.
 what it needs and the honest answer is to show that; the fix is upstream
 (the claim, the entity), not a louder prompt.
 
+### Canva: a revoked connection is not a connection — 2026-09-07 (one ship; hash in the memory note)
+
+**The defect, in the owner's words:** *"Canva would not renew the token for
+baci: Sign-in was rejected: Token lineage has been revoked — reconnect it on
+the Accounts tab."* and *"We agreed that when a specific client is not
+connected it will resolve to organize by folders in Canva."* Reproduced:
+`canva._token` resolved Baci's own credential, renewal was rejected, and the
+error came back one line above the text promising the agency's connection
+serves every account. Baci's row stayed ACTIVE — the Accounts tab said
+"connected — by client" over a dead connection — and the remembered folder
+had been made in Baci's Canva, so the agency's token could not have filed
+into it anyway.
+
+**Standing rules it adds:**
+- **A definitive rejection is recorded, then routed around.** Revoked,
+  invalid grant, expired → `credentials.record_failure` (the one writer),
+  which `resolve` reads at once; a shared provider falls through to the
+  agency's. A transient error changes nothing — switching a client's designs
+  into the agency's Canva on a timeout is how "why is our design in their
+  Canva" starts (`a_transient_canva_error_does_not_switch_accounts`).
+- **A folder belongs to the account that made it.** Remembered per account
+  (`design.canva_folders[source]`), the legacy id read as the account that
+  made it, the agency's root the legacy setting; a folder that is gone is
+  forgotten and recreated once, never failed on for ever.
+- **Whose Canva is said where the edit happens.** `canva.which_account` is
+  the one sentence; `to_canva`'s note, the set card and the Accounts tab
+  all read it.
+- **Look before editing.** Every frame has a viewer — fit, then a click to
+  its own pixels — with the edit control inside it.
+
+**Traps this stretch fell into.** A regex block replacement that ends at
+"the next triple newline" swallowed the whole next function
+(`upload_asset`); `test_canva` caught it. Compare `def` lists against HEAD
+after any block rewrite. A per-account memory key beside a legacy one means
+every reset in every suite must clear both (see `test_canva`'s reset). A
+public helper for that with no caller — `forget_folders`, first cut — was
+refused by `test_register` as an empty connection, rightly: recreate-once
+already covers an owner who reorganised by hand. The `/folders` counter in a fake counts the ROOT first: "the first
+client folder" is the second id.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -739,6 +779,20 @@ what it needs and the honest answer is to show that; the fix is upstream
 > guards, §5 has the record). A named entity is exactly the brief's entity
 > list; the product's own catalogue facts reach the panel and the drafter; a
 > reply that speaks to the operator is a decline the board shows, never copy.
+>
+> **SHIPPED 2026-09-07, THIRD: CANVA FALLS BACK TO THE AGENCY + THE FRAME
+> VIEWER** (9 guards, §5 has the record). A revoked client connection is
+> recorded and routed around; folders are per account; the set says whose
+> Canva; every frame can be looked at, full size, before it is edited.
+>
+> **AND THE COPY QUESTION, answered 2026-09-07 — the owner asked what is
+> missing for exceptional ad copy.** The answer, in order of leverage: a
+> COPY BOARD (the brand's best copy + a swipe file as exemplars — the move
+> that fixed the pictures), then the model and prompt diet (drafter and
+> panel run Sonnet 4.6 at 400 tokens under a rule stack), then an insight
+> step before concepts, then a review harvest for verbatims, then results
+> feeding hooks. The owner's move first: 5 exceptional ads + 5 they would
+> never run. Memory note `gomehagent-creative-substrate` carries it.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

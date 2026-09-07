@@ -1383,6 +1383,35 @@ def _dark(row, provider: str) -> list:
     return out
 
 
+def record_failure(tenant: str, provider: str, error: str, *,
+                   site: str = "") -> int:
+    """Mark this account's ACTIVE connection(s) for a provider FAILED, with the
+    reason. THE ONE WRITER, so the Accounts tab and `resolve` read the same
+    fact: `resolve` returns active rows only, so a row marked here stops being
+    used at once and a shared provider falls through to the agency's.
+
+    Call it only on a DEFINITIVE rejection — a revoked lineage, an invalid
+    grant. A timeout is not a reason to route a client's work through another
+    account; "why is our design in their Canva" starts exactly there.
+    Returns how many rows were marked.
+    """
+    site = _site_key(provider, site)
+    n = 0
+    with db.SessionLocal() as s:
+        q = (s.query(db.Credential)
+             .filter(db.Credential.tenant == tenant,
+                     db.Credential.provider == provider,
+                     db.Credential.status == "active"))
+        if site:
+            q = q.filter(db.Credential.site == site)
+        for row in q.all():
+            row.status = "failed"
+            row.last_error = (error or "")[:500]
+            n += 1
+        s.commit()
+    return n
+
+
 def granted_scopes(tenant: str) -> dict[str, set[str] | None]:
     """provider -> the scopes actually granted, or None when unrecorded.
 

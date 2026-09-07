@@ -86,6 +86,7 @@ def main() -> int:
         for _t in _s.query(db.Tenant).all():
             _d = dict(_t.design or {})
             _d.pop("canva_folder_id", None)
+            _d.pop("canva_folders", None)       # remembered per account since 2026-09-07
             _t.design = _d
         _r = _s.get(db.Setting, "canva_root_folder")
         if _r:

@@ -113,8 +113,9 @@ SABOTAGES = [
     {
         "name": 'the_canva_control_is_not_inside_the_label',
         "file": 'app/admin_ui.py',
-        "find": '          </label>\n          <div class="framebar">{edit}</div>',
-        "replace": '          {edit}</label>\n          <div class="framebar">',
+        # RE-ANCHORED 2026-09-07: the view button sits beside the edit control.
+        "find": '          </label>\n          <div class="framebar">{view}{edit}</div>',
+        "replace": '          {view}{edit}</label>\n          <div class="framebar">',
         "suites": ['test_hosting.py'],
         "why": 'a button inside a <label> activates the label too, so clicking "edit in Canva" silently selects the frame as well and the next Reject takes it',
     },
@@ -133,8 +134,9 @@ SABOTAGES = [
         # The claim is unchanged — the frame RUN has to report itself — so
         # the mutation drops `_frames_run` and leaves the new card alone.
         # RE-ANCHORED 2026-09-07: the boards card joined the line too.
-        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html)',
-        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html)  # SABOTAGE',
+        # RE-ANCHORED 2026-09-07: the viewer joined the line.
+        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html + _viewer())',
+        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html + _viewer())  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": 'the minutes-long frame run reports nowhere, so a crashed one is indistinguishable from a slow one: the banner promises pictures under Pictures and none ever arrive',
     },
@@ -7419,6 +7421,63 @@ SABOTAGES = [
         'replace': '',
         'suites': ['test_the_ad_is_about_the_thing_you_chose.py'],
         'why': 'a declined variant is kept off the board as copy and never appears there at all — the owner sees two variants where they asked for three and nothing says why',
+    },
+    {
+        'name': 'a_revoked_canva_connection_falls_back_to_the_agencys',
+        'file': 'app/canva.py',
+        'find': '        if (c or {}).get("source") == "client" and _rejected(err):\n            cred.record_failure(tenant, "canva", err)',
+        'replace': '        if False:  # SABOTAGE\n            cred.record_failure(tenant, "canva", err)',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "a client whose Canva connection was revoked gets 'reconnect it on the Accounts tab' on every edit while the agency's connection, which the design promises serves every account, sits unused",
+    },
+    {
+        'name': 'the_revocation_is_recorded_where_the_owner_reconnects',
+        'file': 'app/canva.py',
+        'find': '            cred.record_failure(tenant, "canva", err)\n            shared = cred.resolve(tenant, "canva") or {}',
+        'replace': '            shared = cred.resolve(tenant, "canva") or {}  # SABOTAGE',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "the Accounts tab keeps saying 'connected — by client' over a dead connection, and the resolver keeps handing the client its own revoked token on the next call",
+    },
+    {
+        'name': 'a_transient_canva_error_does_not_switch_accounts',
+        'file': 'app/canva.py',
+        # The mutation that matters: EVERY error is a rejection.
+        'find': '    if "connecterror" in low or "timeout" in low or "timed out" in low:\n        return False\n    return any(m in low for m in _REJECTED)',
+        'replace': '    return True  # SABOTAGE',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "a timeout marks a client's working connection failed and routes their designs into the agency's Canva — 'why is our design in their Canva', caused by a network blip",
+    },
+    {
+        'name': 'a_canva_folder_is_remembered_per_account',
+        'file': 'app/canva.py',
+        'find': '    return legacy if (source == "client") == had_own else ""',
+        'replace': '    return legacy  # SABOTAGE',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "the agency's token is sent to file into a folder that exists only in the client's Canva, and the design lands nowhere with a filed_error nobody reads",
+    },
+    {
+        'name': 'a_canva_folder_that_is_gone_is_recreated_once',
+        'file': 'app/canva.py',
+        'find': '    if res.get("ok") or not _gone(str(res.get("error", ""))):\n        return res',
+        'replace': '    if True:  # SABOTAGE\n        return res',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "a client folder deleted by hand in Canva fails every design's filing for ever, because the id is remembered and never questioned",
+    },
+    {
+        'name': 'the_agencys_canva_is_said_on_the_set',
+        'file': 'app/admin_ui.py',
+        'find': '      {_acct_line}\n      <form id="{fid}" method="post" action="/admin/assets_decide"></form>',
+        'replace': '      <form id="{fid}" method="post" action="/admin/assets_decide"></form>',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "a frame edited in the agency's Canva because the client's connection was revoked shows nothing of it on the set — the owner finds out from the folder it landed in",
+    },
+    {
+        'name': 'a_frame_can_be_looked_at_before_it_is_edited',
+        'file': 'app/admin_ui.py',
+        'find': '          <div class="framebar">{view}{edit}</div>',
+        'replace': '          <div class="framebar">{edit}</div>',
+        'suites': ['test_canva_falls_back_to_the_agency.py'],
+        'why': "the only view of a 1024px frame before 'edit in Canva' is a 112px tile — the owner's ask, 'view and zoom into the image before editing', has nowhere to happen",
     },
 ]
 
