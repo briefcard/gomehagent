@@ -466,7 +466,33 @@ the header and never the copy. `text` is now the single writer of the body,
 copy at all SAYS so and is counted in the summary line rather than exporting as
 a silent blank.
 
+**2026-09-07 — a production break I shipped, reported by the owner.**
+`fb00ed1` made `web.ad_frames` send `situation=` into `creative.batch(**args)`
+and taught `batch` to take `output_id` in the same commit — not `situation`.
+Every Make-frames click from 2026-09-05 17:03 raised
+`TypeError: batch() got an unexpected keyword argument 'situation'` inside
+`_run_bg`, which catches and RECORDS, so the button still returned 303. Two
+days. Nothing caught it: the suite replaced `_run_bg` with a spy and never ran
+the receiver; no suite calls `ad_frames` through to the real `batch`;
+`/health` reports the commit, not the button. `ec6d023` fixed the seam at
+three layers (batch accepts AND forwards; `pick`'s photo-selection brief takes
+it too; the suite runs `_run_bg` synchronously into the real `batch`).
+`ae6594e` made it a class: every kwargs spread in `web.py` is diffed against
+its callee's signature — nine sites. The first run of that check reported
+seven clean sites and had silently skipped `ad_frames`→`batch`, because a
+ROUTE FUNCTION named `creative` shadows the module in `web`'s namespace; the
+suite's own coverage assertion caught it.
+
 **The standing rules this stretch added:**
+- **A seam is only tested when both sides execute.** When a caller gains a
+  kwarg, the test must invoke the callee — stub the expensive thing BELOW the
+  seam, never the seam itself. A spy on one side is a test of the spy.
+- **A structural check that can skip a site must assert its own coverage.**
+  "None found" is only an answer when the known-bad case is demonstrably
+  inside the population that was searched.
+- **After gating or narrowing an existing writer, ask what else it was the
+  only writer of.** (`6d52cf6` gated `mark_published` and lost the only
+  writer of `cms_article_id`; `d35b6c8`/`9a1886d` repaired it.)
 - **A critique that is shown and not applied is a task list, not a system.**
   The panel is evidence behind an ad that already follows it; the board leads
   with what was applied and folds the reviewers' words behind that.
@@ -578,6 +604,13 @@ read is on a button and on no schedule.
 > it as *type we control, in your font, positioned by measurement, with Canva
 > kept as an override* — a different proposal from the baked DejaVu at a fixed
 > position they rejected.
+>
+> **Before anything: `python3 scripts/test_the_route_sends_what_the_callee_takes.py`
+> and `test_ad_arrives_whole.py`.** Make-frames was broken in production for two
+> days by a kwarg the route sent and `batch` did not take (`fb00ed1` → fixed
+> `ec6d023`). The first is the class-wide check; if you add a kwarg to any
+> route→function spread, it is the one that will tell you the receiver was
+> not taught. Stub below the seam, never the seam.
 >
 > **2. UX polish — the other open stream, and it needs the owner.** They walk the
 > console and give you the surface; take each as given, one ship each, act where
