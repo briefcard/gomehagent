@@ -483,6 +483,23 @@ seven clean sites and had silently skipped `ad_frames`→`batch`, because a
 ROUTE FUNCTION named `creative` shadows the module in `web`'s namespace; the
 suite's own coverage assertion caught it.
 
+**2026-09-07 — the zodiac batch (`588a953`): the app's own promise, "inject
+the right thing at the right time", failed at RIGHT THING.** An ad for the
+Libra Zodiac Vibe cup — porcelain — came back "18 pieces … shatterproof". The
+entity was correct. The claim handed to the writer was a harvested support
+reply about acrylic glassware, filed with no entity by `email_harvest` and
+approved brand-wide by `review_claim`, which never consulted
+`scope_unconfirmed` — the rule written for exactly that sentence, wired to the
+objection reviewer only. Then `claims()`'s rotation key re-sorted the whole
+list by last-used and threw the specificity order away, so the cup's own claim,
+used once, sat behind a never-used acrylic answer. Then the claim's evidence
+carried the wrong product into the panel. Fixed at entry (the harvester scopes
+by `entity_for`, unique winner or nothing; approval refuses an unscoped
+machine claim unless a person ticks brand-wide — route and toolbar box), in
+selection (rotation rotates WITHIN a specificity tier), and in the ad (the
+entity's own claims lead; an item with none is said on the board). The seam
+suite gained the inverse check: parameters a path NEEDS must be PASSED.
+
 **The standing rules this stretch added:**
 - **A seam is only tested when both sides execute.** When a caller gains a
   kwarg, the test must invoke the callee — stub the expensive thing BELOW the
@@ -493,6 +510,15 @@ suite's own coverage assertion caught it.
 - **After gating or narrowing an existing writer, ask what else it was the
   only writer of.** (`6d52cf6` gated `mark_published` and lost the only
   writer of `cms_article_id`; `d35b6c8`/`9a1886d` repaired it.)
+- **Scoping is a decision, not a default.** A machine-filed claim with no
+  entity is asked about at approval — never believed of everything. A person
+  ticking brand-wide IS the decision.
+- **Rotation rotates within a specificity tier, never across one.** Where
+  there is a subject, its own claims rotate among themselves first.
+- **Correctness before craft.** Exemplars would not have fixed writing about
+  the wrong product. (And: when a gate is added to a path, check the surface
+  that feeds the path can say yes — both refusals of that ship were the UI's
+  and the suites' old silent contract, not the code.)
 - **A critique that is shown and not applied is a task list, not a system.**
   The panel is evidence behind an ad that already follows it; the board leads
   with what was applied and folds the reviewers' words behind that.
@@ -610,7 +636,21 @@ read is on a button and on no schedule.
 > days by a kwarg the route sent and `batch` did not take (`fb00ed1` → fixed
 > `ec6d023`). The first is the class-wide check; if you add a kwarg to any
 > route→function spread, it is the one that will tell you the receiver was
-> not taught. Stub below the seam, never the seam.
+> not taught. Stub below the seam, never the seam. Then
+> `python3 scripts/test_a_claim_knows_what_it_is_about.py` — the zodiac batch,
+> reproduced end to end; it is the test that any change to claims, scoping,
+> rotation or the ad run must keep green.
+>
+> **The next three correctness ships, read to the line, before any craft work:**
+> coherence's `subject_absent` (coherence.py ~312) NUDGES below
+> SUBJECT_MATCH_MIN_WORDS, so a two-sentence ad committed to an entity that
+> never names it passes — it needs a matcher reliable enough on short copy to
+> block; `claim_trace` files every sentence that is not `about_us`/`off_catalogue`
+> as "world" (431/451), so "18 pieces" about a single cup needed no approval —
+> it needs an `about_entity` category checked against `KbEntity.attributes`;
+> and `panel_prompt` (ad_craft.py:532) still injects a brand-scope claim's
+> evidence, mostly closed for new claims and open for already-approved rows.
+> Then the swipe file.
 >
 > **2. UX polish — the other open stream, and it needs the owner.** They walk the
 > console and give you the surface; take each as given, one ship each, act where
