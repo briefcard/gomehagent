@@ -7143,6 +7143,30 @@ SABOTAGES = [
         'suites': ['test_review_is_honest.py'],
         'why': 'the meta outcomes written onto assets are never read: proven_assets falls back to raw use count, so which photograph goes into a frame is insertion order again and the loop closed in 5a95333 is dead',
     },
+    {
+        'name': 'batch_accepts_what_the_route_sends',
+        'file': 'app/creative.py',
+        'find': '          situation: str = "", plates: int = 4, review: bool = True) -> dict:',
+        'replace': '          plates: int = 4, review: bool = True) -> dict:  # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': 'every Make-frames click raises TypeError inside _run_bg and the button still returns 303 — the exact production failure of 2026-09-05 17:03, invisible to a test that spies on the sender',
+    },
+    {
+        'name': 'the_situation_reaches_the_frame_brief',
+        'file': 'app/creative.py',
+        'find': '                     audience_key=audience_key, positioning=positioning,\n                     situation=situation)',
+        'replace': '                     audience_key=audience_key, positioning=positioning)  # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': 'the parameter is accepted and dropped on the floor, so an ad about a circumstance is briefed as a product again — the two-halves defect wearing a fixed signature',
+    },
+    {
+        'name': 'the_photograph_is_chosen_for_the_situation',
+        'file': 'app/creative.py',
+        'find': '    brief = brief_for(tenant, situation=situation, commitment=commitment, fmt=fmt,',
+        'replace': '    brief = brief_for(tenant, commitment=commitment, fmt=fmt,  # SABOTAGE',
+        'suites': ['test_ad_arrives_whole.py'],
+        'why': 'the frame is briefed on the moment while the photograph under it is chosen blind to it, so an ad about a long lunch carries whichever product shot was filed first',
+    },
 ]
 
 

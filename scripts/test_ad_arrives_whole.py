@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import creative, db, kb, systems, tenants, web  # noqa: E402
+from app import creative, db, kb, llm, systems, tenants, web  # noqa: E402
 
 KEY = "s3cret"
 _fail: list[str] = []
@@ -69,13 +69,30 @@ def main() -> int:
     c = TestClient(web.app)
 
     print("— the ad's own words reach the picture —")
+    # THE FIRST VERSION OF THIS SPIED ON THE SENDER AND NEVER RAN THE
+    # RECEIVER. `_run_bg` was replaced with a stub that recorded kwargs and
+    # returned, so the suite proved `ad_frames` SENDS `situation` while
+    # `creative.batch` rejected it with TypeError in production for two days
+    # (2026-09-05 17:03 →). A seam is only tested when both sides execute.
     sent: dict = {}
+    briefs: list = []                    # EVERY call, not a merged dict
+    _real_brief = creative.brief_for
 
-    def _spy(tenant, **kw):
-        sent.update(kw)
-        return {"ok": True, "frames": []}
+    def _brief_spy(tenant, **kw):
+        briefs.append(dict(kw))
+        return _real_brief(tenant, **kw)
+    creative.brief_for = _brief_spy
+    creative._plates = lambda text, shape, n, **kw: {"ok": True, "images": [b"PNGx" * 8]}
 
-    web._run_bg = lambda label, fn, *a, **k: _spy(*a, **k)
+    class _Ok:
+        ok, degraded, error = True, "", ""
+        text = '{"verdicts": [], "overall": "fine", "fix": ""}'
+    llm.ask = lambda *a, **k: _Ok()
+
+    def _run_now(label, fn, *a, **k):
+        sent.update(k)
+        return fn(*a, **k)            # the REAL batch, synchronously
+    web._run_bg = _run_now
     vid = _variant_output("baci")
     r = c.post(f"/admin/ad_frames?key={KEY}",
                data={"tenant": "baci", "output_id": vid, "plates": "1"},
@@ -87,6 +104,40 @@ def main() -> int:
        sent.get("situation") == SITUATION, repr(sent.get("situation")))
     ck("  and the variant is named, so its frames can be found again",
        sent.get("output_id") == vid, repr(sent.get("output_id")))
+    ck("and creative.batch ACCEPTED every kwarg the route sent — no TypeError",
+       bool(briefs), "the receiver ran; a spy on the sender cannot say this")
+    # A MERGED DICT WAS HOLLOW HERE: the composited brief still forwarded
+    # `situation` when the base brief had it stripped, so the sabotage run
+    # reported MISSED. Every brief `batch` triggers must carry it — the frame
+    # brief AND the one inside `pick` that chooses the photograph.
+    base = [b for b in briefs if not b.get("composited")]
+    ck("  and EVERY base brief batch triggered carries the situation "
+       f"({len(base)} calls: frame + photo selection)",
+       bool(base) and all(b.get("situation") == SITUATION for b in base),
+       str([b.get("situation") for b in base]))
+
+    print("\n— structurally: everything ad_frames sends, batch accepts —")
+    import ast as _ast
+    import inspect as _inspect
+    # Walk the PARSED MODULE for the function, rather than slicing source and
+    # re-indenting it — the first version did that and fell over on its own
+    # string surgery, which is a fine way to make a structural check hollow.
+    wsrc = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "app", "web.py")).read()
+    fn = next(n_ for n_ in _ast.walk(_ast.parse(wsrc))
+              if isinstance(n_, (_ast.AsyncFunctionDef, _ast.FunctionDef))
+              and n_.name == "ad_frames")
+    sent_keys = set()
+    for node in _ast.walk(fn):
+        if isinstance(node, _ast.Call):
+            fname = _ast.unparse(node.func)
+            if fname == "dict" or fname.endswith("_run_bg"):
+                sent_keys |= {kw.arg for kw in node.keywords if kw.arg}
+    accepted = set(_inspect.signature(creative.batch).parameters)
+    ck("every kwarg the route builds for batch is in batch's signature",
+       sent_keys <= accepted, f"not accepted: {sorted(sent_keys - accepted)}")
+    ck("  and the check is computed from the AST, not asserted from memory",
+       "situation" in sent_keys and "situation" in accepted, "")
 
     print("\n— and the brief actually carries them —")
     b = creative.brief_for("baci", fmt="ad_frame", positioning="p",
@@ -103,12 +154,15 @@ def main() -> int:
        and any("about" in t for t in bare["thin"]), str(bare["thin"])[:90])
 
     print("\n— a frame is filed under the variant that asked for it —")
+    # A SECOND VARIANT, because the real `batch` above now files frames under
+    # `vid` — the count here must not depend on how many cells it walked.
+    vid2 = _variant_output("baci")
     creative._file_frame("baci", b"PNG", {"subject": SITUATION}, {
         "angle": "identity", "lever": "proof", "moment": "before",
         "framing": "product_led"}, "batch-1", entity_key="", prompt="p",
-        review=False, output_id=vid)
+        review=False, output_id=vid2)
     rows = [a for a in kb.assets("baci", publishable_only=False)
-            if f"output:{vid}" in list(a.tags or [])]
+            if f"output:{vid2}" in list(a.tags or [])]
     ck("the asset carries `output:<id>` beside the cell", len(rows) == 1,
        str([list(a.tags or []) for a in kb.assets("baci", publishable_only=False)])[:150])
     ck("  and the cell tags are NOT replaced by it",
@@ -126,7 +180,7 @@ def main() -> int:
             tenant="baci", output_id=bid, system_key="ad_creative",
             format="ad_batch",
             body=json.dumps({"variants": [
-                {"n": 1, "output_id": vid, "text": "the copy"},
+                {"n": 1, "output_id": vid2, "text": "the copy"},
                 {"n": 2, "output_id": "nope", "text": "more copy"}]})))
         s.commit()
     txt = c.get(f"/admin/ad_export?key={KEY}&output_id={bid}").text

@@ -611,7 +611,8 @@ def _about(asset, subject: str) -> bool:
 
 def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero",
          entity_key: str = "", audience_key: str = "", claim: str = "",
-         prominent: str = "", positioning: str = "", channel: str = "") -> dict:
+         prominent: str = "", positioning: str = "", channel: str = "",
+         situation: str = "") -> dict:
     """The best picture this account already has for this piece, or the brief
     to make one.
 
@@ -642,7 +643,10 @@ def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero"
     kind = str((commitment or {}).get("kind") or "")
     ent = entity_key or str((commitment or {}).get("key") or "")
     product_led = bool(entity_key) or kind in PRODUCT_LED
-    brief = brief_for(tenant, commitment=commitment, fmt=fmt,
+    # THE HERO IS CHOSEN AGAINST THE SAME SUBJECT THE FRAME IS BRIEFED ON.
+    # `batch` learned `situation` on 2026-09-07 and briefed the frame with it
+    # while this — the brief that picks the photograph — stayed blind to it.
+    brief = brief_for(tenant, situation=situation, commitment=commitment, fmt=fmt,
                       prominent=prominent, entity_key=ent if product_led else "",
                       claim=claim, audience_key=audience_key,
                       positioning=positioning)
@@ -912,7 +916,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
           positioning: str = "", entity_key: str = "", audience_key: str = "",
           claim: str = "", prominent: str = "", headline: str = "",
           subline: str = "", fmt: str = "ad_frame", output_id: str = "",
-          plates: int = 4, review: bool = True) -> dict:
+          situation: str = "", plates: int = 4, review: bool = True) -> dict:
     """A set of frames for one ad, filed together under one batch id.
 
     Owner, 2026-08-30: *"each ad will need a carousel of images - potentially
@@ -954,9 +958,15 @@ def batch(tenant: str, *, commitment: dict | None = None,
 
     from . import kb as kbmod, media
     batch_id = _uuid.uuid4().hex
+    # `situation` IS WHAT `_subject_of` READS FIRST. `fb00ed1` made the
+    # caller send it and did not teach this function to take it, so every
+    # "Make frames" from 2026-09-05 17:03 raised TypeError inside `_run_bg`
+    # and the button still returned 303. The sender changed; the receiver
+    # did not; the test spied on the sender and never let the receiver run.
     base = brief_for(tenant, commitment=commitment, fmt=fmt,
                      prominent=prominent, entity_key=entity_key, claim=claim,
-                     audience_key=audience_key, positioning=positioning)
+                     audience_key=audience_key, positioning=positioning,
+                     situation=situation)
 
     # WHICH PHOTOGRAPH, asked once. `pick` is the one ladder every system
     # uses, so the frame that carries the product carries the same one the
@@ -968,6 +978,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
     # same defect as one never recorded, wearing a commit message.
     shot = pick(tenant, commitment=commitment, fmt=fmt, entity_key=entity_key,
                 channel="meta" if fmt == "ad_frame" else "",
+                situation=situation,
                 audience_key=audience_key, claim=claim, prominent=prominent,
                 positioning=positioning)
     product_id = (shot.get("asset_id") or "") if not shot.get("should_generate") \
@@ -982,7 +993,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
     comp_brief = brief_for(tenant, commitment=commitment, fmt=fmt,
                            prominent=prominent, entity_key=entity_key,
                            claim=claim, audience_key=audience_key,
-                           positioning=positioning, composited=True)
+                           positioning=positioning, situation=situation,
+                           composited=True)
 
     frames, errors, repeats, pasted = [], [], 0, 0
     for cell in axes(framings=framings, limit=max(1, int(plates or 4))):
