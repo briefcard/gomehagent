@@ -320,6 +320,40 @@ def _this_exact_product(k: int) -> str:
             "thing the eye lands on.")
 
 
+#: THE ONLY PRODUCT IN THE FRAME IS THE ONE SUPPLIED. Owner, 2026-09-08:
+#: "our plates are given design embellishments both in the main product and
+#: the products shown in the surrounding scene" — with the product drawn from
+#: its photographs, nothing told the model that the REST of the table was
+#: not its to design, so it dressed the scene with look-alikes from the same
+#: imagined range. Props are not products; other tableware, if the scene
+#: needs any, is plain and clearly not something being sold.
+_ONLY_THIS_PRODUCT = (
+    "NO OTHER PRODUCT appears anywhere in the frame — no other plate, glass, "
+    "cup, bowl, jug, pitcher, bottle, box or packaging, and nothing that could "
+    "be taken for another item from the same range. Props are not products: "
+    "linen, food, flowers, cutlery, hands, light. If the scene needs other "
+    "tableware, it is plain, unpatterned, unbranded and clearly incidental. "
+    "Do not embellish, decorate or add pattern to anything.")
+
+
+def _the_cast(k: int, m: int, names: list) -> str:
+    """THE OTHER PRODUCTS THAT MAY APPEAR — the brand's own, photographed.
+    Owner, 2026-09-08: a real tablescape needs other pieces on the table,
+    and *"they should just align with our product line if they do show
+    up"*. So the supporting pieces are the brand's catalogue items, sent as
+    reference images beside the product, drawn exactly, and nothing else
+    that reads as a product is allowed."""
+    who = ", ".join(str(n) for n in names if n) or "the brand's own products"
+    return (f"THE OTHER PRODUCTS THAT MAY APPEAR are ONLY the ones in reference "
+            f"images {k + 1} to {k + m} — {who}, the same brand's own pieces — "
+            "each reproduced EXACTLY as photographed: its shape, proportions, "
+            "colours, pattern, material and finish, never redesigned, recoloured "
+            "or embellished. Use them as the supporting pieces that make this a "
+            "real table, around the product, which stays the thing the eye lands "
+            "on. No product that is not one of these appears; props are not "
+            "products (linen, food, flowers, cutlery, hands, light). Do not "
+            "embellish, decorate or add pattern to anything.")
+
 _THE_LOOK = (
     "The remaining reference images are THE LOOK, not the contents: match "
     "their styling, lighting, palette, surfaces, props, camera height and "
@@ -407,7 +441,9 @@ def _mime(blob: bytes) -> str:
 def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
                     shape: str = "square", n: int = 1,
                     with_people: bool = False, model: str = "",
-                    checklist: list | None = None) -> dict:
+                    checklist: list | None = None,
+                    cast: list[bytes] | None = None,
+                    cast_names: list[str] | None = None) -> dict:
     """A frame generated FROM the brand's own pictures.
 
     `product` is the thing itself, photographed; `look` is the board. Both go
@@ -424,6 +460,7 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
         return {"ok": False, "error": f"unknown shape {shape!r}"}
     product = [b for b in (product or []) if b]
     look = [b for b in (look or []) if b]
+    cast = [b for b in (cast or []) if b] if product else []
     if not product and not look:
         return {"ok": False, "error": "No reference images supplied."}
     rules = []
@@ -436,6 +473,13 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
             rules.append("WHAT A CAREFUL OBSERVER CHECKS ON THIS PRODUCT — keep "
                          "every one exactly as the reference images show it:\n"
                          + "\n".join(f"- {c}" for c in checklist))
+        # THE REST OF THE TABLE. The brand's own companions when it has them
+        # to draw from; otherwise nothing that reads as a product at all —
+        # an invented look-alike is the one thing worse than a bare table.
+        if cast:
+            rules.append(_the_cast(len(product), len(cast), list(cast_names or [])))
+        else:
+            rules.append(_ONLY_THIS_PRODUCT)
         if look:
             rules.append(_THE_LOOK)
     else:
@@ -449,6 +493,8 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
         rules.append(_PEOPLE_ARE_THE_SUBJECT)
     files = ([("image[]", (f"product-{i + 1}", b, _mime(b)))
               for i, b in enumerate(product)]
+             + [("image[]", (f"cast-{i + 1}", b, _mime(b)))
+                for i, b in enumerate(cast)]
              + [("image[]", (f"look-{i + 1}", b, _mime(b)))
                 for i, b in enumerate(look)])
     model = model or MODEL
@@ -462,7 +508,7 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
     if not res["ok"]:
         return res
     return {"ok": True, "images": res["images"], "shape": shape,
-            "inputs": {"product": len(product), "look": len(look)},
+            "inputs": {"product": len(product), "cast": len(cast), "look": len(look)},
             "note": "drawn from the brand's own pictures — the product from "
                     "its photographs, the setting from the board"}
 

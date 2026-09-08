@@ -1149,6 +1149,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
              else {"ok": False, "features": [], "cached": False, "why": ""})
     checklist = list(feats.get("features") or [])
     fidelity = {"judged": 0, "kept": 0, "dropped": 0, "redrafted": 0,
+                "not_the_product": 0, "why_dropped": [],
                 "checklist": bool(checklist), "why": ""}
     framings = tuple(FRAMINGS) if (product_id or drawn) else tuple(
         f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
@@ -1190,19 +1191,35 @@ def batch(tenant: str, *, commitment: dict | None = None,
             # JUDGED AGAINST THE PHOTOGRAPHS; THE CLOSEST IS KEPT. Four came
             # back; one is filed. A kept candidate still wrong is redrawn
             # ONCE with its differences named, and kept only if closer.
-            pick_ = _closest(images, refs["product"], checklist, tenant)
+            pick_ = _closest(images, refs["product"], checklist, tenant,
+                             cast=refs.get("cast") or [])
             if pick_["ok"]:
                 fidelity["judged"] += pick_["judged"]
                 best_b, best_v = pick_["blob"], pick_["verdict"]
                 redrafted = False
                 wrong = (best_v.get("match", 0) < FIDELITY_KEEP
                          and best_v.get("differences"))
-                if wrong or best_v.get("lettering"):
+                # REDRAWN WITH ITS FAULTS NAMED, up to REDRAFTS times, for any
+                # of three faults: not the product, painted lettering, or
+                # another product drawn into the scene. Each redraw is kept
+                # only if it scores better; a lettered or product-strewn
+                # redraw never replaces a clean original.
+                tries = 0
+                while ((wrong or best_v.get("lettering") or best_v.get("other_products"))
+                       and tries < REDRAFTS):
+                    tries += 1
                     fixes = list(best_v.get("differences") or []) if wrong else []
                     if best_v.get("lettering"):
                         fixes.append("REMOVE every piece of lettering, every logo and "
                                      "every button-, badge- or label-like component — "
                                      "the words are set later, by hand, as layers")
+                    if best_v.get("other_products"):
+                        fixes.append("REMOVE every product that is not one of the "
+                                     "supplied products — the only pieces allowed on "
+                                     "the table are the product and the brand's own "
+                                     "supporting pieces in the reference images, each "
+                                     "exactly as photographed; nothing invented, "
+                                     "nothing embellished")
                     again = _with_references(
                         text + "\n\nTHE PREVIOUS ATTEMPT GOT THIS WRONG — CORRECT "
                                "exactly these, and change nothing else:\n"
@@ -1211,26 +1228,39 @@ def batch(tenant: str, *, commitment: dict | None = None,
                         with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
                         checklist=checklist, model=image_model)
                     again_imgs = [b for b in (again.get("images") or []) if b]
-                    if again.get("ok") and again_imgs:
-                        pick2 = _closest(again_imgs, refs["product"], checklist, tenant)
-                        if pick2["ok"]:
-                            fidelity["judged"] += pick2["judged"]
-                            # BETTER = clean where it was lettered, else a
-                            # higher match; a lettered redraw never replaces
-                            # a clean original.
-                            v1, v2 = best_v, pick2["verdict"]
-                            s1 = v1.get("match", 0) - (100 if v1.get("lettering") else 0)
-                            s2 = v2.get("match", 0) - (100 if v2.get("lettering") else 0)
-                            if s2 > s1:
-                                best_b, best_v, redrafted = pick2["blob"], v2, True
-                                fidelity["redrafted"] += 1
+                    if not (again.get("ok") and again_imgs):
+                        break
+                    pick2 = _closest(again_imgs, refs["product"], checklist, tenant,
+                                     cast=refs.get("cast") or [])
+                    if not pick2["ok"]:
+                        break
+                    fidelity["judged"] += pick2["judged"]
+                    v1, v2 = best_v, pick2["verdict"]
+                    if _fidelity_score(v2) > _fidelity_score(v1):
+                        best_b, best_v, redrafted = pick2["blob"], v2, True
+                        fidelity["redrafted"] += 1
+                    wrong = (best_v.get("match", 0) < FIDELITY_KEEP
+                             and best_v.get("differences"))
                 fidelity["dropped"] += len(images) - 1
-                images = [best_b]
-                fids[id(best_b)] = {"match": best_v.get("match", 0),
-                                    "differences": list(best_v.get("differences") or []),
-                                    "candidates": pick_["judged"],
-                                    "redrafted": redrafted,
-                                    "lettering": bool(best_v.get("lettering"))}
+                # NOT THE PRODUCT, NOT FILED. A near miss that survives the
+                # redraws is dropped and SAID, with the difference the judge
+                # named — a frame of a glass that is almost the glass is the
+                # one the owner would run by mistake.
+                if wrong or best_v.get("other_products"):
+                    fidelity["not_the_product"] += 1
+                    why = "; ".join(list(best_v.get("differences") or [])[:2]) or (
+                        "a product that is not the brand's own was drawn into the scene"
+                        if best_v.get("other_products") else "")
+                    if why and why[:160] not in fidelity["why_dropped"]:
+                        fidelity["why_dropped"].append(why[:160])
+                    images = []
+                else:
+                    images = [best_b]
+                    fids[id(best_b)] = {"match": best_v.get("match", 0),
+                                        "differences": list(best_v.get("differences") or []),
+                                        "candidates": pick_["judged"],
+                                        "redrafted": redrafted,
+                                        "lettering": bool(best_v.get("lettering"))}
             else:
                 # NOT JUDGED, NOT PRETENDED. The usual two are kept and the
                 # set says fidelity was not judged, and why.
@@ -1275,7 +1305,10 @@ def batch(tenant: str, *, commitment: dict | None = None,
     board_said = ""
     if refs["on"]:
         board_said = (f" — drawn from {len(refs['product'])} photograph(s) of "
-                      f"the product and {len(refs['look'])} board pin(s)"
+                      f"the product"
+                      + (f", {len(refs['cast'])} of its companions "
+                         f"({', '.join(refs['cast_names'][:3])})" if refs.get("cast") else "")
+                      + f" and {len(refs['look'])} board pin(s)"
                       if (refs["product"] or refs["look"]) else
                       " — the board is on, but none of its pictures could be used")
         if refs["excluded"]:
@@ -1311,8 +1344,11 @@ def batch(tenant: str, *, commitment: dict | None = None,
             board_said += (f"; {fidelity['judged']} candidate(s) judged against "
                            f"the product's photographs, {fidelity['kept']} kept — "
                            f"closest to the product"
-                           + (f", {fidelity['redrafted']} redrawn once with its "
+                           + (f", {fidelity['redrafted']} redrawn with its "
                               f"differences named" if fidelity["redrafted"] else "")
+                           + (f", {fidelity['not_the_product']} cell(s) dropped — NOT "
+                              f"the product: " + "; ".join(fidelity["why_dropped"][:2])
+                              if fidelity["not_the_product"] else "")
                            + ("" if checklist else "; no checklist could be derived"
                               + (f" ({feats.get('why')})" if feats.get("why") else "")))
         else:
@@ -1598,7 +1634,8 @@ def _with_references(text: str, shape: str, n: int, refs: dict, *,
     return imagegen.with_references(
         text, product=refs["product"], look=refs["look"], shape=shape,
         n=max(1, min(4, int(n or 1))), with_people=with_people,
-        checklist=list(checklist or []), model=model)
+        checklist=list(checklist or []), model=model,
+        cast=list(refs.get("cast") or []), cast_names=list(refs.get("cast_names") or []))
 
 
 # ---------------------------------------------------------------------------
@@ -1621,7 +1658,13 @@ def _with_references(text: str, shape: str, n: int, refs: dict, *,
 #: is a choice, two was a coin toss.
 CANDIDATES = 4
 #: Below this match the kept candidate is redrawn once with its differences.
-FIDELITY_KEEP = 85
+FIDELITY_KEEP = 90
+#: How many times a cell's best candidate is redrawn with its faults named —
+#: not the product, painted lettering, other products in the scene — before
+#: the cell is given up. Owner, 2026-09-08: an "almost" product (a glass
+#: generalised to its type, a plate given an embellishment) is a different
+#: product; at 85 it was filed as a near miss, and the owner saw it.
+REDRAFTS = 2
 #: Look pins that ride along when the product is in the request. Four
 #: against four split the model's attention evenly; the product is the
 #: subject, so the look yields.
@@ -1634,9 +1677,9 @@ hardware, and how the parts meet. Six to ten items, each a short phrase that is
 TRUE OF THE PHOTOGRAPHS — nothing inferred, nothing about the setting.
 Answer in JSON only: {"features": ["…", "…"]}"""
 
-_COMPARE_PROMPT = """The FIRST image is a generated picture. The images after it are
-photographs of the real product it was meant to show. Judge ONLY the product:
-is the object in the first image this exact product?
+_COMPARE_PROMPT = """The FIRST image is a generated picture. The next {k} image(s) are
+photographs of the real product it was meant to show.{cast_said} Judge the
+product first: is the object in the first image this exact product?
 
 CHECKLIST — what a careful observer checks on this product:
 {checklist}
@@ -1649,9 +1692,23 @@ Answer in JSON only:
 Name only differences on the PRODUCT itself (shape, pattern, marks, colours,
 proportions, finish) — not the setting, the light, or the crop. An empty
 differences list means it is the product.
+"ALMOST" IS NOT THE PRODUCT. A different silhouette (stem, rim, foot, handle,
+facets, wall thickness, height-to-width), a different or added decoration,
+pattern, embellishment or edge treatment, a different colour, material or
+transparency, or a generalised version of the type ("a wine glass" where the
+photographs show THIS wine glass) is a DIFFERENT product: same_product=false
+and match no higher than 60, with the difference named.
+"other_products" is true if the picture shows ANY item that reads as a
+product — a plate, glass, cup, bowl, jug, bottle, box or packaging that looks
+designed, patterned, decorated or branded — that is NOT the product and NOT
+one of the brand's supporting pieces supplied here: an invented or look-alike
+item. Supporting pieces that match their photographs are fine. Plain
+incidental props (linen, food, flowers, cutlery, hands) are not products.
 "lettering" is true if the picture carries ANY rendered text, lettering,
 logo, button, badge, price tag, sticker or interface-like component anywhere
-— the words are set later, by hand, and any at all counts."""
+— the words are set later, by hand, and any at all counts.
+Answer with all five keys: match, differences, same_product, lettering and
+other_products."""
 
 
 def _fingerprint(blobs: list) -> str:
@@ -1718,7 +1775,7 @@ product_features = _product_features_live      # replaceable, so the suite can d
 
 
 def _compare_product_live(candidate: bytes, product: list, features: list,
-                          tenant: str = "") -> dict:
+                          tenant: str = "", cast: list | None = None) -> dict:
     """One candidate against the photographs, with the checklist as the
     rubric. `{ok, match, differences, same, why}`. Ranks; never vetoes."""
     import base64 as _b64
@@ -1728,10 +1785,15 @@ def _compare_product_live(candidate: bytes, product: list, features: list,
     if not candidate or not refs:
         return {"ok": False, "match": 0, "differences": [], "same": False,
                 "why": "nothing to compare"}
+    extra = [b for b in (cast or []) if b][:CAST_INPUTS]
     content = [{"type": "image", "source": {
         "type": "base64", "media_type": "image/png",
-        "data": _b64.standard_b64encode(b).decode()}} for b in [candidate] + refs]
+        "data": _b64.standard_b64encode(b).decode()}} for b in [candidate] + refs + extra]
+    cast_said = (f" The {len(extra)} image(s) after those are photographs of the "
+                 f"brand's OTHER products that may appear as supporting pieces."
+                 if extra else "")
     content.append({"type": "text", "text": _COMPARE_PROMPT.format(
+        k=len(refs), cast_said=cast_said,
         checklist="\n".join(f"- {f}" for f in (features or [])) or "- (none derived)")})
     reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=500)
     if not getattr(reply, "ok", False):
@@ -1751,19 +1813,31 @@ def _compare_product_live(candidate: bytes, product: list, features: list,
     diffs = [str(d).strip() for d in (data.get("differences") or []) if str(d).strip()][:6]
     return {"ok": True, "match": match, "differences": diffs,
             "same": bool(data.get("same_product")) or (match >= FIDELITY_KEEP and not diffs),
-            "lettering": bool(data.get("lettering")), "why": ""}
+            "lettering": bool(data.get("lettering")),
+            "other_products": bool(data.get("other_products")), "why": ""}
 
 
 compare_product = _compare_product_live        # replaceable, so the suite can drive every path
 
 
-def _closest(candidates: list, product: list, features: list, tenant: str) -> dict:
+def _fidelity_score(v: dict) -> int:
+    """One number to rank verdicts by: the match, minus a hundred for painted
+    lettering and fifty for another product in the scene — so neither fault
+    is ever 'a good likeness with a flaw'."""
+    return (int(v.get("match", 0) or 0)
+            - (100 if v.get("lettering") else 0)
+            - (50 if v.get("other_products") else 0))
+
+
+def _closest(candidates: list, product: list, features: list, tenant: str,
+             cast: list | None = None) -> dict:
     """Every candidate judged; the closest returned with its verdict.
     `{ok, blob, verdict, judged, why}` — `ok` False when the judge could not
     run, in which case nothing has been ranked and the caller must say so."""
     verdicts = []
     for blob in candidates:
-        v = compare_product(blob, product, features, tenant)
+        v = (compare_product(blob, product, features, tenant, cast=cast) if cast
+             else compare_product(blob, product, features, tenant))
         if not v.get("ok"):
             return {"ok": False, "blob": b"", "verdict": v, "judged": 0,
                     "why": v.get("why", "")}
@@ -1776,6 +1850,7 @@ def _closest(candidates: list, product: list, features: list, tenant: str) -> di
     # type burned into the picture where the owner wanted a layer (2026-09-07),
     # and no product match makes up for it.
     best_v, best_b = max(verdicts, key=lambda vb: (0 if vb[0].get("lettering") else 1,
+                                                    0 if vb[0].get("other_products") else 1,
                                                     vb[0].get("match", 0)))
     return {"ok": True, "blob": best_b, "verdict": best_v, "judged": len(verdicts), "why": ""}
 
@@ -1785,6 +1860,39 @@ def _closest(candidates: list, product: list, features: list, tenant: str) -> di
 #: and a board's palette, and every extra one is upload time on a call that
 #: already takes a minute.
 BOARD_INPUTS = 4
+#: How many of the brand's OTHER products ride along as the supporting
+#: pieces of a tablescape. Owner, 2026-09-08: background products are
+#: "almost mandatory so it looks like a real tablescape", and "they should
+#: just align with our product line if they do show up".
+CAST_INPUTS = 3
+
+
+def companions(tenant: str, entity_key: str, *, limit: int = CAST_INPUTS) -> list:
+    """The brand's own products that may share the table with this one:
+    catalogue items with a photograph the brand may use, this one excluded —
+    siblings of its collection first, a different kind of piece preferred
+    (a glass and a bowl beside a plate, not three plates). Rows, in order."""
+    hero = next((e for e in kb.entities(tenant, available_only=False)
+                 if str(e.key) == str(entity_key)), None)
+    hero_parents = set(getattr(hero, "parent_keys", None) or []) if hero else set()
+    hero_type = str(((getattr(hero, "attributes", None) or {}).get("product_type") or "")).lower()
+    photos: dict = {}
+    for a in kb.assets(tenant, publishable_only=True, kind="image"):
+        key = str(a.entity_key or "")
+        if (not key or key == str(entity_key) or (a.origin or "") == GENERATED_ORIGIN
+                or (a.subject or "") == kb.LOGO):
+            continue
+        photos.setdefault(key, a)
+    out = []
+    for e in kb.entities(tenant, type="product"):
+        if str(e.key) == str(entity_key) or str(e.key) not in photos:
+            continue
+        kind = str(((e.attributes or {}).get("product_type") or "")).lower()
+        score = (2 if hero_parents & set(e.parent_keys or []) else 0) \
+            + (1 if kind and kind != hero_type else 0)
+        out.append((-score, str(e.name or e.key), e, photos[str(e.key)]))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return [(e, a) for _s, _n, e, a in out[:max(0, limit)]]
 
 
 def board_inputs(tenant: str, entity_key: str, product_id: str = "",
@@ -1821,7 +1929,7 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
     sel = kbmod.board(tenant, boards) if boards else every
     out = {"product": [], "look": [], "pins": [], "excluded": [], "on": on,
            "boards": list(sel["boards"]), "unknown": list(sel["unknown"]),
-           "direction": ""}
+           "direction": "", "cast": [], "cast_names": []}
     if not on:
         return out
     ent = entity_key or ""
@@ -1837,16 +1945,33 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
         # the system would have used is the one the model should match most.
         rest.sort(key=lambda r: 0 if r.id == product_id else 1)
         product_rows += rest
+    # THE CAST — the brand's OTHER products that may share the table, as
+    # photographs: product pins on the selected boards that are not this
+    # product first (the owner's choice), then the catalogue's companions,
+    # so a tablescape is laid with the line's own pieces and never with
+    # look-alikes. Only when the product itself is in the request.
+    cast_rows: list = []
+    if ent and product_rows:
+        cast_rows = [r for r in sel["product"] if (r.entity_key or "") != ent]
+        names = {}
+        for e in kbmod.entities(tenant, available_only=False):
+            names[str(e.key)] = str(e.name or e.key)
+        have = {r.id for r in cast_rows}
+        for e, a in companions(tenant, ent, limit=CAST_INPUTS):
+            if a.id not in have and len(cast_rows) < CAST_INPUTS:
+                cast_rows.append(a)
+        for r in cast_rows[:CAST_INPUTS]:
+            out["cast_names"].append(names.get(str(r.entity_key or ""), str(r.title or "")))
     # THE WORDS PATH. What the selected boards' reference pins look like,
     # read once and stored on the board; a reference pin contributes this
     # and nothing else.
     out["direction"] = kbmod.board_direction(tenant, boards)
-    for role, rows in (("product", product_rows), ("look", sel["look"])):
+    for role, rows in (("product", product_rows), ("cast", cast_rows), ("look", sel["look"])):
         # THE LOOK YIELDS TO THE PRODUCT. With the product in the request the
         # look pins are direction, not the subject; four of each split the
         # model's attention evenly, which is where the product's marks went.
         cap = (LOOK_INPUTS_WITH_PRODUCT if (role == "look" and product_rows)
-               else BOARD_INPUTS)
+               else CAST_INPUTS if role == "cast" else BOARD_INPUTS)
         for r in rows:
             if len(out[role]) >= cap:
                 break
@@ -1857,13 +1982,14 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
             # A PRODUCT INPUT IS TRIMMED TO THE PRODUCT: a catalogue cutout is
             # mostly margin, and the margin is what the model was matching.
             blob, _mime = imagegen.input_image(_fetch(r.url or ""),
-                                               trim=(role == "product"))
+                                               trim=(role in ("product", "cast")))
             if not blob:
                 out["excluded"].append({"asset_id": r.id, "role": role,
                                         "why": "the picture could not be fetched"})
                 continue
             out[role].append(blob)
             out["pins"].append(r.id)
+    out["cast_names"] = out["cast_names"][:len(out["cast"])]
     return out
 
 

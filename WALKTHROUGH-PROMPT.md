@@ -1065,6 +1065,65 @@ label "boards" in `BG_BRAND_LABELS`, its state on the card.
 
 ---
 
+### An "almost" product is not the product; the rest of the table is the brand's own line — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's report:** *"The images are looking good but with the wrong
+PRODUCTS! … Our acrylic glassware is generalized to shapes and glasses that
+aren't correct depictions. Our plates are given design embellishments both
+in the main product and the products shown in the surrounding scene. These
+days, there must be a way to create this without hallucinations."* Then,
+on a first draft that banned other products: *"we can pull background
+products — in fact in this case for example its almost mandatory so it
+looks like a real tablescape"* and *"They should just align with our
+product line if they do show up."*
+
+**What was true.** The drawn route REDRAWS the product from its
+photographs; the bar was 85 with one redraft, and the closest candidate was
+filed whatever its match — a near miss reached the owner as "product match
+84". Nothing told the model the rest of the table was not its to design,
+so it dressed the scene with look-alikes from an imagined range, and the
+judge was never asked whether it had.
+
+**The ship.** `FIDELITY_KEEP` 85 → 90; `REDRAFTS = 2` (a redraw replaces
+only if `_fidelity_score` improves: match − 100 lettering − 50 other
+products); still not the product, or still with a product that is not the
+brand's, after the redraws → DROPPED, never filed, counted in
+`fidelity["not_the_product"]`, said in the note with the judge's named
+difference. **THE CAST:** `creative.companions(tenant, key)` = the brand's
+other products with a usable photograph (siblings of the hero's collection
+first, a different kind of piece preferred); `board_inputs` carries `cast`
++ `cast_names` — product pins on the chosen boards that are not the hero
+first (the owner's choice), then the catalogue's companions, up to
+`CAST_INPUTS = 3`, trimmed like the product; `imagegen.with_references`
+sends them as `cast-N` files and tells the model THE OTHER PRODUCTS THAT
+MAY APPEAR are ONLY those, exactly as photographed (`_the_cast`); with no
+companion on file, `_ONLY_THIS_PRODUCT` — props only. The judge
+(`_compare_product_live(cast=)`) sees the companions, is told which images
+are which, and `other_products` now means "a product that is NOT the hero
+and NOT one of the supplied companions". `_closest` ranks clean-of-invented
+above match. The set's note says "drawn from N photograph(s) of the
+product, M of its companions (names) and L board pin(s)".
+
+**Standing rules it adds:**
+- **Not the product is not filed** (`an_almost_product_is_not_filed`,
+  `the_bar_is_ninety`, `a_second_redraft_is_tried`).
+- **Every product in a frame is the brand's own, photographed.** The hero
+  from its photographs, the companions from theirs, and nothing else
+  (`the_cast_is_the_brands_own_line`, `the_cast_rides_the_request`,
+  `the_judge_sees_the_cast`, `the_scene_holds_no_other_product`,
+  `other_products_are_redrawn_away`, `the_judge_is_asked_about_other_products`).
+- **The judge is told what "almost" means** (`the_rubric_says_almost_is_not_the_product`).
+
+**What this cannot do, said to the owner.** A generative edit REDRAWS; it
+cannot guarantee the object. Two routes can: the photograph composited (the
+`_integrated` route — exact pixels, the "pasted" risk, gated), and a
+provider built for reference fidelity — Google's image models take up to
+six object references "with high fidelity" (docs read 2026-09-08: the
+Interactions API, `gemini-3-pro-image` / `gemini-3.1-flash-image`). The
+bake-off decides; the adapter is the next ship.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1209,6 +1268,32 @@ label "boards" in `BG_BRAND_LABELS`, its state on the card.
 > direction rides every cell drawn for that board; owned pins stay the
 > pixels. **Owner's move:** Brand → the Lifestyle board → paste the
 > Pinterest board link → Fill; read the direction on the card; run a set.
+>
+> **SHIPPED 2026-09-08, TWELFTH: AN "ALMOST" PRODUCT IS NOT THE PRODUCT, AND
+> THE REST OF THE TABLE IS THE BRAND'S OWN LINE** (10 guards, 4 re-anchored,
+> §5 has the record). Bar 90, two named redraws, a near miss is dropped and
+> said; the companions on the table are the brand's own products from their
+> photographs (board pins first, then the catalogue), told to the model and
+> to the judge; a product that is neither is the fault. What generation
+> cannot promise is said in §5.
+>
+> **NEXT: A SECOND IMAGE PROVIDER FOR THE BAKE-OFF — GOOGLE'S IMAGE MODELS.**
+> Docs read 2026-09-08 (ai.google.dev/gemini-api/docs/image-generation):
+> `POST https://generativelanguage.googleapis.com/v1beta/interactions`,
+> header `x-goog-api-key`, body `{"model", "input": [{"type":"text","text"},
+> {"type":"image","mime_type","data":<b64>}…], "response_format":
+> {"type":"image","mime_type","aspect_ratio","image_size"}}`; the reply's
+> last image block is the picture (`output_image` in the SDK; walk the JSON
+> for `{"type":"image","data"}`). Models: `gemini-3.1-flash-image` (Nano
+> Banana 2, "excelling at multiple reference image processing and
+> consistency"), `gemini-3-pro-image` (Nano Banana Pro, "accurate brand
+> consistency"; up to 6 object references with high fidelity, 14 in all),
+> `gemini-3.1-flash-lite-image` (not for multiple references),
+> `gemini-2.5-flash-image` (legacy). Needs `GEMINI_API_KEY` from the owner.
+> Build: `imagegen.with_references(model="gemini:…")` dispatch to a Gemini
+> adapter, the same product/look inputs, `bakeoff.py --models
+> gpt-image-1,gemini:gemini-3-pro-image`; record the first live response
+> shape. Then the owner's blind ranking.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with
