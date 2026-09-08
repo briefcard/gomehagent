@@ -136,8 +136,10 @@ SABOTAGES = [
         # RE-ANCHORED 2026-09-07: the boards card joined the line too.
         # RE-ANCHORED 2026-09-07: the viewer joined the line.
         # RE-ANCHORED 2026-09-07: the Kept frames card joined the line.
-        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
-        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())  # SABOTAGE',
+        # RE-ANCHORED 2026-09-07 (later): the boards card LEFT the line — it
+        # lives on the Brand tab now.
+        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
+        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": 'the minutes-long frame run reports nowhere, so a crashed one is indistinguishable from a slow one: the banner promises pictures under Pictures and none ever arrive',
     },
@@ -7357,8 +7359,8 @@ SABOTAGES = [
     {
         'name': 'the_board_pin_route_refuses_a_board_that_does_not_exist',
         'file': 'app/web.py',
-        'find': '    if board not in kbm.boards(tenant):\n        return _back_to_content(tenant, err=(f"no board named {board!r} — "',
-        'replace': '    if False:  # SABOTAGE\n        return _back_to_content(tenant, err=(f"no board named {board!r} — "',
+        'find': '    if board not in kbm.boards(tenant):\n        return _back_to_brand(tenant, err=(f"no board named {board!r} — "',
+        'replace': '    if False:  # SABOTAGE\n        return _back_to_brand(tenant, err=(f"no board named {board!r} — "',
         'suites': ['test_the_board_reaches_the_generator.py'],
         'why': 'a pin aimed at a board that does not exist is refused by the writer with a sentence the console never shows — the button appears to do nothing',
     },
@@ -7681,8 +7683,8 @@ SABOTAGES = [
     {
         'name': 'a_kept_frame_shows_its_placements',
         'file': 'app/admin_ui.py',
-        'find': '                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
-        'replace': '                  + _board_card(key, tenant) + batch_html + _viewer())  # SABOTAGE',
+        'find': '                  + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
+        'replace': '                  + batch_html + _viewer())  # SABOTAGE',
         'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
         'why': 'the 4:5 and 9:16 placements are cut on approval and shown nowhere, so the owner asks how the ratios get made — the question of 2026-09-07 asked again',
     },
@@ -7829,6 +7831,70 @@ SABOTAGES = [
         'replace': '        back = ("" if True else _form("/admin/asset_harvest", a.id, "", "bring back from Canva",  # SABOTAGE',
         'suites': ['test_a_frame_arrives_in_canva_as_layers.py'],
         'why': 'the designs are adjusted in Canva and there is no control on the frame that brings them back — the JSON route nobody can reach from the card is the only way',
+    },
+    {
+        'name': 'the_brand_tab_carries_the_boards',
+        'file': 'app/admin_ui.py',
+        'find': '  {_channel_rules_card(key, tenant)}\n  {_board_card(key, tenant)}\n',
+        'replace': '  {_channel_rules_card(key, tenant)}\n',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': 'the boards are on no page at all — the Pictures page gave them up and the Brand tab never took them — and the owner cannot create or pin a board anywhere',
+    },
+    {
+        'name': 'the_brand_tab_carries_the_channel_rules',
+        'file': 'app/admin_ui.py',
+        'find': '  {identity}\n  {_channel_rules_card(key, tenant)}',
+        'replace': '  {identity}',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': 'the channel instructions exist in the database and on no surface, so nobody can set or see them',
+    },
+    {
+        'name': 'channel_instructions_are_saved',
+        'file': 'app/web.py',
+        'find': '            channels[ch] = str(form.get(f"channel_{ch}", "")).strip()',
+        'replace': '            pass  # SABOTAGE',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': "the card accepts the owner's instructions, says 'saved', and stores nothing — every draft goes on ignoring them",
+    },
+    {
+        'name': 'the_channel_rides_the_rules_block',
+        'file': 'app/resolve.py',
+        'find': '        "block": block + guidance + channel_text,',
+        'replace': '        "block": block + guidance,  # SABOTAGE',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': "the instruction is stored and shown and reaches no drafter — the exact 'rule that reaches no generator' the KB audit exists to catch",
+    },
+    {
+        'name': 'the_channel_is_keyed_by_the_system_asking',
+        'file': 'app/resolve.py',
+        'find': '    channel = kb.channel_rules(tenant, system) if system else ""',
+        'replace': '    channel = kb.channel_rules(tenant, channel="ads") if system else ""  # SABOTAGE',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': "every system reads the ads instruction, so an email is drafted under 'never end on a question' written for a Meta ad",
+    },
+    {
+        'name': 'the_panel_judges_against_the_ads_rule',
+        'file': 'app/ad_craft.py',
+        'find': '    channel = str((bundle.get("rules") or {}).get("channel") or "").strip()\n    if channel:',
+        'replace': '    channel = ""  # SABOTAGE\n    if channel:',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': 'the drafter is told the rule and the panel is not, so a concept that breaks it is approved by the judge that exists to catch it',
+    },
+    {
+        'name': 'a_board_route_returns_to_the_brand_tab',
+        'file': 'app/web.py',
+        'find': '    ok = said.startswith("Created")\n    return _back_to_brand(tenant, msg=said if ok else "",',
+        'replace': '    ok = said.startswith("Created")\n    return _back_to_content(tenant, msg=said if ok else "",',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': 'creating a board lands the owner on the Pictures page, where the boards no longer are, with a message about a card they cannot see',
+    },
+    {
+        'name': 'a_system_outside_the_table_reads_no_channel',
+        'file': 'app/kb.py',
+        'find': '    for key, _label, systems in CHANNELS:\n        if system_key in systems:\n            return key\n    return ""',
+        'replace': '    for key, _label, systems in CHANNELS:\n        if system_key in systems:\n            return key\n    return "ads"  # SABOTAGE',
+        'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
+        'why': 'a system nobody wrote an instruction for is handed the ads rule, and reports come out written like Meta ads',
     },
 ]
 

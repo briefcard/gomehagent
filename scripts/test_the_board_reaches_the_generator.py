@@ -379,9 +379,13 @@ def main() -> int:
        and got4["board"]["drawn"] is False and got4["board"]["product"] == 0,
        str([(c["path"], len(c["files"] or [])) for c in sent]))
 
-    print("\n— THE CONSOLE: the board is a section of the Pictures room —")
-    page = ui.render_content(KEY, tenant="baci", sub="pictures")
-    ck("the boards render where the pictures are reviewed, each by name",
+    print("\n— THE CONSOLE: the board is a section of the BRAND tab —")
+    # Owner, 2026-09-07: the boards "should live permanently in the Brand
+    # tab as this affects all of the brand's creatives". The Pictures room
+    # keeps the per-run choice on the form that starts the run.
+    page = ui.render_brand(KEY, tenant="baci")
+    pics = ui.render_content(KEY, tenant="baci", sub="pictures")
+    ck("the boards render on the Brand tab, each by name",
        "Visual boards" in page and 'id="board"' in page
        and all(f'id="board-{b}"' in page for b in ("studio", "lifestyle", "zodiac-collection"))
        and "on white, hard shadow" in page)
@@ -390,12 +394,15 @@ def main() -> int:
     ck("  and the library offers the three actions against a chosen board",
        all(f'value="{v}"' in page for v in ("pin_look", "pin_product", "unpin"))
        and '<select name="board" form="boardform">' in page)
+    ck("  and not on the Pictures page, which says where they are",
+       'id="board"' not in pics and "Brand tab" in pics)
     ck("  the set's card says what it was drawn from",
-       "drawn from 4 of the brand" in page)
+       "drawn from 4 of the brand" in pics)
     ck("the form that starts a run offers the boards to draw from",
        'name="boards" multiple' in ui.boards_select("baci")
        and "Zodiac collection" in ui.boards_select("baci")
-       and ui.boards_select("coverings") == "")
+       and "no boards" in ui.boards_select("coverings")
+       and "Brand tab" in ui.boards_select("coverings"))
     r = client.post("/admin/board_add", params={"key": KEY},
                     data={"tenant": "baci", "name": "Gift guide", "note": "boxed, ribboned"})
     ck("a board is created from the console",
@@ -433,8 +440,8 @@ def main() -> int:
        r.status_code == 200 and "gift-guide" not in kb.boards("baci")
        and not kb.pinned(next(a for a in kb.assets("baci")
                               if a.url == "https://cdn.example/new-look.png")))
-    ck("  no boards is said as a state, before any instruction",
-       "no boards" in ui.render_content(KEY, tenant="coverings", sub="pictures"))
+    ck("  no boards is said as a state, before any instruction — on the Brand tab, where boards are made",
+       "no boards" in ui.render_brand(KEY, tenant="coverings"))
 
     print()
     if _fail:

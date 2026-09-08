@@ -774,7 +774,16 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
             voice[f] = [ln.strip() for ln in
                         str(form.get(f, "")).splitlines() if ln.strip()]
             changed_voice = True
+    # COPY INSTRUCTIONS BY CHANNEL (owner, 2026-09-07). Only the channels the
+    # form carried are touched, same rule as the rest of the voice: the
+    # identity form's save must not blank the channel card and vice versa.
+    channels = dict(voice.get("channels") or {})
+    for ch, _label, _readers in kbm.CHANNELS:
+        if form.get(f"channel_{ch}") is not None:
+            channels[ch] = str(form.get(f"channel_{ch}", "")).strip()
+            changed_voice = True
     if changed_voice:
+        voice["channels"] = channels
         fields["voice"] = voice
     # How the entity pickers group the catalogue — per account, MERGED into
     # `selection` (rewriting a JSON column to set one key is how an account
@@ -792,6 +801,8 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         fields["selection"] = {**dict(b.selection or {}), "entity_grouping": g}
 
     msgs = []
+    from_channels = any(form.get(f"channel_{ch}") is not None
+                        for ch, _l, _r in kbm.CHANNELS)
     if fields:
         res = kbm.set_brand(tenant, **fields)
         if not res.startswith("Updated"):
@@ -799,7 +810,9 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
                 f"/admin/ui?tab={'kb' if from_kb else 'brand'}&tenant={quote(tenant)}"
                 f"&err={quote(res[:200])}#identity", 303)
         msgs.append(f"pickers now group by {fields['selection']['entity_grouping']}"
-                    if from_kb else "identity saved")
+                    if from_kb else
+                    ("channel instructions saved — they ride every draft of that "
+                     "channel from the next run" if from_channels else "identity saved"))
     if from_kb:
         # Back to the tab the control lives on, not the Brand tab.
         return RedirectResponse(
@@ -818,7 +831,8 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         msgs.append(kbm.remove_banned(tenant, drop)[:160])
     return RedirectResponse(
         f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-        f"&ok={quote(' · '.join(msgs) or 'nothing to change')}#identity", 303)
+        f"&ok={quote(' · '.join(msgs) or 'nothing to change')}"
+        f"#{'channels' if from_channels else 'identity'}", 303)
 
 
 @app.post("/admin/brand_sources")
@@ -6879,7 +6893,7 @@ async def board_add(request: Request, key: str = Depends(admin_key)):
     said = kbm.add_board(tenant, str(form.get("name", "")),
                          note=str(form.get("note", "")))
     ok = said.startswith("Created")
-    return _back_to_content(tenant, msg=said if ok else "",
+    return _back_to_brand(tenant, msg=said if ok else "",
                             err="" if ok else said, anchor="board")
 
 
@@ -6893,7 +6907,7 @@ async def board_remove(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     said = kbm.remove_board(tenant, str(form.get("board", "")))
     ok = said.startswith("Removed")
-    return _back_to_content(tenant, msg=said if ok else "",
+    return _back_to_brand(tenant, msg=said if ok else "",
                             err="" if ok else said, anchor="board")
 
 
@@ -6915,13 +6929,13 @@ async def board_pin(request: Request, key: str = Depends(admin_key)):
     board = str(form.get("board", "")).strip()
     ids = [str(i) for i in form.getlist("asset_ids") if str(i).strip()]
     if not ids:
-        return _back_to_content(tenant, msg="no pictures were selected",
+        return _back_to_brand(tenant, msg="no pictures were selected",
                                 anchor="board")
     if action not in ("pin_look", "pin_product", "unpin"):
-        return _back_to_content(tenant, err=f"unknown board action {action!r}",
+        return _back_to_brand(tenant, err=f"unknown board action {action!r}",
                                 anchor="board")
     if board not in kbm.boards(tenant):
-        return _back_to_content(tenant, err=(f"no board named {board!r} — "
+        return _back_to_brand(tenant, err=(f"no board named {board!r} — "
                                              "choose one, or create it first"),
                                 anchor="board")
     done, refused = 0, []
@@ -6942,7 +6956,7 @@ async def board_pin(request: Request, key: str = Depends(admin_key)):
     name = kbm.boards(tenant)[board].get("name") or board
     verb = (f"unpinned from “{name}”" if action == "unpin"
             else f"pinned as the {action[4:]} on “{name}”")
-    return _back_to_content(
+    return _back_to_brand(
         tenant, msg=f"{verb}: {done} picture(s)" if done else "",
         err="; ".join(refused[:2]), anchor="board")
 
@@ -7725,6 +7739,21 @@ def seed_kb(key: str = Depends(admin_key), report_only: str = "") -> dict:
     if report_only:
         return {"status": kb_seed.status()}
     return kb_seed.seed_all()
+
+
+def _back_to_brand(tenant: str, msg: str = "", err: str = "", anchor: str = ""):
+    """Return to the Brand tab — where the boards live since 2026-09-07 — with
+    what happened, said once, and the reader put back at the card."""
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    url = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
+    if msg:
+        url += f"&ok={quote(msg[:200])}"
+    if err:
+        url += f"&err={quote(err[:200])}"
+    if anchor:
+        url += f"#{anchor}"
+    return RedirectResponse(url, 303)
 
 
 def _back_to_content(tenant: str, started: str = "", err: str = "",

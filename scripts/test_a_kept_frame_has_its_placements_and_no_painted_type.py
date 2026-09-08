@@ -189,8 +189,11 @@ def main() -> int:
        "Feed" in page and ("Reels" in page or "Stories" in page), "")
 
     print("\n— THE BOARD SAYS WHAT TO PIN —")
+    # The boards card lives on the Brand tab since 2026-09-07 (owner: they
+    # shape every system's pictures, not one run's).
+    brand_page = ui.render_brand(KEY, tenant="baci")
     ck("the boards card warns that copy on a pin is copied into the frame",
-       "finished ads" in page or "copy on a pin" in page, "")
+       "finished ads" in brand_page or "copy on a pin" in brand_page, "")
 
     print()
     if _fail:

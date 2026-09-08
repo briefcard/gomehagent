@@ -510,6 +510,13 @@ def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
                      "buyer the claim implies, and say that you had to")
     if str(bundle.get("positioning") or "").strip():
         parts.append(f"POSITIONING UNDER TEST: {str(bundle['positioning']).strip()}")
+    # THE BRAND'S OWN RULE FOR ADS reaches the judge as well as the drafter —
+    # a rule only the drafter sees is advice (memory: every KB rule names the
+    # generator that receives it AND the validator that enforces it).
+    channel = str((bundle.get("rules") or {}).get("channel") or "").strip()
+    if channel:
+        parts.append("HOW THIS BRAND WRITES FOR ADS — its own instruction; a "
+                     f"concept that ignores it fails: {channel}")
     fun = bundle.get("funnel") or {}
     if isinstance(fun, dict) and fun.get("label"):
         parts.append(f"FUNNEL STAGE: {fun['label']} — the reader {fun.get('reader', '')}")

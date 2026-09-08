@@ -172,9 +172,23 @@ def _rules(tenant: str, system: str = "", guidance_also: tuple = ()) -> dict:
     if system:
         from . import systems as _sys
         guidance = _sys.guidance_block(tenant, system, also=guidance_also)
+    # HOW THIS BRAND WRITES FOR THIS CHANNEL. Owner, 2026-09-07: copy
+    # instructions per channel, kept on the Brand tab. Appended HERE, in the
+    # one function every consumer of a bundle already reads (the same reason
+    # guidance rides here), keyed by the SYSTEM asking — an email rule never
+    # reaches an ad. Beside the prose, `channel` is the structured field the
+    # ad panel and any validator read.
+    channel = kb.channel_rules(tenant, system) if system else ""
+    channel_text = ""
+    if channel:
+        channel_text = (f"\n\n## HOW THIS BRAND WRITES FOR "
+                        f"{kb.channel_label(kb.channel_for(system)).upper()}\n"
+                        f"The brand's own instruction for this channel — follow "
+                        f"it as a rule, not a suggestion:\n{channel}")
     return {
-        "block": block + guidance,
+        "block": block + guidance + channel_text,
         "guidance": guidance,
+        "channel": channel,
         # `craft` is NOT folded into `block` here — it is added to the bundle
         # further down, once the situations are known, so a lesson can be
         # matched to what is actually being asked rather than injected at

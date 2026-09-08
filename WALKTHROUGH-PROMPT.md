@@ -931,6 +931,53 @@ Canva maps by name, whether the scrim's alpha survives the import.
 
 ---
 
+### The Brand tab owns the boards and the copy instructions by channel — 2026-09-07 (one ship; hash in the memory note)
+
+**The owner's instruction:** *"the visual boards live in the review page
+right now, but they should live permanently in the 'Brand' tab as this
+affects all of the brands creatives. Same for copy instructions across
+different channels."* Asked in the same message: a Pinterest board as a
+source (not built — its own API sign-in and Pinterest's app approval; pins
+would be REFERENCE rights only), how a run chooses boards (the multi-select
+on the form that starts it; none = all), and variations from different
+boards in one run (today several boards POOL their pins; a board axis is a
+small ship, not built).
+
+**What was true.** `_board_card` rendered on the Pictures page. The voice
+record was one, brand-wide (tone, do-say, never-say): an instruction true
+only of email had nowhere to go but every draft, or nowhere.
+
+**The ship.** `_board_card` renders on the Brand tab after Identity; the
+board routes return there (`_back_to_brand`); the Pictures page says where
+the boards are and the run form keeps the per-run choice (`boards_select`
+says "no boards yet — make one on the Brand tab" when there are none).
+`kb.CHANNELS` = (ads, email, blog, gbp, messages) each with the SYSTEMS
+that read it; `kb.channel_for(system_key)`, `kb.channel_rules(tenant,
+system_key|channel)`; stored on `KbBrand.voice["channels"]`, written only by
+`set_brand` through `/admin/brand_update` (`channel_<ch>` fields; only the
+channels the form carried are touched). `resolve._rules` appends "HOW THIS
+BRAND WRITES FOR <CHANNEL>" to the rules block EVERY drafter reads, keyed by
+the system asking, and exposes `rules.channel` (declared in
+`bundle.PARTS`); `ad_craft.panel_prompt` judges against it. The Brand card
+names, per channel, the systems that read it and counts what is set.
+
+**Standing rules it adds:**
+- **What shapes every creative lives on Brand; what shapes one run lives on
+  its form** (`the_brand_tab_carries_the_boards`, `a_board_route_returns_to_the_brand_tab`).
+- **A channel's instruction reaches its own drafts and no other's** — keyed
+  by the system asking, in the one block every drafter reads, and the ad
+  panel enforces it (`the_channel_rides_the_rules_block`,
+  `the_channel_is_keyed_by_the_system_asking`, `the_panel_judges_against_the_ads_rule`,
+  `a_system_outside_the_table_reads_no_channel`).
+- **A card that reports a rule names who reads it** (the card says "read
+  by Ad creative", so a rule for a channel nothing writes for is visibly idle).
+
+**Trap.** A page check that reads a form control from the wrong page: the
+per-run boards select is on the ad board's run form and the article form,
+never on the Pictures page — assert on `boards_select`, not on the page.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1051,16 +1098,22 @@ Canva maps by name, whether the scrim's alpha survives the import.
 > confirm four layers. Unverified until then: how Canva sizes the slide and
 > maps the faces (the export asks for Meta's pixels regardless).
 >
-> **THE OWNER'S NEXT FOUR, asked 2026-09-07 (answered in the thread, not
-> built):** (1) the boards belong on the BRAND tab, permanently — they shape
-> every system's pictures — with the per-run select staying on each form;
-> (2) COPY INSTRUCTIONS PER CHANNEL (ads, email, blog, GBP…) on the Brand tab,
-> reaching each channel's drafter AND its panel — today the voice record is
-> brand-wide only; (3) a BOARD AXIS — one board per variation in one run,
-> each frame tagged with its board (today several boards pool their pins);
-> (4) a PINTEREST connection (API v5, its own OAuth + Pinterest's app
-> approval; pins as REFERENCE rights only, never product) — its docs first,
-> standing rule. Do (1)+(2) as one ship; (3) is small; (4) after the docs.
+> **SHIPPED 2026-09-07, NINTH: THE BRAND TAB OWNS THE BOARDS AND THE COPY
+> INSTRUCTIONS BY CHANNEL** (8 guards, 3 re-anchored, §5 has the record).
+> Boards render and are managed on Brand; the run form keeps the per-run
+> choice. `kb.CHANNELS` (ads, email, blog, gbp, messages) with the systems
+> that read each; the instruction rides the rules block of every draft of
+> that channel — keyed by the system asking — and the ad panel judges
+> against the ads one. **Owner's move:** Brand → "Copy instructions by
+> channel" → write the ads and email rules; the next batch drafts under them.
+>
+> **THE OWNER'S OTHER TWO, asked 2026-09-07 (answered, not built):** (3) a
+> BOARD AXIS — one board per variation in one run, each frame tagged with
+> its board (today several boards pool their pins; a small ship on
+> `creative.axes`/`batch(boards=)`); (4) a PINTEREST connection (API v5, its
+> own OAuth + Pinterest's app approval; pins as REFERENCE rights only, never
+> product) — its docs first, standing rule, and the owner's yes before a new
+> sign-in.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

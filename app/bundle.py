@@ -92,7 +92,7 @@ PARTS: dict[str, dict] = {
                        "pipeline has been taught — the constraints that must "
                        "never be violated",
                   sub=("block", "guidance", "positioning", "voice_tone",
-                       "banned_claims")),
+                       "banned_claims", "channel")),
     # -- tier 2: who is asking, what they doubt, who they are --------------
     "situations": dict(tier=2, absent=THINS, supplies="resolve._situated",
                        what="what this request is about, classified"),

@@ -1783,6 +1783,47 @@ def ensure_brand(tenant: str, display_name: str = "") -> db.KbBrand:
         return row
 
 
+#: THE CHANNELS A BRAND WRITES FOR, and the systems that read each one's
+#: instructions. Owner, 2026-09-07: copy instructions "across different
+#: channels" belong on the Brand tab, because they shape every draft of that
+#: kind — an email rule is not an ad rule. A system not listed here reads no
+#: channel instruction, and `channel_for` says so with "".
+CHANNELS: tuple = (
+    ("ads", "Ads", ("ad_creative",)),
+    ("email", "Email", ("campaign_email", "moment_email", "reorder_engine",
+                        "lead_responder")),
+    ("blog", "Blog and articles", ("blog",)),
+    ("gbp", "Google Business Profile", ("gbp_post", "gbp_listing")),
+    ("messages", "Replies and service messages", ("service_desk",)),
+)
+
+
+def channel_for(system_key: str) -> str:
+    """Which channel a system writes for, or "" — read off CHANNELS, so a
+    system this table does not name gets no instruction rather than a
+    guessed one."""
+    for key, _label, systems in CHANNELS:
+        if system_key in systems:
+            return key
+    return ""
+
+
+def channel_label(channel: str) -> str:
+    return next((label for key, label, _s in CHANNELS if key == channel), channel)
+
+
+def channel_rules(tenant: str, system_key: str = "", channel: str = "") -> str:
+    """The brand's own copy instructions for one channel — by system key or
+    by channel — or "". Stored on `KbBrand.voice["channels"]`, written only
+    by `set_brand` through the Brand tab."""
+    ch = channel or channel_for(system_key)
+    if not ch:
+        return ""
+    b = brand(tenant)
+    chans = ((b.voice or {}).get("channels") or {}) if b else {}
+    return str(chans.get(ch) or "").strip()
+
+
 def set_brand(tenant: str, **fields) -> str:
     """Update brand-level fields. `tone` is a convenience into voice.tone.
 

@@ -4524,6 +4524,8 @@ and hand-set fields survive future re-derives.</p>
   campaign email once approved. What may be ASSERTED (claims, objections, the
   catalogue) lives on Knowledge.</p>
   {identity}
+  {_channel_rules_card(key, tenant)}
+  {_board_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
   {sources_card}
   <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
@@ -6313,13 +6315,55 @@ def boards_select(tenant: str, *, name: str = "boards") -> str:
     the choice the owner asked for is made where the run is started."""
     have = kb.boards(tenant)
     if not have:
-        return ""
+        # Said, not silent: a form with no board control reads as a brand
+        # that has no such thing, and the boards are made on the Brand tab.
+        return ('<span class="when">no boards yet &mdash; make one on the Brand '
+                'tab and pin the brand&#39;s own pictures to it</span>')
     opts = "".join(f'<option value="{_esc(slug)}">{_esc(b.get("name") or slug)}'
                    f'</option>' for slug, b in have.items())
     return (f'<select name="{_esc(name)}" multiple size="{min(4, len(have))}" '
             f'title="Which boards to draw from. None chosen means all of them.">'
             f'{opts}</select><span class="when">boards to draw from &mdash; '
-            f'none chosen means all</span>')
+            f'none chosen means all; boards are made and pinned on the Brand tab</span>')
+
+
+def _channel_rules_card(key: str, tenant: str) -> str:
+    """COPY INSTRUCTIONS BY CHANNEL — the brand's own rules for how it writes
+    ads, emails, articles, Business Profile posts and replies.
+
+    Owner, 2026-09-07: the boards *"should live permanently in the 'Brand'
+    tab as this affects all of the brand's creatives. Same for copy
+    instructions across different channels."* The voice record was one,
+    brand-wide; an email rule is not an ad rule. Each channel's text rides
+    the rules block of every draft that system makes (`resolve._rules`,
+    keyed by the system asking) and the ad panel judges against the ads one
+    — said here, per channel, with the systems that read it, so a rule
+    typed for a channel nothing writes for is visibly idle."""
+    from . import systems as _sys
+    b = kb.brand(tenant)
+    chans = ((b.voice or {}).get("channels") or {}) if b else {}
+    rows = ""
+    for ch, label, readers in kb.CHANNELS:
+        names = [str((_sys.CATALOG.get(k) or {}).get("name") or k) for k in readers]
+        rows += f"""
+    <label>{_esc(label)} <span class="mut">&mdash; read by {_esc(", ".join(names))}</span></label>
+    <textarea name="channel_{_esc(ch)}" rows="3" placeholder="how this brand writes {_esc(label.lower())} — e.g. never an exclamation mark; one idea per line; end on the offer">{_esc(str(chans.get(ch) or ""))}</textarea>"""
+    return f"""
+<div class="anchor" id="channels"></div>
+<div class="card">
+  <div class="head"><h2>Copy instructions by channel</h2>
+    <span class="mut">{sum(1 for ch, _l, _r in kb.CHANNELS if str(chans.get(ch) or "").strip())}
+    of {len(kb.CHANNELS)} set</span></div>
+  <p class="mut">The brand&#39;s own rules for each kind of writing. Each rides
+  the rules block of every draft that channel&#39;s systems make &mdash; the
+  drafter reads it as a rule, and for ads the panel judges against it. Tone
+  and do-say / never-say above apply to every channel; put here only what is
+  true of one.</p>
+  <form class="f" method="post" action="/admin/brand_update">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">{rows}
+    <div class="row"><button>Save channel instructions</button></div>
+  </form>
+</div>"""
 
 
 def _board_card(key: str, tenant: str) -> str:
@@ -6717,8 +6761,11 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # AND WHAT A RUN IS DOING RIGHT NOW. Generation is minutes long and off
     # the request, so without this a failed run and a running one look
     # identical: the banner promised pictures under Pictures and none came.
+    # THE BOARDS LIVE ON THE BRAND TAB (owner, 2026-09-07: they shape every
+    # system's pictures, not one run's); this page keeps the per-run choice,
+    # on the form that starts the run (`boards_select`).
     batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)
-                  + _board_card(key, tenant) + batch_html
+                  + batch_html
                   + _kept_frames_card(key, tenant) + _viewer())
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
@@ -6801,7 +6848,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
     assets_form = batch_html + pics_html + f"""
     <div class="card">
       <div class="head"><h2>Creative library</h2></div>
-      <p class="mut">Photographs the creative pipeline may use.
+      <p class="mut">Photographs the creative pipeline may use. The boards &mdash; which of these a run draws from &mdash; are made and pinned on the Brand tab; each run picks its boards on the form that starts it.
       <b>Owned</b> is the client&#39;s to publish; <b>reference</b> is
       inspiration only and can never leave the building. What it depicts is
       guessed from the file — a cutout is an object, anything else is treated
