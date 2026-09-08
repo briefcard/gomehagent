@@ -65,16 +65,56 @@ def _usable(rows: list, entity_keys) -> list:
 def hero_for_campaign(tenant: str, *, segment_key: str = "",
                       entity_keys: list[str] | None = None,
                       title: str = "", draft_if_missing: bool = False,
-                      boards: tuple | list = ()) -> dict:
+                      boards: tuple | list = (),
+                      draw_first: bool = False,
+                      commitment: dict | None = None, claim: str = "",
+                      prominent: str = "", situation: str = "",
+                      image_model: str = "") -> dict:
     """The hero image for one campaign email, or the governed path to one.
 
     Returns one of:
+      {ok, basis: "generated", image: {url, alt}, asset_id, model, note}
       {ok, basis: "approved_asset", image: {url, alt}, asset_id}
       {ok, basis: "drafted_in_canva", image: None, drafted: {...}, note}
       {ok, basis: "none", image: None, why}   — absence, named
+    and `drawn_why` on any of them when a drawing was attempted and dropped.
+
+    DRAWN FIRST (owner, 2026-09-08: *"I want this on all the systems. Emails
+    and blogs are still not leveraging this generative feature at all"*).
+    With `draw_first` on and the brand's own pictures to draw from
+    (`drawable`), the hero is what the ad set makes: drawn from the
+    product's photographs in the board's look, judged against those
+    photographs, filed PROPOSED — and the draft the owner reviews carries
+    it. `FORMATS["email_hero"]` says why it outranks the catalogue shot: a
+    product shot at the top of an email is a catalogue page. Approving the
+    email approves the picture in it (`push_campaign_to_esp` →
+    `kb.approve_generated`); nothing reaches the platform that a person did
+    not look at. A drawing that was NOT the product is dropped and said, and
+    the approved-photograph ladder below it stands exactly as before.
     """
     ordered = list(dict.fromkeys(k for k in (entity_keys or []) if k))
     ents = set(ordered)
+    drawn_why = ""
+    if draw_first and drawable(tenant, ordered[0] if ordered else "", boards):
+        subject = ordered[0] if ordered else ""
+        made = generate(tenant, commitment=commitment, fmt="email_hero",
+                        entity_key=subject, claim=claim, prominent=prominent,
+                        situation=situation, boards=boards,
+                        image_model=image_model)
+        if made.get("ok"):
+            return {"ok": True, "basis": "generated",
+                    "asset_id": made["asset_id"],
+                    "subject_key": subject or "brand-wide",
+                    "image": {"url": made["url"],
+                              "alt": made.get("subject") or segment_key or ""},
+                    "model": made.get("model", ""),
+                    "assessment": made.get("assessment") or {},
+                    "fidelity": made.get("fidelity"),
+                    "note": (f"drawn by {made.get('model', '')} — "
+                             f"{made.get('basis', '')}; PROPOSED — approving "
+                             f"this email approves the picture")}
+        drawn_why = ("a picture was drawn and dropped: "
+                     + str(made.get("error") or "generation failed")[:200] + ". ")
     rows: list = []
     # The brand-wide shelf ("" ) is ALWAYS fetched alongside the scoped keys.
     # It used to be fetched only when no entity was named — so the moment a
@@ -108,11 +148,13 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
                     "subject_key": (getattr(pick, "entity_key", "") or ""
                                     ) or "brand-wide",
                     "image": {"url": pick.url,
-                              "alt": pick.title or segment_key or ""}}
+                              "alt": pick.title or segment_key or ""},
+                    "drawn_why": drawn_why}
 
     if not draft_if_missing:
         return {"ok": True, "basis": "none", "image": None,
-                "why": ("no approved, owned photograph fits this campaign "
+                "why": (drawn_why
+                        + "no approved, owned photograph fits this campaign "
                         "(entity-scoped or brand-wide) — approve one in the "
                         "pictures queue, or pass draft_visual to have a "
                         "bespoke Canva draft created for review.")}
@@ -120,7 +162,8 @@ def hero_for_campaign(tenant: str, *, segment_key: str = "",
     from . import canva, credentials as cred
     if not (cred.resolve(tenant, "canva") or {}).get("secret"):
         return {"ok": True, "basis": "none", "image": None,
-                "why": ("no approved photograph fits, and no Canva is "
+                "why": (drawn_why
+                        + "no approved photograph fits, and no Canva is "
                         "connected to draft one — connect Canva on the "
                         "Accounts tab, or approve a picture in the queue.")}
     made = canva.create_design(
@@ -149,8 +192,49 @@ _DRIVE_IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 #: What a generated image is filed as. `owned` because the client
 #: commissioned it and the model's output is theirs to publish; `generated` as
 #: the origin so it is never mistaken for a photograph somebody took.
+#: `kb.GENERATED_ORIGIN` is the same word — kb reads it to settle a generated
+#: picture on the strength of its artifact's approval, and the suite holds the
+#: two equal.
 GENERATED_RIGHTS = "owned"
 GENERATED_ORIGIN = "generated"
+
+
+def drawable(tenant: str, entity_key: str = "", boards: tuple | list = ()) -> bool:
+    """Whether `generate` would have the brand's own pictures to draw FROM —
+    the same reading `board_inputs` makes, without fetching a byte: the
+    boards are on, and the selected boards carry a look, or the piece is
+    about a product that is pinned or photographed. A piece that is not
+    drawable falls to the approved-photograph ladder, so a run never draws
+    a nameless scene where a real photograph was on file."""
+    every = kb.board(tenant)
+    if not (every["look"] or every["product"]):
+        return False
+    sel = kb.board(tenant, boards) if boards else every
+    if sel["look"]:
+        return True
+    ent = entity_key or ""
+    if not ent:
+        return False
+    if any((r.entity_key or "") == ent for r in sel["product"]):
+        return True
+    return any((r.entity_key or "") == ent
+               and (r.origin or "") != GENERATED_ORIGIN
+               and (r.subject or "") != kb.LOGO
+               for r in kb.assets(tenant, publishable_only=True, kind="image"))
+
+
+def brand_model(tenant: str) -> tuple[str, str]:
+    """The model a system draws with when its form did not say — the brand's
+    default from the Brand tab (`kb.image_model`), honoured when its key is
+    set, else the system default — and WHY when the brand's could not be
+    honoured, so the run says it rather than drawing with something else
+    silently. Owner, 2026-09-08: *"I want this on all the systems. Emails and
+    blogs are still not leveraging this generative feature at all."* The ad
+    set's form starts from this value; the email hero and the article
+    pictures, drawn inside a run with no form in front of them, read it here."""
+    from . import imagegen
+    models, why = imagegen.chosen("", default=kb.image_model(tenant))
+    return (models[0] if models else imagegen.MODEL), why
 
 
 #: WHAT THE PICTURE IS FOR, per format. Not sizes — jobs.
@@ -802,15 +886,18 @@ def pick(tenant: str, *, commitment: dict | None = None, fmt: str = "email_hero"
             "should_generate": True, "brief": brief, "subject": subject}
 
 
-def _render(tenant: str, text: str, shape: str, source: bytes) -> tuple:
-    """One image, using the product's own pixels when there are any to protect."""
+def _render(tenant: str, text: str, shape: str, source: bytes,
+            model: str = "") -> tuple:
+    """One image, using the product's own pixels when there are any to protect.
+    The masked route is OpenAI's edit endpoint whatever `model` says — a
+    Google model draws from references (`with_references`) or draws scenery."""
     from . import imagegen
     if source:
         res = imagegen.place_product(source, text, shape=shape, n=1)
         best = (res.get("candidates") or [{}])[0] if res.get("ok") else {}
         return res, best.get("image") or b"", \
             "product masked — its pixels are the real ones"
-    res = imagegen.plate(text, shape=shape, n=1)
+    res = imagegen.plate(text, shape=shape, n=1, model=model)
     return res, ((res.get("images") or [b""])[0] if res.get("ok") else b""), \
         "generated scenery — no product in frame"
 
@@ -820,8 +907,17 @@ def generate(tenant: str, *, commitment: dict | None = None,
              entity_key: str = "", claim: str = "", situation: str = "",
              audience_key: str = "", positioning: str = "",
              prompt: str = "", review: bool = True,
-             boards: tuple | list = ()) -> dict:
+             boards: tuple | list = (), image_model: str = "") -> dict:
     """Make one image, check it did the job, and FILE IT so something can use it.
+
+    JUDGED LIKE THE AD SET (owner, 2026-09-08: *"I want this on all the
+    systems"*). Drawn from the product's photographs, CANDIDATES are asked
+    for and each is judged against those photographs with the checklist as
+    the rubric — the closest kept, redrawn with its faults named up to
+    REDRAFTS times, and a near miss DROPPED and said (`_judged`, the same
+    helper `batch` runs). An email hero of an almost-product is the same
+    wrong picture in a different place. `image_model` is the form's choice;
+    blank means the brand's default (`brand_model`), then the system's.
 
     DRAWN FROM THE BOARDS when the account has them (owner, 2026-09-06:
     *"accessible by the other systems as well not just ads"*): the same
@@ -869,20 +965,62 @@ def generate(tenant: str, *, commitment: dict | None = None,
 
     refs = board_inputs(tenant, entity_key, source_id, boards=boards)
     from_board = bool(refs["product"] or refs["look"])
+    drawn = bool(refs["product"])
+    # THE MODEL: the form's choice, else the brand's default, else the
+    # system's — said when the brand's could not be taken.
+    model, model_why = (image_model, "") if image_model else brand_model(tenant)
+    if model_why:
+        brief["thin"].append(model_why)
+    # THE PRODUCT'S CHECKLIST AND THE JUDGE, exactly as the ad set has them.
+    feats = (product_features(tenant, entity_key, refs["product"]) if drawn
+             else {"ok": False, "features": [], "cached": False, "why": ""})
+    checklist = list(feats.get("features") or [])
+    fidelity = {"judged": 0, "kept": 0, "dropped": 0, "redrafted": 0,
+                "not_the_product": 0, "why_dropped": [],
+                "checklist": bool(checklist), "why": ""}
 
     def _draw(text_: str) -> tuple:
+        """One kept picture for this text: `(res, blob, basis)`, `res["fid"]`
+        the judge's verdict on it when there was one. Drawn from the
+        photographs, CANDIDATES are judged and the closest kept; a near miss
+        is dropped and `res["dropped"]` says so."""
         text_ = text_ + _direction_brief(refs)
         if from_board:
-            got_ = _with_references(text_, brief["shape"], 1, refs)
-            return got_, ((got_.get("images") or [b""])[0] if got_.get("ok") else b""), (
-                f"drawn from the brand's own pictures — {len(refs['product'])} of "
-                f"the product, {len(refs['look'])} of the look")
-        return _render(tenant, text_, brief["shape"], source)
+            got_ = _with_references(text_, brief["shape"],
+                                    CANDIDATES if drawn else 1, refs,
+                                    checklist=checklist, model=model)
+            images_ = ([b for b in (got_.get("images") or []) if b]
+                       if got_.get("ok") else [])
+            basis_ = (f"drawn from the brand's own pictures — {len(refs['product'])} of "
+                      f"the product, {len(refs['look'])} of the look")
+            if drawn and images_:
+                j = _judged(tenant, images_, text_, refs, checklist,
+                            lambda t: _with_references(t, brief["shape"], PER_PROMPT,
+                                                       refs, checklist=checklist,
+                                                       model=model),
+                            fidelity=fidelity)
+                images_ = j["images"]
+                if not images_:
+                    why_ = (fidelity["why_dropped"][-1] if fidelity["why_dropped"]
+                            else "not the product")
+                    return ({"ok": False, "dropped": True,
+                             "error": ("the picture drawn was NOT the product — "
+                                       + why_ + " — dropped rather than filed")},
+                            b"", basis_)
+                got_["fid"] = j["fids"].get(id(images_[0]))
+                basis_ += (f"; {fidelity['judged']} candidate(s) judged against the "
+                           f"product's photographs, the closest kept"
+                           if fidelity["judged"] else
+                           "; fidelity was not judged"
+                           + (f" — {fidelity['why']}" if fidelity["why"] else ""))
+            return got_, (images_[0] if images_ else b""), basis_
+        return _render(tenant, text_, brief["shape"], source, model=model)
 
     res, blob, basis = _draw(text)
     if not res.get("ok") or not blob:
         return {"ok": False, "error": res.get("error", "generation failed"),
-                "thin": brief["thin"]}
+                "dropped": bool(res.get("dropped")), "judged": fidelity,
+                "model": model, "thin": brief["thin"]}
 
     verdict = assess(blob, brief, tenant) if review else {
         "ok": False, "why": "not reviewed", "failed": [], "verdicts": [],
@@ -898,7 +1036,10 @@ def generate(tenant: str, *, commitment: dict | None = None,
             attempts = 2
             v2 = assess(blob2, brief, tenant)
             if v2.get("ok") and len(v2.get("failed") or []) < len(verdict["failed"]):
-                blob, verdict, basis, text = blob2, v2, basis2, again_text
+                blob, verdict, basis, text, res = blob2, v2, basis2, again_text, res2
+    fid = dict(res.get("fid") or {}) or None
+    if fid:
+        fidelity["kept"] = 1
 
     put = media.put(tenant, blob, mime="image/png", origin=GENERATED_ORIGIN)
     if not put["ok"]:
@@ -911,6 +1052,8 @@ def generate(tenant: str, *, commitment: dict | None = None,
         prompt=text[:2000], entity_key=entity_key,
         derived_from=(list(refs["pins"]) if from_board
                       else [source_id] if source_id else []),
+        # WHICH MODEL DREW IT, on the picture — the same tag a frame carries.
+        tags=[f"model:{model}"],
         origin=GENERATED_ORIGIN)
 
     asset_id = ""
@@ -925,7 +1068,8 @@ def generate(tenant: str, *, commitment: dict | None = None,
     # nobody reads.
     if asset_id:
         try:
-            kbmod.set_asset_assessment(asset_id, verdict)
+            kbmod.set_asset_assessment(
+                asset_id, {**verdict, "fidelity": fid} if fid else verdict)
         except Exception:                                        # noqa: BLE001
             pass
 
@@ -933,6 +1077,8 @@ def generate(tenant: str, *, commitment: dict | None = None,
             "reused": put["reused"], "basis": basis, "said": said,
             "prompt": text, "thin": brief["thin"], "subject": brief["subject"],
             "attempts": attempts, "assessment": verdict,
+            # THE JUDGE'S WORD ON THIS PICTURE, and the count of what it saw.
+            "model": model, "fidelity": fid, "judged": fidelity,
             "board": {"on": refs["on"], "drawn": bool(refs["product"]),
                       "product": len(refs["product"]), "look": len(refs["look"]),
                       "pins": list(refs["pins"]), "excluded": refs["excluded"],
@@ -1053,6 +1199,99 @@ NEEDS_THE_PRODUCT = ("product_led", "detail")
 PEOPLE_ARE_THE_SUBJECT = ("person_led",)
 
 
+def _judged(tenant: str, images: list, text: str, refs: dict, checklist: list,
+            redraw, *, fidelity: dict) -> dict:
+    """The candidates judged against the product's photographs; the closest
+    kept, redrawn with its faults named, a near miss dropped and said.
+
+    ONE JUDGE FOR EVERY SYSTEM. This was the ad set's loop, inline in
+    `batch`; the email hero and the article pictures now draw through
+    `generate`, and an almost-product at the top of an email is the same
+    wrong picture the owner would run by mistake in an ad (2026-09-08). The
+    loop moved here unchanged so the two cannot drift: `redraw(text)` is the
+    caller's own draw (its shape, its people, its model), `fidelity` is the
+    caller's counters, updated in place, and the return is `{"images": [the
+    kept one] or [], "fids": {id(blob): verdict}}`.
+    """
+    fids: dict = {}
+    if images:
+        # JUDGED AGAINST THE PHOTOGRAPHS; THE CLOSEST IS KEPT. Four came
+        # back; one is filed. A kept candidate still wrong is redrawn
+        # ONCE with its differences named, and kept only if closer.
+        pick_ = _closest(images, refs["product"], checklist, tenant,
+                         cast=refs.get("cast") or [])
+        if pick_["ok"]:
+            fidelity["judged"] += pick_["judged"]
+            best_b, best_v = pick_["blob"], pick_["verdict"]
+            redrafted = False
+            wrong = (best_v.get("match", 0) < FIDELITY_KEEP
+                     and best_v.get("differences"))
+            # REDRAWN WITH ITS FAULTS NAMED, up to REDRAFTS times, for any
+            # of three faults: not the product, painted lettering, or
+            # another product drawn into the scene. Each redraw is kept
+            # only if it scores better; a lettered or product-strewn
+            # redraw never replaces a clean original.
+            tries = 0
+            while ((wrong or best_v.get("lettering") or best_v.get("invented"))
+                   and tries < REDRAFTS):
+                tries += 1
+                fixes = list(best_v.get("differences") or []) if wrong else []
+                if best_v.get("lettering"):
+                    fixes.append("REMOVE every piece of lettering, every logo and "
+                                 "every button-, badge- or label-like component — "
+                                 "the words are set later, by hand, as layers")
+                if best_v.get("invented"):
+                    fixes.append("REMOVE every invented decoration, pattern, "
+                                 "ornament or design feature — the product and the "
+                                 "other pieces on the table carry exactly the "
+                                 "designs and patterns in the reference images, in "
+                                 "the same line, and nothing more")
+                again = redraw(
+                    text + "\n\nTHE PREVIOUS ATTEMPT GOT THIS WRONG — CORRECT "
+                           "exactly these, and change nothing else:\n"
+                    + "\n".join(f"- {d}" for d in fixes))
+                again_imgs = [b for b in (again.get("images") or []) if b]
+                if not (again.get("ok") and again_imgs):
+                    break
+                pick2 = _closest(again_imgs, refs["product"], checklist, tenant,
+                                 cast=refs.get("cast") or [])
+                if not pick2["ok"]:
+                    break
+                fidelity["judged"] += pick2["judged"]
+                v1, v2 = best_v, pick2["verdict"]
+                if _fidelity_score(v2) > _fidelity_score(v1):
+                    best_b, best_v, redrafted = pick2["blob"], v2, True
+                    fidelity["redrafted"] += 1
+                wrong = (best_v.get("match", 0) < FIDELITY_KEEP
+                         and best_v.get("differences"))
+            fidelity["dropped"] += len(images) - 1
+            # NOT THE PRODUCT, NOT FILED. A near miss that survives the
+            # redraws is dropped and SAID, with the difference the judge
+            # named — a frame of a glass that is almost the glass is the
+            # one the owner would run by mistake.
+            if wrong or best_v.get("invented"):
+                fidelity["not_the_product"] += 1
+                why = "; ".join(list(best_v.get("differences") or [])[:2]) or (
+                    "decoration was invented on the product or the pieces around it"
+                    if best_v.get("invented") else "")
+                if why and why[:160] not in fidelity["why_dropped"]:
+                    fidelity["why_dropped"].append(why[:160])
+                images = []
+            else:
+                images = [best_b]
+                fids[id(best_b)] = {"match": best_v.get("match", 0),
+                                    "differences": list(best_v.get("differences") or []),
+                                    "candidates": pick_["judged"],
+                                    "redrafted": redrafted,
+                                    "lettering": bool(best_v.get("lettering"))}
+        else:
+            # NOT JUDGED, NOT PRETENDED. The usual two are kept and the
+            # set says fidelity was not judged, and why.
+            fidelity["why"] = fidelity["why"] or pick_.get("why", "")
+            images = images[:PER_PROMPT]
+    return {"images": images, "fids": fids}
+
+
 def batch(tenant: str, *, commitment: dict | None = None,
           positioning: str = "", entity_key: str = "", audience_key: str = "",
           claim: str = "", prominent: str = "", headline: str = "",
@@ -1108,6 +1347,12 @@ def batch(tenant: str, *, commitment: dict | None = None,
 
     from . import kb as kbmod, media, imagegen
     batch_id = _uuid.uuid4().hex
+    # THE MODEL: the form's choice, else the brand's default (Brand tab),
+    # else the system's — said in the note when the brand's could not be
+    # taken. `batch_each` names its models outright.
+    model_why = ""
+    if not image_model:
+        image_model, model_why = brand_model(tenant)
     # `situation` IS WHAT `_subject_of` READS FIRST. `fb00ed1` made the
     # caller send it and did not teach this function to take it, so every
     # "Make frames" from 2026-09-05 17:03 raised TypeError inside `_run_bg`
@@ -1188,83 +1433,13 @@ def batch(tenant: str, *, commitment: dict | None = None,
         images = [b for b in (res.get("images") or []) if b]
         fids: dict = {}
         if drawn and images:
-            # JUDGED AGAINST THE PHOTOGRAPHS; THE CLOSEST IS KEPT. Four came
-            # back; one is filed. A kept candidate still wrong is redrawn
-            # ONCE with its differences named, and kept only if closer.
-            pick_ = _closest(images, refs["product"], checklist, tenant,
-                             cast=refs.get("cast") or [])
-            if pick_["ok"]:
-                fidelity["judged"] += pick_["judged"]
-                best_b, best_v = pick_["blob"], pick_["verdict"]
-                redrafted = False
-                wrong = (best_v.get("match", 0) < FIDELITY_KEEP
-                         and best_v.get("differences"))
-                # REDRAWN WITH ITS FAULTS NAMED, up to REDRAFTS times, for any
-                # of three faults: not the product, painted lettering, or
-                # another product drawn into the scene. Each redraw is kept
-                # only if it scores better; a lettered or product-strewn
-                # redraw never replaces a clean original.
-                tries = 0
-                while ((wrong or best_v.get("lettering") or best_v.get("invented"))
-                       and tries < REDRAFTS):
-                    tries += 1
-                    fixes = list(best_v.get("differences") or []) if wrong else []
-                    if best_v.get("lettering"):
-                        fixes.append("REMOVE every piece of lettering, every logo and "
-                                     "every button-, badge- or label-like component — "
-                                     "the words are set later, by hand, as layers")
-                    if best_v.get("invented"):
-                        fixes.append("REMOVE every invented decoration, pattern, "
-                                     "ornament or design feature — the product and the "
-                                     "other pieces on the table carry exactly the "
-                                     "designs and patterns in the reference images, in "
-                                     "the same line, and nothing more")
-                    again = _with_references(
-                        text + "\n\nTHE PREVIOUS ATTEMPT GOT THIS WRONG — CORRECT "
-                               "exactly these, and change nothing else:\n"
-                        + "\n".join(f"- {d}" for d in fixes),
-                        base["shape"], PER_PROMPT, refs,
-                        with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
-                        checklist=checklist, model=image_model)
-                    again_imgs = [b for b in (again.get("images") or []) if b]
-                    if not (again.get("ok") and again_imgs):
-                        break
-                    pick2 = _closest(again_imgs, refs["product"], checklist, tenant,
-                                     cast=refs.get("cast") or [])
-                    if not pick2["ok"]:
-                        break
-                    fidelity["judged"] += pick2["judged"]
-                    v1, v2 = best_v, pick2["verdict"]
-                    if _fidelity_score(v2) > _fidelity_score(v1):
-                        best_b, best_v, redrafted = pick2["blob"], v2, True
-                        fidelity["redrafted"] += 1
-                    wrong = (best_v.get("match", 0) < FIDELITY_KEEP
-                             and best_v.get("differences"))
-                fidelity["dropped"] += len(images) - 1
-                # NOT THE PRODUCT, NOT FILED. A near miss that survives the
-                # redraws is dropped and SAID, with the difference the judge
-                # named — a frame of a glass that is almost the glass is the
-                # one the owner would run by mistake.
-                if wrong or best_v.get("invented"):
-                    fidelity["not_the_product"] += 1
-                    why = "; ".join(list(best_v.get("differences") or [])[:2]) or (
-                        "decoration was invented on the product or the pieces around it"
-                        if best_v.get("invented") else "")
-                    if why and why[:160] not in fidelity["why_dropped"]:
-                        fidelity["why_dropped"].append(why[:160])
-                    images = []
-                else:
-                    images = [best_b]
-                    fids[id(best_b)] = {"match": best_v.get("match", 0),
-                                        "differences": list(best_v.get("differences") or []),
-                                        "candidates": pick_["judged"],
-                                        "redrafted": redrafted,
-                                        "lettering": bool(best_v.get("lettering"))}
-            else:
-                # NOT JUDGED, NOT PRETENDED. The usual two are kept and the
-                # set says fidelity was not judged, and why.
-                fidelity["why"] = fidelity["why"] or pick_.get("why", "")
-                images = images[:PER_PROMPT]
+            j = _judged(tenant, images, text, refs, checklist,
+                        lambda t: _with_references(
+                            t, base["shape"], PER_PROMPT, refs,
+                            with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
+                            checklist=checklist, model=image_model),
+                        fidelity=fidelity)
+            images, fids = j["images"], j["fids"]
         for blob in images:
             verdict = None
             if needs and not direct:
@@ -1321,6 +1496,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
     if refs["unknown"]:
         board_said += ("; no board named " + ", ".join(refs["unknown"])
                        + " — nothing was pulled from it")
+    if model_why:
+        board_said += f"; {model_why}"
     # WHY CELLS FAILED, SAID — and FIRST when nothing was made. Owner,
     # 2026-09-08: a Lifestyle run reported "made 0 · clean 0 — nothing was
     # generated — drawn from 0 photograph(s) … 4 board pin(s)" and nothing

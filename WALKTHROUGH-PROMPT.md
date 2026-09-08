@@ -1295,6 +1295,55 @@ blind ranking stays `scripts/bakeoff.py`.
 
 ---
 
+### Every system draws — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's ask:** *"I want this on all the systems. Emails and blogs are
+still not leveraging this generative feature at all."*
+
+**The ship.** A brand default image model on the Brand tab
+(`kb.image_model`/`set_image_model`, one writer; "both" and a keyless model
+refused by name; `imagegen.chosen(default=)`, `creative.brand_model`) that
+`batch`, `generate`, the make-frames form and the article's Generate form
+start from. The ad set's judge loop extracted into `creative._judged`
+unchanged and run by `generate` too: CANDIDATES from the product's
+photographs, the closest kept, redrawn with faults named, a near miss
+DROPPED and said. The email hero (`hero_for_campaign(draw_first=)`) and the
+article hero are DRAWN FIRST when `creative.drawable` says the brand's own
+pictures allow it, filed PROPOSED, carried in the draft; a body marker
+nothing approved fits is drawn too (`place_images(generate=, made=)`, two
+per pass) and recorded on `Output.media_ids` after the hero. Approving the
+email (the ESP push) or the article (the publish arm) approves the drawn
+pictures through `kb.approve_generated` — generated origin only; a flagged
+one never ships unattended (`ship_unattended`). `generate_visual` (blank =
+yes) on both plans turns it off. The workroom shows the article's pictures
+and where each stands.
+
+**Standing rules it adds:**
+- **A picture the system drew is judged wherever it is drawn** —
+  `a_generated_picture_is_judged_against_the_photographs`,
+  `a_near_miss_is_not_a_hero`.
+- **The brand's choice reaches every run; a form's choice wins; one picture
+  is one model** — `the_brand_default_reaches_the_generator`,
+  `the_brand_form_has_one_writer`, `both_is_not_a_brand_default`,
+  `one_picture_one_model`, `the_article_form_offers_the_model`.
+- **Drawn first, approved with the artifact, never through a side door** —
+  `the_email_draws_first`, `the_article_draws_first`,
+  `approving_the_email_approves_its_picture`,
+  `publishing_the_article_approves_its_pictures`,
+  `the_body_pictures_are_recorded_for_the_approval`,
+  `a_crawled_candidate_never_comes_through_the_side_door`,
+  `a_flagged_generated_picture_does_not_ship_unattended`.
+- **Reversed on the owner's word (2026-09-01 → 2026-09-08):** the drafting
+  run selects first and now DRAWS through the one seam (`test_creative_seam`
+  records both dates).
+
+**Traps:** a plan flag must be in the skill's `params=` tuple as well as
+`systems.py`, or `skill.run` refuses the run as an unknown parameter; an
+asset used once becomes PROVEN and leads `pick`; a product-led body marker
+is filled by the product's own photograph before anything is drawn.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1481,6 +1530,18 @@ blind ranking stays `scripts/bakeoff.py`.
 > "both" — one set per model on the same brief, each frame tagged with the
 > model, the set card saying which drew it. **Owner's move:** add the key,
 > choose "both" on one variant, compare the two sets under Pictures.
+>
+> **SHIPPED 2026-09-08, SEVENTEENTH: EVERY SYSTEM DRAWS** (14 guards, §5 has
+> the record). The Brand tab chooses the model every system draws with; the
+> email hero and the article's hero are DRAWN FIRST from the brand's own
+> pictures when they allow it, judged like an ad frame, filed proposed and
+> carried in the draft; a body marker nothing fits is drawn too; approving
+> the email or the article approves its pictures; a flagged one never ships
+> unattended. **Owner's move:** run one campaign email and one article for a
+> product with a photograph and a pinned look, open the draft, read the
+> "hero:" / "picture:" line, approve — and check the picture went approved
+> on Review · Pictures. `generate_visual: no` on a plan keeps it to
+> photographs.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with

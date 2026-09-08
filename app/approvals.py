@@ -380,6 +380,19 @@ def ship_unattended(tenant: str, output_id: str, why: str = "") -> dict:
         return {"ok": False,
                 "why": f"{len(ids)} pending ships for one output — refusing to "
                        f"choose; a person should"}
+    # A GENERATED PICTURE ITS OWN REVIEWER FLAGGED IS NOT CLEARED. Approving
+    # the article approves the pictures it carries (`_approve_generated_media`)
+    # — on the auto rung that approval is nobody's, so it is given only to a
+    # picture whose reviewer ran and passed it. Anything else waits for a
+    # person, and the run says so.
+    held = [g for g in _generated_media(output_id)
+            if g["failed"] or not g["reviewed"]]
+    if held:
+        return {"ok": False,
+                "why": ("a generated picture needs a person: "
+                        + "; ".join((", ".join(g["failed"]) if g["failed"]
+                                     else "its review could not run")
+                                    for g in held[:2]))}
     said = apply_decision(ids[0], "approved")
     with db.SessionLocal() as s:
         run = s.get(db.SystemRun, runs[ids[0]]) if runs[ids[0]] else None
@@ -683,6 +696,37 @@ def _fields_from_artifact(output_id: str, payload_fields: dict) -> dict:
     return out
 
 
+def _generated_media(output_id: str) -> list[dict]:
+    """The output's generated pictures still waiting on review, with what
+    their reviewer flagged — `kb.generated_pending` over `Output.media_ids`."""
+    if not output_id:
+        return []
+    try:
+        from . import kb
+        with db.SessionLocal() as s:
+            row = s.query(db.Output).filter(db.Output.id == output_id).first()
+            ids = list((row.media_ids or []) if row is not None else [])
+        return kb.generated_pending(ids)
+    except Exception:                                            # noqa: BLE001
+        return []
+
+
+def _approve_generated_media(output_id: str, *, via: str = "") -> list[str]:
+    """Approve every GENERATED, still-proposed picture this output carries —
+    the artifact's approval is the picture's (owner, 2026-09-08). Returns
+    what was said per picture; `kb.approve_generated` keeps the door to
+    generated pictures only, so a crawled candidate in the same list stays
+    exactly where it was."""
+    said = []
+    for g in _generated_media(output_id):
+        try:
+            from . import kb
+            said.append(kb.approve_generated(g["asset_id"], by="owner", via=via))
+        except Exception:                                        # noqa: BLE001
+            said.append("Not approved.")
+    return said
+
+
 def _article_image_for(output_id: str) -> dict:
     """The featured image for a published article, joined from what carried it.
 
@@ -860,6 +904,13 @@ def _execute(ap: db.Approval) -> None:
         _blog = sites.ensure_blog(_bt) if _bt else {}
         _blog_id = _blog.get("blog_id") or p.get("blog_id") or None
         _blog_said = sites.blog_note(_blog) if _blog else ""
+        # THE PICTURES THE ARTICLE CARRIES ARE APPROVED WITH IT. A generated
+        # hero or body picture is filed PROPOSED; the person approving the
+        # article looked at it on the article's page, and this is where that
+        # decision reaches the picture — BEFORE `_article_image_for` asks
+        # `may_publish`, so the featured image it joins is the one they saw.
+        _approve_generated_media(p.get("output_id") or "",
+                                 via="article's approval")
         res = sites.backend(profile).create_article(
             profile, _blog_id,
             _fields_from_artifact(p.get("output_id") or "", p["fields"]))

@@ -3472,12 +3472,29 @@ def _run_campaign_email(ctx: Context) -> dict:
                                  + list(commitment.get("also") or [])
                                  + [e.get("key", "") for e in ents]) if k],
         title=f"Email hero — {seg['name']}"[:120],
-        draft_if_missing=_flag(ctx.params.get("draft_visual")))
+        draft_if_missing=_flag(ctx.params.get("draft_visual")),
+        # DRAWN FIRST, on by default (owner, 2026-09-08: *"I want this on all
+        # the systems. Emails and blogs are still not leveraging this
+        # generative feature at all."*) — when the brand's own pictures allow
+        # it, the hero is drawn from the product's photographs in the board's
+        # look, judged against those photographs like an ad frame, filed
+        # PROPOSED and carried in the draft the owner reviews; the push that
+        # follows their approval approves the picture. Otherwise, and when a
+        # drawing is dropped, the approved-photograph ladder as before.
+        # `generate_visual: no` on the plan turns it off.
+        draw_first=_flag(ctx.params.get("generate_visual"), default=True),
+        commitment=commitment,
+        claim=(ctx.bundle.get("claims") or [{}])[0].get("claim", ""),
+        prominent=str(copy.get("subject") or ""))
     hero = hero_got.get("image")
     hero_subject = str(hero_got.get("subject_key") or "")
     if hero_got.get("basis") == "drafted_in_canva":
         ctx.note("bespoke visual: " + hero_got.get("note", ""))
+    elif hero_got.get("basis") == "generated":
+        ctx.note("hero: " + hero_got.get("note", ""))
     elif not hero:
+        if hero_got.get("drawn_why"):
+            ctx.note("hero: " + str(hero_got["drawn_why"]).strip())
         # THE PRODUCT'S OWN PHOTOGRAPH IS A HERO. The creative library and the
         # entity's `attributes.image` are two different stores, both filled by
         # the same catalogue sync, and only the library was ever reachable
@@ -4131,6 +4148,12 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
         # act the creative library's `uses` counter exists for.
         try:
             from . import kb as _kb
+            # A GENERATED HERO IS APPROVED BY THIS APPROVAL. The owner looked
+            # at the email with the picture in it and said yes; a second
+            # queue for the same decision is how an accepted picture stays
+            # 'proposed' forever. Only a generated picture — the door checks.
+            _kb.approve_generated(push["hero_asset_id"], by="owner",
+                                  via="email's approval")
             _kb.mark_asset_used(push["hero_asset_id"],
                                 destination="campaign_email draft")
         except Exception:                                        # noqa: BLE001
@@ -4514,7 +4537,7 @@ register(Skill(
             # who RECEIVES the send, the audience is who it is WRITTEN FOR,
             # and one `reorder_due` list contains all three Baci personas.
             "audience_key",
-            "offer", "utterance", "draft_visual"),
+            "offer", "utterance", "draft_visual", "generate_visual"),
     writes=True,
     produces="draft",
     # ONE-TO-MANY WORK NAMES ITS READER. Owner, 2026-08-31: "Audience only
@@ -4561,7 +4584,7 @@ register(Skill(
     needs=("rules.voice_tone", "rules.positioning"),
     params=("revision_notes", "goal", "subject", "intent", "deadline",
             "entity_key", "entity_keys", "audience_key", "offer", "utterance",
-            "draft_visual",
+            "draft_visual", "generate_visual",
             # Accepted so a plan carrying one is not refused at the door —
             # and then overwritten. Declaring it is what lets `_run_reorder`
             # say so in its own body rather than in a runner error.
@@ -4832,9 +4855,24 @@ _IMG_MARK = _re.compile(r'[ \t]*<!--\s*IMAGE:\s*(.{3,160}?)\s*-->[ \t]*\n?',
 MAX_BODY_IMAGES = 2
 
 
+#: How many body pictures ONE pass may draw when nothing approved fits a
+#: marker. Each is a generation (a minute or two, judged); two is an
+#: illustrated article, four is a run that never returns.
+GENERATE_BODY_MAX = 2
+
+
 def place_images(body: str, tenant: str, *, commitment: dict | None = None,
-                 entity_key: str = "", used: set | None = None) -> tuple:
+                 entity_key: str = "", used: set | None = None,
+                 generate: bool = False, made: list | None = None) -> tuple:
     """Fill the drafter's placement markers from what this brand has approved.
+
+    AND DRAW WHAT IT DOES NOT HAVE, when `generate` is on (owner,
+    2026-09-08: every system draws): a marker nothing approved fits is
+    drawn by `creative.generate(fmt="article_body")` — judged like every
+    generated picture, filed PROPOSED — up to GENERATE_BODY_MAX per pass,
+    and each one's id is appended to `made`, the caller's list, so the
+    article's approval can approve them with it (`Output.media_ids`). A
+    marker past the cap is still a brief, as before.
 
     THE MODEL NAMES THE PLACE AND THE SUBJECT; IT NEVER NAMES THE PICTURE. The
     same rule the internal links already follow, for the same reason: a URL
@@ -4871,6 +4909,22 @@ def place_images(body: str, tenant: str, *, commitment: dict | None = None,
         got = creative.pick(tenant, commitment=commitment, fmt="article_body",
                             entity_key=entity_key, prominent=subject)
         aid = str(got.get("asset_id") or "")
+        if (not aid or aid in seen or not (got.get("url") or "")) and generate \
+                and sum(1 for p in placed if p.get("rung") == "generated") < GENERATE_BODY_MAX:
+            drawn = creative.generate(tenant, commitment=commitment,
+                                      fmt="article_body", entity_key=entity_key,
+                                      prominent=subject)
+            if drawn.get("ok") and drawn.get("asset_id") not in seen:
+                got = {**got, "asset_id": drawn["asset_id"], "url": drawn["url"],
+                       "alt": drawn.get("subject") or subject,
+                       "rung": "generated",
+                       "why": (f"drawn by {drawn.get('model', '')} — proposed; "
+                               f"approving the article approves it")}
+                aid = str(drawn["asset_id"])
+                if made is not None:
+                    made.append(aid)
+            else:
+                aid = ""
         if not aid or aid in seen or not (got.get("url") or ""):
             wanted.append(subject)
             return ""
@@ -5263,13 +5317,49 @@ def _run_blog_article(ctx: Context) -> dict:
         entity_key=entity_key, prominent=title,
         claim=(ctx.bundle.get("claims") or [{}])[0].get("claim", ""))
     _hero_id = str(_hero.get("asset_id") or "")
+    # DRAWN FIRST, on by default. Owner, 2026-09-08: *"Emails and blogs are
+    # still not leveraging this generative feature at all."* The pick
+    # ladder selects among approved pictures; a PROVEN one (a recorded
+    # result) still leads. Below that, when the brand's own pictures allow
+    # it (`creative.drawable`), the same generator the workroom button calls
+    # draws the hero here — from the product's photographs in the board's
+    # look, judged against those photographs, filed PROPOSED — and the
+    # article carries it to review; a dropped drawing leaves the pick's
+    # photograph in place. Approving the article approves the picture
+    # (`approvals._execute` → `kb.approve_generated`); on the auto rung a
+    # generated picture its own reviewer flagged does not ship unattended
+    # (`approvals.ship_unattended`). `generate_visual: no` on the plan turns
+    # it off, and the old brief-and-button path remains.
+    _draw = _flag(ctx.params.get("generate_visual"), default=True)
+    if _draw and _hero.get("rung") != "proven" and creative.drawable(
+            ctx.tenant, entity_key):
+        _made = creative.generate(
+            ctx.tenant, commitment=_about, fmt="article_hero",
+            entity_key=entity_key, prominent=title,
+            claim=(ctx.bundle.get("claims") or [{}])[0].get("claim", ""))
+        if _made.get("ok"):
+            _hero = {**_hero, "asset_id": _made["asset_id"], "url": _made["url"],
+                     "alt": _made.get("subject") or title, "basis": "generated",
+                     "rung": "generated",
+                     "why": (f"drawn by {_made.get('model', '')} — "
+                             f"{_made.get('basis', '')}; PROPOSED — approving "
+                             f"this article approves it")}
+            _hero_id = str(_made["asset_id"])
+        else:
+            ctx.note("a picture was drawn for the hero and dropped: "
+                     + str(_made.get("error") or "generation failed")[:200])
+    # THE BODY PICTURES DRAWN, recorded for the article's approval — the hero
+    # first, because the publish arm takes the first publishable id as the
+    # featured image.
+    _body_made: list = []
     # THE PICTURES INSIDE THE PIECE, filled where the drafter marked a place.
     # After the hero on purpose: the hero's id goes in as `used`, so the same
     # photograph cannot appear twice — once under the headline and once
     # halfway down, which reads as a rendering fault rather than illustration.
     body, _in_body, _img_wanted = place_images(
         body, ctx.tenant, commitment=_about, entity_key=entity_key,
-        used={_hero_id} if _hero_id else set())
+        used={_hero_id} if _hero_id else set(),
+        generate=_draw, made=_body_made)
     if _in_body:
         ctx.note("pictures in the piece: "
                  + "; ".join(f"{p['subject']} ({p['rung']})" for p in _in_body))
@@ -5355,7 +5445,7 @@ def _run_blog_article(ctx: Context) -> dict:
         _hero_used |= {p["asset_id"] for p in _in_body}
         fixed, _again, _still_wanted = place_images(
             fixed, ctx.tenant, commitment=_about, entity_key=entity_key,
-            used=_hero_used)
+            used=_hero_used, generate=_draw, made=_body_made)
         for _w in _still_wanted:
             ctx.thin.append(f"image:{_w}")
         return fixed
@@ -5384,7 +5474,11 @@ def _run_blog_article(ctx: Context) -> dict:
                      {"claim_id": c["claim_id"], "text": c["claim"],
                       "scope": c.get("scope", "brand-wide")}
                      for c in (ctx.bundle.get("claims") or [])[:12]]),
-             media_ids=[_hero_id] if _hero_id else [],
+             # THE HERO FIRST, then every body picture this run DREW — read
+             # after the redraft loop (a callable), so a repair pass's
+             # drawings are recorded too and the approval can settle them.
+             media_ids=lambda: ([_hero_id] if _hero_id else []) + [
+                 a for a in _body_made if a != _hero_id],
              meta={"title": title,
                    "seo_title": _seo_title(keyword, title),
                    "seo_description": _meta_description(keyword, body),
@@ -5639,7 +5733,9 @@ register(Skill(
             # An article is one-to-many, so it has a reader in the same sense
             # a campaign does — and it briefs from the same funnel.
             "audience_key",
-            "revision_notes"),
+            "revision_notes",
+            # Draw the pictures on a miss (blank = yes) — owner, 2026-09-08.
+            "generate_visual"),
     writes=True,
     produces="draft",
     run=_run_blog_article))

@@ -74,8 +74,10 @@ def main() -> int:
     ck("  and 'both' means every model with a key",
        imagegen.chosen("both") == ([imagegen.MODEL, "gemini:gemini-3-pro-image", "gemini:gemini-3.1-flash-image"], ""))
     frm = open(ui.__file__).read()
-    ck("  the make-frames form carries the choice beside the boards",
-       "{model_select()}" in frm and frm.index("{boards_select(tenant)}\n        {model_select()}") > 0)
+    # SINCE 2026-09-08 (every system draws) the form starts from the brand's
+    # default model — `model_select(current=kb.image_model(tenant))`.
+    ck("  the make-frames form carries the choice beside the boards, starting from the brand's default",
+       frm.index("{boards_select(tenant)}\n        {model_select(current=kb.image_model(tenant))}") > 0)
 
     print("\n— THE ROUTE HONOURS THE CHOICE, AND REFUSES BY NAME —")
     with db.SessionLocal() as s:

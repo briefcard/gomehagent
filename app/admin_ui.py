@@ -4529,6 +4529,7 @@ and hand-set fields survive future re-derives.</p>
   {identity}
   {_channel_rules_card(key, tenant)}
   {_board_card(key, tenant)}
+  {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
   {sources_card}
   <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
@@ -6322,18 +6323,24 @@ def _drawn_by(frames) -> str:
     return (" &middot; drawn by " + _esc(", ".join(names))) if names else ""
 
 
-def model_select(*, name: str = "image_model") -> str:
+def model_select(*, name: str = "image_model", allow_both: bool = True,
+                 current: str = "") -> str:
     """The image model a set is drawn by, chosen where the set starts —
     owner, 2026-09-08: *"allow me to choose which model to use or if to use
     both."* A model without its key is listed, not selectable, and says
-    what to add; "both" appears once two models are set up."""
+    what to add; "both" appears once two models are set up, and only where
+    a SET is drawn (`allow_both`) — one picture is one model. `current` is
+    the brand's default (`kb.image_model`), preselected so every form
+    starts from the choice made on the Brand tab."""
     from . import imagegen
     offer = imagegen.choices()
+    cur = str(current or "").strip()
     opts = "".join(
-        f'<option value="{_esc(c["value"])}"{"" if c["ok"] else " disabled"} '
+        f'<option value="{_esc(c["value"])}"{"" if c["ok"] else " disabled"}'
+        f'{" selected" if (c["value"] == cur and c["ok"]) else ""} '
         f'title="{_esc(c["why"])}">{_esc(c["label"])}{"" if c["ok"] else " — " + _esc(c["why"])}</option>'
         for c in offer)
-    if sum(1 for c in offer if c["ok"]) >= 2:
+    if allow_both and sum(1 for c in offer if c["ok"]) >= 2:
         opts += (f'<option value="{imagegen.BOTH}">both — one set per model, on the same '
                  f'brief, to compare</option>')
     return (f'<select name="{_esc(name)}" title="Which image model draws this set. '
@@ -6403,6 +6410,83 @@ def _channel_rules_card(key: str, tenant: str) -> str:
   <form class="f" method="post" action="/admin/brand_update">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">{rows}
     <div class="row"><button>Save channel instructions</button></div>
+  </form>
+</div>"""
+
+
+def _article_pictures(out_row) -> str:
+    """What an article carries under its headline and in its body, and where
+    each picture STANDS — approved, or generated and PROPOSED with what its
+    reviewer said — so the person approving the article knows the approval
+    settles the picture too (owner, 2026-09-08: every system draws)."""
+    ids = list(getattr(out_row, "media_ids", None) or []) if out_row is not None else []
+    if not ids:
+        return ""
+    rows = []
+    with db.SessionLocal() as s:
+        for i, aid in enumerate(ids[:4]):
+            a = s.get(db.KbAsset, str(aid))
+            if a is None:
+                continue
+            v = dict(a.assessment or {})
+            fid = dict(v.get("fidelity") or {})
+            model = next((str(t)[len("model:"):] for t in (a.tags or [])
+                          if str(t).startswith("model:")), "")
+            proposed = (a.review or "") == "proposed"
+            generated = (a.origin or "") == "generated"
+            if proposed and generated:
+                stands = ("<b>PROPOSED</b> &mdash; generated"
+                          + (f" by {_esc(model)}" if model else "")
+                          + "; approving this article approves it")
+            elif proposed:
+                stands = "<b>PROPOSED</b> &mdash; needs its own review on Review &middot; Pictures"
+            else:
+                stands = _esc(a.review or "approved")
+            said = []
+            if fid.get("match") is not None:
+                said.append(f"judged {_esc(str(fid.get('match')))}/100 against the product&#39;s photographs")
+            if v.get("failed"):
+                said.append("the reviewer flagged: " + _esc(", ".join(str(f) for f in v["failed"])))
+            rows.append(
+                f'<div class="row" style="align-items:flex-start;gap:10px;margin-top:6px">'
+                f'<img src="{_esc(a.url or "")}" alt="{_esc(a.title or "")}" '
+                f'style="max-width:180px;max-height:120px;border-radius:4px">'
+                f'<span class="when"><b>{"Hero" if i == 0 else "In the body"}</b> &middot; '
+                f'{stands}{(" &middot; " + "; ".join(said)) if said else ""}</span></div>')
+    if not rows:
+        return ""
+    return ('<div class="note" style="margin-top:8px"><b>Pictures on this article.</b>'
+            + "".join(rows) + "</div>")
+
+
+def _image_model_card(key: str, tenant: str) -> str:
+    """The brand's default image model — what EVERY system draws with when
+    no form says otherwise. Owner, 2026-09-08: *"I want this on all the
+    systems. Emails and blogs are still not leveraging this generative
+    feature at all."* The ad set's form starts from this and may choose
+    another, or both; the email hero and the article's pictures are drawn
+    inside a run with no form in front of them, so this is their choice."""
+    from . import creative
+    cur = kb.image_model(tenant)
+    model, why = creative.brand_model(tenant)
+    return f"""
+<div class="anchor" id="model"></div>
+<div class="card">
+  <div class="head"><h2>Pictures — which model draws them</h2></div>
+  <p class="mut">Every system draws its pictures with this model unless a form
+  says otherwise: the ad frames, the email hero when no approved photograph
+  fits, the article&#39;s hero and up to two body pictures when none fits.
+  Each is drawn from the brand&#39;s own pictures, judged against the
+  product&#39;s photographs, and arrives <b>proposed</b> — approving the email
+  or the article approves the picture in it. The make-frames form starts from
+  this choice and may pick another, or both. Drawing now with
+  <b>{_esc(model)}</b>{(" &mdash; " + _esc(why)) if why else ""}.</p>
+  <form class="row" method="post" action="/admin/brand_update">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    {model_select(name="image_model", allow_both=False, current=cur)}
+    <button class="sec">Save the model</button>
+    <span class="mut">a plan&#39;s <code>generate_visual: no</code> keeps one
+    email or article to approved photographs.</span>
   </form>
 </div>"""
 
@@ -13619,6 +13703,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
               style="margin-top:8px">
           <input type="hidden" name="output_id" value="{_esc(output_id)}">
           {boards_select(getattr(art, "tenant", "") or "")}
+          {model_select(name="image_model", allow_both=False,
+                        current=kb.image_model(getattr(art, "tenant", "") or ""))}
           <button class="btn sec" type="submit">Generate the picture</button>
           <span class="when">no approved photograph fitted this piece, so
           nothing was attached. This briefs one from what the article is
@@ -13626,6 +13712,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           &mdash; and it arrives on <b>Review &middot; Pictures</b> as
           proposed, and cannot be used until you approve it there.</span>
         </form>"""
+        else:
+            decide += _article_pictures(_out_row)
 
     if superseded_by:
         # A replaced draft is a record, not a workspace — every decision and
@@ -13779,7 +13867,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           <option value="12">24 frames</option>
         </select>
         {boards_select(tenant)}
-        {model_select()}
+        {model_select(current=kb.image_model(tenant))}
         <button type="submit" class="sec">Make frames</button>
         <span class="when">the carousel for THIS variant — one angle, lever,
         moment and framing each, built on its own positioning and claim. They

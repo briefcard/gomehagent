@@ -198,11 +198,17 @@ def main() -> int:
     _blog = next(f for f in _ast.walk(_tree)
                  if isinstance(f, _ast.FunctionDef) and f.name == "_run_blog_article")
     _body = _ast.get_source_segment(_src, _blog) or ""
-    ck("the drafting run selects and never generates",
-       "creative.pick(" in _body and "creative.generate(" not in _body,
-       "generation is three minutes and about two thousand text calls, and "
-       "lands `proposed` — a draft that did it inline would block to produce "
-       "something it is not allowed to attach")
+    # REVERSED 2026-09-08 by the owner: *"Emails and blogs are still not
+    # leveraging this generative feature at all."* The run still SELECTS
+    # first (a proven photograph beats a rendering) and now DRAWS through the
+    # one seam when the brand's pictures allow it, gated by the plan's
+    # `generate_visual`; the picture it attaches is PROPOSED and is approved
+    # with the article, which is what made attaching it allowed.
+    ck("the drafting run selects, and draws through the one seam under the plan's flag",
+       "creative.pick(" in _body and "creative.generate(" in _body
+       and "generate_visual" in _body,
+       "a draft that generated with no flag and no approval path would block "
+       "for minutes to attach something nobody could approve")
     ck("…and asks, when nothing fits",
        _got["should_generate"] is True)
 

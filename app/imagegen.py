@@ -81,13 +81,28 @@ def choices() -> list[dict]:
     return out
 
 
-def chosen(value: str) -> tuple[list[str], str]:
+def chosen(value: str, default: str = "") -> tuple[list[str], str]:
     """What a form's choice means: `(models, why_not)`. Empty = the default;
     BOTH = every model whose key is set (two or more, or it is refused by
-    name); a listed model = itself, if its key is set."""
+    name); a listed model = itself, if its key is set.
+
+    `default` is what "" means when the caller has a brand default
+    (`kb.image_model`) — honoured if its key is set, otherwise the system
+    default WITH the reason, so a run can say the brand's choice was not
+    taken instead of drawing with something else silently."""
     offer = choices()
     value = str(value or "").strip()
     if not value or value == "default":
+        default = str(default or "").strip()
+        if default and default != MODEL:
+            for c in offer:
+                if c["value"] == default:
+                    if c["ok"]:
+                        return [default], ""
+                    return [MODEL], (f"the brand's default ({c['label']}) is not "
+                                     f"available — {c['why']}; drawing with {MODEL}")
+            return [MODEL], (f"the brand's default {default!r} is not one of the "
+                             f"offered models; drawing with {MODEL}")
         return [MODEL], ""
     if value == BOTH:
         avail = [c["value"] for c in offer if c["ok"]]

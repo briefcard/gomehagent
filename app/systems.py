@@ -463,6 +463,13 @@ CATALOG = {
                      required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
+                # DRAWN ON A MISS, ON BY DEFAULT (owner, 2026-09-08: "I want
+                # this on all the systems"). Blank means yes; "no" keeps the
+                # email to approved photographs and the catalogue shot. The
+                # model is the brand's default on the Brand tab.
+                dict(key="generate_visual",
+                     label="Draw a hero on a miss (blank = yes)",
+                     required=False, kind="flag"),
                 # `draft_into_esp` is NOT a plan field. Producing the draft in
                 # the client's ESP is what this system IS — a campaign that
                 # stops short of the platform is not a lighter version of the
@@ -582,6 +589,13 @@ CATALOG = {
                 dict(key="revision_notes",
                      label="What this redraft must fix", required=False,
                      kind="text"),
+                # DRAWN ON A MISS, ON BY DEFAULT — the hero, and up to two
+                # body pictures the drafter marked a place for (owner,
+                # 2026-09-08). Blank means yes. The pictures arrive PROPOSED
+                # and are approved with the article.
+                dict(key="generate_visual",
+                     label="Draw the pictures on a miss (blank = yes)",
+                     required=False, kind="flag"),
             ),
             artifact="cms_article",
             ship="publishes the draft article, behind seo_guard",

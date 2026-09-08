@@ -2966,6 +2966,107 @@ def board_direction(tenant: str, boards_: tuple | list = ()) -> str:
     return "\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# THE BRAND'S DEFAULT IMAGE MODEL. Owner, 2026-09-08: *"I want this on all the
+# systems. Emails and blogs are still not leveraging this generative feature
+# at all."* The ad set's form chooses a model per set (`imagegen.chosen`);
+# the email hero and the article pictures are drawn inside a run with no form
+# in front of them, so the choice for those lives HERE, on the brand, and the
+# make-frames form starts from it. `creative.brand_model` is the one reader.
+# ---------------------------------------------------------------------------
+
+
+def image_model(tenant: str) -> str:
+    """The brand's default image model — `visual["image_model"]`, "" when the
+    brand has not chosen, which means the system default (`config.IMAGE_MODEL`)."""
+    row = brand(tenant)
+    return str(((row.visual or {}) if row is not None else {}).get("image_model") or "")
+
+
+def set_image_model(tenant: str, value: str) -> str:
+    """ONE writer. A brand default is ONE model: "both" is a per-set choice
+    on the make-frames form and is refused here by name. A model whose key
+    is not set is refused with the variable to add, so the default can never
+    be a model that fails at run time in the middle of an email."""
+    from . import imagegen
+    value = str(value or "").strip()
+    if value == imagegen.BOTH:
+        return ("A brand default is one model — 'both' is chosen per set, on "
+                "the make-frames form.")
+    if value:
+        _models, why = imagegen.chosen(value)
+        if why:
+            return why
+    ensure_brand(tenant)
+    row = brand(tenant)
+    visual = dict(row.visual or {})
+    if value:
+        visual["image_model"] = value
+    else:
+        visual.pop("image_model", None)
+    set_brand(tenant, visual=visual)
+    return (f"Every system now draws with {value} unless a form says otherwise."
+            if value else "Every system now draws with the system default.")
+
+
+#: What a picture the system drew is filed as (`creative.GENERATED_ORIGIN`
+#: reads this) — the one origin `approve_generated` will settle on the
+#: strength of the artifact's approval.
+GENERATED_ORIGIN = "generated"
+
+
+def approve_generated(asset_id: str, *, by: str = "owner", via: str = "") -> str:
+    """Approve a GENERATED, still-proposed picture because the artifact that
+    carries it was approved — the person who approved the email or the
+    article looked at the picture there, and a second queue for the same
+    decision is how a picture the owner has already accepted stays
+    'proposed' forever (owner, 2026-09-08: every system draws).
+
+    ONLY A GENERATED PICTURE. A crawled candidate or a Drive find arriving
+    through this door would be a licence nobody granted — `origin` is
+    checked, not assumed, and anything else is sent back to Review ·
+    Pictures. Never raises: a picture that cannot be settled must not fail
+    the push that already happened."""
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbAsset, asset_id)
+            if row is None:
+                return "No such asset."
+            if (row.origin or "") != GENERATED_ORIGIN:
+                return ("Not a generated picture — it needs its own review on "
+                        "Review · Pictures.")
+            if (row.review or "") != prov.PROPOSED:
+                return f"Already {row.review or 'reviewed'}."
+    except Exception:                                            # noqa: BLE001
+        return "Not approved."
+    said = review_asset(asset_id, True, by=by, rights=OWNED)
+    return said + (f" — with the {via}" if via else "")
+
+
+def generated_pending(asset_ids) -> list[dict]:
+    """Of these, the generated pictures still waiting on review, each with
+    what its own reviewer flagged: `[{asset_id, failed, reviewed}]`. The
+    unattended ship reads this — a generated picture whose reviewer flagged
+    something, or could not run, is not 'cleared', and cleared is the only
+    thing that ships with nobody looking."""
+    out = []
+    try:
+        with db.SessionLocal() as s:
+            for aid in list(asset_ids or []):
+                row = s.get(db.KbAsset, str(aid))
+                if row is None or (row.origin or "") != GENERATED_ORIGIN:
+                    continue
+                if (row.review or "") != prov.PROPOSED:
+                    continue
+                v = dict(row.assessment or {})
+                out.append({"asset_id": row.id,
+                            "failed": [str(f) for f in (v.get("failed") or [])],
+                            "reviewed": bool(v.get("ok"))})
+    except Exception:                                            # noqa: BLE001
+        return out
+    return out
+
+
 def remove_board(tenant: str, slug: str) -> str:
     """Take a board away, and every pin on it with it — a pin to a board that
     no longer exists is a tag nothing reads, which is worse than none."""
