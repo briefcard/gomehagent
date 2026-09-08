@@ -210,6 +210,14 @@ def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
 IMPORTS_DOC = "https://www.canva.dev/docs/connect/api-reference/design-imports/create-design-import-job/"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 IMPORT_POLLS, IMPORT_POLL_S = 12, 1.5
+#: A 5xx from the import is Canva's side: tried once more after a pause.
+IMPORT_TRIES, IMPORT_RETRY_S = 2, 2.0
+
+
+def _server_side(err: str) -> bool:
+    """Whether an error text is Canva's own failure (a 5xx), not ours."""
+    head = (err or "").strip()[:3]
+    return head.isdigit() and head.startswith("5")
 
 
 def _call_import(tenant: str, blob: bytes, title: str, mime: str) -> dict:
@@ -866,7 +874,22 @@ def import_design(tenant: str, blob: bytes, *, title: str,
     """
     if not blob:
         return {"ok": False, "error": "nothing to import"}
-    res = call_import(tenant, blob, title, mime)
+    import time as _time
+    from . import toolcalls as _tc
+    # RECORDED, AND RETRIED ONCE. Owner, 2026-09-08: "Canva: 500: server
+    # error" on every layered import, with nothing anywhere saying so but
+    # the flash. The call is filed like every other platform round trip,
+    # and a 5xx — Canva's side — is tried once more after a pause before
+    # the caller is told.
+    res: dict = {}
+    for attempt in range(IMPORT_TRIES):
+        res = call_import(tenant, blob, title, mime)
+        _tc.record(tenant, "canva:POST /imports", source="adapter", provider="canva",
+                   ok=bool(res.get("ok")), error="" if res.get("ok") else str(res.get("error", "")),
+                   bytes_back=len(blob))
+        if res.get("ok") or not _server_side(str(res.get("error", ""))) or attempt + 1 >= IMPORT_TRIES:
+            break
+        _time.sleep(IMPORT_RETRY_S)
     if not res.get("ok"):
         return res
     job = (res.get("data") or {}).get("job") or {}

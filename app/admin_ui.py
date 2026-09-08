@@ -6207,7 +6207,16 @@ def _kept_frames_card(key: str, tenant: str) -> str:
             pic = (f'<a href="{_esc(str(url))}" target="_blank" rel="noopener">picture</a>'
                    if url else '<span class="mut">not cut yet</span>')
             did = designs.get(fmt)
-            if did:
+            if did and _h.is_flat(a, fmt):
+                # SAID AS FLAT: the layered import failed and the picture went
+                # as one image; the button is offered again for the layers.
+                lay = (f'<a href="https://www.canva.com/design/{_esc(did)}/edit" '
+                       f'target="_blank" rel="noopener">flat in Canva &rarr;</a> '
+                       + _form("/admin/asset_canva", a.id, fmt, "try the layers again",
+                               "The layered import failed last time and the picture went "
+                               "to Canva as one flat image. Tries the layers again.",
+                               new_tab=True))
+            elif did:
                 lay = (f'<a href="https://www.canva.com/design/{_esc(did)}/edit" '
                        f'target="_blank" rel="noopener">layers in Canva &rarr;</a>')
             else:

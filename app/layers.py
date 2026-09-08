@@ -36,7 +36,6 @@ import io
 import math
 import re
 import zipfile
-from xml.sax.saxutils import escape as _x
 
 EMU_PER_PX = 9525
 PT_PER_PX = 0.75
@@ -220,146 +219,9 @@ def _hpt(px: float) -> int:
 
 
 # --------------------------------------------------------------------------
-# The parts of the package
+# The deck
 # --------------------------------------------------------------------------
 
-_NS = ('xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
-       'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"')
-_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
-
-_EMPTY_TREE_HEAD = ('<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>'
-                    '</p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/>'
-                    '<a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/>'
-                    '</a:xfrm></p:grpSpPr>')
-
-
-def _content_types() -> str:
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Default Extension="png" ContentType="image/png"/>'
-        '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
-        '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
-        '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
-        '<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
-        '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
-        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
-        '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
-        '</Types>')
-
-
-def _rels(pairs: list[tuple[str, str, str]]) -> str:
-    body = "".join(f'<Relationship Id="{i}" Type="{t}" Target="{_x(tg)}"/>' for i, t, tg in pairs)
-    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<Relationships xmlns="{_PKG}">{body}</Relationships>')
-
-
-def _presentation(W: int, H: int) -> str:
-    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<p:presentation {_NS}>'
-            f'<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
-            f'<p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst>'
-            f'<p:sldSz cx="{_emu(W)}" cy="{_emu(H)}"/>'
-            f'<p:notesSz cx="6858000" cy="9144000"/></p:presentation>')
-
-
-def _master() -> str:
-    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<p:sldMaster {_NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/>'
-            f'</p:bgRef></p:bg><p:spTree>{_EMPTY_TREE_HEAD}</p:spTree></p:cSld>'
-            f'<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" '
-            f'accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" '
-            f'accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
-            f'<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
-            f'<p:txStyles><p:titleStyle><a:lvl1pPr/></p:titleStyle>'
-            f'<p:bodyStyle><a:lvl1pPr/></p:bodyStyle><p:otherStyle><a:lvl1pPr/></p:otherStyle>'
-            f'</p:txStyles></p:sldMaster>')
-
-
-def _layout_part() -> str:
-    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<p:sldLayout {_NS} type="blank" preserve="1"><p:cSld name="Blank">'
-            f'<p:spTree>{_EMPTY_TREE_HEAD}</p:spTree></p:cSld>'
-            f'<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>')
-
-
-def _theme_part(accent: str, heading: str, body: str) -> str:
-    def clr(name, val):
-        return f"<a:{name}><a:srgbClr val=\"{val}\"/></a:{name}>"
-    fills = "".join('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>' for _ in range(3))
-    lines = "".join(f'<a:ln w="{w}"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>'
-                    for w in (9525, 25400, 38100))
-    effects = "".join("<a:effectStyle><a:effectLst/></a:effectStyle>" for _ in range(3))
-    return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="gomehagent">'
-            f'<a:themeElements><a:clrScheme name="gomehagent">'
-            + clr("dk1", "000000") + clr("lt1", "FFFFFF") + clr("dk2", "1C1E22") + clr("lt2", "F2F3F5")
-            + "".join(clr(f"accent{i}", accent) for i in range(1, 7))
-            + clr("hlink", "0563C1") + clr("folHlink", "954F72")
-            + f'</a:clrScheme><a:fontScheme name="gomehagent">'
-            f'<a:majorFont><a:latin typeface="{_x(heading)}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>'
-            f'<a:minorFont><a:latin typeface="{_x(body)}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>'
-            f'</a:fontScheme><a:fmtScheme name="gomehagent">'
-            f'<a:fillStyleLst>{fills}</a:fillStyleLst><a:lnStyleLst>{lines}</a:lnStyleLst>'
-            f'<a:effectStyleLst>{effects}</a:effectStyleLst><a:bgFillStyleLst>{fills}</a:bgFillStyleLst>'
-            f'</a:fmtScheme></a:themeElements></a:theme>')
-
-
-def _xfrm(box: dict) -> str:
-    return (f'<a:xfrm><a:off x="{_emu(box["x"])}" y="{_emu(box["y"])}"/>'
-            f'<a:ext cx="{_emu(box["w"])}" cy="{_emu(box["h"])}"/></a:xfrm>')
-
-
-def _pic(sid: int, name: str, rid: str, box: dict, crop: dict | None = None) -> str:
-    src = ""
-    if crop and any(crop.get(k, 0) > 0.0005 for k in ("l", "t", "r", "b")):
-        src = "<a:srcRect " + " ".join(
-            f'{k}="{int(round(crop.get(k, 0) * 100000))}"' for k in ("l", "t", "r", "b")) + "/>"
-    return (f'<p:pic><p:nvPicPr><p:cNvPr id="{sid}" name="{_x(name)}"/>'
-            f'<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
-            f'<p:blipFill><a:blip r:embed="{rid}"/>{src}<a:stretch><a:fillRect/></a:stretch></p:blipFill>'
-            f'<p:spPr>{_xfrm(box)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>')
-
-
-def _rect(sid: int, name: str, box: dict, fill: str, alpha: int) -> str:
-    return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="{_x(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
-            f'<p:spPr>{_xfrm(box)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-            f'<a:solidFill><a:srgbClr val="{fill}"><a:alpha val="{alpha}"/></a:srgbClr></a:solidFill>'
-            f'<a:ln><a:noFill/></a:ln></p:spPr>'
-            f'<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>')
-
-
-def _text(sid: int, name: str, box: dict, lines: list[str], *, font_px: int,
-          colour: str, face: str, align: str = "l", anchor: str = "b") -> str:
-    paras = "".join(
-        f'<a:p><a:pPr algn="{align}"><a:lnSpc><a:spcPct val="95000"/></a:lnSpc></a:pPr>'
-        f'<a:r><a:rPr lang="en-US" sz="{_hpt(font_px)}" b="1" dirty="0">'
-        f'<a:solidFill><a:srgbClr val="{colour}"/></a:solidFill>'
-        f'<a:latin typeface="{_x(face)}"/></a:rPr><a:t>{_x(line)}</a:t></a:r></a:p>'
-        for line in lines)
-    return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="{_x(name)}"/><p:cNvSpPr txBox="1"/>'
-            f'<p:nvPr/></p:nvSpPr><p:spPr>{_xfrm(box)}<a:prstGeom prst="rect"><a:avLst/>'
-            f'</a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" '
-            f'tIns="0" rIns="0" bIns="0" anchor="{anchor}"><a:normAutofit/></a:bodyPr>'
-            f'<a:lstStyle/>{paras}</p:txBody></p:sp>')
-
-
-def _pill(sid: int, name: str, box: dict, text: str, *, font_px: int, fill: str,
-          colour: str, face: str) -> str:
-    pad = _emu(font_px * 1.0)
-    return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="{_x(name)}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
-            f'<p:spPr>{_xfrm(box)}<a:prstGeom prst="roundRect"><a:avLst>'
-            f'<a:gd name="adj" fmla="val 50000"/></a:avLst></a:prstGeom>'
-            f'<a:solidFill><a:srgbClr val="{fill}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>'
-            f'<p:txBody><a:bodyPr wrap="square" lIns="{pad}" tIns="0" rIns="{pad}" bIns="0" '
-            f'anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" '
-            f'sz="{_hpt(font_px)}" b="1" dirty="0"><a:solidFill><a:srgbClr val="{colour}"/>'
-            f'</a:solidFill><a:latin typeface="{_x(face)}"/></a:rPr><a:t>{_x(text)}</a:t></a:r>'
-            f'</a:p></p:txBody></p:sp>')
 
 
 def deck(frame: bytes, *, size: tuple[int, int], headline: str = "", ask: str = "",
@@ -367,6 +229,14 @@ def deck(frame: bytes, *, size: tuple[int, int], headline: str = "", ask: str = 
          title: str = "Ad") -> dict:
     """One slide, four to five layers, as .pptx bytes: `{ok, pptx, layers,
     skipped, colour, scrim, font, size}`.
+
+    WRITTEN WITH python-pptx, not by hand. The first version assembled the
+    package itself — thirteen parts, the minimum PowerPoint opens — and
+    Canva's importer answered `500 server error` on it (owner, 2026-09-08).
+    A package the mature writer produces carries the parts every importer
+    expects (presentation defaults, view and presentation properties, table
+    styles, a real master and theme), and it is what those importers see
+    all day. The layout is computed here; the writer only sets it down.
 
     `frame` is the kept picture (PNG/JPEG bytes). `theme` is the brand's
     email/brand theme (`colors.accent`, `colors.accent_text`, `colors.text`,
@@ -411,80 +281,105 @@ def deck(frame: bytes, *, size: tuple[int, int], headline: str = "", ask: str = 
     lay = layout(W, H, headline=headline, ask=ask, safe=safe, logo_aspect=logo_aspect)
     region = lay.get("headline") or lay.get("cta")
     colour, scrim = _colour_for(img, crop, W, H, region, dark_text)
-
     photo_png = frame if frame[:8] == b"\x89PNG\r\n\x1a\n" else _png(img.convert("RGBA"))
-    media = {"image1.png": photo_png}
-    rels = [("rId1", f"{_REL}/slideLayout", "../slideLayouts/slideLayout1.xml"),
-            ("rId2", f"{_REL}/image", "../media/image1.png")]
-    shapes = [_pic(2, "Photo", "rId2", {"x": 0, "y": 0, "w": W, "h": H}, crop)]
-    made = ["Photo"]
-    sid = 3
+
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+    from pptx.util import Emu, Pt
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(_emu(W)), Emu(_emu(H))
+    blank = prs.slide_layouts[6]          # the template's "Blank" layout
+    slide = prs.slides.add_slide(blank)
+    made = []
+
+    def _rgb(hexv: str):
+        return RGBColor(int(hexv[0:2], 16), int(hexv[2:4], 16), int(hexv[4:6], 16))
+
+    def _box(b: dict) -> tuple:
+        return Emu(_emu(b["x"])), Emu(_emu(b["y"])), Emu(_emu(b["w"])), Emu(_emu(b["h"]))
+
+    pic = slide.shapes.add_picture(io.BytesIO(photo_png), *_box({"x": 0, "y": 0, "w": W, "h": H}))
+    pic.name = "Photo"
+    # THE COVER CROP, kept adjustable: the same cut `compose.crop_placements`
+    # makes in pixels, expressed as a crop Canva keeps on the element.
+    # Only a real cut is written: the library writes an empty <a:srcRect/>
+    # for a zero crop, which reads as a crop to anything that looks.
+    for side, attr in (("l", "crop_left"), ("r", "crop_right"), ("t", "crop_top"), ("b", "crop_bottom")):
+        if crop.get(side, 0) > 0.0005:
+            setattr(pic, attr, float(crop[side]))
+    made.append("Photo")
+
     if scrim and (lay.get("headline") or lay.get("cta")):
         top = lay["text_top"] - int(H * 0.04)
-        shapes.append(_rect(sid, "Scrim", {"x": 0, "y": top, "w": W, "h": H - top},
-                            "000000" if scrim == "dark" else "FFFFFF", 38000))
+        sh = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, *_box({"x": 0, "y": top, "w": W, "h": H - top}))
+        sh.name = "Scrim"
+        sh.fill.solid()
+        sh.fill.fore_color.rgb = _rgb("000000" if scrim == "dark" else "FFFFFF")
+        sh.line.fill.background()
+        # python-pptx has no alpha API; the DrawingML element does.
+        ns = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        srgb = sh.fill._xPr.find(f".//{ns}srgbClr")
+        if srgb is not None:
+            from lxml import etree
+            alpha = etree.SubElement(srgb, f"{ns}alpha")
+            alpha.set("val", "38000")
+        sh.text_frame.text = ""
         made.append("Scrim")
-        sid += 1
+
     if logo_img is not None and lay.get("logo"):
-        media["image2.png"] = _png(logo_img.convert("RGBA"))
-        rels.append(("rId3", f"{_REL}/image", "../media/image2.png"))
-        shapes.append(_pic(sid, "Logo", "rId3", lay["logo"]))
+        lg = slide.shapes.add_picture(io.BytesIO(_png(logo_img.convert("RGBA"))), *_box(lay["logo"]))
+        lg.name = "Logo"
         made.append("Logo")
-        sid += 1
+
     if lay.get("headline"):
         hb = lay["headline"]
-        shapes.append(_text(sid, "Headline", hb, hb["lines"], font_px=hb["font_px"],
-                            colour=colour, face=heading_face))
+        tb = slide.shapes.add_textbox(*_box(hb))
+        tb.name = "Headline"
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.BOTTOM
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = Emu(0)
+        for i, line in enumerate(hb["lines"]):
+            para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            para.alignment = PP_ALIGN.LEFT
+            para.line_spacing = 0.95
+            run = para.add_run()
+            run.text = line
+            run.font.name = heading_face
+            run.font.size = Pt(hb["font_px"] * PT_PER_PX)
+            run.font.bold = True
+            run.font.color.rgb = _rgb(colour)
         made.append("Headline")
-        sid += 1
+
     if lay.get("cta"):
         cb = lay["cta"]
-        shapes.append(_pill(sid, "CTA", cb, ask, font_px=cb["font_px"], fill=accent,
-                            colour=accent_text, face=body_face))
+        pill = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, *_box(cb))
+        pill.name = "CTA"
+        pill.adjustments[0] = 0.5
+        pill.fill.solid()
+        pill.fill.fore_color.rgb = _rgb(accent)
+        pill.line.fill.background()
+        pt = pill.text_frame
+        pt.vertical_anchor = MSO_ANCHOR.MIDDLE
+        pt.margin_left = pt.margin_right = Emu(_emu(cb["font_px"]))
+        pt.margin_top = pt.margin_bottom = Emu(0)
+        para = pt.paragraphs[0]
+        para.alignment = PP_ALIGN.CENTER
+        run = para.add_run()
+        run.text = ask
+        run.font.name = body_face
+        run.font.size = Pt(cb["font_px"] * PT_PER_PX)
+        run.font.bold = True
+        run.font.color.rgb = _rgb(accent_text)
         made.append("CTA")
-        sid += 1
 
-    slide = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-             f'<p:sld {_NS}><p:cSld name="{_x(title[:60])}"><p:spTree>{_EMPTY_TREE_HEAD}'
-             + "".join(shapes) +
-             f'</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>')
-
+    prs.core_properties.title = title[:120]
+    prs.core_properties.author = "gomehagent"
     out = io.BytesIO()
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", _content_types())
-        z.writestr("_rels/.rels", _rels([
-            ("rId1", f"{_REL}/officeDocument", "ppt/presentation.xml"),
-            ("rId2", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
-             "docProps/core.xml"),
-            ("rId3", f"{_REL}/extended-properties", "docProps/app.xml")]))
-        z.writestr("docProps/core.xml", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
-            'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
-            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-            f'<dc:title>{_x(title[:120])}</dc:title><dc:creator>gomehagent</dc:creator>'
-            '</cp:coreProperties>'))
-        z.writestr("docProps/app.xml", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
-            '<Application>gomehagent</Application><Slides>1</Slides></Properties>'))
-        z.writestr("ppt/presentation.xml", _presentation(W, H))
-        z.writestr("ppt/_rels/presentation.xml.rels", _rels([
-            ("rId1", f"{_REL}/slideMaster", "slideMasters/slideMaster1.xml"),
-            ("rId2", f"{_REL}/slide", "slides/slide1.xml"),
-            ("rId3", f"{_REL}/theme", "theme/theme1.xml")]))
-        z.writestr("ppt/slideMasters/slideMaster1.xml", _master())
-        z.writestr("ppt/slideMasters/_rels/slideMaster1.xml.rels", _rels([
-            ("rId1", f"{_REL}/slideLayout", "../slideLayouts/slideLayout1.xml"),
-            ("rId2", f"{_REL}/theme", "../theme/theme1.xml")]))
-        z.writestr("ppt/slideLayouts/slideLayout1.xml", _layout_part())
-        z.writestr("ppt/slideLayouts/_rels/slideLayout1.xml.rels", _rels([
-            ("rId1", f"{_REL}/slideMaster", "../slideMasters/slideMaster1.xml")]))
-        z.writestr("ppt/theme/theme1.xml", _theme_part(accent, heading_face, body_face))
-        z.writestr("ppt/slides/slide1.xml", slide)
-        z.writestr("ppt/slides/_rels/slide1.xml.rels", _rels(rels))
-        for name, blob in media.items():
-            z.writestr(f"ppt/media/{name}", blob)
+    prs.save(out)
     return {"ok": True, "pptx": out.getvalue(), "layers": made, "skipped": skipped,
             "colour": f"#{colour}", "scrim": scrim, "size": (W, H),
             "font": {"heading": heading_face, "body": body_face},
@@ -527,7 +422,8 @@ def read_layers(pptx: bytes) -> dict:
             "colour": rpr_fill.get("val") if rpr_fill is not None else "",
             "fill": sp_fill.get("val") if sp_fill is not None else "",
             "geometry": geom.get("prst") if geom is not None else "",
-            "cropped": el.find(".//a:srcRect", ns) is not None})
+            "cropped": any(int(v or 0) for v in ((el.find(".//a:srcRect", ns).attrib.values())
+                                                 if el.find(".//a:srcRect", ns) is not None else []))})
     return {"size": size, "layers": layers, "parts": sorted(parts)}
 
 

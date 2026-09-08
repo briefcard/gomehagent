@@ -1124,6 +1124,50 @@ bake-off decides; the adapter is the next ship.
 
 ---
 
+### The deck is a standard package, and a Canva import that fails falls back to the picture — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's report:** *"Canva: 500: {"statusCode":500,"error":"server
+error"} — I am getting this since our latest update with the 'powerpoint'
+approach."*
+
+**What was true.** `layers.deck` assembled the .pptx by hand — the
+thirteen parts PowerPoint opens, which python-pptx parsed and QuickLook
+rendered — and Canva's importer answered 500 on it. The import call was
+not filed in `toolcalls`, not retried, and its failure closed the door that
+had worked the day before: the flash, and nothing in Canva.
+
+**The ship.** `python-pptx>=1.0` in requirements; `layers.deck` writes the
+same layout with the library (crop via `crop_*`, names via `shape.name`,
+fonts/colours per run, the pill's `adjustments[0]`, the scrim's alpha as
+DrawingML), so the package carries every part importers expect; the
+hand-written parts are gone; `read_layers` is unchanged and the layers
+suite reads the library's output. `canva.import_design` files every
+attempt as `canva:POST /imports` in `toolcalls` with Canva's own answer,
+and retries a 5xx once after `IMPORT_RETRY_S` (`_server_side`).
+`hosting.to_canva`: a failed import falls back to `editable_from_image` —
+the picture as ONE flat image — recorded on the placement and marked with
+the tag `canva-flat:<fmt>` (`is_flat`, `mark_flat`); the note says why and
+that it is flat; the Kept-frames card says "flat in Canva" and offers "try
+the layers again"; a flat placement is never "reused" — the next press
+tries the layers, and a success replaces the flat design and clears the
+mark.
+
+**Standing rules it adds:**
+- **A package another program must read is written by the standard
+  writer** (`the_deck_is_written_by_the_library`).
+- **A provider's failure is filed and retried once when it is theirs**
+  (`an_import_is_filed_as_a_tool_call`, `a_server_error_is_tried_once_more`).
+- **The door stays open**: a failed layered import opens the flat picture,
+  said as flat, and the layers are tried again next time
+  (`a_failed_import_falls_back_to_the_picture`, `a_flat_placement_is_tried_again`,
+  `the_card_says_flat`).
+
+**Unverified until pressed:** whether Canva's importer accepts the
+library's package (the 500 gave no reason); if it still refuses, the tool
+call carries Canva's answer and the frame still opens flat.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1276,6 +1320,14 @@ bake-off decides; the adapter is the next ship.
 > photographs (board pins first, then the catalogue), told to the model and
 > to the judge; a product that is neither is the fault. What generation
 > cannot promise is said in §5.
+>
+> **SHIPPED 2026-09-08, THIRTEENTH: THE DECK IS A STANDARD PACKAGE, AND A
+> CANVA IMPORT THAT FAILS FALLS BACK TO THE PICTURE** (6 guards, §5 has the
+> record). python-pptx writes the deck; the import is filed and a 5xx
+> retried once; a failed import opens the flat picture, said as flat, and
+> the layers are tried again on the next press. **Owner's move:** press
+> "layer in Canva" once more; if it opens flat, the tool-call record holds
+> Canva's answer.
 >
 > **NEXT: A SECOND IMAGE PROVIDER FOR THE BAKE-OFF — GOOGLE'S IMAGE MODELS.**
 > Docs read 2026-09-08 (ai.google.dev/gemini-api/docs/image-generation):

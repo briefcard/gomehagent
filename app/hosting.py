@@ -152,6 +152,28 @@ def _fallback_headline(tenant: str, row) -> str:
     return "Headline"
 
 
+FLAT_TAG = "canva-flat:"
+
+
+def is_flat(row, fmt: str) -> bool:
+    """Whether this placement's design in Canva is the flat fallback."""
+    return f"{FLAT_TAG}{fmt}" in [str(t) for t in (getattr(row, "tags", None) or [])]
+
+
+def mark_flat(asset_id: str, fmt: str, on: bool) -> None:
+    """Record on the frame that a placement went to Canva flat (or that the
+    layers replaced it). A tag, like the boards: the fact rides the row."""
+    with db.SessionLocal() as s:
+        got = s.get(db.KbAsset, asset_id)
+        if got is None:
+            return
+        tags = [str(t) for t in (got.tags or []) if str(t) != f"{FLAT_TAG}{fmt}"]
+        if on:
+            tags.append(f"{FLAT_TAG}{fmt}")
+        got.tags = tags
+        s.commit()
+
+
 def to_canva(tenant: str, asset_id: str, fmt: str = "1:1") -> dict:
     """Hand a frame to Canva AS LAYERS, for one placement.
 
@@ -183,7 +205,10 @@ def to_canva(tenant: str, asset_id: str, fmt: str = "1:1") -> dict:
     have = dict(row.canva_designs or {})
     if row.canva_design_id and not have.get("1:1"):
         have["1:1"] = row.canva_design_id
-    if have.get(fmt):
+    # A FLAT FALLBACK IS NOT A DESIGN TO REUSE. When the layered import
+    # failed and the frame went as one picture, a second press tries the
+    # layers again rather than opening the flat one for ever.
+    if have.get(fmt) and not is_flat(row, fmt):
         did = str(have[fmt])
         return {"ok": True, "design_id": did, "reused": True, "fmt": fmt,
                 "edit_url": f"https://www.canva.com/design/{did}/edit",
@@ -205,10 +230,41 @@ def to_canva(tenant: str, asset_id: str, fmt: str = "1:1") -> dict:
     # Canva caps a design title at 50 characters, unencoded (IMPORTS_DOC).
     title = f"{(row.title or 'Ad frame')[:canva.UPLOAD_NAME_MAX - len(fmt) - 3]} · {fmt}"
     sent = canva.import_design(tenant, made["pptx"], title=title)
+    flat_said = ""
     if not sent.get("ok"):
-        return sent
+        # THE DOOR STAYS OPEN. Canva's importer answered 500 on every deck
+        # for a day (owner, 2026-09-08) and the button was dead with it. A
+        # failed import falls back to the route that has always worked —
+        # the picture as one flat image in a custom design — SAID as such
+        # on the frame and in the note, so nobody mistakes it for layers,
+        # and the next press tries the layers again.
+        why = str(sent.get("error") or "the import failed")[:160]
+        if have.get(fmt) and is_flat(row, fmt):
+            did = str(have[fmt])
+            return {"ok": True, "design_id": did, "reused": True, "fmt": fmt, "flat": True,
+                    "edit_url": f"https://www.canva.com/design/{did}/edit",
+                    "note": f"the layers could not be imported again ({why}); the flat "
+                            f"picture already in Canva is opened instead"}
+        flat = canva.editable_from_image(tenant, blob, title=title, entity_key=row.entity_key or "",
+                                         record=False)
+        if not flat.get("ok"):
+            return {"ok": False, "error": f"the layers could not be imported ({why}), and the "
+                                          f"flat picture could not be opened either: "
+                                          f"{str(flat.get('error') or '')[:120]}"}
+        kb.set_asset_design(row.id, fmt, str(flat.get("design_id") or ""))
+        mark_flat(row.id, fmt, True)
+        acct = canva.which_account(tenant)
+        return {"ok": True, "design_id": str(flat.get("design_id") or ""), "reused": False,
+                "fmt": fmt, "flat": True, "edit_url": flat.get("edit_url", ""),
+                "account": acct.get("source", ""), "layers": [], "skipped": {},
+                "note": (f"the layers could not be imported — Canva answered: {why}. The "
+                         f"picture is open in Canva as ONE flat image instead; press "
+                         f"'layer in Canva' again later to try the layers."
+                         + (f" It went to the agency's Canva — {acct['note']}"
+                            if acct.get("note") else ""))}
     design_id = str(sent.get("design_id") or "")
     kb.set_asset_design(row.id, fmt, design_id)
+    mark_flat(row.id, fmt, False)
     # WHOSE CANVA IT WENT INTO, when that is not the obvious answer. A frame
     # that opened in the agency's Canva because the client's own connection
     # was revoked is a fact the person editing it needs, and the design's

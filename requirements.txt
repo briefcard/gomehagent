@@ -25,3 +25,8 @@ cryptography>=42.0
 # matter inside a voice turn's latency budget.
 numpy>=1.26
 Pillow>=10.0
+# The layers deck a frame goes to Canva as (`app/layers.py`). The first
+# version wrote the .pptx by hand and Canva's importer answered 500 on it
+# (owner, 2026-09-08); the package a mature writer produces is the one every
+# importer sees all day, so the deck is written with it.
+python-pptx>=1.0
