@@ -1549,6 +1549,15 @@ class _Provenance:
     #: for a decision that has already been made.
     placements = Column(JSON, default=dict)
 
+    #: THE SAME FRAME AS LAYERS IN CANVA, one design per placement:
+    #: `{"1:1": design_id, "4:5": …, "9:16": …}`. `canva_design_id` above
+    #: stays the 1:1 (every reader of it keeps working); the others live
+    #: here so `canva.harvest` can bring each placement back at Meta's
+    #: recommended size. Owner, 2026-09-07: *"is there a way to layer them
+    #: so we can adjust as needed?"* — the layers are the design; this is
+    #: the handle to it.
+    canva_designs = Column(JSON, default=dict)
+
     #: WHO SERVES THIS PICTURE. `{}` while we do; once the client's own CMS
     #: holds it, `{"platform": …, "id": …, "url": …, "at": …}` and `url` above
     #: points at THEIR copy.

@@ -278,8 +278,10 @@ def main() -> int:
 
     print("\n— and Canva is the editable stage, on demand —")
     from app import canva
-    _real_editable = canva.editable_from_image
-    canva.editable_from_image = lambda t, b, **kw: {
+    # The frame goes as LAYERS (a deck through the documented import) since
+    # 2026-09-07; `import_design` is the seam `to_canva` reaches Canva through.
+    _real_import = canva.import_design
+    canva.import_design = lambda t, b, **kw: {
         "ok": True, "design_id": "DAF123",
         "edit_url": "https://www.canva.com/design/DAF123/edit"}
     did, _ = _frame("eien", blob=png(45))
@@ -309,15 +311,18 @@ def main() -> int:
        _r.status_code == 303
        and "canva.com/design/DAF123/edit" in (_r.headers.get("location") or ""),
        f"{_r.status_code} {_r.headers.get('location', '')[:80]}")
-    # Through the REAL editable_from_image / create_design, with only the
-    # transport stubbed: the frame must be the only row carrying the design.
-    canva.editable_from_image = _real_editable
-    canva.upload_bytes = lambda t, b, name, **kw: {"ok": True, "asset_id": "AST9"}
+    # Through the REAL import_design, with only the transport stubbed: the
+    # frame must be the only row carrying the design.
+    canva.import_design = _real_import
+    canva.call_import = lambda t, b, title, mime: {
+        "ok": True, "data": {"job": {"id": "job-9", "status": "in_progress"}}}
+    canva.IMPORT_POLL_S = 0
     _saved_call = canva.call
     canva.call = lambda t, m, p, **kw: (
-        {"ok": True, "data": {"design": {"id": "DAF999", "urls": {
-            "edit_url": "https://www.canva.com/design/DAF999/edit"}}}}
-        if p == "/designs" else {"ok": True, "data": {}})
+        {"ok": True, "data": {"job": {"id": "job-9", "status": "success", "result": {
+            "designs": [{"id": "DAF999", "urls": {
+                "edit_url": "https://www.canva.com/design/DAF999/edit"}}]}}}}
+        if p == "/imports/job-9" else {"ok": True, "data": {}})
     _fresh2, _ = _frame("eien", blob=png(47))
     _n_before = len(kb.assets("eien", publishable_only=False))
     made2 = hosting.to_canva("eien", _fresh2)

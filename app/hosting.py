@@ -82,58 +82,188 @@ def _bytes(row) -> tuple:
         return b"", f"could not fetch it: {exc.__class__.__name__}"
 
 
-def to_canva(tenant: str, asset_id: str) -> dict:
-    """Hand a frame to Canva so the type and layout can be changed.
+def _copy_for(tenant: str, row) -> dict:
+    """The words this frame was made for — `{headline, ask, output_id}` off the
+    ad variant that asked for it (`batch` tags every frame `output:<id>`), or
+    empty when the frame is not an ad's.
 
-    ON DEMAND, not for every frame at generation. A set is up to thirty
-    variations and two of them get kept; making thirty Canva designs up front
-    is twenty-eight canvases nobody opens, several minutes of upload polling,
-    and a client folder that becomes unusable within a week. So the button is
-    per frame, and the set-wide version is the same call in a loop.
-
-    The design is recorded ON the frame, so the frame that comes back from
-    Canva is the frame that went — `canva.harvest` files the export against
-    the same design id, and without that join a finished design becomes a
-    second, unrelated picture.
+    THE AD'S OWN WORDS, read from the batch record, because that is the one
+    copy `ad_variant_save` edits; a headline stored beside the frame would
+    ship the pre-edit words. `ad_export` reads the same record.
     """
-    from . import canva
+    import json as _json
+    oid = next((str(t)[len("output:"):] for t in list(row.tags or [])
+                if str(t).startswith("output:")), "")
+    out = {"headline": "", "ask": "", "output_id": oid}
+    if not oid:
+        return out
+    from . import layers
+    with db.SessionLocal() as s:
+        arts = (s.query(db.ArtifactBody)
+                .filter(db.ArtifactBody.tenant == tenant,
+                        db.ArtifactBody.format == "ad_batch")
+                .order_by(db.ArtifactBody.id.desc()).all())
+        for art in arts:
+            try:
+                batch = _json.loads(art.body or "") or {}
+            except Exception:                                    # noqa: BLE001
+                continue
+            for v in (batch.get("variants") or []):
+                if str(v.get("output_id") or "") != oid:
+                    continue
+                text = str(v.get("text") or "")
+                out["headline"] = (str(v.get("headline") or "").strip()
+                                   or layers.first_line(text))
+                out["ask"] = layers.ask_line(text)
+                return out
+    return out
+
+
+def _theme(tenant: str) -> dict:
+    """The brand's theme with every field filled — the SAME record the
+    emails and the site read their colours and faces from, so a layer set in
+    Canva and a button in a campaign agree."""
+    from . import email_render
+    b = kb.brand(tenant)
+    return email_render._theme(dict(getattr(b, "theme", None) or {}))
+
+
+def _logo(theme: dict) -> bytes:
+    """The brand mark's bytes, or nothing. A seam: the suite hands one in."""
+    url = str((theme or {}).get("logo_url") or "")
+    if not url:
+        return b""
+    try:
+        import httpx
+        r = httpx.get(url, timeout=30, follow_redirects=True)
+        return r.content if r.status_code < 400 else b""
+    except Exception:                                            # noqa: BLE001
+        return b""
+
+
+def _fallback_headline(tenant: str, row) -> str:
+    """When a frame carries no copy: the thing it shows, by name, so the
+    headline layer exists and reads as a real one to be retitled."""
+    key = str(getattr(row, "entity_key", "") or "")
+    if key:
+        for e in kb.entities(tenant, available_only=False):
+            if str(getattr(e, "key", "")) == key and getattr(e, "name", ""):
+                return str(e.name)[:60]
+    return "Headline"
+
+
+def to_canva(tenant: str, asset_id: str, fmt: str = "1:1") -> dict:
+    """Hand a frame to Canva AS LAYERS, for one placement.
+
+    Owner, 2026-09-07: *"the text and components are not separate layers on
+    Canva they are burned on — is there a way to layer them so we can adjust
+    as needed?"* There is, through the connection that already works: the
+    Connect API imports a PowerPoint file as a design, and each object in it
+    arrives as its own editable element (`layers` says where that is
+    documented). So the frame goes as a one-slide deck — the photograph,
+    the brand mark, the headline and the CTA pill, each a layer — rather
+    than as one flattened picture the type was painted into.
+
+    ONE DESIGN PER PLACEMENT (`fmt`), because a layout is a fact about a
+    ratio: the 9:16 keeps Meta's safe zones, the others use the frame. The
+    1:1 stays on `canva_design_id`, where `stage`, `harvest` and the console
+    have always read it; the rest are on `canva_designs`.
+
+    ON DEMAND, not for every frame at generation — a set is up to thirty
+    variations and two get kept — and reused: a frame already in Canva for
+    that placement opens the design it has rather than making a second.
+    """
+    from . import canva, compose, layers
     row = _row(tenant, asset_id)
     if row is None:
         return {"ok": False, "error": "no such picture"}
-    if row.canva_design_id:
-        return {"ok": True, "design_id": row.canva_design_id, "reused": True,
-                "edit_url": f"https://www.canva.com/design/{row.canva_design_id}/edit",
+    if fmt not in compose.SIZES:
+        return {"ok": False, "error": f"unknown placement {fmt!r} — one of "
+                                      f"{', '.join(compose.SIZES)}"}
+    have = dict(row.canva_designs or {})
+    if row.canva_design_id and not have.get("1:1"):
+        have["1:1"] = row.canva_design_id
+    if have.get(fmt):
+        did = str(have[fmt])
+        return {"ok": True, "design_id": did, "reused": True, "fmt": fmt,
+                "edit_url": f"https://www.canva.com/design/{did}/edit",
                 "note": "it is already open in Canva"}
     blob, why = _bytes(row)
     if why:
         return {"ok": False, "error": why}
-    made = canva.editable_from_image(
-        tenant, blob, title=(row.title or "Ad frame")[:120],
-        entity_key=row.entity_key or "",
-        # The frame IS the record: the design id lands on it below. A second
-        # row of kind="design" with the same thumbnail read as another
-        # picture to review.
-        record=False)
+
+    copy = _copy_for(tenant, row)
+    theme = _theme(tenant)
+    made = layers.deck(
+        blob, size=compose.SIZES[fmt],
+        headline=copy["headline"] or _fallback_headline(tenant, row),
+        ask=copy["ask"], theme=theme, logo=_logo(theme),
+        safe=(compose.META_PLACEMENTS.get(fmt) or {}).get("safe"),
+        title=f"{row.title or 'Ad frame'} · {fmt}")
     if not made.get("ok"):
-        return made
-    design_id = str(made.get("design_id") or "")
-    with db.SessionLocal() as s:
-        got = s.get(db.KbAsset, asset_id)
-        if got is not None:
-            got.canva_design_id = design_id
-            s.commit()
+        return {"ok": False, "error": str(made.get("error") or "the layers could not be built")}
+    # Canva caps a design title at 50 characters, unencoded (IMPORTS_DOC).
+    title = f"{(row.title or 'Ad frame')[:canva.UPLOAD_NAME_MAX - len(fmt) - 3]} · {fmt}"
+    sent = canva.import_design(tenant, made["pptx"], title=title)
+    if not sent.get("ok"):
+        return sent
+    design_id = str(sent.get("design_id") or "")
+    kb.set_asset_design(row.id, fmt, design_id)
     # WHOSE CANVA IT WENT INTO, when that is not the obvious answer. A frame
     # that opened in the agency's Canva because the client's own connection
     # was revoked is a fact the person editing it needs, and the design's
     # folder is the only place it would otherwise show.
     acct = canva.which_account(tenant)
-    return {"ok": True, "design_id": design_id, "reused": False,
-            "edit_url": made.get("edit_url", ""),
-            "account": acct.get("source", ""),
-            "note": "the picture is fixed; the text and layout are editable. "
-                    "Nothing is published."
-                    + (f" It went to the agency's Canva, in this account's "
-                       f"folder — {acct['note']}" if acct.get("note") else "")}
+    skipped = dict(made.get("skipped") or {})
+    note = (f"{', '.join(made['layers'])} are separate layers in Canva"
+            + (f" (no {'/'.join(skipped)}: " + "; ".join(skipped.values()) + ")"
+               if skipped else "")
+            + ". Nothing is published."
+            + (f" It went to the agency's Canva, in this account's folder — "
+               f"{acct['note']}" if acct.get("note") else ""))
+    return {"ok": True, "design_id": design_id, "reused": False, "fmt": fmt,
+            "edit_url": sent.get("edit_url", ""), "account": acct.get("source", ""),
+            "layers": list(made["layers"]), "skipped": skipped,
+            "colour": made.get("colour", ""), "note": note}
+
+
+def layer_placements(tenant: str, asset_id: str) -> dict:
+    """Every Meta placement of one kept frame, as its own layered design in
+    Canva. Owner, 2026-09-07: *"how do we ensure that final approved assets
+    get created in the different ratios needed for the meta placements?"* —
+    by making each ratio on approval, with the layers reflowed to it, so what
+    the designer adjusts is the ratio that runs. `{ok, designs, errors}`."""
+    from . import compose
+    out: dict = {"ok": False, "designs": {}, "errors": {}}
+    for fmt in compose.META_PLACEMENTS:
+        got = to_canva(tenant, asset_id, fmt)
+        if got.get("ok"):
+            out["designs"][fmt] = got["design_id"]
+        else:
+            out["errors"][fmt] = str(got.get("error") or "")[:160]
+    out["ok"] = bool(out["designs"])
+    out["note"] = (f"{len(out['designs'])} of {len(compose.META_PLACEMENTS)} placements "
+                   f"are layered designs in Canva"
+                   + (f"; not made: " + "; ".join(f"{k}: {v}" for k, v in out["errors"].items())
+                      if out["errors"] else ""))
+    return out
+
+
+def layer_kept(tenant: str, asset_ids: list) -> dict:
+    """The approval's other half, off the request: each kept frame's three
+    placements as layered designs. One line per frame, so a failure to make
+    them is a sentence in the run strip rather than a silence."""
+    out = {"made": 0, "frames": 0, "reasons": []}
+    for aid in list(asset_ids or []):
+        got = layer_placements(tenant, str(aid))
+        out["frames"] += 1
+        out["made"] += len(got.get("designs") or {})
+        for why in (got.get("errors") or {}).values():
+            if why and why not in out["reasons"]:
+                out["reasons"].append(why)
+    out["note"] = (f"{out['made']} layered design(s) in Canva for {out['frames']} kept frame(s)"
+                   + (f" — {'; '.join(out['reasons'][:3])}" if out["reasons"] else ""))
+    return out
 
 
 def publish(tenant: str, asset_id: str) -> dict:

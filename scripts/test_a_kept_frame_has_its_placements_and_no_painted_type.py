@@ -178,9 +178,9 @@ def main() -> int:
     ck("approving cuts the 4:5 and 9:16 placements onto the frame",
        cut.get("ok") and set((cut.get("cut") or {}).keys()) >= {"4:5", "9:16"}, str(cut)[:160])
     page = ui.render_content(KEY, tenant="baci", sub="pictures")
-    ck("the Pictures page shows the kept frame with its placements and their sizes",
+    ck("the Pictures page shows the kept frame with its placements and Meta's sizes for them",
        "Kept frames" in page and "4:5" in page and "9:16" in page and "1080" in page
-       and "1350" in page and "1920" in page, "")
+       and "1440&times;1800" in page and "1440&times;2560" in page, "")
     lines = web._variant_frames("baci", "out-1")
     ck("  and the ad export lists each frame's placements under it",
        any("4:5" in ln and "9:16" in " ".join(lines) for ln in lines)

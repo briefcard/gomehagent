@@ -200,9 +200,50 @@ def _call_binary(tenant: str, path: str, blob: bytes, name: str) -> dict:
         return {"ok": True, "data": {}}
 
 
+#: DESIGN IMPORTS — the documented way a file becomes an editable design:
+#: `POST /v1/imports`, body = the bytes, `Content-Type: application/octet-stream`,
+#: `Import-Metadata: {"title_base64", "mime_type"}`; title ≤ 50 characters
+#: unencoded; then `GET /v1/imports/{jobId}` until `success` (result.designs[])
+#: or `failed` (error.message). PowerPoint is among the accepted types, and
+#: each object on a slide arrives as its own element — which is how a frame
+#: reaches Canva as LAYERS (`layers.deck`) rather than one flat picture.
+IMPORTS_DOC = "https://www.canva.dev/docs/connect/api-reference/design-imports/create-design-import-job/"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+IMPORT_POLLS, IMPORT_POLL_S = 12, 1.5
+
+
+def _call_import(tenant: str, blob: bytes, title: str, mime: str) -> dict:
+    """`POST /imports` exactly as documented (IMPORTS_DOC)."""
+    import base64 as _b64
+
+    secret, why = _token(tenant)
+    if why:
+        return {"ok": False, "error": why}
+    import httpx
+    meta = _b64.b64encode(title[:UPLOAD_NAME_MAX].encode()).decode()
+    try:
+        r = httpx.post(f"{BASE}/imports", timeout=TIMEOUT, content=blob,
+                       headers={"Authorization": f"Bearer {secret}",
+                                "Content-Type": "application/octet-stream",
+                                "Import-Metadata":
+                                    '{"title_base64":"%s","mime_type":"%s"}' % (meta, mime)})
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "error": "Canva rejected the token — reconnect on "
+                                      "the Accounts tab."}
+    if r.status_code >= 400:
+        return {"ok": False, "error": f"{r.status_code}: {r.text[:200]}"}
+    try:
+        return {"ok": True, "data": r.json()}
+    except Exception:                                            # noqa: BLE001
+        return {"ok": True, "data": {}}
+
+
 from . import toolcalls as _tc  # noqa: E402
 call = _tc.instrument('canva', _call)          # replaceable, so the suite can drive every path
 call_binary = _call_binary
+call_import = _call_import
 
 
 # ---------------------------------------------------------------------------
@@ -518,12 +559,36 @@ def create_design(tenant: str, *, title: str, design_type: str = "",
             "recorded": said}
 
 
-def export(tenant: str, design_id: str, fmt: str = "png") -> dict:
-    """Start an export. Returns the job — Canva finishes it asynchronously."""
+#: EXPORTS — `POST /v1/exports {design_id, format:{type, width?, height?}}`;
+#: for png/jpg a `width`/`height` in pixels (40–25000) scales the export,
+#: keeping the design's aspect (both given and mismatched → the larger wins).
+#: The result's download URLs EXPIRE AFTER 24 HOURS, so `harvest` keeps the
+#: bytes rather than the link.
+EXPORTS_DOC = "https://www.canva.dev/docs/connect/api-reference/exports/create-design-export-job/"
+EXPORT_RESULT_DOC = "https://www.canva.dev/docs/connect/api-reference/exports/get-design-export-job/"
+EXPORT_SIDE_MIN, EXPORT_SIDE_MAX = 40, 25000
+
+
+def export(tenant: str, design_id: str, fmt: str = "png", *,
+           width: int = 0, height: int = 0) -> dict:
+    """Start an export. Returns the job — Canva finishes it asynchronously.
+    `width`/`height` (png/jpg only, EXPORTS_DOC) ask for the picture at a
+    placement's size — Meta's recommended 1440×1800 for Feed 4:5, say —
+    rather than at whatever size the design happens to be."""
     if fmt not in ("png", "jpg", "pdf", "gif", "mp4", "pptx"):
         return {"ok": False, "error": f"unsupported export format {fmt!r}"}
+    form: dict = {"type": fmt}
+    if fmt == "jpg":
+        form["quality"] = 92
+    if fmt in ("png", "jpg"):
+        for k, v in (("width", int(width or 0)), ("height", int(height or 0))):
+            if v:
+                if not (EXPORT_SIDE_MIN <= v <= EXPORT_SIDE_MAX):
+                    return {"ok": False, "error": f"export {k} {v} is outside Canva's "
+                                                  f"{EXPORT_SIDE_MIN}–{EXPORT_SIDE_MAX} px"}
+                form[k] = v
     res = call(tenant, "POST", "/exports",
-               payload={"design_id": design_id, "format": {"type": fmt}})
+               payload={"design_id": design_id, "format": form})
     if not res["ok"]:
         return res
     job = (res["data"] or {}).get("job") or {}
@@ -789,6 +854,59 @@ def _size_of(blob: bytes) -> tuple:
         return 0, 0
 
 
+def import_design(tenant: str, blob: bytes, *, title: str,
+                  mime: str = PPTX_MIME, poll: int = IMPORT_POLLS) -> dict:
+    """A file — a `layers.deck` — as a new, editable design, filed in this
+    account's folder. `{ok, design_id, edit_url, view_url, thumbnail_url,
+    filed, filed_error}`; the caller's row records the id.
+
+    The import is a job, so this waits for it a bounded number of times: a
+    caller left holding "in_progress" has nothing to do with it, and an
+    unbounded poll turns a Canva outage into a hung request.
+    """
+    if not blob:
+        return {"ok": False, "error": "nothing to import"}
+    res = call_import(tenant, blob, title, mime)
+    if not res.get("ok"):
+        return res
+    job = (res.get("data") or {}).get("job") or {}
+    job_id = str(job.get("id") or "")
+    status = str(job.get("status") or "in_progress")
+    import time as _time
+    tries = 0
+    while status == "in_progress":
+        if not job_id:
+            return {"ok": False, "error": "Canva accepted the file but returned no "
+                                          "job to follow."}
+        if tries >= max(1, poll):
+            return {"ok": False, "job_id": job_id,
+                    "error": "the import was still processing after several "
+                             "checks — try again rather than assuming it failed"}
+        _time.sleep(IMPORT_POLL_S)
+        tries += 1
+        got = call(tenant, "GET", f"/imports/{job_id}")
+        if not got.get("ok"):
+            return got
+        job = (got.get("data") or {}).get("job") or {}
+        status = str(job.get("status") or "in_progress")
+    if status == "failed":
+        return {"ok": False, "error": (job.get("error") or {}).get("message")
+                or "Canva could not import the file"}
+    designs = list(((job.get("result") or {}).get("designs")) or [])
+    d = designs[0] if designs else {}
+    did = str(d.get("id") or "")
+    if not did:
+        return {"ok": False, "error": "the import finished with no design id"}
+    filed = _file_into_folder(tenant, did)
+    urls = d.get("urls") or {}
+    return {"ok": True, "design_id": did,
+            "edit_url": urls.get("edit_url", "") or f"https://www.canva.com/design/{did}/edit",
+            "view_url": urls.get("view_url", ""),
+            "thumbnail_url": (d.get("thumbnail") or {}).get("url", ""),
+            "filed": filed.get("ok", False),
+            "filed_error": "" if filed.get("ok") else filed.get("error", "")}
+
+
 # ---------------------------------------------------------------------------
 # From a finished design to an image an email can actually use
 # ---------------------------------------------------------------------------
@@ -799,8 +917,86 @@ def _size_of(blob: bytes) -> tuple:
 HARVEST_TIMEOUT_S, HARVEST_POLL_S = 25, 2.0
 
 
+def _download(url: str) -> tuple:
+    """`(bytes, mime)` of an export, or `(b"", "")`. A seam for the suite."""
+    try:
+        import httpx
+        r = httpx.get(url, timeout=90, follow_redirects=True)
+        if r.status_code >= 400 or not r.content:
+            return b"", ""
+        return r.content, (r.headers.get("content-type") or "image/png").split(";")[0].strip()
+    except Exception:                                            # noqa: BLE001
+        return b"", ""
+
+
+download = _download
+
+
+def _keep(tenant: str, url: str) -> str:
+    """Canva's export link into OUR store, returning our URL — or "" and the
+    caller keeps Canva's. The links expire after 24 hours
+    (EXPORT_RESULT_DOC): a row pointing at one would 404 tomorrow, and an
+    approved asset that is gone by the time it is uploaded to Meta is not an
+    approved asset."""
+    from . import media
+    blob, mime = download(url)
+    if not blob:
+        return ""
+    put = media.put(tenant, blob, mime=mime or "image/png", origin="generated")
+    return str(put.get("url") or "") if put.get("ok") else ""
+
+
+def _await_export(tenant: str, started: dict, wait: bool) -> tuple:
+    """`(urls, job_id, failure)` once an export has rendered — or not."""
+    import time as _time
+    urls, job = list(started.get("urls") or []), str(started.get("job_id") or "")
+    deadline = _time.monotonic() + (HARVEST_TIMEOUT_S if wait else 0)
+    while not urls and job and _time.monotonic() < deadline:
+        _time.sleep(HARVEST_POLL_S)
+        got = export_result(tenant, job)
+        if not got.get("ok"):
+            return [], job, str(got.get("error", ""))[:100]
+        if got.get("status") == "failed":
+            return [], job, "Canva could not render it"
+        urls = list(got.get("urls") or [])
+    return urls, job, ""
+
+
+def _harvest_placements(tenant: str, row, *, wait: bool = True) -> dict:
+    """A frame's OTHER placements, each exported from its own layered design
+    at Meta's recommended size (`compose.META_PLACEMENTS`) and recorded on
+    the frame in place of the flat crop. `{filed, pending, failed}`."""
+    from . import compose
+    out: dict = {"filed": 0, "pending": [], "failed": []}
+    designs = {k: str(v) for k, v in dict(row.canva_designs or {}).items()
+               if k != "1:1" and v}
+    if not designs:
+        return out
+    cut = dict(row.placements or {})
+    for fmt, did in designs.items():
+        want = ((compose.META_PLACEMENTS.get(fmt) or {}).get("recommended")
+                or compose.SIZES.get(fmt) or (0, 0))
+        started = export(tenant, did, "png", width=int(want[0]), height=int(want[1]))
+        if not started.get("ok"):
+            out["failed"].append(f"{row.title or did} {fmt}: {str(started.get('error', ''))[:100]}")
+            continue
+        urls, job, failure = _await_export(tenant, started, wait)
+        if failure:
+            out["failed"].append(f"{row.title or job} {fmt}: {failure}")
+            continue
+        if not urls:
+            out["pending"].append({"design_id": did, "job_id": job,
+                                   "title": f"{row.title or ''} {fmt}".strip()})
+            continue
+        cut[fmt] = _keep(tenant, urls[0]) or urls[0]
+        out["filed"] += 1
+    if out["filed"]:
+        kb.set_asset_placements(row.id, cut)
+    return out
+
+
 def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
-            wait: bool = True) -> dict:
+            wait: bool = True, asset_id: str = "") -> dict:
     """Export finished designs and file them as USABLE images.
 
     This was the missing half of the visual loop. `create_design` files a row
@@ -816,11 +1012,15 @@ def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
     the next run. Idempotent by URL through `kb.add_asset`, so re-running
     re-files nothing.
     """
-    import time as _time
     every = kb.assets(tenant, publishable_only=False)
+
+    def _designs(r) -> set:
+        return {str(v) for v in dict(r.canva_designs or {}).values() if v} \
+            | ({str(r.canva_design_id)} if r.canva_design_id else set())
+
     rows = [r for r in every
-            if r.canva_design_id and (not design_id
-                                      or r.canva_design_id == design_id)]
+            if _designs(r) and (not design_id or design_id in _designs(r))
+            and (not asset_id or r.id == asset_id)]
     if not rows:
         return {"ok": True, "filed": 0, "pending": [], "failed": [],
                 "note": "no Canva designs are recorded for this account"}
@@ -829,13 +1029,13 @@ def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
     # or a frame whose source says it was edited — so the sweep does not
     # re-export the same canvas every hour. Naming a design id is the
     # owner's "bring it back again" and overrides that.
-    done = set() if design_id else {
+    done = set() if (design_id or asset_id) else {
         r.canva_design_id for r in every
         if r.kind == "image" and r.canva_design_id
         and ("Canva" in str(r.source or ""))}
     filed, pending, failed = 0, [], []
     for r in rows:
-        if r.canva_design_id in done:
+        if r.canva_design_id and r.canva_design_id in done:
             continue
         # A FRAME THAT WENT TO CANVA COMES BACK AS ITSELF. `hosting.to_canva`
         # records the design on the frame precisely so the finished design is
@@ -843,39 +1043,46 @@ def harvest(tenant: str, *, design_id: str = "", entity_key: str = "",
         # and then skipped the frame as "already an image" — made it a third
         # copy of one picture in the review queue.
         frame = r.kind == "image" and "exported from Canva" not in str(r.source or "")
+        if frame and not r.canva_design_id:
+            # Only placement designs — nothing to bring back as the frame itself.
+            more = _harvest_placements(tenant, r, wait=wait)
+            filed += more["filed"]
+            pending.extend(more["pending"])
+            failed.extend(more["failed"])
+            continue
         started = export(tenant, r.canva_design_id, "png")
         if not started.get("ok"):
             failed.append(f"{r.title or r.canva_design_id}: "
                           f"{str(started.get('error', ''))[:100]}")
             continue
-        urls, job = list(started.get("urls") or []), started.get("job_id", "")
-        deadline = _time.monotonic() + (HARVEST_TIMEOUT_S if wait else 0)
-        while not urls and job and _time.monotonic() < deadline:
-            _time.sleep(HARVEST_POLL_S)
-            got = export_result(tenant, job)
-            if not got.get("ok"):
-                failed.append(f"{r.title or job}: {str(got.get('error',''))[:100]}")
-                break
-            if got.get("status") == "failed":
-                failed.append(f"{r.title or job}: Canva could not render it")
-                break
-            urls = list(got.get("urls") or [])
+        urls, job, failure = _await_export(tenant, started, wait)
+        if failure:
+            failed.append(f"{r.title or job}: {failure}")
+            continue
         if not urls:
             pending.append({"design_id": r.canva_design_id, "job_id": job,
                             "title": r.title or ""})
             continue
+        # THE BYTES, NOT THE LINK: Canva's export URL is gone in 24 hours.
+        kept = _keep(tenant, urls[0]) or urls[0]
         if frame:
             with db.SessionLocal() as s:
                 got = s.get(db.KbAsset, r.id)
                 if got is not None:
-                    got.url = urls[0]
-                    got.source = ((got.source or "generated")
-                                  + " · edited in Canva")
+                    got.url = kept
+                    if "edited in Canva" not in str(got.source or ""):
+                        got.source = ((got.source or "generated")
+                                      + " · edited in Canva")
                     s.commit()
                     filed += 1
+            # AND ITS PLACEMENTS, each from its own layered design.
+            more = _harvest_placements(tenant, r, wait=wait)
+            filed += more["filed"]
+            pending.extend(more["pending"])
+            failed.extend(more["failed"])
             continue
         said = kb.add_asset(
-            tenant, urls[0], rights=kb.OWNED,
+            tenant, kept, rights=kb.OWNED,
             title=(r.title or "Canva design") + " (export)",
             kind="image", subject="graphic", source="exported from Canva",
             entity_key=entity_key or (r.entity_key or ""),

@@ -3732,6 +3732,26 @@ def set_asset_placements(asset_id: str, cut: dict) -> str:
         return "Not recorded."
 
 
+def set_asset_design(asset_id: str, fmt: str, design_id: str) -> str:
+    """Record the Canva design that holds this frame's layers for one
+    placement. One writer. The 1:1 is ALSO written to `canva_design_id`,
+    because that column is what `stage`, `harvest` and the console read."""
+    try:
+        with db.SessionLocal() as s:
+            row = s.get(db.KbAsset, asset_id)
+            if row is None:
+                return "No such asset."
+            have = dict(row.canva_designs or {})
+            have[str(fmt)] = str(design_id)
+            row.canva_designs = have
+            if str(fmt) == "1:1":
+                row.canva_design_id = str(design_id)
+            s.commit()
+        return "Recorded."
+    except Exception:                                            # noqa: BLE001
+        return "Not recorded."
+
+
 def set_asset_hosted(asset_id: str, where: dict, url: str = "") -> str:
     """Record that the client's own platform now serves this picture.
 

@@ -144,14 +144,18 @@ def main() -> int:
             if fid in ("stale-baci-folder", "folder-2"):
                 return {"ok": False, "error": "404: folder not found"}
             return {"ok": True, "data": {}}
-        if path == "/designs":
-            return {"ok": True, "data": {"design": {
-                "id": "des-1", "urls": {"edit_url": "https://www.canva.com/design/des-1/edit",
-                                         "view_url": "https://www.canva.com/design/des-1/view"}}}}
+        if path == "/imports/job-1":
+            # the frame goes as LAYERS through the documented import (2026-09-07)
+            return {"ok": True, "data": {"job": {"id": "job-1", "status": "success", "result": {
+                "designs": [{"id": "des-1", "urls": {
+                    "edit_url": "https://www.canva.com/design/des-1/edit",
+                    "view_url": "https://www.canva.com/design/des-1/view"}}]}}}}
         return {"ok": True, "data": {}}
 
     canva.call = _fake_call
-    canva.upload_bytes = lambda tenant, blob, name, **k: {"ok": True, "asset_id": "asset-1"}
+    canva.call_import = lambda tenant, blob, title, mime: {
+        "ok": True, "data": {"job": {"id": "job-1", "status": "in_progress"}}}
+    canva.IMPORT_POLL_S = 0
     # Baci's folder, remembered from when Baci's own Canva made it.
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, "baci")

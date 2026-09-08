@@ -868,6 +868,66 @@ needs ITS OWN sign-in, buildable as one more `oauth.FLOWS` provider with
 dynamic client registration, minted through `credentials.bearer`. Then the
 layers (`add_text`/`format_text`/`insert_shape`/`insert_fill`/commit), then
 placements by `resize-design` + export per placement.
+**Superseded the same day** — see the next record: the layers ship through
+the Connect import, not the editor, and the editor sign-in is stashed.
+
+---
+### A frame reaches Canva as layers, one design per Meta placement — 2026-09-07 (one ship; hash in the memory note)
+
+**The owner's questions:** *"is there a way to layer them so we can adjust
+as needed?"*, *"how do we ensure that final approved assets get created in
+the different ratios needed for the meta placements?"* and, when a second
+sign-in appeared, *"canva was working before, why are we adjusting the way
+we connect?"*
+
+**What was true.** `hosting.to_canva` uploaded one flat picture and built a
+custom design around it. Connect REST cannot add elements; the editor's
+tools sit behind `mcp.canva.com`, whose protected-resource metadata names
+only itself as token issuer — a second sign-in. That sign-in was built
+(`canva_editor` flow, dynamic registration, minted via `credentials.bearer`),
+its gate refused three suites (a page render REGISTERED the client — a
+side effect no page may have; a non-https base URL had to read blocked;
+`oauth.py` became a 12th `Setting` writer), and the owner's question
+settled it: it is stashed (`git stash list`: "ship 8 (superseded
+2026-09-07)"), not shipped.
+
+**The route:** the Connect API's design import — documented, PowerPoint
+accepted, each object on a slide an editable element. `layers.deck`
+hand-writes a one-slide .pptx (no dependency); `canva.import_design` sends
+it as documented (`POST /v1/imports`, `Import-Metadata`, job polled);
+`hosting.to_canva(fmt)` makes one design PER PLACEMENT (the 1:1 stays on
+`canva_design_id`, the rest on `KbAsset.canva_designs`); approval schedules
+all three (`hosting.layer_kept`, label "layers", only where a Canva is
+connected); `canva.harvest` exports each at Meta's recommended size and
+KEEPS THE BYTES — Canva's export links expire after 24 hours (documented);
+the Kept-frames card and the ad export name every design.
+
+**Standing rules it adds:**
+- **Type is a layer, never pixels, and its colour is measured** under the
+  type: white on dark, the brand's text colour on pale, a scrim when busy
+  (`type_colour_is_measured_under_the_type`, `the_cta_wears_the_brands_accent`).
+- **A layout is a fact about a ratio.** One design per placement; 9:16 keeps
+  Meta's 14/35/6% (`the_9x16_keeps_metas_safe_zone`); cover-crop, never
+  stretch (`the_photo_is_cover_cropped_not_stretched`).
+- **The words are the ad's own**, read from the batch record — the headline,
+  and the last short line as the ask (`the_headline_is_the_ads_own`,
+  `the_ask_is_the_ads_last_line`).
+- **An approved asset is our bytes at Meta's size** (`an_export_asks_for_metas_size`,
+  `an_export_is_kept_not_linked`, `placements_come_back_from_their_designs`).
+- **A second sign-in needs the owner's yes.** Before adding a provider, say
+  why the existing connection cannot do it, and ask.
+
+**Traps this stretch fell into.** A gate chained through `grep` hides a
+refusal (`&&` sees grep's status) — never pipe a gate. A page render that
+calls a provider (client registration inside `configured()`) is a side
+effect `test_rehearse` refuses — anything that talks to a provider belongs
+behind the click. When the owner asks "why are we changing X", the answer
+may be "we should not": stash, record, and take the route through what
+already works.
+
+**Unverified until pressed:** how Canva sizes an imported slide (the export
+asks for Meta's pixels regardless, aspect kept), which of the theme's faces
+Canva maps by name, whether the scrim's alpha survives the import.
 
 ---
 
@@ -975,30 +1035,32 @@ placements by `resize-design` + export per placement.
 > every approved frame's 1:1 / 4:5 / 9:16 with Meta's numbers; the export
 > lists them.
 >
-> **NEXT SHIP — NO LONGER GATED ON A PROBE: THE CANVA EDITOR SIGN-IN.** The
-> probe was answered from public metadata: `mcp.canva.com/mcp` returns 401
-> with `resource_metadata`, and its `.well-known/oauth-authorization-server`
-> advertises authorize/token/register endpoints, PKCE S256, refresh tokens,
-> `client_id_metadata_document_supported`. So the editor wants its own
-> grant: add a `canva_editor` provider to `oauth.FLOWS` (dynamic client
-> registration at `/register` with the app's callback, `stores=refresh_token`,
-> minted via `credentials.bearer`), a `credentials.PROVIDERS` row ("Canva
-> editor"), `SHARED_PROVIDERS` for the agency fallback, and
-> `canva.mcp_session` on that token. THEN the layers (add_text, format_text,
-> insert_shape, insert_fill, commit), THEN placements by resize-design +
-> export. Previous framing follows:
+> **SHIPPED 2026-09-07, EIGHTH: A FRAME REACHES CANVA AS LAYERS, ONE DESIGN
+> PER META PLACEMENT** (16 guards, 2 re-anchored, §5 has the record). Through
+> the connection that already works: the Connect API's documented design
+> import takes a PowerPoint and makes each object an editable element, so
+> `layers.deck` writes the photograph (cover-cropped), the brand mark, the
+> headline and the CTA pill as separate objects, laid out per ratio inside
+> Meta's safe zones, in the brand's colours and faces, with the ad's own
+> words; approval schedules all three designs; `harvest` brings each back at
+> Meta's recommended size as OUR bytes (Canva's links expire in 24 h). The
+> Canva EDITOR sign-in (mcp.canva.com's own OAuth) was built, its gate
+> refused, and the owner asked why the connection was changing at all: it is
+> in `git stash` ("ship 8 (superseded 2026-09-07)") and is NOT the route.
+> **Owner's move:** Kept frames → "layer in Canva" on one frame → open it →
+> confirm four layers. Unverified until then: how Canva sizes the slide and
+> maps the faces (the export asks for Meta's pixels regardless).
 >
-> **(earlier) NEXT SHIP, GATED ON A PROBE: TEXT + CTA LAYERS IN CANVA** (owner,
-> 2026-09-07: *"text layers and CTA layers in Canva according to branding and
-> the photos/palettes in the references … so we can edit the output"*). The
-> facts are in the memory note `gomehagent-creative-substrate` (section
-> "TEXT + CTA LAYERS"): Connect REST cannot place elements; Autofill is
-> Enterprise-only; the Canva MCP `edit-design` can (`add_text`, `format_text`,
-> `insert_shape`, `insert_fill`, commit) and takes the Brand Kit's fonts as
-> the design default. FIRST MOVE: with Baci's Canva reconnected, probe
-> `canva.mcp_tools("baci")` — does Canva's MCP accept the Connect token or
-> want its own grant? Surface the answer on Connections. Then the layers
-> ship; if it wants its own grant, that OAuth flow first.
+> **THE OWNER'S NEXT FOUR, asked 2026-09-07 (answered in the thread, not
+> built):** (1) the boards belong on the BRAND tab, permanently — they shape
+> every system's pictures — with the per-run select staying on each form;
+> (2) COPY INSTRUCTIONS PER CHANNEL (ads, email, blog, GBP…) on the Brand tab,
+> reaching each channel's drafter AND its panel — today the voice record is
+> brand-wide only; (3) a BOARD AXIS — one board per variation in one run,
+> each frame tagged with its board (today several boards pool their pins);
+> (4) a PINTEREST connection (API v5, its own OAuth + Pinterest's app
+> approval; pins as REFERENCE rights only, never product) — its docs first,
+> standing rule. Do (1)+(2) as one ship; (3) is small; (4) after the docs.
 >
 > **WHAT IS LEFT NEEDS THE OWNER. Do not proceed past this without them.**
 > Two direction rows (Baci, Ironside) — hand them a filled draft to strike

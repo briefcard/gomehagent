@@ -398,6 +398,7 @@ button.sec{background:transparent;color:var(--acc)}
   background:var(--panel)}
 .frame .pic{border:0;border-radius:0;background:none}
 .lbbtn{font-size:12px;padding:3px 9px;border:1px solid var(--rule);border-radius:4px;background:none;color:inherit;cursor:zoom-in}
+.keptctl{padding:4px 2px 2px}.keptrow{font-size:.74rem;margin:3px 0;line-height:1.5}.inl{display:inline}.inl .sec{padding:1px 7px;font-size:.7rem}
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:60;overflow:auto}
 #lb[hidden]{display:none}
 .lbbar{position:sticky;top:0;display:flex;gap:10px;align-items:center;padding:10px 14px;background:rgba(0,0,0,.65);color:#eee;font-size:13px}
@@ -711,7 +712,10 @@ BG_BRAND_LABELS = (("voice", "Voice derive"),)
 #: fills no queue Sources knows about, and its state belongs where the frames
 #: were promised to appear rather than in a fold about feeders.
 BG_PICTURE_LABELS = (("ad_frames", "Ad frames"),
-                     ("hosting", "Hand-off to the client's site"))
+                     ("hosting", "Hand-off to the client's site"),
+                     # each kept frame's Meta placements as layered designs
+                     # in Canva (hosting.layer_kept), off the approval
+                     ("layers", "Layered designs in Canva"))
 
 #: Every label `_run_bg` may write under. `test_pointers` holds the writers to
 #: THIS, so a new background action must be named by the surface that reports
@@ -6153,55 +6157,90 @@ def _winning_look_card(key: str, tenant: str) -> str:
 
 
 def _kept_frames_card(key: str, tenant: str) -> str:
-    """THE FRAMES THAT WERE KEPT, WITH THEIR PLACEMENTS. Owner, 2026-09-07:
-    *"How do we ensure that final approved assets get created in the
-    different ratios needed for the meta placements?"* They have been —
-    approving a frame has cut its 4:5 and 9:16 since 2026-08-29, recorded on
-    the frame and moved by the hand-off — and no surface showed them. A
-    kept frame leaves the waiting set on approval, so this is where it
-    lands: each with its three placements named the way Meta names them,
-    their sizes, and where the frame is in its life (in Canva, hosted)."""
+    """THE FRAMES THAT WERE KEPT, WITH THEIR PLACEMENTS — each ratio a layered
+    design in Canva, and the picture that came back from it.
+
+    Owner, 2026-09-07: *"the text and components are not separate layers on
+    Canva they are burned on — is there a way to layer them so we can adjust
+    as needed? Also, how do we ensure that final approved assets get created
+    in the different ratios needed for the meta placements?"* Approving a
+    frame cuts its 4:5 and 9:16 and — where a Canva is connected — makes the
+    three layered designs (`hosting.layer_kept`); this card is where each
+    lands, with a button for any ratio not made yet and one that brings the
+    adjusted designs back as pictures at Meta's recommended sizes."""
     from . import compose, hosting as _h, provenance as prov
     kept = [a for a in kb.assets(tenant, publishable_only=False, kind="image")
             if (a.batch or "") and (a.review or "") == prov.APPROVED
             and a.status == "active"][:24]
     if not kept:
         return ""
+
+    def _form(action: str, aid: str, fmt: str, label: str, title: str,
+              new_tab: bool = False) -> str:
+        return (f'<form method="post" action="{action}"'
+                + (' target="_blank"' if new_tab else "") + ' class="inl">'
+                f'<input type="hidden" name="key" value="{_esc(key)}">'
+                f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                f'<input type="hidden" name="asset_id" value="{_esc(aid)}">'
+                + (f'<input type="hidden" name="fmt" value="{_esc(fmt)}">' if fmt else "")
+                + f'<button type="submit" class="sec" title="{_esc(title)}">{label}</button></form>')
+
     tiles = ""
     for a in kept:
-        links = [f'<a href="{_esc(a.url or "")}" target="_blank" rel="noopener">1:1</a>']
-        for fmt in ("4:5", "9:16"):
-            url = (a.placements or {}).get(fmt)
+        designs = {k: str(v) for k, v in dict(a.canva_designs or {}).items() if v}
+        if a.canva_design_id and not designs.get("1:1"):
+            designs["1:1"] = str(a.canva_design_id)
+        rows = ""
+        for fmt in ("1:1", "4:5", "9:16"):
+            url = a.url if fmt == "1:1" else (a.placements or {}).get(fmt)
             w, h = compose.SIZES.get(fmt, (0, 0))
             meta = compose.META_PLACEMENTS.get(fmt, {})
-            if url:
-                links.append(f'<a href="{_esc(str(url))}" target="_blank" rel="noopener" '
-                             f'title="{_esc(meta.get("placement", ""))} — {w}×{h}">'
-                             f'{_esc(fmt)}</a> <span class="mut">{_esc(meta.get("placement", ""))} '
-                             f'{w}&times;{h}</span>')
+            rec = meta.get("recommended")
+            size = f"{rec[0]}&times;{rec[1]}" if rec else f"{w}&times;{h}"
+            pic = (f'<a href="{_esc(str(url))}" target="_blank" rel="noopener">picture</a>'
+                   if url else '<span class="mut">not cut yet</span>')
+            did = designs.get(fmt)
+            if did:
+                lay = (f'<a href="https://www.canva.com/design/{_esc(did)}/edit" '
+                       f'target="_blank" rel="noopener">layers in Canva &rarr;</a>')
             else:
-                links.append(f'<span class="mut">{_esc(fmt)}: not cut yet</span>')
+                lay = _form("/admin/asset_canva", a.id, fmt, "layer in Canva",
+                            "Makes this ratio a design in Canva with the photograph, "
+                            "the mark, the headline and the CTA as separate layers. "
+                            "Opens in a new tab. Nothing is published.", new_tab=True)
+            rows += (f'<div class="keptrow"><b>{_esc(fmt)}</b> <span class="mut">'
+                     f'{_esc(meta.get("placement", ""))} {size}</span> &middot; {pic} '
+                     f'&middot; {lay}</div>')
+        back = (_form("/admin/asset_harvest", a.id, "", "bring back from Canva",
+                      "Exports every design of this frame at Meta's recommended "
+                      "size and keeps the pictures here — Canva's own links "
+                      "expire in a day.") if designs else "")
         where = _h.stage(a)
-        state = ("in Canva &rarr;" if where == "editable" else
+        state = ("layers in Canva" if where == "editable" else
                  "hosted on the client&#39;s site" if where == "hosted" else "kept")
         tiles += f"""
         <div class="frame">
           <label class="pic"><img src="{_esc(a.url or '')}" loading="lazy" alt="">
-            <span class="picmeta">{_esc((a.title or '')[:40])}<br>{' &middot; '.join(links)}
+            <span class="picmeta">{_esc((a.title or '')[:40])}
             <br><span class="mut">{state}</span></span></label>
+          <div class="keptctl">{rows}{back}</div>
         </div>"""
     return f"""
     <div class="anchor" id="kept"></div>
     <div class="card">
       <div class="head"><h2>Kept frames</h2>
-        <span class="mut">{len(kept)} kept &middot; each cut for Feed 4:5 and
-        Reels / Stories 9:16 on approval</span></div>
+        <span class="mut">{len(kept)} kept &middot; each ratio a layered design
+        in Canva, made on approval</span></div>
       <p class="mut">Meta&#39;s placements, from its Ads Guide: Feed runs 4:5
       (1440&times;1800 recommended, 600&times;750 minimum); Reels and Stories run
       9:16 (1440&times;2560 recommended) with the top 14%, bottom 35% and 6% of
-      each side kept free of text and logos. A crop of the flat picture is
-      what is cut here; once a frame carries editable layers in Canva, the
-      placements come from resizing that design, so the layers reflow.</p>
+      each side kept free of text and logos. Each ratio is its own design in
+      Canva &mdash; the photograph, the brand mark, the headline and the CTA as
+      separate layers, laid out for that ratio, in the brand&#39;s colours and
+      faces &mdash; made when the frame is approved where a Canva is connected,
+      or by the button. Adjust the layers there; &ldquo;bring back&rdquo;
+      exports each design at Meta&#39;s recommended size and the pictures here
+      become those exports.</p>
       <div class="picgrid">{tiles}</div>
     </div>"""
 

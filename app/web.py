@@ -3459,6 +3459,13 @@ def _variant_frames(tenant: str, output_id: str) -> list[str]:
             w, h = _compose.SIZES.get(fmt, (0, 0))
             name = (_compose.META_PLACEMENTS.get(fmt) or {}).get("placement", "")
             lines.append(f"    {fmt} ({name}, {w}×{h}): {purl}")
+        # AND THE LAYERED DESIGNS, one per placement, where the type is
+        # adjusted — the export is what runs; the design is where it changes.
+        designs = dict(a.canva_designs or {})
+        if a.canva_design_id and not designs.get("1:1"):
+            designs["1:1"] = a.canva_design_id
+        for fmt, did in designs.items():
+            lines.append(f"    {fmt} layers in Canva: https://www.canva.com/design/{did}/edit")
     return lines
 @app.get("/admin/ad_export", response_class=PlainTextResponse)
 def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:
@@ -6812,7 +6819,7 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     approve = action in ("approve", "approve_use", "approve_reference")
     rights = ("owned" if action in ("approve", "approve_use")
               else "reference" if action == "approve_reference" else "")
-    cuts = 0
+    cuts, layered = 0, []
     for aid in ids:
         kbm.review_asset(aid, approve=approve, rights=rights)
         # KEEPING A FRAME CUTS ITS PLACEMENTS, here, because this is where the
@@ -6826,8 +6833,20 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
                 if row is not None and (row.batch or ""):
                     from . import creative as _cr
                     cuts += 1 if _cr.placements(tenant, aid).get("ok") else 0
+                    layered.append(aid)
             except Exception:                                    # noqa: BLE001
                 pass
+    # AND EACH KEPT FRAME'S PLACEMENTS AS LAYERED DESIGNS IN CANVA — the
+    # photograph, the mark, the headline and the CTA as separate elements,
+    # laid out for each ratio (owner, 2026-09-07: "how do we ensure that
+    # final approved assets get created in the different ratios needed for
+    # the meta placements?"). Off the request: three imports per frame. Only
+    # where a Canva is connected, so an account without one is not told
+    # three times per frame that it is not.
+    if rights == "owned" and layered:
+        from . import canva as _canva, hosting as _hosting
+        if _canva.which_account(tenant).get("source"):
+            _run_bg("layers", _hosting.layer_kept, tenant, list(layered))
     # AND THEY BECOME THE CLIENT'S. Owner, 2026-08-30: an approved picture
     # belongs on the client's own CMS "so it's accessible to us". Off the
     # request because it is an upload per picture and per crop; reported by
@@ -7007,11 +7026,8 @@ def _first_line(body: str) -> str:
     the words the ad actually says, or the picture and the post argue two
     different things.
     """
-    for line in str(body or "").splitlines():
-        t = line.strip().lstrip("#").strip()
-        if t:
-            return t[:90]
-    return ""
+    from . import layers as _layers
+    return _layers.first_line(body)
 
 
 @app.post("/admin/asset_canva", response_class=HTMLResponse)
@@ -7034,7 +7050,11 @@ async def asset_canva(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     aid = str(form.get("asset_id", "")).strip()
-    got = _hosting.to_canva(tenant, aid)
+    # WHICH PLACEMENT. The layers are laid out per ratio (hosting.to_canva);
+    # the Pictures page's edit control means the 1:1, the Kept-frames card
+    # names the ratio it wants.
+    fmt = str(form.get("fmt", "") or "1:1").strip() or "1:1"
+    got = _hosting.to_canva(tenant, aid, fmt)
     if not got.get("ok"):
         return _back_to_content(tenant, msg=f"Canva: {got.get('error', '')}"[:200],
                                 anchor="pics")
@@ -7048,6 +7068,33 @@ async def asset_canva(request: Request, key: str = Depends(admin_key)):
     if not url:
         url = f"https://www.canva.com/design/{got.get('design_id', '')}/edit"
     return RedirectResponse(url, 303)
+
+
+@app.post("/admin/asset_harvest", response_class=HTMLResponse)
+async def asset_harvest(request: Request, key: str = Depends(admin_key)):
+    """Bring one kept frame back from Canva: its 1:1 and every placement
+    design, exported at Meta's recommended sizes and kept as OUR bytes.
+
+    The other half of the layers. A design adjusted in Canva is not an ad
+    until it is a picture again, and `/admin/canva_harvest` was a JSON
+    route nobody could reach from the frame it belonged to.
+    """
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    aid = str(form.get("asset_id", "")).strip()
+    from . import canva as _cv
+    got = _cv.harvest(tenant, asset_id=aid)
+    if not got.get("ok"):
+        return _back_to_content(tenant, msg=f"Canva: {got.get('error', '')}"[:200],
+                                anchor="kept")
+    bits = [f"{got.get('filed', 0)} picture(s) back from Canva"]
+    if got.get("pending"):
+        bits.append(f"{len(got['pending'])} still rendering — press again in a moment")
+    if got.get("failed"):
+        bits.append("; ".join(str(x) for x in got["failed"])[:120])
+    return _back_to_content(tenant, msg=" · ".join(bits)[:200], anchor="kept")
 
 
 @app.post("/admin/asset_add", response_class=HTMLResponse)
