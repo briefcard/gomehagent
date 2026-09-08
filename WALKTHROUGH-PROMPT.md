@@ -827,6 +827,48 @@ photograph that is depends on creation order — find the input by its
 property (transparency), never by position. `id(blob)` keys a per-blob
 record safely only within one loop iteration; the dict is rebuilt per cell.
 
+### A kept frame has its placements; no candidate with painted type wins — 2026-09-07 (one ship; hash in the memory note)
+
+**The owner's two questions:** *"the text and components are not separate
+layers on Canva they are burned on — is there a way to layer them?"* and
+*"how do we ensure that final approved assets get created in the different
+ratios needed for the meta placements?"* Nothing sets type into a frame —
+the image model paints lettering and components, most likely copied from
+look pins that are finished ads; the review asked "free of text?" as advice
+and the judge ranked on product match alone. The 4:5 and 9:16 crops have
+been cut on approval since 2026-08-29 and shown nowhere.
+
+**Standing rules it adds:**
+- **Painted type is a defect, not a flaw.** The judge answers `lettering`;
+  a clean candidate always outranks a lettered one; lettering triggers the
+  one redraft by name; a lettered redraw never replaces a clean original
+  (`the_judges_verdict_carries_lettering`, `a_lettered_candidate_never_beats_a_clean_one`,
+  `painted_lettering_is_redrawn_away`).
+- **A pin's own copy is not the look.** `_THE_LOOK` says so; the boards
+  card says "pin photographs, not finished ads"
+  (`a_pins_own_text_is_not_the_look`, `the_board_warns_against_pins_with_copy`).
+- **Meta's placements are a documented table, read twice.**
+  `compose.META_PLACEMENTS` (Ads Guide 2026-09-07: Feed 4:5 1440×1800 min
+  600×750; Reels 9:16 1440×2560, safe 14/35/6%) feeds the "Kept frames"
+  card and the ad export — a placement is named the way Meta names it in
+  both (`a_kept_frame_shows_its_placements`, `the_export_lists_the_placements`).
+- **A kept frame has a home.** Approval takes a frame out of the waiting
+  set; "Kept frames" is where it lands, with its placements and its stage.
+
+**Traps this stretch fell into.** A fake keyed on a running counter that
+`sent.clear()` does not reset — key fakes on what the test can see (requests
+seen). A grep for a sentence that is an f-string split across lines finds
+nothing; print the block, then anchor.
+
+**The layers, settled but not built.** Connect REST cannot place elements;
+Autofill is Enterprise-only; the Canva MCP editor can, and its server
+publishes standard OAuth metadata (`mcp.canva.com`: authorize, token,
+register, PKCE S256, refresh tokens, `client_id_metadata_document`) — so it
+needs ITS OWN sign-in, buildable as one more `oauth.FLOWS` provider with
+dynamic client registration, minted through `credentials.bearer`. Then the
+layers (`add_text`/`format_text`/`insert_shape`/`insert_fill`/commit), then
+placements by `resize-design` + export per placement.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
@@ -927,7 +969,26 @@ record safely only within one loop iteration; the dict is rebuilt per cell.
 > frame. `scripts/bakeoff.py --tenant baci --entity <key> --models a,b` for
 > the owner's blind ranking; `--reveal` afterwards.
 >
-> **NEXT SHIP, GATED ON A PROBE: TEXT + CTA LAYERS IN CANVA** (owner,
+> **SHIPPED 2026-09-07, SEVENTH: KEPT FRAMES + NO PAINTED TYPE** (7 guards,
+> §5 has the record). The judge treats painted lettering as a defect; the
+> boards card says pin photographs, not finished ads; "Kept frames" shows
+> every approved frame's 1:1 / 4:5 / 9:16 with Meta's numbers; the export
+> lists them.
+>
+> **NEXT SHIP — NO LONGER GATED ON A PROBE: THE CANVA EDITOR SIGN-IN.** The
+> probe was answered from public metadata: `mcp.canva.com/mcp` returns 401
+> with `resource_metadata`, and its `.well-known/oauth-authorization-server`
+> advertises authorize/token/register endpoints, PKCE S256, refresh tokens,
+> `client_id_metadata_document_supported`. So the editor wants its own
+> grant: add a `canva_editor` provider to `oauth.FLOWS` (dynamic client
+> registration at `/register` with the app's callback, `stores=refresh_token`,
+> minted via `credentials.bearer`), a `credentials.PROVIDERS` row ("Canva
+> editor"), `SHARED_PROVIDERS` for the agency fallback, and
+> `canva.mcp_session` on that token. THEN the layers (add_text, format_text,
+> insert_shape, insert_fill, commit), THEN placements by resize-design +
+> export. Previous framing follows:
+>
+> **(earlier) NEXT SHIP, GATED ON A PROBE: TEXT + CTA LAYERS IN CANVA** (owner,
 > 2026-09-07: *"text layers and CTA layers in Canva according to branding and
 > the photos/palettes in the references … so we can edit the output"*). The
 > facts are in the memory note `gomehagent-creative-substrate` (section

@@ -135,8 +135,9 @@ SABOTAGES = [
         # the mutation drops `_frames_run` and leaves the new card alone.
         # RE-ANCHORED 2026-09-07: the boards card joined the line too.
         # RE-ANCHORED 2026-09-07: the viewer joined the line.
-        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html + _viewer())',
-        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html + _viewer())  # SABOTAGE',
+        # RE-ANCHORED 2026-09-07: the Kept frames card joined the line.
+        "find": '    batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
+        "replace": '    batch_html = (_winning_look_card(key, tenant)\n                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": 'the minutes-long frame run reports nowhere, so a crashed one is indistinguishable from a slow one: the banner promises pictures under Pictures and none ever arrive',
     },
@@ -7574,7 +7575,8 @@ SABOTAGES = [
     {
         'name': 'the_closest_candidate_is_the_one_kept',
         'file': 'app/creative.py',
-        'find': '    best_v, best_b = max(verdicts, key=lambda vb: vb[0].get("match", 0))',
+        # RE-ANCHORED 2026-09-07: the ranking key grew the lettering test.
+        'find': '    best_v, best_b = max(verdicts, key=lambda vb: (0 if vb[0].get("lettering") else 1,\n                                                    vb[0].get("match", 0)))',
         'replace': '    best_v, best_b = verdicts[0]  # SABOTAGE',
         'suites': ['test_the_product_is_judged_against_its_photographs.py'],
         'why': 'the judge scores four candidates and the first one is kept regardless — the judgement is spent and the frame the owner sees is a coin toss',
@@ -7582,8 +7584,9 @@ SABOTAGES = [
     {
         'name': 'a_wrong_product_is_redrawn_once_with_its_differences_named',
         'file': 'app/creative.py',
-        'find': '                if (best_v.get("match", 0) < FIDELITY_KEEP\n                        and best_v.get("differences")):',
-        'replace': '                if False:  # SABOTAGE',
+        # RE-ANCHORED 2026-09-07: the redraft condition became `wrong or lettering`.
+        'find': '                wrong = (best_v.get("match", 0) < FIDELITY_KEEP\n                         and best_v.get("differences"))',
+        'replace': '                wrong = False  # SABOTAGE',
         'suites': ['test_the_product_is_judged_against_its_photographs.py'],
         'why': 'a frame whose product the judge called wrong — the rim silver, not gold — is filed as the closest with the difference named and never corrected, when one more request with that sentence in it usually fixes it',
     },
@@ -7642,6 +7645,62 @@ SABOTAGES = [
         'replace': '                checklist=checklist)  # SABOTAGE\n        else:\n            res = _plates(',
         'suites': ['test_the_product_is_judged_against_its_photographs.py'],
         'why': 'the bake-off runs every model through the default one, and the owner ranks three identical sets believing they compared providers',
+    },
+    {
+        'name': 'the_judges_verdict_carries_lettering',
+        'file': 'app/creative.py',
+        'find': '            "lettering": bool(data.get("lettering")), "why": ""}',
+        'replace': '            "lettering": False, "why": ""}  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'the judge is asked about painted type and its answer is thrown away, so a frame with a headline burned into the picture ranks purely on product match',
+    },
+    {
+        'name': 'a_lettered_candidate_never_beats_a_clean_one',
+        'file': 'app/creative.py',
+        'find': '    best_v, best_b = max(verdicts, key=lambda vb: (0 if vb[0].get("lettering") else 1,\n                                                    vb[0].get("match", 0)))',
+        'replace': '    best_v, best_b = max(verdicts, key=lambda vb: (1, vb[0].get("match", 0)))  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'the best product match wins even with a fake CTA button painted across it, and the owner opens Canva to find the type burned in',
+    },
+    {
+        'name': 'painted_lettering_is_redrawn_away',
+        'file': 'app/creative.py',
+        'find': '                if wrong or best_v.get("lettering"):',
+        'replace': '                if wrong:  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'when every candidate carries painted type, the least bad is filed as it is and nobody asks the model to take the lettering out',
+    },
+    {
+        'name': 'a_pins_own_text_is_not_the_look',
+        'file': 'app/imagegen.py',
+        'find': '    "If a reference carries text, a logo, a button, a badge or any layout "\n    "component, those are NOT part of the look: this frame carries no "\n    "lettering and no components of any kind — the words are set later, by "\n    "hand, as layers.")',
+        'replace': '    "")  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': "a look pin that is a finished ad hands its headline and button to the model as part of the look, and every frame comes back with somebody else's copy on it",
+    },
+    {
+        'name': 'a_kept_frame_shows_its_placements',
+        'file': 'app/admin_ui.py',
+        'find': '                  + _board_card(key, tenant) + batch_html\n                  + _kept_frames_card(key, tenant) + _viewer())',
+        'replace': '                  + _board_card(key, tenant) + batch_html + _viewer())  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'the 4:5 and 9:16 placements are cut on approval and shown nowhere, so the owner asks how the ratios get made — the question of 2026-09-07 asked again',
+    },
+    {
+        'name': 'the_export_lists_the_placements',
+        'file': 'app/web.py',
+        'find': '        for fmt, purl in (a.placements or {}).items():\n            w, h = _compose.SIZES.get(fmt, (0, 0))',
+        'replace': '        for fmt, purl in {}.items():  # SABOTAGE\n            w, h = _compose.SIZES.get(fmt, (0, 0))',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'the ship lists the square frame only, and the person pasting into Meta re-crops the story version by hand with the product off the top',
+    },
+    {
+        'name': 'the_board_warns_against_pins_with_copy',
+        'file': 'app/admin_ui.py',
+        'find': '             f"pin is read for direction, in words, and never sent. <b>Pin "\n             f"photographs, not finished ads</b> &mdash; copy on a pin is copied "\n             f"into the frame, and the words belong on layers.")',
+        'replace': '             f"pin is read for direction, in words, and never sent.")  # SABOTAGE',
+        'suites': ['test_a_kept_frame_has_its_placements_and_no_painted_type.py'],
+        'why': 'the owner pins finished ads as the look, the frames come back with type painted in, and nothing on the board says why',
     },
 ]
 

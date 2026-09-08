@@ -6152,6 +6152,60 @@ def _winning_look_card(key: str, tenant: str) -> str:
     </div>"""
 
 
+def _kept_frames_card(key: str, tenant: str) -> str:
+    """THE FRAMES THAT WERE KEPT, WITH THEIR PLACEMENTS. Owner, 2026-09-07:
+    *"How do we ensure that final approved assets get created in the
+    different ratios needed for the meta placements?"* They have been —
+    approving a frame has cut its 4:5 and 9:16 since 2026-08-29, recorded on
+    the frame and moved by the hand-off — and no surface showed them. A
+    kept frame leaves the waiting set on approval, so this is where it
+    lands: each with its three placements named the way Meta names them,
+    their sizes, and where the frame is in its life (in Canva, hosted)."""
+    from . import compose, hosting as _h, provenance as prov
+    kept = [a for a in kb.assets(tenant, publishable_only=False, kind="image")
+            if (a.batch or "") and (a.review or "") == prov.APPROVED
+            and a.status == "active"][:24]
+    if not kept:
+        return ""
+    tiles = ""
+    for a in kept:
+        links = [f'<a href="{_esc(a.url or "")}" target="_blank" rel="noopener">1:1</a>']
+        for fmt in ("4:5", "9:16"):
+            url = (a.placements or {}).get(fmt)
+            w, h = compose.SIZES.get(fmt, (0, 0))
+            meta = compose.META_PLACEMENTS.get(fmt, {})
+            if url:
+                links.append(f'<a href="{_esc(str(url))}" target="_blank" rel="noopener" '
+                             f'title="{_esc(meta.get("placement", ""))} — {w}×{h}">'
+                             f'{_esc(fmt)}</a> <span class="mut">{_esc(meta.get("placement", ""))} '
+                             f'{w}&times;{h}</span>')
+            else:
+                links.append(f'<span class="mut">{_esc(fmt)}: not cut yet</span>')
+        where = _h.stage(a)
+        state = ("in Canva &rarr;" if where == "editable" else
+                 "hosted on the client&#39;s site" if where == "hosted" else "kept")
+        tiles += f"""
+        <div class="frame">
+          <label class="pic"><img src="{_esc(a.url or '')}" loading="lazy" alt="">
+            <span class="picmeta">{_esc((a.title or '')[:40])}<br>{' &middot; '.join(links)}
+            <br><span class="mut">{state}</span></span></label>
+        </div>"""
+    return f"""
+    <div class="anchor" id="kept"></div>
+    <div class="card">
+      <div class="head"><h2>Kept frames</h2>
+        <span class="mut">{len(kept)} kept &middot; each cut for Feed 4:5 and
+        Reels / Stories 9:16 on approval</span></div>
+      <p class="mut">Meta&#39;s placements, from its Ads Guide: Feed runs 4:5
+      (1440&times;1800 recommended, 600&times;750 minimum); Reels and Stories run
+      9:16 (1440&times;2560 recommended) with the top 14%, bottom 35% and 6% of
+      each side kept free of text and logos. A crop of the flat picture is
+      what is cut here; once a frame carries editable layers in Canva, the
+      placements come from resizing that design, so the layers reflow.</p>
+      <div class="picgrid">{tiles}</div>
+    </div>"""
+
+
 def _viewer() -> str:
     """The frame viewer: one overlay for the page, opened by any `.lbbtn`.
     Fit to the screen first; a click on the picture shows it at its own
@@ -6200,7 +6254,9 @@ def _fidelity_line(assessment: dict) -> str:
             + (f' &middot; {_esc("; ".join(diffs))}' if diffs else "")
             + (f' &middot; best of {_esc(str(fid.get("candidates")))}'
                if fid.get("candidates") else "")
-            + (" &middot; redrawn once" if fid.get("redrafted") else ""))
+            + (" &middot; redrawn once" if fid.get("redrafted") else "")
+            + (' &middot; <b class="gapt">lettering painted in &mdash; remove it in '
+               'Canva</b>' if fid.get("lettering") else ""))
 
 
 def _drawn_from(frames) -> str:
@@ -6300,7 +6356,9 @@ def _board_card(key: str, tenant: str) -> str:
              f"product from its own photographs, the setting from the look "
              f"pins of whichever boards a run selects (all of them unless it "
              f"says). An owned pin is sent to the model as pixels; a reference "
-             f"pin is read for direction, in words, and never sent.")
+             f"pin is read for direction, in words, and never sent. <b>Pin "
+             f"photographs, not finished ads</b> &mdash; copy on a pin is copied "
+             f"into the frame, and the words belong on layers.")
             if n_pins else
             ("Nothing is pinned, so pictures are generated <b>from words "
              "alone</b> &mdash; the model has never seen this brand&#39;s "
@@ -6309,7 +6367,8 @@ def _board_card(key: str, tenant: str) -> str:
              "mimic: the product&#39;s own photographs as the product, the "
              "brand&#39;s photography as the look. A Pinterest save can be "
              "added by URL below as reference; it guides in words and is "
-             "never sent."))
+             "never sent. Pin photographs, not finished ads &mdash; copy on a "
+             "pin is copied into the frame."))
     create = f"""
       <details class="sec"><summary>New board</summary>
       <form class="f" method="post" action="/admin/board_add">
@@ -6620,7 +6679,8 @@ def render_content(key: str, tenant: str = "", started: str = "",
     # the request, so without this a failed run and a running one look
     # identical: the banner promised pictures under Pictures and none came.
     batch_html = (_frames_run(tenant) + _winning_look_card(key, tenant)
-                  + _board_card(key, tenant) + batch_html + _viewer())
+                  + _board_card(key, tenant) + batch_html
+                  + _kept_frames_card(key, tenant) + _viewer())
     approved_pics = [a for a in kbm.assets(tenant) if a.kind == "image"]
     marks = kbm.logos(tenant)
     # Pager past 60 (spec §4): photograph #61 was unreachable — a 60-cap

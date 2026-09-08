@@ -343,6 +343,24 @@ def composite_on_plate(product_png: bytes, plate_png: bytes, *, headline: str,
 # on purpose, and a thing to say over it.
 # ---------------------------------------------------------------------------
 
+#: META'S IMAGE PLACEMENTS, read from the Ads Guide on 2026-09-07
+#: (https://www.facebook.com/business/ads-guide/update/image, and the
+#: Instagram Feed / Instagram Reels pages under it). Feed: 4:5, recommended
+#: 1440×1800, minimum 600×750 (Instagram: minimum width 500). Reels: 9:16,
+#: recommended 1440×2560, with 14% of the top, 35% of the bottom and 6% of
+#: each side kept free of text, logos and key elements. The crops here are
+#: cut at SIZES; the recommended sizes are the export targets once a finished
+#: design is resized in Canva. Read by the Pictures page and the ad export,
+#: so a placement is named the way Meta names it in both places.
+META_PLACEMENTS = {
+    "1:1": {"placement": "Feed (square)", "recommended": None, "minimum": None},
+    "4:5": {"placement": "Feed", "recommended": (1440, 1800), "minimum": (600, 750)},
+    "9:16": {"placement": "Reels / Stories", "recommended": (1440, 2560),
+             "minimum": None, "safe": {"top": 0.14, "bottom": 0.35, "sides": 0.06}},
+}
+META_PLACEMENTS_DOC = "https://www.facebook.com/business/ads-guide/update/image"
+
+
 def crop_placements(frame: bytes, *,
                     formats: list[str] | None = None) -> dict:
     """A FINISHED frame re-cut to the other placements. No product, no text.

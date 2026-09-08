@@ -3451,6 +3451,14 @@ def _variant_frames(tenant: str, output_id: str) -> list[str]:
         except Exception:                                        # noqa: BLE001
             pass
         lines.append(f"  {a.url}   ({cell}){flagged}")
+        # THE PLACEMENTS, under the frame they were cut from — named the way
+        # Meta names them, with their sizes. Cut on approval since 2026-08-29
+        # and listed nowhere until the owner asked how the ratios get made.
+        from . import compose as _compose
+        for fmt, purl in (a.placements or {}).items():
+            w, h = _compose.SIZES.get(fmt, (0, 0))
+            name = (_compose.META_PLACEMENTS.get(fmt) or {}).get("placement", "")
+            lines.append(f"    {fmt} ({name}, {w}×{h}): {purl}")
     return lines
 @app.get("/admin/ad_export", response_class=PlainTextResponse)
 def ad_export(key: str = Depends(admin_key), output_id: str = "") -> str:

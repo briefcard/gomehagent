@@ -1121,13 +1121,18 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 fidelity["judged"] += pick_["judged"]
                 best_b, best_v = pick_["blob"], pick_["verdict"]
                 redrafted = False
-                if (best_v.get("match", 0) < FIDELITY_KEEP
-                        and best_v.get("differences")):
+                wrong = (best_v.get("match", 0) < FIDELITY_KEEP
+                         and best_v.get("differences"))
+                if wrong or best_v.get("lettering"):
+                    fixes = list(best_v.get("differences") or []) if wrong else []
+                    if best_v.get("lettering"):
+                        fixes.append("REMOVE every piece of lettering, every logo and "
+                                     "every button-, badge- or label-like component — "
+                                     "the words are set later, by hand, as layers")
                     again = _with_references(
-                        text + "\n\nTHE PREVIOUS ATTEMPT GOT THE PRODUCT WRONG "
-                               "— CORRECT exactly these, and change nothing "
-                               "else about it:\n"
-                        + "\n".join(f"- {d}" for d in best_v["differences"]),
+                        text + "\n\nTHE PREVIOUS ATTEMPT GOT THIS WRONG — CORRECT "
+                               "exactly these, and change nothing else:\n"
+                        + "\n".join(f"- {d}" for d in fixes),
                         base["shape"], PER_PROMPT, refs,
                         with_people=cell["framing"] in PEOPLE_ARE_THE_SUBJECT,
                         checklist=checklist, model=image_model)
@@ -1136,15 +1141,22 @@ def batch(tenant: str, *, commitment: dict | None = None,
                         pick2 = _closest(again_imgs, refs["product"], checklist, tenant)
                         if pick2["ok"]:
                             fidelity["judged"] += pick2["judged"]
-                            if pick2["verdict"].get("match", 0) > best_v.get("match", 0):
-                                best_b, best_v, redrafted = pick2["blob"], pick2["verdict"], True
+                            # BETTER = clean where it was lettered, else a
+                            # higher match; a lettered redraw never replaces
+                            # a clean original.
+                            v1, v2 = best_v, pick2["verdict"]
+                            s1 = v1.get("match", 0) - (100 if v1.get("lettering") else 0)
+                            s2 = v2.get("match", 0) - (100 if v2.get("lettering") else 0)
+                            if s2 > s1:
+                                best_b, best_v, redrafted = pick2["blob"], v2, True
                                 fidelity["redrafted"] += 1
                 fidelity["dropped"] += len(images) - 1
                 images = [best_b]
                 fids[id(best_b)] = {"match": best_v.get("match", 0),
                                     "differences": list(best_v.get("differences") or []),
                                     "candidates": pick_["judged"],
-                                    "redrafted": redrafted}
+                                    "redrafted": redrafted,
+                                    "lettering": bool(best_v.get("lettering"))}
             else:
                 # NOT JUDGED, NOT PRETENDED. The usual two are kept and the
                 # set says fidelity was not judged, and why.
@@ -1537,10 +1549,14 @@ CHECKLIST — what a careful observer checks on this product:
 Answer in JSON only:
 {{"match": <0-100, 100 = indistinguishable from the photographs>,
   "differences": ["<one concrete difference the observer would notice>", …],
-  "same_product": <true|false>}}
+  "same_product": <true|false>,
+  "lettering": <true|false>}}
 Name only differences on the PRODUCT itself (shape, pattern, marks, colours,
 proportions, finish) — not the setting, the light, or the crop. An empty
-differences list means it is the product."""
+differences list means it is the product.
+"lettering" is true if the picture carries ANY rendered text, lettering,
+logo, button, badge, price tag, sticker or interface-like component anywhere
+— the words are set later, by hand, and any at all counts."""
 
 
 def _fingerprint(blobs: list) -> str:
@@ -1640,7 +1656,7 @@ def _compare_product_live(candidate: bytes, product: list, features: list,
     diffs = [str(d).strip() for d in (data.get("differences") or []) if str(d).strip()][:6]
     return {"ok": True, "match": match, "differences": diffs,
             "same": bool(data.get("same_product")) or (match >= FIDELITY_KEEP and not diffs),
-            "why": ""}
+            "lettering": bool(data.get("lettering")), "why": ""}
 
 
 compare_product = _compare_product_live        # replaceable, so the suite can drive every path
@@ -1659,9 +1675,13 @@ def _closest(candidates: list, product: list, features: list, tenant: str) -> di
         verdicts.append((v, blob))
     if not verdicts:
         return {"ok": False, "blob": b"", "verdict": {}, "judged": 0, "why": "no candidates"}
-    # HIGHEST MATCH WINS; a tie goes to the first, which is the API's own
-    # first choice.
-    best_v, best_b = max(verdicts, key=lambda vb: vb[0].get("match", 0))
+    # A CLEAN CANDIDATE FIRST, then the highest match; a tie goes to the
+    # first, which is the API's own first choice. Painted lettering, logos or
+    # button-like components are not "a good likeness with a flaw" — they are
+    # type burned into the picture where the owner wanted a layer (2026-09-07),
+    # and no product match makes up for it.
+    best_v, best_b = max(verdicts, key=lambda vb: (0 if vb[0].get("lettering") else 1,
+                                                    vb[0].get("match", 0)))
     return {"ok": True, "blob": best_b, "verdict": best_v, "judged": len(verdicts), "why": ""}
 
 

@@ -324,7 +324,11 @@ _THE_LOOK = (
     "The remaining reference images are THE LOOK, not the contents: match "
     "their styling, lighting, palette, surfaces, props, camera height and "
     "framing. Nothing from inside them — no object, person, room or text — is "
-    "copied into this frame; they say how it should feel, not what is in it.")
+    "copied into this frame; they say how it should feel, not what is in it. "
+    "If a reference carries text, a logo, a button, a badge or any layout "
+    "component, those are NOT part of the look: this frame carries no "
+    "lettering and no components of any kind — the words are set later, by "
+    "hand, as layers.")
 
 #: How hard the model is asked to match its inputs. `high` is what makes a
 #: reference a reference rather than a mood — at `low`, the API's default, a
