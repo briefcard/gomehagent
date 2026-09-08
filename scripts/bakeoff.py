@@ -7,12 +7,13 @@ the same brief and the same board go through each model named here, the sets
 land under Pictures with only a number on them, the owner keeps and rejects
 without knowing which is which, and `--reveal` says afterwards.
 
-Only models on the configured image API (IMAGE_API_BASE — OpenAI-compatible)
-can be compared this way; a provider that speaks a different API needs an
-adapter first, and this script says so rather than pretending.
-
+Two doors: a plain model name goes to the configured image API
+(IMAGE_API_BASE — OpenAI-compatible); a `gemini:<model>` name goes to Google's
+image models through `app/gemini_images.py` (GEMINI_API_KEY required — the
+docs read 2026-09-08 say Nano Banana Pro takes up to six object references
+"with high fidelity"). Both get the same words and the same pictures.
   python3 scripts/bakeoff.py --tenant baci --entity zodiac-cup \\
-      --models gpt-image-1,gpt-image-1-mini --plates 2
+      --models gpt-image-1,gemini:gemini-3-pro-image,gemini:gemini-3.1-flash-image --plates 2
   python3 scripts/bakeoff.py --tenant baci --reveal
 """
 from __future__ import annotations

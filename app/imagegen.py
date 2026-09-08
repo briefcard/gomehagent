@@ -286,7 +286,12 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
                 [prompt]
                 + (["Styling reference: " + inspiration] if inspiration else [])
                 + rules).strip()}
-    res = post("/images/generations", json_body=body)
+    from . import gemini_images as _gemini
+    if _gemini.is_gemini(model or MODEL):
+        res = _gemini.edit(body["prompt"], images=[], model=model or MODEL, shape=shape,
+                           n=body["n"])
+    else:
+        res = post("/images/generations", json_body=body)
     if not res["ok"]:
         return res
     return {"ok": True, "images": res["images"], "shape": shape,
@@ -500,6 +505,19 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
              + [("image[]", (f"look-{i + 1}", b, _mime(b)))
                 for i, b in enumerate(look)])
     model = model or MODEL
+    # THE SECOND DOOR. A `gemini:` model takes the same words and the same
+    # pictures, in the same order, through Google's image API — the bake-off
+    # compares providers on identical requests or it compares nothing.
+    from . import gemini_images as _gemini
+    if _gemini.is_gemini(model):
+        res = _gemini.edit("\n\n".join([prompt] + rules).strip(),
+                           images=[f[1] for f in files], model=model, shape=shape,
+                           n=max(1, min(4, n)))
+        if not res["ok"]:
+            return res
+        return {"ok": True, "images": res["images"], "shape": shape,
+                "inputs": {"product": len(product), "cast": len(cast), "look": len(look)},
+                "note": f"drawn from the brand's own pictures by {res.get('model', model)}"}
     data = {"model": model, "size": SIZES[shape],
             "n": str(max(1, min(4, n))),
             "prompt": "\n\n".join([prompt] + rules).strip()}

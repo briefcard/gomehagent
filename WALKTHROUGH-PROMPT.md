@@ -1218,6 +1218,54 @@ a correction reverses a rule, restate the rule back before writing it.
 
 ---
 
+### A second image provider is a call away — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's ask:** *"These days, there must be a way to create this
+without hallucinations."* Exact reproduction of a specific object is a
+PROVIDER capability; the bake-off could compare models only on the one
+OpenAI-compatible endpoint and said a different provider "needs an adapter
+first".
+
+**The contract (Google's docs, read 2026-09-08):** the Interactions API —
+`POST {GEMINI_API_BASE}/interactions`, header `x-goog-api-key`, body
+`{model, input: [text block, image blocks (mime_type + base64)…],
+response_format: {type: image, mime_type, aspect_ratio, image_size}}`; the
+reply's last image block is the picture (the SDK's `output_image`; REST is
+walked for `{"type":"image","data"}`, the older `inlineData` shape too).
+Models and limits: `gemini-3-pro-image` (Nano Banana Pro, 6 object
+references "with high fidelity", 3 style), `gemini-3.1-flash-image` (10
+objects, 3 style), `gemini-3.1-flash-lite-image` (14 objects, no style),
+`gemini-2.5-flash-image` (legacy, 3).
+
+**The ship.** `config.GEMINI_API_KEY` / `GEMINI_API_BASE`;
+`app/gemini_images.py` (`is_gemini`, `limits`, `image_blocks`, `edit` —
+one call per picture, the product and cast as object references capped per
+model, the looks as style references, every call filed under provider
+`gemini_images` with the reply's top-level keys on the row, Google's error
+as "status: message"); `imagegen.with_references` and `imagegen.plate`
+dispatch a `gemini:<model>` name to it with the SAME words and pictures in
+the same order — nothing else changes; `bakeoff.py` names the door.
+
+**Standing rules it adds:**
+- **One request, two doors**: a provider comparison is only a comparison
+  when the words and pictures are identical (`a_gemini_model_is_a_call_away`,
+  `the_references_ride_in_order`).
+- **A provider's contract is encoded, its limits included**
+  (`the_call_is_the_documented_one`, `object_references_are_capped_per_model`,
+  `the_last_image_block_is_the_picture`).
+- **A missing key refuses by the variable's name and calls nothing; every
+  call is filed** (`the_key_is_required_by_name`, `the_call_is_filed`).
+
+**Unverified until the owner adds the key:** the raw REST reply's nesting
+(the row's `keys:` says what came back), the models' availability on the
+owner's key, and — the point — whether Nano Banana Pro reproduces Baci's
+pieces. **Owner's move:** add `GEMINI_API_KEY` (Google AI Studio) to the
+Render env, then `python3 scripts/bakeoff.py --tenant baci --entity <key>
+--models gpt-image-1,gemini:gemini-3-pro-image,gemini:gemini-3.1-flash-image`
+and rank the sets blind; `--reveal` after.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1389,23 +1437,14 @@ a correction reverses a rule, restate the rule back before writing it.
 > the product photos that we own are for design and pattern reference.
 > That's it."*
 >
-> **NEXT: A SECOND IMAGE PROVIDER FOR THE BAKE-OFF — GOOGLE'S IMAGE MODELS.**
-> Docs read 2026-09-08 (ai.google.dev/gemini-api/docs/image-generation):
-> `POST https://generativelanguage.googleapis.com/v1beta/interactions`,
-> header `x-goog-api-key`, body `{"model", "input": [{"type":"text","text"},
-> {"type":"image","mime_type","data":<b64>}…], "response_format":
-> {"type":"image","mime_type","aspect_ratio","image_size"}}`; the reply's
-> last image block is the picture (`output_image` in the SDK; walk the JSON
-> for `{"type":"image","data"}`). Models: `gemini-3.1-flash-image` (Nano
-> Banana 2, "excelling at multiple reference image processing and
-> consistency"), `gemini-3-pro-image` (Nano Banana Pro, "accurate brand
-> consistency"; up to 6 object references with high fidelity, 14 in all),
-> `gemini-3.1-flash-lite-image` (not for multiple references),
-> `gemini-2.5-flash-image` (legacy). Needs `GEMINI_API_KEY` from the owner.
-> Build: `imagegen.with_references(model="gemini:…")` dispatch to a Gemini
-> adapter, the same product/look inputs, `bakeoff.py --models
-> gpt-image-1,gemini:gemini-3-pro-image`; record the first live response
-> shape. Then the owner's blind ranking.
+> **SHIPPED 2026-09-08, FIFTEENTH: A SECOND IMAGE PROVIDER IS A CALL AWAY**
+> (7 guards, §5 has the record). A `gemini:<model>` name anywhere a model
+> is named goes to Google's image models through `app/gemini_images.py`
+> with the same words and pictures; the bake-off compares the two doors.
+> **Owner's move:** add `GEMINI_API_KEY` to the Render env, run
+> `python3 scripts/bakeoff.py --tenant baci --entity <key> --models
+> gpt-image-1,gemini:gemini-3-pro-image,gemini:gemini-3.1-flash-image`,
+> rank blind, `--reveal`. If Nano Banana Pro wins, set `IMAGE_MODEL` to it.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with

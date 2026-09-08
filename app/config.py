@@ -179,6 +179,16 @@ IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gpt-image-1")
 # a provider with a different request shape needs more than a URL, and
 # pretending otherwise would be a seam that fails at the first real use.
 IMAGE_API_BASE = os.environ.get("IMAGE_API_BASE", "https://api.openai.com/v1")
+# THE SECOND IMAGE PROVIDER, for the bake-off. Exact reproduction of a
+# specific object is a provider capability (bakeoff.py); Google's image
+# models take reference images of objects "with high fidelity" (docs read
+# 2026-09-08). A model named `gemini:<model>` anywhere a model is named —
+# IMAGE_MODEL, `bakeoff.py --models` — goes to `gemini_images` instead of
+# the OpenAI-compatible endpoint above. Unset key = that route refuses by
+# name; nothing else changes.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE",
+                                 "https://generativelanguage.googleapis.com/v1beta")
 
 SWEEP_HOUR = int(os.environ.get("SWEEP_HOUR", "20"))
 BUCKET_BACKFILL_DAYS = int(os.environ.get("BUCKET_BACKFILL_DAYS", "30"))
