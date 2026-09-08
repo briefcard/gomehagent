@@ -1168,6 +1168,56 @@ call carries Canva's answer and the frame still opens flat.
 
 ---
 
+### The board is the style reference, the owned photographs are the design and pattern reference — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner, a day after the companions ship:** *"the edits went live and
+are good — the only thing is that I dont think it makes sense to force the
+secondary products into the photos … now all their relative proportions
+are off in the photos so it's almost better if we stick to letting the
+visual boards set the reference and let the AI generate the photos."* A
+first draft answered that with PLAIN, generic tableware around the product
+— *"WHY WOULD WE WANT TO SPECIFICALLY HAVE NON-BACI MILANO PLATES IN THE
+IMAGES?"* — and the owner then stated the whole rule: *"The Visual board
+is for style reference, the product photos that we own are for design and
+pattern reference. That's it."*
+
+**Why the proportions went.** A photograph of a cup and one of a plate
+each fill their own frame; the request carries no scale between them, so
+a model told to reproduce both as objects guesses the relative size.
+
+**The ship.** Two references, two roles, in the request's words:
+`_THE_LOOK` (the board = how the frame looks) unchanged; `_THE_LINE` (no
+companion pinned) — the other pieces are from the same line as the
+product, same design language, materials, colours, finishes, patterns, at
+natural sizes, in the board's style, nothing invented; `_the_cast` (a
+product the owner pinned beside it) — its photograph is DESIGN AND PATTERN
+reference for the other pieces, "what the pieces look like, not how big
+they are or where they stand". `creative.companions` (the catalogue's
+automatic pick) is gone: the cast is only the owner's pins. The judge's
+fault is now `invented` — decoration, pattern, ornament, colour or design
+feature ADDED to the product or the other pieces beyond what the
+references show, or another brand's look — redrawn by name ("REMOVE every
+invented decoration…"), dropped if it stays ("decoration was invented on
+the product or the pieces around it"). "Other products" as a fault is
+gone: pieces in the line are what a real table has.
+
+**Standing rules it adds:**
+- **Two references, two roles**: the board says how it looks, the owned
+  photographs say what the pieces are; nothing is invented and nothing is
+  generic (`the_other_pieces_are_in_the_line`, `the_judge_is_asked_about_invented_decoration`,
+  `invented_decoration_is_redrawn_away`).
+- **Nothing is added to a request on the system's own guess** — companions
+  are pins (`the_cast_is_the_brands_own_line`).
+- **A reference says what a thing looks like, never how big it is**
+  (`the_cast_rides_the_request`, `the_judge_sees_the_cast`).
+
+**Trap this stretch fell into.** Answering the owner's sentence instead
+of their intent: "let the AI generate the photos" meant Baci-style pieces
+drawn from the board, and the first draft wrote "plain, unbranded". When
+a correction reverses a rule, restate the rule back before writing it.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1328,6 +1378,16 @@ call carries Canva's answer and the frame still opens flat.
 > the layers are tried again on the next press. **Owner's move:** press
 > "layer in Canva" once more; if it opens flat, the tool-call record holds
 > Canva's answer.
+>
+> **SHIPPED 2026-09-08, FOURTEENTH: THE BOARD IS THE STYLE REFERENCE, THE
+> OWNED PHOTOGRAPHS ARE THE DESIGN AND PATTERN REFERENCE** (8 guards
+> re-anchored, §5 has the record). The automatic companions threw the
+> proportions and are gone; the other pieces on the table are drawn in the
+> line, in the board's style; a pinned companion's photograph is design and
+> pattern reference, never size; the judge's fault is INVENTED decoration.
+> The owner's rule, verbatim: *"The Visual board is for style reference,
+> the product photos that we own are for design and pattern reference.
+> That's it."*
 >
 > **NEXT: A SECOND IMAGE PROVIDER FOR THE BAKE-OFF — GOOGLE'S IMAGE MODELS.**
 > Docs read 2026-09-08 (ai.google.dev/gemini-api/docs/image-generation):

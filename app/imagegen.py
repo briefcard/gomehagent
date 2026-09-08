@@ -320,39 +320,41 @@ def _this_exact_product(k: int) -> str:
             "thing the eye lands on.")
 
 
-#: THE ONLY PRODUCT IN THE FRAME IS THE ONE SUPPLIED. Owner, 2026-09-08:
-#: "our plates are given design embellishments both in the main product and
-#: the products shown in the surrounding scene" — with the product drawn from
-#: its photographs, nothing told the model that the REST of the table was
-#: not its to design, so it dressed the scene with look-alikes from the same
-#: imagined range. Props are not products; other tableware, if the scene
-#: needs any, is plain and clearly not something being sold.
-_ONLY_THIS_PRODUCT = (
-    "NO OTHER PRODUCT appears anywhere in the frame — no other plate, glass, "
-    "cup, bowl, jug, pitcher, bottle, box or packaging, and nothing that could "
-    "be taken for another item from the same range. Props are not products: "
-    "linen, food, flowers, cutlery, hands, light. If the scene needs other "
-    "tableware, it is plain, unpatterned, unbranded and clearly incidental. "
-    "Do not embellish, decorate or add pattern to anything.")
+#: TWO KINDS OF REFERENCE, TWO ROLES. Owner, 2026-09-08: *"The Visual board
+#: is for style reference, the product photos that we own are for design
+#: and pattern reference. That's it."* So the board's pictures say how the
+#: frame LOOKS (`_THE_LOOK`); the brand's own product photographs say what
+#: the pieces in it are DESIGNED like — the product exactly, and the other
+#: pieces on the table in the same line. What the model may never do is
+#: invent: a plate given an embellishment the line does not have, a glass
+#: generalised to its type, a piece from some other brand's look.
+_THE_LINE = (
+    "THE OTHER PIECES OF TABLEWARE in the frame are from the same line as the "
+    "product: the same design language, materials, colours, finishes and "
+    "patterns, at natural sizes beside it, laid as a real table is laid, in "
+    "the style of the brand's own pictures among the references. Nothing "
+    "invented and nothing added — no ornament, pattern or decoration the "
+    "product's own line does not have, and no other brand's look. The product "
+    "stays the one the eye lands on.")
 
 
 def _the_cast(k: int, m: int, names: list) -> str:
-    """THE OTHER PRODUCTS THAT MAY APPEAR — the brand's own, photographed.
-    Owner, 2026-09-08: a real tablescape needs other pieces on the table,
-    and *"they should just align with our product line if they do show
-    up"*. So the supporting pieces are the brand's catalogue items, sent as
-    reference images beside the product, drawn exactly, and nothing else
-    that reads as a product is allowed."""
-    who = ", ".join(str(n) for n in names if n) or "the brand's own products"
-    return (f"THE OTHER PRODUCTS THAT MAY APPEAR are ONLY the ones in reference "
-            f"images {k + 1} to {k + m} — {who}, the same brand's own pieces — "
-            "each reproduced EXACTLY as photographed: its shape, proportions, "
-            "colours, pattern, material and finish, never redesigned, recoloured "
-            "or embellished. Use them as the supporting pieces that make this a "
-            "real table, around the product, which stays the thing the eye lands "
-            "on. No product that is not one of these appears; props are not "
-            "products (linen, food, flowers, cutlery, hands, light). Do not "
-            "embellish, decorate or add pattern to anything.")
+    """DESIGN AND PATTERN REFERENCE for the other pieces: the owner pinned
+    other products of the line on the board, and their photographs say what
+    those pieces look like — never how big they are or where they stand.
+    Owner, 2026-09-08: companions sent as objects to reproduce came back
+    with "all their relative proportions … off", because separately
+    photographed pieces carry no scale between them."""
+    who = ", ".join(str(n) for n in names if n) or "the brand's own pieces"
+    return (f"DESIGN AND PATTERN REFERENCE for the other pieces on the table: "
+            f"reference images {k + 1} to {k + m} are the brand's own {who}. The "
+            "other pieces follow their design, pattern, colour, material and "
+            "finish exactly — but these images say what the pieces LOOK LIKE, "
+            "not how big they are or where they stand: give them natural "
+            "proportions beside the product and lay them as a real table is "
+            "laid. Nothing invented, no added ornament, no other brand's look. "
+            "The product stays the one the eye lands on.")
+
 
 _THE_LOOK = (
     "The remaining reference images are THE LOOK, not the contents: match "
@@ -479,7 +481,7 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
         if cast:
             rules.append(_the_cast(len(product), len(cast), list(cast_names or [])))
         else:
-            rules.append(_ONLY_THIS_PRODUCT)
+            rules.append(_THE_LINE)
         if look:
             rules.append(_THE_LOOK)
     else:

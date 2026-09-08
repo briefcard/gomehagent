@@ -1205,7 +1205,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 # only if it scores better; a lettered or product-strewn
                 # redraw never replaces a clean original.
                 tries = 0
-                while ((wrong or best_v.get("lettering") or best_v.get("other_products"))
+                while ((wrong or best_v.get("lettering") or best_v.get("invented"))
                        and tries < REDRAFTS):
                     tries += 1
                     fixes = list(best_v.get("differences") or []) if wrong else []
@@ -1213,13 +1213,12 @@ def batch(tenant: str, *, commitment: dict | None = None,
                         fixes.append("REMOVE every piece of lettering, every logo and "
                                      "every button-, badge- or label-like component — "
                                      "the words are set later, by hand, as layers")
-                    if best_v.get("other_products"):
-                        fixes.append("REMOVE every product that is not one of the "
-                                     "supplied products — the only pieces allowed on "
-                                     "the table are the product and the brand's own "
-                                     "supporting pieces in the reference images, each "
-                                     "exactly as photographed; nothing invented, "
-                                     "nothing embellished")
+                    if best_v.get("invented"):
+                        fixes.append("REMOVE every invented decoration, pattern, "
+                                     "ornament or design feature — the product and the "
+                                     "other pieces on the table carry exactly the "
+                                     "designs and patterns in the reference images, in "
+                                     "the same line, and nothing more")
                     again = _with_references(
                         text + "\n\nTHE PREVIOUS ATTEMPT GOT THIS WRONG — CORRECT "
                                "exactly these, and change nothing else:\n"
@@ -1246,11 +1245,11 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 # redraws is dropped and SAID, with the difference the judge
                 # named — a frame of a glass that is almost the glass is the
                 # one the owner would run by mistake.
-                if wrong or best_v.get("other_products"):
+                if wrong or best_v.get("invented"):
                     fidelity["not_the_product"] += 1
                     why = "; ".join(list(best_v.get("differences") or [])[:2]) or (
-                        "a product that is not the brand's own was drawn into the scene"
-                        if best_v.get("other_products") else "")
+                        "decoration was invented on the product or the pieces around it"
+                        if best_v.get("invented") else "")
                     if why and why[:160] not in fidelity["why_dropped"]:
                         fidelity["why_dropped"].append(why[:160])
                     images = []
@@ -1698,17 +1697,17 @@ pattern, embellishment or edge treatment, a different colour, material or
 transparency, or a generalised version of the type ("a wine glass" where the
 photographs show THIS wine glass) is a DIFFERENT product: same_product=false
 and match no higher than 60, with the difference named.
-"other_products" is true if the picture shows ANY item that reads as a
-product — a plate, glass, cup, bowl, jug, bottle, box or packaging that looks
-designed, patterned, decorated or branded — that is NOT the product and NOT
-one of the brand's supporting pieces supplied here: an invented or look-alike
-item. Supporting pieces that match their photographs are fine. Plain
-incidental props (linen, food, flowers, cutlery, hands) are not products.
+"invented" is true if the picture ADDS any decoration, pattern, ornament,
+embellishment, colour or design feature — to the product OR to the other
+pieces of tableware on the table — that the reference images do not show, or
+shows a piece in another brand's look: an invented design. Other pieces that
+follow the references' designs and patterns, in the same line, are fine.
+Plain incidental props (linen, food, flowers, cutlery, hands) are not judged.
 "lettering" is true if the picture carries ANY rendered text, lettering,
 logo, button, badge, price tag, sticker or interface-like component anywhere
 — the words are set later, by hand, and any at all counts.
 Answer with all five keys: match, differences, same_product, lettering and
-other_products."""
+invented."""
 
 
 def _fingerprint(blobs: list) -> str:
@@ -1814,7 +1813,7 @@ def _compare_product_live(candidate: bytes, product: list, features: list,
     return {"ok": True, "match": match, "differences": diffs,
             "same": bool(data.get("same_product")) or (match >= FIDELITY_KEEP and not diffs),
             "lettering": bool(data.get("lettering")),
-            "other_products": bool(data.get("other_products")), "why": ""}
+            "invented": bool(data.get("invented")), "why": ""}
 
 
 compare_product = _compare_product_live        # replaceable, so the suite can drive every path
@@ -1822,11 +1821,11 @@ compare_product = _compare_product_live        # replaceable, so the suite can d
 
 def _fidelity_score(v: dict) -> int:
     """One number to rank verdicts by: the match, minus a hundred for painted
-    lettering and fifty for another product in the scene — so neither fault
-    is ever 'a good likeness with a flaw'."""
+    lettering and fifty for invented decoration — so neither fault is ever
+    'a good likeness with a flaw'."""
     return (int(v.get("match", 0) or 0)
             - (100 if v.get("lettering") else 0)
-            - (50 if v.get("other_products") else 0))
+            - (50 if v.get("invented") else 0))
 
 
 def _closest(candidates: list, product: list, features: list, tenant: str,
@@ -1850,7 +1849,7 @@ def _closest(candidates: list, product: list, features: list, tenant: str,
     # type burned into the picture where the owner wanted a layer (2026-09-07),
     # and no product match makes up for it.
     best_v, best_b = max(verdicts, key=lambda vb: (0 if vb[0].get("lettering") else 1,
-                                                    0 if vb[0].get("other_products") else 1,
+                                                    0 if vb[0].get("invented") else 1,
                                                     vb[0].get("match", 0)))
     return {"ok": True, "blob": best_b, "verdict": best_v, "judged": len(verdicts), "why": ""}
 
@@ -1860,39 +1859,15 @@ def _closest(candidates: list, product: list, features: list, tenant: str,
 #: and a board's palette, and every extra one is upload time on a call that
 #: already takes a minute.
 BOARD_INPUTS = 4
-#: How many of the brand's OTHER products ride along as the supporting
-#: pieces of a tablescape. Owner, 2026-09-08: background products are
-#: "almost mandatory so it looks like a real tablescape", and "they should
-#: just align with our product line if they do show up".
+#: How many of the brand's OTHER products ride along as supporting pieces —
+#: only the ones the owner PINNED as the product on the chosen board.
+#: Owner, 2026-09-08, after a day of companions drawn from the catalogue:
+#: "all their relative proportions are off … it's almost better if we stick
+#: to letting the visual boards set the reference and let the AI generate
+#: the photos." A photograph of a cup and one of a plate each fill their own
+#: frame; the model has no scale between them, and guesses. So companions
+#: are an explicit choice on the board, and nothing is added on its own.
 CAST_INPUTS = 3
-
-
-def companions(tenant: str, entity_key: str, *, limit: int = CAST_INPUTS) -> list:
-    """The brand's own products that may share the table with this one:
-    catalogue items with a photograph the brand may use, this one excluded —
-    siblings of its collection first, a different kind of piece preferred
-    (a glass and a bowl beside a plate, not three plates). Rows, in order."""
-    hero = next((e for e in kb.entities(tenant, available_only=False)
-                 if str(e.key) == str(entity_key)), None)
-    hero_parents = set(getattr(hero, "parent_keys", None) or []) if hero else set()
-    hero_type = str(((getattr(hero, "attributes", None) or {}).get("product_type") or "")).lower()
-    photos: dict = {}
-    for a in kb.assets(tenant, publishable_only=True, kind="image"):
-        key = str(a.entity_key or "")
-        if (not key or key == str(entity_key) or (a.origin or "") == GENERATED_ORIGIN
-                or (a.subject or "") == kb.LOGO):
-            continue
-        photos.setdefault(key, a)
-    out = []
-    for e in kb.entities(tenant, type="product"):
-        if str(e.key) == str(entity_key) or str(e.key) not in photos:
-            continue
-        kind = str(((e.attributes or {}).get("product_type") or "")).lower()
-        score = (2 if hero_parents & set(e.parent_keys or []) else 0) \
-            + (1 if kind and kind != hero_type else 0)
-        out.append((-score, str(e.name or e.key), e, photos[str(e.key)]))
-    out.sort(key=lambda t: (t[0], t[1]))
-    return [(e, a) for _s, _n, e, a in out[:max(0, limit)]]
 
 
 def board_inputs(tenant: str, entity_key: str, product_id: str = "",
@@ -1945,21 +1920,18 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
         # the system would have used is the one the model should match most.
         rest.sort(key=lambda r: 0 if r.id == product_id else 1)
         product_rows += rest
-    # THE CAST — the brand's OTHER products that may share the table, as
-    # photographs: product pins on the selected boards that are not this
-    # product first (the owner's choice), then the catalogue's companions,
-    # so a tablescape is laid with the line's own pieces and never with
-    # look-alikes. Only when the product itself is in the request.
+    # THE CAST — the brand's OTHER products the owner pinned as the product
+    # on the selected boards: DESIGN AND PATTERN references for the other
+    # pieces on the table, never objects to reproduce at a guessed scale
+    # (2026-09-08: separately photographed pieces carry no size between
+    # them). Nothing is added from the catalogue on its own. Only when the
+    # product itself is in the request.
     cast_rows: list = []
     if ent and product_rows:
         cast_rows = [r for r in sel["product"] if (r.entity_key or "") != ent]
         names = {}
         for e in kbmod.entities(tenant, available_only=False):
             names[str(e.key)] = str(e.name or e.key)
-        have = {r.id for r in cast_rows}
-        for e, a in companions(tenant, ent, limit=CAST_INPUTS):
-            if a.id not in have and len(cast_rows) < CAST_INPUTS:
-                cast_rows.append(a)
         for r in cast_rows[:CAST_INPUTS]:
             out["cast_names"].append(names.get(str(r.entity_key or ""), str(r.title or "")))
     # THE WORDS PATH. What the selected boards' reference pins look like,
