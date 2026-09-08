@@ -6095,7 +6095,9 @@ def _frames_run(tenant: str) -> str:
         if not state:
             continue
         when = _esc(str(got.get("at") or "")[:16].replace("T", " "))
-        detail = _esc(str(got.get("detail") or "")[:300])
+        # Room for the reason: a refusal quoted in the API's own words is
+        # longer than a count, and it is the one thing this line is for.
+        detail = _esc(str(got.get("detail") or "")[:600])
         if state == "running":
             chip, says = ("chip", f"{_esc(name)} &mdash; running"), (
                 f"started {when} &mdash; an image call and a review per cell, "

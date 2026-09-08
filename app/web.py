@@ -8192,7 +8192,16 @@ def _summarise(result) -> str:
     # show a board of reference pins as a board that is working.
     note = result.get("extractor_note") or (
         result.get("note") if isinstance(result.get("note"), str) else "") or ""
-    return " · ".join(bits) + (f" — {note[:300]}" if note else "")
+    out = " · ".join(bits) + (f" — {note[:300]}" if note else "")
+    # THE FAILURES A RUN COLLECTED, when its own note did not carry them. A
+    # frames run kept every cell's refusal in `errors` and the strip showed
+    # "made 0" with no reason (owner, 2026-09-08). Said once: a note that
+    # already names the first failure is not repeated.
+    errs = ([str(e) for e in result.get("errors") if str(e).strip()]
+            if isinstance(result.get("errors"), (list, tuple)) else [])
+    if errs and errs[0].split(": ", 1)[-1][:60] not in note:
+        out += f" — {len(errs)} error(s): {errs[0][:200]}"
+    return out
 
 
 #: What a run REFUSED, SKIPPED or DROPPED, by the key each producer already

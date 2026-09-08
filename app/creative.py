@@ -1089,9 +1089,10 @@ def batch(tenant: str, *, commitment: dict | None = None,
                            positioning=positioning, situation=situation,
                            composited=True)
 
-    frames, errors, repeats, pasted = [], [], 0, 0
+    frames, errors, repeats, pasted, cells = [], [], 0, 0, 0
     for cell in axes(framings=framings, limit=max(1, int(plates or 4)),
                      moments=DRAWN_MOMENTS if drawn else ()):
+        cells += 1
         text = base["prompt"] + _axis_brief(cell, drawn=drawn)
         needs = cell["framing"] in NEEDS_THE_PRODUCT
         # THE ROUTE. Drawn from the brand's pictures when it has the product
@@ -1205,12 +1206,30 @@ def batch(tenant: str, *, commitment: dict | None = None,
                       if (refs["product"] or refs["look"]) else
                       " — the board is on, but none of its pictures could be used")
         if refs["excluded"]:
+            # THE FIRST SENTENCE OF THE REASON, whole. Cut at 90 characters
+            # it read "not licensed for use. Generate something of our ow",
+            # which the owner took for a broken sentence rather than a rule.
             board_said += (f"; {len(refs['excluded'])} pin(s) kept out of the "
                            "request: " + "; ".join(
-                               str(e["why"])[:90] for e in refs["excluded"][:3]))
+                               str(e["why"]).split(". ")[0] for e in refs["excluded"][:3]))
     if refs["unknown"]:
         board_said += ("; no board named " + ", ".join(refs["unknown"])
                        + " — nothing was pulled from it")
+    # WHY CELLS FAILED, SAID — and FIRST when nothing was made. Owner,
+    # 2026-09-08: a Lifestyle run reported "made 0 · clean 0 — nothing was
+    # generated — drawn from 0 photograph(s) … 4 board pin(s)" and nothing
+    # else, while every cell's refusal sat in `errors`, which no note and
+    # no surface read. A run that did nothing for no stated reason is a
+    # button that looks broken; the API's own words are the reason.
+    distinct: list = []
+    for e in errors:
+        why = str(e).split(": ", 1)[-1].strip()
+        if why and why not in distinct:
+            distinct.append(why)
+    failed_said = ""
+    if errors:
+        failed_said = (f"{len(errors)} of {cells} cell(s) failed: {distinct[0][:220]}"
+                       + (f"; also: {distinct[1][:120]}" if len(distinct) > 1 else ""))
     # WHAT THE JUDGE DID, SAID. "Four candidates, one kept" is a fact about
     # the set; "fidelity was not judged" is a different fact and must not
     # look like the first.
@@ -1263,12 +1282,15 @@ def batch(tenant: str, *, commitment: dict | None = None,
                       + (f"; {pasted} were dropped because the product still "
                          f"read as pasted on after a second plate"
                          if pasted else "")
+                      + (f"; {failed_said}" if failed_said else "")
                       + board_said
                       + ". No type is set into these — open one in Canva to "
                         "add the headline"
                       + (f" (“{headline[:60]}”)" if headline else ""))
                      if frames else
-                     ("nothing was generated" + board_said
+                     ("nothing was generated"
+                      + (f" — {failed_said}" if failed_said else "")
+                      + board_said
                       + (f" — {pasted} composite(s) were dropped because the "
                          f"product read as pasted on" if pasted else ""))),
             "held_back": (

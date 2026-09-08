@@ -978,6 +978,44 @@ never on the Pictures page — assert on `boards_select`, not on the page.
 
 ---
 
+### A run that made nothing says why — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's report:** *"My latest run didnt generate any photos — I used
+the Lifestyle board and see this message: made 0 · clean 0 — nothing was
+generated — drawn from 0 photograph(s) of the product and 4 board pin(s);
+1 pin(s) kept out of the request: reference only — saved for inspiration,
+not licensed for use. Generate something of our ow. Is there an issue with
+the way we generate?"*
+
+**What was true (reproduced in the suite before the fix).** The look-only
+route works: four owned pins go in as the look, nothing as the product, and
+frames come back when the API answers. What failed was the API call on
+every cell — `batch` kept each refusal in `errors`, its note said only
+"nothing was generated" plus the board's contribution, `_summarise` never
+read `errors`, and the strip showed a run that did nothing for no reason.
+Every image call is recorded in `toolcalls` with its error, where no
+surface showed it. The excluded pin's reason was cut at 90 characters,
+mid-word.
+
+**Standing rules it adds:**
+- **A run that made nothing LEADS with why**: "N of M cell(s) failed: <the
+  API's own words>", before what the board contributed
+  (`a_run_that_made_nothing_names_the_reason`); a partial run says it after
+  what it made (`a_partial_run_says_what_failed`).
+- **`_summarise` reads `errors`** for every background result whose note
+  did not already carry the first one (`a_runs_errors_reach_the_summary`).
+- **A reason on a surface is a whole sentence** — cut at the sentence, never
+  the character (`an_excluded_pins_reason_is_whole`).
+
+**The likely cause of the owner's run, unverifiable from here:** the image
+API refused or rate-limited every cell — a Lifestyle board's pictures of
+people at tables are the kind the safety system rejects as edit inputs.
+The next run says the exact words; if it is a safety refusal, the fix is
+in the board (pin pictures without recognisable people as inputs), not in
+the generator.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1106,6 +1144,24 @@ never on the Pictures page — assert on `boards_select`, not on the page.
 > that channel — keyed by the system asking — and the ad panel judges
 > against the ads one. **Owner's move:** Brand → "Copy instructions by
 > channel" → write the ads and email rules; the next batch drafts under them.
+>
+> **SHIPPED 2026-09-08, TENTH: A RUN THAT MADE NOTHING SAYS WHY** (4 guards,
+> §5 has the record). The owner's Lifestyle run reported "made 0" and no
+> reason while every cell's API refusal sat in `errors`; the reason now
+> leads the note and reaches the strip, `_summarise` reads `errors` for
+> every background result, and an excluded pin's reason is a whole
+> sentence. The look-only route is proven to make frames in the suite.
+> **Owner's move:** run the same set again and read the reason on the strip.
+>
+> **NEXT: A PINTEREST BOARD LINK FILLS A BOARD — NO API.** Verified
+> 2026-09-08: `https://www.pinterest.com/<user>/<board>.rss` is public XML
+> (24 items: title, pin link, a 236px thumbnail); swapping `/236x/` for
+> `/originals/` resolves the full-size image, `/736x/` as the fallback. Pins
+> land as REFERENCE rights (never sent as pixels — the standing rule) and
+> are READ INTO DIRECTION WORDS by one vision call per board (the
+> `learn_winning_look` pattern, `_LOOK` prompt), cached on the board record
+> and appended to every drawn cell's prompt for that board. Owned pins stay
+> the pixels. The owner's choice per pin stays: mark one owned if it is.
 >
 > **THE OWNER'S OTHER TWO, asked 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with
