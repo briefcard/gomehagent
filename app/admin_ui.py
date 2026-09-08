@@ -705,7 +705,10 @@ BG_LABELS = (("harvest", "Harvest"), ("scan", "Compliance scan"),
 #: its button in Review's Sources fold — a voice derive fills no queue, and a
 #: state reported where its control is not is exactly what rule 1 forbids. It
 #: is the same vocabulary, viewed by the tab that owns the action.
-BG_BRAND_LABELS = (("voice", "Voice derive"),)
+BG_BRAND_LABELS = (("voice", "Voice derive"),
+                   # a Pinterest board filled onto a visual board, or a
+                   # board's reference pins read into direction (boards card)
+                   ("boards", "Board fill / direction read"))
 
 #: And the one Review's PICTURES section reports, through `_frames_run`. A
 #: third group for the same reason the second exists: making an ad's frames
@@ -6416,6 +6419,40 @@ def _board_card(key: str, tenant: str) -> str:
         tiles = "".join(_tile(a, [r for sl, r in on_boards[a.id] if sl == slug])
                         for a in mine)
         note = f'<p class="mut">{_esc(b.get("note") or "")}</p>' if b.get("note") else ""
+        # THE WORDS A REFERENCE PIN CONTRIBUTES, shown where the pins are —
+        # or the fact that they have not been read yet, with the control.
+        refs_n = sum(1 for a in mine if (a.rights or kb.REFERENCE) != kb.OWNED)
+        d = b.get("direction") or {}
+        if d.get("text"):
+            note += (f'<p class="mut"><b>Direction</b>, read from {int(d.get("from") or 0)} '
+                     f'reference pin(s) {_esc(str(d.get("read_at") or "")[:10])}: '
+                     f'{_esc(str(d.get("text"))[:700])}</p>')
+        elif refs_n:
+            note += (f'<p class="mut"><b>{refs_n} reference pin(s), not read into '
+                     f'direction yet</b> &mdash; until they are, they guide nothing.</p>')
+        note += f"""
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <form method="post" action="/admin/board_fill" class="inl">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="board" value="{_esc(slug)}">
+          <input name="url" placeholder="https://www.pinterest.com/<user>/<board>/"
+                 style="width:22rem" required>
+          <button class="sec" title="Every pin of that public Pinterest board lands
+            here as a REFERENCE pin — read for direction in words, never sent
+            as pixels — and the board is read into its direction. No API, no
+            sign-in: Pinterest's public feed.">Fill from a Pinterest board</button>
+        </form>
+        <form method="post" action="/admin/board_read" class="inl">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="board" value="{_esc(slug)}">
+          <button class="sec" title="Looks at this board's reference pins once and
+            writes down the light, framing, palette and styling they share;
+            that direction rides every picture drawn for this board.">
+            {"Read the direction again" if d.get("text") else "Read the reference pins into direction"}</button>
+        </form>
+      </div>"""
         sections += f"""
       <div class="anchor" id="board-{_esc(slug)}"></div>
       <h3>{_esc(b.get("name") or slug)} <span class="mut">&middot; {len(mine)}
@@ -6485,6 +6522,23 @@ def _board_card(key: str, tenant: str) -> str:
     more = (f'<p class="mut">The newest {len(shown)} of {loose} unpinned '
             f'pictures on file.</p>' if loose > len(shown) else "")
     pool_tiles = "".join(_tile(a, []) for a in shown)
+    # WHAT THE LAST FILL OR READ DID, where the boards are. A background
+    # action that failed must not look like one still running.
+    from .web import bg_status as _bgs
+    bst = _bgs("boards", tenant) or {}
+    bnote = ""
+    if bst.get("state") == "running":
+        bnote = ('<div class="note">Reading the Pinterest board &mdash; the pins '
+                 'and the direction appear here when it lands; this page does not '
+                 'refresh itself.</div>')
+    elif bst.get("state") == "failed":
+        bnote = (f'<div class="note"><strong>The board fill failed</strong> '
+                 f'{_esc(str(bst.get("at") or "")[:16].replace("T", " "))} &mdash; '
+                 f'{_esc(str(bst.get("detail") or ""))}</div>')
+    elif bst.get("state") == "done":
+        bnote = (f'<p class="mut">Last board fill / read '
+                 f'{_esc(str(bst.get("at") or "")[:16].replace("T", " "))} &mdash; '
+                 f'{_esc(str(bst.get("detail") or "")[:400])}</p>')
     return f"""
     <div class="anchor" id="board"></div>
     <div class="card">
@@ -6492,6 +6546,7 @@ def _board_card(key: str, tenant: str) -> str:
         <span class="mut">{len(every['product'])} pinned as the product &middot;
         {len(every['look'])} as the look</span></div>
       <p class="mut">{says}</p>
+      {bnote}
       {create}
       {sections}
       {controls}

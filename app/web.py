@@ -6897,6 +6897,50 @@ async def board_add(request: Request, key: str = Depends(admin_key)):
                             err="" if ok else said, anchor="board")
 
 
+@app.post("/admin/board_fill", response_class=HTMLResponse)
+async def board_fill(request: Request, key: str = Depends(admin_key)):
+    """A public Pinterest board, by its link, onto one of the brand's boards
+    — as REFERENCE pins, then read into direction. Owner, 2026-09-08: *"I
+    dont want to use an API for pinterest … Ideally if we can go off a
+    board link that'd work best."* Off the request: a feed, up to forty
+    fetches and one vision call."""
+    from . import kb as kbm, pinterest
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    slug = str(form.get("board", "")).strip()
+    if slug not in kbm.boards(tenant):
+        return _back_to_brand(tenant, err=f"no board named {slug!r}", anchor="board")
+    url, why = pinterest.board_url(str(form.get("url", "")))
+    if why:
+        return _back_to_brand(tenant, err=why, anchor=f"board-{slug}")
+    _run_bg("boards", pinterest.fill_board, tenant, slug, url)
+    return _back_to_brand(
+        tenant, msg=("reading the Pinterest board in the background — its pins "
+                     "land on the board as reference and the direction is read "
+                     "from them; they appear here when it finishes"),
+        anchor=f"board-{slug}")
+
+
+@app.post("/admin/board_read", response_class=HTMLResponse)
+async def board_read(request: Request, key: str = Depends(admin_key)):
+    """Read a board's reference pins into direction words, on the owner's
+    click — one vision call, never on a schedule."""
+    from . import creative as _cr, kb as kbm
+    if key != config.APPROVAL_SECRET:
+        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    slug = str(form.get("board", "")).strip()
+    if slug not in kbm.boards(tenant):
+        return _back_to_brand(tenant, err=f"no board named {slug!r}", anchor="board")
+    _run_bg("boards", _cr.read_board_direction, tenant, slug)
+    return _back_to_brand(tenant, msg="reading the board's reference pins into "
+                                      "direction in the background",
+                          anchor=f"board-{slug}")
+
+
 @app.post("/admin/board_remove", response_class=HTMLResponse)
 async def board_remove(request: Request, key: str = Depends(admin_key)):
     """Remove a board and every pin on it — said in the message, not silent."""

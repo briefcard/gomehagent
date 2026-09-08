@@ -2935,6 +2935,37 @@ def add_board(tenant: str, name: str, note: str = "") -> str:
     return f"Created the board “{name}” ({slug})."
 
 
+def set_board_direction(tenant: str, slug: str, direction: dict) -> str:
+    """Record what a board's reference pins look like, in words, on the board
+    itself: `{"text", "from", "read_at"}`. One writer. The words are what a
+    reference pin contributes — it is never sent as pixels — so a board with
+    reference pins and no direction is a board that guides nothing yet."""
+    have = boards(tenant)
+    if slug not in have:
+        return f"No board called {slug!r}."
+    row = brand(tenant)
+    visual = dict(row.visual or {})
+    have[slug] = {**have[slug], "direction": dict(direction or {})}
+    visual["boards"] = have
+    set_brand(tenant, visual=visual)
+    return "Recorded."
+
+
+def board_direction(tenant: str, boards_: tuple | list = ()) -> str:
+    """The direction words of the boards a run selected (all boards when none
+    are named), each under its board's name — or "" when none has been read.
+    THE WORDS PATH for reference pins, beside the pixels path `board()`."""
+    known = boards(tenant)
+    use = [str(b) for b in (boards_ or ()) if str(b) in known] or list(known)
+    parts = []
+    for slug in use:
+        d = (known.get(slug) or {}).get("direction") or {}
+        text = str(d.get("text") or "").strip()
+        if text:
+            parts.append(f"{known[slug].get('name') or slug}: {text}")
+    return "\n".join(parts)
+
+
 def remove_board(tenant: str, slug: str) -> str:
     """Take a board away, and every pin on it with it — a pin to a board that
     no longer exists is a tag nothing reads, which is worse than none."""

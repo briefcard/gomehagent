@@ -1016,6 +1016,55 @@ the generator.
 
 ---
 
+### A Pinterest board link fills a board; reference pins are read into direction — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's ask:** *"I dont want to use an API for pinterest but I also
+dont have a way to upload those photos directly. Ideally if we can go off
+a board link that'd work best."*
+
+**What was true.** The boards card had said since 2026-09-06 that a
+reference pin "is read for direction, in words, and never sent";
+`board_inputs` kept it out and NOTHING read it — a reference pin
+contributed nothing. A stated capability with no wiring, the class the
+KB-rules audit exists for.
+
+**The contract (a public page format, not an API — verified 2026-09-08):**
+`https://www.pinterest.com/<user>/<board>.rss` is XML; each `<item>`
+carries the pin's title, link and a 236px `i.pinimg.com` thumbnail; the
+same path under `/originals/` is the full-size file (`/736x/` the large
+thumbnail). It can change without notice; `pinterest.pins` says so when
+the feed is not there.
+
+**The ship.** `app/pinterest.py` (`board_url` refuses anything that is not
+`pinterest.com/<user>/<board>/`, `pins` off the feed, `fill_board` → every
+pin as a REFERENCE look pin on the named board, idempotent by URL, then
+the read); `creative.read_board_direction` (one vision call over up to 8
+reference pins, the `learn_winning_look` pattern, prompt `_BOARD_LOOK`
+forbids naming a product) → `kb.set_board_direction` on the board record;
+`kb.board_direction(tenant, boards)` = the words of the selected boards;
+`board_inputs` carries `direction` beside the pixels; `batch` appends
+`_direction_brief(refs)` to every cell (both routes) and the article hero
+does the same; the boards card shows each board's direction (or "N
+reference pins, not read yet — they guide nothing"), a "Fill from a
+Pinterest board" field and a "Read" control; routes `/admin/board_fill`
+(validates the link, `_run_bg("boards", …)`) and `/admin/board_read`;
+label "boards" in `BG_BRAND_LABELS`, its state on the card.
+
+**Standing rules it adds:**
+- **A saved picture is REFERENCE until somebody says otherwise**, and a
+  reference pin contributes WORDS, never pixels (`a_pinterest_pin_lands_as_reference`,
+  `board_inputs_carries_the_words`, `the_direction_rides_every_cell`).
+- **A capability the console states must be wired the day it is stated**
+  (`a_filled_board_is_read_into_direction`, `the_direction_is_stored_on_the_board`,
+  `the_card_shows_the_direction`).
+- **A link is validated before a background job is started on it**
+  (`a_non_board_link_is_refused`).
+
+**Unverified until pressed:** Pinterest's feed for the owner's own boards
+(a secret board has no feed); the direction's quality on real pins.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1153,17 +1202,15 @@ the generator.
 > sentence. The look-only route is proven to make frames in the suite.
 > **Owner's move:** run the same set again and read the reason on the strip.
 >
-> **NEXT: A PINTEREST BOARD LINK FILLS A BOARD — NO API.** Verified
-> 2026-09-08: `https://www.pinterest.com/<user>/<board>.rss` is public XML
-> (24 items: title, pin link, a 236px thumbnail); swapping `/236x/` for
-> `/originals/` resolves the full-size image, `/736x/` as the fallback. Pins
-> land as REFERENCE rights (never sent as pixels — the standing rule) and
-> are READ INTO DIRECTION WORDS by one vision call per board (the
-> `learn_winning_look` pattern, `_LOOK` prompt), cached on the board record
-> and appended to every drawn cell's prompt for that board. Owned pins stay
-> the pixels. The owner's choice per pin stays: mark one owned if it is.
+> **SHIPPED 2026-09-08, ELEVENTH: A PINTEREST BOARD LINK FILLS A BOARD, AND
+> REFERENCE PINS ARE READ INTO DIRECTION** (8 guards, §5 has the record).
+> No API: the board's public feed. Pins land as REFERENCE on the board the
+> owner names, one vision call writes down what they share, and that
+> direction rides every cell drawn for that board; owned pins stay the
+> pixels. **Owner's move:** Brand → the Lifestyle board → paste the
+> Pinterest board link → Fill; read the direction on the card; run a set.
 >
-> **THE OWNER'S OTHER TWO, asked 2026-09-07 (answered, not built):** (3) a
+> **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with
 > its board (today several boards pool their pins; a small ship on
 > `creative.axes`/`batch(boards=)`); (4) a PINTEREST connection (API v5, its

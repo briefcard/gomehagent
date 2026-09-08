@@ -526,6 +526,78 @@ and do not describe any single image — if they have little in common, say
 that plainly rather than inventing a shared style."""
 
 
+_BOARD_LOOK = """These are pictures a brand saved as REFERENCES for how its own
+pictures should look. They are not the brand's pictures and not its
+products.
+
+Describe, in one paragraph, WHAT THEY HAVE IN COMMON as photographs — the
+light (direction, hardness, colour), the framing and camera height, the
+palette, the styling, surfaces and props, whether people appear and how,
+and the overall finish. Write it as direction somebody could shoot to.
+
+Say nothing about any words on them, name no brand or product in them, and
+do not describe any single image — if they have little in common, say that
+plainly rather than inventing a shared style."""
+
+
+def read_board_direction(tenant: str, slug: str, *, limit: int = 8) -> dict:
+    """Look at a board's REFERENCE pins once and write down what they look
+    like — the words path for pictures the brand may not send as pixels.
+
+    Owner's card has said since 2026-09-06 that a reference pin "is read for
+    direction, in words, and never sent"; until 2026-09-08 nothing read it.
+    Same shape as `learn_winning_look`: one vision call, a description
+    stored (`kb.set_board_direction`), the pictures dropped. `{ok, text,
+    from, why}`.
+    """
+    from . import db, imagegen, llm
+    have = kb.boards(tenant)
+    if slug not in have:
+        return {"ok": False, "why": f"no board named {slug!r}", "from": 0}
+    rows = [r for r in kb.board(tenant, [slug])["look"]
+            if (r.rights or kb.REFERENCE) != kb.OWNED]
+    if not rows:
+        return {"ok": False, "from": 0,
+                "why": "no reference pins on this board — owned pins are sent as "
+                       "pixels and need no reading"}
+    import base64 as _b64
+    blocks: list = []
+    for r in rows[:max(1, limit)]:
+        blob = _fetch(r.url or "")
+        if not blob:
+            continue
+        blocks.append({"type": "image",
+                       "source": {"type": "base64", "media_type": imagegen._mime(blob),
+                                  "data": _b64.standard_b64encode(blob).decode()}})
+    if not blocks:
+        return {"ok": False, "from": 0,
+                "why": "none of the reference pins could be fetched, so there is "
+                       "nothing to look at"}
+    blocks.append({"type": "text", "text": _BOARD_LOOK})
+    reply = llm.ask("creative_review", blocks, tenant=tenant, max_tokens=500)
+    if not getattr(reply, "ok", False):
+        return {"ok": False, "from": len(blocks) - 1,
+                "why": (getattr(reply, "degraded", "")
+                        or getattr(reply, "error", "the reading could not run"))}
+    text = (reply.text or "").strip()
+    if not text:
+        return {"ok": False, "from": len(blocks) - 1, "why": "the reading came back empty"}
+    kb.set_board_direction(tenant, slug, {"text": text[:1500], "from": len(blocks) - 1,
+                                          "read_at": db.utcnow().isoformat()})
+    return {"ok": True, "text": text[:1500], "from": len(blocks) - 1, "why": ""}
+
+
+def _direction_brief(refs: dict) -> str:
+    """The reference boards' direction, as prompt text — or nothing."""
+    text = str((refs or {}).get("direction") or "").strip()
+    if not text:
+        return ""
+    return ("\n\nTHE BRAND'S VISUAL DIRECTION, read from the pictures it saved as "
+            "references (match it — the light, the framing, the palette, the "
+            "styling; it names no product and none is to be invented from it):\n"
+            + text)
+
+
 def learn_winning_look(tenant: str, *, top: int = 3) -> dict:
     """Look at this account's best ads and write down what they look like.
 
@@ -799,6 +871,7 @@ def generate(tenant: str, *, commitment: dict | None = None,
     from_board = bool(refs["product"] or refs["look"])
 
     def _draw(text_: str) -> tuple:
+        text_ = text_ + _direction_brief(refs)
         if from_board:
             got_ = _with_references(text_, brief["shape"], 1, refs)
             return got_, ((got_.get("images") or [b""])[0] if got_.get("ok") else b""), (
@@ -1093,7 +1166,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
     for cell in axes(framings=framings, limit=max(1, int(plates or 4)),
                      moments=DRAWN_MOMENTS if drawn else ()):
         cells += 1
-        text = base["prompt"] + _axis_brief(cell, drawn=drawn)
+        text = base["prompt"] + _axis_brief(cell, drawn=drawn) + _direction_brief(refs)
         needs = cell["framing"] in NEEDS_THE_PRODUCT
         # THE ROUTE. Drawn from the brand's pictures when it has the product
         # to draw from; a look-only board styles the cells that carry no
@@ -1747,7 +1820,8 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
     on = bool(every["look"] or every["product"])
     sel = kbmod.board(tenant, boards) if boards else every
     out = {"product": [], "look": [], "pins": [], "excluded": [], "on": on,
-           "boards": list(sel["boards"]), "unknown": list(sel["unknown"])}
+           "boards": list(sel["boards"]), "unknown": list(sel["unknown"]),
+           "direction": ""}
     if not on:
         return out
     ent = entity_key or ""
@@ -1763,6 +1837,10 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
         # the system would have used is the one the model should match most.
         rest.sort(key=lambda r: 0 if r.id == product_id else 1)
         product_rows += rest
+    # THE WORDS PATH. What the selected boards' reference pins look like,
+    # read once and stored on the board; a reference pin contributes this
+    # and nothing else.
+    out["direction"] = kbmod.board_direction(tenant, boards)
     for role, rows in (("product", product_rows), ("look", sel["look"])):
         # THE LOOK YIELDS TO THE PRODUCT. With the product in the request the
         # look pins are direction, not the subject; four of each split the
