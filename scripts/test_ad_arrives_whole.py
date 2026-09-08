@@ -127,15 +127,31 @@ def main() -> int:
     fn = next(n_ for n_ in _ast.walk(_ast.parse(wsrc))
               if isinstance(n_, (_ast.AsyncFunctionDef, _ast.FunctionDef))
               and n_.name == "ad_frames")
+    # EVERY BACKGROUND CALL AGAINST ITS OWN CALLEE. Since 2026-09-08 the
+    # route starts either `cr.batch` (one model) or `cr.batch_each` (one set
+    # per model, which forwards everything but `models` to `batch`), so each
+    # `_run_bg(label, fn, ...)` is checked against the fn it names, and the
+    # forwarder's kwargs against the function it forwards to.
     sent_keys = set()
+    bad: set = set()
     for node in _ast.walk(fn):
         if isinstance(node, _ast.Call):
             fname = _ast.unparse(node.func)
-            if fname == "dict" or fname.endswith("_run_bg"):
+            if fname == "dict":
                 sent_keys |= {kw.arg for kw in node.keywords if kw.arg}
+            elif fname.endswith("_run_bg") and len(node.args) >= 2:
+                callee = _ast.unparse(node.args[1]).split(".")[-1]
+                keys = {kw.arg for kw in node.keywords if kw.arg}
+                sent_keys |= keys
+                target = getattr(creative, callee, None)
+                params = set(_inspect.signature(target).parameters) if target else set()
+                if callee == "batch_each":
+                    keys = keys - {"models"}
+                    params = set(_inspect.signature(creative.batch).parameters)
+                bad |= keys - params
     accepted = set(_inspect.signature(creative.batch).parameters)
     ck("every kwarg the route builds for batch is in batch's signature",
-       sent_keys <= accepted, f"not accepted: {sorted(sent_keys - accepted)}")
+       not bad, f"not accepted: {sorted(bad)}")
     ck("  and the check is computed from the AST, not asserted from memory",
        "situation" in sent_keys and "situation" in accepted, "")
 

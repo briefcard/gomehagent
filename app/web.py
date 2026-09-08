@@ -7068,11 +7068,24 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
     if unknown:
         return _back_to_content(
             tenant, err=f"no board named {', '.join(unknown)}", anchor="board")
-    _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,
-            output_id=output_id, boards=tuple(boards), **args)
+    # WHICH MODEL, chosen on the form (owner, 2026-09-08: "allow me to choose
+    # which model to use or if to use both"); a model whose key is not set is
+    # refused by the name of the variable, before anything runs.
+    from . import imagegen as _ig
+    models, why = _ig.chosen(str(form.get("image_model", "") or ""))
+    if why:
+        return _back_to_content(tenant, err=why, anchor="pics")
+    if len(models) == 1:
+        _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,
+                output_id=output_id, boards=tuple(boards), image_model=models[0], **args)
+    else:
+        _run_bg("ad_frames", cr.batch_each, tenant, models=list(models), claim=claim,
+                plates=plates, output_id=output_id, boards=tuple(boards), **args)
     return _back_to_content(
-        tenant, msg=(f"making {plates * cr.PER_PROMPT} frames — they appear "
-                     f"under Pictures as one set when they land"
+        tenant, msg=(f"making {plates * cr.PER_PROMPT} frames"
+                     + (f" — one set per model: {', '.join(models)}" if len(models) > 1
+                        else f" by {models[0]}")
+                     + " — they appear under Pictures when they land"
                      + (f", drawn from {', '.join(boards)}" if boards else "")),
         anchor="pics")
 

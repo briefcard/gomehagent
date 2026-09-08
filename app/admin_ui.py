@@ -6314,6 +6314,33 @@ def _fidelity_line(assessment: dict) -> str:
                'Canva</b>' if fid.get("lettering") else ""))
 
 
+def _drawn_by(frames) -> str:
+    """Which model drew a set, off the frames' own tags — so two sets made
+    on one brief by two models read apart on the card."""
+    names = sorted({str(t)[len("model:"):] for f in frames for t in (f.tags or [])
+                    if str(t).startswith("model:")})
+    return (" &middot; drawn by " + _esc(", ".join(names))) if names else ""
+
+
+def model_select(*, name: str = "image_model") -> str:
+    """The image model a set is drawn by, chosen where the set starts —
+    owner, 2026-09-08: *"allow me to choose which model to use or if to use
+    both."* A model without its key is listed, not selectable, and says
+    what to add; "both" appears once two models are set up."""
+    from . import imagegen
+    offer = imagegen.choices()
+    opts = "".join(
+        f'<option value="{_esc(c["value"])}"{"" if c["ok"] else " disabled"} '
+        f'title="{_esc(c["why"])}">{_esc(c["label"])}{"" if c["ok"] else " — " + _esc(c["why"])}</option>'
+        for c in offer)
+    if sum(1 for c in offer if c["ok"]) >= 2:
+        opts += (f'<option value="{imagegen.BOTH}">both — one set per model, on the same '
+                 f'brief, to compare</option>')
+    return (f'<select name="{_esc(name)}" title="Which image model draws this set. '
+            f'Both makes one set per model; scripts/bakeoff.py ranks them blind.">'
+            f'{opts}</select>')
+
+
 def _drawn_from(frames) -> str:
     """What a set was drawn from, off the frames themselves — `derived_from`
     is the board's record on each one, so the card cannot claim a board the
@@ -6662,7 +6689,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
       <div class="head"><h2>Ad set{(' &middot; ' + _esc(g['subject'][:60]))
                                    if g.get('subject') else ''}</h2>
         <span class="mut">{g['made']} frames &middot; {g['clean']} read right
-        to the reviewer{_drawn_from(g['frames'])}</span></div>
+        to the reviewer{_drawn_from(g['frames'])}{_drawn_by(g['frames'])}</span></div>
       <p class="mut">One ad, approached {g['made']} ways &mdash; a different
       angle, lever, moment and framing each time. <b>Keep the ones that
       work.</b> The note under each frame is the model&#39;s own read of it
@@ -13752,10 +13779,12 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
           <option value="12">24 frames</option>
         </select>
         {boards_select(tenant)}
+        {model_select()}
         <button type="submit" class="sec">Make frames</button>
         <span class="when">the carousel for THIS variant — one angle, lever,
         moment and framing each, built on its own positioning and claim. They
-        land under Pictures as one set to keep or reject.</span>
+        land under Pictures as one set to keep or reject — one set per model
+        if you chose both.</span>
       </form>"""
                 vcards += (f'<div class="msg{" gone" if dropped else ""}">'
                            f'<div class="row"><b>Variant {n}</b> {chips}'

@@ -46,6 +46,59 @@ from . import config
 
 BASE = config.IMAGE_API_BASE
 MODEL = config.IMAGE_MODEL
+
+#: THE MODELS A SET MAY BE DRAWN BY, offered where the set is started.
+#: Owner, 2026-09-08: *"Can we just place those into the system and allow me
+#: to choose which model to use or if to use both."* The first is the
+#: configured default; the Google ones are offered only once their key is
+#: set, and "both" means one set per available model, each frame carrying
+#: the model that drew it, so the two can be compared on the same brief.
+CHOICES = (
+    ("gpt-image-1", "OpenAI gpt-image-1"),
+    ("gemini:gemini-3-pro-image", "Google Nano Banana Pro"),
+    ("gemini:gemini-3.1-flash-image", "Google Nano Banana 2"),
+)
+BOTH = "both"
+
+
+def choices() -> list[dict]:
+    """The offer: `[{value, label, ok, why}]`, the default first. A model
+    whose key is not set is listed and NOT selectable, with the reason, so
+    the form says what one line of configuration would add."""
+    from . import gemini_images as _gemini
+    out = []
+    names = dict(CHOICES)
+    order = [MODEL] + [v for v, _l in CHOICES if v != MODEL]
+    for value in order:
+        label = names.get(value, value) + (" (the default)" if value == MODEL else "")
+        if _gemini.is_gemini(value):
+            ok, why = bool(config.GEMINI_API_KEY), ("" if config.GEMINI_API_KEY else
+                                                    "add GEMINI_API_KEY to offer this model")
+        else:
+            ok, why = bool(config.OPENAI_API_KEY), ("" if config.OPENAI_API_KEY else
+                                                    "add OPENAI_API_KEY to offer this model")
+        out.append({"value": value, "label": label, "ok": ok, "why": why})
+    return out
+
+
+def chosen(value: str) -> tuple[list[str], str]:
+    """What a form's choice means: `(models, why_not)`. Empty = the default;
+    BOTH = every model whose key is set (two or more, or it is refused by
+    name); a listed model = itself, if its key is set."""
+    offer = choices()
+    value = str(value or "").strip()
+    if not value or value == "default":
+        return [MODEL], ""
+    if value == BOTH:
+        avail = [c["value"] for c in offer if c["ok"]]
+        if len(avail) < 2:
+            missing = "; ".join(c["why"] for c in offer if not c["ok"]) or "no second model is set up"
+            return [], f"'both' needs two models with keys — {missing}"
+        return avail, ""
+    for c in offer:
+        if c["value"] == value:
+            return ([value], "") if c["ok"] else ([], f"{c['label']}: {c['why']}")
+    return [], f"{value!r} is not one of the offered models"
 TIMEOUT = 180
 
 # What the model will actually return. Asking it for 9:16 gets a refusal or a

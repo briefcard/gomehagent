@@ -1106,7 +1106,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
     """
     import uuid as _uuid
 
-    from . import kb as kbmod, media
+    from . import kb as kbmod, media, imagegen
     batch_id = _uuid.uuid4().hex
     # `situation` IS WHAT `_subject_of` READS FIRST. `fb00ed1` made the
     # caller send it and did not teach this function to take it, so every
@@ -1282,7 +1282,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
                                 output_id=output_id,
                                 product_id=product_id if (needs or drawn) else "",
                                 derived_from=refs["pins"] if direct else [],
-                                fidelity=fids.get(id(blob)))
+                                fidelity=fids.get(id(blob)),
+                                model=image_model or imagegen.MODEL)
             if not filed.get("duplicate") and not filed.get("error") and fids.get(id(blob)):
                 fidelity["kept"] += 1
             if filed.get("duplicate"):
@@ -1355,6 +1356,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
                            + (f" — {fidelity['why']}" if fidelity["why"] else "")
                            + ", so the usual two per cell were kept unranked")
     return {"ok": bool(frames), "batch": batch_id, "frames": frames,
+            "model": image_model or imagegen.MODEL,
             "made": len(frames), "clean": len(clean),
             "subject": base["subject"], "thin": base["thin"],
             "errors": errors, "product_asset": product_id,
@@ -1406,6 +1408,26 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 f"{', '.join(dropped)} were not attempted — a generated "
                 f"product would not be this client's product"
                 if dropped else "")}
+
+
+def batch_each(tenant: str, *, models: list, **kw) -> dict:
+    """One set per model, on the same brief, board and words — the owner's
+    "or if to use both" (2026-09-08). Each set is a `batch` of its own, its
+    frames tagged with the model, so the Pictures page shows them side by
+    side; the summary says what each made. `{ok, made, clean, errors, note,
+    sets: [{model, batch, made, clean, note}]}`."""
+    sets, made, clean, errors = [], 0, 0, []
+    for m in [str(x) for x in (models or []) if str(x)]:
+        got = batch(tenant, image_model=m, **kw)
+        sets.append({"model": m, "batch": got.get("batch", ""), "made": got.get("made", 0),
+                     "clean": got.get("clean", 0), "note": str(got.get("note") or "")[:300]})
+        made += int(got.get("made", 0) or 0)
+        clean += int(got.get("clean", 0) or 0)
+        errors += [f"{m}: {e}" for e in (got.get("errors") or [])]
+    note = " ‖ ".join(f"{x['model']}: {x['made']} made, {x['clean']} clean — {x['note'][:140]}"
+                      for x in sets) or "no model was named"
+    return {"ok": made > 0, "made": made, "clean": clean, "errors": errors,
+            "sets": sets, "models": [x["model"] for x in sets], "note": note}
 
 
 def _composite(tenant: str, product_id: str, plate: bytes, shape: str, *,
@@ -1498,7 +1520,7 @@ _PLACEMENT = {"square": "1:1", "portrait": "4:5", "landscape": "1:1"}
 def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 batch_id: str, *, entity_key: str, prompt: str, review: bool,
                 product_id: str = "", output_id: str = "",
-                verdict: dict | None = None,
+                verdict: dict | None = None, model: str = "",
                 derived_from: list | None = None,
                 fidelity: dict | None = None) -> dict:
     """Store the bytes, judge them, and file the asset. One frame's whole life.
@@ -1546,7 +1568,10 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
         origin=GENERATED_ORIGIN, batch=batch_id,
         derived_from=list(derived_from or []),
         tags=([cell["angle"], cell["lever"], cell["moment"], cell["framing"]]
-              + ([f"output:{output_id}"] if output_id else [])))
+              + ([f"output:{output_id}"] if output_id else [])
+              # WHICH MODEL DREW IT, on the frame — so two sets made on the
+              # same brief by two models can be told apart on the card.
+              + ([f"model:{model}"] if model else [])))
     row = next((a for a in kbmod.assets(tenant, publishable_only=False)
                 if (a.url or "") == put["url"]), None)
     if row is None:

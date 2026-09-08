@@ -1266,6 +1266,35 @@ and rank the sets blind; `--reveal` after.
 
 ---
 
+### The image model is chosen where the set starts — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's ask:** *"Can we just place those into the system and allow
+me to choose which model to use or if to use both."*
+
+**The ship.** `imagegen.CHOICES` (OpenAI gpt-image-1, Google Nano Banana
+Pro, Google Nano Banana 2), `choices()` (the default first; a model whose
+key is not set is listed, not selectable, with "add GEMINI_API_KEY to offer
+this model"), `chosen(value)` ("" = the default; "both" = every model with
+a key, refused by name when fewer than two; a listed model = itself if its
+key is set). `admin_ui.model_select()` on the make-frames form; the route
+refuses a model without its key before anything runs, sends one model to
+`creative.batch` and several to the new `creative.batch_each` (one set per
+model on the same brief, board and words); every frame carries
+`model:<name>` in its tags (`_file_frame(model=)`), and the set card says
+"drawn by <model>" (`_drawn_by`), so two sets on one brief read apart. The
+blind ranking stays `scripts/bakeoff.py`.
+
+**Standing rules it adds:**
+- **A choice that needs a key says so where it is offered, and refuses by
+  the variable's name** (`a_model_without_its_key_is_not_offered`,
+  `the_route_refuses_a_model_without_its_key`).
+- **Both means one set per model, told apart on the frame**
+  (`both_runs_one_set_per_model`, `a_frame_carries_its_model`,
+  `the_card_says_which_model_drew_it`).
+- **The form's choice reaches the run** (`the_chosen_model_reaches_the_run`).
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1445,6 +1474,13 @@ and rank the sets blind; `--reveal` after.
 > `python3 scripts/bakeoff.py --tenant baci --entity <key> --models
 > gpt-image-1,gemini:gemini-3-pro-image,gemini:gemini-3.1-flash-image`,
 > rank blind, `--reveal`. If Nano Banana Pro wins, set `IMAGE_MODEL` to it.
+>
+> **SHIPPED 2026-09-08, SIXTEENTH: THE IMAGE MODEL IS CHOSEN WHERE THE SET
+> STARTS** (6 guards, §5 has the record). The make-frames form offers the
+> OpenAI default, Google's two models (once GEMINI_API_KEY is set) and
+> "both" — one set per model on the same brief, each frame tagged with the
+> model, the set card saying which drew it. **Owner's move:** add the key,
+> choose "both" on one variant, compare the two sets under Pictures.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with
