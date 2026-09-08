@@ -18,6 +18,40 @@ app = FastAPI(title="Saias Operations Assistant")
 @app.on_event("startup")
 def startup() -> None:
     db.init_db()
+    _sweep_interrupted()
+
+
+def _sweep_interrupted() -> int:
+    """A background job that was RUNNING when the process died reports
+    nothing ever again — a deploy restarts the server, and the owner's card
+    says "running" for a run that stopped hours ago (owner, 2026-09-08, five
+    minutes into a run whose card promised two). At boot, every `bg:*` row
+    left in `running` is marked failed with the reason, so the next look at
+    the card says what happened and what to do. Returns how many."""
+    import json as _json
+    n = 0
+    try:
+        with db.SessionLocal() as s:
+            for row in s.query(db.Setting).filter(db.Setting.key.like("bg:%")).all():
+                try:
+                    got = _json.loads(row.value or "{}")
+                except Exception:                                # noqa: BLE001
+                    continue
+                if str(got.get("state") or "") != "running":
+                    continue
+                row.value = _json.dumps({
+                    "state": "failed",
+                    "detail": ("the server restarted while this was running (a deploy "
+                               "does that) — the work stopped where it was; press it "
+                               "again" + (f". Last progress: {got['detail']}"
+                                          if got.get("detail") else "")),
+                    "at": str(got.get("at") or db.utcnow().isoformat())})
+                s.merge(row)
+                n += 1
+            s.commit()
+    except Exception:                                            # noqa: BLE001
+        log.exception("sweeping interrupted background jobs failed")
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -8227,6 +8261,18 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
                                      "at": db.utcnow().isoformat()})
             s.merge(row)
             s.commit()
+
+    # PROGRESS, FOR THE JOBS THAT CAN SAY IT. A run of twenty minutes that
+    # reports nothing until the end is a broken button for nineteen of them
+    # (owner, 2026-09-08). A job whose signature takes `progress` is handed a
+    # writer; each call replaces the running detail, and the card shows it.
+    import inspect
+    try:
+        takes_progress = "progress" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        takes_progress = False
+    if takes_progress and "progress" not in kw:
+        kw["progress"] = lambda text: _mark("running", str(text or "")[:600])
 
     def _go():
         try:

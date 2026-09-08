@@ -12,7 +12,7 @@ https://ai.google.dev/gemini-api/docs/image-generation):
   POST https://generativelanguage.googleapis.com/v1beta/interactions
   header x-goog-api-key; body {"model", "input": [{"type":"text","text"},
   {"type":"image","mime_type","data":<base64>}…], "response_format":
-  {"type":"image","mime_type","aspect_ratio","image_size"}}; the reply's
+  {"type":"image","aspect_ratio","image_size"}}; the reply's
   last image block is the picture. Reference limits: gemini-3-pro-image 6
   objects + 3 style, gemini-3.1-flash-image 10 objects, flash-lite 14, no
   style references on the lite and legacy models.
@@ -110,7 +110,11 @@ def main() -> int:
        [base64.b64decode(b["data"]) for b in imgs] == [prod, cast, look]
        and all(b["mime_type"] == "image/png" for b in imgs), f"{len(imgs)} images")
     ck("  the shape becomes the documented aspect ratio and size",
-       body.get("response_format") == {"type": "image", "mime_type": "image/png",
+       # NO `mime_type` SINCE 2026-09-08: the first live run was refused on it
+       # ("Supported values: 'image/jpeg'"), the docs' own curl example sends
+       # none, and the reply is converted to PNG at the edge instead
+       # (`test_the_model_takes_what_the_docs_say`).
+       body.get("response_format") == {"type": "image",
                                        "aspect_ratio": "2:3", "image_size": "1K"}, str(body.get("response_format")))
     ck("  and the picture that comes back is the reply's image block, decoded",
        got["images"][0] == MADE and got.get("note", "").endswith("gemini-3-pro-image"))

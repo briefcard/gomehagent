@@ -3795,6 +3795,11 @@ def proposed_assets(tenant: str) -> list[db.KbAsset]:
         return rows
 
 
+#: The tag on a drawn attempt the judge found is NOT the product — filed
+#: under its set to be seen, never counted as made or clean.
+NOT_THE_PRODUCT = "not-the-product"
+
+
 def batches(tenant: str) -> list[dict]:
     """Proposed frames grouped by the SET they were generated as.
 
@@ -3812,8 +3817,15 @@ def batches(tenant: str) -> list[dict]:
         if not (r.batch or ""):
             continue
         g = out.setdefault(r.batch, {"batch": r.batch, "frames": [],
-                                     "subject": "", "at": None})
-        g["frames"].append(r)
+                                     "attempts": [], "subject": "", "at": None})
+        # NOT THE PRODUCT, KEPT APART. The closest attempt of a cell the judge
+        # dropped is filed under the set so the owner can see what was drawn
+        # (2026-09-08: a run that made nothing showed nothing), tagged
+        # `not-the-product`, and never counted as a frame the set made.
+        if NOT_THE_PRODUCT in [str(x) for x in (r.tags or [])]:
+            g["attempts"].append(r)
+        else:
+            g["frames"].append(r)
         g["subject"] = g["subject"] or str(r.subject or "")
         if r.created_at and (g["at"] is None or r.created_at > g["at"]):
             g["at"] = r.created_at

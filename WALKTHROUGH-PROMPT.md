@@ -1344,6 +1344,54 @@ is filled by the product's own photograph before anything is drawn.
 
 ---
 
+### The model takes what the docs say — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's ask:** *"Im not getting any results from the different
+models."* / *"Nothing landed back into the drafts we expected."* / *"make
+sure that you learn the lesson of what kind of inputs the models take."*
+
+**What happened.** Every Google cell was refused before drawing — `400: The
+value 'image/png' is not supported for 'response_format.mime_type'.
+Supported values: 'image/jpeg'` — because the adapter was written from a
+docs summary and a guess. The OpenAI half judged fourteen candidates, kept
+none above the bar of 90, dropped every cell under ship 12's rule and filed
+nothing; the set note was cut at 140 characters and the card at 600, so
+none of this could be read; the card promised "two to three minutes".
+
+**The ship.** `gemini_images`: the contract per model from the docs
+(`LIMITS` with object/style caps and offered sizes, `INPUT_MIMES`,
+`INLINE_BUDGET`), checked in `input_blocks` before the call — a mime the API
+does not take converted to PNG or left out and said, trailing pictures
+dropped to keep 20 MB and said, `image_size` one the model offers; NO
+`mime_type` on `response_format` (the docs' curl example sends none); the
+reply converted to PNG at the edge, its mime filed. `web._run_bg` hands a
+`progress` writer to a job whose signature takes one; `batch` reports every
+cell, `batch_each` prefixes the model; the running card shows progress or
+the honest estimate; `web._sweep_interrupted` at boot marks a job left
+running as failed with the reason. The per-set note rides whole. `_judged`
+hands back the closest dropped attempt; `batch` files it apart under the
+set (`kb.NOT_THE_PRODUCT`), `kb.batches` keeps it out of made/clean, the
+card shows the attempts in their own row marked NOT the product.
+
+**Standing rules it adds:**
+- **A provider's contract is per model, both sides, written down from its
+  docs and checked before the call** — `no_response_mime_is_sent`,
+  `an_input_the_api_does_not_take_is_converted`,
+  `the_inline_ceiling_is_kept`, `the_reply_is_png_at_the_edge`.
+- **A long run says where it stands; a run the server cut says so** —
+  `a_job_that_can_say_where_it_stands_is_asked_to`,
+  `an_interrupted_job_is_said_at_boot`, `the_running_card_is_honest`,
+  `the_set_note_rides_whole`.
+- **What the judge dropped is shown, never counted** —
+  `a_dropped_attempt_is_filed_apart`, `a_dropped_attempt_is_not_counted`,
+  `the_card_shows_the_attempts`.
+
+**Trap:** re-anchoring several guards in one pass must take every source
+segment from the ORIGINAL text before replacing any — replacing one by one
+shifts the offsets of the rest and corrupts the list (it did, once).
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1542,6 +1590,16 @@ is filled by the product's own photograph before anything is drawn.
 > "hero:" / "picture:" line, approve — and check the picture went approved
 > on Review · Pictures. `generate_visual: no` on a plan keeps it to
 > photographs.
+>
+> **SHIPPED 2026-09-08, EIGHTEENTH: THE MODEL TAKES WHAT THE DOCS SAY** (11
+> guards, §5 has the record). The Google image contract is pinned per model
+> and checked before a byte is sent (no response mime; inputs converted or
+> left out and said; 20 MB kept); a running set reports every cell and the
+> model; a run cut by a restart says so; the set note rides whole; the
+> judge's dropped attempts sit under the set marked NOT the product, never
+> counted. **Owner's move:** run "both" once more on the same variant, read
+> the running card as it fills, and compare the two sets — and the attempts
+> row under each — on Pictures.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with

@@ -6100,13 +6100,25 @@ def _frames_run(tenant: str) -> str:
             continue
         when = _esc(str(got.get("at") or "")[:16].replace("T", " "))
         # Room for the reason: a refusal quoted in the API's own words is
-        # longer than a count, and it is the one thing this line is for.
-        detail = _esc(str(got.get("detail") or "")[:600])
+        # longer than a count, and it is the one thing this line is for. The
+        # whole recorded detail — cut at 600 it hid which cells were dropped
+        # and why (2026-09-08).
+        detail = _esc(str(got.get("detail") or "")[:1500])
         if state == "running":
+            # THE HONEST ESTIMATE, then the run's own progress once it has
+            # any. "Two to three minutes" was written before the judge; a
+            # judged frame is a drawing of four candidates, a judge call per
+            # candidate and up to two redraws — minutes per frame, and one
+            # whole set per model when both were chosen.
             chip, says = ("chip", f"{_esc(name)} &mdash; running"), (
-                f"started {when} &mdash; an image call and a review per cell, "
-                f"two to three minutes. The set appears below when it lands; "
-                f"this page does not refresh itself.")
+                f"started {when} &mdash; "
+                + (f"<b>{detail}</b>. " if detail else
+                   "each frame is a drawing of four candidates, a judge call per "
+                   "candidate and up to two redraws — count on three to six "
+                   "minutes per frame, and one full set per model when both were "
+                   "chosen. ")
+                + "Frames appear below as they are kept; reload this page to see "
+                  "progress — it does not refresh itself.")
         elif state == "failed":
             chip, says = ("chip off", f"{_esc(name)} &mdash; failed"), (
                 f"{when} &mdash; {detail}")
@@ -6294,6 +6306,46 @@ def _viewer() -> str:
       document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!lb.hidden){close();}});
     })();
     </script>"""
+
+
+def _attempts_block(g: dict, fid: str) -> str:
+    """The closest attempt of each cell the judge DROPPED — shown under the
+    set, marked NOT the product with its match and named differences, never
+    counted in the set's numbers. Owner, 2026-09-08, on a run the judge
+    emptied: *"Nothing landed back into the drafts we expected."* They can
+    be rejected with the set, or kept on purpose — the checkbox joins the
+    same form."""
+    attempts = list(g.get("attempts") or [])
+    if not attempts:
+        return ""
+    cells = ""
+    for f in attempts:
+        ass = f.assessment if isinstance(f.assessment, dict) else {}
+        fid_ = dict(ass.get("fidelity") or {})
+        tags = [str(t) for t in (f.tags or []) if not str(t).startswith(("model:", "output:"))
+                and str(t) != kb.NOT_THE_PRODUCT][:2]
+        diffs = "; ".join(str(d) for d in (fid_.get("differences") or [])[:2])
+        cells += f"""
+        <div class="frame" style="opacity:.8">
+          <label class="pic">
+            <input type="checkbox" class="fr" name="asset_ids"
+                   value="{_esc(f.id)}" form="{fid}">
+            <img src="{_esc(f.url or '')}" loading="lazy" alt="">
+            <span class="picmeta">{_esc(' · '.join(tags))}
+              <b class="gapt">NOT the product &middot; match {_esc(str(fid_.get('match', '')))}</b>
+              {(' &middot; ' + _esc(diffs)) if diffs else ''}</span>
+          </label>
+        </div>"""
+    return (f'<p class="mut" style="margin-top:12px"><b>Not the product</b> &mdash; the '
+            f'closest attempt from each of the {len(attempts)} cell(s) the judge dropped, '
+            f'below the bar of {creative_bar()}. Shown so you can see what was drawn; not '
+            f'counted above, and rejected with the set unless you keep one on purpose.</p>'
+            f'<div class="picgrid">{cells}</div>')
+
+
+def creative_bar() -> int:
+    from . import creative
+    return int(creative.FIDELITY_KEEP)
 
 
 def _fidelity_line(assessment: dict) -> str:
@@ -6797,6 +6849,7 @@ def _batch_cards(key: str, tenant: str, waiting: list) -> tuple:
           selected</button>
       </div>
       <div class="picgrid">{cells}</div>
+      {_attempts_block(g, fid)}
     </div>"""
 
     # Scoped to the card it is in. A page-wide selector would tick every set

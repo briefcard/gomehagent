@@ -6,14 +6,28 @@ capability — `scripts/bakeoff.py` says so, and it could only compare models
 on the one OpenAI-compatible endpoint. This module is the adapter that
 script said a different provider would need.
 
-THE CONTRACT, read from Google's docs on 2026-09-08
-(https://ai.google.dev/gemini-api/docs/image-generation):
+THE CONTRACT, read from Google's docs on 2026-09-08 — and read AGAIN the
+same day after the first live run, when every Pro cell was refused with
+`400: The value 'image/png' is not supported for 'response_format.mime_type'.
+Supported values: 'image/jpeg'`. Owner: *"make sure that you learn the
+lesson of what kind of inputs the models take."* So the contract is written
+down per model, both sides, and checked before a byte is sent:
   POST {GEMINI_API_BASE}/interactions        header  x-goog-api-key: <key>
   {"model": "<model>",
    "input": [{"type": "text", "text": "…"},
              {"type": "image", "mime_type": "image/png", "data": "<base64>"}, …],
-   "response_format": {"type": "image", "mime_type": "image/png",
-                       "aspect_ratio": "1:1", "image_size": "1K"}}
+   "response_format": {"type": "image", "aspect_ratio": "1:1", "image_size": "1K"}}
+  · the docs' own curl example sets NO `mime_type` on `response_format`; this
+    module sends none, and converts whatever mime the reply carries to PNG
+    at this edge (`to_png`), which is the contract the pipeline holds.
+  · INPUT images: `image/png`, `image/jpeg`, `image/webp`, `image/heic`,
+    `image/heif` (https://ai.google.dev/gemini-api/docs/image-understanding);
+    anything else is converted to PNG or left out and said.
+  · the whole inline request — text plus every base64 image — must stay
+    under 20 MB (same page); trailing style pins are dropped to fit, and
+    the drop is said.
+  · `image_size` must be an uppercase-K value the model offers (`LIMITS`);
+    `aspect_ratio` from the documented list (`ASPECT`).
   The reply's last image block is the picture (the SDK's `output_image`);
   REST is read by walking the JSON for {"type": "image", "data": …}.
 Models: gemini-3.1-flash-image (Nano Banana 2 — "excelling at multiple
@@ -39,18 +53,86 @@ PREFIX = "gemini:"
 TIMEOUT = 180
 DEFAULT_MODEL = "gemini-3-pro-image"
 
-#: How many OBJECT references each model takes "with high fidelity", per the
-#: docs' table, and how many style references. The product and its
-#: companions are objects; the look pins are style.
+#: THE CONTRACT PER MODEL, from the docs' table: how many OBJECT references
+#: each takes "with high fidelity" and how many STYLE references (the product
+#: and its companions are objects; the look pins are style), and the output
+#: sizes it offers ("You must use an uppercase 'K'"; 512px is 3.1 Flash only;
+#: Lite is 1K only).
 LIMITS = {
-    "gemini-3-pro-image": {"objects": 6, "style": 3},
-    "gemini-3.1-flash-image": {"objects": 10, "style": 3},
-    "gemini-3.1-flash-lite-image": {"objects": 14, "style": 0},
-    "gemini-2.5-flash-image": {"objects": 3, "style": 0},
+    "gemini-3-pro-image": {"objects": 6, "style": 3, "sizes": ("1K", "2K", "4K")},
+    "gemini-3.1-flash-image": {"objects": 10, "style": 3,
+                               "sizes": ("512px", "1K", "2K", "4K")},
+    "gemini-3.1-flash-lite-image": {"objects": 14, "style": 0, "sizes": ("1K",)},
+    "gemini-2.5-flash-image": {"objects": 3, "style": 0, "sizes": ("1K",)},
 }
+#: The size every request asks for — the one value every model offers.
+IMAGE_SIZE = "1K"
+#: What the API accepts as an INPUT image, per the image-understanding page.
+INPUT_MIMES = ("image/png", "image/jpeg", "image/webp", "image/heic", "image/heif")
+#: The inline request ceiling (text + every base64 image), per the same page,
+#: and the margin this module keeps under it.
+INLINE_BUDGET = 20 * 1024 * 1024
+INLINE_MARGIN = int(INLINE_BUDGET * 0.9)
 
 #: `imagegen.SIZES` shapes as the aspect ratios the API takes.
 ASPECT = {"square": "1:1", "landscape": "3:2", "portrait": "2:3"}
+
+
+def sniff(blob: bytes) -> str:
+    """The mime type the bytes actually are, from their magic — never from
+    the name a caller gave them."""
+    b = bytes(blob or b"")[:12]
+    if b[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if b[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
+def to_png(blob: bytes) -> bytes:
+    """Any picture PIL can read, as PNG bytes — b"" when it cannot."""
+    import io
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(blob))
+        im.load()
+        buf = io.BytesIO()
+        im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:                                            # noqa: BLE001
+        return b""
+
+
+def input_blocks(images: list, *, objects_cap: int, style_cap: int) -> tuple[list, list]:
+    """The image blocks a request may carry, checked against the contract:
+    `(blocks, said)`. Objects first (capped), then style (capped); a mime the
+    API does not take is converted to PNG or left out; the inline budget is
+    kept by dropping trailing pictures. Every drop is a sentence in `said`."""
+    objects = [i for i in images if not str(i[0]).startswith("look-")][:objects_cap]
+    style = [i for i in images if str(i[0]).startswith("look-")][:style_cap]
+    blocks, said, used = [], [], 0
+    for name, blob, mime in objects + style:
+        # THE BYTES SAY WHAT THEY ARE; the caller's label is a claim. Bytes
+        # with no recognisable magic are decoded to prove they are a picture
+        # at all — a label of "image/png" on garbage is exactly the request
+        # the API refuses in a background run nobody is watching.
+        real = sniff(blob)
+        if not real or real not in INPUT_MIMES:
+            blob = to_png(blob)
+            if not blob:
+                said.append(f"{name}: not an image the API takes "
+                            f"({real or str(mime or '') or 'unknown'}) — left out")
+                continue
+            real = "image/png"
+        data = base64.b64encode(blob).decode()
+        if used + len(data) > INLINE_MARGIN:
+            said.append(f"{name}: left out — the request would pass the API's 20 MB inline limit")
+            continue
+        used += len(data)
+        blocks.append({"type": "image", "mime_type": real, "data": data})
+    return blocks, said
 
 
 def is_gemini(model: str) -> bool:
@@ -124,16 +206,20 @@ def edit(prompt: str, *, images: list, model: str = "", shape: str = "square",
         _tc.record(tenant, "images:interactions", source="creative", provider="gemini_images",
                    ok=False, error=why)
         return {"ok": False, "error": why, "model": name}
-    objects = [i for i in images if not str(i[0]).startswith("look-")][:lim["objects"]]
-    style = [i for i in images if str(i[0]).startswith("look-")][:lim["style"]]
-    blocks = [{"type": "text", "text": prompt}]
-    for _name, blob, mime in objects + style:
-        blocks.append({"type": "image", "mime_type": mime or "image/png",
-                       "data": base64.b64encode(blob).decode()})
+    pictures, said = input_blocks(images, objects_cap=lim["objects"], style_cap=lim["style"])
+    blocks = [{"type": "text", "text": prompt}] + pictures
+    if IMAGE_SIZE not in lim.get("sizes", (IMAGE_SIZE,)):
+        err = f"{name} does not offer image_size {IMAGE_SIZE!r} — it offers {', '.join(lim['sizes'])}"
+        _tc.record(tenant, "images:interactions", source="creative", provider="gemini_images",
+                   ok=False, error=err)
+        return {"ok": False, "error": err, "model": name}
+    # NO `mime_type` ON THE RESPONSE FORMAT — the docs' curl example sends
+    # none, and the Pro model refused "image/png" by name on the first live
+    # run. The reply's own mime is read off its block and converted below.
     body = {"model": name, "input": blocks,
-            "response_format": {"type": "image", "mime_type": "image/png",
+            "response_format": {"type": "image",
                                 "aspect_ratio": ASPECT.get(shape, "1:1"),
-                                "image_size": "1K"}}
+                                "image_size": IMAGE_SIZE}}
     url = f"{config.GEMINI_API_BASE.rstrip('/')}/interactions"
     out: list = []
     for _ in range(max(1, min(4, int(n or 1)))):
@@ -168,20 +254,33 @@ def edit(prompt: str, *, images: list, model: str = "", shape: str = "square",
                        ok=False, error=err, ms=int((_clock.monotonic() - started) * 1000))
             return {"ok": False, "error": err, "model": name, "images": out}
         try:
-            out.append(base64.b64decode(found[-1]["data"]))
+            raw = base64.b64decode(found[-1]["data"])
         except Exception:                                        # noqa: BLE001
             return {"ok": False, "error": "the image block did not decode", "model": name,
                     "images": out}
+        # THE REPLY'S MIME IS WHATEVER THE MODEL GIVES (Pro: JPEG); the
+        # pipeline's contract is PNG bytes, so the conversion is here, at the
+        # edge, and the reply's mime is filed beside the call.
+        got_mime = str(found[-1].get("mime_type") or found[-1].get("mimeType") or sniff(raw) or "")
+        png = raw if sniff(raw) == "image/png" else to_png(raw)
+        if not png:
+            return {"ok": False, "error": f"the reply's picture ({got_mime or 'unknown mime'}) "
+                                          f"could not be read as an image", "model": name,
+                    "images": out}
+        out.append(png)
         # THE SHAPE, RECORDED ONCE PER CALL: the docs describe the SDK's view
         # of the reply; the raw keys ride the ledger so the first live call
         # says what the API actually returned.
         _tc.record(tenant, "images:interactions", source="creative", provider="gemini_images",
                    ok=True, ms=int((_clock.monotonic() - started) * 1000),
                    bytes_back=len(out[-1]),
-                   ref=("keys: " + ", ".join(sorted(payload.keys())[:8])) if isinstance(payload, dict) else "")
+                   ref=((("keys: " + ", ".join(sorted(payload.keys())[:8])) if isinstance(payload, dict) else "")
+                        + f"; reply {got_mime or 'image/?'} → png"
+                        + (("; " + "; ".join(said)) if said else "")))
     try:
         from . import usage
         usage.log_image("image_edit" if images else "image_generate", name, len(out))
     except Exception:                                            # noqa: BLE001
         pass
-    return {"ok": True, "images": out, "model": name}
+    return {"ok": True, "images": out, "model": name,
+            "note": "; ".join(said), "inputs": len(pictures)}

@@ -1211,9 +1211,13 @@ def _judged(tenant: str, images: list, text: str, refs: dict, checklist: list,
     loop moved here unchanged so the two cannot drift: `redraw(text)` is the
     caller's own draw (its shape, its people, its model), `fidelity` is the
     caller's counters, updated in place, and the return is `{"images": [the
-    kept one] or [], "fids": {id(blob): verdict}}`.
+    kept one] or [], "fids": {id(blob): verdict}, "below": the closest
+    dropped attempt or None}` — `below` so a caller can SHOW what was drawn
+    when the judge kept nothing (2026-09-08: a run that made nothing showed
+    nothing), without ever counting it as a frame.
     """
     fids: dict = {}
+    below = None
     if images:
         # JUDGED AGAINST THE PHOTOGRAPHS; THE CLOSEST IS KEPT. Four came
         # back; one is filed. A kept candidate still wrong is redrawn
@@ -1277,6 +1281,8 @@ def _judged(tenant: str, images: list, text: str, refs: dict, checklist: list,
                 if why and why[:160] not in fidelity["why_dropped"]:
                     fidelity["why_dropped"].append(why[:160])
                 images = []
+                below = {"blob": best_b, "verdict": best_v,
+                         "candidates": pick_["judged"], "redrafted": redrafted}
             else:
                 images = [best_b]
                 fids[id(best_b)] = {"match": best_v.get("match", 0),
@@ -1289,7 +1295,7 @@ def _judged(tenant: str, images: list, text: str, refs: dict, checklist: list,
             # set says fidelity was not judged, and why.
             fidelity["why"] = fidelity["why"] or pick_.get("why", "")
             images = images[:PER_PROMPT]
-    return {"images": images, "fids": fids}
+    return {"images": images, "fids": fids, "below": below}
 
 
 def batch(tenant: str, *, commitment: dict | None = None,
@@ -1297,8 +1303,13 @@ def batch(tenant: str, *, commitment: dict | None = None,
           claim: str = "", prominent: str = "", headline: str = "",
           subline: str = "", fmt: str = "ad_frame", output_id: str = "",
           situation: str = "", plates: int = 4, review: bool = True,
-          boards: tuple | list = (), image_model: str = "") -> dict:
+          boards: tuple | list = (), image_model: str = "",
+          progress=None) -> dict:
     """A set of frames for one ad, filed together under one batch id.
+
+    `progress(text)` — when the caller hands one (`web._run_bg` does) — is
+    told after every cell where the set stands, so a twenty-minute run is
+    not a blank card for nineteen of them (owner, 2026-09-08).
 
     Owner, 2026-08-30: *"each ad will need a carousel of images - potentially
     up to 20-30 variations of different images with different ways of
@@ -1394,7 +1405,7 @@ def batch(tenant: str, *, commitment: dict | None = None,
              else {"ok": False, "features": [], "cached": False, "why": ""})
     checklist = list(feats.get("features") or [])
     fidelity = {"judged": 0, "kept": 0, "dropped": 0, "redrafted": 0,
-                "not_the_product": 0, "why_dropped": [],
+                "not_the_product": 0, "why_dropped": [], "shown_below": 0,
                 "checklist": bool(checklist), "why": ""}
     framings = tuple(FRAMINGS) if (product_id or drawn) else tuple(
         f for f in FRAMINGS if f not in NEEDS_THE_PRODUCT)
@@ -1409,8 +1420,10 @@ def batch(tenant: str, *, commitment: dict | None = None,
                            composited=True)
 
     frames, errors, repeats, pasted, cells = [], [], 0, 0, 0
-    for cell in axes(framings=framings, limit=max(1, int(plates or 4)),
-                     moments=DRAWN_MOMENTS if drawn else ()):
+    attempts: list = []
+    plan = list(axes(framings=framings, limit=max(1, int(plates or 4)),
+                     moments=DRAWN_MOMENTS if drawn else ()))
+    for cell in plan:
         cells += 1
         text = base["prompt"] + _axis_brief(cell, drawn=drawn) + _direction_brief(refs)
         needs = cell["framing"] in NEEDS_THE_PRODUCT
@@ -1440,6 +1453,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
                             checklist=checklist, model=image_model),
                         fidelity=fidelity)
             images, fids = j["images"], j["fids"]
+            if j.get("below"):
+                attempts.append((j["below"], cell, text))
         for blob in images:
             verdict = None
             if needs and not direct:
@@ -1468,6 +1483,38 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 errors.append(filed["error"])
                 continue
             frames.append(filed["frame"])
+        if progress:
+            try:
+                progress(f"cell {cells} of {len(plan)} — {len(frames)} kept, "
+                         f"{fidelity['not_the_product']} not the product, "
+                         f"{len(errors)} failed")
+            except Exception:                                    # noqa: BLE001
+                pass
+
+    # THE CLOSEST ATTEMPT OF EACH DROPPED CELL, filed under the set APART
+    # from its frames (`kb.NOT_THE_PRODUCT` tag — `kb.batches` keeps them out
+    # of `made` and `clean`). Owner, 2026-09-08, on a run the judge emptied:
+    # *"Nothing landed back into the drafts we expected."* A near miss is
+    # still not the product and is never counted as one; it is shown, with
+    # its match and its named differences, so the owner can see what the
+    # model drew and decide for themselves. Not assessed against the brief —
+    # a picture of the wrong product does not need a second opinion.
+    for b, cell_, text_ in attempts:
+        v = b["verdict"]
+        filed = _file_frame(
+            tenant, b["blob"], base, cell_, batch_id, entity_key=entity_key,
+            prompt=text_, review=False,
+            verdict={"ok": False, "failed": [], "verdicts": [], "overall": "",
+                     "fix": "", "why": "not reviewed — the judge found it is not the product"},
+            output_id=output_id, product_id=product_id, derived_from=refs["pins"],
+            fidelity={"match": v.get("match", 0),
+                      "differences": list(v.get("differences") or []),
+                      "candidates": b["candidates"], "redrafted": b["redrafted"],
+                      "lettering": bool(v.get("lettering")),
+                      "invented": bool(v.get("invented")), "below": True},
+            model=image_model or imagegen.MODEL, extra_tags=[kbmod.NOT_THE_PRODUCT])
+        if filed.get("frame"):
+            fidelity["shown_below"] += 1
 
     # THREE STATES, NOT TWO. A frame the reviewer could not read is not
     # a frame that passed; counting it clean is how an outage arrives
@@ -1525,6 +1572,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
                               f"differences named" if fidelity["redrafted"] else "")
                            + (f", {fidelity['not_the_product']} cell(s) dropped — NOT "
                               f"the product: " + "; ".join(fidelity["why_dropped"][:2])
+                              + (f" (the closest attempt of each is under the set, "
+                                 f"marked not the product)" if fidelity["shown_below"] else "")
                               if fidelity["not_the_product"] else "")
                            + ("" if checklist else "; no checklist could be derived"
                               + (f" ({feats.get('why')})" if feats.get("why") else "")))
@@ -1587,21 +1636,29 @@ def batch(tenant: str, *, commitment: dict | None = None,
                 if dropped else "")}
 
 
-def batch_each(tenant: str, *, models: list, **kw) -> dict:
+def batch_each(tenant: str, *, models: list, progress=None, **kw) -> dict:
     """One set per model, on the same brief, board and words — the owner's
     "or if to use both" (2026-09-08). Each set is a `batch` of its own, its
     frames tagged with the model, so the Pictures page shows them side by
     side; the summary says what each made. `{ok, made, clean, errors, note,
     sets: [{model, batch, made, clean, note}]}`."""
     sets, made, clean, errors = [], 0, 0, []
-    for m in [str(x) for x in (models or []) if str(x)]:
-        got = batch(tenant, image_model=m, **kw)
+    names = [str(x) for x in (models or []) if str(x)]
+    for i, m in enumerate(names, 1):
+        # THE MODEL IN FRONT OF EVERY PROGRESS LINE, so "cell 3 of 8" says
+        # whose cell it is.
+        say = ((lambda text, i=i, m=m: progress(f"model {i} of {len(names)} ({m}): {text}"))
+               if progress else None)
+        got = batch(tenant, image_model=m, progress=say, **kw)
+        # THE WHOLE NOTE. Cut at 140 characters it read "14 candidate(s)
+        # judged against the product's photograp ‖" and the owner could not
+        # learn that every cell had been dropped, or why (2026-09-08).
         sets.append({"model": m, "batch": got.get("batch", ""), "made": got.get("made", 0),
-                     "clean": got.get("clean", 0), "note": str(got.get("note") or "")[:300]})
+                     "clean": got.get("clean", 0), "note": str(got.get("note") or "")[:700]})
         made += int(got.get("made", 0) or 0)
         clean += int(got.get("clean", 0) or 0)
         errors += [f"{m}: {e}" for e in (got.get("errors") or [])]
-    note = " ‖ ".join(f"{x['model']}: {x['made']} made, {x['clean']} clean — {x['note'][:140]}"
+    note = " ‖ ".join(f"{x['model']}: {x['made']} made, {x['clean']} clean — {x['note'][:600]}"
                       for x in sets) or "no model was named"
     return {"ok": made > 0, "made": made, "clean": clean, "errors": errors,
             "sets": sets, "models": [x["model"] for x in sets], "note": note}
@@ -1699,7 +1756,8 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
                 product_id: str = "", output_id: str = "",
                 verdict: dict | None = None, model: str = "",
                 derived_from: list | None = None,
-                fidelity: dict | None = None) -> dict:
+                fidelity: dict | None = None,
+                extra_tags: list | None = None) -> dict:
     """Store the bytes, judge them, and file the asset. One frame's whole life.
 
     `fidelity` is the judge's verdict against the product's photographs —
@@ -1748,7 +1806,8 @@ def _file_frame(tenant: str, blob: bytes, base: dict, cell: dict,
               + ([f"output:{output_id}"] if output_id else [])
               # WHICH MODEL DREW IT, on the frame — so two sets made on the
               # same brief by two models can be told apart on the card.
-              + ([f"model:{model}"] if model else [])))
+              + ([f"model:{model}"] if model else [])
+              + [str(x) for x in (extra_tags or []) if str(x)]))
     row = next((a for a in kbmod.assets(tenant, publishable_only=False)
                 if (a.url or "") == put["url"]), None)
     if row is None:
