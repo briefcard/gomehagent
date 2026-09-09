@@ -1392,6 +1392,56 @@ shifts the offsets of the rest and corrupts the list (it did, once).
 
 ---
 
+### The OpenAI contract, the newest editor, and the lever — 2026-09-08 (one ship; hash in the memory note)
+
+**The owner's word:** on the four attempts under a set the judge emptied
+(a scalloped plate drawn from ONE photograph, 32 candidates, the same fault
+named every time): *"None of them is right."* The judge was right; the
+model had one view of the edge.
+
+**The ship.** The empty-set note names the lever ("drew from N
+photograph(s) of the product — add more, especially close-ups of what the
+judge named, and run again"). The OpenAI door gets the same treatment the
+Google door got: `imagegen.OPENAI_DOC`, `OPENAI_MODELS` (ids the edits
+reference lists, fidelity support, quality tiers, sixteen pictures),
+`OPENAI_INPUT_MIMES`, `OPENAI_FILE_MAX`, `openai_contract`, and
+`check_openai` before every edits and generations call — an unlisted id
+SENT with the endpoint's documented defaults and said with the URL (the
+model is a setting; the API's own refusal lands on the card), wrong file
+type converted or left out and said, over-count dropped from the end and
+said, every drop first in the door's note. `CHOICES` offers gpt-image-2.5 Sunburst and Flare (published
+2026-09-08; Sunburst is "our most capable model for image generation and
+editing") through the documented multipart door; the default stays
+gpt-image-1 until the owner chooses. "Both" is one set PER PROVIDER now
+(`provider_of`, `providers_ready`): the default for its own door and the
+other door's first model, refused by name with one provider keyed, offered
+on the form only across providers.
+
+**Standing rules it adds:**
+- **An empty set says what would change the next one** —
+  `the_empty_set_names_the_lever`.
+- **Every provider's contract is per model, checked before the call, and a
+  dropped input is said** — `an_unlisted_openai_model_is_said`,
+  `the_openai_count_is_checked_before_the_call`,
+  `scenery_through_an_unlisted_model_is_said`, `a_dropped_reference_is_said`.
+- **The most capable editor is on the form** — `the_newest_openai_editor_is_offered`.
+- **"Both" is one set PER PROVIDER, not per model** (three OpenAI models on
+  one key are not three sets) — `both_is_one_set_per_provider`,
+  `the_form_offers_both_only_across_providers`.
+
+**Traps:** a session's scratchpad can vanish overnight — a ship body and a
+docs patch kept only there had to be rewritten; the memory note is the
+record that survives. Refusing an unlisted model id by name broke
+`test_the_image_model_is_a_setting` ("ranking three models should be a
+script, not three deploys") — the contract is checked and SAID, never a
+gate on the id.
+
+**Owner's move:** pin two or three more photographs of the product —
+including a close-up of the part the judge named — then run "both" with
+Sunburst chosen on the Brand tab, and compare.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1600,6 +1650,16 @@ shifts the offsets of the rest and corrupts the list (it did, once).
 > counted. **Owner's move:** run "both" once more on the same variant, read
 > the running card as it fills, and compare the two sets — and the attempts
 > row under each — on Pictures.
+>
+> **SHIPPED 2026-09-09, NINETEENTH: THE OPENAI CONTRACT, THE NEWEST EDITOR,
+> AND THE LEVER** (8 guards, §5 has the record). The owner looked at four
+> attempts of a scalloped plate drawn from one photograph: "None of them is
+> right." The empty-set note now says the lever (more photographs,
+> close-ups of what the judge named); the OpenAI door has its contract per
+> model checked before the call, like the Google door; gpt-image-2.5
+> Sunburst and Flare are on the form; "both" is one set per provider.
+> **Owner's move:** pin more product photographs including a close-up of
+> the edge, set Sunburst as the brand's model, run "both", compare.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with

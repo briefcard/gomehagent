@@ -72,7 +72,9 @@ def main() -> int:
     ck("with the key set every model is selectable and 'both' is offered",
        "disabled" not in sel2 and 'value="both"' in sel2 and "one set per model" in sel2)
     ck("  and 'both' means every model with a key",
-       imagegen.chosen("both") == ([imagegen.MODEL, "gemini:gemini-3-pro-image", "gemini:gemini-3.1-flash-image"], ""))
+       # ONE SET PER PROVIDER since 2026-09-08 (the OpenAI side lists three models
+       # now): the default for its own door and the other door's first model.
+       imagegen.chosen("both") == ([imagegen.MODEL, "gemini:gemini-3-pro-image"], ""))
     frm = open(ui.__file__).read()
     # SINCE 2026-09-08 (every system draws) the form starts from the brand's
     # default model — `model_select(current=kb.image_model(tenant))`.
@@ -103,7 +105,7 @@ def main() -> int:
                         follow_redirects=False)
         ck("  'both' runs one set per model",
            scheduled[-1][1] is creative.batch_each
-           and scheduled[-1][3].get("models") == [imagegen.MODEL, "gemini:gemini-3-pro-image", "gemini:gemini-3.1-flash-image"]
+           and scheduled[-1][3].get("models") == [imagegen.MODEL, "gemini:gemini-3-pro-image"]
            and "one set per model" in unquote(r.headers.get("location", "")))
         n = len(scheduled)
         config.GEMINI_API_KEY = ""

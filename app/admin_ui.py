@@ -6392,9 +6392,11 @@ def model_select(*, name: str = "image_model", allow_both: bool = True,
         f'{" selected" if (c["value"] == cur and c["ok"]) else ""} '
         f'title="{_esc(c["why"])}">{_esc(c["label"])}{"" if c["ok"] else " — " + _esc(c["why"])}</option>'
         for c in offer)
-    if allow_both and sum(1 for c in offer if c["ok"]) >= 2:
-        opts += (f'<option value="{imagegen.BOTH}">both — one set per model, on the same '
-                 f'brief, to compare</option>')
+    ready = imagegen.providers_ready(offer)
+    if allow_both and ready["openai"] and ready["google"]:
+        opts += (f'<option value="{imagegen.BOTH}">both — one set from each provider '
+                 f'(this model and the other door&#39;s first), on the same brief, to '
+                 f'compare</option>')
     return (f'<select name="{_esc(name)}" title="Which image model draws this set. '
             f'Both makes one set per model; scripts/bakeoff.py ranks them blind.">'
             f'{opts}</select>')

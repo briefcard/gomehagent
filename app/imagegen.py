@@ -55,10 +55,95 @@ MODEL = config.IMAGE_MODEL
 #: the model that drew it, so the two can be compared on the same brief.
 CHOICES = (
     ("gpt-image-1", "OpenAI gpt-image-1"),
+    ("gpt-image-2.5-sunburst", "OpenAI gpt-image-2.5 Sunburst — editing precision"),
+    ("gpt-image-2.5-flare", "OpenAI gpt-image-2.5 Flare — fast"),
     ("gemini:gemini-3-pro-image", "Google Nano Banana Pro"),
     ("gemini:gemini-3.1-flash-image", "Google Nano Banana 2"),
 )
 BOTH = "both"
+
+#: THE OPENAI CONTRACT, PER MODEL, from the edits reference
+#: (OPENAI_DOC, read 2026-09-08 — the day the 2.5 models were published).
+#: Owner, the same day: *"make sure that you learn the lesson of what kind of
+#: inputs the models take."* `model` on POST /v1/images/edits accepts these
+#: ids; `input_fidelity` is "high"|"low" (the mini refuses it); `quality` is
+#: low/medium/high for every GPT image model and xhigh/max on the 2.5 pair;
+#: `size` is 1024x1024, 1536x1024, 1024x1536 (or auto); "you can provide up
+#: to 16 images"; the multipart form `-F "image[]=@file.png"` is documented
+#: on the same endpoint, and the JSON form takes `images[].image_url` as a
+#: data URL. Checked in `check_openai` before a byte is sent.
+OPENAI_DOC = "https://developers.openai.com/api/docs/api-reference/images/createEdit"
+OPENAI_MODELS = {
+    "gpt-image-1": {"fidelity": True, "quality": ("low", "medium", "high"), "refs": 16},
+    "gpt-image-1-mini": {"fidelity": False, "quality": ("low", "medium", "high"), "refs": 16},
+    "gpt-image-1.5": {"fidelity": True, "quality": ("low", "medium", "high"), "refs": 16},
+    "gpt-image-2": {"fidelity": True, "quality": ("low", "medium", "high"), "refs": 16},
+    "gpt-image-2.5-sunburst": {"fidelity": True,
+                               "quality": ("low", "medium", "high", "xhigh", "max"), "refs": 16},
+    "gpt-image-2.5-flare": {"fidelity": True,
+                            "quality": ("low", "medium", "high", "xhigh", "max"), "refs": 16},
+}
+OPENAI_INPUT_MIMES = ("image/png", "image/jpeg", "image/webp")
+#: Per-file ceiling the reference states for uploads.
+OPENAI_FILE_MAX = 50 * 1024 * 1024
+#: What an id the reference does not list is sent with: the endpoint's
+#: documented defaults for "GPT image models". The list is what the docs
+#: said on the day they were read, and the 2.5 pair appeared on that very
+#: day — a model is a SETTING here (`test_the_image_model_is_a_setting`:
+#: "ranking three models should be a script, not three deploys"), so an
+#: unlisted id goes through, checked against the defaults, and the note
+#: says it was not on the list. The API's own refusal, if any, is recorded
+#: per cell and said in the run's note.
+OPENAI_DEFAULT = {"fidelity": True, "quality": ("low", "medium", "high"), "refs": 16}
+
+
+def openai_contract(model: str) -> dict:
+    """The documented limits of one OpenAI image model, `listed` True when
+    the reference names it — a dated snapshot id (`gpt-image-2.5-sunburst-
+    2026-09-08`) answers as its family; an unlisted id gets the endpoint's
+    documented defaults."""
+    name = str(model or "")
+    for key in sorted(OPENAI_MODELS, key=len, reverse=True):
+        if name == key or name.startswith(key + "-"):
+            return {**OPENAI_MODELS[key], "listed": True}
+    return {**OPENAI_DEFAULT, "listed": False}
+
+
+def check_openai(model: str, files: list | None = None) -> tuple[list, str, list]:
+    """The request against the contract, BEFORE the call: `(files, refusal,
+    said)`. An id the reference does not list is SAID — sent with the
+    endpoint's documented defaults, the note naming the list and the docs
+    URL — never refused: the model is a setting, and the API's own refusal
+    lands on the card. Pictures past the documented count are dropped from
+    the end and said; a file the endpoint does not take is converted to PNG
+    or dropped and said; a file over the ceiling is dropped and said."""
+    from . import gemini_images as _g
+    if _g.is_gemini(model):
+        return list(files or []), "", []
+    lim = openai_contract(model)
+    kept, said = [], []
+    if not lim.get("listed"):
+        said.append(f"{model!r} is not in the OpenAI edits reference's model list "
+                    f"({', '.join(OPENAI_MODELS)}; {OPENAI_DOC}) — sent with the "
+                    f"endpoint's documented defaults")
+    for f in list(files or []):
+        field, part = f[0], f[1]
+        name, blob, mime = (part[0], part[1], part[2]) if isinstance(part, tuple) else ("", part, "")
+        real = _g.sniff(blob)
+        if real not in OPENAI_INPUT_MIMES:
+            png = _g.to_png(blob)
+            if not png:
+                said.append(f"{name or field}: not a picture the endpoint takes — left out")
+                continue
+            blob, real = png, "image/png"
+        if len(blob) >= OPENAI_FILE_MAX:
+            said.append(f"{name or field}: over the endpoint's 50 MB per-file ceiling — left out")
+            continue
+        if len(kept) >= lim["refs"]:
+            said.append(f"{name or field}: past the documented {lim['refs']} images — left out")
+            continue
+        kept.append((field, (name, blob, real)))
+    return kept, "", said
 
 
 def choices() -> list[dict]:
@@ -81,10 +166,37 @@ def choices() -> list[dict]:
     return out
 
 
+def provider_of(model: str) -> str:
+    """Which door a model name goes through — "google" for a `gemini:` name,
+    "openai" for the rest."""
+    from . import gemini_images as _gemini
+    return "google" if _gemini.is_gemini(model) else "openai"
+
+
+def providers_ready(offer: list | None = None) -> dict:
+    """`{"openai": bool, "google": bool}` — which doors have a key, read off
+    the offer. "Both" is a comparison BETWEEN PROVIDERS (owner, 2026-09-08:
+    OpenAI against Google), not one set per listed model — three OpenAI
+    models on one key are not three providers."""
+    offer = offer if offer is not None else choices()
+    out = {"openai": False, "google": False}
+    for c in offer:
+        if c["ok"]:
+            out[provider_of(c["value"])] = True
+    return out
+
+
 def chosen(value: str, default: str = "") -> tuple[list[str], str]:
     """What a form's choice means: `(models, why_not)`. Empty = the default;
-    BOTH = every model whose key is set (two or more, or it is refused by
-    name); a listed model = itself, if its key is set.
+    BOTH = ONE model per provider with a key — the default (the brand's,
+    else the system's) for its own provider and the first listed model of
+    the other — refused by name when only one provider is keyed; a listed
+    model = itself, if its key is set.
+
+    BOTH IS ONE SET PER PROVIDER, not per model (2026-09-08, the day the
+    OpenAI side grew from one model to three): the owner asked to compare
+    OpenAI with Google, and five sets on one press would be five times the
+    minutes and the money for a comparison that needs two.
 
     `default` is what "" means when the caller has a brand default
     (`kb.image_model`) — honoured if its key is set, otherwise the system
@@ -105,11 +217,21 @@ def chosen(value: str, default: str = "") -> tuple[list[str], str]:
                              f"offered models; drawing with {MODEL}")
         return [MODEL], ""
     if value == BOTH:
-        avail = [c["value"] for c in offer if c["ok"]]
-        if len(avail) < 2:
-            missing = "; ".join(c["why"] for c in offer if not c["ok"]) or "no second model is set up"
-            return [], f"'both' needs two models with keys — {missing}"
-        return avail, ""
+        ready = providers_ready(offer)
+        if not (ready["openai"] and ready["google"]):
+            missing = "; ".join(c["why"] for c in offer if not c["ok"]) or "no second provider is set up"
+            return [], f"'both' needs two providers with keys — {missing}"
+        # THE PROVIDER'S OWN MODEL FIRST: the default where it is one of that
+        # provider's, else the first listed model that provider offers.
+        lead, _why = chosen("", default=default)
+        first = lead[0] if lead else MODEL
+        picked = [first]
+        other = "google" if provider_of(first) == "openai" else "openai"
+        for c in offer:
+            if c["ok"] and provider_of(c["value"]) == other:
+                picked.append(c["value"])
+                break
+        return picked, ""
     for c in offer:
         if c["value"] == value:
             return ([value], "") if c["ok"] else ([], f"{c['label']}: {c['why']}")
@@ -359,12 +481,18 @@ def plate(prompt: str, *, shape: str = "square", n: int = 1,
         res = _gemini.edit(body["prompt"], images=[], model=model or MODEL, shape=shape,
                            n=body["n"])
     else:
+        _files, _refusal, said = check_openai(model or MODEL)
         res = post("/images/generations", json_body=body)
+        if res.get("ok") and said:
+            res["note"] = "; ".join(said)
     if not res["ok"]:
         return res
     return {"ok": True, "images": res["images"], "shape": shape,
-            "note": "background only — no product was generated, so there is "
-                    "nothing here that could be the wrong product"}
+            # WHAT THE CONTRACT CHECK SAID, first — an unlisted id, a dropped
+            # picture — then the reassurance.
+            "note": ((str(res.get("note")) + "; ") if res.get("note") else "")
+                    + "background only — no product was generated, so there is "
+                      "nothing here that could be the wrong product"}
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +580,9 @@ INPUT_MAX_SIDE = 1536
 
 
 def _fidelity_for(model: str) -> str:
-    return "" if "mini" in (model or "") else INPUT_FIDELITY
+    """`input_fidelity` only where the contract says the model takes it."""
+    lim = openai_contract(model)
+    return INPUT_FIDELITY if lim.get("fidelity", "mini" not in (model or "")) else ""
 
 
 def _trim_margins(im, pad: float = 0.04):
@@ -586,6 +716,13 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
         return {"ok": True, "images": res["images"], "shape": shape,
                 "inputs": {"product": len(product), "cast": len(cast), "look": len(look)},
                 "note": f"drawn from the brand's own pictures by {res.get('model', model)}"}
+    # THE CONTRACT, CHECKED BEFORE THE CALL (2026-09-08): an unlisted model
+    # is refused here by name, the pictures are counted and typed against the
+    # reference, and every drop is said in the note.
+    files, _refusal, said = check_openai(model, files)
+    if not files:
+        return {"ok": False, "error": "no reference picture the endpoint takes was left"
+                                      + (" — " + "; ".join(said) if said else "")}
     data = {"model": model, "size": SIZES[shape],
             "n": str(max(1, min(4, n))),
             "prompt": "\n\n".join([prompt] + rules).strip()}
@@ -597,7 +734,10 @@ def with_references(prompt: str, *, product: list[bytes], look: list[bytes],
         return res
     return {"ok": True, "images": res["images"], "shape": shape,
             "inputs": {"product": len(product), "cast": len(cast), "look": len(look)},
-            "note": "drawn from the brand's own pictures — the product from "
+            # WHAT WAS LEFT OUT, first — a dropped reference is the fact the
+            # owner needs before the reassurance.
+            "note": ("; ".join(said) + "; " if said else "")
+                    + "drawn from the brand's own pictures — the product from "
                     "its photographs, the setting from the board"}
 
 

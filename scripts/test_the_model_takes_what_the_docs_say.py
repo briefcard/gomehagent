@@ -145,6 +145,69 @@ def main() -> int:  # noqa: PLR0915
     ck("a model's reference caps hold — Pro: 6 objects and 3 style",
        got4.get("ok") and len(ins4) == 9 and got4.get("inputs") == 9, str(len(ins4)))
 
+    print("\n— THE OPENAI CONTRACT, PER MODEL, FROM ITS REFERENCE —")
+    ck("the reference URL rides the module, the 2.5 pair is listed with its extra quality tiers, the mini takes no fidelity",
+       imagegen.OPENAI_DOC.startswith("https://developers.openai.com/")
+       and "xhigh" in imagegen.OPENAI_MODELS["gpt-image-2.5-sunburst"]["quality"]
+       and "xhigh" not in imagegen.OPENAI_MODELS["gpt-image-1"]["quality"]
+       and imagegen.OPENAI_MODELS["gpt-image-1-mini"]["fidelity"] is False
+       and all(v["refs"] == 16 for v in imagegen.OPENAI_MODELS.values()))
+    snap = imagegen.openai_contract("gpt-image-2.5-sunburst-2026-09-08")
+    ck("  a dated snapshot answers as its family, listed; an unknown id gets the documented defaults, unlisted",
+       snap.get("listed") is True
+       and {k: v for k, v in snap.items() if k != "listed"} == imagegen.OPENAI_MODELS["gpt-image-2.5-sunburst"]
+       and imagegen.openai_contract("dall-e-9") == {**imagegen.OPENAI_DEFAULT, "listed": False})
+    ck("  the newest editing model is offered where a set starts, once the OpenAI key is set",
+       any(c["value"] == "gpt-image-2.5-sunburst" and c["ok"] for c in imagegen.choices()))
+    ocalls: list = []
+
+    def _opost(path, *, json_body=None, files=None, data=None):
+        ocalls.append({"path": path, "files": files, "data": data, "json": json_body})
+        n_ = int((data or {}).get("n") or (json_body or {}).get("n") or 1)
+        return {"ok": True, "images": [png((9, i * 30 + 3, 9, 255)) for i in range(n_)]}
+    imagegen.post = _opost
+    got_o = imagegen.with_references("a cup", product=[png((1, 2, 3, 255))], look=[jpeg((5, 5, 5))],
+                                     shape="square", n=1, model="gpt-image-2.5-sunburst")
+    ck("the 2.5 model goes through the documented multipart door with input_fidelity high",
+       got_o.get("ok") and ocalls and ocalls[-1]["path"] == "/images/edits"
+       and ocalls[-1]["data"]["model"] == "gpt-image-2.5-sunburst"
+       and ocalls[-1]["data"]["input_fidelity"] == "high" and len(ocalls[-1]["files"]) == 2,
+       str(got_o)[:160])
+    before = len(ocalls)
+    bad = imagegen.with_references("a cup", product=[png((1, 2, 3, 255))], look=[], shape="square",
+                                   n=1, model="dall-e-9")
+    ck("  an id the reference does not list is SENT with the documented defaults — the model is a setting — and SAID, with the docs URL",
+       bad.get("ok") and len(ocalls) == before + 1 and ocalls[-1]["data"]["model"] == "dall-e-9"
+       and "not in the OpenAI edits reference" in bad.get("note", "") and imagegen.OPENAI_DOC in bad.get("note", ""),
+       str(bad.get("note"))[:200])
+    many = imagegen.with_references("a cup", product=[png((i, 2, 3, 255)) for i in range(4)],
+                                    look=[png((7, i, 3, 255)) for i in range(4)],
+                                    cast=[png((3, 3, i, 255)) for i in range(3)], shape="square", n=1,
+                                    model="gpt-image-1")
+    ck("  the pictures are counted against the documented sixteen",
+       many.get("ok") and len(ocalls[-1]["files"]) <= 16)
+    real_refs = imagegen.OPENAI_MODELS["gpt-image-1"]["refs"]
+    imagegen.OPENAI_MODELS["gpt-image-1"]["refs"] = 2
+    few = imagegen.with_references("a cup", product=[png((i, 2, 3, 255)) for i in range(3)],
+                                   look=[png((7, 1, 3, 255))], shape="square", n=1, model="gpt-image-1")
+    imagegen.OPENAI_MODELS["gpt-image-1"]["refs"] = real_refs
+    ck("  past the count the rest are dropped from the end, and said",
+       few.get("ok") and len(ocalls[-1]["files"]) == 2 and "past the documented 2 images" in few.get("note", ""),
+       f"files={len(ocalls[-1]['files'])} note={few.get('note')}")
+    gone = imagegen.plate("a table", shape="square", n=1, model="dall-e-9")
+    ck("  scenery through an unlisted model goes through and is said the same way",
+       gone.get("ok") and "not in the OpenAI edits reference" in gone.get("note", ""), str(gone)[:200])
+    ck("'both' is one set PER PROVIDER — three OpenAI models on one key are not three sets",
+       imagegen.chosen("both") == ([imagegen.MODEL, "gemini:gemini-3-pro-image"], "")
+       and imagegen.chosen("both", default="gpt-image-2.5-sunburst") == (["gpt-image-2.5-sunburst", "gemini:gemini-3-pro-image"], "")
+       and imagegen.chosen("both", default="gemini:gemini-3.1-flash-image") == (["gemini:gemini-3.1-flash-image", imagegen.MODEL], ""),
+       str(imagegen.chosen("both", default="gpt-image-2.5-sunburst")))
+    config.GEMINI_API_KEY = ""
+    ck("  and with one provider keyed it is refused by name, on the form too",
+       not imagegen.chosen("both")[0] and "two providers" in imagegen.chosen("both")[1]
+       and 'value="both"' not in ui.model_select())
+    config.GEMINI_API_KEY = "gk-test"
+
     print("\n— A RUN SAYS WHERE IT STANDS —")
     seen: list = []
 
@@ -245,6 +308,9 @@ def main() -> int:  # noqa: PLR0915
                              and not (a.assessment or {}).get("ok") for a in g["attempts"]))
     ck("  the note says the attempts are under the set",
        "closest attempt of each is under the set" in got.get("note", ""), got.get("note", "")[-200:])
+    ck("  and names the lever — how many photographs it drew from, add close-ups of what was named",
+       "drew from 1 photograph(s) of the product" in got.get("note", "")
+       and "close-ups of what the judge named" in got.get("note", ""), got.get("note", "")[-260:])
     ck("  progress was told after every cell, in the run's own words",
        len(lines) == 2 and lines[0].startswith("cell 1 of 2") and "not the product" in lines[-1], str(lines))
     page = ui._batch_cards(KEY, "baci", list(kb.proposed_assets("baci")))[0]

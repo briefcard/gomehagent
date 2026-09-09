@@ -1575,6 +1575,19 @@ def batch(tenant: str, *, commitment: dict | None = None,
                               + (f" (the closest attempt of each is under the set, "
                                  f"marked not the product)" if fidelity["shown_below"] else "")
                               if fidelity["not_the_product"] else "")
+                           # THE LEVER, when the judge emptied the set. Owner,
+                           # 2026-09-08, on four attempts of a scalloped plate
+                           # drawn from ONE photograph: *"None of them is
+                           # right."* The judge was right and the model had one
+                           # view of the edge it kept getting wrong. What
+                           # changes the next run is more photographs of the
+                           # product, of the parts the judge named — said here,
+                           # where the empty set is reported.
+                           + (f". Nothing was kept: the model drew from "
+                              f"{len(refs['product'])} photograph(s) of the product — "
+                              f"add more, especially close-ups of what the judge "
+                              f"named, and run again"
+                              if fidelity["not_the_product"] and not fidelity["kept"] else "")
                            + ("" if checklist else "; no checklist could be derived"
                               + (f" ({feats.get('why')})" if feats.get("why") else "")))
         else:

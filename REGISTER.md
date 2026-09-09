@@ -200,7 +200,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`boards_select`**(tenant, name?) → `str`  ·  from `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`
 - **`creative_bar`**() → `int`  ·  **from nothing**
 - **`entity_select`**(tenant, current?, name?, blank?, multiple?) → `str`  ·  **from nothing**
-- **`model_select`**(name?, allow_both?, current?) → `str`  ·  from `test_the_image_model_is_chosen_where_the_set_starts.py`
+- **`model_select`**(name?, allow_both?, current?) → `str`  ·  from `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`
 - **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`render_assurance`**(key, tenant?, days?, system?, rule?, started?, page?, gap?) → `str`  ·  from `test_assurance_tab.py`, `test_claim_trace.py`, `test_kb_ui.py`, `web.py`
 - **`render_brand`**(key, tenant?, msg?, err?, derive_voice?, pick?) → `str`  ·  from `test_a_kept_frame_has_its_placements_and_no_painted_type.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_ban_list.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_every_system_draws.py`, `test_kb_ui.py`, `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `web.py`
@@ -515,7 +515,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`apply_ack`**(token) → `str`  ·  from `test_digest.py`, `web.py`
 - **`brief`**(hours_back?) → `dict`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`
 - **`build_digest`**(hours_back?) → `str`  ·  from `command_agent.py`, `test_digest.py`, `test_rehearse.py`
-- **`choices`**(kind, ref, fingerprint) → `dict`  ·  from `admin_ui.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `web.py`
+- **`choices`**(kind, ref, fingerprint) → `dict`  ·  from `admin_ui.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`, `web.py`
 - **`collect`**(hours_back?) → `list[dict]`  ·  **from nothing**
 - **`item_link`**(item) → `str`  ·  **from nothing**
 - **`read_token`**(token) → `dict`  ·  from `web.py`
@@ -674,8 +674,8 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`is_gemini`**(model) → `bool`  ·  from `imagegen.py`
 - **`limits`**(model) → `dict`  ·  **from nothing**
 - **`model_name`**(model) → `str`  ·  **from nothing**
-- **`sniff`**(blob) → `str`  ·  **from nothing**
-- **`to_png`**(blob) → `bytes`  ·  **from nothing**
+- **`sniff`**(blob) → `str`  ·  from `imagegen.py`
+- **`to_png`**(blob) → `bytes`  ·  from `imagegen.py`
 
 ### `gmail_client.py`
 
@@ -741,14 +741,18 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `imagegen.py`
 
-- **`choices`**() → `list[dict]`  ·  from `admin_ui.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `web.py`
-- **`chosen`**(value, default?) → `tuple[list[str], str]`  ·  from `creative.py`, `kb.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `web.py`
+- **`check_openai`**(model, files?) → `tuple[list, str, list]`  ·  **from nothing**
+- **`choices`**() → `list[dict]`  ·  from `admin_ui.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`, `web.py`
+- **`chosen`**(value, default?) → `tuple[list[str], str]`  ·  from `creative.py`, `kb.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`, `web.py`
 - **`input_image`**(blob, max_side?, trim?) → `tuple[bytes, str]`  ·  from `creative.py`
+- **`openai_contract`**(model) → `dict`  ·  from `test_the_model_takes_what_the_docs_say.py`
 - **`place_product`**(product_png, prompt, shape?, n?, inspiration?) → `dict`  ·  from `creative.py`, `test_imagegen.py`, `try_imagegen.py`, `web.py`
-- **`plate`**(prompt, shape?, n?, inspiration?, for_product?, with_people?, model?) → `dict`  ·  from `creative.py`, `test_a_second_image_provider_is_a_call_away.py`, `test_an_ad_may_look_like_an_ad.py`, `test_imagegen.py`, `test_the_image_model_is_a_setting.py`
+- **`plate`**(prompt, shape?, n?, inspiration?, for_product?, with_people?, model?) → `dict`  ·  from `creative.py`, `test_a_second_image_provider_is_a_call_away.py`, `test_an_ad_may_look_like_an_ad.py`, `test_imagegen.py`, `test_the_image_model_is_a_setting.py`, `test_the_model_takes_what_the_docs_say.py`
+- **`provider_of`**(model) → `str`  ·  **from nothing**
+- **`providers_ready`**(offer?) → `dict`  ·  from `admin_ui.py`
 - **`scene_with_real_product`**(product_png, prompt, headline?, subline?, inspiration?, shape?, text_colour?, formats?) → `dict`  ·  **from nothing**
 - **`similarity`**(product_png, generated_png, region?) → `float`  ·  from `kb.py`, `test_claim_tagging.py`, `test_imagegen.py`, `test_provenance.py`
-- **`with_references`**(prompt, product?, look?, shape?, n?, with_people?, model?, checklist?, cast?, cast_names?) → `dict`  ·  from `creative.py`, `test_a_second_image_provider_is_a_call_away.py`
+- **`with_references`**(prompt, product?, look?, shape?, n?, with_people?, model?, checklist?, cast?, cast_names?) → `dict`  ·  from `creative.py`, `test_a_second_image_provider_is_a_call_away.py`, `test_the_model_takes_what_the_docs_say.py`
 
 ### `inbox_events.py`
 
