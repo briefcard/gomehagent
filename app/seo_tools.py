@@ -521,6 +521,23 @@ def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
             return "No Semrush data for that query."
         if "ERROR 132" in body.upper() or "BALANCE IS ZERO" in body.upper():
             _halt(body, _tenant)
+            _log(False, body[:160], body)
+            return f"Semrush error: {body[:160]}"
+        if params.get("display_filter"):
+            # THE ONE PARAMETER HERE THAT HAS NEVER ROUND-TRIPPED. The volume
+            # floor on the expansions is written from Semrush's published
+            # filter syntax and nothing has sent it to the live API, so a
+            # wrong character would come back as an error and the harvest
+            # would file nothing at all — a silent empty map, which is worse
+            # than a bill. One retry without it, and the refusal is recorded
+            # so the contract can be fixed rather than guessed at again.
+            #
+            # Free: Semrush does not charge for a request that returns no data,
+            # and an error returns none.
+            _log(False, f"filter rejected, retrying without it: {body[:120]}", body)
+            return _semrush(report, _tenant=_tenant,
+                            **{k: v for k, v in params.items()
+                               if k != "display_filter"})
         _log(False, body[:160], body)
         return f"Semrush error: {body[:160]}"
     lines = body.splitlines()

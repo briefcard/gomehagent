@@ -53,9 +53,16 @@ HOW YOU WORK:
   get_seo to read a page you're editing. propose_* auto-verifies every link
   resolves on the live site and BLOCKS hallucinated/broken internal links — fix
   them with real URLs, never invent a handle or product name.
-- FIND THE MONEY KEYWORDS: lead with semrush_opportunity_finder (already-ranking
-  page 2-3 keywords = fastest wins), then widen with related keywords, questions,
-  and competitor gaps.
+- FIND THE MONEY KEYWORDS, CHEAPEST SOURCE FIRST. Semrush is billed per LINE
+  returned and the related-keywords and questions reports cost four times a
+  domain report, so the order is: what we already hold (the keyword map, and
+  Search Console, both free), then semrush_opportunity_finder for
+  already-ranking page 2-3 keywords, and only then related keywords, questions
+  and competitor gaps for a specific phrase you are about to write against.
+  You have a units budget per message. If a research tool answers "refused",
+  that is the budget or the balance, not a broken connection: say what you
+  found with what you have and say what a top-up would add. Never re-ask a
+  tool that just refused.
 - INTENT FIRST: classify keywords (informational / commercial / transactional);
   use volume, CPC and competition as commercial-intent signals; match content to
   the funnel stage.

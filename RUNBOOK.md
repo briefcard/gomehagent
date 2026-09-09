@@ -526,6 +526,46 @@ Console: `/admin/ui` — Accounts, Systems, Knowledge.
 
 ---
 
+## 6b. Semrush, and what it costs
+
+Semrush bills per LINE returned, at a price that depends on the report: 10 units
+a line for a domain report and 40 for the related-keywords and questions
+reports. One key serves every account. On 2026-09-07 a single Monday harvest
+was 28,000 units an account and nothing in the code knew what a call cost.
+
+Every read now goes through one door that prices it, bounds the lines, checks
+three rolling ceilings and refuses in a sentence naming the ceiling. Answers are
+kept and reused, so a second harvest in the same week buys nothing.
+
+**When the balance runs out.** The door halts for 24 hours and stops asking; the
+first refusal is one row in the ledger rather than seventeen. Buy units at
+Semrush → Subscription info → API units, then press **Read the balance now** on
+the Diagnostics tab. That read is free and a positive reading reopens the door
+immediately. `/health/seo` reports the same number.
+
+**Where to look.** Diagnostics → Platforms and cost → Semrush units: spend by
+account for the window, the last balance and when it was read, the weekly cap,
+and the door's state. The Plan tab shows what a top-up will cost before you
+press it, and says so when the answer is already in hand.
+
+**The knobs**, all environment variables on the `assistant-env` group:
+
+```
+SEMRUSH_WEEKLY_CAP=60000            the whole service, rolling 7 days
+SEMRUSH_ACCOUNT_WEEKLY_CAP=30000    per account (per-tenant override:
+                                    analytics.semrush_weekly_cap)
+SEMRUSH_TURN_CAP=3000               one agent message
+SEMRUSH_EXPANSION_TTL_DAYS=60       how long a bought expansion is reused
+SEMRUSH_NEW_SEEDS_PER_RUN=3         new seeds one harvest may buy
+SEMRUSH_MIN_VOLUME=10               the tail an expansion will not pay for
+SEMRUSH_LOW_BALANCE=20000           when the daily reading warns you
+```
+
+The daily balance reading runs at 05:50 Eastern and messages you below the low
+line. The map top-up runs Monday at `SWEEP_HOUR`:25 and no longer expands seeds
+unattended. The monthly metrics refresh runs on the 1st at `SWEEP_HOUR`:45,
+through the one batch report, a hundred phrases a request.
+
 ## 7. What does not work yet
 
 Read this before promising anything.

@@ -45,6 +45,30 @@ SABOTAGES = [
         "suites": ['test_semrush_asked_once.py'],
         "why": "the two buttons that buy Semrush lines say a top-up is free whatever it will cost, which is the state the 2026-09-07 bill was run up in — the warning was 'Spends API calls' and nothing else",
     },
+    {
+        "name": 'a_rejected_filter_does_not_empty_the_harvest',
+        "file": 'app/seo_tools.py',
+        "find": '        if params.get("display_filter"):\n',
+        "replace": '        if False:  # SABOTAGE\n',
+        "suites": ['test_semrush_units.py'],
+        "why": "the volume floor on the expansions is written from Semrush's published syntax and has never been sent to the live API — one wrong character and every expansion returns an error, so the harvest files nothing and the map silently stops growing",
+    },
+    {
+        "name": 'a_blog_system_says_when_its_map_cannot_grow',
+        "file": 'app/keywords.py',
+        "find": '        _shut = _st.halted()\n        if _shut:\n            notes.append(_shut)\n',
+        "replace": '        _shut = ""  # SABOTAGE\n        if _shut:\n            notes.append(_shut)\n',
+        "suites": ['test_semrush_units.py'],
+        "why": "a halted door or an exhausted cap stops the keyword map growing and the blog system reports itself healthy, so nobody finds out until three weeks of thin harvests are already behind them",
+    },
+    {
+        "name": 'the_agent_is_told_what_its_research_costs',
+        "file": 'app/roles/seo.py',
+        "find": '- FIND THE MONEY KEYWORDS, CHEAPEST SOURCE FIRST.',
+        "replace": '- FIND THE MONEY KEYWORDS: lead with semrush_opportunity_finder.  # SABOTAGE',
+        "suites": ['test_semrush_units.py'],
+        "why": "the SEO agent is told to open every piece of research with the most expensive report it can call, and is told nothing about the per-message budget it will hit or what a refusal means",
+    },
     # --- the same question is bought once (2026-09-09) ---------------------
     {
         "name": 'an_answer_is_bought_once',

@@ -209,7 +209,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`render_diagnostics`**(key, tenant?, days?, level?, system?, limit?, live?, view?, msg?, err?) → `str`  ·  from `test_diagnostics_surface.py`, `test_semrush_units.py`, `web.py`
 - **`render_intake`**(link, tenant, step, done, total, waiting, saved?) → `str`  ·  from `web.py`
 - **`render_kb`**(key, tenant?, err?, msg?, sub?, q?, state?, page?) → `str`  ·  from `test_audience_entities.py`, `test_console_controls.py`, `test_kb_ui.py`, `web.py`
-- **`render_plan`**(key, tenant?, msg?, err?, pick?, days?, probe?, sub?, ssort?, sdesc?) → `str`  ·  from `test_blog_readiness.py`, `test_console_controls.py`, `test_plan_tab.py`, `test_semrush_asked_once.py`, `test_ship_section.py`, `web.py`
+- **`render_plan`**(key, tenant?, msg?, err?, pick?, days?, probe?, sub?, ssort?, sdesc?) → `str`  ·  from `test_blog_readiness.py`, `test_console_controls.py`, `test_plan_tab.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_ship_section.py`, `web.py`
 - **`render_schema`**(key, tenant?, sub?, q?, state?, page?, msg?, err?) → `str`  ·  from `test_kb_ui.py`, `web.py`
 - **`render_systems`**(key, tenant?, msg?, err?, system?, ppage?, sub?, wf?, plan_id?) → `str`  ·  from `test_console_controls.py`, `web.py`
 - **`render_workroom`**(key, output_id, art, kw, ap, ok?, err?) → `str`  ·  from `test_article_picture.py`, `test_every_system_draws.py`, `test_publish_gap.py`, `test_queue_approval.py`, `test_refresh_lands.py`, `test_workroom_email.py`, `web.py`
@@ -929,7 +929,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`overtaking`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_rivals.py`
 - **`progress`**(tenant, days?) → `dict`  ·  from `admin_ui.py`, `test_article_review.py`, `test_keyword_progress.py`, `test_refresh_effect.py`, `web.py`
 - **`progress_windows`**(tenant, windows?) → `list`  ·  from `admin_ui.py`, `test_progress_windows.py`
-- **`readiness`**(tenant, probe?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `web.py`
+- **`readiness`**(tenant, probe?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `test_semrush_units.py`, `web.py`
 - **`readiness_all`**(probe?) → `dict`  ·  from `web.py`
 - **`record_reading`**(tenant, phrase, source?, position?, impressions?, clicks?, ctr?, url?, database?) → `str`  ·  from `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_plan_mix.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`
 - **`refresh_effect`**(tenant, days?) → `dict`  ·  from `test_refresh_effect.py`
@@ -1241,7 +1241,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `resolve.py`
 
-- **`readiness`**(tenant) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `web.py`
+- **`readiness`**(tenant) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `test_semrush_units.py`, `web.py`
 - **`resolve`**(tenant, system?, utterance?, contact_id?, entity_key?, entity_keys?, audience_key?, guidance_also?, requirements?, tier?, limit?) → `dict`  ·  from `ab_context.py`, `approvals.py`, `canva.py`, `channel.py`, `command_agent.py`, `connections.py`, `constant_contact.py`, `creative.py`, `data_tools.py`, `esp.py`, `gbp.py`, `gen_systems_reference.py`, `grounding.py`, `klaviyo.py`, `meta_ads.py`, `omnisend.py`, `register.py`, `responder.py`, `sabotage.py`, `skill.py`, `test_archive.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_bundle_contract.py`, `test_canva_falls_back_to_the_agency.py`, `test_catalog_vocabulary.py`, `test_claim_rotation.py`, `test_console_auth.py`, `test_context.py`, `test_control_piping.py`, `test_craft.py`, `test_credentials.py`, `test_entity_scope.py`, `test_entity_selectors.py`, `test_funnel.py`, `test_gbp.py`, `test_grounding.py`, `test_llm.py`, `test_moments.py`, `test_oauth.py`, `test_open_defects.py`, `test_perishable.py`, `test_pointers.py`, `test_positioning.py`, `test_preview_links.py`, `test_register.py`, `test_resolve.py`, `test_responder.py`, `test_sabotage_anchors.py`, `test_shopify_compliance.py`, `test_shopify_oauth.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `test_the_image_model_is_a_setting.py`, `test_winning_look.py`, `verify_canva.py`, `web.py`
 
 ### `responder.py`
@@ -1274,7 +1274,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `seo_tools.py`
 
-- **`balance_cached`**(max_age_hours?) → `dict`  ·  from `admin_ui.py`, `diagnostics.py`, `test_semrush_units.py`, `web.py`
+- **`balance_cached`**(max_age_hours?) → `dict`  ·  from `admin_ui.py`, `diagnostics.py`, `keywords.py`, `test_semrush_units.py`, `web.py`
 - **`balance_reading`**() → `dict`  ·  **from nothing**
 - **`cached_pull`**(report, ttl_days?, **params) → `—`  ·  from `keywords.py`
 - **`cap_for`**(tenant) → `int`  ·  from `test_semrush_units.py`
@@ -1285,17 +1285,17 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`estimate`**(report, **params) → `int`  ·  from `keywords.py`, `test_semrush_asked_once.py`
 - **`halted`**() → `str`  ·  from `admin_ui.py`, `diagnostics.py`, `keywords.py`, `test_semrush_units.py`, `web.py`
 - **`lines_asked`**(report, params) → `int`  ·  **from nothing**
-- **`over_cap`**(tenant, est) → `str`  ·  **from nothing**
+- **`over_cap`**(tenant, est) → `str`  ·  from `keywords.py`
 - **`preflight`**(tenant, est, what?) → `str`  ·  from `keywords.py`, `test_semrush_units.py`, `test_skill.py`
 - **`price_of`**(report) → `int`  ·  **from nothing**
 - **`record_reading`**(units, source, halted_until?, note?) → `None`  ·  from `test_article_review.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_plan_mix.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`
-- **`semrush`**(report, _tenant?, ttl_days?, **params) → `list[dict] | str`  ·  from `test_semrush_asked_once.py`
+- **`semrush`**(report, _tenant?, ttl_days?, **params) → `list[dict] | str`  ·  from `test_semrush_asked_once.py`, `test_semrush_units.py`
 - **`semrush_competitors`**(domain?, database?, limit?, _tenant?) → `str`  ·  **from nothing**
 - **`semrush_domain_overview`**(domain?, database?, _tenant?) → `str`  ·  from `brief.py`, `tenants.py`
 - **`semrush_keyword_metrics`**(phrases, database?, _tenant?) → `str`  ·  from `keywords.py`, `test_semrush_units.py`
 - **`semrush_opportunity_finder`**(domain?, database?, min_volume?, min_pos?, max_pos?, limit?, exclude_terms?, _tenant?) → `str`  ·  from `keywords.py`, `test_semrush_asked_once.py`
 - **`semrush_questions`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`
-- **`semrush_related_keywords`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`, `test_semrush_asked_once.py`
+- **`semrush_related_keywords`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`
 - **`semrush_serp_rivals`**(phrase, database?, limit?, _tenant?) → `str`  ·  from `keywords.py`
 - **`semrush_top_keywords`**(domain?, database?, limit?, sort?, _tenant?) → `str`  ·  from `keywords.py`, `test_semrush_asked_once.py`
 - **`seo_context_block`**(tenant?) → `str`  ·  **from nothing**
@@ -1404,7 +1404,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`can_promote`**(system) → `dict`  ·  from `admin_ui.py`, `test_allclear.py`, `test_systems.py`
 - **`classify_reason`**(reason) → `dict`  ·  from `test_systems_check.py`
 - **`consumable`**(row, sysrow) → `dict`  ·  from `admin_ui.py`, `test_plans.py`, `worker.py`
-- **`create`**(tenant, key, name?) → `db.System`  ·  from `ab_context.py`, `correlate.py`, `data_tools.py`, `drive_io.py`, `extract.py`, `gmail_client.py`, `kernel.py`, `llm.py`, `planner.py`, `responder.py`, `seed_demo.py`, `skill_pack.py`, `skills.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_board.py`, `test_ad_panel.py`, `test_allclear.py`, `test_an_ad_may_look_like_an_ad.py`, `test_approval_gate.py`, `test_article_repair.py`, `test_article_review.py`, `test_audience_entities.py`, `test_auto_ships.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_cadence_knobs.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_coherence.py`, `test_compliance.py`, `test_compliance_reports.py`, `test_console_controls.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_entity_scope.py`, `test_entity_selectors.py`, `test_every_system_draws.py`, `test_funnel.py`, `test_gbp.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_grounding.py`, `test_kb_ui.py`, `test_keywords.py`, `test_learning.py`, `test_link_flag.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_offers.py`, `test_ops_added.py`, `test_plan_lifecycle.py`, `test_plan_mix.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_question_backlog.py`, `test_queue_approval.py`, `test_refresh_lands.py`, `test_refresh_lane.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_reorder_skill.py`, `test_replies.py`, `test_report_planner.py`, `test_reports_skill.py`, `test_review_is_honest.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schedule_nav.py`, `test_schema_tab.py`, `test_segments.py`, `test_skill.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_support_links.py`, `test_systems.py`, `test_systems_check.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_brands_own_pictures_are_the_references.py`, `test_the_review_answers_one_question.py`, `test_winning_look.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `triage.py`, `voice.py`, `web.py`, `worker.py`
+- **`create`**(tenant, key, name?) → `db.System`  ·  from `ab_context.py`, `correlate.py`, `data_tools.py`, `drive_io.py`, `extract.py`, `gmail_client.py`, `kernel.py`, `llm.py`, `planner.py`, `responder.py`, `seed_demo.py`, `skill_pack.py`, `skills.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_board.py`, `test_ad_panel.py`, `test_allclear.py`, `test_an_ad_may_look_like_an_ad.py`, `test_approval_gate.py`, `test_article_repair.py`, `test_article_review.py`, `test_audience_entities.py`, `test_auto_ships.py`, `test_blog_readiness.py`, `test_blog_skill.py`, `test_bridge.py`, `test_bundle_contract.py`, `test_cadence_knobs.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_coherence.py`, `test_compliance.py`, `test_compliance_reports.py`, `test_console_controls.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_entity_scope.py`, `test_entity_selectors.py`, `test_every_system_draws.py`, `test_funnel.py`, `test_gbp.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_grounding.py`, `test_kb_ui.py`, `test_keywords.py`, `test_learning.py`, `test_link_flag.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_offers.py`, `test_ops_added.py`, `test_plan_lifecycle.py`, `test_plan_mix.py`, `test_planner.py`, `test_plans.py`, `test_pointer_fixes.py`, `test_question_backlog.py`, `test_queue_approval.py`, `test_refresh_lands.py`, `test_refresh_lane.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_reorder_skill.py`, `test_replies.py`, `test_report_planner.py`, `test_reports_skill.py`, `test_review_is_honest.py`, `test_review_ui.py`, `test_run_skill.py`, `test_schedule_nav.py`, `test_schema_tab.py`, `test_segments.py`, `test_semrush_units.py`, `test_skill.py`, `test_strategy.py`, `test_strategy_ledger.py`, `test_support_links.py`, `test_systems.py`, `test_systems_check.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_brands_own_pictures_are_the_references.py`, `test_the_review_answers_one_question.py`, `test_winning_look.py`, `test_workflow_ui.py`, `test_workroom_email.py`, `triage.py`, `voice.py`, `web.py`, `worker.py`
 - **`demote`**(system_id, reason?) → `dict`  ·  from `test_systems.py`
 - **`dismiss_edit_lesson`**(run_id) → `str`  ·  from `web.py`
 - **`drop_note`**(note_id) → `str`  ·  from `learning.py`, `web.py`
@@ -1761,7 +1761,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`purge_scans_route`**(key?, tenant?, dry_run?) → `dict`  ·  route `GET /admin/purge_scans`  ·  **from nothing**
 - **`queue_approval`**(request, key?) → `error`  ·  route `POST /admin/queue_approval`  ·  **from nothing**
 - **`read_key`**(request, key?) → `str`  ·  **from nothing**
-- **`readiness`**(request, auth?, tenant?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`
+- **`readiness`**(request, auth?, tenant?) → `dict`  ·  route `GET /readiness`  ·  from `admin_ui.py`, `dossier.py`, `test_blog_destination.py`, `test_blog_readiness.py`, `test_console_controls.py`, `test_data_layer.py`, `test_resolve.py`, `test_schema_tab.py`, `test_semrush_units.py`
 - **`register_owner`**(key?, chat_id?, name?) → `dict`  ·  route `GET /admin/register_owner`  ·  **from nothing**
 - **`renotify`**(key?) → `dict`  ·  route `GET /admin/renotify`  ·  **from nothing**
 - **`repair_fingerprints`**(key?, tenant?, apply?) → `dict`  ·  route `GET /admin/repair_fingerprints`  ·  from `test_provenance.py`

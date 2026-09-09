@@ -39,7 +39,7 @@ os.environ["SEO_SITES_JSON"] = json.dumps(
               "creds_key": "baci", "database": "us"}})
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import config, db, diagnostics, keywords, seo_tools, tenants, toolcalls  # noqa: E402
+from app import admin_ui, config, db, diagnostics, keywords, seo_tools, tenants, toolcalls  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _fail: list[str] = []
@@ -404,6 +404,66 @@ def main() -> int:
         ck("the snapshot returns the halt and makes no request",
            "halted" in str(got) and not http.calls)
         fresh_balance(500_000)
+
+        print("\n— a filter Semrush rejects costs an answer, not the harvest —")
+        seen = {"n": 0}
+
+        def _reject_filtered(url, params=None, timeout=None):
+            seen["n"] += 1
+            p = dict(params or {})
+            if p.get("display_filter"):
+                return _R("ERROR 50 :: SOMETHING WRONG WITH THE FILTER")
+            return _R(CSV3)
+        seo_tools.httpx.get = _reject_filtered
+        got = seo_tools.semrush_related_keywords("jug", database="us", _tenant="baci")
+        ck("the rows still come back, from one retry without the filter",
+           got.startswith("[") and seen["n"] == 2, f"{seen['n']} request(s): {got[:50]}")
+        rows = ledger("semrush_phrase_related", "baci")
+        ck("and the rejection is recorded so the contract can be fixed",
+           any("filter rejected" in (r.error or "") for r in rows),
+           str([(r.ok, (r.error or "")[:40]) for r in rows[-2:]]))
+        http = Http("ERROR 132 :: API UNITS BALANCE IS ZERO")
+        seo_tools.httpx.get = http
+        seo_tools.semrush("phrase_questions", _tenant="baci", phrase="zzz",
+                          database="us", display_limit=25)
+        ck("a zero balance is NOT retried — it is the door, not the filter",
+           len(http.calls) == 1 and bool(seo_tools.halted()), f"{len(http.calls)}")
+        fresh_balance(500_000)
+
+        print("\n— the blog system says when its map cannot grow —")
+        from app import systems as _sy
+        _sy.create("baci", "blog")
+        if True:
+            seo_tools._halt("API UNITS BALANCE IS ZERO", "baci")
+            r = keywords.readiness("baci", probe=False)
+            know = r["knows_what_to_write"]
+            ck("a halted door is a note on the blog system's own readiness",
+               any("halted" in n for n in know["notes"]), str(know["notes"])[:120])
+            ck("and it does not turn a working account red",
+               know["ok"] == (not know["fix"]), f"ok={know['ok']} fix={know['fix']}")
+            ck("the door's state travels with the numbers a page needs",
+               know["research"]["halted"] is True
+               and "next_top_up_units" in know["research"])
+            page = admin_ui.render_plan("s3cret", "baci", sub="architecture")
+            ck("and it reaches the Plan tab, where the control already is",
+               "halted" in page and "Topping up costs" in page)
+            fresh_balance(500_000)
+            config.SEMRUSH_ACCOUNT_WEEKLY_CAP = 1
+            know = keywords.readiness("baci", probe=False)["knows_what_to_write"]
+            ck("an exhausted cap says the map cannot be topped up",
+               any("cannot be topped up" in n for n in know["notes"]),
+               str(know["notes"])[:120])
+            config.SEMRUSH_ACCOUNT_WEEKLY_CAP = 10**6
+
+        print("\n— the agent is told what its research costs —")
+        from app.roles import seo as _seorole
+        ident = _seorole.IDENTITY
+        ck("it no longer leads with the most expensive report",
+           "lead with semrush_opportunity_finder" not in ident)
+        ck("it is told the order, cheapest first",
+           "CHEAPEST SOURCE FIRST" in ident and "keyword map" in ident)
+        ck("and what a refusal means, so it does not re-ask",
+           "refused" in ident and "Never re-ask" in ident)
 
         print("\n— the worker reads the balance daily, and the health probe is free —")
         wsrc = open(os.path.join(ROOT, "app", "worker.py")).read()

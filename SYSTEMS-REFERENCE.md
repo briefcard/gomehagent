@@ -294,6 +294,45 @@ degrades with the reason and the copy is kept whole at
 `/admin/artifact/<output_id>?raw=1`, which IS the workflow on a platform with
 no write API.
 
+**blog — the research bill, and the one door it goes through (2026-09-09).**
+The keyword map this system writes against is the only place in the platform
+that spends Semrush, and Semrush bills per LINE returned at a price that
+depends on the report: 10 units a line for a domain report, 40 for the
+related-keywords and questions reports an expansion uses. One key serves every
+account, so the ceilings are rolling seven-day totals read from the ledger.
+None of this is in the declarations because none of it is per-system config —
+it is one seam, `seo_tools._semrush`, that every caller already went through:
+the Monday cron, both Plan-tab buttons and the agent's seven research tools.
+
+- **What is kept.** `SemrushPull` holds the answer, keyed by the QUESTION and
+  shared across accounts in the same market, because the related keywords for
+  a phrase are the same fact whoever asks. A domain is read once a week and
+  `own`, `gap`, the weekly snapshot and the agent's opportunity finder all
+  derive from that one read. An expansion is kept for
+  `SEMRUSH_EXPANSION_TTL_DAYS`. Which account SPENT the units stays on
+  `tool_calls`, which carries a tenant; the pull is the answer, not the bill.
+- **What a run may buy.** A seed already in hand is free and never deferred, so
+  the budget bounds only new ones: `SEMRUSH_NEW_SEEDS_PER_RUN` a run, the
+  planner's next articles first. The unattended Monday top-up does not expand
+  at all — expansion is a deliberate press, where the cost is shown.
+- **Knobs** (environment, `assistant-env`): `SEMRUSH_WEEKLY_CAP` 60000,
+  `SEMRUSH_ACCOUNT_WEEKLY_CAP` 30000 (per-tenant override
+  `analytics.semrush_weekly_cap`), `SEMRUSH_TURN_CAP` 3000,
+  `SEMRUSH_EXPANSION_TTL_DAYS` 60, `SEMRUSH_NEW_SEEDS_PER_RUN` 3,
+  `SEMRUSH_MIN_VOLUME` 10, `SEMRUSH_LOW_BALANCE` 20000.
+- **Where it surfaces.** Diagnostics → Platforms and cost → Semrush units:
+  spend by account, the last balance, the cap, the door's state, and the free
+  balance read that reopens a halted door. Plan → the estimate and the balance
+  beside Build and Top up. `readiness()["knows_what_to_write"]["notes"]`
+  carries a halted door or an exhausted cap, as an ADVISORY: a map that exists
+  can still be planned against, and a warning that turns a working account red
+  is one people scroll past.
+- **Two failures worth knowing.** A zero balance halts the door for 24 hours or
+  until a positive reading, and files one ledger row rather than one per
+  refused call. A `display_filter` the API rejects is retried once without it,
+  because the alternative is a harvest that files nothing and a map that
+  silently stops growing.
+
 - **Keyword-map variables** (`db.KeywordTarget`): tier/intent/volume/
   difficulty (computed, never typed; difficulty nullable — unknown is not 0),
   cluster_key+role, status candidate→planned→published→won (settled from

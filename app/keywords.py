@@ -1671,6 +1671,31 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
             f"and questions for anyone else. Set analytics.semrush_db to "
             f"change it.")
 
+    # CAN THE MAP STILL DEEPEN — the question the door decides and this page
+    # is where a blog system's health is read. A halted door or an exhausted
+    # cap does not stop planning against the map we have, so this is a NOTE
+    # like the market one above and never a blocker; what it stops is the map
+    # growing, quietly, which is exactly the kind of thing that is noticed
+    # three weeks later. The control is on the same tab: the estimate and the
+    # balance ride beside the Build and Top up buttons.
+    from . import seo_tools as _st
+    if config.SEMRUSH_API_KEY:
+        _shut = _st.halted()
+        if _shut:
+            notes.append(_shut)
+        else:
+            _room = _st.over_cap(tenant, _st.estimate(
+                "domain_organic", display_limit=_st.DOMAIN_PULL_LINES))
+            if _room:
+                notes.append(
+                    "the map cannot be topped up this week — " + _room)
+    else:
+        notes.append("Semrush is not configured, so the map can be planned "
+                     "against but never widened. Set SEMRUSH_API_KEY.")
+    know["research"] = {"halted": bool(config.SEMRUSH_API_KEY and _st.halted()),
+                        "balance": _st.balance_cached(),
+                        "next_top_up_units": harvest_estimate(tenant)}
+
     know["ok"] = not problems
     know["fix"] = problems
     know["notes"] = notes
