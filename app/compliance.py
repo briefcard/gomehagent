@@ -494,8 +494,42 @@ def named_fields(html_text: str) -> list[tuple[str, str]]:
     return out
 
 
-def check_page(tenant: str, url: str, html: str = "") -> dict:
-    """Check one page. Uses `html` when discovery already supplied it."""
+def _picture_key(url: str) -> str:
+    """What a picture's URL looks like inside a page: the file's stem, with
+    the size suffix a CDN appends stripped — `cup_1024x1024.jpg?v=3` and
+    `cup_small.jpg` are the same picture on the same page."""
+    from urllib.parse import urlparse
+    stem = urlparse(str(url or "")).path.rsplit("/", 1)[-1]
+    stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+    stem = re.sub(r"_(\d+x\d*|\d*x\d+|pico|icon|thumb|small|compact|medium|large|grande|original|master)$", "", stem)
+    return stem.lower()
+
+
+def pictures_on_page(source: str, pictures: list[dict]) -> list[dict]:
+    """The disapproved pictures this page still shows — matched by the
+    picture's URL or its file stem (CDNs resize and re-suffix)."""
+    low = (source or "").lower()
+    found = []
+    for pic in pictures or []:
+        url = str(pic.get("url") or "")
+        key = _picture_key(url)
+        if (url and url.lower() in low) or (len(key) >= 8 and key in low):
+            found.append({"asset_id": pic.get("asset_id", ""), "url": url,
+                          "title": pic.get("title", "")})
+    return found
+
+
+def check_page(tenant: str, url: str, html: str = "",
+               pictures: list[dict] | None = None) -> dict:
+    """Check one page. Uses `html` when discovery already supplied it.
+
+    `pictures` are the brand's DISAPPROVED public pictures
+    (`kb.disapproved_public`) — owner, 2026-09-09: a picture pulled from the
+    site is approved by default, and a later disapproval is "a compliance
+    test against anywhere that photo appears on the brand public assets on
+    the next compliance check". A page still showing one is a finding
+    beside the banned phrases. Passed in by `scan` so the list is read once,
+    not once per page."""
     import httpx
     if html:
         source = html
@@ -504,11 +538,11 @@ def check_page(tenant: str, url: str, html: str = "") -> dict:
             r = httpx.get(url, timeout=25, follow_redirects=True, headers=HEADERS)
             if r.status_code != 200:
                 return {"url": url, "status": f"HTTP {r.status_code}",
-                        "phrases": [], "questions": []}
+                        "phrases": [], "questions": [], "pictures": []}
             source = r.text
         except Exception as exc:  # noqa: BLE001
             return {"url": url, "status": exc.__class__.__name__,
-                    "phrases": [], "questions": []}
+                    "phrases": [], "questions": [], "pictures": []}
 
     text = _clean(source)
     hits, questions = _match(tenant, text)
@@ -520,8 +554,11 @@ def check_page(tenant: str, url: str, html: str = "") -> dict:
             q["where"] = where
         hits += more
         questions += more_q
+    if pictures is None:
+        pictures = kb.disapproved_public(tenant)
     return {"url": url, "status": "ok", "phrases": hits,
-            "questions": questions, "words": len(text.split())}
+            "questions": questions, "words": len(text.split()),
+            "pictures": pictures_on_page(source, pictures)}
 
 
 _SENT = re.compile(r"(?<=[.!?])\s+")
@@ -623,12 +660,19 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
     considered = [p for p in pages
                   if not since or not p["lastmod"] or p["lastmod"][:10] >= since]
     checked, violations, errors, to_review = [], [], [], []
+    # THE DISAPPROVED PUBLIC PICTURES, read once for the whole sweep.
+    disapproved = kb.disapproved_public(tenant)
+    still_public: list[dict] = []
     for p in considered[:limit]:
-        res = check_page(tenant, p["url"], html=p.get("html", ""))
+        res = check_page(tenant, p["url"], html=p.get("html", ""),
+                         pictures=disapproved)
         if res["status"] != "ok":
             errors.append({"url": res["url"], "status": res["status"]})
             continue
         checked.append(res["url"])
+        if res.get("pictures"):
+            still_public.append({"url": res["url"], "site": p.get("site", ""),
+                                 "pictures": res["pictures"]})
         # WHICH SITE, on the finding itself. "Fix this page" against a list
         # spanning three domains is a different job depending on who owns the
         # page, and the URL alone makes the reader work that out per row.
@@ -658,6 +702,11 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         "violations": violations,
         "questions_to_review": to_review[:20],
         "questions_count": len(to_review),
+        # DISAPPROVED PICTURES STILL ON A PUBLIC PAGE — a finding per page,
+        # like a banned phrase; nothing is taken down.
+        "pictures_still_public": still_public,
+        "pictures_count": sum(len(x["pictures"]) for x in still_public),
+        "pictures_watched": len(disapproved),
         "by_phrase": sorted(by_phrase.items(), key=lambda kv: -kv[1]),
         "fetch_errors": errors[:10],
         "note": ("Each violation is a live page using a phrase this brand has "
@@ -709,6 +758,17 @@ def report_text(tenant: str, result: dict) -> str:
                 lines.append(f"      {h['phrase']!r} — {h['context'][:160]}")
         if len(vios) > 40:
             lines.append(f"  … and {len(vios) - 40} more, not listed")
+    pics = result.get("pictures_still_public") or []
+    if pics:
+        lines += ["", f"Disapproved pictures still public — {result.get('pictures_count', 0)} "
+                      f"on {len(pics)} page(s) (of {result.get('pictures_watched', 0)} watched):"]
+        for pg in pics[:40]:
+            lines.append(f"  {pg['url']}")
+            for x in pg["pictures"][:3]:
+                lines.append(f"      {(x.get('title') or x.get('url', ''))[:120]}")
+    elif result.get("pictures_watched"):
+        lines += ["", f"{result['pictures_watched']} disapproved picture(s) watched — none "
+                      f"found on a checked page."]
     return "\n".join(lines)
 
 
@@ -735,6 +795,12 @@ def record_scan(tenant: str, result: dict) -> str:
                         "context": (v["hits"][0]["context"] if v["hits"] else "")[:220]}
                        for v in result["violations"][:40]],
             "truncated": max(0, len(result["violations"]) - 40),
+            "pictures": [{"url": pg["url"],
+                          "pictures": [(x.get("title") or x.get("url", ""))[:120]
+                                       for x in pg["pictures"][:5]]}
+                         for pg in (result.get("pictures_still_public") or [])[:40]],
+            "pictures_count": result.get("pictures_count", 0),
+            "pictures_watched": result.get("pictures_watched", 0),
         })
     # THE REPORT ITSELF, filed the way every other system files its work.
     # `ledger.record` owns both the decision row and the artifact, so this is

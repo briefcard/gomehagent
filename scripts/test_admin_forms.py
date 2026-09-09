@@ -69,7 +69,10 @@ def main() -> int:
     # markup that was never emitted is the empty-table false pass `sabotage.py`
     # was written after.
     kb.add_asset("baci", "https://cdn.example/candidate.jpg", rights=kb.OWNED,
-                 title="A candidate", origin="crawl")
+                 # GENERATED, not crawled: a crawled picture lands approved
+                 # since 2026-09-09 (public is approved), so it would never
+                 # be in this queue.
+                 title="A candidate", origin="generated")
 
     for tab in TABS:
         r = client.get(f"/admin/ui?tab={tab}&tenant=baci&key={KEY}")

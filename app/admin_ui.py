@@ -5642,6 +5642,23 @@ def _compliance_body(tenant: str) -> str:
                     if scan.get("truncated") else "")
             comp = (head + f'<div class="chips">{ranked}</div>'
                     + f'<div class="thread">{items}</div>' + more)
+        # DISAPPROVED PICTURES STILL PUBLIC — the owner's compliance test
+        # for a picture they turned down after it was filed (2026-09-09).
+        pics = scan.get("pictures") or []
+        if pics:
+            rows_ = "".join(
+                f'<div class="msg esc"><div><a href="{_esc(pg["url"])}" target="_blank" '
+                f'rel="noopener">{_esc(pg["url"])}</a></div>'
+                f'<div class="when">still shows: {_esc("; ".join(pg.get("pictures") or []))}</div></div>'
+                for pg in pics)
+            comp += (f'<p class="mut" style="margin-top:8px"><b>{scan.get("pictures_count", 0)} '
+                     f'disapproved picture(s) still on a public page</b> &mdash; a picture you '
+                     f'turned down on Review &middot; Pictures after it was filed from the store '
+                     f'or the site; each page below still shows it. Nothing is taken down.</p>'
+                     f'<div class="thread">{rows_}</div>')
+        elif scan.get("pictures_watched"):
+            comp += (f'<p class="mut">{scan["pictures_watched"]} disapproved picture(s) '
+                     f'watched &mdash; none on a checked page.</p>')
     return comp
 
 

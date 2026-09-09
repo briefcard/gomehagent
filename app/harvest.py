@@ -739,12 +739,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             if msg.startswith("Added"):
                 filed_faqs += 1
 
-    # File the pictures, as PROPOSALS. `origin="crawl"` lands them unapproved,
-    # and `assets()` now excludes proposed rows from a publishable read — a
-    # picture found on a website is a candidate, not a licence. A client's own
-    # domain is a good signal and not a guarantee: plenty of sites carry stock
-    # photography licensed for the web and nothing else, and that distinction
-    # is invisible in the file.
+    # File the pictures, APPROVED. They were proposals until 2026-09-09 —
+    # owner: *"Product photos / content pulled from the website should be
+    # approved by default because they are already public facing. If the
+    # user decides to disapprove after the fact, then we can address this as
+    # a compliance test."* A picture on the brand's own site is the brand's
+    # to use; the disapproval that used to gate it now follows it: reject
+    # one on Review · Pictures and the next compliance sweep reports every
+    # public page still showing it (`kb.disapproved_public`).
     filed = 0
     if apply and images:
         for im in images[:120]:

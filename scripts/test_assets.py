@@ -180,15 +180,25 @@ def main() -> int:
     ck("  and the actual photographs survive", len(photos) == 2, str(photos))
 
     print("\n— approving pictures —")
+    # REVERSED 2026-09-09 by the owner: *"Product photos / content pulled
+    # from the website should be approved by default because they are
+    # already public facing."* A crawled picture lands APPROVED and usable;
+    # what lands in the queue is a picture the system drew. Disapproving a
+    # public one afterwards is a compliance test on the next sweep
+    # (`test_the_brands_own_pictures_are_the_references`).
     kb.add_asset("ironside", "https://cdn/hall.jpg", rights=kb.OWNED,
                  kind="image", title="Main hall", origin="crawl")
     kb.add_asset("ironside", "https://cdn/LOGO.png", rights=kb.OWNED,
                  kind="image", title="logo", subject=kb.LOGO, origin="crawl")
-    ck("crawled pictures land in a queue", len(kb.proposed_assets("ironside")) == 2)
-    ck("  and none of them is publishable yet", len(kb.assets("ironside")) == 0)
+    kb.add_asset("ironside", "https://cdn/drawn.png", rights=kb.OWNED,
+                 kind="image", title="A drawn candidate", origin="generated")
+    ck("crawled pictures land approved — public is approved (owner, 2026-09-09)",
+       len(kb.assets("ironside")) == 2 and len(kb.proposed_assets("ironside")) == 1)
+    ck("  a drawn picture is the one that lands in the queue, not publishable yet",
+       [a.title for a in kb.proposed_assets("ironside")] == ["A drawn candidate"])
     ok, why = kb.may_publish(kb.proposed_assets("ironside")[0].id)
     ck("  may_publish says WHY, not just no", not ok and "review" in why, why[:60])
-    hall = [a for a in kb.proposed_assets("ironside") if a.title == "Main hall"][0]
+    hall = [a for a in kb.assets("ironside") if a.title == "Main hall"][0]
     # Approving GRANTS USE: review alone left rights at `reference` and
     # `may_publish` kept refusing, so the owner's approvals did nothing
     # (owner, 2026-08-22).
@@ -205,7 +215,8 @@ def main() -> int:
        kb.may_publish(_row.id)[0] is False)
 
     kb.review_asset(hall.id, approve=True)
-    ck("approving one makes it usable", len(kb.assets("ironside")) == 1)
+    ck("approving an already-public one changes nothing — still usable",
+       len(kb.assets("ironside")) == 2 and kb.may_publish(hall.id)[0])
     ck("  LOGOS ARE TRACKED APART from the photography — a creative needing "
        "the mark needs the mark, not whichever building sorted first",
        [a.title for a in kb.logos("ironside")] == ["logo"],
@@ -224,10 +235,16 @@ def main() -> int:
     crawled = [a for a in kb.assets("baci", publishable_only=False)
                if a.title == "Main hall"]
     ck("a crawled picture is filed", len(crawled) == 1)
-    ck("  BUT IT IS NOT PUBLISHABLE UNTIL APPROVED — a photograph on a "
-       "client's website is a candidate, not a licence",
-       not any(a.title == "Main hall" for a in kb.assets("baci")),
-       "plenty of sites carry stock licensed for the web and nothing else")
+    # REVERSED 2026-09-09 by the owner: a picture already on the brand's own
+    # public site is approved by default; the "candidate, not a licence"
+    # caution now lives AFTER the fact — disapprove it and the next
+    # compliance sweep reports every public page still showing it.
+    ck("  AND IT IS PUBLISHABLE — public is approved (owner, 2026-09-09)",
+       any(a.title == "Main hall" for a in kb.assets("baci")))
+    kb.review_asset(crawled[0].id, approve=False)
+    ck("  disapproving it afterwards puts it on the compliance sweep's watch list",
+       any(w["asset_id"] == crawled[0].id for w in kb.disapproved_public("baci"))
+       and not any(a.title == "Main hall" for a in kb.assets("baci")))
 
     print("\n— the brand's visual half —")
     kb.set_brand("baci", visual={"direction": "Styled on a laid table.",

@@ -1442,6 +1442,51 @@ Sunburst chosen on the Brand tab, and compare.
 
 ---
 
+### The brand's own pictures are the references — 2026-09-09 (one ship; hash in the memory note)
+
+**The owner's word:** *"most of our products already had several different
+photos, the only issue is that outside of the main product photos, a lot
+of the additional supporting images are lifestyle images where the product
+is one of many items in the photo … Most businesses wont have so many
+available photos right of the bat."* And: *"Product photos / content
+pulled from the website should be approved by default because they are
+already public facing. If the user decides to disapprove after the fact,
+then we can address this as a compliance test against anywhere that photo
+appears on the brand public assets on the next compliance check."*
+
+**What was true.** The sync filed the featured image alone, so a set drew
+from one photograph while the store held six; a lifestyle shot, sent
+whole, confused the model and the judge; a crawled picture waited as a
+proposal.
+
+**The ship.** `catalog_sync` files every store image per product
+(STORE_IMAGES_MAX 8; `store-image:N`, the featured one `packshot`).
+`creative.focus`/`focused` cut the product out of every later photograph
+against the packshot (vision model, one call per picture ever, cached),
+leave out one where it cannot be found with confidence and say so;
+`board_inputs` counts `cropped` and the note says it. A crawled PICTURE
+lands approved (`kb.PUBLIC_PICTURE_ORIGINS`); a crawled claim stays a
+proposal. `kb.disapproved_public` + `compliance.pictures_on_page` +
+`scan`/`report_text`/`record_scan` + the Assurance tab: every public page
+still showing a disapproved picture is a finding, nothing is taken down.
+
+**Standing rules it adds:**
+- **Every photograph the brand already has is a reference, cut to the
+  product** — `every_store_photograph_is_filed`,
+  `the_featured_photograph_is_the_packshot`,
+  `a_lifestyle_shot_is_cut_to_the_product`, `the_cut_is_remembered`,
+  `an_unfound_product_is_left_out`.
+- **Public is approved; a later disapproval is a compliance test** —
+  `a_public_picture_lands_approved`, `a_disapproved_public_picture_is_watched`,
+  `a_page_still_showing_it_is_a_finding`,
+  `the_tab_shows_the_pictures_still_public`,
+  `a_rejection_says_the_sweep_follows`.
+
+**Owner's move:** run the catalogue sync once so every store photograph
+is filed, then run "both" on the same product and read the note's count.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
@@ -1660,6 +1705,16 @@ Sunburst chosen on the Brand tab, and compare.
 > Sunburst and Flare are on the form; "both" is one set per provider.
 > **Owner's move:** pin more product photographs including a close-up of
 > the edge, set Sunburst as the brand's model, run "both", compare.
+>
+> **SHIPPED 2026-09-09, TWENTIETH: THE BRAND'S OWN PICTURES ARE THE
+> REFERENCES** (10 guards, §5 has the record). Every store photograph a
+> product carries is filed on sync (the featured one is the packshot); a
+> lifestyle shot is cut to the product against the packshot before it is a
+> reference, and the note counts the cuts; a picture from the brand's own
+> site is approved when filed; a picture disapproved afterwards is reported
+> by the compliance sweep on every public page still showing it.
+> **Owner's move:** run the catalogue sync, then "both" on the same product,
+> and read the count in the note.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with

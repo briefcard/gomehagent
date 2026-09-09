@@ -308,9 +308,10 @@ def main() -> int:  # noqa: PLR0915
                              and not (a.assessment or {}).get("ok") for a in g["attempts"]))
     ck("  the note says the attempts are under the set",
        "closest attempt of each is under the set" in got.get("note", ""), got.get("note", "")[-200:])
-    ck("  and names the lever — how many photographs it drew from, add close-ups of what was named",
+    ck("  and names the lever — how many photographs it drew from, and that more views of what the judge named would change the next run",
        "drew from 1 photograph(s) of the product" in got.get("note", "")
-       and "close-ups of what the judge named" in got.get("note", ""), got.get("note", "")[-260:])
+       and "what the judge named" in got.get("note", "")
+       and "cut out of it" in got.get("note", ""), got.get("note", "")[-260:])
     ck("  progress was told after every cell, in the run's own words",
        len(lines) == 2 and lines[0].startswith("cell 1 of 2") and "not the product" in lines[-1], str(lines))
     page = ui._batch_cards(KEY, "baci", list(kb.proposed_assets("baci")))[0]

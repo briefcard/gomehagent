@@ -1528,6 +1528,8 @@ def batch(tenant: str, *, commitment: dict | None = None,
     if refs["on"]:
         board_said = (f" — drawn from {len(refs['product'])} photograph(s) of "
                       f"the product"
+                      + (f" ({refs['cropped']} cut to the product out of a lifestyle shot)"
+                         if refs.get("cropped") else "")
                       + (f", {len(refs['cast'])} of its companions "
                          f"({', '.join(refs['cast_names'][:3])})" if refs.get("cast") else "")
                       + f" and {len(refs['look'])} board pin(s)"
@@ -1584,9 +1586,13 @@ def batch(tenant: str, *, commitment: dict | None = None,
                            # product, of the parts the judge named — said here,
                            # where the empty set is reported.
                            + (f". Nothing was kept: the model drew from "
-                              f"{len(refs['product'])} photograph(s) of the product — "
-                              f"add more, especially close-ups of what the judge "
-                              f"named, and run again"
+                              f"{len(refs['product'])} photograph(s) of the product"
+                              + (f" ({refs['cropped']} cut out of lifestyle shots)"
+                                 if refs.get("cropped") else "")
+                              + " — more views of it, especially of what the judge "
+                                "named, would change the next run: the store's own "
+                                "photographs are filed on sync, and a lifestyle shot "
+                                "counts once the product is cut out of it"
                               if fidelity["not_the_product"] and not fidelity["kept"] else "")
                            + ("" if checklist else "; no checklist could be derived"
                               + (f" ({feats.get('why')})" if feats.get("why") else "")))
@@ -2128,6 +2134,122 @@ def _closest(candidates: list, product: list, features: list, tenant: str,
     return {"ok": True, "blob": best_b, "verdict": best_v, "judged": len(verdicts), "why": ""}
 
 
+# ---------------------------------------------------------------------------
+# A LIFESTYLE PHOTOGRAPH IS A SECOND VIEW OF THE PRODUCT, ONCE THE PRODUCT IS
+# CUT OUT OF IT. Owner, 2026-09-09: *"outside of the main product photos, a
+# lot of the additional supporting images are lifestyle images where the
+# product is one of many items in the photo … Most businesses wont have so
+# many available photos right of the bat of just their product in consistent
+# lighting and different angles."* Sent whole, a table of six pieces tells
+# the model "reproduce this" and the judge "compare against this", and both
+# lose the product among the others. So every product photograph after the
+# packshot is shown to the vision model WITH the packshot, asked where that
+# same product sits, and the crop is what goes in — cached per picture, the
+# whole shot never sent as the product.
+# ---------------------------------------------------------------------------
+
+_FOCUS_PROMPT = """The FIRST image is a photograph of one product, on its own.
+The SECOND image is another photograph in which this same product may appear —
+possibly among other items, in a scene.
+Answer in JSON only:
+{"found": <true|false — the product from the first image is visible in the second>,
+ "alone": <true|false — the second image already shows the product on its own, filling most of the frame>,
+ "box": [x0, y0, x1, y1] — the tightest box around THIS product only in the second image, as fractions of its width and height (0 to 1),
+ "confidence": <0-1>}"""
+
+#: Below this the vision model's box is not trusted, and the photograph is
+#: left out of the product references rather than sent as a guess.
+FOCUS_MIN_CONFIDENCE = 0.5
+#: Margin around the box, as a fraction of the crop's size.
+FOCUS_PAD = 0.08
+
+
+def _focus_live(blob: bytes, packshot: bytes, *, tenant: str = "") -> dict:
+    """Where the packshot's product sits in another photograph:
+    `{ok, found, alone, box, confidence, why}`."""
+    import base64 as _b64
+    import json as _json
+    from . import llm
+    if not blob or not packshot:
+        return {"ok": False, "found": False, "alone": False, "box": None,
+                "confidence": 0, "why": "nothing to compare"}
+    content = [{"type": "image", "source": {
+        "type": "base64", "media_type": "image/png",
+        "data": _b64.standard_b64encode(b).decode()}} for b in (packshot, blob)]
+    content.append({"type": "text", "text": _FOCUS_PROMPT})
+    reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=300)
+    if not getattr(reply, "ok", False):
+        return {"ok": False, "found": False, "alone": False, "box": None, "confidence": 0,
+                "why": getattr(reply, "degraded", "") or getattr(reply, "error", "")
+                or "the model could not run"}
+    raw = (reply.text or "").strip()
+    try:
+        data = _json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+        box = [max(0.0, min(1.0, float(v))) for v in (data.get("box") or [])][:4]
+    except Exception:                                            # noqa: BLE001
+        return {"ok": False, "found": False, "alone": False, "box": None, "confidence": 0,
+                "why": "the model did not answer in JSON"}
+    return {"ok": True, "found": bool(data.get("found")), "alone": bool(data.get("alone")),
+            "box": box if len(box) == 4 and box[2] > box[0] and box[3] > box[1] else None,
+            "confidence": float(data.get("confidence") or 0), "why": ""}
+
+
+focus = _focus_live        # replaceable, so the suite can drive every path
+
+
+def focused(tenant: str, asset_id: str, blob: bytes, packshot: bytes) -> tuple[bytes, str]:
+    """A product photograph as a reference: the packshot's product cut out of
+    it when it sits among other things — `(bytes, how)` with `how` one of
+    "packshot" (nothing to compare against, so as it is), "whole" (already
+    the product on its own, or the model could not say), "cut" (cropped to
+    the product), "left out" (the product could not be found with
+    confidence). Cached on a Setting keyed by the picture and the packshot,
+    so a run costs one vision call per new photograph, ever."""
+    import io as _io
+    import json as _json
+    if not packshot or not blob or packshot == blob:
+        return blob, "packshot"
+    key = f"focus:{tenant}:{asset_id}:{_fingerprint([packshot])}"
+    verdict = None
+    try:
+        with kb.db.SessionLocal() as s:
+            row = s.get(kb.db.Setting, key)
+            if row is not None and row.value:
+                verdict = _json.loads(row.value)
+    except Exception:                                            # noqa: BLE001
+        verdict = None
+    if verdict is None:
+        verdict = focus(blob, packshot, tenant=tenant)
+        if verdict.get("ok"):
+            try:
+                with kb.db.SessionLocal() as s:
+                    s.merge(kb.db.Setting(key=key, value=_json.dumps(verdict)))
+                    s.commit()
+            except Exception:                                    # noqa: BLE001
+                pass
+    if not verdict.get("ok") or verdict.get("alone"):
+        return blob, "whole"
+    if not verdict.get("found") or not verdict.get("box") \
+            or float(verdict.get("confidence") or 0) < FOCUS_MIN_CONFIDENCE:
+        return b"", "left out"
+    try:
+        from PIL import Image
+        im = Image.open(_io.BytesIO(blob))
+        im.load()
+        w, h = im.size
+        x0, y0, x1, y1 = verdict["box"]
+        pw, ph = (x1 - x0) * FOCUS_PAD, (y1 - y0) * FOCUS_PAD
+        box = (int(max(0.0, x0 - pw) * w), int(max(0.0, y0 - ph) * h),
+               int(min(1.0, x1 + pw) * w), int(min(1.0, y1 + ph) * h))
+        if box[2] - box[0] < 16 or box[3] - box[1] < 16:
+            return b"", "left out"
+        out = _io.BytesIO()
+        im.crop(box).convert("RGBA").save(out, format="PNG")
+        return out.getvalue(), "cut"
+    except Exception:                                            # noqa: BLE001
+        return blob, "whole"
+
+
 #: How many pictures of each kind go into one request. The API takes sixteen;
 #: four of the product and four of the look is plenty to fix a product's form
 #: and a board's palette, and every extra one is upload time on a call that
@@ -2178,7 +2300,10 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
     sel = kbmod.board(tenant, boards) if boards else every
     out = {"product": [], "look": [], "pins": [], "excluded": [], "on": on,
            "boards": list(sel["boards"]), "unknown": list(sel["unknown"]),
-           "direction": "", "cast": [], "cast_names": []}
+           "direction": "", "cast": [], "cast_names": [],
+           # HOW MANY PRODUCT PHOTOGRAPHS WERE CUT TO THE PRODUCT (lifestyle
+           # shots), said in the note beside the count.
+           "cropped": 0}
     if not on:
         return out
     ent = entity_key or ""
@@ -2192,7 +2317,11 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
                 and (r.subject or "") != kbmod.LOGO]
         # `pick`'s choice first among the photographs: the one the rest of
         # the system would have used is the one the model should match most.
-        rest.sort(key=lambda r: 0 if r.id == product_id else 1)
+        # THE PACKSHOT FIRST: the store's featured photograph (`packshot`
+        # tag) leads, then the chosen shot, then the rest in filing order —
+        # the first is what every later photograph is cut against.
+        rest.sort(key=lambda r: (0 if "packshot" in [str(x) for x in (r.tags or [])] else 1,
+                                 0 if r.id == product_id else 1))
         product_rows += rest
     # THE CAST — the brand's OTHER products the owner pinned as the product
     # on the selected boards: DESIGN AND PATTERN references for the other
@@ -2212,6 +2341,7 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
     # read once and stored on the board; a reference pin contributes this
     # and nothing else.
     out["direction"] = kbmod.board_direction(tenant, boards)
+    packshot_raw = b""
     for role, rows in (("product", product_rows), ("cast", cast_rows), ("look", sel["look"])):
         # THE LOOK YIELDS TO THE PRODUCT. With the product in the request the
         # look pins are direction, not the subject; four of each split the
@@ -2225,10 +2355,24 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
             if not ok:
                 out["excluded"].append({"asset_id": r.id, "role": role, "why": why})
                 continue
+            raw = _fetch(r.url or "")
+            if role == "product" and out["product"]:
+                # A SECOND VIEW OF THE PRODUCT, cut out of the scene it sits
+                # in — against the packshot that leads (`focused`).
+                raw, how = focused(tenant, r.id, raw, packshot_raw)
+                if how == "left out":
+                    out["excluded"].append({"asset_id": r.id, "role": role,
+                                            "why": "the product could not be found in this "
+                                                   "photograph with confidence, so it was not "
+                                                   "sent as a reference"})
+                    continue
+                if how == "cut":
+                    out["cropped"] += 1
+            elif role == "product":
+                packshot_raw = raw
             # A PRODUCT INPUT IS TRIMMED TO THE PRODUCT: a catalogue cutout is
             # mostly margin, and the margin is what the model was matching.
-            blob, _mime = imagegen.input_image(_fetch(r.url or ""),
-                                               trim=(role in ("product", "cast")))
+            blob, _mime = imagegen.input_image(raw, trim=(role in ("product", "cast")))
             if not blob:
                 out["excluded"].append({"asset_id": r.id, "role": role,
                                         "why": "the picture could not be fetched"})

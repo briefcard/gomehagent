@@ -106,13 +106,29 @@ def main() -> int:  # noqa: PLR0915
     print("— selection: approved and owned, or nothing —")
     kb.add_asset("baci", "https://cdn.example/ref-competitor.jpg",
                  rights=kb.REFERENCE, title="Competitor ad", origin="human")
-    kb.add_asset("baci", "https://cdn.example/crawl-candidate.jpg",
-                 rights=kb.OWNED, title="Crawl candidate", origin="crawl")
+    # A GENERATED picture is the one that lands PROPOSED (the crawled one
+    # used to — reversed 2026-09-09 by the owner: a picture already on the
+    # brand's own public site is approved by default, and disapproving it
+    # afterwards is a compliance test; `test_the_brands_own_pictures_are_the_references`).
+    kb.add_asset("baci", "https://cdn.example/drawn-candidate.png",
+                 rights=kb.OWNED, title="Drawn candidate", origin="generated")
     kb.add_asset("baci", "https://cdn.example/logo.png", rights=kb.OWNED,
                  title="Brand mark", subject=kb.LOGO, origin="human")
     got = creative.hero_for_campaign("baci", segment_key="reorder_due")
     ck("reference, proposed and logo rows are all unreachable",
        got["basis"] == "none" and got["image"] is None, got.get("basis"))
+    kb.add_asset("baci", "https://cdn.example/crawl-candidate.jpg",
+                 rights=kb.OWNED, title="Crawl candidate", origin="crawl")
+    got_c = creative.hero_for_campaign("baci", segment_key="reorder_due")
+    ck("a picture crawled from the brand's own site IS reachable — public is approved (owner, 2026-09-09)",
+       got_c["basis"] == "approved_asset"
+       and got_c["image"]["url"].endswith("crawl-candidate.jpg"), str(got_c.get("basis")))
+    _crawl = next(a for a in kb.assets("baci", publishable_only=False)
+                  if (a.url or "").endswith("crawl-candidate.jpg"))
+    said = kb.review_asset(_crawl.id, False)
+    ck("  and disapproving it afterwards says the compliance sweep follows it",
+       "compliance sweep" in said, said)
+    got = creative.hero_for_campaign("baci", segment_key="reorder_due")
     ck("the absence is NAMED, with both ways out",
        "pictures queue" in got["why"] and "draft_visual" in got["why"],
        got.get("why", "")[:80])

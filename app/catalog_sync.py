@@ -188,6 +188,12 @@ def sync_collections(tenant: str, adopt: list[str] | None = None,
                      "bucket is not a range")}
 
 
+#: How many of a product's store photographs are filed — the featured one
+#: and the next seven in the store's order. A set draws from four; the judge
+#: reads the same four; eight leaves room to pin the right ones.
+STORE_IMAGES_MAX = 8
+
+
 def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     """Pull the catalogue into the knowledge base. Idempotent.
 
@@ -339,8 +345,26 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
                             if i.get("src")), ""))
             if img:
                 attrs["image"] = img
-                to_file.append({"key": key, "url": img,
-                                "title": p.get("title") or key})
+            # EVERY PHOTOGRAPH THE STORE HOLDS FOR THE PRODUCT, not the
+            # featured one alone. Owner, 2026-09-09: *"most of our products
+            # already had several different photos"* — and a set drew from
+            # ONE because only the featured image was ever filed. The
+            # featured one leads (`store-image:1`, the packshot the
+            # generator and the judge read first); the rest follow in the
+            # store's order, up to STORE_IMAGES_MAX, each tagged with its
+            # place so a lifestyle shot can be told from the packshot.
+            seen_urls: list = []
+            for src in ([img] + [i.get("src") for i in (p.get("images") or [])]):
+                src = str(src or "")
+                if not src or src in seen_urls:
+                    continue
+                seen_urls.append(src)
+                if len(seen_urls) > STORE_IMAGES_MAX:
+                    break
+                n = len(seen_urls)
+                to_file.append({"key": key, "url": src, "n": n,
+                                "title": (p.get("title") or key)
+                                         + (f" · photo {n}" if n > 1 else "")})
             if hits:
                 attrs["_compliance"] = f"storefront copy uses: {', '.join(hits)}"
             else:
@@ -363,10 +387,12 @@ def sync_shopify(tenant: str, limit: int = 250, dry_run: bool = False) -> dict:
     if not dry_run:
         from . import kb
         for f in to_file:
+            n = int(f.get("n") or 1)
             said = kb.add_asset(tenant, f["url"], rights="owned",
                                 title=f["title"], kind="image",
                                 subject="object", source="shopify",
-                                entity_key=f["key"], origin="store_sync")
+                                entity_key=f["key"], origin="store_sync",
+                                tags=[f"store-image:{n}"] + (["packshot"] if n == 1 else []))
             if said.startswith("Filed"):
                 images_filed += 1
 

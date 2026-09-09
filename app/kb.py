@@ -3200,6 +3200,33 @@ def detect_subject(png_bytes: bytes) -> str:
     return SCENE
 
 
+#: Origins whose PICTURES are the brand's own public-facing ones — approved
+#: the moment they are filed (owner, 2026-09-09). `store_sync` already lands
+#: approved for every table; the site crawl is added for pictures only.
+PUBLIC_PICTURE_ORIGINS = ("crawl",)
+#: The origins a disapproval turns into a compliance finding for.
+PUBLIC_ORIGINS = ("store_sync", "crawl")
+
+
+def disapproved_public(tenant: str) -> list[dict]:
+    """The pictures the owner disapproved AFTER they were filed from the
+    brand's own store or site — `[{asset_id, url, title, source}]` — read by
+    the compliance sweep, which reports every public page still showing one
+    (owner, 2026-09-09: *"we can address this as a compliance test against
+    anywhere that photo appears on the brand public assets on the next
+    compliance check"*). Nothing is taken down; a page is a finding."""
+    out = []
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbAsset)
+                .filter(db.KbAsset.tenant == tenant,
+                        db.KbAsset.review == prov.REJECTED).all())
+        for r in rows:
+            if (r.origin or "") in PUBLIC_ORIGINS and (r.url or "").strip():
+                out.append({"asset_id": r.id, "url": r.url.strip(),
+                            "title": r.title or "", "source": r.source or ""})
+    return out
+
+
 def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
               kind: str = "image", subject: str = "", source: str = "",
               prompt: str = "", tags: list[str] | None = None,
@@ -3232,7 +3259,18 @@ def add_asset(tenant: str, url: str, *, rights: str, title: str = "",
             tags=list(tags or []), entity_key=entity_key or "",
             canva_design_id=canva_design_id, thumbnail_url=thumbnail_url,
             derived_from=list(derived_from or []), batch=batch or "",
-            origin=origin, review=prov.APPROVED if prov.lands_approved(origin)
+            origin=origin,
+            # A PICTURE ALREADY ON THE BRAND'S OWN PUBLIC SITE IS APPROVED.
+            # Owner, 2026-09-09: *"Product photos / content pulled from the
+            # website should be approved by default because they are already
+            # public facing."* So a crawled picture lands usable, like a
+            # store-synced one; disapproving it afterwards is a finding the
+            # next compliance sweep reports against every public page still
+            # showing it (`disapproved_public`, `compliance.check_page`).
+            # Pictures only — a crawled CLAIM is still a proposal, because
+            # the site is exactly where the banned phrases live.
+            review=prov.APPROVED if (prov.lands_approved(origin)
+                                     or (kind == "image" and origin in PUBLIC_PICTURE_ORIGINS))
             else prov.PROPOSED)
         s.add(row)
         s.commit()
@@ -3882,8 +3920,14 @@ def review_asset(asset_id: str, approve: bool, by: str = "owner",
             row.status = "retired"
         s.commit()
         title, usable = row.title or row.url, (row.rights or REFERENCE) == OWNED
+        public = (row.origin or "") in PUBLIC_ORIGINS
     if not approve:
-        return f"Rejected: {title[:60]}"
+        # A DISAPPROVED PUBLIC PICTURE IS A COMPLIANCE TEST from here on: the
+        # next sweep reports every public page still showing it.
+        return (f"Rejected: {title[:60]}"
+                + (" — it came from the brand's own store or site, so the next "
+                   "compliance sweep will report every public page still showing it"
+                   if public else ""))
     return (f"Approved for use: {title[:60]}" if usable else
             f"Approved as REFERENCE only (not usable in emails): {title[:60]}")
 
