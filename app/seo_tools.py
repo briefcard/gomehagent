@@ -62,6 +62,22 @@ DEFAULT_LINES = 30
 MAX_LINES = 300
 #: Reports that return one line per subject and take no `display_limit`.
 FIXED_LINES = {"domain_rank": 1, "domain_ranks": 1, "rank": 1}
+#: How long an answer of each kind stays true enough to reuse. The competitive
+#: landscape is not a live number: a domain's organic keywords move week to
+#: week, and the related keywords and questions around a phrase move over
+#: months — which is why re-buying them every Monday for the same eight seeds
+#: was 25,600 units an account for an answer that had not changed.
+PULL_TTL_DAYS = {"domain_organic": 7, "domain_rank": 7, "domain_organic_organic": 30,
+                 "phrase_these": 30}
+#: The widest domain read anyone makes, and the only one. `nq_desc` with a
+#: limit already buys the highest-volume lines, so no volume filter is sent:
+#: on a small site a filter would return nothing and starve the bootstrap that
+#: `_fetch_own` exists to be.
+DOMAIN_PULL_LINES = 200
+#: What an expansion asks for. Twenty-five rather than forty because the tail
+#: below that is not what gets written, and the floor keeps a phrase nobody
+#: searches from being bought AND filed.
+EXPANSION_LINES = 25
 #: The one batch report Semrush offers: lines = phrases sent, up to 100 a call.
 BATCH_REPORTS = {"phrase_these"}
 BATCH_MAX = 100
@@ -73,6 +89,106 @@ HALT_HOURS = 24
 BALANCE_URL = "https://www.semrush.com/users/countapiunits.html"
 #: A balance reading older than this is re-read before a spending job starts.
 BALANCE_FRESH_HOURS = 1
+
+
+def ttl_for(report: str) -> int:
+    """Days an answer of this kind may be reused."""
+    if report in ("phrase_related", "phrase_questions"):
+        return config.SEMRUSH_EXPANSION_TTL_DAYS
+    return PULL_TTL_DAYS.get(report, 7)
+
+
+def _pull_key(report: str, params: dict) -> tuple:
+    """(report, subject, database, signature) — the question, normalised.
+
+    The signature carries every parameter that changes the answer, so a wider
+    ask is a different question and can never be served a narrower answer.
+    """
+    sig = ";".join(f"{k}={params[k]}" for k in sorted(params)
+                   if k not in ("key", "type"))
+    return (report, str(params.get("domain") or params.get("phrase") or ""),
+            str(params.get("database") or ""), sig)
+
+
+def _normalise(report: str, params: dict) -> dict:
+    """The params as the door would send them — the same bounding `_semrush`
+    applies, done here so the cache key and the request cannot disagree."""
+    out = dict(params)
+    if report not in FIXED_LINES and report not in BATCH_REPORTS:
+        out["display_limit"] = lines_asked(report, out)
+    return out
+
+
+def cached_pull(report: str, ttl_days: int | None = None, **params):
+    """The rows of a recent identical pull, or None. Reads nothing remote."""
+    key = _pull_key(report, _normalise(report, params))
+    ttl = ttl_for(report) if ttl_days is None else int(ttl_days)
+    since = db.utcnow() - dt.timedelta(days=max(0, ttl))
+    with db.SessionLocal() as s:
+        row = (s.query(db.SemrushPull)
+               .filter(db.SemrushPull.report == key[0],
+                       db.SemrushPull.subject == key[1],
+                       db.SemrushPull.database == key[2],
+                       db.SemrushPull.signature == key[3],
+                       db.SemrushPull.at >= since)
+               .order_by(db.SemrushPull.at.desc()).first())
+        if row is None:
+            return None
+        rows = list(row.rows or [])
+        s.expunge(row)
+    return rows
+
+
+def semrush(report: str, _tenant: str = "", ttl_days: int | None = None,
+            **params) -> list[dict] | str:
+    """One Semrush answer, bought once and reused until it goes stale.
+
+    THE READ EVERY CALLER SHOULD USE. `_semrush` is the request; this is the
+    question. A hit costs nothing and is recorded as `semrush_cached` with no
+    provider, so a cache hit can never flatter the platform's failure rate or
+    show up as a call to Semrush that never happened.
+
+    A miss stores the rows under the question's signature, so the next asker —
+    including a DIFFERENT ACCOUNT working the same market — re-files from our
+    copy instead of buying the same lines again.
+    """
+    params = _normalise(report, params)
+    hit = cached_pull(report, ttl_days, **params)
+    if hit is not None:
+        from . import toolcalls as _tc
+        _tc.record(_tenant, "semrush_cached", source="seo", ok=True, ref=report)
+        return hit
+    rows = _semrush(report, _tenant=_tenant, **params)
+    if isinstance(rows, str):
+        return rows
+    with db.SessionLocal() as s:
+        key = _pull_key(report, params)
+        s.add(db.SemrushPull(report=key[0], subject=key[1], database=key[2],
+                             signature=key[3], rows=rows, lines=len(rows),
+                             units=len(rows) * price_of(report)))
+        s.commit()
+    return rows
+
+
+def domain_rows(domain: str = "", database: str = "", _tenant: str = "",
+                ttl_days: int | None = None) -> list[dict] | str:
+    """THE ONE WIDE DOMAIN READ, and everything about a site derives from it.
+
+    Four callers were asking Semrush the same question with different numbers
+    on it: the harvest's `own` (40 lines by traffic), its `gap` (200 by
+    volume), the weekly snapshot (50 by traffic) and the agent's opportunity
+    finder (200 by volume, every time it was called). Four requests, one fact —
+    which keywords this domain ranks for and where.
+
+    So there is one request now, the widest of them, and each caller takes what
+    it needs from the rows. Sorted by volume because that is the order every
+    consumer wants first; `Traffic (%)` rides on the same rows for the ones
+    that want traffic order, so nothing needs a second sort from Semrush.
+    """
+    return semrush("domain_organic", _tenant=_tenant, ttl_days=ttl_days,
+                   domain=domain or config.SEO_DOMAIN,
+                   database=database or config.SEO_DATABASE,
+                   display_limit=DOMAIN_PULL_LINES, display_sort="nq_desc")
 
 
 def price_of(report: str) -> int:
@@ -443,11 +559,18 @@ def semrush_domain_overview(domain: str = "", database: str = "", _tenant: str =
 def semrush_top_keywords(domain: str = "", database: str = "",
                          limit: int = 30, sort: str = "tr_desc",
                          _tenant: str = "") -> str:
-    rows = _semrush("domain_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
-                    database=database or config.SEO_DATABASE,
-                    display_limit=min(int(limit or 30), 100), display_sort=sort)
+    """What this domain ranks for. Served from the week's one domain read and
+    sorted here — the rows carry position, volume and traffic share, so every
+    order this tool offers is a sort of the same answer rather than a second
+    purchase."""
+    rows = domain_rows(domain, database, _tenant=_tenant)
     if isinstance(rows, str):
         return rows
+    order = {"nq_desc": lambda r: -_f(r.get("Search Volume")),
+             "po_asc": lambda r: _f(r.get("Position")) or 1e9,
+             "tr_desc": lambda r: -_f(r.get("Traffic (%)"))}
+    rows = sorted(rows, key=order.get(sort or "tr_desc", order["tr_desc"]))
+    rows = rows[:min(int(limit or 30), 100)]
     slim = [{"keyword": r.get("Keyword"), "position": r.get("Position"),
              "volume": r.get("Search Volume"), "cpc": r.get("CPC"),
              "url": r.get("Url"), "traffic_pct": r.get("Traffic (%)")} for r in rows]
@@ -534,10 +657,17 @@ def semrush_keyword_metrics(phrases: str, database: str = "", _tenant: str = "")
     return json.dumps(slim)
 
 
-def semrush_related_keywords(phrase: str, database: str = "", limit: int = 30, _tenant: str = "") -> str:
-    rows = _semrush("phrase_related", _tenant=_tenant, phrase=phrase,
-                    database=database or config.SEO_DATABASE,
-                    display_limit=min(int(limit or 30), 60), display_sort="nq_desc")
+def semrush_related_keywords(phrase: str, database: str = "",
+                             limit: int = EXPANSION_LINES, _tenant: str = "") -> str:
+    """Related keywords for one seed. THE EXPENSIVE ONE — 40 units a line, one
+    phrase per request, no batch form — so it is bought at `EXPANSION_LINES`,
+    filtered to phrases somebody actually searches, and kept for
+    `SEMRUSH_EXPANSION_TTL_DAYS`."""
+    rows = semrush("phrase_related", _tenant=_tenant, phrase=phrase,
+                   database=database or config.SEO_DATABASE,
+                   display_limit=min(int(limit or EXPANSION_LINES), 60),
+                   display_sort="nq_desc",
+                   display_filter=f"+|Nq|Gt|{config.SEMRUSH_MIN_VOLUME - 1}")
     if isinstance(rows, str):
         return rows
     slim = [{"keyword": r.get("Keyword"), "volume": r.get("Search Volume"),
@@ -545,10 +675,15 @@ def semrush_related_keywords(phrase: str, database: str = "", limit: int = 30, _
     return json.dumps(slim)
 
 
-def semrush_questions(phrase: str, database: str = "", limit: int = 30, _tenant: str = "") -> str:
-    rows = _semrush("phrase_questions", _tenant=_tenant, phrase=phrase,
-                    database=database or config.SEO_DATABASE,
-                    display_limit=min(int(limit or 30), 60), display_sort="nq_desc")
+def semrush_questions(phrase: str, database: str = "",
+                      limit: int = EXPANSION_LINES, _tenant: str = "") -> str:
+    """The questions asked around one seed. Priced, bounded and kept exactly
+    like `semrush_related_keywords`, and for the same reason."""
+    rows = semrush("phrase_questions", _tenant=_tenant, phrase=phrase,
+                   database=database or config.SEO_DATABASE,
+                   display_limit=min(int(limit or EXPANSION_LINES), 60),
+                   display_sort="nq_desc",
+                   display_filter=f"+|Nq|Gt|{config.SEMRUSH_MIN_VOLUME - 1}")
     if isinstance(rows, str):
         return rows
     slim = [{"question": r.get("Keyword"), "volume": r.get("Search Volume"),
@@ -563,9 +698,7 @@ def semrush_opportunity_finder(domain: str = "", database: str = "",
                                _tenant: str = "") -> str:
     """Keywords where the domain ALREADY ranks page 2-3 with real volume — quick
     wins. exclude_terms (per-site brand guardrail) are never recommended."""
-    rows = _semrush("domain_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
-                    database=database or config.SEO_DATABASE,
-                    display_limit=200, display_sort="nq_desc")
+    rows = domain_rows(domain, database, _tenant=_tenant)
     if isinstance(rows, str):
         return rows
     terms = exclude_terms if exclude_terms is not None else config.SEO_EXCLUDE_TERMS
@@ -598,21 +731,29 @@ def capture_snapshot(domain: str = "", database: str = "",
     domain = domain or config.SEO_DOMAIN
     database = database or config.SEO_DATABASE
     why = preflight(_tenant, estimate("domain_rank")
-                    + estimate("domain_organic", display_limit=50),
+                    + (0 if cached_pull("domain_organic", domain=domain,
+                                        database=database,
+                                        display_limit=DOMAIN_PULL_LINES,
+                                        display_sort="nq_desc") is not None
+                       else estimate("domain_organic",
+                                     display_limit=DOMAIN_PULL_LINES)),
                     what="the weekly snapshot")
     if why:
         return why
-    ov = _semrush("domain_rank", _tenant=_tenant, domain=domain, database=database)
+    ov = semrush("domain_rank", _tenant=_tenant, domain=domain, database=database)
     if isinstance(ov, str):
         return ov
     o = ov[0] if ov else {}
-    kw = _semrush("domain_organic", _tenant=_tenant, domain=domain, database=database,
-                  display_limit=50, display_sort="tr_desc")
+    # The same rows the harvest and the agent read this week, sorted by traffic
+    # here. A snapshot is a yardstick, and buying its own 50 lines to measure
+    # against rows we already hold made the yardstick cost 500 units a week.
+    kw = domain_rows(domain, database, _tenant=_tenant)
     top = []
     if isinstance(kw, list):
         top = [{"keyword": r.get("Keyword"), "position": r.get("Position"),
                 "volume": r.get("Search Volume"), "url": r.get("Url"),
-                "traffic_pct": r.get("Traffic (%)")} for r in kw]
+                "traffic_pct": r.get("Traffic (%)")}
+               for r in sorted(kw, key=lambda r: -_f(r.get("Traffic (%)")))[:50]]
     with db.SessionLocal() as s:
         s.add(db.SeoSnapshot(
             domain=domain, database=database, source="semrush",

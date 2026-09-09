@@ -37,6 +37,71 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: once; `why` is the consequence in the world, not the mechanism — a person
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
+    {
+        "name": 'the_spending_button_says_what_it_spends',
+        "file": 'app/admin_ui.py',
+        "find": "    _est = kw.harvest_estimate(tenant)\n",
+        "replace": "    _est = 0  # SABOTAGE\n",
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "the two buttons that buy Semrush lines say a top-up is free whatever it will cost, which is the state the 2026-09-07 bill was run up in — the warning was 'Spends API calls' and nothing else",
+    },
+    # --- the same question is bought once (2026-09-09) ---------------------
+    {
+        "name": 'an_answer_is_bought_once',
+        "file": 'app/seo_tools.py',
+        "find": '    hit = cached_pull(report, ttl_days, **params)\n',
+        "replace": '    hit = None  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "every read goes back to Semrush, so the weekly harvest re-buys the same eight seeds' related keywords and questions for 25,600 units an account, for an answer that moves over months",
+    },
+    {
+        "name": 'a_wider_ask_is_a_different_question',
+        "file": 'app/seo_tools.py',
+        "find": '    sig = ";".join(f"{k}={params[k]}" for k in sorted(params)\n                   if k not in ("key", "type"))\n',
+        "replace": '    sig = ""  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "a caller asking for 200 lines is served a kept answer of 25, silently, and the map is built from a third of the market while the code reports a full read",
+    },
+    {
+        "name": 'the_domain_is_read_once_a_week',
+        "file": 'app/seo_tools.py',
+        "find": '    return semrush("domain_organic", _tenant=_tenant, ttl_days=ttl_days,\n',
+        "replace": '    return _semrush("domain_organic", _tenant=_tenant,  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "the harvest's own, its gap, the weekly snapshot and every agent turn's opportunity finder each buy their own 200-line domain report again — four purchases of one fact",
+    },
+    {
+        "name": 'the_seed_budget_bounds_what_is_new',
+        "file": 'app/keywords.py',
+        "find": '    take = cold[:max(0, config.SEMRUSH_NEW_SEEDS_PER_RUN)]\n',
+        "replace": '    take = cold  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "every cold seed is expanded in one run, so a fresh account's first harvest buys eight expansions at once — 16,000 units — instead of deepening a few at a time",
+    },
+    {
+        "name": 'a_seed_already_in_hand_is_never_deferred',
+        "file": 'app/keywords.py',
+        "find": '    warm = [p for p in pool if reports and _warm(p)]\n',
+        "replace": '    warm = []  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "seeds whose answers we already hold are counted against the new-seed budget and pushed out of the run, so the map stops deepening while paying nothing less",
+    },
+    {
+        "name": 'the_expansion_is_bounded_and_filtered',
+        "file": 'app/keywords.py',
+        "find": '                for r in _fetch_related(profile, seed, seo_tools.EXPANSION_LINES):\n',
+        "replace": '                for r in _fetch_related(profile, seed, limit):  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "the harvest asks a 40-unit-a-line report for forty lines instead of twenty-five, and asks a question the cache probe never asks — so every seed reads as cold for ever and nothing is ever reused",
+    },
+    {
+        "name": 'the_metrics_refresh_is_the_batch_report',
+        "file": 'app/keywords.py',
+        "find": '    got = seo_tools.semrush_keyword_metrics(\n',
+        "replace": '    got = seo_tools.semrush_related_keywords(  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "re-pricing the map goes back to the 40-unit-a-line reports one phrase at a time instead of the one batch report Semrush offers at 10 a line, a hundred phrases a request",
+    },
     # --- the Semrush door (2026-09-09): priced, budgeted, and self-halting ---
     {
         "name": 'a_zero_balance_halts_the_door',
@@ -6230,12 +6295,19 @@ SABOTAGES = [
     {
         "name": "a_callers_own_seed_list_is_capped",
         "file": "app/keywords.py",
-        "find": "                                if r.tier in (\"head\", \"body\")])[:MAX_SEEDS]",
-        "replace": "                                if r.tier in (\"head\", \"body\")])  # SABOTAGE",
-        "suites": ["test_rivals.py"],
+        # RE-ANCHORED 2026-09-09: the pool moved into `seed_pool` when the seed
+        # budget landed. The cap it protects is the same one.
+        "find": "                            if r.tier in (\"head\", \"body\")])[:MAX_SEEDS]",
+        "replace": "                            if r.tier in (\"head\", \"body\")])  # SABOTAGE",
+        # BOTH SUITES, because the two caps protect different halves now. The
+        # seed budget (2026-09-09) bounds what a run BUYS, so it hides this one
+        # on the cold path; what `MAX_SEEDS` still protects is the POOL, and a
+        # pool of forty seeds whose answers are already in hand costs no units
+        # and is still a loop nobody asked for.
+        "suites": ["test_rivals.py", "test_semrush_asked_once.py"],
         "why": "?seeds= on the harvest route becomes an unbounded per-seed "
-               "Semrush loop — two reports each, up to 200 lines apiece — run "
-               "synchronously inside one web request",
+               "loop run synchronously inside one web request — and on a cold "
+               "map, two Semrush reports for every one of them",
     },
     {
         "name": "a_cadence_knob_out_of_range_is_refused",

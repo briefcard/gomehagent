@@ -64,6 +64,12 @@ PLATFORM_MODELS = {
     # trusting the filtered number.
     "SemrushReading": "the shared Semrush key's balance readings and halts — "
                       "service state; spend by account lives on tool_calls",
+    # The ANSWER, not the bill. What Semrush's index says about a domain or a
+    # phrase is the same fact whoever asked, so two accounts in one market pay
+    # for it once; giving it a tenant would mean buying the same lines again
+    # per client. WHICH account spent the units is on `tool_calls`.
+    "SemrushPull": "Semrush's own answer, keyed by the question — shared across "
+                   "accounts on purpose; the spend is attributed on tool_calls",
     "IntakeLink": "carries tenant",
     "ConnectLink": "carries tenant",
     "Credential": "carries tenant",

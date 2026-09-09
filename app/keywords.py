@@ -35,7 +35,7 @@ import json
 import math
 import re
 
-from . import db
+from . import config, db
 
 # ---------------------------------------------------------------------------
 # Tier — computed, with per-account thresholds
@@ -566,6 +566,9 @@ def _fetch_own(profile: dict, limit: int) -> list[dict]:
     was invisible to this module.
     """
     from . import seo_guard, seo_tools
+    # Served from the week's ONE domain read (`seo_tools.domain_rows`), which
+    # `_fetch_gap`, the snapshot and the agent's opportunity finder also read.
+    # Four callers were buying the same fact with different numbers on it.
     return _json_rows(seo_tools.semrush_top_keywords(
         domain=profile.get("domain", ""), database=profile.get("database", ""),
         limit=limit, _tenant=seo_guard.tenant_for(profile)))
@@ -608,31 +611,90 @@ STRIKING_BAND = (3.0, 40.0)
 UNATTENDED_SOURCES = ("gsc", "own", "gap")
 
 
+def seed_pool(tenant: str, seeds: tuple = ()) -> list[str]:
+    """The seeds a harvest would expand, in the order it would take them.
+
+    THE CAP BINDS BOTH BRANCHES. It used to sit on the fallback only —
+    `list(seeds) or [...][:8]` — so the eight applied to the phrases this
+    module chose for itself and not to the ones a caller passed. Since
+    `GET /admin/keywords_harvest?seeds=` builds that tuple straight from a
+    query string with no length of its own, a hand-typed URL was an unbounded
+    per-seed loop in one synchronous request.
+    """
+    return (list(seeds) or [r.phrase for r in targets(tenant)
+                            if r.tier in ("head", "body")])[:MAX_SEEDS]
+
+
+def expansion_plan(tenant: str, *, sources: tuple = ("related", "questions"),
+                   seeds: tuple = (), profile: dict | None = None) -> dict:
+    """Which seeds this harvest will expand, and which of them cost anything.
+
+    THE SEED BUDGET, and it only ever bounds what is NEW. A seed expanded
+    inside `SEMRUSH_EXPANSION_TTL_DAYS` is re-filed from our own copy for
+    nothing, so it is never deferred; a seed nobody has expanded costs 2,000
+    units, so at most `SEMRUSH_NEW_SEEDS_PER_RUN` of those are bought in one
+    run and the rest wait for the next.
+
+    Which new ones go first is not arbitrary: the planner's own next articles
+    (`next_to_write`) are the phrases about to be written against, so their
+    questions are the ones somebody is about to need. Everything else keeps
+    the pool's existing priority order.
+
+    Used by BOTH the estimate and the harvest, so the number shown beside the
+    button and the work the button does cannot drift apart.
+    """
+    from . import seo_tools, sites
+    profile = profile or sites.get(tenant)
+    database = profile.get("database", "") or config.SEO_DATABASE
+    reports = [("related", "phrase_related"), ("questions", "phrase_questions")]
+    reports = [(s, rep_) for s, rep_ in reports if s in sources]
+    pool = seed_pool(tenant, seeds)
+
+    def _warm(phrase: str) -> bool:
+        """Every report this run wants for this seed is already in hand."""
+        return all(seo_tools.cached_pull(
+            rep_, phrase=phrase, database=database,
+            display_limit=seo_tools.EXPANSION_LINES, display_sort="nq_desc",
+            display_filter=f"+|Nq|Gt|{config.SEMRUSH_MIN_VOLUME - 1}") is not None
+            for _s, rep_ in reports)
+
+    warm = [p for p in pool if reports and _warm(p)]
+    cold = [p for p in pool if reports and p not in set(warm)]
+    if cold:
+        soon = {str(p).strip().lower() for p in next_to_write(tenant)}
+        cold.sort(key=lambda p: 0 if str(p).strip().lower() in soon else 1)
+    take = cold[:max(0, config.SEMRUSH_NEW_SEEDS_PER_RUN)]
+    per_seed = sum(seo_tools.estimate(rep_, display_limit=seo_tools.EXPANSION_LINES)
+                   for _s, rep_ in reports)
+    return {"pool": pool, "warm": warm, "buy": take,
+            "deferred": cold[len(take):], "units": len(take) * per_seed}
+
+
 def harvest_estimate(tenant: str, *, sources: tuple = (
         "gsc", "own", "gap", "related", "questions"), seeds: tuple = (),
-        limit: int = 40) -> int:
+        limit: int = 40, profile: dict | None = None) -> int:
     """What a harvest with these arguments can cost, in Semrush units.
 
-    The number `preflight` checks before the first call and the Plan tab
-    shows beside the button. Computed from the same clamps the tools apply,
-    so it is what the door would bill, not a guess beside it.
+    The number `preflight` checks before the first call and the Plan tab shows
+    beside the button. Computed from the same clamps and the same cache the
+    tools use, so it is what the door would bill rather than a guess beside it
+    — and a second harvest in the same week reads as nearly free because it is.
     """
-    from . import seo_tools
+    from . import seo_tools, sites
+    profile = profile or sites.get(tenant)
     units = 0
-    if "own" in sources:
-        units += seo_tools.estimate("domain_organic",
-                                    display_limit=min(int(limit or 30), 100))
-    if "gap" in sources:
-        units += seo_tools.estimate("domain_organic", display_limit=200)
-    expand = [s for s in ("related", "questions") if s in sources]
-    if expand:
-        n = (len(seeds) if seeds
-             else len([r for r in targets(tenant) if r.tier in ("head", "body")]))
-        per = min(int(limit or 30), 60)
-        units += min(n, MAX_SEEDS) * sum(
-            seo_tools.estimate("phrase_related" if s == "related"
-                               else "phrase_questions", display_limit=per)
-            for s in expand)
+    if {"own", "gap"} & set(sources):
+        # ONE READ, however many of the two are asked for.
+        if seo_tools.cached_pull(
+                "domain_organic", domain=profile.get("domain", ""),
+                database=profile.get("database", "") or config.SEO_DATABASE,
+                display_limit=seo_tools.DOMAIN_PULL_LINES,
+                display_sort="nq_desc") is None:
+            units += seo_tools.estimate(
+                "domain_organic", display_limit=seo_tools.DOMAIN_PULL_LINES)
+    if {"related", "questions"} & set(sources):
+        units += expansion_plan(tenant, sources=sources, seeds=seeds,
+                                profile=profile)["units"]
     return units
 
 
@@ -719,17 +781,26 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     # the head terms already in the map makes the second run of `harvest`
     # deepen what the first found, rather than needing a person each time.
     if {"related", "questions"} & set(sources):
-        # THE CAP BINDS BOTH BRANCHES. It used to sit on the fallback only —
-        # `list(seeds) or [...][:8]` — so the eight applied to the phrases this
-        # module chose for itself and not to the ones a caller passed. Since
-        # `GET /admin/keywords_harvest?seeds=` builds that tuple straight from
-        # a query string with no length of its own, a hand-typed URL was an
-        # unbounded per-seed loop: 2 reports x N seeds x up to 200 lines each,
-        # synchronous, in one request. The route's docstring already warned
-        # that "one URL doing both is one somebody refreshes into a Semrush
-        # bill" — it separated the routes and left the count open.
-        pool = (list(seeds) or [r.phrase for r in targets(tenant)
-                                if r.tier in ("head", "body")])[:MAX_SEEDS]
+        plan = expansion_plan(tenant, sources=sources, seeds=seeds,
+                              profile=profile)
+        # WARM FIRST, THEN WHAT WE ARE BUYING. A warm seed is re-filed from our
+        # own copy of an answer already paid for, so it is never deferred; the
+        # budget bounds only the new ones. Both are walked, and the note says
+        # which was which — "found 40 from related" reads the same whether it
+        # cost 2,000 units or nothing, and the difference is the whole point.
+        pool = plan["warm"] + plan["buy"]
+        if plan["deferred"]:
+            notes.append(
+                f"{len(plan['deferred'])} seed(s) not expanded this run — "
+                f"{config.SEMRUSH_NEW_SEEDS_PER_RUN} new seed(s) a run is the "
+                f"budget, and a new one costs about "
+                f"{plan['units'] // max(1, len(plan['buy'])) if plan['buy'] else 2000:,} "
+                f"units. Next run takes the next of them: "
+                + ", ".join(repr(p) for p in plan["deferred"][:3])
+                + ("…" if len(plan["deferred"]) > 3 else ""))
+        if plan["warm"]:
+            notes.append(f"{len(plan['warm'])} seed(s) re-filed from answers "
+                         f"already bought — no units spent on them")
         if not pool:
             # Names what is actually missing rather than the command that was
             # just run. If `own` and `gap` both came back empty there is
@@ -749,7 +820,13 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
                 notes.append(seo_tools.halted())
                 break
             if "related" in sources:
-                for r in _fetch_related(profile, seed, limit):
+                # EXPANSION_LINES, never the harvest's `limit` — that one says
+                # how many rows of the DOMAIN read to file, and handing it to a
+                # 40-unit-a-line report asked for forty lines instead of the
+                # bounded twenty-five. Worse, it asked a question the cache
+                # probe never asks, so every seed read as cold for ever and
+                # nothing was ever reused.
+                for r in _fetch_related(profile, seed, seo_tools.EXPANSION_LINES):
                     if r.get("keyword") and not _excluded(r["keyword"]):
                         upsert(tenant, r["keyword"], source="semrush_related",
                                volume=int(r.get("volume") or 0),
@@ -757,7 +834,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
                                database=profile.get("database", ""))
                         added["related"] += 1
             if "questions" in sources:
-                for r in _fetch_questions(profile, seed, limit):
+                for r in _fetch_questions(profile, seed, seo_tools.EXPANSION_LINES):
                     if r.get("question") and not _excluded(r["question"]):
                         upsert(tenant, r["question"], source="semrush_questions",
                                volume=int(r.get("volume") or 0),
@@ -767,6 +844,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     grouped = cluster(tenant)
     ranked = score(tenant)
     return {"tenant": tenant, "added": added, **grouped,
+            "spent": spent_on(tenant),
             "scored": ranked["scored"], "top": ranked["top"], "notes": notes}
 
 
@@ -1272,6 +1350,25 @@ def progress(tenant: str, *, days: int = 28) -> dict:
         "notes": notes + [f"refresh: {n}" for n in refresh["notes"]]}
 
 
+def spent_on(tenant: str, *, minutes: int = 30) -> int:
+    """Semrush units this account has just spent — what the run actually cost.
+
+    Read from the ledger rather than accumulated in the loop: the door is the
+    only thing that knows what a call billed, and a second counter beside it is
+    a second thing to drift.
+    """
+    import datetime as _dt
+
+    from . import db as _db
+    from sqlalchemy import func as _fn
+    since = _db.utcnow() - _dt.timedelta(minutes=max(1, minutes))
+    with _db.SessionLocal() as s:
+        return int(s.query(_fn.coalesce(_fn.sum(_db.ToolCall.units), 0))
+                   .filter(_db.ToolCall.at >= since,
+                           _db.ToolCall.provider == "semrush",
+                           _db.ToolCall.tenant == tenant).scalar() or 0)
+
+
 #: How often the map itself is refreshed. Distinct from the nightly reading
 #: sync, and much rarer: positions move daily, the competitive landscape does
 #: not, and each top-up spends Semrush calls across every account.
@@ -1331,6 +1428,60 @@ map nobody asked for.
     return {t.key: harvest_one(t.key, limit=limit)
             for t in tenants.all_tenants()
             if systems.find(t.key, "blog")}
+
+def refresh_metrics(tenant: str, *, limit: int = 500) -> dict:
+    """Re-read volume and CPC for the map's phrases, THROUGH THE BATCH REPORT.
+
+    `phrase_these` is the one read Semrush batches — up to a hundred phrases a
+    request at 10 units a line — and until now nothing used it. The metrics on
+    a keyword row came from whichever expansion first found it, and refreshing
+    them meant re-running that expansion at 40 units a line for a phrase we
+    already had. Five hundred phrases cost 5,000 units here against 25,600 a
+    week there, for a better answer: this asks about the phrases in the map,
+    not about whatever a seed happens to be related to this month.
+
+    Monthly, because a search volume is a monthly average.
+    """
+    from . import seo_tools, sites
+    rows = [r for r in targets(tenant) if r.phrase][:max(1, limit)]
+    if not rows:
+        return {"skipped": "no keyword map — nothing to refresh"}
+    profile = sites.get(tenant)
+    database = profile.get("database", "") or config.SEO_DATABASE
+    est = seo_tools.estimate("phrase_these",
+                             phrase=";".join(r.phrase for r in rows))
+    why = seo_tools.preflight(tenant, est, what="the monthly metrics refresh")
+    if why:
+        return {"skipped": why, "phrases": len(rows)}
+    got = seo_tools.semrush_keyword_metrics(
+        ";".join(r.phrase for r in rows), database=database, _tenant=tenant)
+    fresh = _json_rows(got)
+    if not fresh:
+        return {"phrases": len(rows), "refreshed": 0, "note": str(got)[:200]}
+    by_phrase = {str(r.get("keyword") or "").strip().lower(): r for r in fresh}
+    done = 0
+    for row in rows:
+        r = by_phrase.get(row.phrase.strip().lower())
+        if not r:
+            continue
+        upsert(tenant, row.phrase, database=database,
+               volume=int(float(r.get("volume") or 0)),
+               cpc=float(r.get("cpc") or 0.0))
+        done += 1
+    return {"tenant": tenant, "phrases": len(rows), "refreshed": done,
+            "spent": spent_on(tenant)}
+
+
+def refresh_metrics_one(tenant: str, *, limit: int = 500) -> dict:
+    """One account's monthly metrics refresh, with its gates. See `harvest_one`."""
+    from . import systems
+    if not systems.find(tenant, "blog"):
+        return {"skipped": "no blog system installed"}
+    try:
+        return refresh_metrics(tenant, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
+
 
 def sync_one(tenant: str, *, days: int = 28) -> dict:
     """One account's nightly readings, with its gates. See `harvest_one`."""

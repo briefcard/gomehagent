@@ -1030,6 +1030,40 @@ class SeoSiteConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class SemrushPull(Base):
+    """One Semrush answer, kept so the same question is not bought twice.
+
+    The rows themselves, not a summary: what makes a re-harvest free is being
+    able to re-file the phrases without asking again. This is OUR copy of an
+    index we paid to read, keyed by the question rather than by the asker.
+
+    NO TENANT, and that is the point. The related keywords for "acrylic jug" in
+    the `us` database are the same fact whoever asks, so two accounts working
+    the same market pay for it once. Which account SPENT the units is on
+    `tool_calls`, which carries a tenant; this table is the answer, not the
+    bill.
+
+    `signature` is every parameter that changes the answer — the limit, the
+    sort, the filter — so a wider or differently sorted ask is a different pull
+    and can never be served a narrower one's rows.
+    """
+
+    __tablename__ = "semrush_pulls"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    report = Column(String, default="", index=True)
+    #: The domain or the phrase the report was about.
+    subject = Column(String, default="", index=True)
+    database = Column(String, default="", index=True)
+    signature = Column(String, default="", index=True)
+    rows = Column(JSON, default=list)
+    lines = Column(Integer, default=0)
+    #: What this pull cost when it was bought. Every later read of it is free,
+    #: and this is what those reads saved.
+    units = Column(Integer, default=0)
+
+
 class SemrushReading(Base):
     """One reading of the shared Semrush key's remaining API units.
 

@@ -121,13 +121,28 @@ def main() -> int:
 
         for i in range(8):
             keywords.upsert("baci", f"acrylic seed{i}", volume=500, source="semrush_own")
-        ck("one full harvest of eight seeds is 28,000 units — the 2026-09-07 bill",
-           keywords.harvest_estimate("baci") == 28_000, str(keywords.harvest_estimate("baci")))
-        ck("the unattended top-up is 2,400",
-           keywords.harvest_estimate("baci", sources=keywords.UNATTENDED_SOURCES) == 2_400)
-        ck("hand-typed seeds are priced as typed, capped at MAX_SEEDS",
-           keywords.harvest_estimate("baci", seeds=("a", "b", "c")) == 400 + 2000 + 3 * 3200
-           and keywords.harvest_estimate("baci", seeds=tuple(str(i) for i in range(40))) == 28_000)
+        # THE BILL THIS REPLACED, priced from the code as it stood that night:
+        # 40 lines of domain_organic + 200 more + eight seeds x two 40-lines
+        # reports at 40 units a line.
+        was = (e("domain_organic", display_limit=40)
+               + e("domain_organic", display_limit=200)
+               + 8 * (e("phrase_related", display_limit=40)
+                      + e("phrase_questions", display_limit=40)))
+        ck("the harvest that ran on 2026-09-07 was 28,000 units", was == 28_000, str(was))
+        now = keywords.harvest_estimate("baci")
+        one_domain = e("domain_organic", display_limit=seo_tools.DOMAIN_PULL_LINES)
+        per_seed = 2 * e("phrase_related", display_limit=seo_tools.EXPANSION_LINES)
+        ck("the same harvest today is one domain read plus the seed budget",
+           now == one_domain + config.SEMRUSH_NEW_SEEDS_PER_RUN * per_seed
+           and now < was // 3, f"{now} vs {was}")
+        ck("the unattended top-up is the one domain read",
+           keywords.harvest_estimate(
+               "baci", sources=keywords.UNATTENDED_SOURCES) == one_domain,
+           str(one_domain))
+        ck("forty hand-typed seeds cost the same as three, because three is "
+           "what a run buys",
+           keywords.harvest_estimate("baci", seeds=tuple(str(i) for i in range(40)))
+           == keywords.harvest_estimate("baci", seeds=("a", "b", "c")))
 
         print("\n— the door prices what it read and bounds what it asks —")
         http = Http(CSV3)
@@ -314,8 +329,9 @@ def main() -> int:
         try:
             fresh_balance(500_000)
             out = keywords.harvest("baci")
-            ck("with the door open every seed is expanded",
-               count["related"] == 8 and count["questions"] == 8
+            ck("with the door open the run buys its budget of new seeds",
+               count["related"] == config.SEMRUSH_NEW_SEEDS_PER_RUN
+               and count["questions"] == config.SEMRUSH_NEW_SEEDS_PER_RUN
                and not any("refused" in n or "halted" in n for n in out["notes"]),
                str(count))
             for k in count:
@@ -338,6 +354,8 @@ def main() -> int:
                 seo_tools._halt("API UNITS BALANCE IS ZERO", "baci")
                 return []
             keywords._fetch_related = _rel_then_halt
+            for k in count:
+                count[k] = 0
             out = keywords.harvest("baci")
             ck("a door that shuts mid-run stops the loop at the next seed",
                count["related"] == 1 and count["questions"] == 1

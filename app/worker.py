@@ -1146,6 +1146,11 @@ def keyword_sync_sharded() -> dict:
     return _each_tenant("keyword sync", keywords.sync_one)
 
 
+def keyword_metrics_sharded() -> dict:
+    from . import keywords
+    return _each_tenant("metrics refresh", keywords.refresh_metrics_one)
+
+
 def keyword_harvest_sharded() -> dict:
     from . import keywords
     return _each_tenant("keyword map top-up", keywords.harvest_one)
@@ -1305,6 +1310,14 @@ def main() -> None:
     # Monday, before the week's writing is planned.
     sched.add_job(_safe(keyword_harvest_sharded, "keyword map top-up", sharded=True), "cron",
                   day_of_week="mon", hour=config.SWEEP_HOUR, minute=25)
+    # Monthly, through the ONE batch report Semrush offers: every phrase in
+    # the map re-priced in requests of a hundred at 10 units a line, against
+    # 40 a line for re-running the expansion that first found it. A search
+    # volume is a monthly average, so a monthly refresh is the cadence the
+    # number itself has.
+    sched.add_job(
+        _safe(keyword_metrics_sharded, "metrics refresh", sharded=True),
+        "cron", day=1, hour=config.SWEEP_HOUR, minute=45)
     # Weekly, Sunday: a habit is a week's worth of edits, not a day's. Proposes
     # only — every rule goes through the approval queue before a drafter
     # reads it — so a sweep on a quiet account files nothing and says why.

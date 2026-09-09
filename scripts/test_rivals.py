@@ -25,7 +25,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'rv.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import db, keywords, tenants  # noqa: E402
+from app import config, db, keywords, tenants  # noqa: E402
 
 _fail = []
 
@@ -231,8 +231,12 @@ def main() -> int:
                          sources=("related",))
     finally:
         keywords._fetch_related = real_rel
+    # TWO CAPS NOW, and the tighter one wins. `MAX_SEEDS` bounds the pool a
+    # hand-typed `?seeds=` can build; the seed budget (2026-09-09) bounds how
+    # many of that pool are BOUGHT in one run, because an expansion nobody has
+    # in hand costs about 2,000 units. Forty seeds must reach neither number.
     ck("a caller's own seed list is capped too",
-       hit["n"] == keywords.MAX_SEEDS,
+       hit["n"] == min(keywords.MAX_SEEDS, config.SEMRUSH_NEW_SEEDS_PER_RUN),
        f"{hit['n']} expansion(s) of 40 seeds — the [:8] used to sit on the "
        f"fallback branch only, so `?seeds=` on the harvest route was an "
        f"unbounded per-seed loop in one synchronous request")

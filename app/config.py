@@ -256,6 +256,20 @@ SEMRUSH_ACCOUNT_WEEKLY_CAP = int(os.environ.get("SEMRUSH_ACCOUNT_WEEKLY_CAP", "3
 SEMRUSH_TURN_CAP = int(os.environ.get("SEMRUSH_TURN_CAP", "3000"))
 #: Below this many remaining units the daily balance reading tells the owner.
 SEMRUSH_LOW_BALANCE = int(os.environ.get("SEMRUSH_LOW_BALANCE", "20000"))
+#: How long a bought answer stays reusable. The related keywords and questions
+#: around a phrase are the two reports Semrush charges 40 units a line for and
+#: will not batch, and they move over months — so re-asking inside this window
+#: buys an answer we already have. Sixty is the conservative end; the owner may
+#: raise it to ninety, which is closer to how slowly a question set turns over.
+SEMRUSH_EXPANSION_TTL_DAYS = int(os.environ.get("SEMRUSH_EXPANSION_TTL_DAYS", "60"))
+#: The fewest monthly searches a phrase must have to be worth buying. Applied
+#: server-side on the expansions, where the tail is long and nothing at the end
+#: of it is ever written.
+SEMRUSH_MIN_VOLUME = int(os.environ.get("SEMRUSH_MIN_VOLUME", "10"))
+#: New seeds one weekly harvest may expand. A seed already expanded inside the
+#: TTL costs nothing, so this bounds only what is genuinely new — the
+#: difference between a map that deepens every week and a bill that repeats.
+SEMRUSH_NEW_SEEDS_PER_RUN = int(os.environ.get("SEMRUSH_NEW_SEEDS_PER_RUN", "3"))
 # First target property + market for the SEO agent. Baci Milano USA.
 SEO_DOMAIN = os.environ.get("SEO_DOMAIN", "bacimilanousa.com")
 SEO_DATABASE = os.environ.get("SEO_DATABASE", "us")  # Semrush regional database

@@ -14424,6 +14424,22 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         'CMS can still build a map, rank it and decide what to write — the '
         'articles just need somewhere to go before they go there.</p>')
 
+    # WHAT THE SPENDING BUTTONS WILL SPEND, before they are pressed. Both of
+    # them buy Semrush lines, and Semrush bills per line at four times the rate
+    # for the two reports an expansion uses — so "Spends API calls" was the
+    # whole warning a click got. The estimate is the door's own arithmetic over
+    # the answers we already hold, so a top-up in a week we have already paid
+    # for reads as free because it is. Neither number calls anything: the
+    # estimate is a cache lookup and the balance is the last reading.
+    from . import seo_tools as _st
+    _est = kw.harvest_estimate(tenant)
+    _bal = _st.balance_cached()
+    _halt = _st.halted()
+    _cost = (f"about {_est:,} Semrush unit(s)" if _est
+             else "nothing — every answer it needs is already in hand")
+    _cost += (f" · {_bal['units']:,} left as of {_esc(str(_bal['at'])[:16])}"
+              if _bal else " · balance never read")
+
     m = kw.map_for(tenant)
     by_tier = m["by_tier"]
     tiers = " · ".join(f"{n} {t.replace('_', '-')}" for t, n in sorted(by_tier.items())) or "none"
@@ -14436,7 +14452,9 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
             f'<p><a href="{_link("keywords_harvest")}"><button>Build the map'
             '</button></a> <span class="when">Reads Search Console for terms '
             'you already rank near, Semrush for the gap against competitors, '
-            'and the questions people actually ask. Spends API calls.</span></p>')
+            f'and the questions people actually ask. Costs {_cost}.'
+            + (f'<br><b>{_esc(_halt)}</b>' if _halt else "")
+            + '</span></p>')
     else:
         rows_html = ""
         for c in m["clusters"]:
@@ -14469,7 +14487,9 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         f'<a href="{_link("keywords_harvest")}"><button class="sec">Top up the map'
         '</button></a> '
         f'<a href="{_link("keywords_rescore")}"><button class="sec">Re-score'
-        '</button></a>')
+        '</button></a>'
+        f'<div class="when">Topping up costs {_cost}.'
+        + (f' <b>{_esc(_halt)}</b>' if _halt else "") + '</div>')
 
     # The one flash pattern every tab uses: sticky, so a redirect that lands
     # mid-page at an anchor cannot scroll the result out of view. Plan used
