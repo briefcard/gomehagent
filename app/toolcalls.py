@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import datetime as dt
 
+from sqlalchemy import func as _sqlfunc
+
 from . import db
 
 #: Which client platform each tool actually reaches. A tool that only touches
@@ -59,8 +61,10 @@ def provider_for(tool: str) -> str:
 
 def record(tenant: str, tool: str, *, source: str = "kernel", ok: bool = True,
            error: str = "", ms: int = 0, bytes_back: int = 0,
-           provider: str = "", ref: str = "") -> None:
-    """File one tool call. Never raises."""
+           provider: str = "", ref: str = "", units: int = 0) -> None:
+    """File one tool call. Never raises. `units` is what the call cost in the
+    provider's own quota, when the provider has one (Semrush bills per line
+    returned); 0 for every other platform."""
     try:
         with db.SessionLocal() as s:
             s.add(db.ToolCall(
@@ -68,7 +72,7 @@ def record(tenant: str, tool: str, *, source: str = "kernel", ok: bool = True,
                 provider=provider or provider_for(tool),
                 ok="yes" if ok else "no", error=(error or "")[:400],
                 ms=str(int(ms or 0)), bytes_back=str(int(bytes_back or 0)),
-                ref=ref or ""))
+                ref=ref or "", units=int(units or 0)))
             s.commit()
     except Exception:                                            # noqa: BLE001
         pass
@@ -93,8 +97,10 @@ def report(tenant: str = "", days: int = 30) -> dict:
 
     by_tool: dict[str, dict] = {}
     for r in rows:
-        b = by_tool.setdefault(r.tool, {"calls": 0, "failed": 0, "ms": []})
+        b = by_tool.setdefault(r.tool, {"calls": 0, "failed": 0, "ms": [],
+                                        "units": 0})
         b["calls"] += 1
+        b["units"] += int(r.units or 0)
         if r.ok != "yes":
             b["failed"] += 1
         if (r.ms or "").isdigit() and int(r.ms):
@@ -132,8 +138,9 @@ def report(tenant: str = "", days: int = 30) -> dict:
         if r.provider in platform_layer and r.source != "adapter":
             continue          # counted from the round trip instead
         b = by_provider.setdefault(r.provider, {"calls": 0, "failed": 0,
-                                                "last_error": ""})
+                                                "last_error": "", "units": 0})
         b["calls"] += 1
+        b["units"] += int(r.units or 0)
         if r.ok != "yes":
             b["failed"] += 1
             b["last_error"] = b["last_error"] or (r.error or "")[:160]
@@ -167,6 +174,23 @@ def reached(tenant: str, days: int = 30) -> dict[str, int]:
         if r.provider and r.ok == "yes":
             out[r.provider] = out.get(r.provider, 0) + 1
     return out
+
+
+def spent(provider: str, tenant: str = "", days: int = 7) -> int:
+    """Units one provider billed in the window — what a cap is checked against.
+
+    Summed from the rows rather than kept as a counter. A counter drifts from
+    the rows it summarises the first time a write is missed, and the rows are
+    already the record; Diagnostics reads the same rows, so the cap and the
+    page can never disagree about what was spent.
+    """
+    since = db.utcnow() - dt.timedelta(days=days)
+    with db.SessionLocal() as s:
+        q = (s.query(_sqlfunc.coalesce(_sqlfunc.sum(db.ToolCall.units), 0))
+             .filter(db.ToolCall.at >= since, db.ToolCall.provider == provider))
+        if tenant:
+            q = q.filter(db.ToolCall.tenant == tenant)
+        return int(q.scalar() or 0)
 
 
 def clean_path(path: str) -> str:

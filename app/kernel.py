@@ -227,25 +227,33 @@ def run(role: Role, text: str, attachments: list[dict] | None = None,
     memory.save_turn(thread, "user", text)
 
     reply = "I hit my step limit on that one — try breaking it into smaller asks."
-    for _ in range(role.max_steps):
-        msg = client.messages.create(
-            model=role.model, max_tokens=role.max_tokens,
-            system=system, tools=triage._cached_tools(tools), messages=messages,
-        )
-        usage.log_usage(role.usage_purpose, role.model, msg, tenant=tenant)
-        if msg.stop_reason == "tool_use":
-            messages.append({"role": "assistant", "content": msg.content})
-            results = []
-            for block in msg.content:
-                if block.type == "tool_use":
-                    results.append({"type": "tool_result", "tool_use_id": block.id,
-                                    "content": _dispatch(
-                                        role, block.name, dict(block.input),
-                                        session_files, tenant)[:8000]})
-            messages.append({"role": "user", "content": results})
-            continue
-        reply = next((b.text for b in msg.content if b.type == "text"),
-                     "Done (no further output).").strip()
-        break
+    # THE TURN'S SEMRUSH BUDGET. A chat is not a harvest: opened here and
+    # closed whatever happens, so a refusal inside the loop names the turn
+    # and the next turn starts with a full budget.
+    from . import seo_tools as _seo
+    _turn = _seo.start_turn()
+    try:
+        for _ in range(role.max_steps):
+            msg = client.messages.create(
+                model=role.model, max_tokens=role.max_tokens,
+                system=system, tools=triage._cached_tools(tools), messages=messages,
+            )
+            usage.log_usage(role.usage_purpose, role.model, msg, tenant=tenant)
+            if msg.stop_reason == "tool_use":
+                messages.append({"role": "assistant", "content": msg.content})
+                results = []
+                for block in msg.content:
+                    if block.type == "tool_use":
+                        results.append({"type": "tool_result", "tool_use_id": block.id,
+                                        "content": _dispatch(
+                                            role, block.name, dict(block.input),
+                                            session_files, tenant)[:8000]})
+                messages.append({"role": "user", "content": results})
+                continue
+            reply = next((b.text for b in msg.content if b.type == "text"),
+                         "Done (no further output).").strip()
+            break
+    finally:
+        _seo.end_turn(_turn)
     memory.save_turn(thread, "assistant", reply)
     return reply

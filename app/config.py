@@ -237,6 +237,25 @@ BACI_AGENT_TOKEN = os.environ.get("BACI_AGENT_TOKEN", "")
 # Semrush Analytics API key (Semrush -> Subscription -> API). The deployed agent
 # calls api.semrush.com natively, the same pattern as Shopify/Gmail.
 SEMRUSH_API_KEY = os.environ.get("SEMRUSH_API_KEY", "")
+#: THE BILL IS PER LINE, AND THESE ARE THE CEILINGS. Semrush charges every
+#: line a report returns, at a price that depends on the report
+#: (`seo_tools.UNIT_PRICE`: related keywords and questions cost four times a
+#: domain report). One key serves every account, so the ceilings are rolling
+#: seven-day totals read from the ledger: one for the whole service, one per
+#: account (overridable per tenant in `Tenant.analytics["semrush_weekly_cap"]`),
+#: and one per agent turn so a chat cannot spend a harvest. Enforced in
+#: `seo_tools._semrush`, the one door every Semrush read goes through.
+#:
+#: The account default sits just above ONE full harvest (28,000) so the
+#: Plan tab's button still works once a week and a second click the same
+#: week is refused by name. Both come down once expansion is cached and
+#: budgeted (the 2026-09-07 audit's Phase 2), when a harvest costs a
+#: third of this.
+SEMRUSH_WEEKLY_CAP = int(os.environ.get("SEMRUSH_WEEKLY_CAP", "60000"))
+SEMRUSH_ACCOUNT_WEEKLY_CAP = int(os.environ.get("SEMRUSH_ACCOUNT_WEEKLY_CAP", "30000"))
+SEMRUSH_TURN_CAP = int(os.environ.get("SEMRUSH_TURN_CAP", "3000"))
+#: Below this many remaining units the daily balance reading tells the owner.
+SEMRUSH_LOW_BALANCE = int(os.environ.get("SEMRUSH_LOW_BALANCE", "20000"))
 # First target property + market for the SEO agent. Baci Milano USA.
 SEO_DOMAIN = os.environ.get("SEO_DOMAIN", "bacimilanousa.com")
 SEO_DATABASE = os.environ.get("SEO_DATABASE", "us")  # Semrush regional database

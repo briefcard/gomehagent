@@ -12,13 +12,25 @@ Run: python3 scripts/test_imagegen.py
 import io
 import os
 import sys
+import tempfile
 
 os.environ.setdefault("APPROVAL_SECRET", "test-secret")
+# ITS OWN DATABASE, LIKE EVERY OTHER SUITE. Without this the default
+# `sqlite:///local.db` applies, so this suite read and wrote the developer's
+# real database — and, never calling `init_db`, never ran the auto-migration
+# either. Adding a column to a table it touches (`tool_calls.units`, 2026-09-09)
+# therefore failed here and nowhere else, which reads as "the new column broke
+# imagegen" rather than "this suite is pointed at a stale database". The
+# deployed services both call `init_db` at boot, so the column exists there.
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'ig.db')}")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageDraw  # noqa: E402
 
 from app import config, db, imagegen  # noqa: E402
+
+db.init_db()
 
 _fails: list[str] = []
 _sent: list[dict] = []

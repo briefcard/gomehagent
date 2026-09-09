@@ -10491,7 +10491,8 @@ DIAG_VIEWS = (("overview", "Overview"), ("systems", "Systems check"))
 
 def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                        level: str = "", system: str = "",
-                       limit: int = 200, live: int = 0, view: str = "") -> str:
+                       limit: int = 200, live: int = 0, view: str = "",
+                       msg: str = "", err: str = "") -> str:
     """Live reports and logs for one account's systems.
 
     Ordered by what a person triaging actually does: the per-system verdict
@@ -10828,8 +10829,40 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                       + _systems_check(key, tenant, days, need,
                                        "" if every else tenant, system))
 
+    # --- the Semrush bill -----------------------------------------------
+    # Units, by account, beside the balance and the door's state — the one
+    # provider whose calls say nothing about its cost. The control is the
+    # free balance read, which is also what reopens a halted door.
+    sm = pf.get("semrush") or {}
+    if sm.get("configured") or sm.get("units") or sm.get("balance"):
+        bal = sm.get("balance") or {}
+        by_t = " · ".join(f"{_esc(t)} {u:,}" for t, u in
+                          (sm.get("by_tenant") or {}).items())
+        bal_txt = (f"balance <b>{bal['units']:,}</b> units, read "
+                   f"{_esc(str(bal.get('at', ''))[:16])} UTC"
+                   if bal else "balance never read")
+        halt_txt = (f'<div class="bad">{_esc(sm["halted"])}</div>'
+                    if sm.get("halted") else "")
+        pf_html += f"""
+        <h3 style="font-size:.9rem;margin:16px 0 6px">Semrush units</h3>
+        <p class="when"><b>{int(sm.get("units") or 0):,}</b> units spent in this
+        window{(" — " + by_t) if by_t else ""} · cap
+        {int(sm.get("weekly_cap") or 0):,} a week for every account together ·
+        {bal_txt}
+        <form method="get" action="/admin/semrush_balance" style="display:inline">
+          <input type="hidden" name="key" value="{_esc(key)}">
+          <input type="hidden" name="tenant" value="{_esc(tenant)}">
+          <input type="hidden" name="ui" value="1">
+          <button class="sec">Read the balance now</button></form></p>
+        {halt_txt}
+        <p class="when">Semrush bills per line returned, and related keywords
+        and questions cost four times a domain report — calls say nothing
+        about the bill. This is the bill.</p>"""
+
+    flash = ((f'<div class="flash"><div class="ok">{_esc(msg)}</div></div>' if msg else "")
+             + (f'<div class="flash"><div class="bad">{_esc(err)}</div></div>' if err else ""))
     body = f"""
-{_every_note(every, "Every account's runs, calls and checks in one timeline. "
+{flash}{_every_note(every, "Every account's runs, calls and checks in one timeline. "
              "Each row names the client it belongs to.")}
 <div class="filters">{windows}<span class="sep"></span>{levels}{sysfilter}
   <span class="sep"></span>{livebar}{workers_chip}</div>

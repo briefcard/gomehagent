@@ -57,6 +57,13 @@ PLATFORM_MODELS = {
     "JobLease": "which worker instance holds a scheduled job — the service's "
                 "own coordination, keyed by job name (and tenant, when "
                 "sharded) rather than owned by an account",
+    # The shared Semrush key's own readings. One key serves every account,
+    # so its balance and its halt are facts about the SERVICE; WHICH account
+    # spent the units is on `tool_calls`, which carries a tenant. Giving a
+    # reading a tenant would invite filtering the balance per client and then
+    # trusting the filtered number.
+    "SemrushReading": "the shared Semrush key's balance readings and halts — "
+                      "service state; spend by account lives on tool_calls",
     "IntakeLink": "carries tenant",
     "ConnectLink": "carries tenant",
     "Credential": "carries tenant",

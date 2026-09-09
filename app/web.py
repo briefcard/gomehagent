@@ -1188,14 +1188,51 @@ def health_seo(key: str = Depends(admin_key)) -> dict:
                   for p in sites.all_profiles().values()],
     }
     if config.SEMRUSH_API_KEY:
+        # The BALANCE, not a paid domain read. A valid key with units left
+        # answers "does Semrush work for this service" for free; the old
+        # probe spent ten units per hit to ask the same question.
         try:
             from . import seo_tools
-            primary = sites.get("")
-            r = seo_tools.semrush_domain_overview(primary["domain"], primary["database"])
-            out["semrush_probe"] = "ok" if r.startswith("{") and r != "{}" else r[:180]
+            units = seo_tools.units_balance()
+            out["semrush_units"] = units
+            out["semrush_halted"] = seo_tools.halted()
+            out["semrush_probe"] = ("ok" if units else
+                                    "ERROR: API units balance is zero" if units == 0
+                                    else "ERROR: the balance could not be read")
         except Exception as exc:  # noqa: BLE001
             out["semrush_probe"] = f"ERROR: {exc.__class__.__name__}: {str(exc)[:160]}"
     return out
+
+
+@app.get("/admin/semrush_balance")
+def admin_semrush_balance(key: str = Depends(admin_key), tenant: str = "",
+                          ui: int = 0):
+    """Read the Semrush API units balance now. FREE — nothing is spent.
+
+    The control beside the Diagnostics fact. The daily reading is what the
+    page shows, and a top-up at Semrush is invisible until something reads
+    the balance again; a positive reading reopens a halted door on the spot.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import seo_tools
+    units = seo_tools.units_balance(tenant)
+    got = {"units": units, "halted": seo_tools.halted(),
+           "cached": seo_tools.balance_cached()}
+    if not ui:
+        return got
+    from urllib.parse import urlencode
+
+    from fastapi.responses import RedirectResponse
+    if units is None:
+        q = {"err": "the balance could not be read — Semrush did not answer "
+                    "with a number; the key may be wrong or the endpoint down"}
+    else:
+        q = {"ok": f"Semrush has {units:,} API units left"
+                   + (f" — {got['halted']}" if got["halted"]
+                      else " — the door is open")}
+    return RedirectResponse("/admin/ui?" + urlencode(
+        {"key": key, "tab": "diagnostics", "tenant": tenant, **q}), 303)
 
 
 @app.get("/health/workers")
@@ -2451,7 +2488,9 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             level=request.query_params.get("level", ""),
             system=request.query_params.get("system", ""),
             limit=_int("limit", 200, 10, 1000),
-            live=_int("live", 0, 0, 300))
+            live=_int("live", 0, 0, 300),
+            msg=request.query_params.get("ok", ""),
+            err=request.query_params.get("err", ""))
     if tab == "schema":
         try:
             pg = int(request.query_params.get("page", "1"))

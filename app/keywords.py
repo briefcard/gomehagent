@@ -600,6 +600,41 @@ MAX_SEEDS = 8
 #: query is not really about this site yet.
 STRIKING_BAND = (3.0, 40.0)
 
+#: What the UNATTENDED weekly top-up asks Semrush for. Search Console is free
+#: and the two domain pulls are 2,400 units; the per-seed expansion is 25,600
+#: more for the same eight seeds every Monday, re-bought for phrases that
+#: move on a scale of months. Expansion stays a deliberate act from the Plan
+#: tab until it is cached and budgeted (the 2026-09-07 audit's Phase 2).
+UNATTENDED_SOURCES = ("gsc", "own", "gap")
+
+
+def harvest_estimate(tenant: str, *, sources: tuple = (
+        "gsc", "own", "gap", "related", "questions"), seeds: tuple = (),
+        limit: int = 40) -> int:
+    """What a harvest with these arguments can cost, in Semrush units.
+
+    The number `preflight` checks before the first call and the Plan tab
+    shows beside the button. Computed from the same clamps the tools apply,
+    so it is what the door would bill, not a guess beside it.
+    """
+    from . import seo_tools
+    units = 0
+    if "own" in sources:
+        units += seo_tools.estimate("domain_organic",
+                                    display_limit=min(int(limit or 30), 100))
+    if "gap" in sources:
+        units += seo_tools.estimate("domain_organic", display_limit=200)
+    expand = [s for s in ("related", "questions") if s in sources]
+    if expand:
+        n = (len(seeds) if seeds
+             else len([r for r in targets(tenant) if r.tier in ("head", "body")]))
+        per = min(int(limit or 30), 60)
+        units += min(n, MAX_SEEDS) * sum(
+            seo_tools.estimate("phrase_related" if s == "related"
+                               else "phrase_questions", display_limit=per)
+            for s in expand)
+    return units
+
 
 def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
         "gsc", "own", "gap", "related", "questions"), days: int = 28,
@@ -610,7 +645,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     interchangeable and their yields should be comparable — a source that
     never produces a win is one to stop spending API calls on.
     """
-    from . import sites
+    from . import seo_tools, sites
     profile = sites.get(tenant)
     added: dict[str, int] = {s: 0 for s in sources}
     notes: list[str] = []
@@ -628,6 +663,19 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
         """
         low = f" {phrase.lower()} "
         return any(f" {t} " in low or t in phrase.lower() for t in excl)
+
+    # THE BILL IS CHECKED ONCE, AT THE TOP. The door refuses call by call, but
+    # a harvest refused on its seventeenth call has spent sixteen — and on
+    # 2026-09-07 this loop asked seventeen more times after a zero balance.
+    # Search Console is free and still runs; the Semrush sources are dropped
+    # together, and the note says why in the door's own words.
+    paid = [s for s in sources if s != "gsc"]
+    if paid:
+        est = harvest_estimate(tenant, sources=sources, seeds=seeds, limit=limit)
+        why = seo_tools.preflight(tenant, est, what="this harvest")
+        if why:
+            notes.append(why)
+            sources = tuple(s for s in sources if s == "gsc")
 
     if "gsc" in sources:
         for r in _fetch_gsc(profile, days, limit * 3):
@@ -695,6 +743,11 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
                 "account is wrong. You can also pass seeds= to start from "
                 "phrases you already know.")
         for seed in pool:
+            if seo_tools.halted():
+                # The door shut mid-run. Stop asking rather than walk the
+                # rest of the pool collecting the same sentence.
+                notes.append(seo_tools.halted())
+                break
             if "related" in sources:
                 for r in _fetch_related(profile, seed, limit):
                     if r.get("keyword") and not _excluded(r["keyword"]):
@@ -1254,7 +1307,10 @@ def harvest_one(tenant: str, *, limit: int = 40) -> dict:
         return {"skipped": "topped up within the last "
                            f"{HARVEST_EVERY_DAYS} days"}
     try:
-        return harvest(tenant, limit=limit)
+        # UNATTENDED, so the cheap sources only. Nobody is watching a cron
+        # spend 25,600 units re-expanding last week's seeds; expansion is
+        # the Plan tab's button, where the cost is shown before the click.
+        return harvest(tenant, limit=limit, sources=UNATTENDED_SOURCES)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:140]}"}
 
@@ -2358,10 +2414,20 @@ def rivals_refresh(tenant: str, *, top: int = RIVALS_MAX_PHRASES,
     own = _bare(profile.get("domain", ""))
     scope = rivals_scope(tenant, top=top)
     fetched = skipped = failed = 0
+    refused = ""
+    due = [p for p in scope if force or not _serp_fresh(tenant, p)]
+    if due:
+        from . import seo_tools
+        refused = seo_tools.preflight(
+            tenant, len(due) * seo_tools.estimate("phrase_organic",
+                                                  display_limit=RIVALS_DEPTH),
+            what="the rivals refresh")
     for phrase in scope:
         if not force and _serp_fresh(tenant, phrase):
             skipped += 1
             continue
+        if refused:
+            break
         rows = _fetch_serp(profile, phrase, RIVALS_DEPTH)
         fetched += 1
         if not rows:
@@ -2389,7 +2455,7 @@ def rivals_refresh(tenant: str, *, top: int = RIVALS_MAX_PHRASES,
             s.commit()
     return {"tenant": tenant, "scope": len(scope), "fetched": fetched,
             "skipped": skipped, "failed": failed, "cap": RIVALS_MAX_PHRASES,
-            "depth": RIVALS_DEPTH}
+            "depth": RIVALS_DEPTH, "refused": refused}
 
 
 def overtaking(tenant: str) -> list[dict]:

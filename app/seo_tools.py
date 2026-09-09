@@ -11,6 +11,8 @@ Grounding: propose_* verifies every link in the content against the real site
 hallucinated URL or a product/service link that doesn't exist. Writes are
 approval-gated; nothing publishes until Gomeh approves.
 """
+import contextvars
+import datetime as dt
 import json
 
 import httpx
@@ -35,11 +37,299 @@ _GOOGLE_TOOLS = {"gsc_top_queries", "gsc_top_pages", "gsc_page_queries", "gsc_tr
 # ---------------------------------------------------------------------------
 # Semrush client (platform-agnostic research)
 # ---------------------------------------------------------------------------
+#: THE BILL IS PER LINE, AT A PRICE PER REPORT. Verified 2026-09-07 against
+#: developer.semrush.com/api/v3/analytics/{keyword,domain,overview}-reports.
+#: A report absent here is charged at the dearest known rate, so an unpriced
+#: call can never read as free. Related keywords and questions — the two the
+#: harvest fans out per seed — cost FOUR TIMES a domain report, which is why
+#: 880 lines were 28,000 units and a cost reasoned about in lines was wrong on
+#: exactly the part that mattered.
+UNIT_PRICE = {
+    "domain_rank": 10, "domain_ranks": 10, "domain_rank_history": 10,
+    "domain_organic": 10, "phrase_organic": 10, "phrase_this": 10,
+    "phrase_these": 10, "phrase_all": 10,
+    "phrase_fullsearch": 20, "phrase_adwords": 20, "domain_adwords": 20,
+    "rank_difference": 20,
+    "phrase_related": 40, "phrase_questions": 40, "domain_organic_organic": 40,
+    "phrase_kdi": 50,
+}
+UNPRICED_RATE = 50
+#: Sent when a caller names no `display_limit` on a per-line report. The API's
+#: own default is 10,000 lines — 400,000 units for one related-keywords call.
+DEFAULT_LINES = 30
+#: The most lines one call may ask for, whoever asks. The widest read the
+#: harvest makes is the domain report; nothing here needs more.
+MAX_LINES = 300
+#: Reports that return one line per subject and take no `display_limit`.
+FIXED_LINES = {"domain_rank": 1, "domain_ranks": 1, "rank": 1}
+#: The one batch report Semrush offers: lines = phrases sent, up to 100 a call.
+BATCH_REPORTS = {"phrase_these"}
+BATCH_MAX = 100
+
+#: How long a zero balance keeps the door shut without a fresh reading. Units
+#: come back when the owner buys them, which the daily reading and the
+#: console button both notice and clear.
+HALT_HOURS = 24
+BALANCE_URL = "https://www.semrush.com/users/countapiunits.html"
+#: A balance reading older than this is re-read before a spending job starts.
+BALANCE_FRESH_HOURS = 1
+
+
+def price_of(report: str) -> int:
+    return int(UNIT_PRICE.get(report, UNPRICED_RATE))
+
+
+def lines_asked(report: str, params: dict) -> int:
+    """How many lines this call can be billed for, from what it sends."""
+    if report in FIXED_LINES:
+        return FIXED_LINES[report]
+    if report in BATCH_REPORTS:
+        return max(1, len([p for p in str(params.get("phrase", "")).split(";")
+                           if p.strip()]))
+    try:
+        asked = int(params.get("display_limit") or DEFAULT_LINES)
+    except (TypeError, ValueError):
+        asked = DEFAULT_LINES
+    return max(1, min(asked, MAX_LINES))
+
+
+def estimate(report: str, **params) -> int:
+    """The most units one call can cost: the lines it may return × the price."""
+    return lines_asked(report, params) * price_of(report)
+
+
+def record_reading(units: int, source: str, *, halted_until=None,
+                   note: str = "") -> None:
+    """File one reading of the shared key. The newest one is the state."""
+    with db.SessionLocal() as s:
+        s.add(db.SemrushReading(units=int(units or 0), source=source,
+                                halted_until=halted_until, note=(note or "")[:300]))
+        s.commit()
+
+
+def _newest_reading():
+    with db.SessionLocal() as s:
+        row = (s.query(db.SemrushReading)
+               .order_by(db.SemrushReading.at.desc()).first())
+        if row is not None:
+            s.expunge(row)
+        return row
+
+
+def halted() -> str:
+    """"" when the door is open, else why it is shut. No request is made.
+
+    Read off the newest reading: a zero with time left on it is the halt, and
+    anything newer — a positive reading from the console, the daily job or a
+    preflight — is the door open again. Nothing to clear, nothing to drift.
+    """
+    r = _newest_reading()
+    if r is None or int(r.units or 0) > 0 or not r.halted_until:
+        return ""
+    when = db.as_utc(r.halted_until)
+    if when <= db.utcnow():
+        return ""
+    return (f"Semrush is halted until {when:%b %d %H:%M} UTC: the API units "
+            f"balance was zero at {db.as_utc(r.at):%Y-%m-%dT%H:%M}. No request "
+            f"was made. Buy units, then read the balance (Diagnostics → Read "
+            f"the balance now) to reopen it.")
+
+
+def _halt(body: str, tenant: str = "") -> None:
+    """Shut the door on a zero balance, ONCE, and say so in the ledger.
+
+    One ledger row, not one per refused call. The harvest that met this on
+    2026-09-07 made seventeen more requests after the first refusal, and
+    seventeen identical failures in Diagnostics was the symptom the owner
+    reported. The halt is the fact; the refusals it prevents are not.
+    """
+    if halted():
+        return
+    record_reading(0, "refusal",
+                   halted_until=db.utcnow() + dt.timedelta(hours=HALT_HOURS),
+                   note=body)
+    from . import toolcalls as _tc
+    _tc.record(tenant, "semrush_halt", source="seo", provider="semrush",
+               ok=False, error=f"halted for {HALT_HOURS}h — {(body or '')[:120]}")
+
+
+def units_balance(tenant: str = "", source: str = "console") -> int | None:
+    """Read the remaining API units. FREE, one number, and the only honest
+    answer to "can this run finish". None when the endpoint did not answer
+    with a number.
+
+    A positive balance reopens a halted door: the halt exists because the
+    balance was zero, and this is the reading that says it no longer is.
+    """
+    import time as _clock
+    from . import toolcalls as _tc
+    if not config.SEMRUSH_API_KEY:
+        return None
+    t0 = _clock.monotonic()
+    try:
+        r = httpx.get(BALANCE_URL, params={"key": config.SEMRUSH_API_KEY},
+                      timeout=15)
+        body = (r.text or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        _tc.record(tenant, "semrush_balance", source="seo", provider="semrush",
+                   ok=False, error=exc.__class__.__name__,
+                   ms=int((_clock.monotonic() - t0) * 1000))
+        return None
+    digits = body.replace(",", "").strip()
+    if r.status_code != 200 or not digits.isdigit():
+        _tc.record(tenant, "semrush_balance", source="seo", provider="semrush",
+                   ok=False, error=body[:160],
+                   ms=int((_clock.monotonic() - t0) * 1000), bytes_back=len(body))
+        return None
+    units = int(digits)
+    # A positive reading filed AFTER a halt is what reopens the door — the
+    # newest reading is the state. A zero reading keeps it shut for another
+    # HALT_HOURS, with this reading as the reason.
+    record_reading(units, source,
+                   halted_until=(None if units > 0 else
+                                 db.utcnow() + dt.timedelta(hours=HALT_HOURS)),
+                   note="" if units > 0 else "balance read as zero")
+    _tc.record(tenant, "semrush_balance", source="seo", provider="semrush",
+               ok=True, ms=int((_clock.monotonic() - t0) * 1000),
+               bytes_back=len(body))
+    return units
+
+
+def balance_cached(max_age_hours: float | None = None) -> dict:
+    """The last balance reading — {units, at, age_hours} — or {} when there is
+    none, or none young enough when `max_age_hours` is given."""
+    with db.SessionLocal() as s:
+        r = (s.query(db.SemrushReading)
+             .filter(db.SemrushReading.source != "refusal")
+             .order_by(db.SemrushReading.at.desc()).first())
+        if r is not None:
+            s.expunge(r)
+    if r is None:
+        return {}
+    at = db.as_utc(r.at)
+    age = (db.utcnow() - at).total_seconds() / 3600
+    if max_age_hours is not None and age > max_age_hours:
+        return {}
+    return {"units": int(r.units or 0), "at": at.isoformat(timespec="minutes"),
+            "age_hours": round(age, 1)}
+
+
+def balance_reading() -> dict:
+    """The daily job: read the balance, keep it, and tell the owner when it is
+    low — before the week's harvest finds out by being refused."""
+    units = units_balance(source="daily")
+    out = {"units": units, "low": False}
+    if units is None:
+        return out
+    if units < config.SEMRUSH_LOW_BALANCE:
+        out["low"] = True
+        try:
+            from . import channel
+            channel.send_text(
+                f"Semrush has {units:,} API units left (the low line is "
+                f"{config.SEMRUSH_LOW_BALANCE:,}). A harvest costs more than "
+                f"that and will be refused before it starts. Top up at Semrush "
+                f"→ Subscription info → API units.")
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def cap_for(tenant: str) -> int:
+    """This account's weekly ceiling: its own setting, else the default."""
+    if tenant:
+        try:
+            from . import tenants
+            t = tenants.get(tenant)
+            v = (getattr(t, "analytics", None) or {}).get("semrush_weekly_cap")
+            if v not in (None, ""):
+                return max(0, int(v))
+        except Exception:  # noqa: BLE001
+            pass
+    return config.SEMRUSH_ACCOUNT_WEEKLY_CAP
+
+
+def over_cap(tenant: str, est: int) -> str:
+    """"" if `est` more units fit under every ceiling this week, else which
+    ceiling they break. Read from the ledger, never from a counter: a counter
+    drifts from the rows it summarises the first time a write is missed."""
+    from . import toolcalls as _tc
+    total = _tc.spent("semrush", days=7)
+    if total + est > config.SEMRUSH_WEEKLY_CAP:
+        return (f"refused: the service's Semrush cap is "
+                f"{config.SEMRUSH_WEEKLY_CAP:,} units a week and {total:,} are "
+                f"spent; this could cost {est:,}. Raise SEMRUSH_WEEKLY_CAP or "
+                f"wait for the week to roll.")
+    if tenant:
+        cap = cap_for(tenant)
+        mine = _tc.spent("semrush", tenant=tenant, days=7)
+        if mine + est > cap:
+            return (f"refused: {tenant}'s Semrush cap is {cap:,} units a week "
+                    f"and {mine:,} are spent; this could cost {est:,}. Raise "
+                    f"analytics.semrush_weekly_cap on the account or wait for "
+                    f"the week to roll.")
+    return ""
+
+
+#: An agent turn's own budget, opened by the kernel around the step loop. A
+#: chat is not a harvest: the SEO role gets sixteen tool steps a message and
+#: its identity tells it to lead with a 2,000-unit report, so without this a
+#: thorough answer spent more than a week's cap before proposing anything.
+_TURN: contextvars.ContextVar = contextvars.ContextVar("semrush_turn", default=None)
+
+
+def start_turn(cap: int | None = None):
+    """Open a turn's budget; returns the token `end_turn` takes."""
+    return _TURN.set({"cap": config.SEMRUSH_TURN_CAP if cap is None else int(cap),
+                      "spent": 0})
+
+
+def end_turn(token) -> None:
+    _TURN.reset(token)
+
+
+def _turn_room(est: int) -> str:
+    t = _TURN.get()
+    if t is None:
+        return ""
+    if t["spent"] + est > t["cap"]:
+        return (f"refused: this turn's Semrush budget is {t['cap']:,} units and "
+                f"{t['spent']:,} are spent; this could cost {est:,}. Work from "
+                f"Search Console and the keyword map, or ask for a harvest.")
+    return ""
+
+
+def preflight(tenant: str, est: int, *, what: str = "this run") -> str:
+    """"" if a job that will cost about `est` units may start, else why not.
+
+    Checked ONCE at the top of a job rather than left to the door: a harvest
+    refused on its seventeenth call has already spent sixteen. The balance is
+    re-read when the last reading is stale, and that read is free.
+    """
+    why = halted()
+    if why:
+        return why
+    why = over_cap(tenant, est)
+    if why:
+        return why
+    b = balance_cached(BALANCE_FRESH_HOURS)
+    units = b.get("units") if b else units_balance(tenant, source="preflight")
+    if units is not None and units < est:
+        if units == 0:
+            return halted() or (f"refused: Semrush has no API units left, so "
+                                f"{what} cannot start.")
+        return (f"refused: Semrush has {units:,} API units left and {what} "
+                f"could cost about {est:,}. Top up before running it.")
+    return ""
+
+
 #: Which account a Semrush call is being made FOR. Passed explicitly, never
 #: ambient: one API key serves every client, so a call that cannot say whose
 #: work it was is a unit of a shared quota nobody can budget.
 def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
-    """One Semrush read, recorded against the account that asked for it.
+    """One Semrush read, priced, budgeted and recorded against the account
+    that asked for it. THE ONE DOOR: the cron, the console buttons and the
+    agent all come through here, so what is checked here binds them all.
 
     SEMRUSH IS READ-ONLY AND CANNOT POLLUTE THE SEMRUSH ACCOUNT. This is a GET
     against their index; Projects, Position Tracking and Site Audit are a
@@ -55,20 +345,50 @@ def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
     `http_seam` does not fit here — its `tenant_of` maps the seam's first
     argument to an account, and this one's is a report type — so the plain
     recorder is used instead.
+
+    Three things happen before a request leaves, in this order:
+
+    * **A halt is honoured without a round trip.** `ERROR 132 :: API UNITS
+      BALANCE IS ZERO` shuts the door for `HALT_HOURS` or until a balance
+      reading says otherwise. The harvest that met it on 2026-09-07 made
+      seventeen more requests after the first refusal.
+    * **The line count is bounded.** A per-line report with no `display_limit`
+      is sent `DEFAULT_LINES`, never the API's own 10,000; nothing may ask for
+      more than `MAX_LINES`, whoever asks.
+    * **The cost is estimated and checked** against the week's caps and the
+      turn's budget. A refusal is a sentence and ONE ledger row that says
+      "refused", which Diagnostics files as logic — the door doing its job —
+      never as a failed connection.
+
+    A successful read is billed `lines returned × price` and the units land on
+    the ledger row. That number, not the call count, is what Diagnostics shows
+    and what the caps are read from.
     """
     import time as _clock
     from . import toolcalls as _tc
 
     if not config.SEMRUSH_API_KEY:
         return "Semrush is not configured (set SEMRUSH_API_KEY in the environment)."
+    why = halted()
+    if why:
+        return why
+    if report not in FIXED_LINES and report not in BATCH_REPORTS:
+        params["display_limit"] = lines_asked(report, params)
+    est = estimate(report, **params)
+    why = over_cap(_tenant, est) or _turn_room(est)
+    if why:
+        _tc.record(_tenant, "semrush_refused", source="seo", ok=False,
+                   error=why[:300], ref=report)
+        return why
     query = {"type": report, "key": config.SEMRUSH_API_KEY, **params}
     _t0 = _clock.monotonic()
+    price = price_of(report)
 
-    def _log(ok: bool, err: str = "", body: str = "") -> None:
+    def _log(ok: bool, err: str = "", body: str = "", units: int = 0) -> None:
         _tc.record(_tenant, f"semrush_{report}", source="seo",
                    provider="semrush", ok=ok, error=err,
                    ms=int((_clock.monotonic() - _t0) * 1000),
-                   bytes_back=len(body or ""))
+                   bytes_back=len(body or ""), units=units)
 
     try:
         r = httpx.get(SEMRUSH_BASE, params=query, timeout=30)
@@ -83,11 +403,13 @@ def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
             # broken key on the Diagnostics failure rate.
             _log(True, body=body)
             return "No Semrush data for that query."
+        if "ERROR 132" in body.upper() or "BALANCE IS ZERO" in body.upper():
+            _halt(body, _tenant)
         _log(False, body[:160], body)
         return f"Semrush error: {body[:160]}"
-    _log(True, body=body)
     lines = body.splitlines()
     if len(lines) < 2:
+        _log(True, body=body)
         return "No Semrush data for that query."
     headers = [h.strip() for h in lines[0].split(";")]
     rows = []
@@ -95,6 +417,11 @@ def _semrush(report: str, _tenant: str = "", **params) -> list[dict] | str:
         cells = line.split(";")
         if len(cells) == len(headers):
             rows.append(dict(zip(headers, cells)))
+    units = len(rows) * price
+    _log(True, body=body, units=units)
+    turn = _TURN.get()
+    if turn is not None:
+        turn["spent"] += units
     return rows
 
 
@@ -182,13 +509,28 @@ def semrush_serp_rivals(phrase: str, database: str = "", limit: int = 10,
 
 
 def semrush_keyword_metrics(phrases: str, database: str = "", _tenant: str = "") -> str:
-    rows = _semrush("phrase_these", _tenant=_tenant, phrase=phrases,
-                    database=database or config.SEO_DATABASE)
-    if isinstance(rows, str):
-        return rows
-    slim = [{"keyword": r.get("Keyword"), "volume": r.get("Search Volume"),
-             "cpc": r.get("CPC"), "competition": r.get("Competition"),
-             "results": r.get("Number of Results")} for r in rows]
+    """Volume, CPC and competition for many phrases at once.
+
+    THE ONE BATCH READ SEMRUSH OFFERS: `phrase_these` takes up to `BATCH_MAX`
+    phrases a request at 10 units a line, against 40 a line for the per-seed
+    expansions. A longer list is sent in batches of that size; a batch that
+    is refused stops the rest and what was read is returned.
+    """
+    wanted = [p.strip() for p in str(phrases or "").split(";") if p.strip()]
+    if not wanted:
+        return "No phrases to look up."
+    slim: list[dict] = []
+    for i in range(0, len(wanted), BATCH_MAX):
+        rows = _semrush("phrase_these", _tenant=_tenant,
+                        phrase=";".join(wanted[i:i + BATCH_MAX]),
+                        database=database or config.SEO_DATABASE)
+        if isinstance(rows, str):
+            if slim:
+                break
+            return rows
+        slim.extend({"keyword": r.get("Keyword"), "volume": r.get("Search Volume"),
+                     "cpc": r.get("CPC"), "competition": r.get("Competition"),
+                     "results": r.get("Number of Results")} for r in rows)
     return json.dumps(slim)
 
 
@@ -255,6 +597,11 @@ def capture_snapshot(domain: str = "", database: str = "",
                      _tenant: str = "") -> str:
     domain = domain or config.SEO_DOMAIN
     database = database or config.SEO_DATABASE
+    why = preflight(_tenant, estimate("domain_rank")
+                    + estimate("domain_organic", display_limit=50),
+                    what="the weekly snapshot")
+    if why:
+        return why
     ov = _semrush("domain_rank", _tenant=_tenant, domain=domain, database=database)
     if isinstance(ov, str):
         return ov

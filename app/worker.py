@@ -1356,6 +1356,12 @@ def main() -> None:
         from . import seo_tools
         sched.add_job(_safe(seo_tools.capture_snapshot, "seo snapshot"),
                       "cron", day_of_week="mon", hour=6, minute=0)
+        # The balance, daily and free: one number that says whether the
+        # week's harvest can finish, and the reading that reopens the door
+        # after a top-up. Before the snapshot, so Monday's first spend is
+        # checked against today's figure rather than yesterday's.
+        sched.add_job(_safe(seo_tools.balance_reading, "semrush balance"),
+                      "cron", hour=5, minute=50)
     # Meeting scans 3x daily: morning, afternoon, evening (EST)
     for h in (8, 13, 18):
         sched.add_job(_safe(ops_jobs.JOBS["meeting_scan"], "meeting scan"),

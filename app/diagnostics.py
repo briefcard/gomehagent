@@ -251,9 +251,25 @@ def platforms(tenant: str = "", days: int = 30) -> dict:
                       db.ToolCall, tenant).all()
         s.expunge_all()
 
+    # SEMRUSH IS THE ONE PROVIDER WITH A BILL, and calls say nothing about
+    # it: one row can cost ten units or two thousand. Units by account, the
+    # balance the last reading saw, and whether the door is shut — so the
+    # page can say how much of the shared key each client spent and what is
+    # left, from rows already written and a reading already taken.
+    from . import config as _cfg, seo_tools as _st
+    by_tenant: dict[str, int] = {}
+    for r in rows:
+        if r.provider == "semrush" and int(r.units or 0):
+            k = r.tenant or "unattributed"
+            by_tenant[k] = by_tenant.get(k, 0) + int(r.units or 0)
+    semrush = {"units": sum(by_tenant.values()),
+               "by_tenant": dict(sorted(by_tenant.items(), key=lambda kv: -kv[1])),
+               "balance": _st.balance_cached(), "halted": _st.halted(),
+               "weekly_cap": _cfg.SEMRUSH_WEEKLY_CAP,
+               "configured": bool(_cfg.SEMRUSH_API_KEY)}
     if not rows:
         return {"tenant": tenant, "days": days, "calls": 0, "providers": [],
-                "slow": [],
+                "slow": [], "semrush": semrush,
                 "note": ("no tool call was recorded in this window — the "
                          "platforms were not reached, which is not the same "
                          "as them being healthy")}
@@ -271,8 +287,9 @@ def platforms(tenant: str = "", days: int = 30) -> dict:
         if not r.provider:
             continue        # our own tables say nothing about their stack
         p = prov.setdefault(r.provider, {"calls": 0, "failed": 0, "ms": [],
-                                         "last_error": ""})
+                                         "last_error": "", "units": 0})
         p["calls"] += 1
+        p["units"] += int(r.units or 0)
         if r.ok != "yes":
             p["failed"] += 1
             p["last_error"] = p["last_error"] or (r.error or "")[:200]
@@ -298,7 +315,7 @@ def platforms(tenant: str = "", days: int = 30) -> dict:
         key=lambda x: -(x["median_ms"] or 0))
     slow = [t for t in slow if (t["median_ms"] or 0) >= SLOW_MS][:10]
 
-    return {"tenant": tenant, "days": days, "calls": len(rows),
+    return {"tenant": tenant, "days": days, "calls": len(rows), "semrush": semrush,
             "providers": providers, "slow": slow, "slow_after_ms": SLOW_MS,
             "note": ""}
 
@@ -410,7 +427,14 @@ def events(tenant: str = "", days: int = 7, level: str = "",
         for r in _scope(s.query(db.ToolCall).filter(db.ToolCall.at >= since),
                         db.ToolCall, tenant).all():
             ms = int(r.ms) if (r.ms or "").isdigit() else 0
-            if r.ok != "yes":
+            if r.ok != "yes" and (r.error or "").startswith("refused"):
+                # The door said no BEFORE any round trip — a cap, a turn's
+                # budget. The legend on the page calls that logic: the system
+                # doing its job. Filed as a failure it would read as a broken
+                # key, which is the opposite of what happened.
+                lvl, layer = "warn", "logic"
+                detail = (r.error or "")[:300]
+            elif r.ok != "yes":
                 lvl, layer = "fail", "functionality"
                 detail = (r.error or "failed with no error recorded")[:300]
             elif ms >= SLOW_MS:

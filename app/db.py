@@ -563,6 +563,12 @@ class ToolCall(Base):
     ms = Column(String, default="")          # round trip, for the slow ones
     bytes_back = Column(String, default="")  # size, never the payload itself
     ref = Column(String, default="")         # run id / message id, when known
+    #: What the call COST in the provider's own currency, when it has one.
+    #: Semrush bills per line returned (`seo_tools.UNIT_PRICE`); every other
+    #: provider leaves this 0. Calls and bytes said nothing about the bill:
+    #: eighteen Semrush rows read the same whether they cost nothing or
+    #: twenty-eight thousand units.
+    units = Column(Integer, default=0)
 
 
 class ReportedFigure(Base):
@@ -1022,6 +1028,35 @@ class SeoSiteConfig(Base):
     gsc_site = Column(String, default="")     # e.g. sc-domain:bacimilanousa.com
     ga4_property = Column(String, default="")  # numeric GA4 property id
     updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class SemrushReading(Base):
+    """One reading of the shared Semrush key's remaining API units.
+
+    A SERIES, not a setting, because the state the door needs is derived from
+    it: the newest reading is what is left, a zero reading with time on it IS
+    the halt, and a newer positive reading is what reopens the door. One
+    record, three facts, no marker that can drift from the thing it marks.
+
+    Written by `seo_tools` alone — the free `countapiunits` read (daily, from
+    the console, or before a spending job) and the door itself when Semrush
+    answers `ERROR 132`. Carries no tenant: the key is the service's, shared by
+    every account. WHICH account spent the units is on `tool_calls`, which
+    carries one.
+    """
+
+    __tablename__ = "semrush_readings"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    units = Column(Integer, default=0)
+    #: daily | console | preflight | refusal — refusal is the door seeing
+    #: ERROR 132, which is a zero reading Semrush made for us.
+    source = Column(String, default="")
+    #: Set on a zero reading: how long the door stays shut without a fresh
+    #: reading. Empty on a positive one.
+    halted_until = Column(DateTime(timezone=True))
+    note = Column(Text, default="")
 
 
 class KeywordTarget(Base):
