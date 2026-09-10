@@ -566,8 +566,14 @@ def _f(v: str) -> float:
 
 
 def semrush_domain_overview(domain: str = "", database: str = "", _tenant: str = "") -> str:
-    rows = _semrush("domain_rank", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
-                    database=database or config.SEO_DATABASE)
+    # THROUGH THE KEPT ANSWER, like everything else. This was the last caller
+    # buying `domain_rank` raw while `capture_snapshot` bought the same line
+    # through the cache — one fact, two purchases, which is the exact shape of
+    # the four-callers-one-domain-read this work exists to end. It matters
+    # more than its ten units suggests: `tenants.verify` calls it once per
+    # account every time somebody presses Test connections.
+    rows = semrush("domain_rank", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
+                   database=database or config.SEO_DATABASE)
     if isinstance(rows, str):
         return rows
     return json.dumps(rows[0] if rows else {})
@@ -595,9 +601,13 @@ def semrush_top_keywords(domain: str = "", database: str = "",
 
 
 def semrush_competitors(domain: str = "", database: str = "", limit: int = 15, _tenant: str = "") -> str:
-    rows = _semrush("domain_organic_organic", _tenant=_tenant, domain=domain or config.SEO_DOMAIN,
-                    database=database or config.SEO_DATABASE,
-                    display_limit=min(int(limit or 15), 50))
+    # 40 UNITS A LINE, and the agent may call it every turn. Who competes with
+    # a domain overall is the slowest-moving fact any of these reports carries,
+    # so it is kept for `PULL_TTL_DAYS["domain_organic_organic"]`.
+    rows = semrush("domain_organic_organic", _tenant=_tenant,
+                   domain=domain or config.SEO_DOMAIN,
+                   database=database or config.SEO_DATABASE,
+                   display_limit=min(int(limit or 15), 50))
     if isinstance(rows, str):
         return rows
     slim = [{"competitor": r.get("Domain"),
@@ -661,9 +671,9 @@ def semrush_keyword_metrics(phrases: str, database: str = "", _tenant: str = "")
         return "No phrases to look up."
     slim: list[dict] = []
     for i in range(0, len(wanted), BATCH_MAX):
-        rows = _semrush("phrase_these", _tenant=_tenant,
-                        phrase=";".join(wanted[i:i + BATCH_MAX]),
-                        database=database or config.SEO_DATABASE)
+        rows = semrush("phrase_these", _tenant=_tenant,
+                       phrase=";".join(wanted[i:i + BATCH_MAX]),
+                       database=database or config.SEO_DATABASE)
         if isinstance(rows, str):
             if slim:
                 break

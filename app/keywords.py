@@ -709,6 +709,11 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     """
     from . import seo_tools, sites
     profile = sites.get(tenant)
+    # WHAT THIS RUN COSTS, measured across it. `spent_on` reads a window, so
+    # reporting it raw made a second harvest inside that window claim the
+    # first one's units as well — a number that lies upward, on the one figure
+    # somebody would use to decide whether the budget is working.
+    _spent_before = spent_on(tenant)
     added: dict[str, int] = {s: 0 for s in sources}
     notes: list[str] = []
 
@@ -732,8 +737,15 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     # Search Console is free and still runs; the Semrush sources are dropped
     # together, and the note says why in the door's own words.
     paid = [s for s in sources if s != "gsc"]
-    if paid:
-        est = harvest_estimate(tenant, sources=sources, seeds=seeds, limit=limit)
+    est = (harvest_estimate(tenant, sources=sources, seeds=seeds, limit=limit)
+           if paid else 0)
+    # A HARVEST THAT WILL BUY NOTHING ASKS NOTHING, including the balance.
+    # `preflight` re-reads the balance when the last reading is stale, and the
+    # daily one is fourteen hours old by the time the Monday cron runs — so a
+    # fully cached top-up would have made a round trip to find out it needed
+    # no units. Free, and still a call nobody asked for. The door still guards
+    # every individual read, so a wrong estimate cannot spend anything.
+    if est:
         why = seo_tools.preflight(tenant, est, what="this harvest")
         if why:
             notes.append(why)
@@ -844,7 +856,7 @@ def harvest(tenant: str, *, seeds: tuple = (), sources: tuple = (
     grouped = cluster(tenant)
     ranked = score(tenant)
     return {"tenant": tenant, "added": added, **grouped,
-            "spent": spent_on(tenant),
+            "spent": max(0, spent_on(tenant) - _spent_before),
             "scored": ranked["scored"], "top": ranked["top"], "notes": notes}
 
 
@@ -1448,6 +1460,7 @@ def refresh_metrics(tenant: str, *, limit: int = 500) -> dict:
         return {"skipped": "no keyword map — nothing to refresh"}
     profile = sites.get(tenant)
     database = profile.get("database", "") or config.SEO_DATABASE
+    _spent_before = spent_on(tenant)
     est = seo_tools.estimate("phrase_these",
                              phrase=";".join(r.phrase for r in rows))
     why = seo_tools.preflight(tenant, est, what="the monthly metrics refresh")
@@ -1469,7 +1482,7 @@ def refresh_metrics(tenant: str, *, limit: int = 500) -> dict:
                cpc=float(r.get("cpc") or 0.0))
         done += 1
     return {"tenant": tenant, "phrases": len(rows), "refreshed": done,
-            "spent": spent_on(tenant)}
+            "spent": max(0, spent_on(tenant) - _spent_before)}
 
 
 def refresh_metrics_one(tenant: str, *, limit: int = 500) -> dict:

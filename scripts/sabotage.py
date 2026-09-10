@@ -69,6 +69,30 @@ SABOTAGES = [
         "suites": ['test_semrush_units.py'],
         "why": "the SEO agent is told to open every piece of research with the most expensive report it can call, and is told nothing about the per-message budget it will hit or what a refusal means",
     },
+    {
+        "name": 'a_declared_window_reaches_the_kept_read',
+        "file": 'app/seo_tools.py',
+        "find": '    rows = semrush("domain_organic_organic", _tenant=_tenant,\n',
+        "replace": '    rows = _semrush("domain_organic_organic", _tenant=_tenant,  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "a report whose answer the table says is kept for a month is bought raw every time instead — 600 units an agent turn for the slowest-moving fact any of these reports carries, with a knob that reads as working and reaches nothing",
+    },
+    {
+        "name": 'every_semrush_call_names_the_account',
+        "file": 'app/tenants.py',
+        "find": '                domain, (t.analytics or {}).get("semrush_db", "us"),\n                _tenant=key) or "").strip()',
+        "replace": '                domain, (t.analytics or {}).get("semrush_db", "us")) or "").strip()  # SABOTAGE',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "pressing Test connections spends ten units per account against nobody, so the spend counts toward no cap, appears under no client on the Diagnostics card, and cannot be billed or budgeted — the one thing the ledger was built to prevent",
+    },
+    {
+        "name": 'a_run_reports_its_own_cost',
+        "file": 'app/keywords.py',
+        "find": '            "spent": max(0, spent_on(tenant) - _spent_before),\n',
+        "replace": '            "spent": spent_on(tenant),  # SABOTAGE\n',
+        "suites": ['test_semrush_asked_once.py'],
+        "why": "a harvest claims every unit the account spent in the last half hour as its own, so two runs close together each report the pair's total and the one number somebody would use to judge the budget lies upward",
+    },
     # --- the same question is bought once (2026-09-09) ---------------------
     {
         "name": 'an_answer_is_bought_once',

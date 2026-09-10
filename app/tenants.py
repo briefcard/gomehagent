@@ -416,8 +416,13 @@ def verify(key: str) -> dict:
     if caps["analytics"] and domain and config.SEMRUSH_API_KEY:
         try:
             from . import seo_tools
+            # NAMED, because this spends. One key serves every account, so a
+            # call that cannot say whose work it was is a unit of a shared
+            # quota nobody can budget — and this one runs once per account
+            # every time somebody presses Test connections.
             raw = (seo_tools.semrush_domain_overview(
-                domain, (t.analytics or {}).get("semrush_db", "us")) or "").strip()
+                domain, (t.analytics or {}).get("semrush_db", "us"),
+                _tenant=key) or "").strip()
             ok = raw.startswith("{") and raw != "{}"
             out["analytics"] = {"status": "ok" if ok else "FAIL",
                                 "detail": raw[:120]}

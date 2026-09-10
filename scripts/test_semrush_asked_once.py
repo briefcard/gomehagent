@@ -24,6 +24,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -217,7 +218,6 @@ def main() -> int:
                plan["units"] == 2 * 2 * seo_tools.estimate(
                    "phrase_related", display_limit=seo_tools.EXPANSION_LINES),
                str(plan["units"]))
-            before = keywords.spent_on("baci")
             out = keywords.harvest("baci")
             ck("two seeds x two reports left as four requests",
                len(http.of("phrase_related")) == 2
@@ -228,9 +228,13 @@ def main() -> int:
             # LINES RETURNED, not lines asked for — the door bills what came
             # back. One domain read (25 rows at 10) plus two seeds x related
             # (5 rows at 40) and questions (3 rows at 40).
+            # THE RUN'S OWN COST, not a window's. `spent_on` reads the last
+            # thirty minutes, so reporting it raw made a second harvest claim
+            # the first one's units too — a number that lies upward, on the
+            # one figure somebody would use to judge the budget.
             ck("what it spent is the lines it got back, at each report's price",
-               out["spent"] - before == 25 * 10 + 2 * (5 * 40) + 2 * (3 * 40),
-               f"{out['spent'] - before}")
+               out["spent"] == 25 * 10 + 2 * (5 * 40) + 2 * (3 * 40),
+               f"{out['spent']}")
 
             http.reset()
             est2 = keywords.harvest_estimate("baci")
@@ -244,6 +248,10 @@ def main() -> int:
                and len(keywords.expansion_plan("baci")["warm"]) == 4,
                f"{len(http.of('phrase_related'))}r, "
                f"{len(keywords.expansion_plan('baci')['warm'])} warm after")
+            ck("the run right after it reports its OWN cost, not both runs'",
+               out2["spent"] == 2 * (5 * 40) + 2 * (3 * 40),
+               f"{out2['spent']} — a window would have carried "
+               f"{out['spent']} of it over")
             ck("it still files what the warm seeds expand to",
                out2["added"]["related"] > 0 and out2["added"]["questions"] > 0,
                str(out2["added"]))
@@ -303,6 +311,46 @@ def main() -> int:
            len(plan["warm"]) + len(plan["buy"]) == keywords.MAX_SEEDS
            and len(plan["warm"]) <= keywords.MAX_SEEDS,
            f"{len(plan['warm'])} warm + {len(plan['buy'])} bought")
+
+        # COMPUTED FROM THE SOURCE, never surveyed by eye. Three of these
+        # windows were declared and reached nothing: `domain_rank`,
+        # `domain_organic_organic` and `phrase_these` still went through the
+        # raw door while the table said they were kept, which is a knob that
+        # does not exist wearing the label of one.
+        import ast
+        st_src = open(os.path.join(ROOT, "app", "seo_tools.py")).read()
+        raw_reports = {
+            n.args[0].value
+            for n in ast.walk(ast.parse(st_src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "_semrush" and n.args
+            and isinstance(n.args[0], ast.Constant)
+            and isinstance(n.args[0].value, str)}
+        declared = set(seo_tools.PULL_TTL_DAYS) | {"phrase_related", "phrase_questions"}
+        ck("every report with a declared window goes through the kept read",
+           not (declared & raw_reports),
+           f"still raw: {sorted(declared & raw_reports)}")
+
+        # AND EVERY SPENDER NAMES THE ACCOUNT. One key serves every client, so
+        # a call that cannot say whose work it was is a unit of a shared quota
+        # nobody can budget. `tenants.verify` and `brief` both spent against
+        # nobody until this check existed.
+        unnamed = []
+        for path in sorted(pathlib.Path(ROOT, "app").glob("*.py")):
+            if path.name == "seo_tools.py":
+                continue
+            for n in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(n, ast.Call):
+                    continue
+                fn = n.func
+                name = (fn.attr if isinstance(fn, ast.Attribute)
+                        else fn.id if isinstance(fn, ast.Name) else "")
+                if not name.startswith("semrush_") or name == "semrush_serp_rivals":
+                    continue
+                if not any(k.arg == "_tenant" for k in n.keywords):
+                    unnamed.append(f"{path.name}:{n.lineno} {name}")
+        ck("every Semrush call outside the door names the account it spends for",
+           not unnamed, "; ".join(unnamed))
 
         print("\n— the monthly refresh goes through the one batch report —")
         http.reset()

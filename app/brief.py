@@ -185,11 +185,16 @@ def _signal_site(domain: str) -> dict:
     }
 
 
-def _signal_semrush(domain: str) -> dict:
+def _signal_semrush(domain: str, tenant: str = "") -> dict:
     from . import seo_tools
     if not config.SEMRUSH_API_KEY:
         raise RuntimeError("SEMRUSH_API_KEY not configured")
-    raw = (seo_tools.semrush_domain_overview(domain) or "").strip()
+    # `tenant` travels for the same reason it does everywhere else this touches
+    # Semrush: the units are billed against a shared key and an unattributed
+    # one is a cost nobody can budget. Empty is honest here — a brief is
+    # enriched from a domain before an account exists — and lands as
+    # "unattributed" on the Diagnostics card rather than silently on nobody.
+    raw = (seo_tools.semrush_domain_overview(domain, _tenant=tenant) or "").strip()
     if not raw.startswith("{"):
         # The helper returns a human-readable error string on failure; treating
         # that as "no organic presence" would invent a diagnosis.
@@ -206,13 +211,13 @@ def _signal_semrush(domain: str) -> dict:
 SIGNALS = {"site": _signal_site, "semrush": _signal_semrush}
 
 
-def enrich(domain: str) -> tuple[dict, list[str], list[str]]:
+def enrich(domain: str, tenant: str = "") -> tuple[dict, list[str], list[str]]:
     out, ok, failed = {}, [], []
     if not domain:
         return out, ok, ["no domain to enrich from"]
     for name, fn in SIGNALS.items():
         try:
-            out.update(fn(domain))
+            out.update(fn(domain, tenant) if name == "semrush" else fn(domain))
             ok.append(name)
         except Exception as exc:  # noqa: BLE001
             failed.append(f"{name}: {exc.__class__.__name__}")
