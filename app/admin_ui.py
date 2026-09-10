@@ -10904,6 +10904,93 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                   head=refresh, suffix=f"&amp;days={days}&amp;sub={view}")
 
 
+def _answer_engine_access(key: str, tenant: str) -> str:
+    """Whether an answer engine can read this site, and whether one sent anyone.
+
+    THE PRECONDITION FOR EVERYTHING ABOVE IT. Coverage, question-shaped clicks
+    and the answer-taken flag are all about pages an engine has to be able to
+    FETCH, and nothing on this console had ever asked whether it can. A robots
+    rule or a CDN setting changes without anybody here being told.
+
+    RENDERS WHAT WAS STORED and calls nothing: the check asks the client's own
+    site once per crawler, and doing that on every page view would hammer their
+    server and make the tab feel broken. The button runs it.
+    """
+    from . import answer_engines as _ae
+    got = _ae.stored(tenant)
+    btn = (f'<a href="/admin/answer_engines?key={_esc(key)}&amp;tenant='
+           f'{_esc(tenant)}&amp;ui=1"><button class="sec">'
+           f'{"Check again" if got else "Check whether engines can read us"}'
+           f'</button></a>')
+    if not got:
+        return (f'<h3>Can the engines read us</h3><p class="mut">Not checked '
+                f'yet. Everything above assumes an answer engine can fetch '
+                f'these pages, and a robots rule or a CDN setting can stop it '
+                f'without anybody being told.</p><p>{btn}</p>')
+
+    acc = got.get("access") or {}
+    ref = got.get("referrals") or {}
+    ok = acc.get("ok")
+    line = (f'<div class="{"ok" if ok else "bad" if ok is False else "mut"}">'
+            f'{_esc(acc.get("verdict", "not checked"))}</div>')
+    rows = ""
+    for token, meta in ((acc.get("robots") or {}).get("crawlers") or {}).items():
+        edge = ((acc.get("edge") or {}).get("crawlers") or {}).get(token) or {}
+        # A TRAINING CRAWLER THAT IS BLOCKED IS NOT A PROBLEM, and the column
+        # says so rather than showing a red mark somebody then "fixes".
+        if not meta["allowed"]:
+            state = ("blocked — a licensing choice, not a citation problem"
+                     if meta["role"] == "training" else "BLOCKED in robots.txt")
+        elif edge.get("refused"):
+            state = f'refused at the edge ({edge.get("status")}) despite robots.txt'
+        elif edge.get("served"):
+            state = "allowed, and the server serves it"
+        else:
+            state = "allowed in robots.txt"
+        rows += (f'<tr><td>{_esc(token)}</td><td>{_esc(meta["engine"])}</td>'
+                 f'<td>{_esc(meta["role"])}</td><td>{_esc(state)}</td></tr>')
+
+    if ref.get("ok"):
+        by = " · ".join(f"{_esc(k)} {v}" for k, v in
+                        (ref.get("by_engine") or {}).items())
+        sent = (f'<p>Answer engines sent <strong>{ref.get("sessions", 0)}</strong> '
+                f'session(s) in {ref.get("days")} days{" — " + by if by else ""}'
+                f'</p><p class="when">{_esc(ref.get("means", ""))}</p>')
+    else:
+        sent = (f'<p class="mut">Referral traffic not readable — '
+                f'{_esc(str(ref.get("why", "no Analytics property linked"))[:180])}</p>')
+
+    # NAMED, not only implied by the table. A verdict sentence and a column of
+    # states is something to read; the three lists are the answer, and the one
+    # that is NOT a problem says so on the same line as the ones that are.
+    _blocked = ", ".join(acc.get("blocked_search") or [])
+    _edge = ", ".join(acc.get("refused_at_edge") or [])
+    _training = ", ".join(acc.get("blocked_training") or [])
+    summary = "".join(filter(None, [
+        f'<p><b>Cannot cite us:</b> {_esc(_blocked)} '
+        f'<span class="when">disallowed in robots.txt</span></p>' if _blocked else "",
+        f'<p><b>Refused by the server:</b> {_esc(_edge)} '
+        f'<span class="when">whatever robots.txt says</span></p>' if _edge else "",
+        f'<p><b>Not training on us:</b> {_esc(_training)} '
+        f'<span class="when">a licensing choice — costs no citations</span></p>'
+        if _training else ""]))
+    return f"""
+    <h3>Can the engines read us <span class="when">checked
+        {_esc(str(got.get("at", ""))[:16])}</span></h3>
+    {line}
+    {summary}
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>crawler</th><th>engine</th><th>role</th><th>state</th></tr>
+      {rows}
+    </table></div>
+    <p class="when">A <b>search</b> crawler decides whether an engine can cite
+    the page. A <b>training</b> crawler decides whether the content trains a
+    model, and blocking one costs no citations — OpenAI and Google both say so
+    in their own documentation.</p>
+    {sent}
+    <p>{btn}</p>"""
+
+
 def _blog_picker(key: str, tenant: str, pick: bool, tab: str = "plan") -> str:
     """Choose which blog on the store articles publish into.
 
@@ -11962,7 +12049,8 @@ def _progress_section(key: str, tenant: str, days: int,
     <em>this account's own</em> keywords at similar positions — not a published
     CTR curve, which would be somebody else's sample standing in for a
     measurement.</p>
-    <p class="mut">{_esc(a["not_measured"])}</p>"""
+    <p class="mut">{_esc(a["not_measured"])}</p>
+    {_answer_engine_access(key, tenant)}"""
 
     if goal_only:
         # ITS OWN ROOM (spec §7). The goal is set once a quarter and the

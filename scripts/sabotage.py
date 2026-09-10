@@ -93,6 +93,47 @@ SABOTAGES = [
         "suites": ['test_semrush_asked_once.py'],
         "why": "a harvest claims every unit the account spent in the last half hour as its own, so two runs close together each report the pair's total and the one number somebody would use to judge the budget lies upward",
     },
+    # --- can the engines read us (2026-09-10) ------------------------------
+    {
+        "name": 'a_training_block_is_not_a_citation_problem',
+        "file": 'app/answer_engines.py',
+        "find": '            (blocked_search if meta["role"] == "search"\n             else blocked_training if meta["role"] == "training"\n             else blocked_search).append(token)\n',
+        "replace": '            blocked_search.append(token)  # SABOTAGE\n',
+        "suites": ['test_can_the_engines_read_us.py'],
+        "why": "a brand that deliberately blocks GPTBot from training on its content is told its site cannot be cited by ChatGPT, which is false — OpenAI says that is OAI-SearchBot — so somebody opens the site to training to fix a problem that does not exist",
+    },
+    {
+        "name": 'the_edge_is_checked_not_only_robots',
+        "file": 'app/answer_engines.py',
+        "find": '    edge = edge_check(domain, path=path) if probe else {"ok": None, "crawlers": {}}\n',
+        "replace": '    edge = {"ok": None, "crawlers": {}}  # SABOTAGE\n',
+        "suites": ['test_can_the_engines_read_us.py'],
+        "why": "a CDN refusing AI agents by user agent is invisible, so a site whose robots.txt welcomes every engine and whose server refuses them all reports as perfectly readable — the likeliest way a site is uncitable without anyone choosing it",
+    },
+    {
+        "name": 'a_refused_browser_means_the_site_is_down',
+        "file": 'app/answer_engines.py',
+        "find": '    if not control["ok"] or control["status"] >= 400:\n',
+        "replace": '    if not control["ok"] or control["status"] >= 500:  # SABOTAGE\n',
+        "suites": ['test_can_the_engines_read_us.py'],
+        "why": "a site returning 403 to everybody is reported as blocking every AI crawler, so somebody edits robots.txt to fix a server that is simply not serving",
+    },
+    {
+        "name": 'no_robots_file_is_permission',
+        "file": 'app/answer_engines.py',
+        "find": '        parser.parse([])\n        source = f"no robots.txt ({got[\'status\']}), so nothing is disallowed"\n',
+        "replace": '        return {"ok": False, "why": "no robots.txt", "crawlers": {}}  # SABOTAGE\n',
+        "suites": ['test_can_the_engines_read_us.py'],
+        "why": "a site with no robots.txt — which is permission for everything — is reported as unknown, sending somebody to hunt for a file whose absence is the answer",
+    },
+    {
+        "name": 'the_card_calls_nothing',
+        "file": 'app/admin_ui.py',
+        "find": '    got = _ae.stored(tenant)\n',
+        "replace": '    got = _ae.check(tenant)  # SABOTAGE\n',
+        "suites": ['test_can_the_engines_read_us.py'],
+        "why": "opening the Plan tab crawls the client's own site once per crawler, so the page takes seconds, their server is hit on every page view, and the console is the thing hammering it",
+    },
     # --- the page says what it answers (2026-09-10) ------------------------
     {
         "name": 'the_faq_answers_come_off_the_page',

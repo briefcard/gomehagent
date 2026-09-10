@@ -566,6 +566,44 @@ line. The map top-up runs Monday at `SWEEP_HOUR`:25 and no longer expands seeds
 unattended. The monthly metrics refresh runs on the 1st at `SWEEP_HOUR`:45,
 through the one batch report, a hundred phrases a request.
 
+## 6c. Answer engines: can they read us, and are they sending anyone
+
+Two questions that gate everything the blog system does for answer engines. A
+page written to be cited cannot be cited by an engine that is not allowed to
+fetch it, and until 2026-09-10 nothing here asked.
+
+**The distinction that matters.** A SEARCH crawler decides whether an engine
+can cite the page. A TRAINING crawler decides whether the content trains a
+model. Blocking `GPTBot` does not remove a site from ChatGPT's answers — that
+is `OAI-SearchBot`, and OpenAI says so on its own bots page. Google states that
+`Google-Extended` does not affect inclusion or ranking in Search, and AI
+Overviews are served from the Search index, so the crawler that decides whether
+a page can appear in one is `Googlebot`. Blocking a training crawler is a
+licensing choice a brand is entitled to make and costs no citations. The
+console labels it that way rather than as something to fix.
+
+**Where to look.** Plan tab, Progress, "Can the engines read us". It renders
+the last stored check and calls nothing; the button runs it. A weekly job
+re-checks every account with a blog system on Sunday at `SWEEP_HOUR`:50,
+because a robots rule or a CDN setting changes without anybody here being told.
+
+**Two checks, because robots.txt is the declared policy and not the answer.**
+The first reads robots.txt. The second asks the site for a page while
+identifying as each search crawler, which is the only way to catch a CDN
+refusing AI agents at the edge while robots.txt welcomes them. A site that
+refuses an ordinary browser too is reported as down rather than as blocking.
+
+```
+curl -b ~/.gomeh-console -s "https://assistant-web-zm2d.onrender.com/admin/answer_engines?tenant=baci"
+```
+
+**And whether it is working.** The same check reads GA4 for sessions whose
+source is an answer engine — ChatGPT, Perplexity, Claude, Gemini, Copilot.
+Zero is not proof of not being cited, because most answers are read without a
+click, but anything above zero is proof that we are. It pairs with
+`keywords.aeo`'s answer-taken flag, which is the other direction: ranking well
+and not being clicked is consistent with an answer taking the click.
+
 ## 7. What does not work yet
 
 Read this before promising anything.

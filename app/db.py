@@ -1030,6 +1030,31 @@ class SeoSiteConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class AnswerEngineCheck(Base):
+    """Whether the answer engines could read one account's site, and when.
+
+    A SERIES, not a marker. A robots rule or a CDN setting changes without
+    anybody here being told, and the question that follows a bad reading is
+    always "since when" — which a key overwritten in place cannot answer. The
+    weekly job writes one of these per account, so the day Perplexity started
+    being refused is a row rather than a guess.
+    """
+
+    __tablename__ = "answer_engine_checks"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    tenant = Column(String, default="", index=True)
+    #: yes | no | unknown — never a bare bool, because "we could not tell"
+    #: is a third state and collapsing it into False reads as blocked.
+    ok = Column(String, default="")
+    verdict = Column(Text, default="")
+    #: The whole reading: per-crawler robots and edge results, and referrals.
+    detail = Column(JSON, default=dict)
+    #: Sessions an answer engine sent in the window this check looked at.
+    sessions = Column(Integer, default=0)
+
+
 class SemrushPull(Base):
     """One Semrush answer, kept so the same question is not bought twice.
 

@@ -1146,6 +1146,11 @@ def keyword_sync_sharded() -> dict:
     return _each_tenant("keyword sync", keywords.sync_one)
 
 
+def answer_engines_sharded() -> dict:
+    from . import answer_engines
+    return _each_tenant("answer engine access", answer_engines.check_one)
+
+
 def keyword_metrics_sharded() -> dict:
     from . import keywords
     return _each_tenant("metrics refresh", keywords.refresh_metrics_one)
@@ -1318,6 +1323,13 @@ def main() -> None:
     sched.add_job(
         _safe(keyword_metrics_sharded, "metrics refresh", sharded=True),
         "cron", day=1, hour=config.SWEEP_HOUR, minute=45)
+    # Weekly: whether the answer engines can still read each site. A robots
+    # file or a CDN rule changes without anyone here being told, and the cost
+    # of not knowing is every article written since being uncitable. Sunday
+    # evening, so Monday's planning reads a fresh answer.
+    sched.add_job(
+        _safe(answer_engines_sharded, "answer engine access", sharded=True),
+        "cron", day_of_week="sun", hour=config.SWEEP_HOUR, minute=50)
     # Weekly, Sunday: a habit is a week's worth of edits, not a day's. Proposes
     # only — every rule goes through the approval queue before a drafter
     # reads it — so a sweep on a quiet account files nothing and says why.

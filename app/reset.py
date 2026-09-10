@@ -78,7 +78,12 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "tool_calls", "reported_figures", "compliance_events",
               "moments", "keyword_targets", "keyword_readings",
               "artifact_bodies", "artifact_versions", "feedback_items",
-              "digest_acks", "keyword_serps"}
+              "digest_acks", "keyword_serps", "answer_engine_checks"}
+# `answer_engine_checks` is OPERATIONS: it records what WE observed about the
+# client's site on a date — which crawlers it let in and who it sent — not
+# anything the brand knows about itself. Clearing it costs a re-run of the
+# check and loses the history of when access changed, which is a fact about
+# our observation rather than about them.
 # Both classified in the change that adds them, per the lesson below.
 # `keyword_targets` is OPERATIONS and not KNOWLEDGE, which is a real choice:
 # it looks like research about the brand, but what it stores is what somebody

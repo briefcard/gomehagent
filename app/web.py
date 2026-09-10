@@ -1204,6 +1204,30 @@ def health_seo(key: str = Depends(admin_key)) -> dict:
     return out
 
 
+@app.get("/admin/answer_engines")
+def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
+                         probe: int = 1, days: int = 28, ui: int = 0):
+    """Can the answer engines read this site, and did any send somebody.
+
+    THE CHECK RUNS IN THE BACKGROUND and the result is stored, because it
+    fetches the client's own site once per crawler — a page that did that on
+    every render would hammer their server and feel broken. The card renders
+    what was stored; this is the button behind it.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    from . import answer_engines as _ae
+    if not ui:
+        return _ae.check(tenant, probe=bool(probe), days=max(1, min(days, 365)))
+    _run_bg(f"answer_engines:{tenant}", _ae.check, tenant,
+            probe=bool(probe), days=max(1, min(days, 365)))
+    return _plan_back(tenant, key, sub="progress", msg=(
+        "checking whether the answer engines can read the site — it asks the "
+        "site once per crawler, so give it a moment and refresh"))
+
+
 @app.get("/admin/semrush_balance")
 def admin_semrush_balance(key: str = Depends(admin_key), tenant: str = "",
                           ui: int = 0):
