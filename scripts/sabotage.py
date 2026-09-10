@@ -133,6 +133,39 @@ SABOTAGES = [
         "suites": ['test_can_the_engines_read_us.py'],
         "why": "the index handed to answer engines lists pages that were never published and have no URL, so the one file whose whole job is pointing at real content points at nothing",
     },
+    # --- can this account illustrate anything (2026-09-10) -----------------
+    {
+        "name": 'the_count_is_what_a_picker_can_reach',
+        "file": 'app/creative.py',
+        "find": '    images = _kb.assets(tenant, publishable_only=True, kind="image")\n',
+        "replace": '    images = _kb.assets(tenant, publishable_only=False, kind="image")  # SABOTAGE\n',
+        "suites": ['test_can_this_account_illustrate.py'],
+        "why": "an account whose whole library is reference material — inspiration saved from elsewhere, licensed for nothing — reports as able to illustrate, so the one number built to explain empty articles says the opposite of the truth",
+    },
+    {
+        "name": 'an_empty_library_is_not_a_healthy_account',
+        "file": 'app/creative.py',
+        "find": '            "drawable": can_draw, "ok": bool(images or can_draw), "why": why,\n',
+        "replace": '            "drawable": can_draw, "ok": True, "why": why,  # SABOTAGE\n',
+        "suites": ['test_can_this_account_illustrate.py'],
+        "why": "every account reads as able to put pictures on its work whatever it holds, which is exactly the blind spot this was built to close",
+    },
+    {
+        "name": 'a_shipped_picture_is_one_we_may_still_use',
+        "file": 'app/creative.py',
+        "find": '        if not any(_kb.may_publish(a)[0] for a in ids):\n',
+        "replace": '        if not ids:  # SABOTAGE\n',
+        "suites": ['test_can_this_account_illustrate.py'],
+        "why": "an article counts as illustrated because an asset id was attached to it, even when that picture was reference-only and the publish path refused it — the count then agrees with the workroom and disagrees with the live page, which is the whole complaint",
+    },
+    {
+        "name": 'illustrating_is_not_a_blocker',
+        "file": 'app/keywords.py',
+        "find": '    out["ok"] = bool(live and pub.get("ok") and meas.get("ok") is True\n                     and know["ok"])\n',
+        "replace": '    out["ok"] = bool(live and pub.get("ok") and meas.get("ok") is True\n                     and know["ok"]\n                     and (out.get("illustrate") or {}).get("ok"))  # SABOTAGE\n',
+        "suites": ['test_can_this_account_illustrate.py'],
+        "why": "an account with no photographs is reported as not ready to plan at all, so writing stops over something a catalogue sync fixes — an article without a picture is a worse article, not a refused one",
+    },
     # --- can the engines read us (2026-09-10) ------------------------------
     {
         "name": 'a_training_block_is_not_a_citation_problem',

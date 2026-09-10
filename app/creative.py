@@ -199,6 +199,61 @@ GENERATED_RIGHTS = "owned"
 GENERATED_ORIGIN = "generated"
 
 
+def can_illustrate(tenant: str) -> dict:
+    """Whether this account can put a picture on anything, as a number.
+
+    THE FACT THAT WAS ONLY EVER A NOTE. When a run finds nothing to illustrate
+    with it says so — "no picture: ..." — inside that one run, among a dozen
+    other notes, and moves on. So "our articles keep going out without images"
+    was something to notice across weeks rather than something to look at, and
+    the two causes it can have are different jobs: an empty library is a
+    catalogue sync, and an undrawable brand is a board with no pictures pinned.
+
+    Counted, never surveyed. `publishable` is the same read every picker makes
+    (`kb.assets(publishable_only=True)`: active, reviewed, and owned rather
+    than reference), so this number and what a run can actually reach cannot
+    drift apart.
+    """
+    from . import db as _db, kb as _kb, keywords as _kw
+    images = _kb.assets(tenant, publishable_only=True, kind="image")
+    shelf = len([a for a in _kb.assets(tenant, publishable_only=False,
+                                       kind="image")])
+    can_draw = drawable(tenant)
+
+    # THE OUTCOME, not the inventory. An account can hold a thousand pictures
+    # and still publish articles without one, and that is the thing being
+    # complained about — so it is measured on the articles themselves.
+    published = [r for r in _kw.targets(tenant)
+                 if r.status in ("published", "won") and (r.output_id or "")]
+    without = []
+    for row in published:
+        with _db.SessionLocal() as s:
+            out = s.get(_db.Output, row.output_id)
+            ids = list((out.media_ids or []) if out is not None else [])
+        if not any(_kb.may_publish(a)[0] for a in ids):
+            without.append(row.phrase)
+
+    if images:
+        why = ""
+    elif shelf:
+        why = (f"{shelf} picture(s) on file and none of them publishable — "
+               f"they are reference material, saved for inspiration rather "
+               f"than licensed for use. Only owned, reviewed pictures can go "
+               f"on a page.")
+    else:
+        why = ("no pictures on file at all. The catalogue sync files every "
+               "product photograph the store holds, which is what the picture "
+               "ladder draws from.")
+    return {"tenant": tenant, "publishable": len(images), "on_file": shelf,
+            "drawable": can_draw, "ok": bool(images or can_draw), "why": why,
+            "published": len(published), "published_without": len(without),
+            "without": without[:8],
+            "means": ("a run can illustrate what it writes"
+                      if images or can_draw else
+                      "nothing this account writes can carry a picture, and "
+                      "every run will say so one article at a time")}
+
+
 def drawable(tenant: str, entity_key: str = "", boards: tuple | list = ()) -> bool:
     """Whether `generate` would have the brand's own pictures to draw FROM —
     the same reading `board_inputs` makes, without fetching a byte: the

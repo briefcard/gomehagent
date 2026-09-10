@@ -1714,6 +1714,20 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
     know["notes"] = notes
     out["knows_what_to_write"] = know
 
+    # CAN IT ILLUSTRATE — the third question about a written article, next to
+    # publishing it and measuring it. It was answerable only by reading one
+    # run's notes, so "our articles keep going out without pictures" was a
+    # thing to notice over weeks rather than a number to look at.
+    #
+    # NOT A BLOCKER, like the other two: an article without a picture is a
+    # worse article, not a refused one, and gating planning on it would stop
+    # work over something a catalogue sync fixes.
+    from . import creative as _cre
+    try:
+        out["illustrate"] = _cre.can_illustrate(tenant)
+    except Exception as exc:  # noqa: BLE001
+        out["illustrate"] = {"ok": None, "why": f"not counted ({exc.__class__.__name__})"}
+
     # INSTALLED AND ON is part of the answer, not context beside it. The first
     # version returned ok=True for an account that had every connector wired
     # and no `blog` system at all — a green light on a pipeline that cannot

@@ -14573,9 +14573,35 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
     if _pub.get("choose"):
         _fix_blog = " " + _blog_picker(key, tenant, pick)
 
+    # THE FACT AND THE JOB THAT FIXES IT. An empty library is a catalogue
+    # sync; a library of reference-only pictures is a rights problem no sync
+    # touches; an undrawable brand is a board with nothing pinned. The button
+    # is the first of those, because it is the one that is usually true.
+    # `_line` reads `fix` for the reason; `can_illustrate` calls it `why`
+    # because it is a fact about the account, not an instruction. Mapped here
+    # rather than renamed there, so the producer keeps its own vocabulary.
+    _ill = dict(ready.get("illustrate") or {})
+    if _ill.get("why"):
+        _ill["fix"] = _ill["why"]
+    _fix_pics = ""
+    if _ill.get("ok") is False and not _ill.get("on_file"):
+        _fix_pics = (f' <a href="/admin/catalog_sync?key={_esc(key)}&amp;tenant='
+                     f'{_esc(tenant)}"><button class="sec" type="button">'
+                     f'File the store\'s photographs</button></a>')
+    if _ill.get("published_without"):
+        _ill = {**_ill, "detail": (
+            f'{_ill["publishable"]} publishable picture(s) · '
+            f'{_ill["published_without"]} of {_ill["published"]} published '
+            f'article(s) went out without one')}
+    elif _ill.get("ok"):
+        _ill = {**_ill, "detail": (
+            f'{_ill["publishable"]} publishable picture(s)'
+            + (" · and this brand can draw its own" if _ill.get("drawable") else ""))}
+
     downstream_html = (
         '<h3>Once it is written</h3><ul style="margin:0;padding-left:18px">'
         + _line("Publishing", _pub, _fix_blog)
+        + _line("Illustrating", _ill, _fix_pics)
         + _line("Measuring", _meas, _check_gsc)
         + '</ul><p class="when">Neither stops you planning. An account with no '
         'CMS can still build a map, rank it and decide what to write — the '
