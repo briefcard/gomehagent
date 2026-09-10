@@ -93,6 +93,39 @@ SABOTAGES = [
         "suites": ['test_semrush_asked_once.py'],
         "why": "a harvest claims every unit the account spent in the last half hour as its own, so two runs close together each report the pair's total and the one number somebody would use to judge the budget lies upward",
     },
+    # --- the page says what it answers (2026-09-10) ------------------------
+    {
+        "name": 'the_faq_answers_come_off_the_page',
+        "file": 'app/skill_pack.py',
+        "find": '    faqs = sites.faqs_from_body(body, questions)\n',
+        "replace": '    faqs = [{"question": q, "answer": ""} for q in questions]  # SABOTAGE\n',
+        "suites": ['test_the_page_says_what_it_answers.py'],
+        "why": "every article ships with an empty FAQ list again — no visible block and no FAQPage markup, on the one feature written for answer engines, and the run reports success either way",
+    },
+    {
+        "name": 'the_angles_shape_reaches_the_schema',
+        "file": 'app/skill_pack.py',
+        "find": '            "jsonld": sites.schema_for_angle(angle, title, body),\n',
+        "replace": '            "jsonld": None,  # SABOTAGE\n',
+        "suites": ['test_the_page_says_what_it_answers.py'],
+        "why": "a walkthrough's numbered steps and a checklist's items reach the prose and stop, so the shape the angle chose is invisible to every machine that reads the page",
+    },
+    {
+        "name": 'a_marked_up_answer_is_one_a_reader_can_see',
+        "file": 'app/sites.py',
+        "find": '        if len(answer) < FAQ_ANSWER_MIN:\n            continue\n',
+        "replace": '        if False:  # SABOTAGE\n            continue\n',
+        "suites": ['test_the_page_says_what_it_answers.py'],
+        "why": "a heading with nothing under it is marked up as an answered question, so the page claims to answer things it does not and the whole block risks being ignored",
+    },
+    {
+        "name": 'the_page_never_prints_the_same_answer_twice',
+        "file": 'app/seo_tools.py',
+        "find": '        block = sites.faq_html(sites.faqs_not_in(body or "", faqs))\n',
+        "replace": '        block = sites.faq_html(faqs)  # SABOTAGE\n',
+        "suites": ['test_the_page_says_what_it_answers.py'],
+        "why": "every question and answer the article already prints is printed again in a block underneath it, so a reader meets the same Q&A twice and the page reads as generated",
+    },
     # --- the same question is bought once (2026-09-09) ---------------------
     {
         "name": 'an_answer_is_bought_once',

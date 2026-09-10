@@ -861,8 +861,14 @@ def _build_content_fields(profile: dict, args: dict) -> dict:
     body = args.get("body_html")
     faqs = args.get("faqs")
     if faqs:
-        block = sites.faq_html(faqs)
-        body = (body + "\n" + block) if body else block
+        # ONLY WHAT THE PAGE DOES NOT ALREADY ASK. The blog run extracts its
+        # pairs from the body it just wrote, so appending all of them printed
+        # every question and answer a second time; the agent authors pairs a
+        # body does not contain, and those still have to become visible or the
+        # schema would describe content nobody can see.
+        block = sites.faq_html(sites.faqs_not_in(body or "", faqs))
+        if block.strip() and "</h" in block:
+            body = (body + "\n" + block) if body else block
     structured = sites.compose_jsonld(faqs, args.get("jsonld"))
     if structured:
         if getattr(sites.backend(profile), "INLINE_JSONLD", False):

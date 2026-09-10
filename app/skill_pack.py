@@ -5271,7 +5271,28 @@ def _run_blog_article(ctx: Context) -> dict:
                  "keyword itself — edit it in the workroom before publishing; "
                  "a title tag that is the bare search phrase reads as spam "
                  "and wins no clicks")
-    faqs = [{"question": q, "answer": ""} for q in questions]
+    # THE ANSWERS COME OFF THE PAGE, because that is the only place they have
+    # ever existed. This line built the list with an EMPTY answer for every
+    # question and nothing ever filled one, so the propose call's
+    # `[f for f in faqs if f["answer"]]` filtered the whole list away: no FAQ
+    # block, no FAQPage schema, on every article this system has ever written.
+    # The comment two hundred lines up calls this "the AEO half, and it is not
+    # an extra" — it was an extra that never shipped.
+    #
+    # The questions DO reach the drafter, which is why extracting works: it
+    # answers them as sections, and `faqs_from_body` pairs each question-shaped
+    # heading with the answer underneath it. Nothing new is written, nothing is
+    # printed twice, and the markup describes what a reader can actually see.
+    faqs = sites.faqs_from_body(body, questions)
+    if questions and not faqs:
+        ctx.note(f"none of the {len(questions)} question(s) this article was "
+                 f"briefed to answer came back as a question-shaped heading, "
+                 f"so it ships with no FAQ markup. The answers are in the "
+                 f"prose; what is missing is the extractable form that answer "
+                 f"engines read.")
+    elif faqs:
+        ctx.note(f"{len(faqs)} question(s) answered as sections and marked up "
+                 f"for answer engines")
     # WHAT THIS ARTICLE IS, on the artifact itself. These three were computed
     # here, handed to `_propose`, and then existed only inside the approval
     # payload — so the review page went blank the moment that approval stopped
@@ -5631,6 +5652,13 @@ def _run_blog_article(ctx: Context) -> dict:
             "seo_title": _seo_title(keyword, title),
             "seo_description": _meta_description(keyword, body),
             "faqs": [f for f in faqs if f["answer"]],
+            # WHAT THIS ARTICLE IS, in the vocabulary a machine reads. The
+            # angle already decided the shape — a walkthrough is numbered
+            # steps, a checklist is a list — and that decision reached the
+            # prose and stopped. `schema_for_angle` reads the body back and
+            # returns nothing when the shape is not there, so an angle that
+            # was asked for and not delivered marks up nothing.
+            "jsonld": sites.schema_for_angle(angle, title, body),
             # The JOIN, carried from birth. The 2026-08-26 audit found the
             # article approval payload held no output_id and no run_id, so the
             # executor had nothing to join a write-back on — the live URL was

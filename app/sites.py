@@ -593,6 +593,159 @@ def faq_html(faqs: list) -> str:
     return "\n".join(parts)
 
 
+#: A heading that opens with one of these, or ends in a question mark, is a
+#: question the page answers. Deliberately the same shape `keywords.is_question`
+#: uses, kept local so this module stays free of the keyword map.
+_QUESTION_STARTS = frozenset("""
+who what when where why which how can could do does did is are should will
+would may might
+""".split())
+
+
+def _plain(html: str) -> str:
+    """Tags out, whitespace collapsed. The text a person actually reads."""
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html or "",
+                  flags=re.I | re.S)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+
+
+def _is_question(text: str) -> bool:
+    t = (text or "").strip().lower().rstrip(":")
+    if not t:
+        return False
+    return t.endswith("?") or t.split()[0].strip("'\"") in _QUESTION_STARTS
+
+
+#: An FAQ answer long enough to be an answer and short enough to be one.
+#: Below the floor it is a heading with nothing under it; above the ceiling it
+#: is a section, and marking a whole section up as an "answer" is the kind of
+#: over-claiming that gets structured data ignored.
+FAQ_ANSWER_MIN = 40
+FAQ_ANSWER_MAX = 1200
+#: Ten is a page with a FAQ. Thirty is a page pretending to be one.
+FAQ_MAX = 10
+
+
+def faqs_from_body(html: str, asked: list | None = None) -> list[dict]:
+    """The questions this page ALREADY answers, paired with those answers.
+
+    EXTRACTED, never generated beside the article. Two reasons, and the second
+    is the one that bites. Structured data has to describe content a visitor
+    can see — marking up an FAQ that exists only in the schema is a page
+    claiming something it does not have — and the drafter has already been
+    told to answer these as sections, so composing a second FAQ block would
+    print every question and answer on the page twice.
+
+    Any question-shaped heading counts, not only the ones we harvested: the
+    drafter rewords, and a reworded question that a reader can see is worth
+    more than an exact match nobody wrote. `asked` is used only to report
+    coverage back to the run.
+    """
+    out: list[dict] = []
+    parts = re.split(r"(<h[1-6][^>]*>.*?</h[1-6]>)", html or "",
+                     flags=re.I | re.S)
+    for i, chunk in enumerate(parts):
+        if not re.fullmatch(r"<h[1-6][^>]*>.*?</h[1-6]>", chunk or "",
+                            flags=re.I | re.S):
+            continue
+        question = _plain(chunk)
+        if not _is_question(question):
+            continue
+        answer = _plain(parts[i + 1]) if i + 1 < len(parts) else ""
+        if len(answer) < FAQ_ANSWER_MIN:
+            continue
+        if len(answer) > FAQ_ANSWER_MAX:
+            cut = answer[:FAQ_ANSWER_MAX]
+            # Whole sentences, so the schema never ends mid-clause.
+            stop = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+            answer = (cut[:stop + 1] if stop > FAQ_ANSWER_MIN else cut).strip()
+        out.append({"question": question, "answer": answer})
+        if len(out) >= FAQ_MAX:
+            break
+    return out
+
+
+def _norm_heading(text: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", (text or "").lower()).strip()
+
+
+def headings_in(html: str) -> set:
+    """Every heading already on the page, normalised for comparison."""
+    return {_norm_heading(_plain(h)) for h in
+            re.findall(r"<h[1-6][^>]*>.*?</h[1-6]>", html or "", re.I | re.S)}
+
+
+def faqs_not_in(html: str, faqs: list | None) -> list:
+    """The pairs whose question the page does not already ask.
+
+    Two callers hand `faqs` to a proposal and they need opposite things. The
+    blog run reads them OFF the body, so printing a block would show every
+    question and answer twice; the agent authors them beside a body that does
+    not contain them, and without a block they would be marked up and invisible
+    — schema describing content nobody can see. Neither caller has to know:
+    what is already on the page is not printed again, and what is not, is.
+    """
+    seen = headings_in(html)
+    return [f for f in (faqs or [])
+            if _norm_heading(f.get("question", "")) not in seen]
+
+
+def _first_list_items(html: str, ordered: bool) -> list[str]:
+    """The items of the page's first ordered or unordered list."""
+    tag = "ol" if ordered else "ul"
+    m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", html or "", re.I | re.S)
+    if not m:
+        return []
+    items = [_plain(li) for li in
+             re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), re.I | re.S)]
+    return [i for i in items if i]
+
+
+def howto_schema(name: str, steps: list) -> dict | None:
+    """The steps a walkthrough actually prints, as HowTo.
+
+    Google retired HowTo rich results in 2023, so this earns no snippet there.
+    It is emitted for the readers that do still parse it — answer engines and
+    Bing — which is the whole point of the work it belongs to. Saying so here
+    because a schema type nobody explains is one somebody later removes as
+    dead weight, or keeps while expecting a rich result it cannot produce.
+    """
+    steps = [s for s in (steps or []) if s]
+    if len(steps) < 2:
+        return None
+    return {"@context": "https://schema.org", "@type": "HowTo", "name": name,
+            "step": [{"@type": "HowToStep", "position": n, "text": s}
+                     for n, s in enumerate(steps, 1)]}
+
+
+def itemlist_schema(name: str, items: list) -> dict | None:
+    """The things a checklist actually lists, as ItemList."""
+    items = [i for i in (items or []) if i]
+    if len(items) < 2:
+        return None
+    return {"@context": "https://schema.org", "@type": "ItemList",
+            "name": name, "numberOfItems": len(items),
+            "itemListElement": [{"@type": "ListItem", "position": n, "name": i}
+                                for n, i in enumerate(items, 1)]}
+
+
+#: WHAT AN ARTICLE OF THIS SHAPE IS, in the vocabulary a machine reads.
+#: `skill_pack.ARTICLE_ANGLES` already decides the shape — a walkthrough is
+#: numbered steps, a checklist is a list — and until this the decision reached
+#: the prose and stopped. A schema builder that takes the body and returns
+#: nothing when the body does not have that shape, so an angle that was asked
+#: for and not delivered marks up nothing rather than lying.
+def schema_for_angle(angle: str, name: str, html: str) -> list:
+    if angle == "walkthrough":
+        got = howto_schema(name, _first_list_items(html, ordered=True))
+    elif angle == "checklist":
+        got = itemlist_schema(name, _first_list_items(html, ordered=False)
+                              or _first_list_items(html, ordered=True))
+    else:
+        got = None
+    return [got] if got else []
+
+
 def compose_jsonld(faqs: list | None, extra) -> list:
     """Merge an optional FAQPage with extra JSON-LD (Article/Breadcrumb/ItemList).
     Returns a list of schema objects (one <script> can hold an array)."""
