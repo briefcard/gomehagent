@@ -1228,6 +1228,73 @@ def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
         "site once per crawler, so give it a moment and refresh"))
 
 
+@app.get("/admin/ai_training")
+def admin_ai_training(key: str = Depends(admin_key), tenant: str = "",
+                      stance: str = "", ui: int = 0):
+    """Does this brand want AI models trained on its content.
+
+    THE OWNER'S CALL, AND A SEPARATE ONE FROM BEING CITED. Search crawlers
+    decide whether an engine can cite a page; this decides only whether the
+    content trains a model. Undecided is a real third state and is left alone.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if stance not in ("", "allow", "block"):
+        return {"error": "stance must be allow or block"}
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        if row is None:
+            return {"error": f"no brand record for {tenant!r}"}
+        row.ai_training = stance
+        s.commit()
+    said = {"allow": "models may train on this brand's content",
+            "block": "models may not train on this brand's content",
+            "": "undecided — nothing in robots.txt changes"}[stance]
+    return ({"tenant": tenant, "ai_training": stance, "means": said}
+            if not ui else
+            _plan_back(tenant, key, sub="progress", msg=said))
+
+
+@app.get("/admin/answer_engine_files")
+def admin_answer_engine_files(key: str = Depends(admin_key), tenant: str = "",
+                              install: int = 0, ui: int = 0):
+    """What this site should serve for the answer engines, and install it where
+    we can.
+
+    `install=1` queues the Shopify theme write for approval. Nothing is written
+    without a tap, and nothing is queued for a platform we cannot write to —
+    those return the file and say who has to put it there.
+    """
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"error": "name an account, e.g. ?tenant=baci"}
+    from . import answer_engines as _ae
+    got = _ae.files_for(tenant, fresh=True)
+    if not install:
+        return got if not ui else _plan_back(
+            tenant, key, sub="progress",
+            msg="the files are on the card below")
+    robots = got.get("robots") or {}
+    if not robots.get("installable") or not robots.get("changes"):
+        why = (robots.get("why_not") or robots.get("why")
+               or "there is no write path for robots.txt on this platform")
+        return ({"queued": False, "why": why} if not ui else
+                _plan_back(tenant, key, sub="progress", err=f"nothing to install — {why}"))
+    from . import approvals, sites
+    ap = approvals.request_approval(
+        "shopify_theme_asset",
+        f"[SEO/{tenant}] robots.txt: let the answer engines in",
+        {"site": tenant, "asset_key": robots["filename"],
+         "asset_value": robots["content"],
+         "bucket": "seo"},
+        notify=True)
+    return ({"queued": True, "approval": ap} if not ui else
+            _plan_back(tenant, key, sub="progress",
+                       msg="queued for your approval — it writes "
+                           f"{robots['filename']} into the published theme"))
+
+
 @app.get("/admin/semrush_balance")
 def admin_semrush_balance(key: str = Depends(admin_key), tenant: str = "",
                           ui: int = 0):

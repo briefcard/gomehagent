@@ -45,8 +45,9 @@ def ck(label, cond, detail=""):
 
 
 class _R:
-    def __init__(self, text="", status=200):
+    def __init__(self, text="", status=200, server=""):
         self.text, self.status_code = text, status
+        self.headers = {"server": server}
 
 
 def serve(robots: str = "", *, refuse=(), status=200, boom=False):
@@ -216,6 +217,89 @@ def main() -> int:
             s.commit()
         ck("never checked says so, and still offers the button",
            "Not checked yet" in admin_ui._answer_engine_access("s3cret", "baci"))
+
+        print("\n— the file it should serve, and only when it changes something —")
+        from app import kb
+        kb.ensure_brand("baci", "Baci")
+        serve("User-agent: *\nDisallow: /cart\nDisallow: /admin\n")
+        plan = ae.robots_plan("baci")
+        ck("a site that already lets every engine in needs no file",
+           plan["ok"] and not plan["changes"] and "already lets" in plan["why_not"],
+           str(plan.get("why_not"))[:70])
+        ck("and an undecided training stance changes nothing on its own",
+           plan["stance"] == "undecided" and "unmade decision" in plan["why_not"])
+
+        serve("User-agent: *\nDisallow: /cart\nDisallow: /admin\n"
+              "\nUser-agent: OAI-SearchBot\nDisallow: /\n")
+        plan = ae.robots_plan("baci")
+        ck("a blocked search crawler is what makes a file worth writing",
+           plan["changes"] and plan["allow"] == ["OAI-SearchBot"] and not plan["block"])
+        # THE SPECIFICITY TRAP. Naming a crawler detaches it from the wildcard
+        # group, so a bare "Allow: /" would hand it /cart and /admin.
+        ck("the named group repeats the wildcard's disallows, never 'Allow: /'",
+           "Disallow: /cart" in plan["groups"] and "Disallow: /admin" in plan["groups"]
+           and "Allow: /" not in plan["groups"], plan["groups"])
+        ck("on Shopify it is a Liquid template that replays Shopify's defaults",
+           plan["filename"] == "templates/robots.txt.liquid"
+           and "robots.default_groups" in plan["content"]
+           and plan["installable"] is True, plan["filename"])
+
+        with db.SessionLocal() as s:
+            s.get(db.KbBrand, "baci").ai_training = "block"
+            s.commit()
+        plan = ae.robots_plan("baci")
+        ck("blocking training adds those groups and leaves the search ones alone",
+           set(plan["block"]) == {"GPTBot", "ClaudeBot", "Google-Extended"}
+           and plan["allow"] == ["OAI-SearchBot"], str(plan["block"]))
+        ck("a blocked training crawler gets a plain Disallow, not a mirror",
+           "User-agent: GPTBot\nDisallow: /" in plan["groups"])
+        with db.SessionLocal() as s:
+            s.get(db.KbBrand, "baci").ai_training = ""
+            s.commit()
+
+        print("\n— and llms.txt is an index of pages that actually exist —")
+        from app import keywords as kw
+        got = ae.llms_txt("baci")
+        ck("nothing published means no index, and it says why",
+           not got["ok"] and "index of nothing" in got["why"], str(got.get("why"))[:60])
+        kw.upsert("baci", "acrylic jugs", volume=900, source="test",
+                  role="pillar", status="published",
+                  target_url="https://bacimilanousa.com/blogs/news/jugs")
+        kw.upsert("baci", "how to clean a jug", volume=90, source="test",
+                  status="published",
+                  target_url="https://bacimilanousa.com/blogs/news/clean")
+        kw.upsert("baci", "unpublished thing", volume=90, source="test")
+        got = ae.llms_txt("baci")
+        ck("it follows the spec: H1, then H2 sections of markdown links",
+           got["ok"] and got["content"].startswith("# ")
+           and "## Main topics" in got["content"]
+           and "- [acrylic jugs](https://bacimilanousa.com/blogs/news/jugs)"
+           in got["content"], got.get("content", "")[:90])
+        ck("a page with no live URL is not listed",
+           "unpublished thing" not in got["content"] and got["pages"] == 2)
+
+        print("\n— the console shows the files and the decision behind them —")
+        # THE CARD READS THE STORED CHECK, so the check has to have run against
+        # the robots file being asserted about. That IS the design: the plan
+        # comes from a live fetch and rides with the reading, so opening the
+        # page never crawls the client.
+        serve("User-agent: *\nDisallow: /cart\n"
+              "\nUser-agent: OAI-SearchBot\nDisallow: /\n")
+        google_seo._ga_report = lambda *a, **k: "[]"
+        try:
+            ae.check("baci")
+        finally:
+            google_seo._ga_report = real_report
+        calls["n"] = 0
+        ae.httpx.get = _counting
+        card = admin_ui._answer_engine_files("s3cret", "baci")
+        ck("rendering the files makes no request either", calls["n"] == 0)
+        ck("the training stance is shown as undecided, with both controls",
+           "undecided" in card and "Allow training" in card
+           and "Block training" in card)
+        ck("and the file is offered with the button that installs it",
+           "robots.default_groups" in card
+           and "Queue this for approval" in card, "")
 
         print("\n— and it is a weekly job, not something to remember —")
         import re

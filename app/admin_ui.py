@@ -10904,6 +10904,74 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
                   head=refresh, suffix=f"&amp;days={days}&amp;sub={view}")
 
 
+def _answer_engine_files(key: str, tenant: str) -> str:
+    """The files this site should serve, and who can put each one there.
+
+    ACT WHERE YOU REPORT. Saying an engine cannot read the site and leaving
+    somebody to write a robots file by hand is the half of the finding that
+    costs the work. Shopify's robots.txt is a theme template, so there it is a
+    button; everywhere else it is the file and the name of whoever has to
+    upload it.
+    """
+    from . import answer_engines as _ae
+    try:
+        got = _ae.files_for(tenant)
+    except Exception as exc:  # noqa: BLE001
+        return f'<p class="mut">Files unavailable: {_esc(str(exc)[:140])}</p>'
+    rob, llms = got.get("robots") or {}, got.get("llms_txt") or {}
+    out = ['<h3>What the site should serve</h3>']
+
+    # THE STANCE FIRST, because it decides what the file says. Undecided is
+    # rendered as undecided, never as a silent default somebody discovers
+    # later in a generated file.
+    stance = rob.get("stance", "undecided")
+    _s = lambda v, lbl: (  # noqa: E731
+        f'<a href="/admin/ai_training?key={_esc(key)}&amp;tenant={_esc(tenant)}'
+        f'&amp;stance={v}&amp;ui=1"><button class="sec">{lbl}</button></a> ')
+    out.append(
+        f'<p>Training: <b>{_esc(stance)}</b> '
+        f'<span class="when">whether models may train on this brand. Separate '
+        f'from being cited, which the search crawlers decide.</span><br>'
+        + _s("allow", "Allow training") + _s("block", "Block training")
+        + _s("", "Undecided") + '</p>')
+
+    if not rob.get("ok"):
+        out.append(f'<p class="mut">robots.txt: {_esc(rob.get("why", ""))}</p>')
+    elif not rob.get("changes"):
+        out.append(f'<p class="ok">robots.txt needs no change — '
+                   f'{_esc(rob.get("why_not", ""))}</p>')
+    else:
+        what = []
+        if rob.get("allow"):
+            what.append("let in " + ", ".join(rob["allow"]))
+        if rob.get("block"):
+            what.append("keep out " + ", ".join(rob["block"]))
+        btn = (f'<a href="/admin/answer_engine_files?key={_esc(key)}&amp;tenant='
+               f'{_esc(tenant)}&amp;install=1&amp;ui=1"><button>Queue this for '
+               f'approval</button></a>' if rob.get("installable") else
+               '<span class="when">no write path here — this one is a file to '
+               'upload</span>')
+        out.append(
+            f'<p class="bad">robots.txt should {_esc(" and ".join(what))}</p>'
+            f'<p class="when">{_esc(rob.get("how", ""))}</p>'
+            f'<details><summary>{_esc(rob.get("filename", "robots.txt"))}</summary>'
+            f'<pre style="white-space:pre-wrap">{_esc(rob.get("content", ""))}</pre>'
+            f'</details><p>{btn}</p>')
+
+    if llms.get("ok"):
+        out.append(
+            f'<details><summary>llms.txt <span class="when">'
+            f'{llms.get("pages", 0)} published page(s)</span></summary>'
+            f'<pre style="white-space:pre-wrap">{_esc(llms["content"])}</pre>'
+            f'<p class="when">{_esc(llms.get("how", ""))}</p></details>')
+    else:
+        out.append(f'<p class="mut">llms.txt: {_esc(llms.get("why", ""))}</p>')
+
+    if got.get("cdn_note"):
+        out.append(f'<div class="note">{_esc(got["cdn_note"])}</div>')
+    return "\n".join(out)
+
+
 def _answer_engine_access(key: str, tenant: str) -> str:
     """Whether an answer engine can read this site, and whether one sent anyone.
 
@@ -10988,6 +11056,7 @@ def _answer_engine_access(key: str, tenant: str) -> str:
     model, and blocking one costs no citations — OpenAI and Google both say so
     in their own documentation.</p>
     {sent}
+    {_answer_engine_files(key, tenant)}
     <p>{btn}</p>"""
 
 

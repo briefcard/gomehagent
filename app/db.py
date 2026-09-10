@@ -1708,6 +1708,15 @@ class KbBrand(Base):
     # Hard compliance boundary. The validator rejects any draft containing one
     # of these strings — see Baci's origin/handcraft rules. Never advisory.
     banned_claims = Column(JSON, default=list)
+    #: Whether this brand wants AI models trained on its content.
+    #: "" = nobody has decided | "allow" | "block".
+    #:
+    #: EMPTY IS NOT "block". A brand that has never been asked is not a brand
+    #: that said no, and defaulting to a refusal would quietly opt every
+    #: account out of being part of what a model knows. It is also NOT the same
+    #: question as being CITED: search crawlers decide that, and this setting
+    #: never touches them. See `answer_engines`.
+    ai_training = Column(String, default="")
     # Rules TAKEN OUT by hand: [{"phrase", "at", "by"}]. Lifting a hard rule
     # is the most consequential edit on the Brand tab — drafts that were being
     # blocked stop being blocked — so it leaves a record beside the list it

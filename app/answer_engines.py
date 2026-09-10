@@ -130,7 +130,8 @@ def _fetch(url: str, ua: str, timeout: int = 20) -> dict:
     try:
         r = httpx.get(url, timeout=timeout, follow_redirects=True,
                       headers={"User-Agent": ua})
-        return {"ok": True, "status": r.status_code, "text": r.text}
+        return {"ok": True, "status": r.status_code, "text": r.text,
+                "server": r.headers.get("server", "")}
     except Exception as exc:  # noqa: BLE001
         detail = str(exc)[:120]
         if "CERTIFICATE_VERIFY_FAILED" in detail:
@@ -197,7 +198,8 @@ def edge_check(domain: str, tokens=SEARCH_CRAWLERS, path: str = "/") -> dict:
             "served": bool(got["ok"] and got["status"] < 400),
             "refused": bool(got["ok"] and got["status"] in _REFUSED),
             "why": got.get("why", "")}
-    return {"ok": True, "control_status": control["status"], "crawlers": out}
+    return {"ok": True, "control_status": control["status"],
+            "server": control.get("server", ""), "crawlers": out}
 
 
 def access(tenant: str, *, probe: bool = True, path: str = "/") -> dict:
@@ -325,6 +327,242 @@ def referrals(tenant: str, *, days: int = 28) -> dict:
                       "answer engine into the site")}
 
 
+# ---------------------------------------------------------------------------
+# The files. What a site SHOULD serve, generated from what it serves today.
+# ---------------------------------------------------------------------------
+#
+# THE SPECIFICITY TRAP, and the reason a generator is worth having here at all.
+# A crawler obeys the MOST SPECIFIC user-agent group that matches it and
+# ignores every other, `*` included. So "declaring" a bot with
+#
+#     User-agent: OAI-SearchBot
+#     Allow: /
+#
+# does not add a permission — it detaches that crawler from the wildcard group
+# and hands it /cart, /checkout and /admin, which the wildcard was disallowing.
+# Every named group this file writes therefore MIRRORS the wildcard's own
+# disallows, and no group is written at all unless it changes something.
+
+def _wildcard_disallows(robots_text: str) -> list[str]:
+    """The `Disallow:` lines of the `*` group, to mirror into a named one."""
+    out, in_star = [], False
+    for raw in (robots_text or "").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        low = line.lower()
+        if low.startswith("user-agent:"):
+            in_star = line.split(":", 1)[1].strip() == "*"
+            continue
+        if in_star and low.startswith("disallow:"):
+            value = line.split(":", 1)[1].strip()
+            if value:
+                out.append(value)
+    return out
+
+
+def _stance(tenant: str) -> str:
+    """allow | block | "" — and "" means nobody has been asked."""
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        return (getattr(row, "ai_training", "") or "") if row else ""
+
+
+def robots_plan(tenant: str) -> dict:
+    """What this site's robots.txt should say, and whether it already says it.
+
+    CHANGES ONLY WHAT NEEDS CHANGING. The common and correct outcome is
+    "nothing": a site whose robots.txt already lets the search crawlers in and
+    matches the brand's training stance needs no file, and generating one
+    anyway would be churn that carries the specificity trap for no gain.
+    """
+    from . import sites
+    try:
+        profile = sites.get(tenant)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "why": str(exc)[:200]}
+    domain = profile.get("domain", "")
+    got = _fetch(_url(domain) + "/robots.txt", _HUMAN_UA)
+    if not got["ok"]:
+        return {"ok": False, "why": f"robots.txt is not readable — "
+                                    f"{got.get('why', '')}"}
+    text = got["text"] if got["status"] == 200 else ""
+    pol = robots_policy(domain)
+    if not pol.get("ok"):
+        return {"ok": False, "why": pol.get("why", "")}
+    current = pol["crawlers"]
+    stance = _stance(tenant)
+
+    allow, block = [], []
+    for token, meta in current.items():
+        if meta["role"] == "training":
+            # THE OWNER'S CALL, and an unmade one is not a refusal. Undecided
+            # leaves the file alone and says so, rather than opting a brand out
+            # of being part of what a model knows on nobody's authority.
+            if stance == "block" and meta["allowed"]:
+                block.append(token)
+            elif stance == "allow" and not meta["allowed"]:
+                allow.append(token)
+        elif not meta["allowed"]:
+            allow.append(token)
+
+    mirror = _wildcard_disallows(text)
+    plan = {"ok": True, "domain": domain,
+            "platform": profile.get("platform", ""),
+            "stance": stance or "undecided",
+            "allow": sorted(allow), "block": sorted(block),
+            "mirrored_disallows": mirror,
+            "changes": bool(allow or block)}
+    if not plan["changes"]:
+        plan["why_not"] = (
+            "robots.txt already lets every search crawler in"
+            + (f", and matches this brand's choice to {stance} training"
+               if stance else
+               ". Nobody has said whether this brand wants to be trained on, "
+               "and an unmade decision changes nothing here"))
+        return plan
+    plan["groups"] = _groups(allow, block, mirror)
+    plan.update(_rendered(plan))
+    return plan
+
+
+def _groups(allow: list, block: list, mirror: list) -> str:
+    """The user-agent groups, each carrying the wildcard's own disallows."""
+    out = []
+    for token in allow:
+        lines = [f"User-agent: {token}"]
+        # MIRRORED, NOT "Allow: /". Naming a crawler detaches it from the
+        # wildcard group, so without these it would be handed every path the
+        # site disallows to everybody else.
+        lines += [f"Disallow: {d}" for d in mirror] or ["Allow: /"]
+        out.append("\n".join(lines))
+    for token in block:
+        out.append(f"User-agent: {token}\nDisallow: /")
+    return "\n\n".join(out)
+
+
+#: Shopify renders robots.txt from a Liquid template, and the default rules are
+#: maintained by Shopify and updated as their SEO guidance changes. So the
+#: generated template REPLAYS the defaults through their own loop and appends
+#: ours, rather than freezing today's defaults into a static file that stops
+#: tracking theirs. Property names from shopify.dev/themes/seo/robots-txt:
+#: `robots.default_groups`, `group.user_agent`, `group.rules`, `group.sitemap`.
+_SHOPIFY_TEMPLATE = """{%- comment -%}
+  Generated for the answer engines. The loop below is Shopify's own default
+  rule set, replayed unchanged so it keeps tracking their updates; the groups
+  after it are ours.
+
+  Each named group repeats the wildcard group's Disallow lines on purpose: a
+  crawler obeys the most specific group that matches it and ignores '*', so a
+  bare 'Allow: /' here would hand that crawler /cart, /checkout and /admin.
+{%- endcomment -%}
+{% for group in robots.default_groups %}
+  {{- group.user_agent }}
+  {%- for rule in group.rules -%}
+    {{ rule }}
+  {%- endfor -%}
+  {%- if group.sitemap != blank -%}
+    {{ group.sitemap }}
+  {%- endif -%}
+{% endfor %}
+
+{GROUPS}
+"""
+
+
+def _rendered(plan: dict) -> dict:
+    """The file itself, in the form the platform actually serves."""
+    if plan["platform"] == "shopify":
+        return {"filename": "templates/robots.txt.liquid",
+                "content": _SHOPIFY_TEMPLATE.replace("{GROUPS}", plan["groups"]),
+                "installable": True,
+                "how": ("installs into the published theme as "
+                        "templates/robots.txt.liquid, on your approval")}
+    return {"filename": "robots.txt",
+            "content": plan["groups"] + "\n",
+            "installable": False,
+            "how": ("this platform has no write path for robots.txt from here "
+                    "— add these groups to the file the site already serves, "
+                    "keeping everything that is in it")}
+
+
+def llms_txt(tenant: str) -> dict:
+    """An index of what this site is for, in the format llmstxt.org describes.
+
+    H1, then a blockquote summary, then H2 sections of markdown links — the
+    order the specification gives. Built only from pages that are actually
+    PUBLISHED with a real URL, because an index that lists a page an engine
+    cannot fetch is worse than no index.
+    """
+    from . import kb, keywords as kw, sites
+    try:
+        profile = sites.get(tenant)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "why": str(exc)[:200]}
+    brand = kb.get_brand(tenant) if hasattr(kb, "get_brand") else None
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, tenant)
+        name = (getattr(row, "name", "") if row else "") or tenant.title()
+        summary = (getattr(row, "positioning", "") if row else "") or ""
+    live = [r for r in kw.targets(tenant)
+            if r.status in ("published", "won") and (r.target_url or "").strip()]
+    if not live:
+        return {"ok": False, "filename": "llms.txt",
+                "why": ("nothing is published with a live URL yet, so an "
+                        "llms.txt would be an index of nothing")}
+    pillars = [r for r in live if r.role == "pillar"]
+    supports = [r for r in live if r.role != "pillar"]
+
+    def _list(rows):
+        return "\n".join(f"- [{(r.phrase or '').strip()}]({r.target_url.strip()})"
+                          for r in rows)
+    parts = [f"# {name}", ""]
+    if summary:
+        parts += [f"> {summary.strip()}", ""]
+    if pillars:
+        parts += ["## Main topics", "", _list(pillars), ""]
+    if supports:
+        parts += ["## Optional", "", _list(supports), ""]
+    return {"ok": True, "filename": "llms.txt", "content": "\n".join(parts),
+            "pages": len(live), "installable": False,
+            "how": ("serve this at /llms.txt. No platform here has a write "
+                    "path for it, so it is a file to upload")}
+
+
+def files_for(tenant: str, *, fresh: bool = False) -> dict:
+    """Everything this account should serve, and who can install each one.
+
+    READS THE STORED CHECK unless asked for `fresh`. The plan is computed from
+    the site's LIVE robots.txt, so computing it on every page render would put
+    the console back to crawling the client on each look — the thing the stored
+    reading exists to stop. The weekly job and the Check button recompute it;
+    installing recomputes too, because a file is written against what is true
+    now rather than what was true on Sunday.
+    """
+    got = stored(tenant)
+    cdn = ((got.get("access") or {}).get("edge") or {}).get("server", "")
+    if fresh:
+        out = {"tenant": tenant, "robots": robots_plan(tenant),
+               "llms_txt": llms_txt(tenant)}
+    else:
+        kept = got.get("files") or {}
+        out = {"tenant": tenant,
+               "robots": kept.get("robots") or {
+                   "ok": False, "why": "not checked yet — press Check above"},
+               "llms_txt": kept.get("llms_txt") or {
+                   "ok": False, "why": "not checked yet"}}
+    if "cloudflare" in str(cdn).lower():
+        # THE ONE WE CANNOT DO FOR THEM, named only when it is actually in the
+        # path. A CDN can refuse a crawler that robots.txt welcomes, and no
+        # file served from the origin changes that.
+        out["cdn_note"] = (
+            "This site is behind Cloudflare, which can refuse a crawler before "
+            "the origin sees it and cannot be changed by any file here. Check "
+            "Cloudflare → AI Crawl Control (all plans) for which AI services "
+            "reached the site, and the bot rules for anything blocking them.")
+    return out
+
+
 def stored(tenant: str) -> dict:
     """The last check, for a page to render without calling anything."""
     with db.SessionLocal() as s:
@@ -359,7 +597,11 @@ def check(tenant: str, *, probe: bool = True, days: int = 28) -> dict:
     """
     acc = access(tenant, probe=probe)
     ref = referrals(tenant, days=days)
+    # THE PLAN RIDES WITH THE READING. Both come from the same live robots.txt,
+    # and computing them together is what lets the card render from a stored
+    # row without calling anything.
     got = {"access": acc, "referrals": ref,
+           "files": {"robots": robots_plan(tenant), "llms_txt": llms_txt(tenant)},
            "at": db.utcnow().isoformat(timespec="minutes")}
     with db.SessionLocal() as s:
         s.add(db.AnswerEngineCheck(

@@ -1012,7 +1012,17 @@ def _execute(ap: db.Approval) -> None:
         from . import sites, whatsapp
         p = ap.payload
         profile = sites.get(p.get("site"))
-        msg = sites.backend(profile).install_schema_renderer(profile)
+        backend = sites.backend(profile)
+        # ONE KIND, TWO ASSETS. The schema renderer was the only theme write
+        # there had ever been, so this arm hard-coded it; a generated
+        # robots.txt.liquid is the same act through the same documented call,
+        # and a second approval kind for it would be a second path to keep
+        # true. A payload that names an asset writes that asset; one that does
+        # not is the renderer, unchanged.
+        if p.get("asset_key"):
+            msg = backend.put_asset(profile, p["asset_key"], p.get("asset_value", ""))
+        else:
+            msg = backend.install_schema_renderer(profile)
         whatsapp.send_text(f"🧩 {msg}")
     elif ap.kind == "systems_update":
         from . import systems_map, whatsapp

@@ -663,6 +663,27 @@ def _main_theme_id(store: str):
     return main["id"] if main else (themes[0]["id"] if themes else None)
 
 
+def put_asset(profile: dict, key: str, value: str) -> str:
+    """Write one theme asset into the PUBLISHED theme.
+
+    The generalisation of `install_schema_renderer`'s own write. Both go
+    through the same documented call — PUT themes/{id}/assets.json with
+    {"asset": {"key", "value"}} — and this one takes the key from the caller so
+    a generated `templates/robots.txt.liquid` can use the path that already
+    works rather than a second one.
+    """
+    err = _ok(profile)
+    if err:
+        return err
+    store = _store(profile)
+    tid = _main_theme_id(store)
+    if not tid:
+        return f"No theme found to write {key} into."
+    _send(store, "PUT", f"themes/{tid}/assets.json",
+          {"asset": {"key": key, "value": value}})
+    return f"Wrote {key} to the published theme."
+
+
 def install_schema_renderer(profile: dict) -> str:
     """Create the snippet and include it before </head> in the main theme.
     Idempotent; reversible via Shopify's theme versions."""

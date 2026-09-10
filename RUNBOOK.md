@@ -604,6 +604,44 @@ click, but anything above zero is proof that we are. It pairs with
 `keywords.aeo`'s answer-taken flag, which is the other direction: ranking well
 and not being clicked is consistent with an answer taking the click.
 
+### The files, and who can install each one
+
+Plan tab, Progress, under "Can the engines read us". Two files, generated from
+what the site serves today rather than from a template.
+
+**robots.txt is only offered when it changes something.** A site that already
+lets the search crawlers in gets told so and nothing is written. When it does
+need a change, the generated groups repeat the wildcard group's own Disallow
+lines: a crawler obeys the most specific user-agent group that matches it and
+ignores `*`, so a bare `Allow: /` under a crawler's name would detach it from
+the wildcard rules and hand it `/cart`, `/checkout` and `/admin`.
+
+On Shopify it installs. robots.txt there is a theme template, and the generated
+`templates/robots.txt.liquid` replays Shopify's own default groups through
+their loop (so the store keeps tracking their updates) and appends ours. It
+goes through the approval queue like every other write. On WordPress and
+Squarespace there is no write path, so the file is shown and somebody uploads
+it.
+
+**llms.txt** is an index in the format llmstxt.org describes: an H1, a
+blockquote summary, then H2 sections of markdown links. It lists only pages
+that are published with a live URL, because an index pointing at pages an
+engine cannot fetch is worse than none. No platform here can write it.
+
+**Training is a separate decision from being cited, and it is yours.** Search
+crawlers decide whether an engine can cite a page; the training setting decides
+only whether the content trains a model. Undecided is a real third state and
+leaves robots.txt alone — a brand nobody has asked is not a brand that said no.
+The buttons are on the same card. For these accounts the recommendation is to
+allow both: being in training data is roughly how a brand becomes part of what
+a model knows without needing a citation, and blocking it is the publisher's
+posture, which protects licensing revenue none of these brands sell.
+
+**What no file can fix.** A CDN can refuse a crawler before the origin sees the
+request. When the check finds Cloudflare in front of a site, the card says so
+and points at Cloudflare's AI Crawl Control, which is on all plans and shows
+which AI services actually reached the site.
+
 ## 7. What does not work yet
 
 Read this before promising anything.
