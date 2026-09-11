@@ -67,8 +67,13 @@ def main() -> int:
        and "APPROVED claim, verbatim, or leave the slot" in b and "products ×3" in b)
     ck("a picture slot is the brand's to fill — the drafter writes its alt line only",
        "picture ×1 — from the brand's own library; you write its alt line only" in b)
-    ck("the ask's style is said; the brief never carries copy",
-       "outline button" in b and not re.search(r'"[A-Z][^"]{10,}"', b))
+    ck("the ask's style is said in plain words, one destination; the brief never carries copy",
+       "an outlined button" in b and "ONE destination" in b and not re.search(r'"[A-Z][^"]{10,}"', b))
+    twice, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline", "cta"]},
+                                          {"kind": "closing", "slots": ["body", "cta"]}]})
+    ck("a design that asks twice is briefed as the same ask again — the one link, repeated",
+       "cta (the same ask again — the one link, repeated)" in ed.brief(twice)
+       and ed.brief(twice).count("the one ask") == 1)
     ck("a design with no order briefs nothing — the drafter composes as before",
        ed.brief(ed.house()) == "")
     st = {"name": "x", "sequence": ["hero", "text"], "profile": {"notes": "The picture carries the opening."},
@@ -102,6 +107,16 @@ def main() -> int:
     ck("the drafter's words are untouched — a picture is added, never a word",
        [x for x in filled if x.get("type") not in ("image",)] == [{**blocks[0], "image": filled[0]["image"], "alt": filled[0]["alt"]}] + blocks[1:])
     ck("nothing missed, nothing to say", rep["missed"] == [] and rep["notes"] == [])
+    twice2, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline", "body", "cta"]},
+                                           {"kind": "closing", "slots": ["body", "cta"]}]})
+    ask_blocks = [{"type": "hero", "image": CDN + "h.jpg"}, {"type": "heading", "text": "H", "level": 1},
+                  {"type": "text", "html": "<p>Words.</p>"}, {"type": "cta", "label": "Go", "url": "https://x/go"},
+                  {"type": "signature", "text": "Warmly,", "name": "G"}]
+    rep_f, rep_r = ed.fill("baci", twice2, ask_blocks)
+    ck("where the design asks again lower down, the one ask is repeated — same label, same link — and said",
+       sum(1 for x in rep_f if x.get("type") == "cta") == 2
+       and {x["url"] for x in rep_f if x.get("type") == "cta"} == {"https://x/go"}
+       and any("repeated" in n for n in rep_r["notes"]), str([x["type"] for x in rep_f]))
     dd, _ = ed.normalize({"imagery": {"feature": "texture"},
                           "sections": [{"kind": "hero", "slots": ["headline"]},
                                        {"kind": "intro", "slots": ["body", "image:2"]}]})
@@ -113,9 +128,68 @@ def main() -> int:
        and any(n.startswith("design slot not filled") for n in notes)
        and [x for x in filled2 if x.get("type") == "text"])
     ck("a design with no order fills nothing and says nothing",
-       ed.fill("baci", ed.house(), blocks) == (blocks, {"filled": 0, "missed": [], "notes": []}))
+       ed.fill("baci", ed.house(), blocks) == (blocks, {"filled": 0, "missed": [], "notes": [], "unreached": []}))
     hero_kept = ed.fill("baci", d, [{"type": "hero", "image": CDN + "own.jpg", "headline": "H"}])[0][0]
     ck("a hero that already carries a picture keeps it", hero_kept["image"].endswith("own.jpg"))
+
+    # THE PISTOL-SHRIMP REVIEW (2026-09-11): the reference's opening card is
+    # ONE section — kicker, headline, byline, then the picture, body, ask —
+    # while the drafter's hero block is placement only and its words are a
+    # run of their own. The two must meet, and the slot ORDER must hold.
+    card, _ = ed.normalize({"sections": [
+        {"kind": "hero", "layout": "stack", "image": "rounded", "slots": ["kicker", "headline", "sub", "image:1", "body", "cta"]},
+        {"kind": "feature", "layout": "grid2", "slots": ["kicker", "headline", "list"]},
+        {"kind": "closing", "layout": "band", "bg": "dark", "slots": ["image:1"]}]})
+    story = [{"type": "hero", "image": CDN + "h.jpg"},
+             {"type": "heading", "text": "Kick", "level": 2}, {"type": "heading", "text": "Head", "level": 1},
+             {"type": "text", "html": "<p>By the studio</p>"}, {"type": "text", "html": "<p>Body words.</p>"},
+             {"type": "cta", "label": "Go", "url": "#"},
+             {"type": "heading", "text": "Q", "level": 2}, {"type": "heading", "text": "Which?", "level": 1},
+             {"type": "list", "items": ["a", "b"]}]
+    groups = er.group_sections(story, card)
+    ck("a hero section that carries words absorbs the run after it — the reference's card is one section",
+       [g["kind"] for g in groups] == ["hero", "intro"] and len(groups[0]["blocks"]) == 6, str([g["kind"] for g in groups]))
+    o = er.ordered(groups[0]["blocks"], card["sections"][0]["slots"])
+    ck("inside it the design's slot order holds — kicker, headline, byline, THEN the picture, body, ask",
+       [b["type"] for b in o] == ["heading", "heading", "text", "hero", "text", "cta"] and o[0]["level"] == 2 and o[1]["level"] == 1,
+       str([b["type"] for b in o]))
+    h = er.render_design(card, THEME, story)
+    ck("and the render puts the headline above the picture, the quiz on the section after",
+       h.index("Head") < h.index("h_") and h.index("Body words") > h.index("h_") and "Which?" in h)
+    notes2 = []
+    _, rep3 = ed.fill("baci", card, story, note=notes2.append)
+    with_div = story + [{"type": "divider"}, {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
+    kinds_div = [g["kind"] for g in er.group_sections(with_div, card)]
+    ck("a divider is a section boundary — the closing after it is its own run, not the tail of the one above, "
+       "and a last run of words with no heading IS the closing",
+       kinds_div == ["hero", "intro", "closing"] and er.group_sections(with_div, card)[1]["blocks"][-1]["type"] == "divider",
+       str(kinds_div))
+    both, _ = ed.normalize({"sections": [{"kind": "closing", "layout": "band", "bg": "dark", "slots": ["image:1"]},
+                                         {"kind": "closing", "bg": "surface", "slots": ["body", "cta"]}]})
+    taken = {}
+    ck("a closing of words takes the closing that holds words, not the picture-only band before it",
+       er._spec_for(both, "closing", taken, [{"type": "text"}, {"type": "cta"}]).get("bg") == "surface")
+    ck("the brief tells the drafter to put a divider between sections", "divider block between" in ed.brief(card))
+    ck("a design section the draft never reached is said on the run — the closing band here",
+       rep3["unreached"] == ["closing (band on the dark)"] and any("did not reach" in n for n in notes2), str(rep3["unreached"]))
+
+    # The rules gate's block cap is said, never silent (it trimmed at 12 in
+    # silence and the closing fell off the end).
+    from app import skill_pack as _sp
+    said = []
+    many = [{"type": "heading", "text": f"H{i}", "level": 2 if i % 2 else 1} for i in range(_sp.BLOCKS_CAP + 4)]
+    kept, _ = _sp._assemble_blocks({"blocks": many}, [], None, {}, said.append, fmt="designed")
+    ck("the drafter's blocks beyond the cap are dropped AND said, with the count and the cap",
+       len(kept) == _sp.BLOCKS_CAP and any("were dropped — the cap is" in n for n in said), str(said)[:120])
+    ck("the cap holds a designed email of five sections with dividers", _sp.BLOCKS_CAP >= 16)
+    # A design section SKIPPED OVER by the slot-aware match is reported too —
+    # the logo band the closing of words stepped past.
+    skip_blocks = [{"type": "hero", "image": CDN + "h.jpg"}, {"type": "heading", "text": "H", "level": 1},
+                   {"type": "text", "html": "<p>W.</p>"}, {"type": "divider"},
+                   {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
+    _, rep4 = ed.fill("baci", both, skip_blocks)
+    ck("a section the match stepped past is reported as unreached, not only the ones after the cursor",
+       rep4["unreached"] == ["closing (band on the dark)"], str(rep4["unreached"]))
 
     print("\n— 3. the painter —")
     html = er.render_design(d, THEME, filled)

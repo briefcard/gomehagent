@@ -1623,6 +1623,23 @@ different rules, join on the family, not the name**. Twelve guards, all
 were retargeted. NOT proven live; drawing when nothing fits is not wired;
 the legacy renderer still stands for the Brand-tab sample and its suites.
 
+**The pistol-shrimp review, same day (hash in the memory note).** The
+owner asked for the chain reviewed top down on one real gallery email.
+Findings, all fixed and guarded: the reader's sections and the drafter's
+runs did not share a grouping rule (a hero card absorbs its words; slot
+order honoured; kicker+headline one section; a divider is the section
+boundary and the brief says so; the last headingless run is the closing;
+a group takes the next section of its family that can hold what it
+carries; a skipped section is reported); the rules gate trimmed at 12 in
+silence (`BLOCKS_CAP` 24, said); two asks → the one ask repeated; a
+structure named by the page title → by its summary; three devices the
+vocabulary lacked (cards, the kicker pill, list styles pill/arrow/plain).
+Rules it adds: **when a real reference is read, the vocabulary's gaps
+are what the reader could see and could not say — widen the schema, never
+the prompt**; **a review runs the real code with the model stubbed by a
+person, and every finding ships with its guard**. Ten guards, all
+`[ caught ]`.
+
 **Owner's move:** swipe one real RGE email, read the card, open the
 preview beside the reference, run one campaign on it and read the run
 note; then the six-email acceptance.

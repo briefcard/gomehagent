@@ -565,6 +565,55 @@ reader that tiles flipped two entries to FIXED).
   Brand tab's theme sample and the suites that pin the old behaviour;
   retiring them is a cleanup ship of its own, listed under Phase 7.
 
+### The first top-down review — 2026-09-11, `animal-facts-pistol-shrimp-quiz`
+The owner asked for the whole chain reviewed on one real gallery email.
+Run locally with the real code at every step; the three vision passes
+answered by hand from the strips (no key on this machine), in the reader's
+own prompts, fed through the real `read()`. What it found, each fixed and
+guarded in the same ship:
+
+- **The reader's sections and the drafter's runs did not share a grouping
+  rule.** The reference's opening card is ONE section — kicker, headline,
+  byline, then the picture, body, ask — while the drafter's hero block is
+  placement only and its words a run of their own, so the design's next
+  section landed on the hero's copy and everything after was one place
+  off. Now: a hero section that carries word slots absorbs the run after
+  it (`_HERO_WORDS`); the slot ORDER is honoured inside a section
+  (`ordered` — headline over the picture when the reference had it so); a
+  kicker and its headline are one section (a heading starts a run only
+  when the run already holds words); a `divider` is the section boundary
+  the drafter never had, and the brief says to write one; the last
+  headingless run of words is the closing; a group takes the next section
+  of its family that can HOLD what it carries (`_holds` — a closing of
+  words steps past the reference's logo band); a section stepped past is
+  reported as unreached.
+- **The rules gate trimmed the drafter's blocks at 12, in silence** — the
+  closing and its ask fell off the end. `BLOCKS_CAP` = 24, and a trim is
+  said with the count and the cap.
+- **Two asks.** A design that asks twice was briefed for a second cta the
+  one-ask rule then dropped. Now the brief says "the same ask again — the
+  one link, repeated" and `fill` repeats the one ask into a later ask slot
+  (the craft doctrine: one destination, repeated).
+- **The structure was named by the gallery page's title** — the reference
+  email's own headline and brand, in a library that carries no words. Named
+  by `summary(design)` now, as a run-filed structure is.
+- **The vocabulary was too narrow for three common newsletter devices** the
+  reader saw and could not say: sections as a stack of rounded CARDS on the
+  page (`frame.container: cards`), a kicker on a filled PILL (`type.kicker:
+  pill`), and LIST styles — pill buttons two across for a quiz, arrow rows
+  with rules for further reading, plain (`section.list`). Added; the painter
+  walk covered them the moment they existed (45 fields).
+- Small: the brief said "a underline button"; a centred closing centres its
+  ask; in a stack of cards a boundary divider paints no rule under nothing.
+- **Seen and left, named:** the header's patterned strip and the arrow disc
+  beside the underlined link are not in the vocabulary; the hero took the
+  product packshot from the hero ladder rather than the design's
+  `imagery.hero` (lifestyle) — the ladder is the governed choice and the
+  design's kind is a preference, to be reconciled in Phase 7.
+- Before the vocabulary grew, the recreation held the structure and about
+  half the style; after, it is recognisably the reference in Baci's colours
+  with the brand's own photograph and copy. Ten guards, all `[ caught ]`.
+
 ### Phase 7 — Learn, and tidy (later, not this initiative)
 Structures carry outcomes per brand (`results.py` joining `Output.meta
 ["design"]` to performance); a design signature of its own in the library

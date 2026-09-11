@@ -213,6 +213,17 @@ def main() -> int:
     ck("every layout the schema names has a painter; a layout nothing draws falls to stack",
        set(ed.SECTION["layout"].values) == set(er.LAYOUTS)
        and er.LAYOUTS.get("hologram", er._lay_stack) is er._lay_stack)
+    centred, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline"]},
+                                            {"kind": "intro", "slots": ["headline", "body"]},
+                                            {"kind": "closing", "align": "center", "slots": ["body", "cta"]}]})
+    c_blocks = [{"type": "hero", "image": CDN + "h.jpg"}, {"type": "heading", "text": "H", "level": 1},
+                {"type": "text", "html": "<p>Words.</p>"}, {"type": "divider"},
+                {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
+    ck("a centred closing centres its ask too, not only its words",
+       'align="center"' in er.render_design(centred, THEME, c_blocks).split("Go</a>")[0][-420:])
+    stack_cards, _ = ed.normalize({"frame": {"container": "cards"}, "sections": [{"kind": "intro", "slots": ["body"]}]})
+    ck("in a stack of cards a boundary divider paints no rule at the bottom of a card",
+       "height:1px" not in er.render_design(stack_cards, THEME, [{"type": "heading", "text": "H"}, {"type": "text", "html": "<p>x</p>"}, {"type": "divider"}]).split("</table></td></tr></table></td></tr>")[0].split("H<")[1])
     cols = er.render_design(_design_with("section", "layout", "columns"), THEME, BLOCKS)
     ck("columns deal the run's words left and right", cols.count('width="50%"') == 2)
 

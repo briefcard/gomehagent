@@ -123,6 +123,9 @@ SECTION = {
     "text_on_image": _F(_ONOFF, False, "the words sit over the picture"),
     "rule_above": _F(("none", "thin", "thick", "dotted"), "none",
                      "a rule between this section and the one before"),
+    "list": _F(("check", "pill", "arrow", "plain"), "check",
+               "how a list is set: ticks; pill buttons two across (a quiz, a poll); "
+               "rows with an arrow and a rule between (further reading); plain lines"),
 }
 
 #: The whole design. Every group is a dict of fields; `defaults` is SECTION
@@ -130,8 +133,10 @@ SECTION = {
 SCHEMA = {
     "frame": {
         "page": _F(("page", "dark", "tint"), "page", "the ground behind the email"),
-        "container": _F(("flat", "card"), "card",
-                        "the email sits flat on the page, or in a card on it"),
+        "container": _F(("flat", "card", "cards"), "card",
+                        "the email sits flat on the page, in one card on it, or as a "
+                        "stack of cards — every section its own rounded card with the "
+                        "page showing between them"),
         "width": _F((600, 640, 680), 600, "the email's width in pixels"),
         "radius": _F(("none", "soft", "round"), "soft", "how corners are cut, everywhere"),
         "border": _F(_ONOFF, True, "a keyline around the card"),
@@ -160,9 +165,9 @@ SCHEMA = {
         "align": _F(("left", "center"), "left", "where headings sit"),
         "body_size": _F((14, 15, 16, 17), 16, "the reading size in pixels"),
         "leading": _F(("tight", "regular", "airy"), "regular", "line height everywhere"),
-        "kicker": _F(("none", "caps", "accent", "rule"), "accent",
+        "kicker": _F(("none", "caps", "accent", "rule", "pill"), "accent",
                      "the small line over a section: none; small capitals; small "
-                     "capitals in the accent; with a short rule"),
+                     "capitals in the accent; with a short rule; on a filled pill"),
         "italic_sub": _F(_ONOFF, False, "the sub-headline is set in italics"),
     },
     "palette": {
@@ -873,8 +878,11 @@ def read(asset_id: str) -> dict:
     seq = sequence_for_library(design)
     info = {"tier": tier, "edge": edge, "strips": len(parts), "calls": calls,
             "mobile": bool(mobile_sheet), "critiqued": patched, "dropped": dropped}
+    # NAMED BY WHAT IT DOES, never by the page: the gallery's title is the
+    # email's own headline and its brand — copy, in a library that carries
+    # none. The name is the design's summary, as a run-filed structure is.
     got = es.file_structure(
-        name=(title or "swiped design")[:120], sequence=seq, source="swipe",
+        name=(summary(design) or "swiped design")[:120], sequence=seq, source="swipe",
         review="proposed", fits_intents=list(a.get("fits_intents") or []),
         fits_formats=list(a.get("fits_formats") or []),
         source_url=src or url, source_asset_id=asset_id, notes=notes,
@@ -978,14 +986,19 @@ def brief(design: dict) -> str:
     hw = _HEADLINE_WORDS.get(t.get("scale", "modest"), 10)
     lines = ["\n## THE DESIGN THIS SEND IS BUILT ON — its sections, in this order",
              "Write ONE block per slot, in this order, in this brand's own words, "
-             "claims and pictures. The design is borrowed; nothing in it is."]
+             "claims and pictures. The design is borrowed; nothing in it is. Put a "
+             "divider block between one section and the next, so each is its own."]
     case = {"upper": "set in capitals", "title": "set in title case"}.get(t.get("heading_case"), "")
     lines.append(f"  Headlines: at most {hw} words ({t.get('scale', 'modest')} scale"
                  + (f", {case}" if case else "") + "). A kicker is a label, not a sentence.")
     for i, s in enumerate(secs, 1):
         slots = []
+        seen_cta = any("cta" in (x.get("slots") or []) for x in secs[:i - 1])
         for slot in s.get("slots") or []:
             name, _, n = slot.partition(":")
+            if name == "cta" and seen_cta:
+                slots.append("cta (the same ask again — the one link, repeated)")
+                continue
             if name == "headline":
                 slots.append(f"headline (≤{hw} words)")
             elif name == "products":
@@ -998,7 +1011,12 @@ def brief(design: dict) -> str:
         where = f"{s.get('layout', 'stack')} on the {s.get('bg', 'surface')}"
         lines.append(f"  {i}. {s.get('kind', '')} — {where}: " + ("; ".join(slots) if slots else "no copy"))
     c = design.get("cta") or {}
-    lines.append(f"  The ask is a {c.get('style', 'filled')} button; write its label as a verb phrase.")
+    ask = {"filled": "a filled button", "outline": "an outlined button", "full": "a full-width bar",
+           "underline": "an underlined line of text", "arrow": "a line of text with an arrow"}.get(
+        c.get("style", "filled"), "a button")
+    lines.append(f"  The ask is {ask}; write its label as a verb phrase — ONE destination for the "
+                 f"whole email. Where the design asks again later, write the same ask again; "
+                 f"the same link, never a second one.")
     return "\n".join(lines)
 
 
@@ -1018,25 +1036,38 @@ def fill(tenant: str, design: dict, blocks: list, note=None) -> tuple[list, dict
     from . import email_render
     secs = [s for s in (design.get("sections") or [])]
     if not secs:
-        return list(blocks or []), {"filled": 0, "missed": [], "notes": []}
-    grouped = email_render.group_sections(blocks or [])
+        return list(blocks or []), {"filled": 0, "missed": [], "notes": [], "unreached": []}
+    grouped = email_render.group_sections(blocks or [], design)
     taken: dict = {}
+    consumed: set = set()          # (family, index) of every design section a group took
     used: set = set()
     out: list = []
-    report = {"filled": 0, "missed": [], "notes": []}
+    report = {"filled": 0, "missed": [], "notes": [], "unreached": []}
     for g in grouped:
         kind = g["kind"]
         fam = email_render._family(kind)
         order = [s for s in secs if email_render._family(str(s.get("kind"))) == fam]
         i = taken.get(fam, 0)
-        spec = order[i] if i < len(order) else None
-        taken[fam] = i + 1
+        j = next((k for k in range(i, len(order)) if email_render._holds(order[k], g["blocks"])), None)
+        spec = order[j] if j is not None else None
+        taken[fam] = (j + 1) if j is not None else i
+        if j is not None:
+            consumed.add((fam, j))
         blocks_g = list(g["blocks"])
         wants = 0
         for slot in (spec or {}).get("slots") or []:
             name, _, n = slot.partition(":")
             if name == "image":
                 wants = int(n or 1)
+        # THE ONE ASK, REPEATED. The rules gate keeps exactly one cta; a
+        # design that asks again lower down (the reference's second link)
+        # gets the SAME ask — label and destination — never a second one.
+        wants_cta = spec is not None and any(str(sl).split(":")[0] == "cta" for sl in (spec.get("slots") or []))
+        if wants_cta and not any(b.get("type") in ("cta", "button") for b in blocks_g):
+            first = next((b for b in (blocks or []) if b.get("type") in ("cta", "button")), None)
+            if first is not None:
+                blocks_g.append(dict(first))
+                report["notes"].append("the ask repeated where the design asks again — the same link")
         has_pic = any(b.get("type") in ("hero", "image") and b.get("image") for b in blocks_g)
         if spec and wants and not (kind == "hero" and has_pic):
             ikind = (design.get("imagery") or {}).get(_IMAGERY_OF.get(kind, "feature"), "lifestyle")
@@ -1061,6 +1092,20 @@ def fill(tenant: str, design: dict, blocks: list, note=None) -> tuple[list, dict
                     report["missed"].append(
                         f"{wants - n_got} of {wants} picture(s) for the {kind} section ({ikind}) — {got['why']}")
         out += blocks_g
+    # A design section the drafter's blocks never reached — a closing band,
+    # a second run of words — is said, so the difference between the
+    # reference and the email is on the run and not a surprise on the card.
+    fams: dict = {}
+    for s_ in secs:
+        fam = email_render._family(str(s_.get("kind")))
+        fams.setdefault(fam, []).append(s_)
+    for fam, lst in fams.items():
+        for k, s_ in enumerate(lst):
+            if (fam, k) not in consumed:
+                report["unreached"].append(f"{s_.get('kind')} ({s_.get('layout')} on the {s_.get('bg')})")
+    if report["unreached"] and note:
+        note("design sections the draft did not reach: " + "; ".join(report["unreached"])
+             + " — the drafter wrote fewer sections than the design has")
     for m in report["missed"]:
         report["notes"].append("not filled: " + m + "; the section keeps its words")
         if note:

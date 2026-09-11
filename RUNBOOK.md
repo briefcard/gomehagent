@@ -699,7 +699,7 @@ drafter designs fresh, as it always did.
 | field | values | default | what it means |
 |---|---|---|---|
 | `frame.page` | page · dark · tint | page | the ground behind the email |
-| `frame.container` | flat · card | card | the email sits flat on the page, or in a card on it |
+| `frame.container` | flat · card · cards | card | the email sits flat on the page, in one card on it, or as a stack of cards — every section its own rounded card with the page showing between them |
 | `frame.width` | 600 · 640 · 680 | 600 | the email's width in pixels |
 | `frame.radius` | none · soft · round | soft | how corners are cut, everywhere |
 | `frame.border` | off · on | on | a keyline around the card |
@@ -717,7 +717,7 @@ drafter designs fresh, as it always did.
 | `type.align` | left · center | left | where headings sit |
 | `type.body_size` | 14 · 15 · 16 · 17 | 16 | the reading size in pixels |
 | `type.leading` | tight · regular · airy | regular | line height everywhere |
-| `type.kicker` | none · caps · accent · rule | accent | the small line over a section: none; small capitals; small capitals in the accent; with a short rule |
+| `type.kicker` | none · caps · accent · rule · pill | accent | the small line over a section: none; small capitals; small capitals in the accent; with a short rule; on a filled pill |
 | `type.italic_sub` | off · on | off | the sub-headline is set in italics |
 | `palette.mood` | light · dark · high-contrast · tonal · mono | light | the email's overall key — read off the reference, filled by the brand's roles |
 | `palette.accent_use` | buttons · rules · type · blocks | buttons, rules | where the accent is allowed to appear |
@@ -742,6 +742,7 @@ drafter designs fresh, as it always did.
 | `section.aspect` | square · portrait · landscape · wide | landscape | the picture's shape — the slot the brand's own picture is cut to |
 | `section.text_on_image` | off · on | off | the words sit over the picture |
 | `section.rule_above` | none · thin · thick · dotted | none | a rule between this section and the one before |
+| `section.list` | check · pill · arrow · plain | check | how a list is set: ticks; pill buttons two across (a quiz, a poll); rows with an arrow and a rule between (further reading); plain lines |
 
 Section kinds: hero · intro · feature · products · proof · editorial · offer · closing · ps. Slots: kicker · headline · sub · body · list · cta · products · quote · stat · image · caption · signature · ps (products and image take a count, 1–6). Grounds a design may name: page · surface · dark · tint · accent; the roles a brand supplies: page · surface · ink · muted · accent · accent_ink · dark · dark_ink · tint · tint_ink · border · secondary.
 

@@ -512,6 +512,15 @@ def _heading(b: dict, t: dict) -> str:
     # accent (the house), in the ink, with a short rule beneath, or none —
     # which sets it as a plain small heading rather than dropping it.
     k = tp["kicker"]
+    if k == "pill":
+        # A FILLED PILL: small capitals on the tint, in the ink — the label
+        # a newsletter puts over its lead story.
+        pal = t.get("palette") or {}
+        return (f'<tr><td style="padding:{pv + 4}px {ph}px 0{";text-align:center" if tp["talign"] else ""}">'
+                f'<span style="display:inline-block;padding:5px 12px;border-radius:999px;'
+                f'background:{pal.get("tint", c["bg"])};font-family:{t["font"]["body"]};'
+                f'font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;'
+                f'color:{pal.get("tint_ink", c["text"])}">{_esc(b.get("text", ""))}</span></td></tr>')
     col = c["text"] if k in ("caps", "rule", "none") else c["accent"]
     caps = "" if k == "none" else "letter-spacing:1.5px;text-transform:uppercase;"
     rule = (f'<div style="width:28px;height:2px;background:{c["accent"]};margin:6px 0 0'
@@ -542,8 +551,42 @@ def _quote(b: dict, t: dict) -> str:
 
 def _list(b: dict, t: dict) -> str:
     """A checklist — short scannable points with accent marks, for the
-    education-shaped email a paragraph run would bury."""
+    education-shaped email a paragraph run would bury. A DESIGN may set the
+    list another way (`section.list`): pill buttons two across, rows with an
+    arrow and a rule between them, or plain lines."""
     c = t["colors"]
+    style = t.get("list_style") or "check"
+    items = [str(i) for i in (b.get("items") or [])[:6] if str(i or "").strip()]
+    if not items:
+        return ""
+    pv, ph = _PAD[t["look"]["density"]]
+    fam = t["font"]["body"]
+    if style == "pill":
+        gap = 12
+        cw = (t["width"] - 2 * ph - gap) // 2
+        cells = [(f'<td width="{cw}" style="padding:0 0 {gap}px"><div style="border:1px solid {c["border"]};'
+                  f'border-radius:999px;padding:12px 14px;text-align:center;font-family:{fam};font-size:14px;'
+                  f'font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:{c["text"]};'
+                  f'background:{(t.get("palette") or {}).get("page", c["bg"])}">{_esc(it)}</div></td>') for it in items]
+        sp = f'<td width="{gap}" style="font-size:0;line-height:0">&nbsp;</td>'
+        rows = "".join("<tr>" + sp.join(cells[i:i + 2]) + "</tr>" for i in range(0, len(cells), 2))
+        return (f'<tr><td style="padding:{pv}px {ph}px"><table role="presentation" width="100%" '
+                f'cellpadding="0" cellspacing="0" border="0">{rows}</table></td></tr>')
+    if style == "arrow":
+        rows = "".join(
+            f'<tr><td style="padding:12px 0;border-top:1px solid {c["border"]}"><table role="presentation" '
+            f'width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+            f'<td style="font-family:{t["font"]["heading"]};font-size:18px;font-weight:700;line-height:1.3;'
+            f'color:{c["text"]}">{_esc(it)}</td>'
+            f'<td width="28" align="right" style="font-family:{fam};font-size:18px;font-weight:700;'
+            f'color:{c["accent"]}">&rarr;</td></tr></table></td></tr>' for it in items)
+        return (f'<tr><td style="padding:{pv}px {ph}px"><table role="presentation" width="100%" '
+                f'cellpadding="0" cellspacing="0" border="0">{rows}</table></td></tr>')
+    if style == "plain":
+        rows = "".join(f'<tr><td style="font-family:{fam};font-size:16px;line-height:1.55;color:{c["text"]};'
+                       f'padding:4px 0">{_esc(it)}</td></tr>' for it in items)
+        return (f'<tr><td style="padding:{pv}px {ph}px"><table role="presentation" width="100%" '
+                f'cellpadding="0" cellspacing="0" border="0">{rows}</table></td></tr>')
     rows = "".join(
         f'<tr><td width="26" valign="top" style="font-family:{t["font"]["body"]};'
         f'font-size:16px;font-weight:700;color:{c["accent"]};padding:5px 0">✓</td>'
@@ -968,13 +1011,26 @@ _BLOCK_KIND = {"hero": "hero", "products": "products", "quote": "proof", "stat":
                "banner": "offer", "signature": "closing", "ps": "ps"}
 
 
-def group_sections(blocks: list) -> list[dict]:
+#: The slots a hero section may carry beyond its own picture and headline;
+#: a design whose hero names any of these is a CARD — the words belong in
+#: it, and the run that follows the hero block is absorbed into it.
+_HERO_WORDS = ("body", "list", "cta", "quote", "stat", "caption")
+
+
+def group_sections(blocks: list, design: dict | None = None) -> list[dict]:
     """The drafter's flat blocks as sections: a hero, a product block, a
     proof block, a banner, a signature and a P.S. are each their own; a
     heading starts a run of words (the first run after the top is the
     intro, then feature and editorial by turns); text, a list, a divider
     and an ask join the run they are in; an ask with no run is the closing.
-    Returns `[{kind, blocks}]`."""
+    Returns `[{kind, blocks}]`.
+
+    With a `design` whose first hero section carries WORD slots — body, a
+    list, an ask — the hero is a card in the reference (its headline and
+    copy live with its picture), so the run that follows the hero block is
+    absorbed into the hero section; without this the design's next words
+    section landed on the hero's own copy and everything after was off by
+    one (the pistol-shrimp review, 2026-09-11)."""
     out: list[dict] = []
     cur: dict | None = None
     runs = 0
@@ -993,7 +1049,20 @@ def group_sections(blocks: list) -> list[dict]:
             # words it was filled for, and it joins them.
             pending.append(b)
             continue
-        starts = kind == "heading" or cur is None
+        if kind == "divider":
+            # A DIVIDER IS A SECTION BOUNDARY — the one mark a drafter has to
+            # say "the next thing is its own section" without a heading
+            # (the pistol-shrimp review's closing, absorbed into the run
+            # above it). It stays with the run it closes, painted as the
+            # design's divider, and the next block starts fresh.
+            if cur is not None:
+                cur["blocks"].append(b)
+            cur = None
+            continue
+        # A heading starts a run — unless the run so far is only headings
+        # (a kicker, then its headline): those are one section's top, not two.
+        only_heads = cur is not None and all(b.get("type") == "heading" for b in cur["blocks"])
+        starts = (kind == "heading" and not only_heads) or cur is None
         if starts and (kind == "heading" or kind != "cta"):
             runs += 1
             cur = {"kind": "intro" if runs == 1 else ("feature" if runs % 2 == 0 else "editorial"),
@@ -1007,6 +1076,25 @@ def group_sections(blocks: list) -> list[dict]:
         cur["blocks"].append(b)
     if pending:
         out.append({"kind": "editorial", "blocks": pending})
+    # THE LAST RUN OF WORDS WITH NO HEADING IS THE CLOSING — "was this
+    # forwarded to you?" and the ask again, under everything else.
+    if out and out[-1]["kind"] in WORDS and not any(b.get("type") == "heading" for b in out[-1]["blocks"]) \
+            and len(out) > 1:
+        out[-1]["kind"] = "closing"
+    hero_spec = next((x for x in ((design or {}).get("sections") or []) if x.get("kind") == "hero"), None)
+    if hero_spec and any(str(sl).split(":")[0] in _HERO_WORDS for sl in (hero_spec.get("slots") or [])):
+        for i in range(len(out) - 1):
+            if out[i]["kind"] == "hero" and out[i + 1]["kind"] in WORDS:
+                out[i]["blocks"] = out[i]["blocks"] + out[i + 1]["blocks"]
+                del out[i + 1]
+                # The runs after it keep their turns: the first run of words
+                # is still the intro of the design's words family.
+                n = 0
+                for g in out[i + 1:]:
+                    if g["kind"] in WORDS:
+                        n += 1
+                        g["kind"] = "intro" if n == 1 else ("feature" if n % 2 == 0 else "editorial")
+                break
     return out
 
 
@@ -1021,19 +1109,36 @@ def _family(kind: str) -> str:
     return "words" if kind in WORDS else kind
 
 
-def _spec_for(design: dict, kind: str, taken: dict) -> dict:
+def _holds(sec: dict, blocks: list | None) -> bool:
+    """Whether a design section's slots can hold what a group carries: a
+    group with words needs a section with a word slot; a group that is only
+    a picture fits a picture-only section. A section with no slots holds
+    anything."""
+    slots = {str(x).split(":")[0] for x in (sec.get("slots") or [])}
+    if not slots or not blocks:
+        return True
+    types = {b.get("type") for b in blocks}
+    word_types = {"heading", "text", "list", "cta", "button", "quote", "stat", "signature", "ps", "products"}
+    if types & word_types:
+        return bool(slots - {"image"})
+    return True
+
+
+def _spec_for(design: dict, kind: str, taken: dict, blocks: list | None = None) -> dict:
     """How a section of this kind is painted: the design's per-kind default,
     overlaid by the next unconsumed section of that FAMILY in the design's
-    concrete order — a reference's hero treatment reaches the hero, its
-    product grid the products, its second run of words the second run of
-    words, in the order it had them."""
+    concrete order that can HOLD what the group carries — a reference's
+    hero treatment reaches the hero, its product grid the products, its
+    second run of words the second run of words; a closing of words skips a
+    closing that is only a picture (a logo band) for the one with a body."""
     spec = dict((design.get("defaults") or {}).get(kind) or {})
     fam = _family(kind)
     order = [s for s in (design.get("sections") or []) if _family(str(s.get("kind"))) == fam]
     i = taken.get(fam, 0)
-    if i < len(order):
-        spec.update({k: v for k, v in order[i].items() if k not in ("kind", "slots")})
-        taken[fam] = i + 1
+    j = next((k for k in range(i, len(order)) if _holds(order[k], blocks)), None)
+    if j is not None:
+        spec.update({k: v for k, v in order[j].items() if k != "kind"})
+        taken[fam] = j + 1
     return spec
 
 
@@ -1077,18 +1182,20 @@ def _context(base: dict, design: dict, spec: dict, role: str, kind: str) -> dict
     t["type"] = _type(design["type"])
     if spec.get("align") == "center":
         t["type"] = {**t["type"], "talign": "text-align:center;", "align": "center"}
+        t["cta_center"] = True
     if spec.get("layout") == "letter":
         t["type"] = {**t["type"], "kicker": "none", "leading": "airy", "lh": _LEAD["airy"]}
     if spec.get("layout") == "band":
         t["type"] = {**t["type"], "talign": "text-align:center;", "align": "center"}
     t["cta"] = dict(design["cta"])
-    if spec.get("layout") == "band":
+    if spec.get("layout") == "band" or t.get("cta_center"):
         t["cta"] = {**t["cta"], "align": "center"}
     t["divider"] = design["dividers"]["style"]
     t["radius"] = _RADIUS.get(design["frame"]["radius"], "8px")
     t["width"] = int(design["frame"]["width"])
     t["image"] = spec.get("image", "contained")
     t["aspect"] = spec.get("aspect", "")
+    t["list_style"] = spec.get("list", "check")
     t["split"] = "right" if spec.get("layout") == "split-right" else "left"
     layout = spec.get("layout", "stack")
     hero = ("overlay" if layout == "overlay" or spec.get("text_on_image") else
@@ -1101,6 +1208,45 @@ def _context(base: dict, design: dict, spec: dict, role: str, kind: str) -> dict
                        "cta": "block",
                        "products": {"grid2": "grid2", "grid3": "grid3", "collage": "grid2"}.get(layout, "rows")})
     return t
+
+
+#: Which block types fill each slot, in the order the design's slots run.
+_SLOT_TYPES = {"kicker": ("heading",), "headline": ("heading",), "sub": ("text",), "body": ("text",),
+               "list": ("list",), "cta": ("cta", "button"), "products": ("products",),
+               "quote": ("quote",), "stat": ("stat",), "image": ("hero", "image"),
+               "caption": ("text",), "signature": ("signature",), "ps": ("ps",)}
+
+
+def ordered(blocks: list, slots: list | None) -> list:
+    """The section's blocks in the ORDER the design's slots run — a headline
+    over the picture when the reference had it so — each slot taking the
+    next unconsumed block of its type; a kicker takes a level-2 heading and
+    a headline a level-1 one where both exist; what no slot names follows
+    in the order the drafter wrote it. Without slots, the drafter's order."""
+    if not slots:
+        return list(blocks)
+    left = list(blocks)
+    out: list = []
+    for slot in slots:
+        name = str(slot).split(":")[0]
+        types = _SLOT_TYPES.get(name)
+        if not types:
+            continue
+        pick = None
+        for b in left:
+            if b.get("type") not in types:
+                continue
+            if name == "kicker" and b.get("type") == "heading" and int(b.get("level") or 2) <= 1:
+                continue
+            if name == "headline" and b.get("type") == "heading" and int(b.get("level") or 2) > 1 \
+                    and any(x.get("type") == "heading" and int(x.get("level") or 2) <= 1 for x in left):
+                continue
+            pick = b
+            break
+        if pick is not None:
+            out.append(pick)
+            left.remove(pick)
+    return out + left
 
 
 def _paint(blocks: list, t: dict) -> str:
@@ -1215,9 +1361,11 @@ NOT_DRAWN_YET = {"imagery.hero": "Phase 5 — read by the filler, not the painte
 
 
 def _wrap(inner: str, ground: str, pad: int, rule_above: str = "none",
-          rule_colour: str = "") -> str:
+          rule_colour: str = "", card: dict | None = None) -> str:
     """A section's rows inside its ground, with the room the design asks
-    for above and below, and a rule over it when asked."""
+    for above and below, and a rule over it when asked. With `card` (the
+    `cards` container: `{page, radius}`), the section is its own rounded
+    card with the page showing around it."""
     if not inner:
         return ""
     rule = ""
@@ -1227,6 +1375,12 @@ def _wrap(inner: str, ground: str, pad: int, rule_above: str = "none",
         rule = f"border-top:3px solid {rule_colour};"
     elif rule_above == "dotted":
         rule = f"border-top:2px dotted {rule_colour};"
+    if card:
+        return (f'<tr><td style="background:{card["page"]};padding:0 24px 20px">'
+                f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+                f'style="background:{ground};border-radius:{card["radius"]};{rule}">'
+                f'<tr><td style="padding:{pad}px 0"><table role="presentation" width="100%" cellpadding="0" '
+                f'cellspacing="0" border="0">{inner}</table></td></tr></table></td></tr>')
     return (f'<tr><td style="background:{ground};padding:{pad}px 0;{rule}">'
             f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
             f'{inner}</table></td></tr>')
@@ -1257,24 +1411,31 @@ def render_design(design: dict, theme: dict, blocks: list, *, preheader: str = "
     ht = _context(base, design, {"pad": "regular"}, hd["bg"], "header")
     rows.append(_wrap(_header(ht, webview=webview, spec=hd), pal[hd["bg"]], 0))
     taken: dict = {}
-    prev_ground = pal[hd["bg"]]
-    for sec in group_sections(blocks):
-        spec = _spec_for(design, sec["kind"], taken)
+    cards = design["frame"]["container"] == "cards"
+    card = {"page": pal[design["frame"]["page"]], "radius": radius} if cards else None
+    if cards:
+        rows.append(f'<tr><td style="background:{card["page"]};font-size:0;line-height:0;height:20px">&nbsp;</td></tr>')
+    for sec in group_sections(blocks, design):
+        spec = _spec_for(design, sec["kind"], taken, sec["blocks"])
         role = spec.get("bg", "surface")
         t = _context(base, design, spec, role, sec["kind"])
-        inner = LAYOUTS.get(spec.get("layout", "stack"), _lay_stack)(sec["blocks"], t, spec)
+        blocks_s = ordered(sec["blocks"], spec.get("slots"))
+        if cards and blocks_s and blocks_s[-1].get("type") == "divider":
+            # In a stack of cards the gap IS the divider; a boundary divider
+            # at the end of a card would paint a rule under nothing.
+            blocks_s = blocks_s[:-1]
+        inner = LAYOUTS.get(spec.get("layout", "stack"), _lay_stack)(blocks_s, t, spec)
         rows.append(_wrap(inner, pal[role], _SECTION_PAD.get(spec.get("pad", "regular"), 14),
-                          spec.get("rule_above", "none"), t["colors"]["border"]))
-        prev_ground = pal[role]
+                          spec.get("rule_above", "none"), t["colors"]["border"], card))
     ft = design["footer"]
     ftt = _context(base, design, {"pad": "regular"}, ft["bg"], "footer")
     rows.append(_wrap(_footer(ftt, spec=ft), pal[ft["bg"]], 0))
 
     page = pal[design["frame"]["page"]]
-    card = design["frame"]["container"] == "card"
-    chrome = (f'background:{pal["surface"]};'
-              + (f'border:1px solid {pal["border"]};' if card and design["frame"]["border"] else "")
-              + (f"border-radius:{radius};" if card else ""))
+    one_card = design["frame"]["container"] == "card"
+    chrome = ((f'background:{pal["surface"]};' if not cards else f'background:{page};')
+              + (f'border:1px solid {pal["border"]};' if one_card and design["frame"]["border"] else "")
+              + (f"border-radius:{radius};" if one_card else ""))
     pre = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">'
            f'{_esc(preheader)}</div>' if preheader else "")
     fonts = ""
@@ -1292,7 +1453,7 @@ def render_design(design: dict, theme: dict, blocks: list, *, preheader: str = "
         f'{pre}'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         f'border="0" style="background:{page}"><tr>'
-        f'<td align="center" style="padding:{"24px 12px" if card else "0"}">'
+        f'<td align="center" style="padding:{"24px 12px" if one_card else "0"}">'
         f'<table role="presentation" width="{width}" cellpadding="0" cellspacing="0" '
         f'border="0" style="width:100%;max-width:{width}px;{chrome}">'
         f'{"".join(rows)}'

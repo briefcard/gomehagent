@@ -615,8 +615,9 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `email_render.py`
 
-- **`group_sections`**(blocks) → `list[dict]`  ·  from `email_design.py`, `test_a_design_is_executed.py`
+- **`group_sections`**(blocks, design?) → `list[dict]`  ·  from `email_design.py`, `test_a_design_is_executed.py`, `test_content_fits_the_design.py`
 - **`missing_to_send`**(theme) → `list[str]`  ·  from `brand_theme.py`, `skill_pack.py`, `test_brand_theme.py`, `test_email_render.py`
+- **`ordered`**(blocks, slots) → `list`  ·  from `test_content_fits_the_design.py`
 - **`render`**(theme, blocks, preheader?, webview?, look?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_design_is_words_the_renderer_can_draw.py`, `test_a_reference_is_recreated.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`render_design`**(design, theme, blocks, preheader?, webview?) → `str`  ·  from `email_design.py`, `skill_pack.py`, `test_a_design_is_executed.py`, `test_content_fits_the_design.py`
 
@@ -906,7 +907,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`purge_proposals`**(tenant?, origin?, dry_run?) → `dict`  ·  from `test_provenance.py`, `web.py`
 - **`record_asset_outcome`**(asset_id, channel, metrics) → `str`  ·  from `ledger.py`, `meta_ads.py`, `test_assets.py`
 - **`record_unknowns`**(tenant, matches, asked_for?) → `int`  ·  from `brief.py`, `seed_demo.py`, `skill.py`, `test_kb_ui.py`, `test_schema_tab.py`
-- **`remove`**(tenant, kind, row_id, by?) → `dict`  ·  from `harvest.py`, `planner.py`, `seed_demo.py`, `test_kb_removal.py`, `test_schema_tab.py`, `web.py`
+- **`remove`**(tenant, kind, row_id, by?) → `dict`  ·  from `email_render.py`, `harvest.py`, `planner.py`, `seed_demo.py`, `test_kb_removal.py`, `test_schema_tab.py`, `web.py`
 - **`remove_banned`**(tenant, phrase, by?) → `str`  ·  from `seed_demo.py`, `test_ban_list.py`, `web.py`
 - **`remove_board`**(tenant, slug) → `str`  ·  from `web.py`
 - **`repair_fingerprints`**(tenant, apply?) → `dict`  ·  route `GET /admin/repair_fingerprints`  ·  from `test_provenance.py`, `web.py`

@@ -2055,6 +2055,10 @@ PREHEADER_HARD = 90
 #: and unparseable, which reads downstream as "the model failed" and serves the
 #: composer's fixed skeleton — the sameness this whole path exists to end.
 CAMPAIGN_MAX_TOKENS = 2400
+#: The most blocks a layout may carry. A designed email of five sections with
+#: a divider between each is sixteen; a run that exceeds this is trimmed AND
+#: says so — never in silence.
+BLOCKS_CAP = 24
 
 #: WHAT A SEND IS FOR. The owner's complaint (2026-08-21) was "this is all
 #: templates … we want variety and true generation of content and different
@@ -2865,7 +2869,14 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
     out: list = []
     extra_cited: list[str] = []
     seen_cta = seen_hero = False
-    for b in raw[:12]:
+    # THE CAP, SAID. Twelve was the ceiling when a layout was five to ten
+    # blocks; a design with five sections and a divider between each is
+    # sixteen, and the closing — the second ask — was falling off the end
+    # in silence (the pistol-shrimp review, 2026-09-11).
+    if len(raw) > BLOCKS_CAP:
+        note(f"layout: the drafter wrote {len(raw)} blocks; the last "
+             f"{len(raw) - BLOCKS_CAP} were dropped — the cap is {BLOCKS_CAP}")
+    for b in raw[:BLOCKS_CAP]:
         if not isinstance(b, dict):
             continue
         kind = str(b.get("type") or "").strip()

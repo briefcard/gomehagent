@@ -252,6 +252,10 @@ def main() -> int:
            row["profile"]["look"]["hero"] == "overlay" and row["profile"]["look"]["cta"] == "block"
            and row["profile"]["look"]["scale"] == "display" and row["profile"]["look"]["bands"] is True
            and row["sequence"][0] == "hero" and "products" in row["sequence"], str(row["profile"]["look"]))
+        ck("the structure is named by what it does — never by the gallery page's title, which is the "
+           "email's own headline and brand",
+           "gallery" not in row["name"].lower() and "editorial" not in row["name"].lower()
+           and row["name"].startswith("dark key;"), row["name"])
         ck("fits and the source ride along",
            set(row["fits_intents"]) == {"story", "offer"} and row["fits_formats"] == ["designed"]
            and row["source_url"].endswith("/emails/an-editorial-gallery-email"))
