@@ -141,6 +141,22 @@ SABOTAGES = [
         "suites": ['test_a_structure_is_how_not_what.py'],
         "why": "a screenshot of somebody else's email becomes a picture the board reads see, so the agency account turns 'drawable' from email layouts and a generated product picture is drawn in the style of a newsletter",
     },
+    {
+        "name": 'the_draw_is_random_not_a_rotation',
+        "file": 'app/email_structures.py',
+        "find": '    st = random.choice(pool)\n',
+        "replace": '    st = sorted(pool, key=lambda st: (st["last_used_at"] or "", st["used_count"]))[0]  # SABOTAGE\n',
+        "suites": ['test_a_structure_is_how_not_what.py'],
+        "why": "the library rotates on a schedule instead of drawing at random, so a list receives its layouts in an order it can learn to see — the one regularity the owner asked to remove",
+    },
+    {
+        "name": 'a_designated_structure_a_brand_may_not_use_is_refused_not_swapped',
+        "file": 'app/email_structures.py',
+        "find": '        ok, why = usable_for(tenant, st)\n        if not ok:\n            return {"structure": None, "designated": True,\n',
+        "replace": '        ok, why = True, ""\n        if not ok:\n            return {"structure": None, "designated": True,\n',
+        "suites": ['test_a_structure_is_how_not_what.py'],
+        "why": "naming a structure on the plan bypasses the brand-rules check that the random draw obeys, so a person can designate a 'hand-crafted' showcase for Baci and it builds — the rules bend for a request, which is exactly what they must never do",
+    },
     # --- a structure is how, not what (2026-09-11) --------------------------
     {
         "name": 'a_structures_notes_are_checked_against_this_brands_ban_list',

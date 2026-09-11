@@ -2613,6 +2613,25 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
                 f'<div class="what">blank = the planner decides, rotating so '
                 f'this list is given to more often than it is asked</div>'
                 f'<select name="{_esc(f["key"])}">{opts}</select></div>')
+    if f.get("kind") == "structure":
+        # THE LIBRARY, filtered to what THIS brand may use, with the reason
+        # beside anything it may not — so a person never designates a
+        # structure only to be refused after the run. Blank is the default
+        # and says what it does: a random draw.
+        from . import email_structures as _es
+        cur = str(value or "").strip()
+        rows = _es.library(review="approved")
+        opts = ['<option value="">random from the library</option>']
+        for st in rows:
+            ok, why = _es.usable_for(tenant, st) if tenant else (True, "")
+            label = st["name"] + ("" if ok else f" — not for this brand: {why}")
+            opts.append(f'<option value="{_esc(st["id"])}"'
+                        f'{" selected" if st["id"] == cur else ""}'
+                        f'{"" if ok else " disabled"}>{_esc(label[:120])}</option>')
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<div class="what">blank = a random draw from the approved '
+                f'structures this brand may use; name one to build on it</div>'
+                f'<select name="{_esc(f["key"])}">{"".join(opts)}</select></div>')
     if f.get("kind") == "flag":
         cur = str(value or "").strip().lower()
         state = ("yes" if cur in ("1", "true", "yes", "y", "on")

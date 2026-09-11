@@ -99,11 +99,11 @@ Builds and schedules campaign sends from the catalogue and calendar.
 - **Connections:** `esp`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `entity`, `claim`, `objection`, `audience`, `asset`
 - **Skill** `campaign_email` — produces `draft`, tier 3, writes=True
-  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`
+  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `structure`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `campaign_rollout`
 - **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
-- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `generate_visual` (flag)
+- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `structure` (structure), `generate_visual` (flag)
 - **Unit:** a campaign email to one segment
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human, in the ESP
@@ -211,7 +211,7 @@ Triggers replenishment prompts off purchase cadence.
 - **Connections:** `commerce`, `esp`
 - **Knowledge (`kb_needs`):** `entity`
 - **Skill** `reorder_prompt` — produces `draft`, tier 3, writes=True
-  - parameters: `revision_notes`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`, `segment`
+  - parameters: `revision_notes`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`, `structure`, `segment`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `reorder_rollout`
 - **Cadence knobs:** `horizon_days`=30, `per_segment_monthly`=1, `segment_rest_days`=6

@@ -679,10 +679,16 @@ list, citation, coherence — because a structure cannot put a word on the page.
 `CraftLesson`'s terms: technique, never a client fact. Each structure on the
 card shows whether THIS brand may use it and why not when it may not.
 
-**How it is chosen.** Approved only, usable for the brand, fitting the send's
-intent and form, not one of the last shapes that list received, least
-recently used first. With nothing that fits the drafter designs fresh, as it
-always did.
+**How it is chosen: random unless designated.** On the campaign plan, the
+field "Email structure (optional)" lists the approved structures this brand
+may use, with anything it may not use shown disabled and the reason beside
+it. Left blank, the run draws at random from those that fit the send's
+intent and form and are not one of the last shapes that list received. A
+draw rather than a rotation, because a rotation is a schedule a list can
+learn to see. Name one and the run builds on it — or, if this brand may not
+use it, refuses with the reason and designs fresh rather than silently
+swapping. The run's notes say which happened. With nothing that fits the
+drafter designs fresh, as it always did.
 
 ## 7. What does not work yet
 

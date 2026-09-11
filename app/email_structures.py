@@ -300,18 +300,13 @@ def usable_for(tenant: str, structure: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def pick(tenant: str, *, intent: str = "", fmt: str = "",
-         recent_shapes: list | None = None) -> dict | None:
-    """The approved structure to build this send on, or None to design fresh.
-
-    Approved only; usable for THIS brand; fitting the send's intent and form
-    when it declares any; not one of the last few shapes this list received;
-    least recently used first, so the library rotates rather than one favourite
-    winning forever. None is a real answer: with nothing that fits, the drafter
-    composes as it always has.
-    """
+def eligible(tenant: str, *, intent: str = "", fmt: str = "",
+             recent_shapes: list | None = None) -> list[dict]:
+    """Every structure this send COULD be built on: approved, usable for this
+    brand, fitting the send's intent and form where it declares any, and not
+    one of the last shapes this list received."""
     recent = {signature(s) for s in (recent_shapes or []) if s}
-    fitting = []
+    out = []
     for st in library(review="approved"):
         if intent and st["fits_intents"] and intent not in st["fits_intents"]:
             continue
@@ -322,11 +317,49 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
         ok, _why = usable_for(tenant, st)
         if not ok:
             continue
-        fitting.append(st)
-    if not fitting:
-        return None
-    fitting.sort(key=lambda st: (st["last_used_at"] or "", st["used_count"]))
-    return fitting[0]
+        out.append(st)
+    return out
+
+
+def pick(tenant: str, *, intent: str = "", fmt: str = "",
+         recent_shapes: list | None = None, designated: str = "") -> dict:
+    """The structure to build this send on — RANDOM among the eligible, unless
+    one is designated. Owner, 2026-09-11: *"It should be random unless
+    designated specifically (optional)."*
+
+    Random rather than least-recently-used, because rotation is a schedule
+    and a schedule is a pattern a list learns to see; a draw is not. Recent
+    shapes are still excluded, so the same people never get the same layout
+    twice running, which is the one regularity worth keeping.
+
+    A DESIGNATED structure is used when it may be, and REFUSED WITH THE REASON
+    when it may not — never silently swapped. The brand's rules do not bend
+    for a request, and the person who asked deserves to know why. Returns
+    `{structure, why, designated}`; `structure` None means design fresh.
+    """
+    import random
+    if designated:
+        st = next((r for r in library() if r["id"] == designated), None)
+        if st is None:
+            return {"structure": None, "designated": True,
+                    "why": f"no structure with id {designated!r} — designed fresh"}
+        if st["review"] != "approved":
+            return {"structure": None, "designated": True,
+                    "why": (f"{st['name']!r} is {st['review']}, not approved — "
+                            f"approve it on the Brand tab first; designed fresh")}
+        ok, why = usable_for(tenant, st)
+        if not ok:
+            return {"structure": None, "designated": True,
+                    "why": f"{st['name']!r} is not for this brand — {why}; designed fresh"}
+        return {"structure": st, "designated": True,
+                "why": f"designated: {st['name']}"}
+    pool = eligible(tenant, intent=intent, fmt=fmt, recent_shapes=recent_shapes)
+    if not pool:
+        return {"structure": None, "designated": False,
+                "why": "nothing in the library fits this send — designed fresh"}
+    st = random.choice(pool)
+    return {"structure": st, "designated": False,
+            "why": f"drawn from {len(pool)} that fit: {st['name']}"}
 
 
 def mark_used(structure_id: str) -> None:

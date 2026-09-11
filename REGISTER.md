@@ -597,12 +597,13 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`approve`**(structure_id, by?) → `str`  ·  from `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_every_system_draws.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`
 - **`block_types`**() → `tuple`  ·  **from nothing**
 - **`brief`**(structure) → `str`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_digest.py`, `test_funnel.py`
+- **`eligible`**(tenant, intent?, fmt?, recent_shapes?) → `list[dict]`  ·  from `test_a_structure_is_how_not_what.py`
 - **`file_from_output`**(output_id, by?) → `dict`  ·  from `approvals.py`, `test_a_structure_is_how_not_what.py`
 - **`file_structure`**(name?, sequence?, source?, review?, profile?, fits_intents?, fits_formats?, source_url?, source_asset_id?, notes?, by?) → `dict`  ·  from `test_a_structure_is_how_not_what.py`
 - **`find_by_sequence`**(sequence) → `db.EmailStructure | None`  ·  **from nothing**
 - **`library`**(review?) → `list[dict]`  ·  from `admin_ui.py`, `test_a_structure_is_how_not_what.py`
 - **`mark_used`**(structure_id) → `None`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`
-- **`pick`**(tenant, intent?, fmt?, recent_shapes?) → `dict | None`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_creative_seam.py`, `test_the_board_reaches_the_generator.py`
+- **`pick`**(tenant, intent?, fmt?, recent_shapes?, designated?) → `dict`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_creative_seam.py`, `test_the_board_reaches_the_generator.py`
 - **`profile_of`**(blocks) → `dict`  ·  **from nothing**
 - **`read_swipe`**(asset_id) → `dict`  ·  from `test_a_structure_is_how_not_what.py`, `web.py`
 - **`reject`**(structure_id, by?) → `str`  ·  from `web.py`

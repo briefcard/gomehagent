@@ -2369,12 +2369,15 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     # fresh, which is what the drafter always did; the library only ever
     # narrows a choice, never invents one.
     from . import email_structures as _es
-    structure = _es.pick(ctx.tenant, intent=intent, fmt=fmt,
-                         recent_shapes=[h.get("shape") for h in hist if h.get("shape")])
+    chosen = _es.pick(ctx.tenant, intent=intent, fmt=fmt,
+                      recent_shapes=[h.get("shape") for h in hist if h.get("shape")],
+                      designated=str(ctx.params.get("structure") or "").strip())
+    structure = chosen["structure"]
     if structure:
         _es.mark_used(structure["id"])
-        ctx.note(f"structure: {structure['name']} — from the library, "
-                 f"{structure['source']}")
+    # SAID EITHER WAY. A designated structure that could not be used is the
+    # one case where silence would look like the request was honoured.
+    ctx.note("structure: " + chosen["why"])
 
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
             "funnel": plan, "structure": structure,
@@ -4544,6 +4547,13 @@ register(Skill(
     # already made is the defect design rule 4 exists to stop.
     params=("revision_notes",
             "segment", "goal", "subject", "intent", "deadline", "entity_key",
+            # WHICH structure to build on, by id. Optional: blank draws at
+            # random from the library (owner, 2026-09-11). Declared on BOTH
+            # email skills, because both run through `_campaign_craft`, and
+            # the first cut declared it on the reorder prompt alone — the
+            # conformance suite caught the campaign email reading a parameter
+            # it did not accept, which `run` refuses at the door.
+            "structure",
             # THE REST OF WHAT THE SEND IS ABOUT. `entity_key` is the hero;
             # this is everything else its copy may cite, for the email whose
             # subject is a place rather than a thing.
@@ -4602,6 +4612,9 @@ register(Skill(
     params=("revision_notes", "goal", "subject", "intent", "deadline",
             "entity_key", "entity_keys", "audience_key", "offer", "utterance",
             "draft_visual", "generate_visual",
+            # WHICH structure to build on, by id. Optional: blank draws at
+            # random from the library (owner, 2026-09-11).
+            "structure",
             # Accepted so a plan carrying one is not refused at the door —
             # and then overwritten. Declaring it is what lets `_run_reorder`
             # say so in its own body rather than in a runner error.

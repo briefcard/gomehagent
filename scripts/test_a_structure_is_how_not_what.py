@@ -107,37 +107,66 @@ def main() -> int:
     ck("one that needs proof is refused where there is no approved claim",
        not ok and "no approved claim" in why, why[:70])
 
-    print("\n— the library chooses for a send: approved, usable, fitting, rotating —")
+    print("\n— the library chooses for a send: random unless designated —")
     kb.add_claim("eien", "Eien capsules are third-party tested.", "lab", [])
-    es.file_structure(name="story letter", sequence=["heading", "text", "text", "signature"],
-                      source="hand", review="approved", fits_intents=["story"],
-                      fits_formats=["letter"])
+    a1 = es.file_structure(name="story letter", sequence=["heading", "text", "text", "signature"],
+                           source="hand", review="approved", fits_intents=["story"],
+                           fits_formats=["letter"])
+    a2 = es.file_structure(name="another story", sequence=["heading", "text", "list", "signature"],
+                           source="hand", review="approved", fits_intents=["story"],
+                           fits_formats=["letter"])
+    # THE PROPOSAL FITS EXACTLY LIKE THE APPROVED ONES, so review status is
+    # the only thing keeping it out. The first version left its format at the
+    # default, and the format filter excluded it before the review filter got
+    # a chance — the guard on the review filter went MISSED because the test
+    # passed for a reason that was not the one it claimed.
     es.file_structure(name="not yet", sequence=["heading", "list", "cta"],
-                      source="swipe", review="proposed")
-    got = es.pick("eien", intent="story", fmt="letter")
-    ck("it picks an approved structure that fits and that the brand can use",
-       got is not None and got["name"] == "story letter", str(got and got["name"]))
-    ck("a proposed one is never picked",
-       all(r["review"] == "approved" for r in [got]) and
-       es.pick("eien", intent="proof", fmt="designed") is not None)
-    ck("what this list just received is not picked again",
-       es.pick("eien", intent="story", fmt="letter",
-               recent_shapes=[["heading", "text", "text", "signature"]]) is None
-       or es.pick("eien", intent="story", fmt="letter",
-                  recent_shapes=[["heading", "text", "text", "signature"]])["name"] != "story letter")
-    es.mark_used(got["id"])
-    es.file_structure(name="another story", sequence=["heading", "text", "list", "signature"],
-                      source="hand", review="approved", fits_intents=["story"],
+                      source="swipe", review="proposed", fits_intents=["story"],
                       fits_formats=["letter"])
-    ck("the least recently used goes first, so one favourite never wins forever",
-       es.pick("eien", intent="story", fmt="letter")["name"] == "another story")
+    pool = es.eligible("eien", intent="story", fmt="letter")
+    ck("the pool is approved, usable, and fitting — the proposed one is not in it",
+       {st["name"] for st in pool} == {"story letter", "another story"},
+       str([st["name"] for st in pool]))
+    # RANDOM, not a rotation. Owner, 2026-09-11: "random unless designated".
+    # A draw over two eligible structures, repeated, must land on both — a
+    # least-recently-used rule would alternate on a schedule a list could
+    # learn to see; a draw is not a schedule.
+    seen = {es.pick("eien", intent="story", fmt="letter")["structure"]["name"]
+            for _ in range(40)}
+    ck("blank draws at random from everything that fits", seen == {"story letter", "another story"},
+       str(seen))
+    got = es.pick("eien", intent="story", fmt="letter")
+    ck("and it says it was a draw, and from how many",
+       not got["designated"] and "drawn from 2" in got["why"], got["why"])
+    ck("what this list just received is still never drawn again",
+       es.pick("eien", intent="story", fmt="letter",
+               recent_shapes=[["heading", "text", "text", "signature"]])
+       ["structure"]["name"] == "another story")
+    got = es.pick("eien", intent="story", fmt="letter", designated=a1["id"])
+    ck("a designated structure is used by name",
+       got["designated"] and got["structure"]["name"] == "story letter"
+       and got["why"].startswith("designated"), got["why"])
+    prods = next(r for r in es.library() if r["name"] == "grid")
+    got = es.pick("eien", intent="story", fmt="letter", designated=prods["id"])
+    ck("a designated one this brand may not use is REFUSED with the reason, never swapped",
+       got["designated"] and got["structure"] is None
+       and "not for this brand" in got["why"] and "no products" in got["why"], got["why"])
+    pending = next(r for r in es.library() if r["review"] == "proposed")
+    got = es.pick("eien", designated=pending["id"])
+    ck("a designated one that is still a proposal is refused too",
+       got["structure"] is None and "not approved" in got["why"], got["why"])
+    ck("designating nothing that exists says so and designs fresh",
+       es.pick("eien", designated="nope")["structure"] is None)
+    got = es.pick("eien", intent="story", fmt="letter")
+    es.mark_used(got["structure"]["id"])
 
     print("\n— the drafter receives it, and only it —")
-    craft = {"intent": "story", "format": "letter", "structure": got,
+    craft = {"intent": "story", "format": "letter", "structure": got["structure"],
              "funnel": {}, "deadline": ""}
     brief = skill_pack._craft_brief(craft)
     ck("the structure rides the craft brief the drafter reads",
-       "THE STRUCTURE THIS SEND IS BUILT ON" in brief and "story letter" in brief)
+       "THE STRUCTURE THIS SEND IS BUILT ON" in brief
+       and got["structure"]["name"] in brief)
     ck("and nothing in it names an account", "eien" not in brief.lower()
        and "baci" not in brief.lower())
 
@@ -228,12 +257,28 @@ def main() -> int:
            srow["sequence"] == ["hero", "heading", "text", "cta"]
            and "carries the opening" in srow["profile"]["notes"]
            and "acme" not in json.dumps(srow["profile"]).lower())
-        ck("and a proposed swipe is not picked for anyone",
-           all(r["review"] == "approved"
-               for r in [es.pick("eien", intent="offer", fmt="designed") or {"review": "approved"}]))
+        drawn = es.pick("eien", intent="offer", fmt="designed")["structure"]
+        ck("and a proposed swipe is not drawn for anyone",
+           drawn is None or drawn["review"] == "approved")
     finally:
         es.httpx.get = real_get
         llm.ask = real_ask
+
+    print("\n— the plan form offers the library, and disables what this brand may not use —")
+    from app import admin_ui as _ui
+    field = _ui._plan_field_input({"key": "structure", "kind": "structure",
+                                   "label": "Email structure (optional)"}, "", "eien")
+    ck("blank is the random draw, said plainly",
+       'value="">random from the library' in field)
+    ck("a structure this brand may not use is shown, disabled, with the reason",
+       "not for this brand" in field and " disabled>" in field)
+    ck("and one it may use is selectable by id",
+       f'value="{a1["id"]}"' in field and "story letter" in field)
+    from app import systems as _sy
+    decl = next(f for f in _sy.CATALOG["campaign_email"]["workflow"]["plan_fields"]
+                if f["key"] == "structure")
+    ck("the plan field is declared, optional, its own kind",
+       decl["required"] is False and decl["kind"] == "structure")
 
     print("\n— the card shows the library, the verdict per brand, and the controls —")
     from app import admin_ui

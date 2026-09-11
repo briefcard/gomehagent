@@ -463,6 +463,13 @@ CATALOG = {
                      required=False),
                 dict(key="draft_visual", label="Draft a Canva hero on a miss",
                      required=False, kind="flag"),
+                # THE STRUCTURE, optional. Blank draws at random from the
+                # library's approved, brand-usable structures; naming one
+                # builds on it — or refuses with the reason when this brand
+                # may not use it. Its own kind, because the choices are rows
+                # in a table rather than a fixed vocabulary.
+                dict(key="structure", label="Email structure (optional)",
+                     required=False, kind="structure"),
                 # DRAWN ON A MISS, ON BY DEFAULT (owner, 2026-09-08: "I want
                 # this on all the systems"). Blank means yes; "no" keeps the
                 # email to approved photographs and the catalogue shot. The
