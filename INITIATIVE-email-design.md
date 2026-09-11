@@ -3,7 +3,7 @@
 > **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-09-11 at commit `b4c0383`.
 > `BUILD-STATE.md` remains the record of what exists.
 >
-> **Phases 0–4 are built (2026-09-11). Phases 5–7 are not.**
+> **Phases 0–5 are built and Phase 6 is wired (2026-09-11). The live proof and the acceptance are the owner's; Phase 7 is not started.**
 >
 > §2 is a list of facts with `file:line`, each checkable in about a minute. If
 > they still hold, the plan holds. If one has changed, the phase resting on it
@@ -496,58 +496,83 @@ reader that tiles flipped two entries to FIXED).
   `a_concrete_order_reaches_its_kind`, `canspam_survives_every_design`,
   `not_drawn_yet_hides_nothing_drawn`.
 
-### Phase 5 — Content fits the design (`email_design.brief` + `fill`)
-- `brief(design)` replaces `email_structures.brief` for the drafter: the
-  slots in words WITH LIMITS — a poster headline is ≤ 5 words, a kicker ≤ 3,
-  a split section wants a 2-line sub, a grid3 needs names that stand alone,
-  a quote slot needs an approved claim or the section drops. The drafter's
-  `blocks` contract stays; the prompt lists the design's sections as the
-  order and the slots as the shape (today's `_es.brief` at `:433` is the
-  hook, `_craft_brief` at `:2394` the caller).
-- `_assemble_blocks` (`:2833`) unchanged as the RULES gate. After it,
-  `fill(design, blocks, brand, ents, assets, note)` maps validated blocks
-  into sections/slots and fills the IMAGE slots by kind+aspect from the
-  brand's own library: packshot for product cards, lifestyle/scene for a
-  hero, a `focused` cut-out for "product on colour"; when nothing fits and
-  `creative.drawable`, draws one through `creative.generate` judged like a
-  set and approved WITH the email (`d3bf631` path, `hero_for_campaign
-  (draw_first=)` already does this for the hero). A slot it cannot fill
-  degrades that section to its text form AND is named on the run — never a
-  silent text-only email (DEFECTS §2.66).
-- `Output.design` (JSON) filed with every send; `file_from_output` files the
-  DESIGN into the library, once per distinct design signature, named by
-  what it does — the library keeps how approved emails looked, not only
-  their order.
-- Guards: `an_unfillable_slot_is_said`; `a_drawn_slot_is_approved_with_the_email`.
+### Phase 5 — Content fits the design — DONE 2026-09-11 (`email_design.brief` + `fill`)
+- **`brief(design)`**: the drafter's words for a design with a concrete
+  order — each section in order with where it sits, every slot with its
+  LIMIT: the headline's word budget by scale (poster 4 / display 6 / large
+  8 / modest 10) and its case, kicker ≤ 3 words, sub one line, body 40–90
+  words, list 3–5, cta 2–4 words, a quote "an APPROVED claim, verbatim, or
+  leave the slot and the section drops", a picture "from the brand's own
+  library; you write its alt line only". `''` for a design with no order —
+  the drafter composes as before. `email_structures.brief` delegates to it
+  when the structure's design has sections, the notes beneath; the old
+  order-and-shape brief otherwise.
+- **`fill(tenant, design, blocks, note)`**: after `_assemble_blocks` (the
+  rules gate, unchanged), the design's picture slots filled from the
+  brand's own publishable library by the imagery kind the design names
+  for that section (`imagery.hero` / `.product` / `.feature`) and the
+  aspect the slot wants (cut through the CDN at render). A hero without a
+  picture takes one; a section with an `image:n` slot gets `n` picture
+  blocks before its words; a picture is used once; a reference pin never;
+  **a slot nothing fills is named on the run with its fix and the section
+  keeps its words** — never a silent text-only email. A picture is added,
+  never a word. **Drawing when nothing fits is NOT wired** (the plan's
+  `creative.generate` path) — the miss says so; a follow-up.
+- **The renderer**: an `image` block (`_image`: treatment, aspect, live
+  alt; the filler is its only writer — the drafter cannot produce one,
+  `_assemble_blocks` drops it), `split-left/right` for a section with a
+  picture (`_lay_split`), `collage` two across (`_lay_collage`). A picture
+  never starts a run — it joins the words it was filled for. **A run of
+  words is one FAMILY** (`WORDS` = intro/feature/editorial): the grouping
+  names runs by position, the reader by judgment, and they meet on the
+  family in order — without this the reader's "feature" never met the
+  drafter's first run.
+- **The library keeps designs**: `Output.meta["design"]` and
+  `["structure_id"]` ride every send (the same meta bag as `shape`; no new
+  column; read off `ArtifactBody.meta`); `file_from_output` files the
+  design with the shape — approved sends teach the library how they
+  looked. Same sequence = same structure still (the design carried forward
+  is the latest); a design signature of its own is Phase 7's.
+- Suite `scripts/test_content_fits_the_design.py`; six guards, all
+  `[ caught ]`: `a_headline_is_briefed_with_its_budget`,
+  `a_picture_slot_is_filled_by_its_kind`, `a_slot_nothing_fills_is_said`,
+  `a_picture_joins_the_words_it_was_filled_for`,
+  `an_approved_send_files_its_design`, `a_run_of_words_is_one_family`.
 
-### Phase 6 — Wire, prove live, accept
-- The one seam: `skill_pack.py:3609-3615` reads
-  `craft["structure"]["design"]` and calls `render_design`. The AST guard
-  `the_campaign_run_passes_the_look` becomes
-  `the_campaign_run_executes_the_structures_design`, same shape (a NAME fed
-  from the structure; `None` fails it). Zero other changes to the campaign
-  function — if a second change is needed in `skill_pack.py`, stop and ask
-  why.
-- The run note says what happened, whole: *"recreated from <name>: dark
-  editorial, 7 sections; palette page #… surface #… dark #… accent #… (dark
-  computed); faces: brand heading, classified body; slots filled 9/10, drawn
-  1; not filled: proof quote — no approved claim fits."*
-- **First live read** on a real RGE screenshot — this has NEVER run (all
-  suites stub `llm.ask`). Expect one wrong assumption about the model's
-  JSON; fix it from its own words.
-- **Acceptance, owner's eyes:** three references of different character —
-  a dark editorial, a bright product grid, a letter/plain-text — × two brands
-  (Baci, Eien) = six emails on the Brand tab beside their references. The
-  bar: a stranger shown the reference and the email says *"same designer,
-  different brand."* Not before that is the campaign skill switched for the
-  run that ships.
-- Memory note + RUNBOOK §6d regenerated + `WALKTHROUGH-PROMPT.md` §5 entry
-  with the reversed rule verbatim.
+### Phase 6 — Wire, prove live, accept — WIRED 2026-09-11; the live proof and the acceptance are the owner's
+- **The one seam** (`skill_pack.py`, `_build()`): `_design =
+  _structure.get("design") or _ed.house()`; `blocks, _filled = _ed.fill(
+  ctx.tenant, _design, blocks, note=ctx.note)`; `email_render.render_design
+  (_design, theme, blocks, …)`. Nothing else in the campaign function
+  moved. The old `look=` read is gone from the run.
+- **The run note says what happened, whole**: `recreated from <name>:
+  <summary>; grounds → page #… surface #… dark #… tint #… accent #…;
+  faces: heading the brand's own / chosen by the design's class, body …;
+  pictures filled n, not filled m` — and every unfilled slot as its own
+  note with the fix.
+- **The claim, computed**: the AST check in the structure suite and the
+  ledger — the campaign run's ONE render call is `render_design`, its
+  design a NAME assigned from the picked structure, and the fixed template
+  called nowhere in the run. Guard
+  `the_campaign_run_executes_the_structures_design` (retargeted from the
+  look it once guarded) `[ caught ]`. **The ledger reads 0 open.**
+- **Not done here, and not claimable from this machine**: the first live
+  read of a real RGE screenshot (every suite stubs the model); the six-
+  email acceptance (three references × Baci and Eien on the Brand tab,
+  beside their references — "same designer, different brand"). Both are
+  the owner's press. The legacy `render`, `LOOK`, `look_of`,
+  `look_of_design` and `profile["look"]` still exist: `render` serves the
+  Brand tab's theme sample and the suites that pin the old behaviour;
+  retiring them is a cleanup ship of its own, listed under Phase 7.
 
-### Phase 7 — Learn (later, not this initiative)
-Structures carry outcomes per brand (`results.py` joining `Output.design` to
-performance); a "hand" authoring surface for a design written from scratch;
-a picture-to-picture fidelity judge once a screenshot capability exists.
+### Phase 7 — Learn, and tidy (later, not this initiative)
+Structures carry outcomes per brand (`results.py` joining `Output.meta
+["design"]` to performance); a design signature of its own in the library
+(today same sequence = same structure); a "hand" authoring surface; a
+picture-to-picture fidelity judge once a screenshot capability exists;
+drawing a picture through `creative.generate` when no owned one fits a
+slot; retiring the legacy `render`/`LOOK`/`look_of`/`profile["look"]` and
+rewriting the two suites that pin the old renderer in design terms.
 
 ---
 
@@ -604,18 +629,17 @@ a picture-to-picture fidelity judge once a screenshot capability exists.
 > recreated; the brand supplies palette, faces, pictures, logo and words;
 > the reference's copy, pictures, markup and hex never reach the email.
 >
-> **First move:** `python3 scripts/test_a_reference_is_recreated.py` — six
-> entries report `[ open ]`; that is the diagnosis, on record. Then re-check
-> `INITIATIVE-email-design.md` §2 against the tree (`git log -1`, then each
-> `file:line`). Phases 0–4 shipped 2026-09-11; start at Phase 5 (the drafter
-> briefed on the design's slots; `fill` mapping validated blocks into
-> sections and filling image slots from the brand's own pictures by kind and
-> aspect, drawing when drawable, naming what it could not fill;
-> `Output.design` filed and the library keeping designs), then Phase 6 (the
-> one seam in `skill_pack._build()` → `render_design`, retiring `render`,
-> `LOOK` and `profile["look"]`; the first live read; the six-email
-> acceptance). When a phase lands, its ledger entries go red — replace them
-> with that phase's own checks in the same commit. Check first that the entry MEASURES THE NEWS: Phase 2's entry
+> **First move:** `python3 scripts/test_a_reference_is_recreated.py` — it
+> reads `0 defect(s) still open`: every entry the initiative opened, closed by
+> measurement. Then re-check `INITIATIVE-email-design.md` §2 against the tree
+> (`git log -1`, then each `file:line`). Phases 0–5 shipped and Phase 6 is
+> wired (2026-09-11). What is left is the OWNER's: swipe one real RGE email,
+> read the card, open the preview beside the reference, run one campaign on
+> the structure and read the run note; then the six-email acceptance. After
+> that, Phase 7's list — drawing when no picture fits, a design signature in
+> the library, retiring the legacy renderer. When a phase lands, its ledger
+> entries go red — replace them with that phase's own checks in the same
+> commit, and check first that the entry MEASURES THE NEWS: Phase 2's entry
 > counted the wrong fields and did not flip until it was rewritten.
 >
 > Then the phases in order. Under §4 unchanged: reproduce first; every fix

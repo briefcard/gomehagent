@@ -1605,8 +1605,27 @@ draws); **on the accent ground the "surface" is the accent — read the
 palette's true surface** (accent on accent, caught by the suite). Six
 guards, all `[ caught ]`.
 
+**Phases 5 and 6, same day (`ba7ba70`).** `email_design.brief` (slots
+with limits; the headline's budget by scale) reaches the drafter through
+`email_structures.brief`; `email_design.fill` puts the brand's own
+pictures into the design's slots by kind and aspect, names every slot it
+could not fill, adds a picture never a word; the `image` block, split and
+collage layouts; a run of words is one FAMILY on both sides;
+`Output.meta["design"]` filed into the library on approval. THE SEAM
+SWITCHED: `skill_pack._build()` fills and calls `render_design` with the
+structure's design (house when none); the run note says grounds, faces
+and pictures; the AST check and guard retargeted; **the ledger reads 0
+open**. Rules it adds: **a picture never starts a run — it joins the
+words it was filled for**; **a slot nothing fills is said with its fix and
+the section keeps its words**; **when two sides name the same thing by
+different rules, join on the family, not the name**. Twelve guards, all
+`[ caught ]`; two Phase 4 guards went stale on Phase 5's own edits and
+were retargeted. NOT proven live; drawing when nothing fits is not wired;
+the legacy renderer still stands for the Brand-tab sample and its suites.
+
 **Owner's move:** swipe one real RGE email, read the card, open the
-preview beside the reference; then Phase 5.
+preview beside the reference, run one campaign on it and read the run
+note; then the six-email acceptance.
 
 ---
 
