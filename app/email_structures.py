@@ -156,7 +156,7 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
                    profile: dict | None = None, fits_intents=(), fits_formats=(),
                    source_url: str = "", source_asset_id: str = "",
                    notes: str = "", by: str = "", look: dict | None = None,
-                   design: dict | None = None) -> dict:
+                   design: dict | None = None, read_info: dict | None = None) -> dict:
     """Put one structure in the library, once per distinct sequence.
 
     `design` is the whole of how the email is built, in `email_design.SCHEMA`'s
@@ -212,12 +212,22 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
                 if design is not None or not (row.design or {}):
                     row.design = dsg if design is not None else email_design.house(
                         prof.get("look"))
+                if read_info is not None:
+                    prof["read"] = dict(read_info)
+                    # A re-read's notes replace the old — they were checked
+                    # for leaks above like the first ones; blank ones (the
+                    # quoted-copy gate emptied them) leave the old standing.
+                    if notes:
+                        prof["notes"] = notes[:600]
+                    row.profile = prof
                 s.commit()
         return {"ok": True, "id": have.id, "existing": True,
                 "name": have.name, "review": have.review, "dropped": dropped}
     prof = dict(profile or profile_of([{"type": t} for t in seq]))
     if notes:
         prof["notes"] = notes[:600]
+    if read_info is not None:
+        prof["read"] = dict(read_info)
     if lk := look_of(look):
         prof["look"] = lk
     with db.SessionLocal() as s:
@@ -587,75 +597,10 @@ def swipes(tenant: str = SWIPE_TENANT) -> list[dict]:
         return out
 
 
-_READ = """You are looking at a screenshot of a marketing email from a public gallery.
-Describe its STRUCTURE only — never its words, brand, products, prices or
-offer. Answer as JSON with exactly these keys:
-  "sequence": the blocks in order, using ONLY these types: {types}
-  "fits_intents": which of {intents} this shape suits
-  "fits_formats": which of {formats} it is ("letter" = mostly prose, "designed" = built from visual blocks)
-  "notes": one or two sentences on what the structure does well — the
-           arrangement, the rhythm, where the ask lands. No brand names, no
-           product names, no copy, no URLs.
-  "look": how it is ARRANGED, as an object with exactly these keys and only
-          these values —
-            "hero": "contained" (picture, then headline under it) |
-                    "bleed" (picture edge to edge, no rounding) |
-                    "overlay" (headline ON the picture) |
-                    "split" (picture one side, headline the other)
-            "scale": "modest" (headline about body size x1.5) | "display" (very large headline)
-            "density": "tight" | "regular" | "airy" (how much space between sections)
-            "bands": true if sections sit on alternating background bands, else false
-            "cta": "block" (a button) | "full" (a full-width bar) | "pill" (rounded button) | "link" (a text link with an arrow)
-            "products": "rows" (one product per row) | "grid2" (two across) | "grid3" (three across)
-          Describe the arrangement only — never a colour, a typeface or a picture's content.
-Nothing outside the JSON."""
-
-
 def read_swipe(asset_id: str) -> dict:
-    """Look at one swipe and propose the structure it uses. PROPOSED, not
-    approved: a reading is a generator's opinion and generators propose."""
-    import base64 as _b64
-    from . import imagegen, llm
-    with db.SessionLocal() as s:
-        row = s.get(db.KbAsset, asset_id)
-        if row is None:
-            return {"ok": False, "why": "no such swipe"}
-        url, title, src = row.url or "", row.title or "", (row.source or "")
-        from . import kb
-        if (row.rights or kb.REFERENCE) != kb.REFERENCE:
-            return {"ok": False, "why": "not a reference swipe — a brand's own "
-                                        "picture is not read for structure"}
-    try:
-        blob = httpx.get(url, headers={"User-Agent": _UA}, timeout=25,
-                         follow_redirects=True).content
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "why": f"could not fetch the screenshot ({exc.__class__.__name__})"}
-    if not blob:
-        return {"ok": False, "why": "the screenshot was empty"}
-    blocks = [{"type": "image", "source": {"type": "base64",
-                                           "media_type": imagegen._mime(blob),
-                                           "data": _b64.standard_b64encode(blob).decode()}},
-              {"type": "text", "text": _READ.format(
-                  types=", ".join(block_types()), intents=", ".join(INTENTS),
-                  formats=", ".join(FORMATS))}]
-    reply = llm.ask("creative_review", blocks, tenant=SWIPE_TENANT, max_tokens=600)
-    if not getattr(reply, "ok", False):
-        return {"ok": False, "why": getattr(reply, "error", "") or "the reading could not run"}
-    text = str(getattr(reply, "text", "") or "")
-    m = re.search(r"\{.*\}", text, re.S)
-    try:
-        data = json.loads(m.group(0)) if m else {}
-    except ValueError:
-        data = {}
-    if not isinstance(data, dict) or not data.get("sequence"):
-        return {"ok": False, "why": "the reading did not answer in the shape asked"}
-    got = file_structure(
-        name=(title or "swiped structure")[:120], sequence=data.get("sequence") or [],
-        source="swipe", review="proposed",
-        fits_intents=data.get("fits_intents") or [],
-        fits_formats=data.get("fits_formats") or [],
-        source_url=src or url, source_asset_id=asset_id,
-        notes=str(data.get("notes") or ""),
-        look=data.get("look") if isinstance(data.get("look"), dict) else None)
-    got["read"] = data
-    return got
+    """Look at one swipe and propose the structure it uses — its whole DESIGN
+    (`email_design.read`: strips cut to the reviewer's tier, three passes,
+    the vocabulary from the schema). PROPOSED, not approved: a reading is a
+    generator's opinion and generators propose."""
+    from . import email_design
+    return email_design.read(asset_id)

@@ -3,7 +3,7 @@
 > **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-09-11 at commit `b4c0383`.
 > `BUILD-STATE.md` remains the record of what exists.
 >
-> **Phases 0, 1 and 2 are built (2026-09-11). Phases 3–7 are not.**
+> **Phases 0–3 are built (2026-09-11). Phases 4–7 are not.**
 >
 > §2 is a list of facts with `file:line`, each checkable in about a minute. If
 > they still hold, the plan holds. If one has changed, the phase resting on it
@@ -368,40 +368,68 @@ reader that tiles flipped two entries to FIXED).
   display/heading → heading and body/kicker → body, the classification
   choosing only when a face is absent (Decision 1 default).
 
-### Phase 3 — The reader, with eyes (`email_design.read`, replaces `_READ`)
-- **Tile the screenshot** with Pillow: 680-wide strips cut to the REVIEWER'S
-  tier — `llm.image_tier(config.CREATIVE_REVIEW_MODEL)` decides 1568 or 2576
-  — with ~120 px overlap; the mobile render (375 wide) as one more strip when
-  RGE serves it. Every strip checked with `llm.image_fits` before send and
-  marked `transformations: llm.OVERSIZED_IMAGE_ERROR`, so a strip that would
-  be downscaled is refused by the API and said, never degraded in silence.
-  Under 20 image blocks per request, or the 2000 px rule bites.
-- **Pass A — global** (top strip + a contact sheet of all strips scaled to
-  fit one 1568 image): frame, header, type system, palette mood and roles,
-  cta, dividers, footer, imagery direction.
-- **Pass B — per strip**: the sections in that strip with layout, align, bg
-  role, pad, image treatment, aspect, slots. Stitched top-down; the
-  overlap de-duplicated by the section the model names as "continued".
-- **Pass C — the critique**: the strips again, plus the assembled design in
-  words: *"list every visible design property this description gets wrong
-  or misses"* → one corrective merge. (The ad judge's one-corrective-redraft
-  pattern, `creative._judged`, applied to reading.) Without an HTML→image
-  capability this is the fidelity loop that exists; §5 Decision 4 names the
-  screenshot-service option for a picture-to-picture judge later.
-- Output through `normalize`; dropped items listed on the card; filed
-  `review="proposed"` with `design`, `sequence` (derived from
-  `sections[].kind` so the old library reads still work) and `notes`
-  (through `craft.leaks` + a no-quoted-copy check).
-- **The card shows the reference BESIDE a live preview of the recreation**,
-  rendered through THIS brand's palette/type/logo with its three real
-  products, an owned hero photograph and a fixed sample copy — so "would
-  this recreate it?" is answered before approval. Approve / Read again /
-  Reject. "Read its look" becomes "Read its design".
-- Model calls filed in toolcalls like every other call; the read's cost
-  said on the card (three passes per swipe).
-- Guards: `a_strip_never_exceeds_the_pinned_edge`;
-  `a_reference_hex_never_survives_the_read`;
-  `a_references_copy_never_reaches_the_structure`.
+### Phase 3 — The reader, with eyes — DONE 2026-09-11 (`email_design.read`; `_READ` and the first reader deleted)
+- **Strips** (`strips`): the screenshot cut to the reviewer's tier —
+  `llm.image_tier(config.CREATIVE_REVIEW_MODEL)` decides 1568 or 2576 —
+  with 120 px overlap, a wide picture narrowed to the edge first, lossless
+  PNG; every image block carries `transformations: {"oversized_image":
+  "error"}` so a strip that would be downscaled is refused by the API and
+  said. A contact sheet (`contact_sheet`) of the whole at the tier's size.
+  The phone render (`mobile_url`: `…/emails/<slug>.png` → `…/emails/mobile/
+  <slug>.png`) fetched when the gallery serves it, skipped and said when
+  not. Never more than 20 image blocks in a request (`MAX_IMAGE_BLOCKS`).
+- **Three passes, prompts derived from `SCHEMA`** (`prompt_global`,
+  `prompt_strip`, `prompt_critique` — every field, its values and meaning,
+  from `fields()`; the suite proves nothing outside the schema is asked
+  for): A, the whole design off the contact sheet + the top strip (+ the
+  phone render); B, the sections in each strip with `continued` for one
+  cut by the edge; C, the strips again with the assembled design — "list
+  every visible property this gets wrong or misses" — answered as a JSON
+  patch, applied ONCE (`apply_patch`, global groups field by field,
+  sections by index, out-of-range ignored, off-vocabulary dropped and said).
+- `stitch`: a strip's first section marked `continued` is the previous
+  strip's last, kept once, slots the union. `normalize` on the whole; every
+  drop — the reading's and the critique's — filed on the structure as
+  `profile["read"]["dropped"]` with `tier, edge, strips, calls, mobile,
+  critiqued`.
+- **Refusals by name**: no sections found ("the picture may not be an
+  email"); a pass that did not run (the model's own error); over the image
+  limit (before sending); a reading of a non-reference picture.
+  **The reference's copy never lands**: `quoted_copy` — three or more words
+  inside quotation marks in the notes — drops the notes and says so;
+  `craft.leaks` still runs at filing.
+- **The live renderer keeps working**: `look_of_design` derives the old
+  six-axis look from the design (overlay/split/bleed/contained; poster or
+  display → display; leading → density; any section on `page` → bands;
+  arrow/underline → link, full, pill, else block; grid2/grid3) and it is
+  filed as `profile["look"]` until Phase 4 executes the design itself.
+  `sequence_for_library` derives the library's identity from the slots,
+  falling back to the kinds. A re-read of an existing sequence carries the
+  design AND clean notes forward, approval untouched.
+- **The card** (`_structures_card`): "design: <summary> · read in N calls
+  from M strip(s) on the <tier> tier · with the phone render · critiqued
+  once", the drops and the sections under `<details>`, **Read its design**
+  on any structure with a screenshot; a structure never read says "design
+  not read — the house design". The reference-beside-a-live-preview lands
+  with Phase 4 (`render_design` is what would draw it) and the card says so.
+- Ledger: entries 1 and 2 CLOSED by measurement (every image the reader
+  sends fits the reviewer's tier; every block carries the refusal switch;
+  no request over 20 images; the prompt names every schema field, "never a
+  colour, a typeface" gone; a tall screenshot read in ≥3 strips, calls =
+  strips + 2). Four entries open, all Phase 4's. Suite
+  `scripts/test_the_reader_has_eyes.py`; seven guards, all `[ caught ]`:
+  `a_strip_is_cut_to_the_reviewers_tier`, `a_strip_refuses_to_be_downscaled`,
+  `the_prompt_is_the_schema`, `a_continued_section_is_one_section`,
+  `the_critique_is_applied`, `quoted_copy_never_reaches_the_notes`,
+  `a_reading_with_no_sections_is_refused`. Phase 0's
+  `a_fixed_defect_moves_the_ledger` went STALE when the old prompt was
+  deleted (the anchors ratchet caught it) and is retargeted at a fake
+  `render_design`.
+- **NOT proven live.** Every suite stubs `llm.ask`. The `transformations`
+  field on an image block rides through the SDK as a plain dict; if the
+  live API refuses it the read fails loudly with the API's words — that is
+  the designed failure, and the first real press tells. Owner's move: swipe
+  one real RGE email, read it, and read the card.
 
 ### Phase 4 — The renderer executes a design (`email_render.render_design`)
 The biggest ship. Section painters keyed by `layout`, every visual property
@@ -545,12 +573,14 @@ a picture-to-picture fidelity judge once a screenshot capability exists.
 > **First move:** `python3 scripts/test_a_reference_is_recreated.py` — six
 > entries report `[ open ]`; that is the diagnosis, on record. Then re-check
 > `INITIATIVE-email-design.md` §2 against the tree (`git log -1`, then each
-> `file:line`). Phases 0–2 shipped 2026-09-11; start at Phase 3 (the reader
-> with eyes — strips cut to the reviewer's tier, three passes, the reference
-> beside a live preview), and when a phase lands, its ledger entries go red —
-> replace them with that phase's own checks in the same commit. Check first
-> that the entry MEASURES THE NEWS: Phase 2's entry counted the wrong fields
-> and did not flip until it was rewritten.
+> `file:line`). Phases 0–3 shipped 2026-09-11; start at Phase 4 (the renderer
+> executes a design: painters keyed by layout, colours only through
+> `brand.palette`, the legacy `render(theme, blocks, look=)` a thin wrapper so
+> every suite passes unchanged, then the reference-beside-preview on the
+> structures card that Phase 3 left a note for), and when a phase lands, its
+> ledger entries go red — replace them with that phase's own checks in the
+> same commit. Check first that the entry MEASURES THE NEWS: Phase 2's entry
+> counted the wrong fields and did not flip until it was rewritten.
 >
 > Then the phases in order. Under §4 unchanged: reproduce first; every fix
 > ships a sabotage guard that prints `[ caught ]`; ship via

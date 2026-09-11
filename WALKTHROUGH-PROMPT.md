@@ -1487,7 +1487,7 @@ is filed, then run "both" on the same product and read the note's count.
 
 ---
 
-### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phases 0 `408a86e` and 1 `cc5d8b6` of INITIATIVE-email-design.md)
+### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phases 0 `408a86e`, 1 `cc5d8b6`, 2 `fb42809` of INITIATIVE-email-design.md)
 
 **The owner's word**, on the first send built from a swiped structure:
 *"it is currently making the same email with slight layout differences,
@@ -1553,7 +1553,7 @@ is closed so every value has a painter, and one walk (`fields()`) feeds the
 validator, the doc and the painter test**; **a migration is a boot-time
 backfill that writes only where empty**. Six guards, all `[ caught ]`.
 
-**Phase 2, same day (hash in the memory note).** `app/palette.py`
+**Phase 2, same day (`fb42809`).** `app/palette.py`
 (WCAG arithmetic; `fill` — every role from a source, an older colour, or
 one stated computed rule, labelled; `findings` with ratios; `rank_kit` —
 every kit colour placed by rule, the unplaced named; `from_pictures`).
@@ -1572,8 +1572,23 @@ news** (the Phase 0 entry counted `colors.*` and never flipped; rewritten);
 edit to a value that must change the outcome**. Seven guards, all
 `[ caught ]`.
 
-**Owner's move:** the six decisions in the plan's §5 (defaults stand);
-then Phase 3.
+**Phase 3, same day (hash in the memory note).** `email_design.read`
+replaces the first reader (deleted, with `_READ`): strips cut to the
+reviewer's tier with the refusal switch on every block, a contact sheet,
+the phone render when served, three passes with prompts derived from
+`SCHEMA`, stitching, one critique applied as a patch, every drop filed on
+the structure, refusals by name, the reference's quoted copy never in the
+notes, the old look DERIVED for the live renderer, the card saying the
+design/read/drops/sections with **Read its design**. Rules it adds: **a
+test's walk must read the source of truth, not the constant a guard
+mutates** (the prompt checks walked `_GLOBAL_GROUPS` and missed a dropped
+group until they walked `SCHEMA`); **a stub that answers every strip
+identically doubles the email** — answer per strip; **a guard whose target
+a later phase deletes goes STALE and the anchors ratchet says so** —
+retarget it at what is still open. Seven guards, all `[ caught ]`. NOT
+proven live — the first real swipe is the owner's press.
+
+**Owner's move:** swipe one real RGE email and read the card; then Phase 4.
 
 ---
 

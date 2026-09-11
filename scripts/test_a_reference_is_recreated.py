@@ -127,7 +127,7 @@ def main() -> int:
        llm.OVERSIZED_IMAGE_ERROR == {"oversized_image": "error"})
 
     # ------------------------------------------------------------------
-    print("\n— 1. the reader cannot see the type (open until Phase 3) —")
+    print("\n— 1. the reader cannot see the type — CLOSED by Phase 3 (2026-09-11) —")
     W, H = 680, 4543                      # flavors-kept-coming-back.png, measured 2026-09-11
     shot = _png(W, H)
 
@@ -136,50 +136,67 @@ def main() -> int:
             self.text, self.content, self.status_code = text, content, status
             self.headers = {}
     page = ('<html><head><title>Tall gallery email</title>'
-            '<meta property="og:image" content="https://cdn.rge/tall.png">'
+            '<meta property="og:image" content="https://cdn.rge/emails/tall.png">'
             '<meta property="og:title" content="A tall gallery email"></head></html>')
     sent: list = []
+    from app import email_design as _ed
 
     class _Reply:
         ok = True
-        text = json.dumps({"sequence": ["hero", "heading", "text", "cta"],
-                           "fits_intents": ["offer"], "fits_formats": ["designed"],
-                           "notes": "One ask, late.", "look": {"hero": "bleed"}})
+        def __init__(self, text): self.text = text
+
+    def _ask(purpose, blocks, **k):
+        sent.append((purpose, blocks))
+        text = next((b["text"] for b in reversed(blocks) if b.get("type") == "text"), "")
+        if "JSON patch" in text:
+            return _Reply("{}")
+        if "strip " in text and "SECTIONS" in text:
+            return _Reply(json.dumps({"sections": [{"kind": "editorial", "slots": ["headline", "body"]}]}))
+        return _Reply(json.dumps({"palette": {"mood": "dark"}, "notes": "One ask, late."}))
     real_get, real_ask = es.httpx.get, llm.ask
     es.httpx.get = lambda url, **k: (_R(page) if "reallygoodemails" in url
-                                     else _R(content=shot))
-    llm.ask = lambda purpose, blocks, **k: (sent.append((purpose, blocks)) or _Reply())
+                                     else _R(content=shot) if "mobile" not in url
+                                     else _R(status=404))
+    llm.ask = _ask
     try:
         sw = es.add_swipe("https://reallygoodemails.com/emails/a-tall-gallery-email")
         ck("a swipe of a tall gallery email is filed", sw.get("ok") is True, str(sw)[:80])
         rd = es.read_swipe(sw["asset_id"])
-        ck("and read", rd.get("ok") is True, str(rd)[:80])
+        ck("and read", rd.get("ok") is True, str(rd)[:120])
     finally:
         es.httpx.get, llm.ask = real_get, real_ask
-    images = [b for _, blocks in sent for b in blocks if b.get("type") == "image"]
-    ck("the reading sends the model exactly one image block", len(images) == 1, str(len(images)))
-    from PIL import Image
-    sent_w, sent_h = Image.open(io.BytesIO(base64.b64decode(images[0]["source"]["data"]))).size
     model = config.CREATIVE_REVIEW_MODEL
-    seen_w, seen_h = llm.image_seen_as(model, sent_w, sent_h)
     tier, why = llm.image_tier(model)
-    print(f"  the reviewer is {model!r} ({why});\n  it is sent {sent_w}×{sent_h} and "
-          f"looks at {seen_w}×{seen_h} — {seen_h / sent_h:.0%} of the height; a 14 px "
-          f"line of body type arrives {14 * seen_h / sent_h:.1f} px tall")
-    still_broken(
-        f"the swipe reader sends the screenshot whole ({sent_w}×{sent_h}) and the "
-        f"reviewer sees it at {seen_w}×{seen_h}",
-        (sent_w, sent_h) == (W, H) and not llm.image_fits(model, sent_w, sent_h),
-        "Phase 3",
-        "the reader now cuts strips that fit the reviewer's tier before sending")
-    still_broken(
-        "the reading is told to describe the arrangement only — never a colour, a typeface",
-        "never a colour, a typeface" in es._READ, "Phase 3",
-        "the reading now asks for the whole design")
-    ck("no image block sets the refusal switch, so a downscale is silent",
-       all("transformations" not in b for b in images))
+    from PIL import Image
+    sizes = []
+    for _, blocks in sent:
+        for b in blocks:
+            if b.get("type") == "image":
+                sizes.append((Image.open(io.BytesIO(base64.b64decode(b["source"]["data"]))).size,
+                              b.get("transformations")))
+    per_request = [sum(1 for b in blocks if b.get("type") == "image") for _, blocks in sent]
+    print(f"  the reviewer is {model!r} ({why}); the reader sent {len(sent)} request(s), "
+          f"{len(sizes)} image(s), the largest {max(s for s, _ in sizes)} — every one seen as sent")
+    # The claim the old entry held open, measured on the news: what the
+    # reader sends is what the reviewer sees. Closed by Phase 3; kept as
+    # plain checks so a regression shows here.
+    ck("every image the reader sends fits the reviewer's tier — the model looks at it as sent "
+       "(closed by Phase 3)",
+       sizes and all(llm.image_fits(model, *sz) for sz, _ in sizes),
+       str([sz for sz, _ in sizes if not llm.image_fits(model, *sz)]))
+    ck("every image block carries the refusal switch, so a strip that would be downscaled is "
+       "refused by the API and said, never degraded in silence",
+       all(t == llm.OVERSIZED_IMAGE_ERROR for _, t in sizes))
+    ck("no request carries more than 20 image blocks — over that the API holds every image to 2000 px",
+       all(n <= 20 for n in per_request), str(per_request))
+    ck("the reading asks for the whole design, every schema field by name — never 'arrangement only'",
+       all(f'"{name}"' in _ed.prompt_global(False) for g in _ed.SCHEMA for name in _ed.SCHEMA[g])
+       and "never a colour, a typeface" not in _ed.prompt_global(False)
+       and "Describe its DESIGN" in _ed.prompt_global(False))
+    ck("the tall screenshot is read in strips, each cut to the tier's edge, overlapping",
+       (rd.get("read") or {}).get("strips", 0) >= 3 and (rd.get("read") or {}).get("calls", 0)
+       == (rd.get("read") or {}).get("strips", 0) + 2, str(rd.get("read")))
 
-    # ------------------------------------------------------------------
     print("\n— 2. the renderer can paint one email (open until Phase 4) —")
     theme = {"name": "T", "colors": {"accent": "#123456", "text": "#1c1e22",
                                      "bg": "#f2f3f5", "surface": "#ffffff"},

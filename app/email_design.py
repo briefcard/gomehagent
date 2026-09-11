@@ -511,3 +511,374 @@ def assets_for(tenant: str, kind: str, aspect: str = "") -> dict:
 def assets_by_kind(tenant: str) -> dict[str, int]:
     """How many pictures could fill each imagery kind — the Brand tab's line."""
     return {k: len(assets_for(tenant, k)["assets"]) for k in _KIND_FIT}
+
+
+# ---------------------------------------------------------------------------
+# READING a reference into a design — with eyes (Phase 3)
+#
+# The first reader sent the gallery screenshot whole; the screenshots are
+# 680 wide and 2800–4600 tall, and Claude scales a picture to its model's
+# tier (`llm.IMAGE_TIERS`), so a 680×4543 email reached the standard tier
+# at 235×1568 with body type under five pixels — and the prompt then said
+# "never a colour, a typeface". This reader:
+#
+#   * cuts the screenshot into STRIPS that fit the reviewer's tier, each
+#     marked `oversized_image: error` so a strip that WOULD be downscaled is
+#     refused by the API and said, never degraded in silence;
+#   * reads in three passes — A, the whole design (frame, header, type,
+#     palette, ask, footer, imagery) off a contact sheet and the top strip;
+#     B, the sections in each strip; C, a critique of the assembled design
+#     against the strips, answered as a patch — and merges the patch once;
+#   * derives every prompt from `SCHEMA` (`fields()`), so the reading can
+#     never be asked for a field the validator does not know;
+#   * files the result PROPOSED, with everything `normalize` dropped listed
+#     on the structure, and never a word of the reference's copy.
+# ---------------------------------------------------------------------------
+STRIP_OVERLAP = 120
+MAX_IMAGE_BLOCKS = 20          # over this the API holds every image to 2000 px
+_GLOBAL_GROUPS = ("frame", "header", "type", "palette", "cta", "dividers", "footer", "imagery")
+
+
+def _tier_edge() -> tuple[str, int]:
+    from . import config, llm
+    tier, _why = llm.image_tier(config.CREATIVE_REVIEW_MODEL)
+    return tier, llm.IMAGE_TIERS[tier]["max_edge"]
+
+
+def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP) -> list[dict]:
+    """The screenshot as strips that fit `max_edge`, each
+    `{png, top, bottom, width, height}`, overlapping by `overlap` px so a
+    section cut by a strip edge is seen whole in one of them. A picture
+    that already fits is one strip. Lossless PNG: this is the one place
+    the type has to stay legible."""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(blob)).convert("RGB")
+    W, H = im.size
+    if W > max_edge:
+        im = im.resize((max_edge, max(1, round(H * max_edge / W))), Image.LANCZOS)
+        W, H = im.size
+    out = []
+    top = 0
+    while True:
+        bottom = min(H, top + max_edge)
+        crop = im.crop((0, top, W, bottom))
+        buf = io.BytesIO()
+        crop.save(buf, format="PNG", optimize=True)
+        out.append({"png": buf.getvalue(), "top": top, "bottom": bottom,
+                    "width": W, "height": bottom - top})
+        if bottom >= H:
+            break
+        top = bottom - overlap
+    return out
+
+
+def contact_sheet(blob: bytes, max_edge: int) -> bytes:
+    """The whole email at the size the reviewer's tier can hold — the view
+    for the overall key, the frame and the rhythm, never for the type."""
+    import io
+    from PIL import Image
+    from . import llm
+    im = Image.open(io.BytesIO(blob)).convert("RGB")
+    w, h = llm.resized_size(*im.size, max_edge, max_edge * 4)
+    if (w, h) != im.size:
+        im = im.resize((w, h), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _image_block(png: bytes) -> dict:
+    import base64
+    from . import llm
+    return {"type": "image",
+            "source": {"type": "base64", "media_type": "image/png",
+                       "data": base64.standard_b64encode(png).decode()},
+            # A strip that would be downscaled is REFUSED, not shrunk.
+            "transformations": dict(llm.OVERSIZED_IMAGE_ERROR)}
+
+
+def _vals(field: _F) -> str:
+    return " | ".join(("on" if v else "off") if isinstance(v, bool) else str(v)
+                      for v in field.values)
+
+
+def _field_lines(fields: dict, indent: str = "    ") -> str:
+    return "\n".join(f'{indent}"{name}": {_vals(f)}  — {f.meaning}'
+                     + ("  (a list; several allowed)" if f.many else "")
+                     for name, f in fields.items())
+
+
+def prompt_global(has_mobile: bool) -> str:
+    """Pass A. Derived from SCHEMA: every global group, every field, its
+    values and meaning — the reading is asked for exactly what the
+    validator knows and nothing else."""
+    groups = "\n".join(f'  "{g}": {{\n{_field_lines(SCHEMA[g])}\n  }}' for g in _GLOBAL_GROUPS)
+    imgs = ("Image 1 is the whole email scaled to fit; Image 2 is its top at full size"
+            + ("; Image 3 is the same email as rendered on a phone" if has_mobile else "") + ".")
+    return (f"You are looking at a marketing email from a public gallery. {imgs}\n"
+            "Describe its DESIGN — how it is built — and never its words, its brand, its "
+            "products, its prices, or what its pictures show. Grounds are ROLES (page, "
+            "surface, dark, tint, accent), never colours; faces are CLASSES, never names.\n"
+            "Answer as JSON with exactly these groups and fields, each value one of the "
+            "values listed for it:\n{\n" + groups + ",\n"
+            '  "notes": "one or two sentences on what the design does well — the arrangement, '
+            'the rhythm, the type. No brand names, no product names, no quoted copy, no '
+            'URLs, no colours."\n}\nNothing outside the JSON.')
+
+
+def prompt_strip(k: int, n: int, top: int, bottom: int, total: int) -> str:
+    """Pass B. The sections visible in one strip, in SECTION's own words."""
+    return (f"This is strip {k} of {n} of the same email (pixels {top}–{bottom} of {total}). "
+            "List the SECTIONS visible in it, top to bottom — never their words, only how "
+            "each is built. Answer as JSON:\n"
+            '{"sections": [{\n'
+            f'    "kind": {" | ".join(KINDS)}  — what the section is for\n'
+            '    "continued": true | false  — true when this section began above this strip\n'
+            + _field_lines(SECTION) + "\n"
+            f'    "slots": a list from {", ".join(SLOTS)} in reading order; products and image '
+            f'take a count like "products:3" (1–{SLOT_MAX})\n'
+            "}]}\nNothing outside the JSON.")
+
+
+def prompt_critique(design: dict, n: int) -> str:
+    """Pass C. The strips again, the design as read, and one question."""
+    import json
+    return (f"Images 1–{n} are the strips of the same email, top to bottom. Below is its "
+            "design as it was read. List every visible property this description gets "
+            "WRONG or MISSES — a ground that is dark where it says surface, a headline "
+            "set upper-case where it says sentence, a section missing, a slot missing — "
+            "and answer ONLY with a JSON patch in the same shape holding just the fields "
+            'to change: {"frame": {...}, "type": {...}, ..., "sections": [{"index": <0-based '
+            "index into the sections below>, ...fields to change...}], "
+            '"notes": "..."}. An empty object {} means the reading is right. Never a word '
+            "of the email's copy, never a colour, never a face's name.\n\nTHE DESIGN AS READ:\n"
+            + json.dumps({k: v for k, v in design.items() if k != "defaults"}, indent=1))
+
+
+def _json(text: str) -> dict:
+    import json
+    m = re.search(r"\{.*\}", str(text or ""), re.S)
+    if not m:
+        return {}
+    try:
+        got = json.loads(m.group(0))
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def stitch(per_strip: list[list[dict]]) -> list[dict]:
+    """Sections from consecutive strips as one list: a strip's first
+    section marked `continued` is the previous strip's last, seen again in
+    the overlap — kept once, its slots the union in order."""
+    out: list[dict] = []
+    for k, secs in enumerate(per_strip):
+        for i, s in enumerate(secs):
+            s = dict(s or {})
+            cont = bool(s.pop("continued", False))
+            if k and i == 0 and cont and out:
+                prev = out[-1]
+                for slot in s.get("slots") or []:
+                    if slot not in (prev.get("slots") or []):
+                        prev.setdefault("slots", []).append(slot)
+                continue
+            out.append(s)
+    return out
+
+
+def apply_patch(design: dict, patch: dict) -> tuple[dict, list[str]]:
+    """The critique's corrections merged once — global groups field by
+    field, sections by index — and the result normalised; returns what the
+    patch tried to say that the vocabulary does not hold."""
+    import copy
+    d = copy.deepcopy(design)
+    for g in _GLOBAL_GROUPS:
+        if isinstance(patch.get(g), dict):
+            d[g] = {**d.get(g, {}), **patch[g]}
+    for s in (patch.get("sections") or []) if isinstance(patch.get("sections"), list) else []:
+        if not isinstance(s, dict):
+            continue
+        try:
+            i = int(s.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(d.get("sections") or []):
+            d["sections"][i] = {**d["sections"][i], **{k: v for k, v in s.items() if k != "index"}}
+    return normalize(d)
+
+
+_QUOTED = re.compile(r'["“”‘’\']([^"“”‘’\']{2,}?)["“”‘’\']')
+
+
+def quoted_copy(notes: str) -> str:
+    """A run of three or more words inside quotation marks — the reference's
+    own copy, arriving as a 'note'. Returned so the caller can refuse the
+    notes and say why; '' when clean."""
+    for m in _QUOTED.finditer(str(notes or "")):
+        if len(m.group(1).split()) >= 3:
+            return m.group(1)
+    return ""
+
+
+def look_of_design(design: dict) -> dict:
+    """The old six-axis look, read off a design — so the LIVE renderer, which
+    still draws `look` until Phase 4, arranges a swiped structure as well as
+    it can today. The inverse of `house()` where an inverse exists."""
+    hero = (design.get("defaults") or {}).get("hero") or {}
+    for s in design.get("sections") or []:
+        if s.get("kind") == "hero":
+            hero = s
+            break
+    prod = next((s for s in (design.get("sections") or []) if s.get("kind") == "products"),
+                (design.get("defaults") or {}).get("products") or {})
+    t, c = design.get("type") or {}, design.get("cta") or {}
+    look = {
+        "hero": ("overlay" if hero.get("layout") == "overlay" or hero.get("text_on_image")
+                 else "split" if str(hero.get("layout", "")).startswith("split")
+                 else "bleed" if hero.get("image") == "bleed" else "contained"),
+        "scale": "display" if t.get("scale") in ("display", "poster") else "modest",
+        "density": {"tight": "tight", "airy": "airy"}.get(str(t.get("leading")), "regular"),
+        "bands": any((s.get("bg") == "page") for s in (design.get("sections") or [])),
+        "cta": ("link" if c.get("style") in ("arrow", "underline") else
+                "full" if c.get("style") == "full" else
+                "pill" if c.get("radius") == "pill" else "block"),
+        "products": {"grid2": "grid2", "grid3": "grid3"}.get(str(prod.get("layout")), "rows"),
+    }
+    return look
+
+
+_KIND_BLOCKS = {"hero": ["hero"], "intro": ["heading", "text"], "feature": ["heading", "text"],
+                "products": ["products"], "proof": ["quote"], "editorial": ["heading", "text"],
+                "offer": ["heading", "text", "cta"], "closing": ["text", "cta"], "ps": ["ps"]}
+
+
+def sequence_for_library(design: dict) -> list[str]:
+    """The library's sequence for a read design: from its slots, or — when a
+    reading named sections but no slots — from the kinds, so a structure is
+    never filed with fewer than the two blocks the library requires."""
+    seq = sequence_of(design)
+    if len(seq) >= 2:
+        return seq
+    out: list[str] = []
+    for s in design.get("sections") or []:
+        out += _KIND_BLOCKS.get(str(s.get("kind")), [])
+    return out
+
+
+def mobile_url(url: str) -> str:
+    """The gallery's phone render of the same email, when the screenshot URL
+    follows the pattern it serves it under (`…/emails/<slug>.png` →
+    `…/emails/mobile/<slug>.png`); '' otherwise."""
+    m = re.match(r"^(https?://[^?]*/emails/)([^/?]+\.(?:png|jpg|jpeg|webp))$", str(url or ""), re.I)
+    return f"{m.group(1)}mobile/{m.group(2)}" if m else ""
+
+
+def _fetch(url: str) -> bytes:
+    import httpx
+    from .email_structures import _UA
+    try:
+        r = httpx.get(url, headers={"User-Agent": _UA}, timeout=25, follow_redirects=True)
+        return r.content if r.status_code == 200 else b""
+    except Exception:                                            # noqa: BLE001
+        return b""
+
+
+def read(asset_id: str) -> dict:
+    """Read one swiped screenshot into a PROPOSED structure carrying its
+    design. `{ok, id, name, design, dropped, read: {tier, strips, calls,
+    mobile}}` or `{ok: False, why}`."""
+    from . import db, email_structures as es, kb, llm
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if row is None:
+            return {"ok": False, "why": "no such swipe"}
+        url, title, src = row.url or "", row.title or "", (row.source or "")
+        if (row.rights or kb.REFERENCE) != kb.REFERENCE:
+            return {"ok": False, "why": "not a reference swipe — a brand's own picture is not read for design"}
+    blob = _fetch(url)
+    if not blob:
+        return {"ok": False, "why": "could not fetch the screenshot"}
+    tier, edge = _tier_edge()
+    try:
+        parts = strips(blob, edge)
+        sheet = contact_sheet(blob, edge)
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "why": f"the screenshot could not be read as a picture ({exc.__class__.__name__})"}
+    murl = mobile_url(url)
+    mob = _fetch(murl) if murl else b""
+    mobile_sheet = b""
+    if mob:
+        try:
+            mobile_sheet = contact_sheet(mob, edge)
+        except Exception:                                        # noqa: BLE001
+            mobile_sheet = b""
+    calls = 0
+
+    def _ask(blocks: list, text: str, max_tokens: int) -> dict:
+        nonlocal calls
+        imgs = [b for b in blocks if b.get("type") == "image"]
+        if len(imgs) > MAX_IMAGE_BLOCKS:
+            raise ValueError(f"{len(imgs)} images in one request — over {MAX_IMAGE_BLOCKS}, "
+                             f"where the API holds every image to 2000 px")
+        calls += 1
+        reply = llm.ask("creative_review", blocks + [{"type": "text", "text": text}],
+                        tenant=es.SWIPE_TENANT, max_tokens=max_tokens)
+        if not getattr(reply, "ok", False):
+            raise RuntimeError(getattr(reply, "error", "") or "the reading could not run")
+        return _json(getattr(reply, "text", ""))
+
+    try:
+        # A — the whole design.
+        a_blocks = [{"type": "text", "text": "Image 1:"}, _image_block(sheet),
+                    {"type": "text", "text": "Image 2:"}, _image_block(parts[0]["png"])]
+        if mobile_sheet:
+            a_blocks += [{"type": "text", "text": "Image 3:"}, _image_block(mobile_sheet)]
+        a = _ask(a_blocks, prompt_global(bool(mobile_sheet)), 1400)
+        if not a:
+            return {"ok": False, "why": "the reading did not answer in the shape asked (pass A)"}
+        # B — the sections, strip by strip.
+        per_strip: list[list[dict]] = []
+        total = parts[-1]["bottom"]
+        for k, p in enumerate(parts, 1):
+            b = _ask([_image_block(p["png"])],
+                     prompt_strip(k, len(parts), p["top"], p["bottom"], total), 1400)
+            secs = b.get("sections") if isinstance(b.get("sections"), list) else []
+            per_strip.append([x for x in secs if isinstance(x, dict)])
+        raw = {g: a.get(g) for g in _GLOBAL_GROUPS}
+        raw["sections"] = stitch(per_strip)
+        if not raw["sections"]:
+            return {"ok": False, "why": (f"the reading found no sections in {len(parts)} "
+                                         f"strip(s) — the picture may not be an email")}
+        design, dropped = normalize(raw)
+        # C — the critique, applied once.
+        c_blocks = []
+        for i, p in enumerate(parts, 1):
+            c_blocks += [{"type": "text", "text": f"Image {i}:"}, _image_block(p["png"])]
+        patch = _ask(c_blocks, prompt_critique(design, len(parts)), 1200)
+        patched = False
+        if patch:
+            design, dropped2 = apply_patch(design, patch)
+            dropped += [f"critique: {d}" for d in dropped2]
+            patched = True
+    except (RuntimeError, ValueError) as exc:
+        return {"ok": False, "why": str(exc)}
+    notes = str(a.get("notes") or "")
+    if patch and isinstance(patch.get("notes"), str) and patch["notes"].strip():
+        notes = patch["notes"]
+    if (q := quoted_copy(notes)):
+        dropped.append(f"notes: the reading quoted the email's own copy ({q[:40]!r}) — notes dropped; "
+                       f"a design carries technique, never material")
+        notes = ""
+    seq = sequence_for_library(design)
+    info = {"tier": tier, "edge": edge, "strips": len(parts), "calls": calls,
+            "mobile": bool(mobile_sheet), "critiqued": patched, "dropped": dropped}
+    got = es.file_structure(
+        name=(title or "swiped design")[:120], sequence=seq, source="swipe",
+        review="proposed", fits_intents=list(a.get("fits_intents") or []),
+        fits_formats=list(a.get("fits_formats") or []),
+        source_url=src or url, source_asset_id=asset_id, notes=notes,
+        design=design, look=look_of_design(design), read_info=info)
+    got["design"], got["read"] = design, info
+    got.setdefault("dropped", dropped)
+    return got

@@ -6674,17 +6674,45 @@ def _structures_card(key: str, tenant: str) -> str:
                  f'float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
                  if shot and shot.get("image") else "")
         look = st["profile"].get("look") or {}
-        # THE LOOK IS SAID. A structure with none is arranged the house way,
-        # and a swiped one can be read again for it — the reading is the
-        # same call that filed it, on the same screenshot.
+        # THE LOOK IS SAID — it is what the LIVE renderer draws until Phase 4
+        # of INITIATIVE-email-design.md executes the design itself.
         look_html = (f'<br><span class="mut">arranged: '
                      + _esc(", ".join(f"{k} {str(v).lower()}" for k, v in look.items()))
-                     + "</span>" if look else
-                     ('<br><span class="when">no look read — arranged the house way'
-                      + (f' · <a href="/admin/email_swipe?key={_esc(key)}&amp;tenant='
-                         f'{_esc(tenant)}&amp;asset={_esc(shot["asset_id"])}">'
-                         f'<button class="sec">Read its look</button></a>' if shot else "")
-                      + "</span>"))
+                     + "</span>" if look else "")
+        # THE DESIGN IS SAID: what the reader saw, in how many calls, from
+        # how many strips, and everything it volunteered that the vocabulary
+        # does not hold. A structure never read (its design is the house)
+        # says so, and a swiped one can be read — on the same screenshot.
+        from . import email_design as _ed
+        rd = st["profile"].get("read") or {}
+        dsg = st.get("design") or {}
+        read_ctl = (f' · <a href="/admin/email_swipe?key={_esc(key)}&amp;tenant='
+                    f'{_esc(tenant)}&amp;asset={_esc(shot["asset_id"])}">'
+                    f'<button class="sec">Read its design</button></a>' if shot else "")
+        if rd:
+            secs = "".join(
+                f'<li>{_esc(x["kind"])} · {_esc(x["layout"])} on {_esc(x["bg"])}'
+                + (f' · {_esc(", ".join(x.get("slots") or []))}' if x.get("slots") else "")
+                + "</li>" for x in (dsg.get("sections") or []))
+            drops = rd.get("dropped") or []
+            design_html = (
+                f'<br><span class="mut">design: {_esc(_ed.summary(dsg))} · read in '
+                f'{rd.get("calls", "?")} calls from {rd.get("strips", "?")} strip(s) on the '
+                f'{_esc(rd.get("tier", "?"))} tier'
+                + (" · with the phone render" if rd.get("mobile") else "")
+                + (" · critiqued once" if rd.get("critiqued") else "") + "</span>"
+                + (f'<details><summary class="mut">{len(drops)} thing(s) the reading said '
+                   f'that the vocabulary does not hold</summary><ul class="mut">'
+                   + "".join(f"<li>{_esc(d)}</li>" for d in drops) + "</ul></details>" if drops else "")
+                + (f'<details><summary class="mut">{len(dsg.get("sections") or [])} sections</summary>'
+                   f'<ol class="mut">{secs}</ol></details>' if secs else "")
+                + (f'<br><span class="when">a preview through this brand&#39;s palette arrives '
+                   f'when the renderer executes designs (Phase 4)</span>' if shot else "")
+                + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
+        else:
+            design_html = ('<br><span class="when">design not read — the house design, '
+                           'arranged as above' + read_ctl + "</span>")
+        look_html += design_html
         return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")

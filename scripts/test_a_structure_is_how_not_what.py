@@ -54,6 +54,7 @@ def _card_for(tenant: str, strip: str = "") -> str:
         with db.SessionLocal() as s:
             row = s.get(db.EmailStructure, strip)
             prof = dict(row.profile or {}); had = prof.pop("look", None)
+            had_read = prof.pop("read", None)
             row.profile = prof; s.commit()
         try:
             return admin_ui._structures_card("s3cret", tenant)
@@ -63,6 +64,8 @@ def _card_for(tenant: str, strip: str = "") -> str:
                 prof = dict(row.profile or {})
                 if had:
                     prof["look"] = had
+                if had_read:
+                    prof["read"] = had_read
                 row.profile = prof; s.commit()
     return admin_ui._structures_card("s3cret", tenant)
 
@@ -244,24 +247,59 @@ def main() -> int:
     page = ('<html><head><title>Acme welcome</title>'
             '<meta property="og:image" content="https://cdn.rge/acme.png">'
             '<meta property="og:title" content="Welcome to Acme"></head></html>')
+    # A REAL PICTURE: the reader with eyes (INITIATIVE-email-design.md,
+    # Phase 3) cuts the screenshot into strips and refuses bytes that are not
+    # a picture — the fake-PNG shortcut the first reader took no longer reads.
+    import io as _io
+    from PIL import Image as _Image
+    _im = _Image.new("RGB", (680, 2000), "#f4f1ea"); _b = _io.BytesIO(); _im.save(_b, format="PNG")
     real_get = es.httpx.get
     es.httpx.get = lambda url, **k: (_R(page) if "reallygoodemails" in url
-                                     else _R(content=b"\x89PNG\r\n\x1a\n" + b"0" * 64))
-    from app import llm
+                                     else _R(content=_b.getvalue()))
+    from app import email_design as ed, llm
+
+    # The three passes, answered by what the prompt asks for. The design
+    # yields the SAME look the first reader was stubbed to give — overlay,
+    # display, airy, bands, pill, grid3 — so every check below still means
+    # what it did. Volunteered colours and faces must not survive.
+    _A = {"frame": {"container": "card"}, "header": {"logo": "center"},
+          "type": {"scale": "display", "leading": "airy", "display_family": "Futura",
+                   "accent": "#ff0000"},
+          "palette": {"mood": "light"}, "cta": {"style": "filled", "radius": "pill"},
+          "dividers": {"style": "thin"}, "footer": {"align": "center"},
+          "imagery": {"hero": "lifestyle"},
+          "fits_intents": ["offer"], "fits_formats": ["designed"],
+          "notes": "The picture carries the opening; one ask, late.",
+          "hero_style": "cinematic"}
+    # Per strip, as a real reading answers: the 680×2000 picture is two
+    # strips on the standard tier, and the intro sits across the cut — seen
+    # at the bottom of strip 1 and again, `continued`, at the top of strip 2.
+    _B = {1: {"sections": [
+              {"kind": "hero", "layout": "overlay", "bg": "dark", "text_on_image": True,
+               "slots": ["kicker", "headline", "image:1"]},
+              {"kind": "intro", "layout": "stack", "bg": "page", "slots": ["headline"]}]},
+          2: {"sections": [
+              {"kind": "intro", "continued": True, "layout": "stack", "bg": "page",
+               "slots": ["headline", "body"]},
+              {"kind": "products", "layout": "grid3", "bg": "surface", "slots": ["products:3"]},
+              {"kind": "closing", "layout": "stack", "bg": "surface", "slots": ["cta"]}]}}
 
     class _Reply:
         ok = True
-        text = json.dumps({"sequence": ["hero", "heading", "text", "cta"],
-                           "fits_intents": ["offer"], "fits_formats": ["designed"],
-                           "notes": "The picture carries the opening; one ask, late.",
-                           "look": {"hero": "overlay", "scale": "display",
-                                    "density": "airy", "bands": True, "cta": "pill",
-                                    "products": "grid3",
-                                    # volunteered, and must not survive
-                                    "accent": "#ff0000", "font": "Futura",
-                                    "hero_style": "cinematic"}})
+        def __init__(self, text): self.text = text
+
+    import re as _re
+
+    def _ask(purpose, blocks, **k):
+        text = next((b["text"] for b in reversed(blocks) if b.get("type") == "text"), "")
+        if "JSON patch" in text:
+            return _Reply("{}")
+        m = _re.search(r"strip (\d+) of (\d+)", text)
+        if m:
+            return _Reply(json.dumps(_B.get(int(m.group(1)), {"sections": []})))
+        return _Reply(json.dumps(_A))
     real_ask = llm.ask
-    llm.ask = lambda *a, **k: _Reply()
+    llm.ask = _ask
     try:
         # THROUGH THE ROUTE, not only the helper: the control the card offers
         # is the one being pressed.
@@ -302,49 +340,54 @@ def main() -> int:
            rd["ok"] and rd["review"] == "proposed", str(rd)[:80])
         srow = next(r for r in es.library() if r["id"] == rd["id"])
         ck("carrying the shape and the reason, and no words from the source",
-           srow["sequence"] == ["hero", "heading", "text", "cta"]
+           srow["sequence"] == ["hero", "heading", "text", "products", "cta"]
            and "carries the opening" in srow["profile"]["notes"]
-           and "acme" not in json.dumps(srow["profile"]).lower())
+           and "acme" not in json.dumps(srow["profile"]).lower()
+           and "acme" not in json.dumps(srow["design"]).lower(), str(srow["sequence"]))
         drawn = es.pick("eien", intent="offer", fmt="designed")["structure"]
         ck("and a proposed swipe is not drawn for anyone",
            drawn is None or drawn["review"] == "approved")
 
-        print("\n— the LOOK: a structure carries the arrangement, never a colour —")
+        print("\n— the DESIGN: a structure carries how the email is built, never a colour —")
         # Owner, 2026-09-11: the produced email *"was not anywhere near the
-        # structure / styling / layout of the email reference"* — because a
-        # structure carried block ORDER only. The reading now carries how the
-        # blocks are arranged, in the renderer's own vocabulary.
+        # structure / styling / layout of the email reference"*. The reading
+        # carries the whole design now (INITIATIVE-email-design.md); the old
+        # six-axis look is DERIVED from it for the live renderer until
+        # Phase 4 executes the design itself.
         from app import email_render as er
         lk = srow["profile"].get("look") or {}
-        ck("the reading's look is kept on the structure, every axis the renderer draws",
+        ck("the look the live renderer draws is derived from the design, every axis",
            lk == {"hero": "overlay", "scale": "display", "density": "airy",
                   "bands": True, "cta": "pill", "products": "grid3"}, str(lk))
-        ck("a colour, a typeface or a value the renderer does not know is dropped",
-           "accent" not in lk and "font" not in lk and "hero_style" not in lk
-           and es.look_of({"hero": "cinematic", "cta": "PILL"}) == {"cta": "pill"})
-        ck("the reader asks for exactly the renderer's axes, by name",
-           all(f'"{k}"' in es._READ for k in er.LOOK)
-           and all(v in es._READ for vals in er.LOOK.values()
-                   for v in vals if isinstance(v, str)))
+        rd = srow["profile"].get("read") or {}
+        ck("a colour, a typeface or a value the renderer does not know is dropped — and said",
+           "#ff0000" not in json.dumps(srow["design"]) and "Futura" not in json.dumps(srow["design"])
+           and any("never names a colour" in d for d in rd.get("dropped", []))
+           and any("'Futura'" in d for d in rd.get("dropped", []))
+           and es.look_of({"hero": "cinematic", "cta": "PILL"}) == {"cta": "pill"}, str(rd.get("dropped"))[:160])
+        ck("the reader asks for exactly the schema's fields, by name",
+           all(f'"{name}"' in ed.prompt_global(False) for g in ed.SCHEMA for name in ed.SCHEMA[g])
+           and all(f'"{name}"' in ed.prompt_strip(1, 1, 0, 10, 10) for name in ed.SECTION))
         ck("and the drafter's brief says how it will be arranged",
            "arrange it as" in es.brief(srow) and "hero overlay" in es.brief(srow))
-        # A structure filed BEFORE the look existed takes it on a re-read,
+        # A structure filed BEFORE designs existed takes one on a re-read,
         # without a second structure and without touching its review.
         with db.SessionLocal() as s:
             row = s.get(db.EmailStructure, srow["id"])
-            prof = dict(row.profile or {}); prof.pop("look", None)
-            row.profile = prof; row.review = "approved"; s.commit()
+            prof = dict(row.profile or {}); prof.pop("look", None); prof.pop("read", None)
+            row.profile = prof; row.design = ed.house(); row.review = "approved"; s.commit()
         again = web.admin_email_swipe(key="s3cret", tenant="baci",
                                       asset=sw["asset_id"], ui=0)
         after = next(r for r in es.library() if r["id"] == srow["id"])
-        ck("'Read its look' on the card re-reads the same screenshot into the same structure",
+        ck("'Read its design' on the card re-reads the same screenshot into the same structure",
            again.get("ok") is True and after["profile"].get("look", {}).get("hero") == "overlay"
-           and after["review"] == "approved"
+           and after["design"]["sections"] and after["review"] == "approved"
            and len([r for r in es.library() if r["sequence"] == srow["sequence"]]) == 1,
            str(again)[:80])
         card_look = _card_for("baci")
-        ck("the card says how each structure is arranged, or that it was not read",
-           "arranged: hero overlay" in card_look and "Read its look" in _card_for("baci", strip=srow["id"]))
+        ck("the card says how each structure is arranged and designed, or that it was not read",
+           "arranged: hero overlay" in card_look and "design:" in card_look
+           and "Read its design" in _card_for("baci", strip=srow["id"]))
         with db.SessionLocal() as s:  # back to proposed for the sections below
             row = s.get(db.EmailStructure, srow["id"]); row.review = "proposed"; s.commit()
 
