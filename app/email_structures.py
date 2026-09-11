@@ -155,21 +155,33 @@ def find_by_sequence(sequence) -> db.EmailStructure | None:
 def file_structure(*, name: str, sequence: list, source: str, review: str,
                    profile: dict | None = None, fits_intents=(), fits_formats=(),
                    source_url: str = "", source_asset_id: str = "",
-                   notes: str = "", by: str = "", look: dict | None = None) -> dict:
+                   notes: str = "", by: str = "", look: dict | None = None,
+                   design: dict | None = None) -> dict:
     """Put one structure in the library, once per distinct sequence.
 
-    `look` is the arrangement (hero treatment, type scale, density, bands,
-    button style, product layout) — filtered through `look_of` so only what
-    the renderer can draw is kept. It lives in `profile["look"]`, beside the
-    facts about the sequence, and rides to the renderer at use.
+    `design` is the whole of how the email is built, in `email_design.SCHEMA`'s
+    vocabulary; it goes through `email_design.normalize`, which keeps what the
+    renderer draws and RETURNS what it did not (`dropped`, on the result) —
+    a reading that volunteered a hex or a face is told so, never trimmed in
+    silence. Without one the structure carries `email_design.house(look)`:
+    today's renderer as a design, the look folded in.
+
+    `look` is the old six-axis arrangement — kept, in `profile["look"]`, until
+    Phase 4 of INITIATIVE-email-design.md retires the renderer's `LOOK`; the
+    design already carries everything it says.
 
     `notes` are checked with `craft.leaks` BEFORE filing: a structure that
     names a brand, a URL or a person is one that would carry another account's
     fact into every email built on it, and the library is shared.
     """
-    from . import craft
+    from . import craft, email_design
     seq = [str(t).strip().lower() for t in (sequence or []) if str(t).strip()]
     unknown = [t for t in seq if t not in block_types()]
+    dropped: list[str] = []
+    if design is not None:
+        dsg, dropped = email_design.normalize(design)
+    else:
+        dsg = email_design.house(look)
     if unknown:
         return {"ok": False, "why": f"unknown block type(s) {unknown} — a "
                                     f"structure may only use blocks the "
@@ -187,16 +199,22 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
         # the renderer learned a new axis) takes the arrangement now; its
         # sequence, name and review are untouched, so a re-read never undoes
         # an approval.
-        if lk := look_of(look):
+        lk = look_of(look)
+        if lk or design is not None:
             with db.SessionLocal() as s:
                 row = s.get(db.EmailStructure, have.id)
                 prof = dict(row.profile or {})
-                if prof.get("look") != lk:
+                if lk and prof.get("look") != lk:
                     prof["look"] = lk
                     row.profile = prof
-                    s.commit()
+                # A re-read carries its design forward the same way; a design
+                # read where none was is the house with the look folded in.
+                if design is not None or not (row.design or {}):
+                    row.design = dsg if design is not None else email_design.house(
+                        prof.get("look"))
+                s.commit()
         return {"ok": True, "id": have.id, "existing": True,
-                "name": have.name, "review": have.review}
+                "name": have.name, "review": have.review, "dropped": dropped}
     prof = dict(profile or profile_of([{"type": t} for t in seq]))
     if notes:
         prof["notes"] = notes[:600]
@@ -206,7 +224,7 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
         row = db.EmailStructure(
             name=(name or signature(seq))[:120], source=source,
             source_url=source_url[:500], source_asset_id=source_asset_id,
-            sequence=seq, profile=prof,
+            sequence=seq, profile=prof, design=dsg,
             fits_intents=[i for i in fits_intents if i in INTENTS],
             fits_formats=[f for f in fits_formats if f in FORMATS] or ["designed"],
             requires=requires_of(seq), review=review,
@@ -215,7 +233,7 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
         s.add(row)
         s.commit()
         return {"ok": True, "id": row.id, "existing": False, "name": row.name,
-                "review": row.review}
+                "review": row.review, "dropped": dropped}
 
 
 def file_from_output(output_id: str, *, by: str = "owner") -> dict:
@@ -280,10 +298,28 @@ def library(*, review: str = "") -> list[dict]:
         return [_row(r) for r in rows]
 
 
+def backfill_designs() -> int:
+    """Every structure filed before designs existed takes `house(look)`. Run
+    at boot; writes only where the design is empty, so a read design is
+    never overwritten and a second boot changes nothing. Returns how many."""
+    from . import email_design
+    n = 0
+    with db.SessionLocal() as s:
+        for row in s.query(db.EmailStructure).all():
+            if row.design:
+                continue
+            row.design = email_design.house((row.profile or {}).get("look"))
+            n += 1
+        if n:
+            s.commit()
+    return n
+
+
 def _row(r) -> dict:
     return {"id": r.id, "name": r.name, "source": r.source,
             "source_url": r.source_url, "sequence": list(r.sequence or []),
-            "profile": dict(r.profile or {}), "fits_intents": list(r.fits_intents or []),
+            "profile": dict(r.profile or {}), "design": dict(r.design or {}),
+            "fits_intents": list(r.fits_intents or []),
             "fits_formats": list(r.fits_formats or []),
             "requires": list(r.requires or []), "review": r.review,
             "used_count": int(r.used_count or 0),

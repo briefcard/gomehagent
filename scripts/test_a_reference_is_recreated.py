@@ -234,6 +234,17 @@ def main() -> int:
         all_grounds <= {theme["colors"]["bg"], theme["colors"]["text"], theme["colors"]["accent"]}
         and theme["colors"]["text"] not in off_overlay, "Phase 4",
         "a section's ground is now a palette role the design chooses")
+    # Phase 1 filed the DESIGN vocabulary on every structure; nothing draws
+    # it yet. The painter registry the schema walk will run against is
+    # Phase 4's; until it exists this entry holds the claim open.
+    from app import email_design as _ed
+    still_broken(
+        f"the renderer has no painter registry for the design vocabulary "
+        f"({len(_ed.fields())} fields filed, none drawn) — a structure's design "
+        f"is stored and never executed",
+        not hasattr(er, "PAINTERS") and not hasattr(er, "render_design"), "Phase 4",
+        "email_render.render_design executes a design; replace this with the "
+        "schema-walk-against-PAINTERS check")
     ck("the look vocabulary is the six axes the plan describes — a seventh would be news",
        sorted(er.LOOK) == ["bands", "cta", "density", "hero", "products", "scale"],
        str(sorted(er.LOOK)))

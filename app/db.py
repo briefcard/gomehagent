@@ -1099,6 +1099,13 @@ class EmailStructure(Base):
     fits_formats = Column(JSON, default=list)
     #: What a brand must HAVE to use it: products, proof, hero.
     requires = Column(JSON, default=list)
+    #: THE DESIGN — how the email is built, whole, in the vocabulary of
+    #: `email_design.SCHEMA`: frame, header, type system, colour ROLES, each
+    #: section's layout and slots, the ask, the footer. Words the renderer
+    #: draws, never a colour, a face or a copy line (INITIATIVE-email-design.md).
+    #: Rows filed before it existed carry `email_design.house(look)` — today's
+    #: renderer as a design, with the old six-axis look folded in.
+    design = Column(JSON, default=dict)
     #: proposed | approved | rejected
     review = Column(String, default="proposed", index=True)
     reviewed_by = Column(String, default="")
@@ -2714,3 +2721,12 @@ def init_db() -> None:
     except Exception:  # noqa: BLE001 — a failed backfill must not block boot
         import logging
         logging.getLogger("db").exception("provenance backfill failed")
+    try:
+        # A structure filed before designs existed takes the house design,
+        # with its look folded in — so nothing reads a structure and finds no
+        # design. Idempotent: only an empty design is written.
+        from . import email_structures
+        email_structures.backfill_designs()
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("db").exception("design backfill failed")

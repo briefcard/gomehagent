@@ -692,6 +692,61 @@ drafter designs fresh, as it always did.
 
 **SUPERSEDED 2026-09-11 (owner) — read `INITIATIVE-email-design.md` §0 before building on the paragraph below.** It describes how the LIVE renderer behaves until Phase 4 of that plan lands; the rule it states ("never a colour") was the wrong reading of the owner's ask and is reversed there: the reference's whole design is recreated, the brand fills its colour roles, faces, pictures and words.
 
+<!-- BEGIN GENERATED: the design vocabulary — scripts/gen_email_design_doc.py -->
+
+**The design vocabulary (INITIATIVE-email-design.md, Phase 1 — filed on every structure; drawn from Phase 4).** A design is the whole of how an email is built, in these words and no others: a ground is a ROLE the brand's palette fills, a face is a CLASS the brand's own face overrides, a slot is a KIND of content the drafter writes. Generated from `email_design.SCHEMA`; do not edit by hand.
+
+| field | values | default | what it means |
+|---|---|---|---|
+| `frame.page` | page · dark · tint | page | the ground behind the email |
+| `frame.container` | flat · card | card | the email sits flat on the page, or in a card on it |
+| `frame.width` | 600 · 640 · 680 | 600 | the email's width in pixels |
+| `frame.radius` | none · soft · round | soft | how corners are cut, everywhere |
+| `frame.border` | off · on | on | a keyline around the card |
+| `header.logo` | left · center | left | where the brand mark sits |
+| `header.nav` | none · inline · below | inline | the store's sections as links: none, beside the mark, on their own line |
+| `header.case` | upper · title | upper | how the links are set |
+| `header.bg` | page · surface · dark · tint · accent | surface | the header's ground — a role |
+| `header.rule` | off · on | on | a rule under the header |
+| `type.display_family` | serif-display · serif-editorial · sans-geometric · sans-grotesque · condensed · script | serif-editorial | the CLASS of the headline face — the brand's own face wins when it has one on file; this chooses a stack only when it has none |
+| `type.body_family` | serif · sans | sans | the class of the reading face |
+| `type.scale` | modest · large · display · poster | modest | how big the headline is against the body |
+| `type.heading_weight` | light · regular · bold · black | bold | the headline's weight |
+| `type.heading_case` | upper · title · sentence | sentence | the headline's case |
+| `type.tracking` | tight · normal · wide | normal | letter-spacing on headings |
+| `type.align` | left · center | left | where headings sit |
+| `type.body_size` | 14 · 15 · 16 · 17 | 16 | the reading size in pixels |
+| `type.leading` | tight · regular · airy | regular | line height everywhere |
+| `type.kicker` | none · caps · accent · rule | accent | the small line over a section: none; small capitals; small capitals in the accent; with a short rule |
+| `type.italic_sub` | off · on | off | the sub-headline is set in italics |
+| `palette.mood` | light · dark · high-contrast · tonal · mono | light | the email's overall key — read off the reference, filled by the brand's roles |
+| `palette.accent_use` | buttons · rules · type · blocks | buttons, rules | where the accent is allowed to appear |
+| `cta.style` | filled · outline · underline · arrow · full | filled | the ask's shape: a filled button; outlined; an underlined line; a line with an arrow; a full-width bar |
+| `cta.radius` | square · soft · pill | soft | the button's corners |
+| `cta.size` | small · regular · large | regular | the button's size |
+| `cta.case` | upper · title · sentence | sentence | the label's case |
+| `cta.align` | left · center | left | where the ask sits |
+| `dividers.style` | none · thin · thick · dotted · ornament | thin | what separates sections when a divider is asked for |
+| `footer.bg` | page · surface · dark · tint · accent | surface | the footer's ground — a role |
+| `footer.align` | left · center | center | where the footer's lines sit |
+| `footer.socials` | none · words · icons | words | how the social links are shown |
+| `footer.rule` | off · on | off | a rule over the footer |
+| `imagery.hero` | packshot-on-plain · packshot-on-colour · lifestyle · flat-lay · portrait · texture | lifestyle | the kind of picture the opening wants |
+| `imagery.product` | packshot-on-plain · packshot-on-colour · lifestyle · flat-lay · portrait · texture | packshot-on-plain | the kind of picture a product card wants |
+| `imagery.feature` | packshot-on-plain · packshot-on-colour · lifestyle · flat-lay · portrait · texture | lifestyle | the kind of picture a feature section wants |
+| `section.layout` | stack · split-left · split-right · grid2 · grid3 · collage · overlay · columns · band · letter | stack | how the section's parts sit: stacked; picture beside the words (left or right); a grid of two or three; a collage of pictures; words ON the picture; two columns of words; one line on a band; a letter's paragraphs |
+| `section.align` | left · center | left | where the words sit |
+| `section.bg` | page · surface · dark · tint · accent | surface | the ground the section sits on — a ROLE the brand's palette fills, never a colour |
+| `section.pad` | none · tight · regular · airy | regular | the room around the section |
+| `section.image` | none · contained · bleed · rounded · circle · framed · duotone | contained | the picture's treatment: inside the margins; edge to edge; rounded corners; a circle; a keyline; a tint |
+| `section.aspect` | square · portrait · landscape · wide | landscape | the picture's shape — the slot the brand's own picture is cut to |
+| `section.text_on_image` | off · on | off | the words sit over the picture |
+| `section.rule_above` | none · thin · thick · dotted | none | a rule between this section and the one before |
+
+Section kinds: hero · intro · feature · products · proof · editorial · offer · closing · ps. Slots: kicker · headline · sub · body · list · cta · products · quote · stat · image · caption · signature · ps (products and image take a count, 1–6). Grounds a design may name: page · surface · dark · tint · accent; the roles a brand supplies: page · surface · ink · muted · accent · accent_ink · dark · dark_ink · tint · tint_ink · border · secondary.
+
+<!-- END GENERATED: the design vocabulary -->
+
 **The look: a structure carries the arrangement, never a colour.** Block
 order alone was not what the owner meant by "mimic the style" — the first
 send built on a swipe came out as the house template with the swipe's

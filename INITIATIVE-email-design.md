@@ -3,7 +3,7 @@
 > **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-09-11 at commit `b4c0383`.
 > `BUILD-STATE.md` remains the record of what exists.
 >
-> **Phase 0 is built (2026-09-11). Phases 1–7 are not.**
+> **Phases 0 and 1 are built (2026-09-11). Phases 2–7 are not.**
 >
 > §2 is a list of facts with `file:line`, each checkable in about a minute. If
 > they still hold, the plan holds. If one has changed, the phase resting on it
@@ -262,52 +262,47 @@ reader that tiles flipped two entries to FIXED).
   offline pair — identical content through the house default and through
   every toggle flipped — was rendered and sent to the owner 2026-09-11.
 
-### Phase 1 — The design vocabulary and its schema (`app/email_design.py`, new)
-- `SCHEMA`: one declarative structure — for every key: allowed values (or a
-  type), a default, and one line of meaning. Rich, closed, RENDERABLE:
-  - `frame`: `page` role · `container` flat|card · `width` 600|640|680 ·
-    `radius` none|soft|round · `border` on|off
-  - `header`: `logo` left|center · `nav` none|below|inline · `case`
-    upper|title · `bg` role · `rule` on|off
-  - `type`: `display_family` serif-display|serif-editorial|sans-geometric|
-    sans-grotesque|condensed|script · `body_family` serif|sans · `scale`
-    modest|large|display|poster · `heading_weight` light|regular|bold|black ·
-    `heading_case` upper|title|sentence · `tracking` tight|normal|wide ·
-    `align` left|center · `body_size` 14|15|16|17 · `leading` tight|
-    regular|airy · `kicker` none|caps|colour|rule · `italic_sub` on|off
-  - `palette`: `mood` light|dark|high-contrast|tonal|mono · `accent_use`
-    buttons|rules|type|blocks (multi)
-  - `sections[]`: `kind` (hero|intro|feature|products|proof|editorial|
-    offer|closing|ps …) · `layout` stack|split-left|split-right|grid2|
-    grid3|collage|overlay|columns|band|letter · `align` · `bg` role ·
-    `pad` tight|regular|airy|none · `image` none|contained|bleed|rounded|
-    circle|framed|duotone · `aspect` square|portrait|landscape|wide ·
-    `text_on_image` on|off · `rule_above` none|thin|thick|dotted ·
-    `slots` (kicker, headline, sub, body, cta, products:n, quote, stat,
-    image:n, caption)
-  - `cta`: `style` filled|outline|underline|arrow|full · `radius` square|
-    soft|pill · `size` small|regular|large · `case` · `align`
-  - `dividers`: none|thin|thick|dotted|ornament
-  - `footer`: `bg` role · `align` · `socials` icons|words|none · `rule`
-  - `imagery`: per hero/product/feature: packshot-on-plain|packshot-on-colour|
-    lifestyle|flat-lay|portrait|texture — the KIND a slot wants, so the
-    filler can pick from the brand's own library.
-- `normalize(raw) -> (design, dropped)`: unknown keys/values dropped AND
-  RETURNED, never silently (the `7f34ef2` rule: a thing that made nothing
-  says why). A hex, a font name, a brand name anywhere in a design is a
-  dropped item with a reason.
-- `house(theme, look=None) -> design`: the current renderer's exact output
-  expressed as a design, so the old `look` becomes a *minimal design* and
-  nothing in production changes until Phase 6 turns the key.
-- `db.EmailStructure.design` (JSON) added; migration: every row with
-  `profile["look"]` gets `design = house(look=...)`; `look_of`/`LOOK`
-  retired at the END of Phase 4, not before (two vocabularies for one
-  week, then one).
-- Guard: `a_design_value_nothing_draws_is_refused` — schema walk × painter
-  registry (Phase 4 makes it real; Phase 1 lands it red-by-design in
-  `test_open_defects.py`, naming Phase 4).
-- The RUNBOOK §6d table becomes GENERATED from `SCHEMA`
-  (`scripts/gen_systems_reference.py` pattern, byte-compared in CI).
+### Phase 1 — The design vocabulary and its schema — DONE 2026-09-11 (`app/email_design.py`)
+- `SCHEMA`: one declarative structure, 44 fields across `frame`, `header`,
+  `type`, `palette`, `cta`, `dividers`, `footer`, `imagery` and the `SECTION`
+  fields (used twice: `defaults` per kind, and `sections[]`). Every field:
+  values, a default among them, one line of meaning. `KINDS` (9), `SLOTS`
+  (13; `products`/`image` take a count 1–6), `GROUNDS` (the five roles a
+  design may name) ⊂ `ROLES` (the twelve a brand supplies). No free-text
+  field exists — a design cannot carry a word.
+- `normalize(raw) → (design, dropped)`: complete (every field filled),
+  idempotent, and every raw thing that did not make it is a sentence with
+  its reason — a hex is "a design never names a colour", a link "never
+  carries a link", a face or an unknown layout "not a value the renderer
+  draws (…) — default used", a bad slot or count said by index.
+- `house(look=None)`: today's renderer as a design (card, mark left, links
+  inline, editorial serif over grotesque, kicker in the accent, filled soft
+  button, thin rule, centred footer), the six look axes folded in — proven
+  over all 576 combinations, each axis shown to move the design. Tenant-free.
+- `sequence_of(design)`: the library's identity derived from sections' slots,
+  only blocks `email_render._BLOCKS` builds (a hero section = one hero block
+  + its ask). `summary(design)`: one line for a card. `fields()`: the one
+  walk the generator, the prompt (Phase 3) and the painter test (Phase 4)
+  share.
+- `db.EmailStructure.design` (JSON); `email_structures.backfill_designs()`
+  at boot fills empty designs with `house(profile["look"])`, idempotent;
+  `file_structure(design=)` normalises, stores, returns `dropped`; a re-read
+  carries a design forward with approval untouched; `_row` exposes it.
+- RUNBOOK §6d: the vocabulary table is GENERATED between markers by
+  `scripts/gen_email_design_doc.py` (`--check` byte-compares; the suite runs
+  it). The old look table stays until Phase 4 retires `LOOK`.
+- Ledger: the seventh entry — "no painter registry (44 fields filed, none
+  drawn)" — holds Phase 4 open. Suite
+  `scripts/test_a_design_is_words_the_renderer_can_draw.py`; six guards, all
+  `[ caught ]`: `a_hex_never_enters_a_design`,
+  `a_design_is_complete_after_normalise`, `the_house_is_todays_renderer`,
+  `an_old_look_moves_the_design`, `the_vocabulary_table_is_generated`,
+  `a_structure_without_a_design_takes_the_house_at_boot`.
+- Deviations from the plan as first written: the migration is a boot-time
+  backfill (`db.init_db` → `backfill_designs`), not a one-off script; the
+  house has per-KIND `defaults` and an empty `sections` list — a reference
+  read yields a concrete order, the house leaves the order to the drafter,
+  and a renderer reads `defaults[kind]` when a block has no section.
 
 ### Phase 2 — The brand's design inputs (`app/brand_theme.py`, Brand tab)
 - **Palette of roles.** `derive` proposes all twelve roles: from the FULL
@@ -510,9 +505,10 @@ a picture-to-picture fidelity judge once a screenshot capability exists.
 > **First move:** `python3 scripts/test_a_reference_is_recreated.py` — six
 > entries report `[ open ]`; that is the diagnosis, on record. Then re-check
 > `INITIATIVE-email-design.md` §2 against the tree (`git log -1`, then each
-> `file:line`). Phase 0 shipped 2026-09-11; start at Phase 1, and when a
-> phase lands, its ledger entries go red — replace them with that phase's
-> own checks in the same commit.
+> `file:line`). Phases 0 and 1 shipped 2026-09-11; start at Phase 2 (the
+> brand's palette of roles, type roles and assets-by-slot on the Brand tab),
+> and when a phase lands, its ledger entries go red — replace them with that
+> phase's own checks in the same commit.
 >
 > Then the phases in order. Under §4 unchanged: reproduce first; every fix
 > ships a sabotage guard that prints `[ caught ]`; ship via

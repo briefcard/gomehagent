@@ -1539,8 +1539,22 @@ suffers — the photograph callers lose nothing to the downscale.
 - **The campaign skill changes at ONE call site** (`skill_pack._build()`,
   the `email_render.render(...)` call) — a second edit there is a stop.
 
+**Phase 1, same day (hash in the memory note).** `app/email_design.py`:
+`SCHEMA` (44 fields; `KINDS`, `SLOTS`, `GROUNDS` ⊂ `ROLES`; no free-text
+field), `normalize` (complete, idempotent, every drop a sentence with its
+reason), `house(look)` (today's renderer as a design, all 576 looks mapped
+and each axis shown to move it), `sequence_of`, `summary`, `fields()`.
+`EmailStructure.design` + `backfill_designs()` at boot; `file_structure
+(design=)` returns `dropped`. RUNBOOK §6d's vocabulary table is generated
+(`scripts/gen_email_design_doc.py --check`, byte-compared in the suite).
+Rules it adds: **a design never carries a colour, a face or a word —
+by construction (no field can hold one), not by prompt**; **the vocabulary
+is closed so every value has a painter, and one walk (`fields()`) feeds the
+validator, the doc and the painter test**; **a migration is a boot-time
+backfill that writes only where empty**. Six guards, all `[ caught ]`.
+
 **Owner's move:** the six decisions in the plan's §5 (defaults stand);
-then Phase 1.
+then Phase 2.
 
 ---
 
