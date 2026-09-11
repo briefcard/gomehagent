@@ -1487,6 +1487,63 @@ is filed, then run "both" on the same product and read the note's count.
 
 ---
 
+### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phase 0 of INITIATIVE-email-design.md; hash in the memory note)
+
+**The owner's word**, on the first send built from a swiped structure:
+*"it is currently making the same email with slight layout differences,
+but we want the creatives, the styling and font formats etc — it should
+be similar to recreating [the reference] with our content and dynamic
+assets, potentially in colors that make more sense for each brand."*
+
+**THE RULE REVERSED.** `b4c0383` shipped *"a look changes arrangement
+only — colours and typefaces stay the theme's"* (`email_render.py:73-80`,
+RUNBOOK §6d). That was the wrong reading. The rule now: **a reference
+contributes its whole design — layout, type system, colour roles, image
+treatment, spacing, button and footer style — read in words and
+recreated; the brand contributes the palette that fills the roles, its
+faces when on file, its pictures, logo and every word; the reference's
+copy, pictures, markup and hex never reach the email.** Restate it before
+coding (the reversed-rule trap, memory `creative-references-two-roles`).
+
+**What was true (reproduced in `scripts/test_a_reference_is_recreated.py`,
+six entries in the `test_open_defects` style — each passes while the
+defect stands and goes red naming the phase that removes it).**
+(1) The reader cannot see the type: `read_swipe` sends the gallery
+screenshot whole (RGE `og:image` measured 680×2857 and 680×4543); the
+reviewer `claude-sonnet-4-6` is on Claude's standard tier, so a 680×4543
+picture is looked at as 235×1568 — a 14 px line of body type arrives
+4.8 px tall — and the prompt then says "never a colour, a typeface".
+(2) The renderer paints one email: all 576 look combinations share one
+frame, one footer, six colours, and the ink is only ever a ground behind
+the overlay hero's photograph. (3) `_from_canva` proposes one role from a
+four-colour kit. The plan's §2 carries every `file:line`.
+
+**The ship (Phase 0 only — no fix).** The Claude image contract pinned in
+`llm.py` from the docs, with URLs: 28-px patches, two tiers (standard
+1568 px / 1568 tokens; high-resolution 2576 / 4784 for 4.7 and later),
+the docs' resize reference implementation ported line for line and
+checked against their worked examples, `image_tier` reading the version
+off the id (unknown → standard, said), `OVERSIZED_IMAGE_ERROR` = the
+`transformations` field that turns a silent downscale into a refusal.
+All eight Claude-vision call sites audited: none checks the contract;
+only the swipe reader sends a tall picture, so it is the one that
+suffers — the photograph callers lose nothing to the downscale.
+
+**Standing rules it adds:**
+- **The contract lives with the seam that calls the model** — `llm.py`
+  for Claude, as `imagegen.py`/`gemini_images.py` for theirs; a reader
+  imports it, never re-pins it.
+- **A plan's diagnosis is a ledger entry before it is a fix** — an
+  entry that goes red on good news, naming the phase; Phase 0 ships
+  alone so the reproduction is on record before anything moves.
+- **The campaign skill changes at ONE call site** (`skill_pack._build()`,
+  the `email_render.render(...)` call) — a second edit there is a stop.
+
+**Owner's move:** the six decisions in the plan's §5 (defaults stand);
+then Phase 1.
+
+---
+
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`

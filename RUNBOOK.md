@@ -690,6 +690,8 @@ use it, refuses with the reason and designs fresh rather than silently
 swapping. The run's notes say which happened. With nothing that fits the
 drafter designs fresh, as it always did.
 
+**SUPERSEDED 2026-09-11 (owner) — read `INITIATIVE-email-design.md` §0 before building on the paragraph below.** It describes how the LIVE renderer behaves until Phase 4 of that plan lands; the rule it states ("never a colour") was the wrong reading of the owner's ask and is reversed there: the reference's whole design is recreated, the brand fills its colour roles, faces, pictures and words.
+
 **The look: a structure carries the arrangement, never a colour.** Block
 order alone was not what the owner meant by "mimic the style" — the first
 send built on a swipe came out as the house template with the swipe's

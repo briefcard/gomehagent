@@ -9073,6 +9073,30 @@ SABOTAGES = [
         "suites": ['test_a_structure_is_how_not_what.py'],
         "why": "the structure carries a look, the renderer can draw it, and the one call between them drops it — the email is the house template with the swipe's block order, which is exactly what the owner saw",
     },
+    {
+        "name": 'the_image_tier_is_read_off_the_version',
+        "file": 'app/llm.py',
+        "find": "    if v >= (4, 7):\n",
+        "replace": "    if v >= (4, 0):  # SABOTAGE\n",
+        "suites": ['test_a_reference_is_recreated.py'],
+        "why": "every Claude model is taken for the high-resolution tier, so a strip cut for 2576 px is sent to a standard-tier reviewer that shrinks it to 1568 in silence — the reader is blind to the typography again and nothing says so",
+    },
+    {
+        "name": 'a_visual_token_is_a_28_pixel_patch',
+        "file": 'app/llm.py',
+        "find": "IMAGE_PATCH = 28\n",
+        "replace": "IMAGE_PATCH = 32  # SABOTAGE\n",
+        "suites": ['test_a_reference_is_recreated.py'],
+        "why": "the resize arithmetic drifts from the published rule, so what the code says the model sees is not what the model sees — strips are cut to the wrong size and the ledger's numbers are fiction",
+    },
+    {
+        "name": 'a_fixed_defect_moves_the_ledger',
+        "file": 'app/email_structures.py',
+        "find": "Describe the arrangement only — never a colour, a typeface or a picture's content.",
+        "replace": "Describe the whole design.",
+        "suites": ['test_a_reference_is_recreated.py'],
+        "why": "the reader is changed to ask for the design and the Phase 0 ledger keeps reporting the defect open — a phase lands without its own checks replacing the entries, and the plan's record of what is still broken rots exactly as the prose handoffs did",
+    },
 ]
 
 

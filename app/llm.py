@@ -199,3 +199,131 @@ def ask(purpose: str, prompt, *, tenant: str = "", system: str = "",
     """
     return call(purpose, [{"role": "user", "content": prompt}], tenant=tenant,
                 system=system, model=model, max_tokens=max_tokens, **extra)
+
+
+# ---------------------------------------------------------------------------
+# THE IMAGE CONTRACT — what Claude does to a picture before it looks at it.
+#
+# Pinned from the docs (owner's standing rule: learn what inputs the models
+# take, from the published contract, before sending a byte):
+#   https://platform.claude.com/docs/en/build-with-claude/vision
+#   https://platform.claude.com/docs/en/build-with-claude/vision-coordinates
+#     #how-claude-resizes-and-pads-images
+#
+# Read 2026-09-11. What it says, and why it matters here:
+#
+# * Claude sees an image in 28×28-pixel PATCHES — one visual token each, so a
+#   picture costs ⌈w/28⌉ × ⌈h/28⌉ tokens.
+# * Each model has a resolution TIER, a long-edge limit AND a visual-token
+#   limit. A picture over either is scaled down, aspect kept, to the largest
+#   size that fits both — "Claude 4.7 and later" get the high-resolution
+#   tier (2576 px / 4784 tokens); everything else is standard (1568 / 1568).
+# * The scaling is silent by default. Set `transformations` on the image
+#   block to `{"oversized_image": "error"}` and the request is REFUSED with a
+#   400 naming the dimensions and the largest that fit — the house style: a
+#   thing that would be degraded is refused and says so.
+# * Hard limits, separate from the tier: 8000 px on either side; 10 MB per
+#   image base64-encoded on the API directly (5 MB on Bedrock/Vertex); more
+#   than 20 image blocks in one request drops the per-image limit to 2000 px
+#   on each side; JPEG, PNG, GIF (first frame) and WebP only.
+#
+# Why this exists: the swipe reader (`email_structures.read_swipe`) sends a
+# gallery screenshot whole. Those are 680 wide and 2800–4600 tall (measured
+# 2026-09-11), so on the standard tier the model sees a 680×4543 email at
+# 235×1568 — body type under five pixels — and reports it cannot see the
+# typography it was asked about. `image_seen_as` makes that a number a test
+# can assert, and the reader that replaces it (INITIATIVE-email-design.md,
+# Phase 3) cuts strips that fit the tier of the model it is about to call.
+# ---------------------------------------------------------------------------
+IMAGE_DOCS = "https://platform.claude.com/docs/en/build-with-claude/vision"
+IMAGE_MIMES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+IMAGE_MAX_BYTES = 10 * 1024 * 1024      # base64-encoded, on the API directly
+IMAGE_HARD_EDGE = 8000                  # either side, any tier
+IMAGE_MANY = 20                         # over this many blocks in one request…
+IMAGE_MANY_EDGE = 2000                  # …every image is held to this per side
+IMAGE_PATCH = 28
+#: The resolution tiers, verbatim from the table in the vision docs.
+IMAGE_TIERS = {
+    "standard": {"max_edge": 1568, "max_tokens": 1568},
+    "high": {"max_edge": 2576, "max_tokens": 4784},
+}
+#: The image-block field that turns a silent downscale into a refusal.
+OVERSIZED_IMAGE_ERROR = {"oversized_image": "error"}
+
+
+def _model_version(model: str) -> tuple[int, int] | None:
+    """`(major, minor)` read off a model id, or None when it carries none.
+
+    Ids come in every shape this platform has used — `claude-sonnet-4-6`,
+    `claude-opus-5`, `claude-fable-5-1`, `claude-haiku-4-5-20251001`,
+    `claude-3-5-sonnet-20241022` — so the version is the first run of one or
+    two digit groups, and an eight-digit date is never read as a minor.
+    """
+    import re as _re
+    m = _re.search(r"(?<![\d])(\d{1,2})(?:-(\d{1,2}))?(?![\d])", str(model or ""))
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
+def image_tier(model: str) -> tuple[str, str]:
+    """`(tier, why)` for a model id. "Claude 4.7 and later models" are the
+    high-resolution tier (the docs' words); an id whose version cannot be
+    read is treated as STANDARD — the smaller limits — and says so, because
+    assuming the larger tier of an unknown model would send it pictures it
+    then shrinks in silence."""
+    v = _model_version(model)
+    if v is None:
+        return "standard", f"{model!r} carries no version I can read — held to the standard tier"
+    if v >= (4, 7):
+        return "high", f"{model!r} is {v[0]}.{v[1]}, Claude 4.7 or later — high-resolution tier"
+    return "standard", f"{model!r} is {v[0]}.{v[1]}, before 4.7 — standard tier"
+
+
+def image_tokens(width: int, height: int) -> int:
+    """Visual tokens consumed by an image: one token per 28×28 pixel patch."""
+    import math
+    return math.ceil(width / IMAGE_PATCH) * math.ceil(height / IMAGE_PATCH)
+
+
+def resized_size(width: int, height: int, max_edge: int = 1568,
+                 max_tokens: int = 1568) -> tuple[int, int]:
+    """The size Claude resizes an image to before padding — the docs'
+    reference implementation, ported line for line (Python's `round` is the
+    half-to-even the live API uses at exact ties). Returns (width, height);
+    an image that already fits is returned unchanged."""
+    import math
+
+    def fits(w: int, h: int) -> bool:
+        return (math.ceil(w / IMAGE_PATCH) * IMAGE_PATCH <= max_edge
+                and math.ceil(h / IMAGE_PATCH) * IMAGE_PATCH <= max_edge
+                and image_tokens(w, h) <= max_tokens)
+
+    if fits(width, height):
+        return (width, height)
+    if height > width:
+        resized_h, resized_w = resized_size(height, width, max_edge, max_tokens)
+        return (resized_w, resized_h)
+    aspect_ratio = width / height
+    lo, hi = 1, width  # lo always fits; hi never fits
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if fits(mid, max(round(mid / aspect_ratio), 1)):
+            lo = mid
+        else:
+            hi = mid
+    return (lo, max(round(lo / aspect_ratio), 1))
+
+
+def image_seen_as(model: str, width: int, height: int) -> tuple[int, int]:
+    """The size THIS model actually looks at a `width`×`height` picture — the
+    picture itself when it fits the model's tier, the downscaled one when it
+    does not. The number the swipe-reader check asserts on."""
+    tier, _ = image_tier(model)
+    lim = IMAGE_TIERS[tier]
+    return resized_size(width, height, lim["max_edge"], lim["max_tokens"])
+
+
+def image_fits(model: str, width: int, height: int) -> bool:
+    """True when the model sees the picture at the size it was sent."""
+    return image_seen_as(model, width, height) == (width, height)
