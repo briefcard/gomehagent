@@ -6646,6 +6646,29 @@ def _image_model_card(key: str, tenant: str) -> str:
 </div>"""
 
 
+def _design_preview(tenant: str, design: dict, shot: dict | None) -> str:
+    """THE REFERENCE BESIDE THE RECREATION: the design executed with this
+    brand's palette, faces and its own pictures and products, in a sandboxed
+    frame next to the screenshot it was read from — so "would this recreate
+    it?" is answered before the structure is approved. A brand with no theme
+    is told what to do first, on the card."""
+    from . import email_design as _ed
+    if not design or not design.get("sections"):
+        return ""
+    html, note = _ed.preview_html(tenant, design)
+    if not html:
+        return f'<br><span class="when">no preview — {_esc(note)}</span>'
+    return (f'<details open><summary class="mut">preview — this design with {_esc(tenant)}&#39;s '
+            f'palette, faces and pictures'
+            + (f' ({_esc(note)})' if note else "") + '</summary>'
+            f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin:6px 0">'
+            + (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" alt="the reference" '
+               f'style="width:200px;border:1px solid var(--rule)"></a>' if shot and shot.get("image") else "")
+            + f'<iframe sandbox="{PREVIEW_SANDBOX}" srcdoc="{_esc(_preview_html(html))}" '
+              f'style="width:100%;max-width:420px;height:640px;border:1px solid var(--rule);'
+              f'border-radius:6px;background:#fff"></iframe></div></details>')
+
+
 def _structures_card(key: str, tenant: str) -> str:
     """The collective library of email structures, and the swipe board that
     feeds it. On Brand beside the visual boards because it is the same idea
@@ -6706,8 +6729,7 @@ def _structures_card(key: str, tenant: str) -> str:
                    + "".join(f"<li>{_esc(d)}</li>" for d in drops) + "</ul></details>" if drops else "")
                 + (f'<details><summary class="mut">{len(dsg.get("sections") or [])} sections</summary>'
                    f'<ol class="mut">{secs}</ol></details>' if secs else "")
-                + (f'<br><span class="when">a preview through this brand&#39;s palette arrives '
-                   f'when the renderer executes designs (Phase 4)</span>' if shot else "")
+                + _design_preview(tenant, dsg, shot)
                 + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
         else:
             design_html = ('<br><span class="when">design not read — the house design, '

@@ -1588,7 +1588,25 @@ a later phase deletes goes STALE and the anchors ratchet says so** —
 retarget it at what is still open. Seven guards, all `[ caught ]`. NOT
 proven live — the first real swipe is the owner's press.
 
-**Owner's move:** swipe one real RGE email and read the card; then Phase 4.
+**Phase 4, same day (hash in the memory note).** `email_render.render_design`:
+blocks grouped into sections, a concrete order consumed by kind, ONE style
+context per section with the palette substituted for its ground so the
+thirteen block painters paint on any ground unchanged; the type system,
+the ask (inverted on the accent ground), dividers, header, footer, hero
+treatments, aspect crops, the `LAYOUTS` registry, the frame, the faces
+(brand wins, class links its Google face). `render` is NOT a wrapper —
+its positional bands are old behaviour pinned honestly; it retires with
+Phase 6. The card previews a read design with THIS brand's material
+beside the reference. Rules it adds: **colours enter the render only
+through the palette — a ground's muted and border are the renderer's own
+mixes of two roles, never the design's**; **a list that exempts fields
+from a walk is itself checked** (`NOT_DRAWN_YET` must hide nothing that
+draws); **on the accent ground the "surface" is the accent — read the
+palette's true surface** (accent on accent, caught by the suite). Six
+guards, all `[ caught ]`.
+
+**Owner's move:** swipe one real RGE email, read the card, open the
+preview beside the reference; then Phase 5.
 
 ---
 

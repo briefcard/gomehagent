@@ -3,7 +3,7 @@
 > **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-09-11 at commit `b4c0383`.
 > `BUILD-STATE.md` remains the record of what exists.
 >
-> **Phases 0–3 are built (2026-09-11). Phases 4–7 are not.**
+> **Phases 0–4 are built (2026-09-11). Phases 5–7 are not.**
 >
 > §2 is a list of facts with `file:line`, each checkable in about a minute. If
 > they still hold, the plan holds. If one has changed, the phase resting on it
@@ -431,36 +431,70 @@ reader that tiles flipped two entries to FIXED).
   the designed failure, and the first real press tells. Owner's move: swipe
   one real RGE email, read it, and read the card.
 
-### Phase 4 — The renderer executes a design (`email_render.render_design`)
-The biggest ship. Section painters keyed by `layout`, every visual property
-read from the design with the schema default, colours resolved ONLY through
-`brand.palette[role]`, faces through `brand.type` or the classification's
-stack.
-- `render_design(design, brand, content, *, preheader, webview) -> html`.
-- `render(theme, blocks, *, look=)` becomes `render_design(house(theme, look),
-  brand_from_theme(theme), content_from_blocks(blocks))` — a thin wrapper, so
-  **every existing suite passes unchanged**. That is the proof the seam is
-  clean; if a legacy test moves, the wrapper is wrong, not the test.
-- Email-safe by construction, as today: tables, inline styles, bulletproof
-  buttons, `role="presentation"`, alt text, live text under every image,
-  plus what the new range needs — MSO conditionals and VML for section
-  backgrounds and background images in Outlook, `color-scheme` meta and
-  dark-mode-safe backgrounds, widths from the design (600/640/680), a
-  Google Fonts `<link>` + `@import` with the stack fallback when the brand's
-  face or the classification names one (Decision 5).
-- Image slots: Shopify CDN filename convention extended from `_{w}x` to
-  `_{w}x{h}_crop_center` for aspect (`_sized`, `:129`) — the same reasons
-  it uses filenames, not `?width=` (Omnisend's entity-mangling).
-- `scripts/test_email_design_render.py`: every schema value renders and
-  differs from its default (the moved guard from
-  `test_a_structure_is_how_not_what.py:361-368`); **no hex in the output
-  outside `brand.palette` ∪ {#ffffff, #000000 for scrims}** (the moved
-  guard from `:371-379` — the principle kept, the object moved from theme
-  to palette); every layout keeps live text under images; the footer's
-  CAN-SPAM line survives every design.
-- Retire `LOOK`, `_look`, `look_of`, `profile["look"]`, the `look=` kwarg
-  (after the wrapper proves nothing reads them — `python3 scripts/register.py
-  --write`, then the AST guard confirms no reader).
+### Phase 4 — The renderer executes a design — DONE 2026-09-11 (`email_render.render_design`)
+- **`render_design(design, theme, blocks, *, preheader, webview)`.** The
+  drafter's blocks are grouped into SECTIONS (`group_sections`: hero,
+  products, proof, offer, closing, ps are their own; a heading starts a
+  run — intro, then feature/editorial by turns; text/list/divider/ask join
+  the run; an ask alone is the closing). Each section takes its kind's
+  `defaults`, overlaid by the next unconsumed entry of that kind in the
+  design's concrete order (`_spec_for`), so a reference's hero treatment
+  reaches the hero and its grid the products, in the order it had them.
+- **One style context per section** (`_context`): the theme with its
+  colours replaced by the section's GROUND — the ground as surface/page,
+  the ink that reads on it (`palette.INK_OF`), a muted line and a border
+  mixed from the two, the accent kept — plus the design's type and ask,
+  the section's treatment, and the old look derived for the painters that
+  still read it. **The thirteen block painters are the same ones**, handed
+  that context: a quote on the dark ground is painted by the quote painter
+  in the dark ground's ink. Nothing is written twice.
+- **What the painters learned**, every addition inert at the house values
+  so `render` is byte-identical: the type system (`_type`: four scales,
+  weights, upper/title case, tracking, alignment, body size, leading,
+  four kicker styles, italic sub); the ask (`_cta` with a spec: filled,
+  outline, underline, arrow, full; square/soft/pill; three sizes; case;
+  alignment; **inverted on the accent ground** — the first cut painted
+  accent on accent, caught by the suite); dividers (thin/thick/dotted/
+  ornament/none); the header (`_header_design`: mark left or centred, nav
+  none/inline/below, case, rule); the footer (`_footer_design`: ground,
+  alignment, socials as words/chips/none, rule — CAN-SPAM in every one);
+  hero treatments (contained inside the margins, bleed, rounded, circle,
+  framed, duotone on the tint) and split-right; product pictures rounded/
+  circle and cut to the slot's aspect through the CDN's own convention
+  (`_sized(url, w, aspect)` → `_600x480_crop_center`; the 88 px thumbnail
+  is a square crop now, not a squash). Layouts as a registry (`LAYOUTS`:
+  stack, split-*, grid2/3, collage, overlay, columns — words dealt left and
+  right — band, letter). Frame: page ground, card or flat, 600/640/680,
+  radius, keyline. Faces (`_faces`): the brand's own wins; the class
+  chooses a stack only when none is on file, and links its Google face
+  (Decision 5) with the stack as fallback.
+- **`render(theme, blocks, look=)` is NOT a wrapper — a deviation from the
+  plan as written.** Its positional bands (every second run between
+  headings, three cells counted by the suite) and its six toggles are the
+  OLD behaviour, pinned honestly by the suites that pin them; imitating
+  them through a section renderer would have been a second fixed template.
+  It stays untouched until Phase 6 switches the campaign run, then it,
+  `LOOK`, `look_of` and `profile["look"]` are retired together.
+- **The card** (`_design_preview` + `email_design.preview_html/
+  preview_blocks`): a read design is executed with THIS brand's live theme
+  (or its proposal, said) on its own hero photograph, its own three
+  products and plainly-sample copy, in a sandboxed frame beside the
+  reference screenshot — "would this recreate it?" answered before approval.
+  A brand with no theme is told what to do first.
+- `NOT_DRAWN_YET` names the five fields the renderer does not draw (imagery
+  ×3 and the palette's mood/accent_use), each with its phase — and the
+  suite proves the list hides nothing that draws.
+- Ledger: the "no painter registry" entry CLOSED; the three legacy-renderer
+  entries fold into ONE open entry, measured by AST on the campaign run's
+  call: it renders through `email_render.render`, not `render_design` →
+  Phase 6. Suite `scripts/test_a_design_is_executed.py`: 96 non-default
+  values walked from the schema, every one changes the email and keeps the
+  copy and the footer; every hex ∈ palette ∪ the renderer's own mixes; the
+  same design through two palettes = same words, same structure, different
+  colours. Six guards, all `[ caught ]`: `a_ground_takes_its_own_ink`,
+  `a_designs_ground_is_the_brands_colour`, `the_brands_face_wins`,
+  `a_concrete_order_reaches_its_kind`, `canspam_survives_every_design`,
+  `not_drawn_yet_hides_nothing_drawn`.
 
 ### Phase 5 — Content fits the design (`email_design.brief` + `fill`)
 - `brief(design)` replaces `email_structures.brief` for the drafter: the
@@ -573,13 +607,15 @@ a picture-to-picture fidelity judge once a screenshot capability exists.
 > **First move:** `python3 scripts/test_a_reference_is_recreated.py` — six
 > entries report `[ open ]`; that is the diagnosis, on record. Then re-check
 > `INITIATIVE-email-design.md` §2 against the tree (`git log -1`, then each
-> `file:line`). Phases 0–3 shipped 2026-09-11; start at Phase 4 (the renderer
-> executes a design: painters keyed by layout, colours only through
-> `brand.palette`, the legacy `render(theme, blocks, look=)` a thin wrapper so
-> every suite passes unchanged, then the reference-beside-preview on the
-> structures card that Phase 3 left a note for), and when a phase lands, its
-> ledger entries go red — replace them with that phase's own checks in the
-> same commit. Check first that the entry MEASURES THE NEWS: Phase 2's entry
+> `file:line`). Phases 0–4 shipped 2026-09-11; start at Phase 5 (the drafter
+> briefed on the design's slots; `fill` mapping validated blocks into
+> sections and filling image slots from the brand's own pictures by kind and
+> aspect, drawing when drawable, naming what it could not fill;
+> `Output.design` filed and the library keeping designs), then Phase 6 (the
+> one seam in `skill_pack._build()` → `render_design`, retiring `render`,
+> `LOOK` and `profile["look"]`; the first live read; the six-email
+> acceptance). When a phase lands, its ledger entries go red — replace them
+> with that phase's own checks in the same commit. Check first that the entry MEASURES THE NEWS: Phase 2's entry
 > counted the wrong fields and did not flip until it was rewritten.
 >
 > Then the phases in order. Under §4 unchanged: reproduce first; every fix

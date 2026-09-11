@@ -127,7 +127,32 @@ def _look(look: dict | None) -> dict:
 _PAD = {"tight": (6, 24), "regular": (10, 32), "airy": (18, 40)}
 
 
-def _theme(theme: dict, look: dict | None = None) -> dict:
+#: THE TYPE SYSTEM a section is set in — a design's `type` group resolved to
+#: the numbers the painters use. The house values are today's exactly, so a
+#: painter reading these emits the same bytes it always did for the house;
+#: a design moves them. Sizes are (hero h1, section h1); weights CSS.
+_SCALE = {"modest": (26, 24), "large": (32, 28), "display": (38, 34), "poster": (48, 42)}
+_WEIGHT = {"light": "300", "regular": "400", "bold": "600", "black": "800"}
+_TRACK = {"tight": "-0.02em", "normal": "", "wide": "0.08em"}
+_LEAD = {"tight": "1.5", "regular": "1.65", "airy": "1.8"}
+_TYPE_DEFAULT = {"scale": "modest", "heading_weight": "bold", "heading_case": "sentence",
+                 "tracking": "normal", "align": "left", "body_size": 16,
+                 "leading": "regular", "kicker": "accent", "italic_sub": False}
+
+
+def _type(spec: dict | None) -> dict:
+    """The resolved type context: every value the painters read, from the
+    design's `type` group or the house."""
+    tp = {**_TYPE_DEFAULT, **{k: v for k, v in (spec or {}).items() if k in _TYPE_DEFAULT}}
+    h1, h2 = _SCALE.get(tp["scale"], _SCALE["modest"])
+    return {**tp, "h1": h1, "h2": h2, "weight": _WEIGHT.get(tp["heading_weight"], "600"),
+            "case": {"upper": "text-transform:uppercase;", "title": "text-transform:capitalize;"}.get(tp["heading_case"], ""),
+            "track": (f'letter-spacing:{_TRACK[tp["tracking"]]};' if _TRACK.get(tp["tracking"]) else ""),
+            "talign": ("text-align:center;" if tp["align"] == "center" else ""),
+            "lh": _LEAD.get(tp["leading"], "1.65")}
+
+
+def _theme(theme: dict, look: dict | None = None, type_spec: dict | None = None) -> dict:
     """A theme with every field filled from the default, deep enough for the
     nested dicts the renderer reads."""
     t = {**_DEFAULT, **(theme or {})}
@@ -136,6 +161,7 @@ def _theme(theme: dict, look: dict | None = None) -> dict:
     # The look rides beside the theme, never inside it: a theme row on file
     # cannot smuggle an arrangement in, and a look cannot reach a colour.
     t["look"] = _look(look)
+    t["type"] = _type(type_spec)
     return t
 
 
@@ -143,7 +169,13 @@ def _esc(s) -> str:
     return _html.escape(str(s or ""))
 
 
-def _sized(url: str, width: int) -> str:
+#: The crop a slot's aspect asks for, as height per width — cut through the
+#: same Shopify filename convention (`_600x480_crop_center`), so a picture
+#: arrives at the slot's shape rather than being squashed into it.
+_ASPECT = {"square": 1.0, "portrait": 1.25, "landscape": 0.667, "wide": 0.5}
+
+
+def _sized(url: str, width: int, aspect: str = "") -> str:
     """A Shopify CDN photo asked for at the size the email actually shows.
 
     The catalogue sync stores the storefront's own image URL, which is the
@@ -170,6 +202,8 @@ def _sized(url: str, width: int) -> str:
         return u
     if _re.search(r"_\d+x\d*$", stem):          # already sized — leave it alone
         return u
+    if aspect in _ASPECT:
+        return f"{stem}_{width}x{int(round(width * _ASPECT[aspect]))}_crop_center{dot}{ext}{sep}{query}"
     return f"{stem}_{width}x{dot}{ext}{sep}{query}"
 
 
@@ -196,27 +230,36 @@ def _hero(b: dict, t: dict) -> str:
     """
     c = t["colors"]
     lk = t["look"]
+    tp = t["type"]
     pv, ph = _PAD[lk["density"]]
-    h1 = 38 if lk["scale"] == "display" else 26
-    lh = "1.1" if lk["scale"] == "display" else "1.25"
-    src = _sized(b["image"], t["width"] * 2) if b.get("image") else ""
+    # The size: the look's scale (the house's two steps) or the design's
+    # (four). The look wins only where it says display, which the design's
+    # own scale already says.
+    h1 = tp["h1"] if tp["scale"] != "modest" else (38 if lk["scale"] == "display" else 26)
+    lh = "1.1" if h1 >= 38 else "1.25"
+    hs = f'{tp["case"]}{tp["track"]}{tp["talign"]}'
+    sub_style = "font-style:italic;" if tp.get("italic_sub") else ""
+    treat = t.get("image") or ""
+    src = _sized(b["image"], t["width"] * 2, t.get("aspect", "")) if b.get("image") else ""
     alt = _esc(b.get("alt", ""))
     headline, sub = b.get("headline", ""), b.get("sub", "")
 
     if lk["hero"] == "split" and src:
         half = t["width"] // 2
+        pic = (f'<td width="{half}" valign="top" style="padding:0">'
+               f'<img src="{_esc(src)}" width="{half}" alt="{alt}" '
+               f'style="display:block;width:100%;max-width:{half}px;height:auto;border:0'
+               f'{";border-radius:" + t["radius"] if treat == "rounded" else ""}"></td>')
+        words = (f'<td valign="middle" style="padding:{pv + 8}px {ph - 8}px">'
+                 + (f'<h1 style="margin:0 0 8px;font-family:{t["font"]["heading"]};'
+                    f'font-size:{h1 - 6}px;line-height:{lh};color:{c["text"]};font-weight:{tp["weight"]};{hs}">'
+                    f'{_esc(headline)}</h1>' if headline else "")
+                 + (f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:15px;'
+                    f'line-height:1.5;color:{c["muted"]};{sub_style}">{_esc(sub)}</p>' if sub else "")
+                 + '</td>')
+        cells = words + pic if t.get("split") == "right" else pic + words
         return (f'<tr><td style="padding:0"><table role="presentation" width="100%" '
-                f'cellpadding="0" cellspacing="0" border="0"><tr>'
-                f'<td width="{half}" valign="top" style="padding:0">'
-                f'<img src="{_esc(src)}" width="{half}" alt="{alt}" '
-                f'style="display:block;width:100%;max-width:{half}px;height:auto;border:0"></td>'
-                f'<td valign="middle" style="padding:{pv + 8}px {ph - 8}px">'
-                + (f'<h1 style="margin:0 0 8px;font-family:{t["font"]["heading"]};'
-                   f'font-size:{h1 - 6}px;line-height:{lh};color:{c["text"]};font-weight:600">'
-                   f'{_esc(headline)}</h1>' if headline else "")
-                + (f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:15px;'
-                   f'line-height:1.5;color:{c["muted"]}">{_esc(sub)}</p>' if sub else "")
-                + '</td></tr></table></td></tr>')
+                f'cellpadding="0" cellspacing="0" border="0"><tr>{cells}</tr></table></td></tr>')
 
     if lk["hero"] == "overlay" and src:
         return (f'<tr><td style="padding:0;background:{c["text"]} url({_esc(src)}) center/cover '
@@ -225,23 +268,42 @@ def _hero(b: dict, t: dict) -> str:
                 f'border="0"><tr><td style="padding:120px {ph}px {pv + 18}px;'
                 f'background:linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,.62) 100%)">'
                 + (f'<h1 style="margin:0;font-family:{t["font"]["heading"]};'
-                   f'font-size:{h1}px;line-height:{lh};color:#ffffff;font-weight:600">'
+                   f'font-size:{h1}px;line-height:{lh};color:#ffffff;font-weight:{tp["weight"]};{hs}">'
                    f'{_esc(headline)}</h1>' if headline else "")
                 + (f'<p style="margin:8px 0 0;font-family:{t["font"]["body"]};font-size:16px;'
-                   f'line-height:1.5;color:#ffffff;opacity:.9">{_esc(sub)}</p>' if sub else "")
+                   f'line-height:1.5;color:#ffffff;opacity:.9;{sub_style}">{_esc(sub)}</p>' if sub else "")
                 + '</td></tr></table></td></tr>')
 
     radius = "0" if lk["hero"] == "bleed" else f'{t["radius"]} {t["radius"]} 0 0'
-    img = (f'<tr><td style="padding:0"><img src="{_esc(src)}" width="{t["width"]}" '
-           f'alt="{alt}" style="display:block;width:100%;max-width:{t["width"]}px;'
-           f'height:auto;border:0;border-radius:{radius}"></td></tr>') if src else ""
+    # A DESIGN'S TREATMENT of the opening picture: inside the margins,
+    # rounded on every corner, a circle, a keyline, or on the tint (the one
+    # "duotone" email can honestly do without touching the pixels).
+    if treat == "contained" and t.get("cta"):
+        w = t["width"] - 2 * ph
+        img = (f'<tr><td style="padding:{pv}px {ph}px 0"><img src="{_esc(src)}" width="{w}" '
+               f'alt="{alt}" style="display:block;width:100%;max-width:{w}px;height:auto;border:0;'
+               f'border-radius:{t["radius"]}"></td></tr>') if src else ""
+    elif treat in ("rounded", "circle", "framed", "duotone") and src:
+        w = t["width"] - 2 * ph
+        if treat == "circle":
+            w = min(w, 320)
+        rad = {"rounded": "16px", "circle": "50%", "framed": t["radius"], "duotone": t["radius"]}[treat]
+        frame = f'border:1px solid {c["border"]};padding:8px;' if treat == "framed" else ""
+        ground = f'background:{t["palette"]["tint"]};padding:{pv + 10}px {ph}px;' if treat == "duotone" else f'padding:{pv}px {ph}px 0;'
+        img = (f'<tr><td align="center" style="{ground}"><img src="{_esc(src)}" width="{w}" '
+               f'alt="{alt}" style="display:block;width:100%;max-width:{w}px;height:auto;border:0;'
+               f'border-radius:{rad};{frame}margin:0 auto"></td></tr>')
+    else:
+        img = (f'<tr><td style="padding:0"><img src="{_esc(src)}" width="{t["width"]}" '
+               f'alt="{alt}" style="display:block;width:100%;max-width:{t["width"]}px;'
+               f'height:auto;border:0;border-radius:{radius}"></td></tr>') if src else ""
     head = (f'<tr><td style="padding:{pv + 18}px {ph}px 4px">'
             f'<h1 style="margin:0;font-family:{t["font"]["heading"]};'
-            f'font-size:{h1}px;line-height:{lh};color:{c["text"]};font-weight:600">'
+            f'font-size:{h1}px;line-height:{lh};color:{c["text"]};font-weight:{tp["weight"]};{hs}">'
             f'{_esc(headline)}</h1></td></tr>') if headline else ""
     subr = (f'<tr><td style="padding:6px {ph}px 0">'
             f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:16px;'
-            f'line-height:1.5;color:{c["muted"]}">{_esc(sub)}</p></td></tr>') if sub else ""
+            f'line-height:1.5;color:{c["muted"]};{sub_style}">{_esc(sub)}</p></td></tr>') if sub else ""
     return img + head + subr
 
 
@@ -259,8 +321,11 @@ def _text(b: dict, t: dict) -> str:
     body = body.replace("<p>", '<p style="margin:0 0 14px">')
     pv, ph = _PAD[t["look"]["density"]]
     lh = {"tight": "1.5", "regular": "1.65", "airy": "1.8"}[t["look"]["density"]]
+    tp = t["type"]
+    if tp["leading"] != "regular":
+        lh = tp["lh"]
     return (f'<tr><td style="padding:{pv}px {ph}px 2px;font-family:{t["font"]["body"]};'
-            f'font-size:16px;line-height:{lh};color:{c["text"]}">{body}</td></tr>')
+            f'font-size:{tp["body_size"]}px;line-height:{lh};color:{c["text"]}{";" + tp["talign"].rstrip(";") if tp["talign"] else ""}">{body}</td></tr>')
 
 
 def _cta(b: dict, t: dict) -> str:
@@ -272,6 +337,48 @@ def _cta(b: dict, t: dict) -> str:
     lk = t["look"]
     pv, ph = _PAD[lk["density"]]
     url, label = _esc(b.get("url", "#")), _esc(b.get("label", "Shop now"))
+    spec = t.get("cta")
+    if spec:
+        # A DESIGN'S ASK: filled, outlined, an underlined line, a line with
+        # an arrow, or a full-width bar; square, soft or pill; three sizes;
+        # its case and where it sits. On the accent ground the filled
+        # button inverts (surface on accent) so it still reads as a button.
+        radius = {"square": "0", "soft": t["radius"], "pill": "999px"}.get(spec["radius"], t["radius"])
+        pad, fs = {"small": ("10px 20px", "14px"), "regular": ("14px 28px", "15px"),
+                   "large": ("18px 36px", "17px")}.get(spec["size"], ("14px 28px", "15px"))
+        case = {"upper": "text-transform:uppercase;letter-spacing:.06em;",
+                "title": "text-transform:capitalize;"}.get(spec["case"], "")
+        align = ' align="center"' if spec["align"] == "center" else ""
+        fam = t["font"]["body"]
+        on_accent = t.get("ground") == "accent"
+        # On the accent ground `c["surface"]` IS the accent (the ground
+        # context paints surface as the ground), so the inversion reads the
+        # palette's true surface — the first cut painted accent on accent.
+        pal = t.get("palette") or {}
+        fill, ink = ((pal.get("surface", "#ffffff"), pal.get("accent", c["accent"])) if on_accent
+                     else (c["accent"], c["accent_text"]))
+        link_ink = c["text"] if on_accent else c["accent"]
+        if spec["style"] in ("arrow", "underline"):
+            deco = "underline" if spec["style"] == "underline" else "none"
+            tail = " &rarr;" if spec["style"] == "arrow" else ""
+            return (f'<tr><td{align} style="padding:{pv}px {ph}px {pv + 8}px">'
+                    f'<a href="{url}" style="font-family:{fam};font-size:{fs};font-weight:600;'
+                    f'color:{link_ink};text-decoration:{deco};{case}">{label}{tail}</a></td></tr>')
+        if spec["style"] == "outline":
+            return (f'<tr><td{align} style="padding:{pv + 2}px {ph}px {pv + 10}px"><table role="presentation" '
+                    f'cellpadding="0" cellspacing="0" border="0"{" align=center" if align else ""}><tr>'
+                    f'<td style="border:2px solid {link_ink};border-radius:{radius}">'
+                    f'<a href="{url}" style="display:inline-block;padding:{pad};font-family:{fam};'
+                    f'font-size:{fs};font-weight:600;color:{link_ink};text-decoration:none;{case}">'
+                    f'{label}</a></td></tr></table></td></tr>')
+        full = spec["style"] == "full"
+        return (f'<tr><td{align} style="padding:{pv + 2}px {ph}px {pv + 10}px"><table role="presentation" '
+                f'cellpadding="0" cellspacing="0" border="0"{" width=100%" if full else (" align=center" if align else "")}><tr>'
+                f'<td style="background:{fill};border-radius:{radius};{"text-align:center;" if full else ""}">'
+                f'<a href="{url}" style="display:{"block" if full else "inline-block"};'
+                f'padding:{pad};font-family:{fam};font-size:{fs};'
+                f'font-weight:600;color:{ink};text-decoration:none;{case}">'
+                f'{label}</a></td></tr></table></td></tr>')
     if lk["cta"] == "link":
         return (f'<tr><td style="padding:{pv}px {ph}px {pv + 8}px">'
                 f'<a href="{url}" style="font-family:{t["font"]["body"]};font-size:16px;'
@@ -304,9 +411,9 @@ def _products(b: dict, t: dict) -> str:
         url = p.get("url") or "#"
         img_td = (f'<td width="96" valign="top" style="padding:2px 14px 2px 0">'
                   f'<a href="{_esc(url)}">'
-                  f'<img src="{_esc(_sized(p["image"], 176))}" width="88" '
+                  f'<img src="{_esc(_sized(p["image"], 176, "square"))}" width="88" '
                   f'alt="{_esc(p.get("name", ""))}" style="display:block;width:88px;'
-                  f'height:88px;border:0;border-radius:{t["radius"]};'
+                  f'height:88px;border:0;border-radius:{"50%" if t.get("image") == "circle" else t["radius"]};'
                   f'background:{c["border"]}"></a></td>'
                   if p.get("image") else "")
         price = (f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
@@ -349,9 +456,10 @@ def _product_grid(b: dict, t: dict, cols: int) -> str:
     cells = []
     for p in items:
         url = _esc(p.get("url") or "#")
-        pic = (f'<img src="{_esc(_sized(p["image"], cw * 2))}" width="{cw}" '
+        prad = {"rounded": "16px", "circle": "50%"}.get(t.get("image") or "", t["radius"])
+        pic = (f'<img src="{_esc(_sized(p["image"], cw * 2, t.get("aspect") or "square"))}" width="{cw}" '
                f'alt="{_esc(p.get("name", ""))}" style="display:block;width:100%;'
-               f'max-width:{cw}px;height:auto;border:0;border-radius:{t["radius"]};'
+               f'max-width:{cw}px;height:auto;border:0;border-radius:{prad};'
                f'background:{c["border"]}">' if p.get("image") else
                f'<div style="width:100%;height:{cw}px;background:{c["border"]};'
                f'border-radius:{t["radius"]}"></div>')
@@ -382,25 +490,36 @@ def _heading(b: dict, t: dict) -> str:
     paragraph. The owner's live drafts read as "just long text" while the
     section heads were plain bold lines one size off the body."""
     c = t["colors"]
+    tp = t["type"]
     pv, ph = _PAD[t["look"]["density"]]
-    display = t["look"]["scale"] == "display"
+    display = t["look"]["scale"] == "display" or tp["scale"] in ("display", "poster")
+    hs = f'{tp["case"]}{tp["track"]}{tp["talign"]}'
     if int(b.get("level") or 2) <= 1:
+        size = tp["h2"] if tp["scale"] != "modest" else (34 if display else 24)
         return (f'<tr><td style="padding:{pv + 6}px {ph}px 2px">'
                 f'<div style="font-family:{t["font"]["heading"]};'
-                f'font-size:{34 if display else 24}px;'
-                f'font-weight:700;line-height:{"1.1" if display else "1.25"};'
-                f'color:{c["text"]}">{_esc(b.get("text", ""))}</div></td></tr>')
+                f'font-size:{size}px;'
+                f'font-weight:{"700" if tp["weight"] == "600" else tp["weight"]};line-height:{"1.1" if display else "1.25"};'
+                f'color:{c["text"]};{hs}">{_esc(b.get("text", ""))}</div></td></tr>')
     # At display scale the section head is a real title rather than a
     # kicker — the one reading of "big type" that survives a small screen.
     if display:
         return (f'<tr><td style="padding:{pv + 4}px {ph}px 0">'
                 f'<div style="font-family:{t["font"]["heading"]};font-size:22px;'
-                f'font-weight:700;line-height:1.2;color:{c["text"]}">'
+                f'font-weight:700;line-height:1.2;color:{c["text"]};{hs}">'
                 f'{_esc(b.get("text", ""))}</div></td></tr>')
+    # THE KICKER, in the style the design names: small capitals in the
+    # accent (the house), in the ink, with a short rule beneath, or none —
+    # which sets it as a plain small heading rather than dropping it.
+    k = tp["kicker"]
+    col = c["text"] if k in ("caps", "rule", "none") else c["accent"]
+    caps = "" if k == "none" else "letter-spacing:1.5px;text-transform:uppercase;"
+    rule = (f'<div style="width:28px;height:2px;background:{c["accent"]};margin:6px 0 0'
+            f'{";margin-left:auto;margin-right:auto" if tp["talign"] else ""}"></div>' if k == "rule" else "")
     return (f'<tr><td style="padding:{pv + 4}px {ph}px 0">'
             f'<div style="font-family:{t["font"]["body"]};font-size:13px;'
-            f'font-weight:700;letter-spacing:1.5px;text-transform:uppercase;'
-            f'color:{c["accent"]}">{_esc(b.get("text", ""))}</div></td></tr>')
+            f'font-weight:700;{caps}'
+            f'color:{col};{tp["talign"]}">{_esc(b.get("text", ""))}</div>{rule}</td></tr>')
 
 
 def _quote(b: dict, t: dict) -> str:
@@ -465,6 +584,19 @@ def _banner(b: dict, t: dict) -> str:
 
 
 def _divider(b: dict, t: dict) -> str:
+    style = t.get("divider")
+    c = t["colors"]
+    if style == "none":
+        return ""
+    if style == "thick":
+        return (f'<tr><td style="padding:12px 32px"><div style="height:3px;'
+                f'background:{c["text"]};line-height:3px"> </div></td></tr>')
+    if style == "dotted":
+        return (f'<tr><td style="padding:8px 32px"><div style="height:0;'
+                f'border-top:2px dotted {c["border"]};line-height:0"> </div></td></tr>')
+    if style == "ornament":
+        return (f'<tr><td align="center" style="padding:10px 32px;font-family:{t["font"]["heading"]};'
+                f'font-size:16px;color:{c["accent"]};line-height:1">&#10022;</td></tr>')
     return (f'<tr><td style="padding:8px 32px"><div style="height:1px;'
             f'background:{t["colors"]["border"]};line-height:1px"> </div></td></tr>')
 
@@ -548,8 +680,10 @@ def _band(row: str, bg: str) -> str:
                     f'<tr><td align="center" style="background:{bg};', 1)
 
 
-def _header(t: dict, webview: bool = True) -> str:
+def _header(t: dict, webview: bool = True, spec: dict | None = None) -> str:
     c = t["colors"]
+    if spec:
+        return _header_design(t, webview, spec)
     logo = (f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t["logo_alt"] or t["name"])}" '
             f'height="30" style="display:block;border:0;height:30px">'
             if t["logo_url"] else
@@ -582,8 +716,54 @@ def _header(t: dict, webview: bool = True) -> str:
     return top + nav
 
 
-def _footer(t: dict) -> str:
+def _header_design(t: dict, webview: bool, spec: dict) -> str:
+    """The header a DESIGN asks for: the mark left or centred; the store's
+    links none, inline beside the mark, or on their own line below; upper
+    or title case; a rule under it or not. The ground is the section
+    context's, painted by the caller."""
+    c = t["colors"]
+    logo = (f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t["logo_alt"] or t["name"])}" '
+            f'height="30" style="display:block;border:0;height:30px'
+            f'{";margin:0 auto" if spec["logo"] == "center" else ""}">'
+            if t["logo_url"] else
+            f'<span style="font-family:{t["font"]["heading"]};font-size:20px;'
+            f'font-weight:600;color:{c["text"]}">{_esc(t["name"])}</span>')
+    view = ((f'<a href="{BROWSER}" style="font-family:{t["font"]["body"]};'
+             f'font-size:12px;color:{c["muted"]};text-decoration:underline">'
+             f'View in browser</a>') if webview else "")
+    nav_items = [i for i in (t.get("nav") or []) if i.get("label") and i.get("url")]
+    case = "text-transform:uppercase;letter-spacing:.02em;" if spec["case"] == "upper" else ""
+    links = (f'  <span style="color:{c["border"]}">·</span>  '.join(
+        f'<a href="{_esc(i["url"])}" style="color:{c["text"]};text-decoration:none;'
+        f'font-family:{t["font"]["body"]};font-size:13px;{case}">{_esc(i["label"])}</a>'
+        for i in nav_items[:5])) if nav_items and spec["nav"] != "none" else ""
+    if spec["logo"] == "center":
+        top = (f'<tr><td align="center" style="padding:18px 32px 0">{logo}'
+               + (f'<div style="padding-top:6px">{view}</div>' if view else "") + '</td></tr>')
+        if links and spec["nav"] == "inline":
+            top += f'<tr><td align="center" style="padding:10px 32px 0">{links}</td></tr>'
+    else:
+        right = (links if links and spec["nav"] == "inline" else view)
+        top = (f'<tr><td style="padding:18px 32px 0"><table role="presentation" width="100%" '
+               f'cellpadding="0" cellspacing="0" border="0"><tr>'
+               f'<td align="left">{logo}</td><td align="right">{right}</td>'
+               f'</tr></table></td></tr>')
+        if links and spec["nav"] == "inline" and view:
+            top += f'<tr><td align="right" style="padding:4px 32px 0">{view}</td></tr>'
+    if links and spec["nav"] == "below":
+        top += f'<tr><td style="padding:14px 32px 6px" align="center">{links}</td></tr>'
+    if spec["rule"]:
+        top += (f'<tr><td style="padding:{"0" if links and spec["nav"] == "below" else "12px"} 32px 0">'
+                f'<div style="height:1px;background:{c["border"]};line-height:1px"> </div></td></tr>')
+    else:
+        top += '<tr><td style="padding:0 32px 6px;font-size:0;line-height:0"> </td></tr>'
+    return top
+
+
+def _footer(t: dict, spec: dict | None = None) -> str:
     c, f = t["colors"], t["footer"]
+    if spec:
+        return _footer_design(t, spec)
     # CAN-SPAM: a physical address and a working unsubscribe are REQUIRED. The
     # address is rendered from the theme; if a client's theme has none the line
     # says so, loudly, rather than shipping an email that is illegal to send.
@@ -607,6 +787,44 @@ def _footer(t: dict) -> str:
             f'opacity:.85">{_esc(f["disclaimer"])}</div>' if f["disclaimer"] else "")
     return (f'<tr><td style="padding:24px 32px 32px;font-family:{t["font"]["body"]};'
             f'font-size:12px;line-height:1.6;color:{c["muted"]};text-align:center">'
+            f'{tag}{social_row}'
+            f'<div>{_esc(f["brand"] or t["name"])} · {addr}</div>'
+            f'<div style="padding-top:8px">'
+            f'<a href="{UNSUB}" style="color:{c["muted"]};text-decoration:underline">'
+            f'Unsubscribe</a></div>{disc}</td></tr>')
+
+
+def _footer_design(t: dict, spec: dict) -> str:
+    """The footer a DESIGN asks for: its lines left or centred, the social
+    links as words, as chips, or not at all, a rule over it or not. The
+    ground is the section context's. CAN-SPAM is not a variant: the
+    address and the unsubscribe are in every one."""
+    c, f = t["colors"], t["footer"]
+    al = "center" if spec["align"] == "center" else "left"
+    addr = (_esc(f["address"]) if f["address"]
+            else '<span style="color:#c0392b">[NO MAILING ADDRESS ON FILE — '
+                 'required before this can send]</span>')
+    tag = f'<div style="padding-bottom:10px">{_esc(f["tagline"])}</div>' if f["tagline"] else ""
+    socials = [x for x in (f.get("socials") or []) if x.get("name") and x.get("url")]
+    social_row = ""
+    if socials and spec["socials"] == "words":
+        social_row = ('<div style="padding-bottom:12px;font-size:13px">' + "   ".join(
+            f'<a href="{_esc(x["url"])}" style="color:{c["muted"]};text-decoration:none;'
+            f'font-weight:600">{_esc(x["name"])}</a>' for x in socials[:5]) + "</div>")
+    elif socials and spec["socials"] == "icons":
+        # No icon files are ever fetched from anywhere: the "icon" is the
+        # platform's initial in a small chip, in the ground's own ink.
+        social_row = ('<div style="padding-bottom:12px">' + " ".join(
+            f'<a href="{_esc(x["url"])}" title="{_esc(x["name"])}" style="display:inline-block;'
+            f'width:26px;height:26px;line-height:26px;border-radius:13px;border:1px solid {c["muted"]};'
+            f'color:{c["muted"]};text-decoration:none;font-size:12px;font-weight:700;text-align:center">'
+            f'{_esc(x["name"][:1])}</a>' for x in socials[:5]) + "</div>")
+    disc = (f'<div style="padding-top:10px;font-size:11px;color:{c["muted"]};'
+            f'opacity:.85">{_esc(f["disclaimer"])}</div>' if f["disclaimer"] else "")
+    rule = (f'<tr><td style="padding:0 32px"><div style="height:1px;background:{c["border"]};'
+            f'line-height:1px"> </div></td></tr>' if spec["rule"] else "")
+    return (rule + f'<tr><td style="padding:24px 32px 32px;font-family:{t["font"]["body"]};'
+            f'font-size:12px;line-height:1.6;color:{c["muted"]};text-align:{al}">'
             f'{tag}{social_row}'
             f'<div>{_esc(f["brand"] or t["name"])} · {addr}</div>'
             f'<div style="padding-top:8px">'
@@ -687,3 +905,310 @@ def missing_to_send(theme: dict) -> list[str]:
     if not (t["footer"]["brand"] or t["name"]):
         gaps.append("brand name")
     return gaps
+
+
+# ---------------------------------------------------------------------------
+# RENDERING A DESIGN — INITIATIVE-email-design.md, Phase 4
+#
+# `render` above paints one email: thirteen block painters, one frame, one
+# header, one footer, six toggles. `render_design` executes a DESIGN
+# (`email_design.SCHEMA`): the blocks are grouped into SECTIONS, each section
+# gets the treatment the design names for its kind (or for its place in a
+# concrete order read off a reference), and every colour is resolved through
+# the brand's PALETTE OF ROLES — the section's ground and the ink that reads
+# on it — never through the design, which names roles only. The block
+# painters are the same ones: each is handed a style context whose colours
+# ARE the section's ground, so a quote on the dark ground is painted by the
+# quote painter in the dark ground's ink, and nothing is written twice.
+#
+# `render` stays as it is until Phase 6 switches the campaign run and
+# retires it — its positional bands and its six toggles are not worth
+# imitating through a section renderer, and the suites that pin them pin
+# the OLD behaviour, honestly.
+# ---------------------------------------------------------------------------
+
+#: A face by CLASS, for a brand with none on file: (the Google face to link,
+#: the email-safe stack). The brand's own face always wins (Decision 1).
+_CLASS_STACKS = {
+    "serif-display": ("Playfair Display", "'Playfair Display', Georgia, 'Times New Roman', serif"),
+    "serif-editorial": ("", "Georgia, 'Times New Roman', serif"),
+    "sans-geometric": ("Montserrat", "'Montserrat', 'Century Gothic', 'Trebuchet MS', Arial, sans-serif"),
+    "sans-grotesque": ("Inter", "'Inter', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"),
+    "condensed": ("Oswald", "'Oswald', 'Arial Narrow', Impact, Arial, sans-serif"),
+    "script": ("Dancing Script", "'Dancing Script', 'Brush Script MT', cursive"),
+}
+_BODY_STACKS = {"serif": ("", "Georgia, 'Times New Roman', serif"),
+                "sans": ("", "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif")}
+_RADIUS = {"none": "0", "soft": "8px", "round": "16px"}
+_SECTION_PAD = {"none": 0, "tight": 6, "regular": 14, "airy": 28}
+_DENSITY_OF_PAD = {"none": "tight", "tight": "tight", "regular": "regular", "airy": "airy"}
+#: Which of a block's kinds is its own section; everything else joins the
+#: run it is in (a heading starts one).
+_BLOCK_KIND = {"hero": "hero", "products": "products", "quote": "proof", "stat": "proof",
+               "banner": "offer", "signature": "closing", "ps": "ps"}
+
+
+def group_sections(blocks: list) -> list[dict]:
+    """The drafter's flat blocks as sections: a hero, a product block, a
+    proof block, a banner, a signature and a P.S. are each their own; a
+    heading starts a run of words (the first run after the top is the
+    intro, then feature and editorial by turns); text, a list, a divider
+    and an ask join the run they are in; an ask with no run is the closing.
+    Returns `[{kind, blocks}]`."""
+    out: list[dict] = []
+    cur: dict | None = None
+    runs = 0
+    for b in blocks or []:
+        kind = str((b or {}).get("type", ""))
+        own = _BLOCK_KIND.get(kind)
+        if own:
+            out.append({"kind": own, "blocks": [b]})
+            cur = None
+            continue
+        if kind not in _BLOCKS:
+            continue
+        starts = kind == "heading" or cur is None
+        if starts and (kind == "heading" or kind != "cta"):
+            runs += 1
+            cur = {"kind": "intro" if runs == 1 else ("feature" if runs % 2 == 0 else "editorial"),
+                   "blocks": []}
+            out.append(cur)
+        elif cur is None:            # an ask on its own
+            cur = {"kind": "closing", "blocks": []}
+            out.append(cur)
+        cur["blocks"].append(b)
+    return out
+
+
+def _spec_for(design: dict, kind: str, taken: dict) -> dict:
+    """How a section of this kind is painted: the design's per-kind default,
+    overlaid by the next unconsumed section of that kind in the design's
+    concrete order — a reference's hero treatment reaches the hero, its
+    product grid the products, in the order it had them."""
+    spec = dict((design.get("defaults") or {}).get(kind) or {})
+    order = [s for s in (design.get("sections") or []) if s.get("kind") == kind]
+    i = taken.get(kind, 0)
+    if i < len(order):
+        spec.update({k: v for k, v in order[i].items() if k not in ("kind", "slots")})
+        taken[kind] = i + 1
+    return spec
+
+
+def _ground_colors(palette: dict, role: str) -> dict:
+    """The renderer's colour roles as they are ON THIS GROUND: the ground
+    itself as surface and page, the ink that reads on it, a muted line and
+    a border mixed from the two, the accent kept for buttons and rules."""
+    from . import palette as _pal
+    ink_role = _pal.INK_OF.get(role, "ink")
+    ground, ink = palette[role], palette[ink_role]
+    return {"bg": ground, "surface": ground, "text": ink,
+            "muted": _pal.mix(ink, ground, 0.45), "border": _pal.mix(ground, ink, 0.14),
+            "accent": palette["accent"], "accent_text": palette["accent_ink"]}
+
+
+def _faces(base: dict, tspec: dict) -> tuple[dict, list[str]]:
+    """The faces: the brand's own where it has one on file (its stack is not
+    the renderer's default), else the class the design names — and the
+    Google faces to link for the classes that have one."""
+    faces, google = {}, []
+    for role, default, table, key in (("heading", _DEFAULT["font"]["heading"], _CLASS_STACKS, "display_family"),
+                                      ("body", _DEFAULT["font"]["body"], _BODY_STACKS, "body_family")):
+        own = str(base["font"].get(role) or "")
+        if own and own != default:
+            faces[role] = own
+            continue
+        gf, stack = table.get(tspec.get(key), ("", default))
+        faces[role] = stack
+        if gf:
+            google.append(gf)
+    return faces, google
+
+
+def _context(base: dict, design: dict, spec: dict, role: str, kind: str) -> dict:
+    """The style context one section is painted in: the brand's theme with
+    the colours of this ground, the design's type and ask, the section's
+    treatment, and the old look derived for the painters that still read it."""
+    t = dict(base)
+    t["colors"] = _ground_colors(base["palette"], role)
+    t["ground"] = role
+    t["type"] = _type(design["type"])
+    if spec.get("align") == "center":
+        t["type"] = {**t["type"], "talign": "text-align:center;", "align": "center"}
+    if spec.get("layout") == "letter":
+        t["type"] = {**t["type"], "kicker": "none", "leading": "airy", "lh": _LEAD["airy"]}
+    if spec.get("layout") == "band":
+        t["type"] = {**t["type"], "talign": "text-align:center;", "align": "center"}
+    t["cta"] = dict(design["cta"])
+    if spec.get("layout") == "band":
+        t["cta"] = {**t["cta"], "align": "center"}
+    t["divider"] = design["dividers"]["style"]
+    t["radius"] = _RADIUS.get(design["frame"]["radius"], "8px")
+    t["width"] = int(design["frame"]["width"])
+    t["image"] = spec.get("image", "contained")
+    t["aspect"] = spec.get("aspect", "")
+    t["split"] = "right" if spec.get("layout") == "split-right" else "left"
+    layout = spec.get("layout", "stack")
+    hero = ("overlay" if layout == "overlay" or spec.get("text_on_image") else
+            "split" if layout in ("split-left", "split-right") else
+            "bleed" if spec.get("image") == "bleed" else "contained")
+    t["look"] = _look({"hero": hero,
+                       "scale": "display" if t["type"]["scale"] in ("display", "poster") else "modest",
+                       "density": _DENSITY_OF_PAD.get(spec.get("pad", "regular"), "regular"),
+                       "bands": False,
+                       "cta": "block",
+                       "products": {"grid2": "grid2", "grid3": "grid3", "collage": "grid2"}.get(layout, "rows")})
+    return t
+
+
+def _paint(blocks: list, t: dict) -> str:
+    rows = []
+    for b in blocks:
+        fn = _BLOCKS.get((b or {}).get("type", ""))
+        if fn:
+            rows.append(fn(b, t))
+    return "".join(rows)
+
+
+def _lay_stack(blocks: list, t: dict, spec: dict) -> str:
+    return _paint(blocks, t)
+
+
+def _lay_columns(blocks: list, t: dict, spec: dict) -> str:
+    """Two columns of words: the run's headings stay full width above; its
+    text and lists are dealt left and right, half each."""
+    heads = [b for b in blocks if b.get("type") == "heading"]
+    rest = [b for b in blocks if b.get("type") != "heading"]
+    words = [b for b in rest if b.get("type") in ("text", "list")]
+    others = [b for b in rest if b.get("type") not in ("text", "list")]
+    if len(words) < 2:
+        return _paint(blocks, t)
+    half = (len(words) + 1) // 2
+    ph = _PAD[t["look"]["density"]][1]
+    inner = {**t, "width": (t["width"] - 2 * ph) // 2}
+    left, right = _paint(words[:half], inner), _paint(words[half:], inner)
+    cols = (f'<tr><td style="padding:0 {ph - 24}px"><table role="presentation" width="100%" '
+            f'cellpadding="0" cellspacing="0" border="0"><tr>'
+            f'<td width="50%" valign="top"><table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0">{left}</table></td>'
+            f'<td width="50%" valign="top"><table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0">{right}</table></td></tr></table></td></tr>')
+    return _paint(heads, t) + cols + _paint(others, t)
+
+
+def _lay_band(blocks: list, t: dict, spec: dict) -> str:
+    """One thing on a band: everything centred in one generous cell, the
+    ground the section's (an accent or a dark, in the design that asked
+    for it) — a banner block loses its own box, since the band IS the box."""
+    c = t["colors"]
+    inner = []
+    for b in blocks:
+        if b.get("type") == "banner":
+            inner.append(f'<tr><td align="center" style="padding:6px 0;font-family:{t["font"]["heading"]};'
+                         f'font-size:22px;font-weight:{t["type"]["weight"]};line-height:1.25;'
+                         f'color:{c["text"]};{t["type"]["case"]}{t["type"]["track"]}">{_esc(b.get("text", ""))}</td></tr>')
+        else:
+            fn = _BLOCKS.get(b.get("type", ""))
+            if fn:
+                inner.append(fn(b, t))
+    ph = _PAD[t["look"]["density"]][1]
+    return (f'<tr><td align="center" style="padding:22px {ph}px;text-align:center">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'{"".join(inner)}</table></td></tr>')
+
+
+LAYOUTS = {"stack": _lay_stack, "split-left": _lay_stack, "split-right": _lay_stack,
+           "grid2": _lay_stack, "grid3": _lay_stack, "collage": _lay_stack,
+           "overlay": _lay_stack, "columns": _lay_columns, "band": _lay_band,
+           "letter": _lay_stack}
+#: Vocabulary values that are not drawn by this renderer YET, and which
+#: phase draws them — named so the painter walk skips them by name rather
+#: than passing them by accident.
+NOT_DRAWN_YET = {"imagery.hero": "Phase 5", "imagery.product": "Phase 5",
+                 "imagery.feature": "Phase 5", "palette.mood": "Phase 5 (a key the reader records; the brand's palette already decides)",
+                 "palette.accent_use": "Phase 5"}
+
+
+def _wrap(inner: str, ground: str, pad: int, rule_above: str = "none",
+          rule_colour: str = "") -> str:
+    """A section's rows inside its ground, with the room the design asks
+    for above and below, and a rule over it when asked."""
+    if not inner:
+        return ""
+    rule = ""
+    if rule_above == "thin":
+        rule = f"border-top:1px solid {rule_colour};"
+    elif rule_above == "thick":
+        rule = f"border-top:3px solid {rule_colour};"
+    elif rule_above == "dotted":
+        rule = f"border-top:2px dotted {rule_colour};"
+    return (f'<tr><td style="background:{ground};padding:{pad}px 0;{rule}">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'{inner}</table></td></tr>')
+
+
+def render_design(design: dict, theme: dict, blocks: list, *, preheader: str = "",
+                  webview: bool = True) -> str:
+    """A DESIGN executed with a brand's palette, faces and chrome, on the
+    drafter's blocks → send-ready, email-safe HTML.
+
+    Every colour in the output is one of the brand's twelve roles (plus the
+    scrim the overlay hero paints over a photograph); the design chose the
+    ROLE of every ground and the brand chose what colour that role is. The
+    faces are the brand's own where it has them, the class the design names
+    where it has none. CAN-SPAM's footer is in every design.
+    """
+    from . import email_design
+    design, _dropped = email_design.normalize(design)
+    base = _theme(theme)
+    pal = base["palette"]
+    faces, google = _faces(base, design["type"])
+    base = {**base, "font": {**base["font"], **faces}}
+    width = int(design["frame"]["width"])
+    radius = _RADIUS.get(design["frame"]["radius"], "8px")
+
+    rows: list[str] = []
+    hd = design["header"]
+    ht = _context(base, design, {"pad": "regular"}, hd["bg"], "header")
+    rows.append(_wrap(_header(ht, webview=webview, spec=hd), pal[hd["bg"]], 0))
+    taken: dict = {}
+    prev_ground = pal[hd["bg"]]
+    for sec in group_sections(blocks):
+        spec = _spec_for(design, sec["kind"], taken)
+        role = spec.get("bg", "surface")
+        t = _context(base, design, spec, role, sec["kind"])
+        inner = LAYOUTS.get(spec.get("layout", "stack"), _lay_stack)(sec["blocks"], t, spec)
+        rows.append(_wrap(inner, pal[role], _SECTION_PAD.get(spec.get("pad", "regular"), 14),
+                          spec.get("rule_above", "none"), t["colors"]["border"]))
+        prev_ground = pal[role]
+    ft = design["footer"]
+    ftt = _context(base, design, {"pad": "regular"}, ft["bg"], "footer")
+    rows.append(_wrap(_footer(ftt, spec=ft), pal[ft["bg"]], 0))
+
+    page = pal[design["frame"]["page"]]
+    card = design["frame"]["container"] == "card"
+    chrome = (f'background:{pal["surface"]};'
+              + (f'border:1px solid {pal["border"]};' if card and design["frame"]["border"] else "")
+              + (f"border-radius:{radius};" if card else ""))
+    pre = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">'
+           f'{_esc(preheader)}</div>' if preheader else "")
+    fonts = ""
+    if google:
+        fam = "&family=".join(g.replace(" ", "+") + ":wght@400;600;700" for g in google)
+        fonts = (f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={fam}&display=swap">'
+                 f'<style>@import url("https://fonts.googleapis.com/css2?family={fam}&display=swap");</style>')
+    return (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="color-scheme" content="light">'
+        f'<title>{_esc(base["name"])}</title>{fonts}</head>'
+        f'<body style="margin:0;padding:0;background:{page}">'
+        f'{pre}'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'border="0" style="background:{page}"><tr>'
+        f'<td align="center" style="padding:{"24px 12px" if card else "0"}">'
+        f'<table role="presentation" width="{width}" cellpadding="0" cellspacing="0" '
+        f'border="0" style="width:100%;max-width:{width}px;{chrome}">'
+        f'{"".join(rows)}'
+        f'</table></td></tr></table></body></html>'
+    )

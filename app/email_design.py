@@ -882,3 +882,67 @@ def read(asset_id: str) -> dict:
     got["design"], got["read"] = design, info
     got.setdefault("dropped", dropped)
     return got
+
+
+# ---------------------------------------------------------------------------
+# The preview: a design executed with THIS brand's material (Phase 4)
+# ---------------------------------------------------------------------------
+def preview_blocks(tenant: str) -> list[dict]:
+    """Sample blocks a structure is previewed with for one brand — its own
+    photograph as the hero, its own three products, fixed sample copy that
+    is plainly sample copy. Nothing here is a draft; it exists so "would
+    this recreate the reference?" is answered on the card, before approval,
+    with the brand's material rather than lorem or another brand's."""
+    from . import kb
+    ents = []
+    for e in kb.entities(tenant)[:12]:
+        a = getattr(e, "attributes", None) or {}
+        if getattr(e, "name", "") and a.get("image"):
+            ents.append({"name": e.name, "price": str(a.get("price") or ""),
+                         "url": str(a.get("url") or "#"), "image": str(a["image"])})
+        if len(ents) == 3:
+            break
+    hero = ""
+    got = assets_for(tenant, "lifestyle")
+    if got["ok"]:
+        hero = got["assets"][0].url or ""
+    elif ents:
+        hero = ents[0]["image"]
+    blocks: list[dict] = []
+    if hero:
+        blocks.append({"type": "hero", "image": hero, "alt": "the brand's own photograph",
+                       "headline": "A sample headline, set the design's way",
+                       "sub": "Sample copy — the drafter writes the real words."})
+    else:
+        blocks.append({"type": "heading", "text": "A sample headline, set the design's way", "level": 1})
+    blocks += [{"type": "heading", "text": "A section kicker"},
+               {"type": "text", "html": "<p>Sample body copy, so the measure, the leading and the "
+                                        "ink on this ground can be judged. The real email carries "
+                                        "this brand's own words and claims.</p>"},
+               {"type": "text", "html": "<p>A second paragraph, for the layouts that deal words "
+                                        "into two columns.</p>"}]
+    if ents:
+        blocks.append({"type": "products", "items": ents})
+    blocks += [{"type": "quote", "text": "A pull-quote stands in for an approved claim.",
+                "attribution": "sample"},
+               {"type": "divider"},
+               {"type": "cta", "label": "The ask", "url": "#"},
+               {"type": "ps", "text": "A postscript, set apart above the footer."}]
+    return blocks
+
+
+def preview_html(tenant: str, design: dict) -> tuple[str, str]:
+    """`(html, why_not)`: the design executed with the brand's live theme —
+    or its proposal when nothing is approved yet, said — on its own material.
+    '' with a reason when the brand has no theme at all."""
+    from . import brand_theme, email_render
+    theme = brand_theme.live_theme(tenant)
+    note = ""
+    if not theme:
+        theme = dict((brand_theme.proposed(tenant) or {}).get("theme") or {})
+        note = "through the PROPOSED theme — nothing is approved on the Brand tab yet"
+    if not theme:
+        return "", "this brand has no theme yet — derive and approve one on the Brand tab to preview"
+    html = email_render.render_design(design, theme, preview_blocks(tenant),
+                                      preheader="Design preview")
+    return html, note

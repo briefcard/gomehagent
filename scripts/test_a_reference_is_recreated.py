@@ -36,6 +36,7 @@ import io
 import itertools
 import json
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -45,7 +46,7 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import (brand_theme, config, db, email_render as er,  # noqa: E402
-                 email_structures as es, kb, llm, tenants)
+                 email_structures as es, kb, llm, skill_pack, tenants)
 
 PLAN = "INITIATIVE-email-design.md"
 _fail: list[str] = []
@@ -197,7 +198,7 @@ def main() -> int:
        (rd.get("read") or {}).get("strips", 0) >= 3 and (rd.get("read") or {}).get("calls", 0)
        == (rd.get("read") or {}).get("strips", 0) + 2, str(rd.get("read")))
 
-    print("\n— 2. the renderer can paint one email (open until Phase 4) —")
+    print("\n— 2. the renderer can paint one email — the fixed template stands until Phase 6 switches the run —")
     theme = {"name": "T", "colors": {"accent": "#123456", "text": "#1c1e22",
                                      "bg": "#f2f3f5", "surface": "#ffffff"},
              "footer": {"address": "1 Main St"}}
@@ -213,60 +214,37 @@ def main() -> int:
     combos = list(itertools.product(*[list(v) for _, v in axes]))
     renders = [er.render(theme, blocks, look=dict(zip([k for k, _ in axes], c)))
                for c in combos]
-    hexes = lambda h: set(m.lower() for m in re.findall(r"#[0-9a-fA-F]{3,6}\b", h))
-    theme_hex = hexes(er.render(theme, blocks))
-    all_hex = set().union(*(hexes(h) for h in renders))
-    header_of = lambda h: h.split("</head>", 1)[1].split("<tr><td style=\"padding:0\">", 1)[0] \
-        if "<tr><td style=\"padding:0\">" in h else ""
-    footer_of = lambda h: h[h.rfind("<tr><td style=\"padding:24px 32px 32px"):]
     frame_of = lambda h: h[:h.find("<title>")] + h[h.find("</title>"):h.find("<tr><td style=\"padding:18px 32px 0\">")]
-    n_frames = len({frame_of(h) for h in renders})
-    n_footers = len({footer_of(h) for h in renders})
-    sizes = set().union(*(set(re.findall(r"font-size:(\d+)px", h)) for h in renders))
-    # A TEXT section on a dark ground. The bulletproof button is a filled
-    # cell (the accent) and the overlay hero paints the ink behind its
-    # photograph — those are the only grounds today's renderer ever sets
-    # besides the page colour under a band. Under every look whose hero is
-    # NOT the overlay, the ink never appears as a ground at all.
-    keys = [k for k, _ in axes]
-    grounds = lambda h: set(re.findall(
-        r'<tr><td[^>]*style="[^"]*background:(#[0-9a-fA-F]{3,6})', h))
-    all_grounds = set().union(*(grounds(h) for h in renders))
-    off_overlay = set().union(*(grounds(h) for c, h in zip(combos, renders)
-                                if dict(zip(keys, c))["hero"] != "overlay"))
-    print(f"  {len(combos)} look combinations rendered: {n_frames} distinct frame(s), "
-          f"{n_footers} distinct footer(s), {len(all_hex)} colour(s) in play, "
-          f"font sizes {sorted(int(s) for s in sizes)}, cell grounds {sorted(all_grounds)}")
+    footer_of = lambda h: h[h.rfind("<tr><td style=\"padding:24px 32px 32px"):]
+    n_frames, n_footers = len({frame_of(h) for h in renders}), len({footer_of(h) for h in renders})
+    print(f"  `email_render.render` (the fixed template): {len(combos)} look combinations, "
+          f"{n_frames} frame(s), {n_footers} footer(s) — unchanged, and retired with Phase 6")
+    # CLOSED by Phase 4: `render_design` executes a design — every schema
+    # value drawn (walked in test_a_design_is_executed.py), colours only
+    # through the palette, one design two brands. The layouts registry is
+    # the painter registry the Phase 1 entry held open.
+    from app import email_design as _ed2
+    ck("the renderer executes a design: render_design exists and every layout the schema names has a painter "
+       "(closed by Phase 4)",
+       callable(getattr(er, "render_design", None)) and set(_ed2.SECTION["layout"].values) == set(er.LAYOUTS))
+    # OPEN until Phase 6: the CAMPAIGN RUN still calls the fixed template.
+    # Measured on the call, by AST — not on a keyword's presence.
+    import ast as _ast
+    src = pathlib.Path(skill_pack.__file__).read_text()
+    tree = _ast.parse(src)
+    calls = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+             and isinstance(n.func, _ast.Attribute) and n.func.attr in ("render", "render_design")
+             and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
+    names = sorted({c.func.attr for c in calls})
     still_broken(
-        f"every one of the {len(combos)} look combinations shares one frame and one footer",
-        n_frames == 1 and n_footers == 1, "Phase 4",
-        "a design now chooses the frame and the footer")
-    still_broken(
-        "no combination reaches a colour the seven theme roles do not name",
-        all_hex <= theme_hex | {"#ffffff"}, "Phase 4",
-        "the renderer now paints from a palette of roles")
-    still_broken(
-        "the only grounds any look can set are the page colour, the button's accent, "
-        "and the ink behind the overlay hero's photograph — no text section on a dark ground",
-        all_grounds <= {theme["colors"]["bg"], theme["colors"]["text"], theme["colors"]["accent"]}
-        and theme["colors"]["text"] not in off_overlay, "Phase 4",
-        "a section's ground is now a palette role the design chooses")
-    # Phase 1 filed the DESIGN vocabulary on every structure; nothing draws
-    # it yet. The painter registry the schema walk will run against is
-    # Phase 4's; until it exists this entry holds the claim open.
-    from app import email_design as _ed
-    still_broken(
-        f"the renderer has no painter registry for the design vocabulary "
-        f"({len(_ed.fields())} fields filed, none drawn) — a structure's design "
-        f"is stored and never executed",
-        not hasattr(er, "PAINTERS") and not hasattr(er, "render_design"), "Phase 4",
-        "email_render.render_design executes a design; replace this with the "
-        "schema-walk-against-PAINTERS check")
+        f"the campaign run renders through email_render.{'/'.join(names) or '?'} — the fixed "
+        f"template, not the structure's design",
+        names == ["render"], "Phase 6",
+        "skill_pack._build now calls render_design with the structure's design")
     ck("the look vocabulary is the six axes the plan describes — a seventh would be news",
        sorted(er.LOOK) == ["bands", "cta", "density", "hero", "products", "scale"],
        str(sorted(er.LOOK)))
 
-    # ------------------------------------------------------------------
     print("\n— 3. the brand kit's colours are discarded — CLOSED by Phase 2 (2026-09-11) —")
     # The entry that held this open measured `colors.*` alone — a PROXY —
     # and stayed green after Phase 2 put the kit's colours under `palette.*`

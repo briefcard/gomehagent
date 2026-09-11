@@ -260,7 +260,16 @@ def main() -> int:
            "design: dark key" in card and f"read in {info['calls']} calls from {info['strips']} strip(s)" in card
            and "with the phone render" in card and "critiqued once" in card
            and "the vocabulary does not hold" in card and "products · grid2 on tint" in card
-           and "Read its design" in card and "arrives when the renderer executes designs" in card)
+           and "Read its design" in card
+           and ("no preview — this brand has no theme yet" in card))
+        # THE PREVIEW: with a theme on the Brand tab, the card shows the design
+        # executed with this brand's material beside the reference screenshot.
+        from app import brand_theme as _bt
+        _bt.approve("baci", {"footer.address": "1 Main St", "palette.dark": "#0b1a0f"})
+        card2 = admin_ui._structures_card("s3cret", "baci")
+        ck("with a theme approved, the reference sits beside a preview of the design in this brand's palette",
+           "preview — this design with baci" in card2 and 'alt="the reference"' in card2
+           and "srcdoc=" in card2 and "#0b1a0f" in card2)
         # The quoted-copy gate, exercised: a critique with no notes leaves
         # pass A's, which quote three words of the email — dropped, and said.
         C_no_notes = {k: v for k, v in C.items() if k != "notes"}
