@@ -133,6 +133,14 @@ SABOTAGES = [
         "suites": ['test_can_the_engines_read_us.py'],
         "why": "the index handed to answer engines lists pages that were never published and have no URL, so the one file whose whole job is pointing at real content points at nothing",
     },
+    {
+        "name": 'a_swipe_never_enters_the_picture_reads',
+        "file": 'app/email_structures.py',
+        "find": '                 title=meta["title"] or url, kind=SWIPE_KIND,\n',
+        "replace": '                 title=meta["title"] or url, kind="image",\n',
+        "suites": ['test_a_structure_is_how_not_what.py'],
+        "why": "a screenshot of somebody else's email becomes a picture the board reads see, so the agency account turns 'drawable' from email layouts and a generated product picture is drawn in the style of a newsletter",
+    },
     # --- a structure is how, not what (2026-09-11) --------------------------
     {
         "name": 'a_structures_notes_are_checked_against_this_brands_ban_list',

@@ -208,6 +208,18 @@ def main() -> int:
             asset = s.get(db.KbAsset, sw["asset_id"])
             ck("reference rights, so it can never be a hero or a product",
                asset.rights == kb.REFERENCE and not kb.may_publish(asset.id)[0])
+        # A PLACE TO LOOK, and NOT on a visual board: the boards feed the
+        # picture ladder, and a screenshot of somebody's email is not a look
+        # the brand's pictures are drawn in. It is seen beside the structure
+        # it produced instead.
+        ck("the swipe is its own kind, invisible to every picture read",
+           kb.board(es.SWIPE_TENANT)["look"] == [] and
+           not any(a.id == sw["asset_id"] for a in
+                   kb.assets(es.SWIPE_TENANT, publishable_only=False, kind="image")))
+        listed = [x for x in es.swipes() if x["asset_id"] == sw["asset_id"]]
+        ck("and it is listed as a swipe, with its screenshot",
+           listed and listed[0]["image"] == "https://cdn.rge/acme.png"
+           and listed[0]["review"] == "unread", str(listed)[:80])
         rd = es.read_swipe(sw["asset_id"])
         ck("the reading lands as a PROPOSED structure",
            rd["ok"] and rd["review"] == "proposed", str(rd)[:80])
@@ -237,6 +249,8 @@ def main() -> int:
        and next(r for r in es.library() if r["id"] == pending["id"])["review"] == "approved")
     ck("each structure says whether THIS brand may use it",
        "usable here" in card and "not for this brand" in card)
+    ck("the reference screenshot is shown beside the structure it produced",
+       'src="https://cdn.rge/acme.png"' in card)
     ck("the swipe form on the card is the control that was pressed above",
        'action="/admin/email_swipe"' in card and "/admin/email_structure?" in card)
     ck("and the card says the library is shared, shape only",

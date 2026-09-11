@@ -66,7 +66,14 @@ FORMATS = ("letter", "designed")
 #: asset machinery gives them rights=reference for free, which is the property
 #: that matters — a swipe can never be selected as a picture for anything.
 SWIPE_TENANT = "agency"
-SWIPE_BOARD = "email-swipes"
+#: NOT ON A VISUAL BOARD, deliberately. The boards feed the picture ladder
+#: and `creative.drawable`: a "look" pin is a style the brand's pictures are
+#: drawn in. A screenshot of somebody's email is not that, and pinning it
+#: would make the agency account "drawable" from email layouts. Swipes are
+#: their own kind (`email_swipe`), which every picture read ignores, and they
+#: are SEEN beside the structure each one produced — the reference next to
+#: what was read off it.
+SWIPE_KIND = "email_swipe"
 SWIPE_HOST = "reallygoodemails.com"
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -414,19 +421,36 @@ def add_swipe(raw_url: str, *, tenant: str = SWIPE_TENANT) -> dict:
     if not meta["image"]:
         return {"ok": False, "why": "the page declares no screenshot to read"}
     kb.add_asset(tenant, meta["image"], rights=kb.REFERENCE,
-                 title=meta["title"] or url, kind="email_swipe",
+                 title=meta["title"] or url, kind=SWIPE_KIND,
                  source=url)
     with db.SessionLocal() as s:
         row = (s.query(db.KbAsset)
                .filter(db.KbAsset.tenant == tenant, db.KbAsset.url == meta["image"])
                .order_by(db.KbAsset.created_at.desc()).first())
         aid = row.id if row is not None else ""
-    try:
-        kb.set_board_role(aid, SWIPE_BOARD, "reference")
-    except Exception:  # noqa: BLE001
-        pass
     return {"ok": True, "asset_id": aid, "url": url, "title": meta["title"],
             "image": meta["image"]}
+
+
+def swipes(tenant: str = SWIPE_TENANT) -> list[dict]:
+    """Every swiped screenshot, with the structure it was read into — or the
+    fact that it was not. The place to SEE the references."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbAsset)
+                .filter(db.KbAsset.tenant == tenant, db.KbAsset.kind == SWIPE_KIND,
+                        db.KbAsset.status == "active")
+                .order_by(db.KbAsset.created_at.desc()).all())
+        by_asset = {str(r.source_asset_id): r for r in
+                    s.query(db.EmailStructure).all() if r.source_asset_id}
+        out = []
+        for a in rows:
+            st = by_asset.get(a.id)
+            out.append({"asset_id": a.id, "image": a.url or "", "title": a.title or "",
+                        "source_url": a.source or "",
+                        "structure_id": st.id if st is not None else "",
+                        "structure_name": st.name if st is not None else "",
+                        "review": st.review if st is not None else "unread"})
+        return out
 
 
 _READ = """You are looking at a screenshot of a marketing email from a public gallery.

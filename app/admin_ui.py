@@ -6582,8 +6582,15 @@ def _structures_card(key: str, tenant: str) -> str:
         return ("<span class=\"ok\">usable here</span>" if ok else
                 f'<span class="when">not for this brand — {_esc(why)}</span>')
 
+    shots = {sw["structure_id"]: sw for sw in _es.swipes() if sw["structure_id"]}
+
     def _one(st: dict, controls: str) -> str:
-        return (f'<div class="msg"><b>{_esc(st["name"])}</b> '
+        shot = shots.get(st["id"])
+        thumb = (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" '
+                 f'alt="{_esc(shot["title"])}" style="max-width:120px;max-height:160px;'
+                 f'float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
+                 if shot and shot.get("image") else "")
+        return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
                 + (f' · used {st["used_count"]}×' if st["used_count"] else "")
@@ -6607,7 +6614,15 @@ def _structures_card(key: str, tenant: str) -> str:
       or its pictures. One email's page, not a category.</span>
     </form>"""
 
-    body = (add
+    unread = [sw for sw in _es.swipes() if sw["review"] == "unread"]
+    unread_html = ("".join(
+        f'<div class="msg"><a href="{_esc(sw["image"])}"><img src="{_esc(sw["image"])}" '
+        f'alt="{_esc(sw["title"])}" style="max-width:120px;max-height:160px;float:right;'
+        f'margin:0 0 6px 10px;border:1px solid #ddd"></a><b>{_esc(sw["title"])}</b> '
+        f'<span class="when">swiped, not read into a structure — the reading '
+        f'did not land; swipe it again</span></div>' for sw in unread)
+        if unread else "")
+    body = (add + unread_html
             + (f'<h4>Waiting for you ({len(proposed)})</h4>'
                + "".join(_one(st, _ctl(st)) for st in proposed) if proposed else "")
             + (f'<h4>In the library ({len(approved)})</h4>'
