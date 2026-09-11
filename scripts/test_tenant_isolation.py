@@ -49,6 +49,17 @@ PLATFORM_MODELS = {
     # trusted like it.
     "CraftLesson": "cross-client TECHNIQUE by design — never a client fact; "
                    "guarded by craft.leaks() + business_model reach + approval",
+    # The SECOND model that deliberately crosses the boundary, on CraftLesson's
+    # terms exactly: a structure is HOW an email is built — block order, where
+    # the ask lands — never WHAT it says. It cannot carry a claim_id; its
+    # notes are refused at filing if they identify an account
+    # (`craft.leaks`); and it is checked against EACH brand's ban list and
+    # needs at the moment of use (`email_structures.usable_for`), before a
+    # drafter sees it. The copy, the claims and the pictures that fill it go
+    # through every gate they went through before. Owner, 2026-09-11: the
+    # library is collective by request.
+    "EmailStructure": "cross-client TECHNIQUE by design — a block order, never "
+                      "a client fact; leak-guarded at filing, brand-gated at use",
     "Setting": "run-once markers for the service itself",
     # A lease is about the WORKER, not the client. Which instance holds a cron
     # is a fact about this service; giving it a tenant would invite it to be

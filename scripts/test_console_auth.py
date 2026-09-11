@@ -205,7 +205,11 @@ def main() -> int:
          "form POSTs and file uploads"),
         (r"Jinja2Templates", "jinja2", "server-side templates"),
         (r"SessionMiddleware", "itsdangerous", "signed session cookies"),
-        (r"EmailStr", "email-validator", "pydantic email fields"),
+        # WHOLE WORD. `EmailStr` as a bare substring matched `EmailStructure`
+        # — the email-structure library, 2026-09-11 — and demanded a
+        # dependency nothing imports. A check that fires on the wrong thing
+        # is one somebody learns to skim.
+        (r"\bEmailStr\b", "email-validator", "pydantic email fields"),
     ]
     for pattern, package, why in LAZY:
         if not _re.search(pattern, src):

@@ -1055,6 +1055,58 @@ class AnswerEngineCheck(Base):
     sessions = Column(Integer, default=0)
 
 
+class EmailStructure(Base):
+    """One way an email can be built, kept so it can be built that way again.
+
+    THE COLLECTIVE LIBRARY. Owner, 2026-09-11: *"Anytime we build out new
+    email structures, we should save any approved structure to our collective
+    library of email structures so we can reuse them in the future for
+    different copy / campaigns."* A structure is the block sequence and the
+    reasons for it — where the hero sits, how many asks, how dense — and never
+    the words or the pictures that filled it.
+
+    NO TENANT, like `CraftLesson` and for the same reason: a structure is
+    TECHNIQUE, never a fact about a client's business. It cannot carry a
+    claim_id, it is checked against each brand's rules at the moment it is
+    USED (`email_structures.usable_for`), and its notes are refused if they
+    identify anyone (`craft.leaks`). What it may not do is decide what is
+    said — the copy, the claims and the pictures stay the brand's own and go
+    through every gate they went through before.
+
+    Two ways in. A SWIPE — a gallery email read for its structure, in words —
+    arrives as a proposal and waits for a person, because a reading is a
+    generator's opinion. A RUN — an email of ours the owner approved — arrives
+    approved, because the approval was the decision.
+    """
+
+    __tablename__ = "email_structures"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    name = Column(String, default="")
+    #: swipe | run | hand
+    source = Column(String, default="", index=True)
+    source_url = Column(String, default="")
+    #: The reference screenshot it was read from, when it was a swipe.
+    source_asset_id = Column(String, default="")
+    #: The block types in order — the same vocabulary the renderer speaks.
+    sequence = Column(JSON, default=list)
+    #: What the sequence is FOR, in words: hero treatment, asks, density.
+    profile = Column(JSON, default=dict)
+    #: story | education | proof | offer — which sends it suits.
+    fits_intents = Column(JSON, default=list)
+    #: letter | designed
+    fits_formats = Column(JSON, default=list)
+    #: What a brand must HAVE to use it: products, proof, hero.
+    requires = Column(JSON, default=list)
+    #: proposed | approved | rejected
+    review = Column(String, default="proposed", index=True)
+    reviewed_by = Column(String, default="")
+    reviewed_at = Column(DateTime(timezone=True))
+    used_count = Column(Integer, default=0)
+    last_used_at = Column(DateTime(timezone=True))
+
+
 class SemrushPull(Base):
     """One Semrush answer, kept so the same question is not bought twice.
 

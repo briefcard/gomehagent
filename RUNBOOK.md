@@ -642,6 +642,48 @@ request. When the check finds Cloudflare in front of a site, the card says so
 and points at Cloudflare's AI Crawl Control, which is on all plans and shows
 which AI services actually reached the site.
 
+## 6d. The email structure library, and the swipe board
+
+Brand tab, "Email structures", beside the visual boards. Owner, 2026-09-11:
+mimic many styles from Really Good Emails, respect brand rules, and save every
+approved structure to a collective library for reuse with different copy.
+
+**A structure is how an email is built, never what it says.** Block order and
+the reasons for it: where the picture sits, how many asks and where, how
+dense. Never the words, never the pictures, never the markup. Every email in
+that gallery is some brand's copyrighted creative; the pattern is what is
+legitimate, applied with our own material. It is the visual-board rule one
+channel over: a reference contributes words, never pixels.
+
+**Two ways in.**
+- *Swipe.* Paste one email's page from reallygoodemails.com into the form.
+  The screenshot is filed as a REFERENCE picture on the agency's swipe board
+  (so it can never be selected as a hero), read once in words into a
+  structure, and the structure waits for your approval. A category or search
+  page is refused; you curate, the system reads what you chose.
+- *Run.* When you approve a campaign email and it pushes to the ESP, its
+  block sequence is filed as an approved structure automatically, once per
+  distinct sequence, named by what it does (`hero-led medium offer, 2 asks`)
+  and never by the account.
+
+**Brand rules bind at the moment of use, in two places.** Before the drafter
+sees a structure, `usable_for` refuses it for a brand when its notes use a
+word that brand bars (a structure described around "hand-crafted" never
+reaches Baci), when it needs something the brand cannot supply (a products
+block with no products on file, a proof block with no approved claim, a hero
+where nothing can illustrate), or when its notes identify another account.
+Then the drafted email goes through every gate it went through before — ban
+list, citation, coherence — because a structure cannot put a word on the page.
+
+**The library is shared and says so.** It carries no account, on
+`CraftLesson`'s terms: technique, never a client fact. Each structure on the
+card shows whether THIS brand may use it and why not when it may not.
+
+**How it is chosen.** Approved only, usable for the brand, fitting the send's
+intent and form, not one of the last shapes that list received, least
+recently used first. With nothing that fits the drafter designs fresh, as it
+always did.
+
 ## 7. What does not work yet
 
 Read this before promising anything.

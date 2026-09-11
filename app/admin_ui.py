@@ -4529,6 +4529,7 @@ and hand-set fields survive future re-derives.</p>
   {identity}
   {_channel_rules_card(key, tenant)}
   {_board_card(key, tenant)}
+  {_structures_card(key, tenant)}
   {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
   {sources_card}
@@ -6559,6 +6560,69 @@ def _image_model_card(key: str, tenant: str) -> str:
     <span class="mut">a plan&#39;s <code>generate_visual: no</code> keeps one
     email or article to approved photographs.</span>
   </form>
+</div>"""
+
+
+def _structures_card(key: str, tenant: str) -> str:
+    """The collective library of email structures, and the swipe board that
+    feeds it. On Brand beside the visual boards because it is the same idea
+    one channel over: a reference contributes words, never its own material.
+
+    SHARED, and rendered as shared — the library carries no account, and the
+    card says so, because a structure that looked like this brand's own would
+    invite somebody to put this brand's facts in its notes.
+    """
+    from . import email_structures as _es
+    rows = _es.library()
+    proposed = [r for r in rows if r["review"] == "proposed"]
+    approved = [r for r in rows if r["review"] == "approved"]
+
+    def _usable(st: dict) -> str:
+        ok, why = _es.usable_for(tenant, st)
+        return ("<span class=\"ok\">usable here</span>" if ok else
+                f'<span class="when">not for this brand — {_esc(why)}</span>')
+
+    def _one(st: dict, controls: str) -> str:
+        return (f'<div class="msg"><b>{_esc(st["name"])}</b> '
+                f'<span class="when">{_esc(st["source"])}'
+                + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
+                + (f' · used {st["used_count"]}×' if st["used_count"] else "")
+                + f'</span><br><code>{_esc(" → ".join(st["sequence"]))}</code>'
+                + (f'<br><span class="mut">{_esc(str(st["profile"].get("notes", ""))[:220])}</span>'
+                   if st["profile"].get("notes") else "")
+                + f'<br>{_usable(st)} {controls}</div>')
+
+    def _ctl(st: dict) -> str:
+        base = f'/admin/email_structure?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;id={_esc(st["id"])}'
+        return (f'<a href="{base}&amp;verdict=approved"><button class="sec">Approve</button></a> '
+                f'<a href="{base}&amp;verdict=rejected"><button class="sec">Reject</button></a>')
+
+    add = f"""
+    <form method="get" action="/admin/email_swipe" style="margin:8px 0">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
+      <button type="submit">Swipe this email</button>
+      <span class="when">read for its structure, in words — never its copy
+      or its pictures. One email's page, not a category.</span>
+    </form>"""
+
+    body = (add
+            + (f'<h4>Waiting for you ({len(proposed)})</h4>'
+               + "".join(_one(st, _ctl(st)) for st in proposed) if proposed else "")
+            + (f'<h4>In the library ({len(approved)})</h4>'
+               + "".join(_one(st, "") for st in approved) if approved else
+               '<p class="mut">Nothing in the library yet. The first approved '
+               'send files its shape here on its own; a swipe files one for '
+               'you to approve.</p>'))
+    return f"""
+<div class="card"><div class="head"><h2>Email structures</h2>
+  <span class="mut">shared across every account — shape only, never words</span></div>
+  <p class="when">A structure is the block order and why: where the picture
+  sits, how many asks and where, how dense. Every approved send files its
+  shape here once; a swipe from the gallery arrives as a proposal. Each is
+  checked against THIS brand's rules before its drafter ever sees it.</p>
+  {body}
 </div>"""
 
 

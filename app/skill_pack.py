@@ -2362,8 +2362,22 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     ctx.note(f"funnel stage: {plan['label']} — derived from a {warmth} list "
              f"on a{'n asking' if plan['asks'] else ' giving'} send")
 
+    # THE STRUCTURE THIS SEND IS BUILT ON, from the collective library — an
+    # approved shape that fits this intent and form, that THIS brand may use
+    # (`usable_for`: its notes pass the ban list, it needs nothing the brand
+    # lacks), and that this list has not just received. None means design
+    # fresh, which is what the drafter always did; the library only ever
+    # narrows a choice, never invents one.
+    from . import email_structures as _es
+    structure = _es.pick(ctx.tenant, intent=intent, fmt=fmt,
+                         recent_shapes=[h.get("shape") for h in hist if h.get("shape")])
+    if structure:
+        _es.mark_used(structure["id"])
+        ctx.note(f"structure: {structure['name']} — from the library, "
+                 f"{structure['source']}")
+
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
-            "funnel": plan,
+            "funnel": plan, "structure": structure,
             "deadline": str(ctx.bundle.get("deadline") or "").strip(),
             # A redraft's marching orders — set by the workroom's
             # Request-changes path, empty on a fresh draft. Rides `craft`
@@ -2412,6 +2426,9 @@ def _craft_brief(craft: dict) -> str:
         out += [f"\n## HOW IT LOOKS: {fmt['label']}", fmt["brief"],
                 "Blocks available to you for this send: "
                 + ", ".join(fmt["blocks"]) + " (use no others)."]
+    if craft.get("structure"):
+        from . import email_structures as _es
+        out.append(_es.brief(craft["structure"]))
     if craft.get("deadline"):
         out += ["\n## THE REAL DEADLINE (state it exactly, never soften or "
                 "inflate it)", str(craft["deadline"])]

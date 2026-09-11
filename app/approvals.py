@@ -457,6 +457,18 @@ def apply_decision(ap_id: str, decision: str) -> str:
                 got = _sp.push_campaign_to_esp(
                     ap.tenant or p.get("tenant", ""), p.get("output_id", ""))
                 if got.get("ok"):
+                    # THE OWNER'S RULE: an approved email's SHAPE joins the
+                    # collective library, once per distinct sequence, so it
+                    # can be built again with different words. Filed here,
+                    # where the approval is executed, because the approval
+                    # was the decision — not on emit, where nothing has been
+                    # decided yet. Never blocks the push.
+                    try:
+                        from . import email_structures as _es
+                        _es.file_from_output(p.get("output_id", ""),
+                                             by=getattr(ap, "approved_by", "") or "owner")
+                    except Exception:                                # noqa: BLE001
+                        pass
                     extra = (" (some images stayed hotlinked: "
                              + ", ".join(got["images_not_rehosted"][:3]) + ")"
                              if got.get("images_not_rehosted") else "")

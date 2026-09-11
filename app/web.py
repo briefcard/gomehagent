@@ -1228,6 +1228,57 @@ def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
         "site once per crawler, so give it a moment and refresh"))
 
 
+@app.get("/admin/email_swipe")
+def admin_email_swipe(key: str = Depends(admin_key), tenant: str = "",
+                      url: str = "", ui: int = 1):
+    """Swipe one gallery email onto the board and read its structure.
+
+    Two steps in one press: the screenshot is filed as REFERENCE (never a
+    picture for anything), then read once, in words, into a PROPOSED structure
+    that waits on the Brand tab for approval.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import email_structures as _es
+    got = _es.add_swipe(url)
+    if got.get("ok"):
+        read = _es.read_swipe(got["asset_id"])
+        msg = (f"swiped and read — {read.get('name', '')} is waiting for your "
+               f"approval" if read.get("ok") else
+               f"swiped, but the reading did not land — {read.get('why', '')}")
+        err = "" if read.get("ok") else msg
+        msg = msg if read.get("ok") else ""
+    else:
+        msg, err = "", got.get("why", "")
+    if not ui:
+        return {"swipe": got, "ok": bool(msg), "why": err}
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&key={quote(key)}"
+    back += f"&ok={quote(msg)}" if msg else f"&err={quote(err)}"
+    return RedirectResponse(back, 303)
+
+
+@app.get("/admin/email_structure")
+def admin_email_structure(key: str = Depends(admin_key), tenant: str = "",
+                          id: str = "", verdict: str = "", ui: int = 1):
+    """Approve or reject one structure in the collective library."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from . import email_structures as _es
+    if verdict not in ("approved", "rejected"):
+        return {"error": "verdict must be approved or rejected"}
+    said = (_es.approve(id) if verdict == "approved" else _es.reject(id))
+    if not ui:
+        return {"id": id, "said": said}
+    return RedirectResponse(
+        f"/admin/ui?tab=brand&tenant={quote(tenant)}&key={quote(key)}&ok={quote(said)}", 303)
+
+
 @app.get("/admin/ai_training")
 def admin_ai_training(key: str = Depends(admin_key), tenant: str = "",
                       stance: str = "", ui: int = 0):
