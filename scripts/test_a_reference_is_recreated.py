@@ -250,7 +250,13 @@ def main() -> int:
        str(sorted(er.LOOK)))
 
     # ------------------------------------------------------------------
-    print("\n— 3. the brand kit's colours are discarded (open until Phase 2) —")
+    print("\n— 3. the brand kit's colours are discarded — CLOSED by Phase 2 (2026-09-11) —")
+    # The entry that held this open measured `colors.*` alone — a PROXY —
+    # and stayed green after Phase 2 put the kit's colours under `palette.*`
+    # roles. A ledger that fails on good news has to be measuring the news:
+    # the claim is that a kit colour reaches SOME proposed field, so that is
+    # what is counted now, and the closed claim stays as a plain check so a
+    # regression shows here.
     kit = {"logo_url": "", "colors": ["#112233", "#445566", "#778899", "#aabbcc"],
            "fonts": {}}
     real_kit = brand_theme.canva_kit
@@ -260,14 +266,18 @@ def main() -> int:
     finally:
         brand_theme.canva_kit = real_kit
     fields = got.get("fields") or {}
-    colour_fields = {k: v[0] for k, v in fields.items() if k.startswith("colors.")}
-    kept = {c for c in kit["colors"] if any(c == v for v in colour_fields.values())}
-    print(f"  a kit of {len(kit['colors'])} colours proposes {colour_fields}")
-    still_broken(
-        "a four-colour brand kit proposes one role — the accent, from the first colour",
-        got.get("ok") and kept == {"#112233"} and set(colour_fields) == {"colors.accent",
-                                                                          "colors.accent_text"},
-        "Phase 2", "the deriver now proposes a palette of roles from the whole kit")
+    reached = {c for c in kit["colors"]
+               if any(c.lower() == str(v[0]).lower() for k, v in fields.items()
+                      if not k.startswith("_"))}
+    roles = sorted(k for k in fields if k.startswith("palette."))
+    unplaced = {c.lower() for c in (fields.get("_unplaced", ([], ""))[0] or [])}
+    print(f"  a kit of {len(kit['colors'])} colours proposes {roles}; unplaced, and said: {sorted(unplaced)}")
+    ck("every colour in a four-colour kit reaches a proposed role OR is named as one no role took "
+       "— nothing is discarded in silence (closed by Phase 2; the old entry counted colors.* "
+       "only and would never have flipped)",
+       got.get("ok") and {c.lower() for c in reached} | unplaced == {c.lower() for c in kit["colors"]}
+       and len(roles) >= 3 and (not unplaced or "no role took" in fields["_unplaced"][1]),
+       f"reached {sorted(reached)}, unplaced {sorted(unplaced)}")
     ck("the seven roles the theme knows are the ones the plan names",
        sorted(er._DEFAULT["colors"]) == ["accent", "accent_text", "bg", "border",
                                          "muted", "surface", "text"],

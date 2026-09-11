@@ -270,13 +270,17 @@ def main() -> int:  # noqa: PLR0915
        brand_theme.live_theme("eien") == {} and brand_theme.proposed("eien") == {})
     got4 = brand_theme.derive("eien")
     ck("derive succeeds with every source down", got4.get("ok") is True)
-    ck("all three sources named with why",
-       set(got4["unavailable"]) == {"canva", "shopify", "site"}
+    # Four since 2026-09-11: the brand's own product photographs propose
+    # palette roles (INITIATIVE-email-design.md, Phase 2) and are named with
+    # their fix like the other three when there are none on file.
+    ck("all four sources named with why",
+       set(got4["unavailable"]) == {"canva", "shopify", "site", "pictures"}
+       and "catalogue sync" in got4["unavailable"]["pictures"]
        and "no Shopify store connected" in got4["unavailable"]["shopify"]
        and "no domain" in got4["unavailable"]["site"])
-    ck("the theme is identity-only — nothing invented",
+    ck("the theme is identity-only — nothing invented, no palette either",
        got4["theme"].get("name") and "colors" not in got4["theme"]
-       and "logo_url" not in got4["theme"])
+       and "logo_url" not in got4["theme"] and "palette" not in got4["theme"])
     ck("the CAN-SPAM gap is named",
        any("footer.address" in g for g in got4["gaps"]))
 

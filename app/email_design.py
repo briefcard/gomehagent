@@ -453,3 +453,61 @@ def fields() -> list[tuple[str, str, tuple, object, str]]:
     for name, f in SECTION.items():
         rows.append(("section", name, f.values, f.default, f.meaning))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# The brand's pictures, by the kind of slot each can fill
+# ---------------------------------------------------------------------------
+#: How a slot's `imagery` kind is found among what is on file. Nothing new is
+#: filed for this: the catalogue sync marks the featured store image
+#: `packshot` (subject object), later store images are the product among
+#: other things, Drive photographs are `photo`, a pinned scene is `scene`,
+#: a surface is `surface`. A cut-out ("packshot-on-colour") is made at fill
+#: time by `creative.focused`, never stored, so it reads as a packshot here.
+_KIND_FIT = {
+    "packshot-on-plain": (("object", "packshot"), ("object", "")),
+    "packshot-on-colour": (("object", "packshot"), ("object", "")),
+    "lifestyle": (("photo", ""), ("scene", ""), ("object", "store-image")),
+    "flat-lay": (("photo", ""), ("scene", ""), ("object", "store-image")),
+    "portrait": (("photo", ""), ("scene", "")),
+    "texture": (("surface", ""),),
+}
+
+
+def assets_for(tenant: str, kind: str, aspect: str = "") -> dict:
+    """The brand's own publishable pictures that can fill a slot of this
+    `imagery` kind, best fit first — `{ok, kind, aspect, assets, why}`.
+    `assets` are the KbAsset rows; `aspect` rides along as the crop the slot
+    wants (the filler cuts to it through the CDN, Phase 5). An empty answer
+    says why by name, so a run that leaves a slot empty can say it too."""
+    from . import kb
+    fits = _KIND_FIT.get(kind)
+    if fits is None:
+        return {"ok": False, "kind": kind, "aspect": aspect, "assets": [],
+                "why": f"{kind!r} is not an imagery kind ({', '.join(_KIND_FIT)})"}
+    rows = [a for a in kb.assets(tenant) if (a.kind or "image") == "image"]
+    out, seen = [], set()
+    for subject, tag in fits:
+        for a in rows:
+            if a.id in seen or (a.subject or "") != subject:
+                continue
+            tags = [str(t) for t in (a.tags or [])]
+            if tag == "packshot" and "packshot" not in tags:
+                continue
+            if tag == "store-image" and not any(t.startswith("store-image:") and t != "store-image:1"
+                                                for t in tags):
+                continue
+            if tag == "" and subject == "object" and "packshot" in tags:
+                pass    # a packshot fits a plain-packshot slot as the second rank too
+            seen.add(a.id)
+            out.append(a)
+    why = "" if out else (f"no publishable picture on file fits a {kind} slot — "
+                          + {"texture": "file a surface photograph",
+                             "portrait": "file a photograph of a person, or a scene",
+                             }.get(kind, "run the catalogue sync, or file a photograph"))
+    return {"ok": bool(out), "kind": kind, "aspect": aspect, "assets": out, "why": why}
+
+
+def assets_by_kind(tenant: str) -> dict[str, int]:
+    """How many pictures could fill each imagery kind — the Brand tab's line."""
+    return {k: len(assets_for(tenant, k)["assets"]) for k in _KIND_FIT}

@@ -1487,7 +1487,7 @@ is filed, then run "both" on the same product and read the note's count.
 
 ---
 
-### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phase 0 of INITIATIVE-email-design.md; hash in the memory note)
+### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phases 0 `408a86e` and 1 `cc5d8b6` of INITIATIVE-email-design.md)
 
 **The owner's word**, on the first send built from a swiped structure:
 *"it is currently making the same email with slight layout differences,
@@ -1539,7 +1539,7 @@ suffers — the photograph callers lose nothing to the downscale.
 - **The campaign skill changes at ONE call site** (`skill_pack._build()`,
   the `email_render.render(...)` call) — a second edit there is a stop.
 
-**Phase 1, same day (hash in the memory note).** `app/email_design.py`:
+**Phase 1, same day (`cc5d8b6`).** `app/email_design.py`:
 `SCHEMA` (44 fields; `KINDS`, `SLOTS`, `GROUNDS` ⊂ `ROLES`; no free-text
 field), `normalize` (complete, idempotent, every drop a sentence with its
 reason), `house(look)` (today's renderer as a design, all 576 looks mapped
@@ -1553,8 +1553,27 @@ is closed so every value has a painter, and one walk (`fields()`) feeds the
 validator, the doc and the painter test**; **a migration is a boot-time
 backfill that writes only where empty**. Six guards, all `[ caught ]`.
 
+**Phase 2, same day (hash in the memory note).** `app/palette.py`
+(WCAG arithmetic; `fill` — every role from a source, an older colour, or
+one stated computed rule, labelled; `findings` with ratios; `rank_kit` —
+every kit colour placed by rule, the unplaced named; `from_pictures`).
+`email_render._DEFAULT["palette"]` is the same rule on the defaults. The
+deriver's four sources propose roles (a FOURTH, the brand's own packshots,
+lowest); `derive` fills and checks, and with nothing derived writes NO
+palette (absence survives); `approve` refuses a non-#hex by name, keeps
+given/edited roles and recomputes the rest around them; edits carry
+forward. Brand tab: swatches with provenance, live beside proposed, an
+input per role inside the approve form, findings, faces on file, pictures
+by slot kind. `email_design.assets_for`/`assets_by_kind`. Rules it adds:
+**a role's provenance is a source's name or `computed: <rule>` — never a
+stand-in attributed to a source**; **a ledger entry must measure the
+news** (the Phase 0 entry counted `colors.*` and never flipped; rewritten);
+**a guard whose test edits a value to an equivalent one goes UNDETECTED —
+edit to a value that must change the outcome**. Seven guards, all
+`[ caught ]`.
+
 **Owner's move:** the six decisions in the plan's §5 (defaults stand);
-then Phase 2.
+then Phase 3.
 
 ---
 

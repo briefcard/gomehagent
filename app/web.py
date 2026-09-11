@@ -1094,6 +1094,11 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     edits = {path: str(form.get(path, ""))
              for path, _label, _hint in ui._THEME_EDIT_FIELDS
              if str(form.get(path, "")).strip()}
+    # The palette of roles, one input per role on the same form — the roles
+    # come from the vocabulary, never a list kept here.
+    from .email_design import ROLES as _roles
+    edits.update({f"palette.{r}": str(form.get(f"palette.{r}", ""))
+                  for r in _roles if str(form.get(f"palette.{r}", "")).strip()})
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
            if got.get("ok") else ("err", got.get("error", "approve failed")))

@@ -3963,6 +3963,8 @@ _BRAND_CSS = """<style>
 .bt-table td,.bt-table th{border:1px solid var(--rule);padding:4px 8px;text-align:left}
 .bt-form input[type=text]{width:100%;box-sizing:border-box;padding:5px}
 .bt-form td{vertical-align:top}
+.sw{display:inline-block;width:14px;height:14px;border:1px solid var(--rule);border-radius:3px;vertical-align:middle;margin-right:6px}
+.bt-form input.role{width:7.5em;font-family:ui-monospace,monospace}
 /* A source row is a label and a URL side by side, each wide enough to READ
    at a glance — an unreadable URL in a list of sites is a list you cannot
    check. They grow to share the row and wrap on a phone. */
@@ -4035,6 +4037,63 @@ def _theme_preview(theme: dict) -> str:
                               preheader="Theme preview")
     return (f'<iframe sandbox="{PREVIEW_SANDBOX}" '
             f'srcdoc="{_esc(_preview_html(doc))}" class="bt-frame"></iframe>')
+
+
+def _palette_rows(proposed: dict, live: dict, sources: dict, findings: list,
+                  live_findings: list, tenant: str) -> str:
+    """The PALETTE OF ROLES on the Brand tab — every role a design may
+    resolve through, as a swatch with where it came from (a source's own
+    name, or `computed: <rule>`), beside the live one and an input to set
+    it. Contrast findings under it, named with their ratio. Then the faces
+    on file and how many of the brand's own pictures fit each kind of slot
+    — the three things a design needs from a brand (INITIATIVE-email-design
+    .md, Phase 2). Inside the approve form: act where you report."""
+    from . import email_design as _ed, email_render as _er
+    pp = dict(proposed.get("palette") or {})
+    lp = dict(live.get("palette") or {})
+    rows = ""
+    for role in _ed.ROLES:
+        pv, lv = pp.get(role, ""), lp.get(role, "")
+        came = sources.get(f"palette.{role}", "")
+        rows += (f"<tr><td><code>{_esc(role)}</code></td>"
+                 f"<td>{'<span class=sw style=background:' + _esc(pv) + '></span>' + _esc(pv) if pv else '<span class=mut>—</span>'}</td>"
+                 f"<td class='mut'>{_esc(came) if pv else ''}</td>"
+                 f"<td>{'<span class=sw style=background:' + _esc(lv) + '></span>' + _esc(lv) if lv else '<span class=mut>—</span>'}</td>"
+                 f"<td><input type='text' class='role' name='palette.{role}' "
+                 f"placeholder='{_esc(pv or lv or '#hex')}'></td></tr>")
+    f1 = "".join(f"<li>{_esc(x)}</li>" for x in findings)
+    f2 = "".join(f"<li>{_esc(x)}</li>" for x in live_findings)
+    found = ""
+    if f1:
+        found += f"<p><b>Contrast, proposed</b> — each pair below the bar:</p><ul>{f1}</ul>"
+    if f2:
+        found += f"<p><b>Contrast, live</b>:</p><ul>{f2}</ul>"
+    if pp and not f1:
+        found += "<p class='mut'>Every ground/ink pair in the proposal reads.</p>"
+    # The faces: the brand's own when a source supplied one; else said, and
+    # the design's classification chooses at render (owner's decision 1).
+    th = proposed or live or {}
+    faces = []
+    for role in ("heading", "body"):
+        stack = str((th.get("font") or {}).get(role) or "")
+        fam = stack.split(",")[0].strip().strip("'\"") if stack else ""
+        dflt = _er._DEFAULT["font"][role].split(",")[0].strip().strip("'\"")
+        faces.append(f"{role}: <b>{_esc(fam)}</b>" if fam and fam != dflt
+                     else f"{role}: <span class='mut'>none on file — the design's classification chooses</span>")
+    by_kind = _ed.assets_by_kind(tenant) if tenant else {}
+    pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in by_kind.items())
+    none = [k for k, n in by_kind.items() if not n]
+    return f"""<h4 style="margin:14px 0 4px">Palette of roles</h4>
+<p class="mut">A design names a role, never a colour; the brand's colour under
+that name is what ships. Every kit colour is placed by one stated rule; a role
+no source gave is computed by one and says so. Type a #hex to set a role by
+hand — it survives re-derives like every hand-set field.</p>
+<div class="tblwrap"><table class="bt-table"><tr><th>role</th><th>proposed</th>
+<th>came from</th><th>live</th><th>set</th></tr>{rows}</table></div>
+{found}
+<p><b>Faces on file</b> — {' · '.join(faces)}</p>
+<p><b>Pictures by the kind of slot they fit</b> — {pics or '<span class=mut>none on file</span>'}
+{('<br><span class=mut>none for ' + _esc(', '.join(none)) + ' — ' + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>') if none and tenant else ''}</p>"""
 
 
 def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
@@ -4518,6 +4577,10 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                    f"<small class='mut'>{_esc(hint)}</small></td>"
                    f"<td><input type='text' name='{path}' "
                    f"value='{_esc(node)}'></td></tr>")
+    palette_html = _palette_rows(prop.get("theme") or {}, live or {},
+                                 prop.get("sources") or (live.get("_meta") or {}).get("sources") or {},
+                                 st.get("findings") or [], st.get("live_findings") or [],
+                                 tenant)
     keyfield = f'<input type="hidden" name="key" value="{_esc(key)}">'
     # A control that can only fail teaches distrust of every control (the
     # Sources block's own rule about a store-sync button with no store). With
@@ -4535,6 +4598,7 @@ and hand-set fields survive future re-derives.</p>
 <form method="post" action="/admin/brand_theme/approve" class="bt-form">
   {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
   <div class="tblwrap"><table class="bt-table">{inputs}</table></div>
+  {palette_html}
   <p><button>Approve — this look ships</button></p>
 </form>"""
 

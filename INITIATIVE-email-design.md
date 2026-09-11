@@ -3,7 +3,7 @@
 > **THIS IS A PLAN, NOT A STATE FILE.** Written 2026-09-11 at commit `b4c0383`.
 > `BUILD-STATE.md` remains the record of what exists.
 >
-> **Phases 0 and 1 are built (2026-09-11). Phases 2–7 are not.**
+> **Phases 0, 1 and 2 are built (2026-09-11). Phases 3–7 are not.**
 >
 > §2 is a list of facts with `file:line`, each checkable in about a minute. If
 > they still hold, the plan holds. If one has changed, the phase resting on it
@@ -304,29 +304,69 @@ reader that tiles flipped two entries to FIXED).
   read yields a concrete order, the house leaves the order to the drafter,
   and a renderer reads `defaults[kind]` when a block has no section.
 
-### Phase 2 — The brand's design inputs (`app/brand_theme.py`, Brand tab)
-- **Palette of roles.** `derive` proposes all twelve roles: from the FULL
-  Canva kit (every colour, ranked by luminance into page/surface/ink/dark/
-  accent/secondary), Shopify Brand primary+secondary, the site's
-  `theme-color`, and — proposed, never assumed — the dominant colours of the
-  brand's own packshots (`kb.assets` OWNED + `imagegen` quantise, `:384`
-  already does 16-colour quantising). Missing roles are COMPUTED from what
-  exists (dark from ink; tint from accent at 8 % over surface; every `_ink`
-  by `_on`) and labelled computed in provenance, exactly as `accent_text` is
-  today. WCAG-ish contrast checked per role pair; a failing pair is a
-  named finding on the card, not a silent fallback.
-- **Type roles** `display/heading/body/kicker`: the brand's faces when a
-  source supplies them (`_stack`, `:79`); else `classification` left blank
-  so the design's classification chooses at render (Decision 1).
-- **Assets by slot kind**: a small mapping from what is on file (`subject`,
-  `kind`, `focused` cut-outs, `entity_key`) to the design's `imagery` kinds.
-  No new column — a reader, `email_design.assets_for(tenant, kind, aspect)`.
-- Brand tab: the palette as swatches with provenance and the contrast
-  findings; the two-line type card; the sample email previewed through the
-  proposed AND live palette (the existing derive/approve/edits-carry-forward
-  flow at `:441-560` — nothing new in how approval works). Owner's rule
-  (2026-08-21): a real console section, never a link.
-- Guard: `a_brand_kit_colour_is_not_discarded`; `a_computed_role_is_labelled`.
+### Phase 2 — The brand's design inputs — DONE 2026-09-11 (`app/palette.py`, `brand_theme.py`, Brand tab)
+- **`app/palette.py`** — the arithmetic (WCAG luminance and contrast, the
+  readable ink on a ground, mix, saturation), `fill(given, colors) →
+  (palette, how)`: every one of the twelve roles filled — a role a source
+  gave, else the older theme colour that already IS that role (`from
+  colors.<field>`, resolved to that field's source), else `computed: <one
+  stated rule>` (the dark ground is the ink, deepened when the ink is
+  light; the tint is the accent at eight per cent over the surface; every
+  `_ink` is the readable one on its ground; the secondary is the muted
+  colour standing in). `findings(palette)`: every ground/ink pair below
+  4.5:1 (3:1 for the muted line and for the accent as a text link) named
+  with its ratio. `rank_kit(hexes)`: the first colour is the accent, the
+  darkest the dark ground (and the ink when near black), the lightest the
+  page, a second light the tint, the most saturated remainder the
+  secondary — one stated rule each; what no role takes is returned to be
+  NAMED, never lost. `from_pictures(blobs)`: the most frequent real colour
+  across the packshots → secondary, the most frequent light one → tint;
+  white/black/grey never; a light colour is held to a gentler saturation bar
+  than a mid-tone (a bone is not a grey).
+- **`email_render._DEFAULT["palette"]`** = `palette.fill({}, _DEFAULT
+  ["colors"])` — the default palette and a brand's computed roles are ONE
+  rule in one place; `_theme()` merges `palette` like `colors`. No painter
+  reads it until Phase 4 (the ledger's seventh entry holds that open).
+- **`brand_theme`**: `_from_canva` places EVERY kit colour under a role by
+  `rank_kit` and names the unplaced under `partial`; `_from_shopify`
+  proposes `palette.accent`/`accent_ink` (primary) and `palette.secondary`
+  (secondary); `_from_site` proposes `palette.accent`; a FOURTH source,
+  `_from_pictures` (seam `packshot_blobs`), lowest precedence, names its fix
+  when there are no photographs. `_fill_palette` in `derive` fills and
+  checks; provenance per role is the source's own name, `<field's source> —
+  as <role>`, `hand-set`, or `computed: <rule>`; `findings` ride the
+  proposal and `status()`. **Absence survives:** with nothing derived, no
+  palette is written — the renderer's default applies at render. `approve`
+  refuses a role that is not a `#hex` by name, keeps every given/edited
+  role and recomputes the computed ones around them (an edited dark ground
+  takes a fresh readable ink), reports findings in its note; edited roles
+  carry forward across re-derives like every hand-set field.
+- **Brand tab** (`admin_ui._palette_rows`, inside the approve form — act
+  where you report): the twelve roles as swatches, proposed beside live,
+  where each came from, an input per role; contrast findings for the
+  proposal and the live palette; the faces on file (or "none on file — the
+  design's classification chooses", Decision 1); pictures counted by the
+  kind of slot they fit, an empty kind with its fix. The approve route reads
+  `palette.<role>` for every role in `email_design.ROLES`.
+- **`email_design.assets_for(tenant, kind, aspect)` / `assets_by_kind`**:
+  publishable pictures by imagery kind — packshots for packshot slots (a
+  cut-out is made at fill time, never stored), photographs then later store
+  images for lifestyle/flat-lay, surfaces for texture; a reference pin
+  fills nothing; an empty kind says its fix.
+- Ledger: entry 3 CLOSED — and the first cut of that entry counted
+  `colors.*` only, so it did not flip when the fix landed; it now measures
+  the claim (every kit colour reaches a role or is named unplaced). Six
+  entries open. Suite `scripts/test_a_brand_fills_the_roles.py`; seven
+  guards, all `[ caught ]`: `a_brand_kit_colour_is_not_discarded`,
+  `a_computed_role_is_labelled`, `a_contrast_failure_is_a_finding`,
+  `an_edited_role_is_refilled_around` (went UNDETECTED on the first cut —
+  the test edited navy to near-black and both took white ink; sharpened),
+  `a_role_that_is_not_a_colour_is_refused`,
+  `the_default_palette_is_the_one_rule`, `a_reference_pin_fills_no_slot`.
+- Not done, by decision: type roles as new theme fields — the brand's
+  `font.heading`/`font.body` already are the faces; Phase 4 maps
+  display/heading → heading and body/kicker → body, the classification
+  choosing only when a face is absent (Decision 1 default).
 
 ### Phase 3 — The reader, with eyes (`email_design.read`, replaces `_READ`)
 - **Tile the screenshot** with Pillow: 680-wide strips cut to the REVIEWER'S
@@ -505,10 +545,12 @@ a picture-to-picture fidelity judge once a screenshot capability exists.
 > **First move:** `python3 scripts/test_a_reference_is_recreated.py` — six
 > entries report `[ open ]`; that is the diagnosis, on record. Then re-check
 > `INITIATIVE-email-design.md` §2 against the tree (`git log -1`, then each
-> `file:line`). Phases 0 and 1 shipped 2026-09-11; start at Phase 2 (the
-> brand's palette of roles, type roles and assets-by-slot on the Brand tab),
-> and when a phase lands, its ledger entries go red — replace them with that
-> phase's own checks in the same commit.
+> `file:line`). Phases 0–2 shipped 2026-09-11; start at Phase 3 (the reader
+> with eyes — strips cut to the reviewer's tier, three passes, the reference
+> beside a live preview), and when a phase lands, its ledger entries go red —
+> replace them with that phase's own checks in the same commit. Check first
+> that the entry MEASURES THE NEWS: Phase 2's entry counted the wrong fields
+> and did not flip until it was rewritten.
 >
 > Then the phases in order. Under §4 unchanged: reproduce first; every fix
 > ships a sabotage guard that prints `[ caught ]`; ship via

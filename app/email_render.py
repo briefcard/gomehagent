@@ -52,6 +52,15 @@ _DEFAULT = {
                "border": "#e6e8ec"},
     "font": {"heading": "Georgia, 'Times New Roman', serif",
              "body": "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"},
+    # THE PALETTE OF ROLES (INITIATIVE-email-design.md, Phase 2): the twelve
+    # names a DESIGN's grounds resolve through — page, surface, ink, muted,
+    # accent, accent_ink, dark, dark_ink, tint, tint_ink, border, secondary.
+    # Filled below from `colors` by `palette.fill`, the one rule the deriver
+    # applies to a brand's own colours, so the default palette and a brand's
+    # computed roles are the same arithmetic. No painter reads it until
+    # Phase 4; it is in the shape now so a role is a theme field the owner
+    # can approve and edit like any other.
+    "palette": {},
     "radius": "8px", "width": 600,
     # A working nav, brand data: [{"label","url"}]. Empty renders no nav bar.
     "nav": [],
@@ -67,6 +76,14 @@ _DEFAULT = {
     "footer": {"brand": "", "address": "", "tagline": "",
                "socials": [], "disclaimer": ""},
 }
+
+
+def _default_palette() -> dict:
+    from . import palette as _pal
+    return _pal.fill({}, _DEFAULT["colors"])[0]
+
+
+_DEFAULT["palette"] = _default_palette()
 
 
 #: THE LOOK: how the blocks are ARRANGED. A closed vocabulary, every value a
@@ -114,7 +131,7 @@ def _theme(theme: dict, look: dict | None = None) -> dict:
     """A theme with every field filled from the default, deep enough for the
     nested dicts the renderer reads."""
     t = {**_DEFAULT, **(theme or {})}
-    for k in ("colors", "font", "footer", "sender"):
+    for k in ("colors", "font", "footer", "sender", "palette"):
         t[k] = {**_DEFAULT[k], **((theme or {}).get(k) or {})}
     # The look rides beside the theme, never inside it: a theme row on file
     # cannot smuggle an arrangement in, and a look cannot reach a colour.
