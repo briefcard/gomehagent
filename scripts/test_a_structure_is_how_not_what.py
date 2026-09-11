@@ -368,8 +368,12 @@ def main() -> int:
         ck("the reader asks for exactly the schema's fields, by name",
            all(f'"{name}"' in ed.prompt_global(False) for g in ed.SCHEMA for name in ed.SCHEMA[g])
            and all(f'"{name}"' in ed.prompt_strip(1, 1, 0, 10, 10) for name in ed.SECTION))
-        ck("and the drafter's brief says how it will be arranged",
-           "arrange it as" in es.brief(srow) and "hero overlay" in es.brief(srow))
+        bf = es.brief(srow)
+        ck("and the drafter's brief is the design's — its sections in order, the hero on the dark, "
+           "the headline's limit, the notes — never copy",
+           "THE DESIGN THIS SEND IS BUILT ON" in bf and "hero — overlay on the dark" in bf
+           and "products ×3" in bf and "≤6 words" in bf and "carries the opening" in bf
+           and "acme" not in bf.lower(), bf[:200])
         # A structure filed BEFORE designs existed takes one on a re-read,
         # without a second structure and without touching its review.
         with db.SessionLocal() as s:
@@ -434,29 +438,34 @@ def main() -> int:
            er.render(theme, blocks, look={"products": "grid2"}).count('href="https://x/a"') == 1
            and ">A<" in er.render(theme, blocks, look={"products": "grid2"}))
 
-        # THE SKILL PASSES IT — the claim turned into a check: the one render
-        # call in the campaign run reads the look off the picked structure.
+        # THE SKILL EXECUTES IT — the claim turned into a check: the one
+        # render call in the campaign run is `render_design`, and the design
+        # it is handed is a NAME assigned from the picked structure's design
+        # (`_design = _structure.get("design") or _ed.house()`). Not "a
+        # call named render_design exists" — `render_design(_ed.house(), …)`
+        # would pass that and render every send as the house.
         import ast as _ast
         src = pathlib.Path(skill_pack.__file__).read_text()
-        calls = [n for n in _ast.walk(_ast.parse(src)) if isinstance(n, _ast.Call)
-                 and isinstance(n.func, _ast.Attribute) and n.func.attr == "render"
-                 and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
-        # Not "a keyword named look is present" — `look=None` would pass
-        # that. The value must be a NAME, and that name must be assigned from
-        # the picked structure's profile in the same source.
         tree = _ast.parse(src)
+        calls = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+                 and isinstance(n.func, _ast.Attribute) and n.func.attr == "render_design"
+                 and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
         def _fed_from_structure(name: str) -> bool:
             for n in _ast.walk(tree):
                 if (isinstance(n, _ast.Assign) and len(n.targets) == 1
                         and isinstance(n.targets[0], _ast.Name) and n.targets[0].id == name):
                     seg = _ast.get_source_segment(src, n.value) or ""
-                    if 'get("structure")' in seg and '.get("look")' in seg:
+                    if '.get("design")' in seg and "_structure" in seg:
                         return True
             return False
-        looks = [next((k.value for k in c.keywords if k.arg == "look"), None) for c in calls]
-        ck("the campaign run's render call passes the structure's look",
-           calls and all(isinstance(v, _ast.Name) and _fed_from_structure(v.id) for v in looks),
-           f"{len(calls)} call(s)")
+        firsts = [c.args[0] if c.args else None for c in calls]
+        legacy = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+                  and isinstance(n.func, _ast.Attribute) and n.func.attr == "render"
+                  and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
+        ck("the campaign run's one render call executes the structure's design, and the fixed "
+           "template is called nowhere in the run",
+           len(calls) == 1 and all(isinstance(v, _ast.Name) and _fed_from_structure(v.id) for v in firsts)
+           and not legacy, f"{len(calls)} design call(s), {len(legacy)} legacy call(s)")
     finally:
         es.httpx.get = real_get
         llm.ask = real_ask

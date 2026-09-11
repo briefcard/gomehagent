@@ -198,7 +198,7 @@ def main() -> int:
        (rd.get("read") or {}).get("strips", 0) >= 3 and (rd.get("read") or {}).get("calls", 0)
        == (rd.get("read") or {}).get("strips", 0) + 2, str(rd.get("read")))
 
-    print("\n— 2. the renderer can paint one email — the fixed template stands until Phase 6 switches the run —")
+    print("\n— 2. the renderer can paint one email — CLOSED by Phases 4 and 6 (2026-09-11) —")
     theme = {"name": "T", "colors": {"accent": "#123456", "text": "#1c1e22",
                                      "bg": "#f2f3f5", "surface": "#ffffff"},
              "footer": {"address": "1 Main St"}}
@@ -218,7 +218,7 @@ def main() -> int:
     footer_of = lambda h: h[h.rfind("<tr><td style=\"padding:24px 32px 32px"):]
     n_frames, n_footers = len({frame_of(h) for h in renders}), len({footer_of(h) for h in renders})
     print(f"  `email_render.render` (the fixed template): {len(combos)} look combinations, "
-          f"{n_frames} frame(s), {n_footers} footer(s) — unchanged, and retired with Phase 6")
+          f"{n_frames} frame(s), {n_footers} footer(s) — no longer what a send is built with")
     # CLOSED by Phase 4: `render_design` executes a design — every schema
     # value drawn (walked in test_a_design_is_executed.py), colours only
     # through the palette, one design two brands. The layouts registry is
@@ -227,20 +227,33 @@ def main() -> int:
     ck("the renderer executes a design: render_design exists and every layout the schema names has a painter "
        "(closed by Phase 4)",
        callable(getattr(er, "render_design", None)) and set(_ed2.SECTION["layout"].values) == set(er.LAYOUTS))
-    # OPEN until Phase 6: the CAMPAIGN RUN still calls the fixed template.
-    # Measured on the call, by AST — not on a keyword's presence.
-    import ast as _ast
-    src = pathlib.Path(skill_pack.__file__).read_text()
-    tree = _ast.parse(src)
-    calls = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
-             and isinstance(n.func, _ast.Attribute) and n.func.attr in ("render", "render_design")
-             and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
-    names = sorted({c.func.attr for c in calls})
-    still_broken(
-        f"the campaign run renders through email_render.{'/'.join(names) or '?'} — the fixed "
-        f"template, not the structure's design",
-        names == ["render"], "Phase 6",
-        "skill_pack._build now calls render_design with the structure's design")
+    # CLOSED by Phase 6: the campaign run executes the structure's design.
+    # Measured on the call, by AST — the design handed to render_design is
+    # a NAME assigned from the picked structure, and the fixed template is
+    # called nowhere in the run.
+    if True:
+        import ast as _ast
+        src = pathlib.Path(skill_pack.__file__).read_text()
+        tree = _ast.parse(src)
+        calls = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+                 and isinstance(n.func, _ast.Attribute) and n.func.attr == "render_design"
+                 and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
+        def _fed_from_structure(name: str) -> bool:
+            for n in _ast.walk(tree):
+                if (isinstance(n, _ast.Assign) and len(n.targets) == 1
+                        and isinstance(n.targets[0], _ast.Name) and n.targets[0].id == name):
+                    seg = _ast.get_source_segment(src, n.value) or ""
+                    if '.get("design")' in seg and "_structure" in seg:
+                        return True
+            return False
+        firsts = [c.args[0] if c.args else None for c in calls]
+        legacy = [n for n in _ast.walk(tree) if isinstance(n, _ast.Call)
+                  and isinstance(n.func, _ast.Attribute) and n.func.attr == "render"
+                  and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
+        ck("the campaign run's one render call executes the structure's design — the fixed "
+           "template is called nowhere (closed by Phase 6)",
+           len(calls) == 1 and all(isinstance(v, _ast.Name) and _fed_from_structure(v.id) for v in firsts)
+           and not legacy, f"{len(calls)} design call(s), {len(legacy)} legacy call(s)")
     ck("the look vocabulary is the six axes the plan describes — a seventh would be news",
        sorted(er.LOOK) == ["bands", "cta", "density", "hero", "products", "scale"],
        str(sorted(er.LOOK)))

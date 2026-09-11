@@ -664,7 +664,27 @@ def _ps(b: dict, t: dict) -> str:
             f'{body}</div></td></tr>')
 
 
-_BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta,
+def _image(b: dict, t: dict) -> str:
+    """A section's own picture — a slot the design asked for, filled from
+    the brand's library (never by a drafter: the filler is the only writer
+    of this block). Cut to the slot's aspect through the CDN, treated as
+    the section's `image` says, live alt text always."""
+    if not b.get("image"):
+        return ""
+    pv, ph = _PAD[t["look"]["density"]]
+    treat = t.get("image") or "contained"
+    w = t["width"] if treat == "bleed" else t["width"] - 2 * ph
+    rad = {"rounded": "16px", "circle": "50%", "bleed": "0"}.get(treat, t["radius"])
+    frame = f'border:1px solid {t["colors"]["border"]};padding:8px;' if treat == "framed" else ""
+    cell = (f'padding:0' if treat == "bleed" else
+            f'background:{(t.get("palette") or {}).get("tint", t["colors"]["bg"])};padding:{pv + 10}px {ph}px'
+            if treat == "duotone" else f'padding:{pv}px {ph}px 0')
+    return (f'<tr><td align="center" style="{cell}"><img src="{_esc(_sized(b["image"], w * 2, t.get("aspect", "")))}" '
+            f'width="{w}" alt="{_esc(b.get("alt", ""))}" style="display:block;width:100%;max-width:{w}px;'
+            f'height:auto;border:0;border-radius:{rad};{frame}margin:0 auto"></td></tr>')
+
+
+_BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta, "image": _image,
            "heading": _heading, "products": _products, "divider": _divider,
            "quote": _quote, "list": _list, "stat": _stat, "banner": _banner,
            "signature": _signature, "ps": _ps}
@@ -958,6 +978,7 @@ def group_sections(blocks: list) -> list[dict]:
     out: list[dict] = []
     cur: dict | None = None
     runs = 0
+    pending: list[dict] = []          # pictures waiting for the run they belong to
     for b in blocks or []:
         kind = str((b or {}).get("type", ""))
         own = _BLOCK_KIND.get(kind)
@@ -967,30 +988,52 @@ def group_sections(blocks: list) -> list[dict]:
             continue
         if kind not in _BLOCKS:
             continue
+        if kind == "image" and cur is None:
+            # A picture never starts a run: the filler puts it before the
+            # words it was filled for, and it joins them.
+            pending.append(b)
+            continue
         starts = kind == "heading" or cur is None
         if starts and (kind == "heading" or kind != "cta"):
             runs += 1
             cur = {"kind": "intro" if runs == 1 else ("feature" if runs % 2 == 0 else "editorial"),
-                   "blocks": []}
+                   "blocks": pending}
+            pending = []
             out.append(cur)
         elif cur is None:            # an ask on its own
-            cur = {"kind": "closing", "blocks": []}
+            cur = {"kind": "closing", "blocks": pending}
+            pending = []
             out.append(cur)
         cur["blocks"].append(b)
+    if pending:
+        out.append({"kind": "editorial", "blocks": pending})
     return out
+
+
+#: A run of words is one family. The grouping names runs intro, feature and
+#: editorial by their position; a reading names them by judgment — so a
+#: group and a design section meet on the FAMILY, in order, never on which
+#: of the three either side happened to say.
+WORDS = ("intro", "feature", "editorial")
+
+
+def _family(kind: str) -> str:
+    return "words" if kind in WORDS else kind
 
 
 def _spec_for(design: dict, kind: str, taken: dict) -> dict:
     """How a section of this kind is painted: the design's per-kind default,
-    overlaid by the next unconsumed section of that kind in the design's
+    overlaid by the next unconsumed section of that FAMILY in the design's
     concrete order — a reference's hero treatment reaches the hero, its
-    product grid the products, in the order it had them."""
+    product grid the products, its second run of words the second run of
+    words, in the order it had them."""
     spec = dict((design.get("defaults") or {}).get(kind) or {})
-    order = [s for s in (design.get("sections") or []) if s.get("kind") == kind]
-    i = taken.get(kind, 0)
+    fam = _family(kind)
+    order = [s for s in (design.get("sections") or []) if _family(str(s.get("kind"))) == fam]
+    i = taken.get(fam, 0)
     if i < len(order):
         spec.update({k: v for k, v in order[i].items() if k not in ("kind", "slots")})
-        taken[kind] = i + 1
+        taken[fam] = i + 1
     return spec
 
 
@@ -1095,6 +1138,47 @@ def _lay_columns(blocks: list, t: dict, spec: dict) -> str:
     return _paint(heads, t) + cols + _paint(others, t)
 
 
+def _lay_split(blocks: list, t: dict, spec: dict) -> str:
+    """A picture beside the words: the section's picture block in one cell,
+    everything else in the other, the side the layout says. A hero section
+    keeps its own split (the hero painter draws it); a section with no
+    picture stacks."""
+    pics = [b for b in blocks if b.get("type") == "image" and b.get("image")]
+    if not pics or any(b.get("type") == "hero" for b in blocks):
+        return _paint(blocks, t)
+    words = [b for b in blocks if b is not pics[0]]
+    ph = _PAD[t["look"]["density"]][1]
+    half = (t["width"] - 2 * ph) // 2
+    inner = {**t, "width": half + 2 * ph}
+    pic = (f'<td width="{half}" valign="top"><table role="presentation" width="100%" cellpadding="0" '
+           f'cellspacing="0" border="0">{_image(pics[0], {**inner, "image": "rounded" if t.get("image") == "rounded" else "contained"})}</table></td>')
+    txt = (f'<td width="{half}" valign="middle"><table role="presentation" width="100%" cellpadding="0" '
+           f'cellspacing="0" border="0">{_paint(words, inner)}</table></td>')
+    cells = txt + pic if t.get("split") == "right" else pic + txt
+    return (f'<tr><td style="padding:0 {ph - 24 if ph > 24 else 0}px"><table role="presentation" width="100%" '
+            f'cellpadding="0" cellspacing="0" border="0"><tr>{cells}</tr></table></td></tr>')
+
+
+def _lay_collage(blocks: list, t: dict, spec: dict) -> str:
+    """Pictures two across, the words under them: the section's picture
+    blocks as a grid, then the rest. With one or no picture it stacks."""
+    pics = [b for b in blocks if b.get("type") == "image" and b.get("image")]
+    if len(pics) < 2:
+        return _paint(blocks, t)
+    rest = [b for b in blocks if b.get("type") != "image"]
+    pv, ph = _PAD[t["look"]["density"]]
+    gap = 12
+    cw = (t["width"] - 2 * ph - gap) // 2
+    cells = [(f'<td width="{cw}" valign="top" style="padding:0 0 {gap}px"><img src="{_esc(_sized(p["image"], cw * 2, "square"))}" '
+              f'width="{cw}" alt="{_esc(p.get("alt", ""))}" style="display:block;width:100%;max-width:{cw}px;'
+              f'height:auto;border:0;border-radius:{t["radius"]}"></td>') for p in pics[:4]]
+    spacer = f'<td width="{gap}" style="font-size:0;line-height:0">&nbsp;</td>'
+    rows = "".join("<tr>" + spacer.join(cells[i:i + 2]) + "</tr>" for i in range(0, len(cells), 2))
+    grid = (f'<tr><td style="padding:{pv}px {ph}px 0"><table role="presentation" width="100%" '
+            f'cellpadding="0" cellspacing="0" border="0">{rows}</table></td></tr>')
+    return grid + _paint(rest, t)
+
+
 def _lay_band(blocks: list, t: dict, spec: dict) -> str:
     """One thing on a band: everything centred in one generous cell, the
     ground the section's (an accent or a dark, in the design that asked
@@ -1116,16 +1200,18 @@ def _lay_band(blocks: list, t: dict, spec: dict) -> str:
             f'{"".join(inner)}</table></td></tr>')
 
 
-LAYOUTS = {"stack": _lay_stack, "split-left": _lay_stack, "split-right": _lay_stack,
-           "grid2": _lay_stack, "grid3": _lay_stack, "collage": _lay_stack,
+LAYOUTS = {"stack": _lay_stack, "split-left": _lay_split, "split-right": _lay_split,
+           "grid2": _lay_stack, "grid3": _lay_stack, "collage": _lay_collage,
            "overlay": _lay_stack, "columns": _lay_columns, "band": _lay_band,
            "letter": _lay_stack}
 #: Vocabulary values that are not drawn by this renderer YET, and which
 #: phase draws them — named so the painter walk skips them by name rather
 #: than passing them by accident.
-NOT_DRAWN_YET = {"imagery.hero": "Phase 5", "imagery.product": "Phase 5",
-                 "imagery.feature": "Phase 5", "palette.mood": "Phase 5 (a key the reader records; the brand's palette already decides)",
-                 "palette.accent_use": "Phase 5"}
+NOT_DRAWN_YET = {"imagery.hero": "Phase 5 — read by the filler, not the painter",
+                 "imagery.product": "Phase 5 — read by the filler, not the painter",
+                 "imagery.feature": "Phase 5 — read by the filler, not the painter",
+                 "palette.mood": "Phase 7 — a key the reader records; the brand's palette decides",
+                 "palette.accent_use": "Phase 7"}
 
 
 def _wrap(inner: str, ground: str, pad: int, rule_above: str = "none",

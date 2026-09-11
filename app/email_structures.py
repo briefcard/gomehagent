@@ -254,6 +254,7 @@ def file_from_output(output_id: str, *, by: str = "owner") -> dict:
     library grows by shapes, not by sends. Approved on arrival, because the
     approval was the decision.
     """
+    from . import email_design
     with db.SessionLocal() as s:
         out = s.get(db.Output, output_id)
         if out is None:
@@ -262,6 +263,13 @@ def file_from_output(output_id: str, *, by: str = "owner") -> dict:
         angle = str(out.angle or "")
         theme = str(out.theme or "")
         tenant = str(out.tenant or "")
+        # THE DESIGN THE SEND WAS BUILT ON rides the artifact's meta (Phase
+        # 5 — `Context.emit` writes the same meta onto `ArtifactBody`); an
+        # approved send files it with its shape, so the library keeps how
+        # approved emails looked, not only their order.
+        art = (s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == output_id)
+               .order_by(db.ArtifactBody.created_at.desc()).first())
+        design = dict(((getattr(art, "meta", None) or {}).get("design") or {}))
     if len(seq) < 2:
         return {"ok": False, "why": "this output recorded no block sequence"}
     # NAMED BY WHAT IT DOES, never by whose it was. The library is shared, so
@@ -275,7 +283,8 @@ def file_from_output(output_id: str, *, by: str = "owner") -> dict:
              + (", with proof" if prof["proof"] else ""))
     got = file_structure(name=label, sequence=seq, source="run",
                          review="approved", fits_intents=[angle] if angle in INTENTS else [],
-                         fits_formats=[theme] if theme in FORMATS else [], by=by)
+                         fits_formats=[theme] if theme in FORMATS else [], by=by,
+                         design=design if design else None)
     got["from_tenant_note"] = ("filed from an approved send; the account is "
                                "not recorded on the structure") if tenant else ""
     return got
@@ -477,9 +486,19 @@ def mark_used(structure_id: str) -> None:
 
 
 def brief(structure: dict) -> str:
-    """The words the drafter gets. The ORDER, and why — never any copy."""
+    """The words the drafter gets. The ORDER, and why — never any copy. A
+    structure carrying a design with a concrete order is briefed by that
+    (`email_design.brief`: its sections, their slots, the limits the type
+    scale imposes); the shape facts and the notes ride beneath either way."""
+    from . import email_design
     prof = structure.get("profile") or {}
     seq = structure.get("sequence") or []
+    dsg = email_design.brief(structure.get("design") or {})
+    if dsg:
+        lines = [dsg]
+        if prof.get("notes"):
+            lines.append("  What it does well: " + str(prof["notes"])[:400])
+        return "\n".join(lines)
     lines = [f"\n## THE STRUCTURE THIS SEND IS BUILT ON: {structure.get('name', '')}",
              "Compose the blocks in THIS order, each filled with this brand's own "
              "words, claims and pictures — the structure is borrowed, nothing "

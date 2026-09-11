@@ -1487,7 +1487,7 @@ is filed, then run "both" on the same product and read the note's count.
 
 ---
 
-### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phases 0 `408a86e`, 1 `cc5d8b6`, 2 `fb42809` of INITIATIVE-email-design.md)
+### The reference's whole design is recreated; the brand fills it — 2026-09-11 (Phases 0 `408a86e`, 1 `cc5d8b6`, 2 `fb42809`, 3 `95c7936`, 4 `e1a4a21` of INITIATIVE-email-design.md)
 
 **The owner's word**, on the first send built from a swiped structure:
 *"it is currently making the same email with slight layout differences,
@@ -1572,7 +1572,7 @@ news** (the Phase 0 entry counted `colors.*` and never flipped; rewritten);
 edit to a value that must change the outcome**. Seven guards, all
 `[ caught ]`.
 
-**Phase 3, same day (hash in the memory note).** `email_design.read`
+**Phase 3, same day (`95c7936`).** `email_design.read`
 replaces the first reader (deleted, with `_READ`): strips cut to the
 reviewer's tier with the refusal switch on every block, a contact sheet,
 the phone render when served, three passes with prompts derived from
@@ -1588,7 +1588,7 @@ a later phase deletes goes STALE and the anchors ratchet says so** —
 retarget it at what is still open. Seven guards, all `[ caught ]`. NOT
 proven live — the first real swipe is the owner's press.
 
-**Phase 4, same day (hash in the memory note).** `email_render.render_design`:
+**Phase 4, same day (`e1a4a21`).** `email_render.render_design`:
 blocks grouped into sections, a concrete order consumed by kind, ONE style
 context per section with the palette substituted for its ground so the
 thirteen block painters paint on any ground unchanged; the type system,

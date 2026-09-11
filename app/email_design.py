@@ -946,3 +946,125 @@ def preview_html(tenant: str, design: dict) -> tuple[str, str]:
     html = email_render.render_design(design, theme, preview_blocks(tenant),
                                       preheader="Design preview")
     return html, note
+
+
+# ---------------------------------------------------------------------------
+# CONTENT FITS THE DESIGN (Phase 5): the drafter's brief, and the filler
+# ---------------------------------------------------------------------------
+#: How many words a headline may run at each scale — a poster headline is
+#: four words, not a sentence; the drafter is told, and the renderer's type
+#: scale is why.
+_HEADLINE_WORDS = {"modest": 10, "large": 8, "display": 6, "poster": 4}
+_SLOT_WORDS = {"kicker": "at most 3 words", "sub": "one line, at most 18 words",
+               "body": "40–90 words", "caption": "at most 12 words",
+               "list": "3–5 short items", "cta": "2–4 words, the one ask",
+               "quote": "an APPROVED claim, verbatim, or leave the slot and the section drops",
+               "stat": "one figure from an approved claim, with its caption",
+               "signature": "the sender on file signs; write the sign-off line only",
+               "ps": "one or two sentences carrying the same link"}
+#: The imagery kind a section's picture slot draws from.
+_IMAGERY_OF = {"hero": "hero", "products": "product"}
+
+
+def brief(design: dict) -> str:
+    """The words the drafter gets for a design with a concrete order: each
+    section, what it is for, its slots with the LIMITS the design's type
+    imposes — never any copy. '' for a design with no order (the house),
+    where the drafter composes its own blocks as before."""
+    secs = design.get("sections") or []
+    if not secs:
+        return ""
+    t = design.get("type") or {}
+    hw = _HEADLINE_WORDS.get(t.get("scale", "modest"), 10)
+    lines = ["\n## THE DESIGN THIS SEND IS BUILT ON — its sections, in this order",
+             "Write ONE block per slot, in this order, in this brand's own words, "
+             "claims and pictures. The design is borrowed; nothing in it is."]
+    case = {"upper": "set in capitals", "title": "set in title case"}.get(t.get("heading_case"), "")
+    lines.append(f"  Headlines: at most {hw} words ({t.get('scale', 'modest')} scale"
+                 + (f", {case}" if case else "") + "). A kicker is a label, not a sentence.")
+    for i, s in enumerate(secs, 1):
+        slots = []
+        for slot in s.get("slots") or []:
+            name, _, n = slot.partition(":")
+            if name == "headline":
+                slots.append(f"headline (≤{hw} words)")
+            elif name == "products":
+                slots.append(f"products ×{n or 1} — each name stands on its own"
+                             + (", one line each" if s.get("layout") in ("grid2", "grid3") else ""))
+            elif name == "image":
+                slots.append(f"picture ×{n or 1} — from the brand's own library; you write its alt line only")
+            else:
+                slots.append(f"{name} ({_SLOT_WORDS.get(name, 'brief')})")
+        where = f"{s.get('layout', 'stack')} on the {s.get('bg', 'surface')}"
+        lines.append(f"  {i}. {s.get('kind', '')} — {where}: " + ("; ".join(slots) if slots else "no copy"))
+    c = design.get("cta") or {}
+    lines.append(f"  The ask is a {c.get('style', 'filled')} button; write its label as a verb phrase.")
+    return "\n".join(lines)
+
+
+def fill(tenant: str, design: dict, blocks: list, note=None) -> tuple[list, dict]:
+    """The validated blocks with the design's PICTURE slots filled from the
+    brand's own library — by the imagery kind the design names for that
+    section and the aspect the slot wants — and every slot it could not
+    fill NAMED, never silent. `(blocks, report)`; `report` = {filled,
+    missed, notes}. A picture is added, never a word; the blocks the
+    drafter wrote are untouched.
+
+    Sections are consumed the way the renderer consumes them — the k-th
+    concrete section of a kind takes the k-th picture — so the filler and
+    the painter agree on which section a picture belongs to. Drawing a
+    picture when none fits (`creative.generate`) is not wired here yet;
+    the miss says so and the section degrades to its words."""
+    from . import email_render
+    secs = [s for s in (design.get("sections") or [])]
+    if not secs:
+        return list(blocks or []), {"filled": 0, "missed": [], "notes": []}
+    grouped = email_render.group_sections(blocks or [])
+    taken: dict = {}
+    used: set = set()
+    out: list = []
+    report = {"filled": 0, "missed": [], "notes": []}
+    for g in grouped:
+        kind = g["kind"]
+        fam = email_render._family(kind)
+        order = [s for s in secs if email_render._family(str(s.get("kind"))) == fam]
+        i = taken.get(fam, 0)
+        spec = order[i] if i < len(order) else None
+        taken[fam] = i + 1
+        blocks_g = list(g["blocks"])
+        wants = 0
+        for slot in (spec or {}).get("slots") or []:
+            name, _, n = slot.partition(":")
+            if name == "image":
+                wants = int(n or 1)
+        has_pic = any(b.get("type") in ("hero", "image") and b.get("image") for b in blocks_g)
+        if spec and wants and not (kind == "hero" and has_pic):
+            ikind = (design.get("imagery") or {}).get(_IMAGERY_OF.get(kind, "feature"), "lifestyle")
+            got = assets_for(tenant, ikind, spec.get("aspect", ""))
+            cands = [a for a in got["assets"] if a.id not in used]
+            if kind == "hero" and blocks_g and blocks_g[0].get("type") == "hero":
+                if cands:
+                    blocks_g[0] = {**blocks_g[0], "image": cands[0].url,
+                                   "alt": blocks_g[0].get("alt") or (cands[0].title or "")}
+                    used.add(cands[0].id)
+                    report["filled"] += 1
+                else:
+                    report["missed"].append(f"the hero's picture — {got['why']}")
+            else:
+                n_got = 0
+                for a in cands[:wants]:
+                    blocks_g.insert(n_got, {"type": "image", "image": a.url, "alt": a.title or ""})
+                    used.add(a.id)
+                    n_got += 1
+                report["filled"] += n_got
+                if n_got < wants:
+                    report["missed"].append(
+                        f"{wants - n_got} of {wants} picture(s) for the {kind} section ({ikind}) — {got['why']}")
+        out += blocks_g
+    for m in report["missed"]:
+        report["notes"].append("not filled: " + m + "; the section keeps its words")
+        if note:
+            note("design slot not filled — " + m)
+    if note and report["filled"]:
+        note(f"design pictures filled from the brand's own library: {report['filled']}")
+    return out, report

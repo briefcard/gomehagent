@@ -3599,23 +3599,41 @@ def _run_campaign_email(ctx: Context) -> dict:
         _undouble_blocks(blocks)
         c["preheader"] = _undouble(c.get("preheader", ""))
         c["subject"] = _undouble(c.get("subject", ""))
-        # THE LOOK OF THE STRUCTURE THIS SEND IS BUILT ON. A structure carried
-        # block ORDER only, and the renderer painted every block one fixed
-        # way — so a send built on a swiped shape read as the house template
-        # with the swipe's sequence, "not anywhere near the structure /
-        # styling / layout of the email reference" (owner, 2026-09-11). The
-        # arrangement the swipe was read to have rides here; the colours and
-        # typefaces stay the theme's, because those are the brand.
-        _look = ((craft.get("structure") or {}).get("profile") or {}).get("look")
-        html = email_render.render(theme, blocks,
-                                   preheader=c.get("preheader", ""),
-                                   # Omnisend has no view-in-browser variable —
-                                   # its caps say so, and a header link no
-                                   # variable can fill ships as literal text.
-                                   webview=webview, look=_look)
-        if _look:
-            ctx.note("arranged as the structure's look: "
-                     + ", ".join(f"{k} {str(v).lower()}" for k, v in _look.items()))
+        # THE DESIGN OF THE STRUCTURE THIS SEND IS BUILT ON — the one seam
+        # (INITIATIVE-email-design.md, Phase 6). A structure carried block
+        # order and six toggles, and the renderer painted one email around
+        # them: "the same email with slight layout differences" (owner,
+        # 2026-09-11). The structure's whole DESIGN rides here now — frame,
+        # type, grounds as roles, each section's layout and slots, the ask,
+        # the footer — executed with THIS brand's palette, faces and pictures.
+        # A send with no structure is built on the house design, which is
+        # today's email exactly. The colours are the brand's roles, never the
+        # reference's; the pictures the brand's own, filled by slot; the words
+        # the drafter's, gated as before.
+        from . import email_design as _ed
+        _structure = craft.get("structure") or {}
+        _design = _structure.get("design") or _ed.house()
+        blocks, _filled = _ed.fill(ctx.tenant, _design, blocks, note=ctx.note)
+        html = email_render.render_design(_design, theme, blocks,
+                                          preheader=c.get("preheader", ""),
+                                          # Omnisend has no view-in-browser variable —
+                                          # its caps say so, and a header link no
+                                          # variable can fill ships as literal text.
+                                          webview=webview)
+        if _structure:
+            _pal = email_render._theme(theme)["palette"]
+            _faces = email_render._faces(email_render._theme(theme), _design.get("type") or {})[0]
+            _own = {r for r in ("heading", "body")
+                    if str(theme.get("font", {}).get(r) or "") and
+                    str(theme["font"][r]) != email_render._DEFAULT["font"][r]}
+            ctx.note("recreated from " + str(_structure.get("name", "")) + ": "
+                     + _ed.summary(_design)
+                     + "; grounds → " + ", ".join(f"{r} {_pal[r]}" for r in ("page", "surface", "dark", "tint", "accent"))
+                     + "; faces: " + ", ".join(f"{r} {'the brand\'s own' if r in _own else 'chosen by the design\'s class'}"
+                                               for r in ("heading", "body"))
+                     + f"; pictures filled {_filled['filled']}"
+                     + (f", not filled {len(_filled['missed'])}" if _filled["missed"] else ""))
+        state.update(design=_design, structure_id=str(_structure.get("id") or ""))
         native = esp.personalize(ctx.tenant, html)
         state.update(
             copy=c, blocks=blocks,
@@ -3821,6 +3839,10 @@ def _run_campaign_email(ctx: Context) -> dict:
                       "basis": basis, "intent": craft.get("intent", ""),
                       "format": craft.get("format", ""),
                       "shape": [b.get("type", "?") for b in state["blocks"]],
+                      # THE DESIGN IT WAS BUILT ON, so an approved send files
+                      # it into the library with its shape (Phase 5).
+                      "design": state.get("design") or {},
+                      "structure_id": state.get("structure_id", ""),
                       "sendable": not missing, "missing_to_send": missing},
         redraft=_repair if basis == "model" else None)
 
