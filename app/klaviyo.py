@@ -102,13 +102,35 @@ def segments(tenant: str) -> dict:
     `esp.PROFILES["klaviyo"]["audience_fn"]` names this, and the console reads
     it to offer the owner a list rather than a box to type an id into.
     """
-    got = call(tenant, "GET", "/segments/", params={"page[size]": 100})
-    if not got["ok"]:
-        return {"ok": False, "error": got["error"], "segments": []}
-    out = []
-    for row in (got["data"] or {}).get("data") or []:
-        attrs = row.get("attributes") or {}
-        out.append({"id": row.get("id", ""), "name": attrs.get("name", "")})
+    # THE DOCUMENTED PAGE SIZE, AND EVERY PAGE. developers.klaviyo.com,
+    # Get Segments: `page[size]` — "Default: 10. Min: 1. Max: 10." The first
+    # version asked for 100 and the API refused every campaign's targeting
+    # read with "Page size must be an integer between 1 and 10: 100" — the
+    # owner met it on 2026-09-11 as "the campaign is untargeted so far".
+    # Pagination is a cursor: the response's `links.next` is a complete URL
+    # carrying `page[cursor]`, followed until it is absent. A mid-pagination
+    # failure fails the whole read, for the same reason Omnisend's does — a
+    # partial audience list is the duplicate-segment risk a full read exists
+    # to remove.
+    from urllib.parse import parse_qs, urlparse
+    out, pages = [], 0
+    params: dict = {"page[size]": 10}
+    while pages < 50:
+        got = call(tenant, "GET", "/segments/", params=params)
+        if not got["ok"]:
+            return {"ok": False, "error": got["error"], "segments": []}
+        data = got["data"] or {}
+        for row in data.get("data") or []:
+            attrs = row.get("attributes") or {}
+            out.append({"id": row.get("id", ""), "name": attrs.get("name", "")})
+        pages += 1
+        nxt = str((data.get("links") or {}).get("next") or "")
+        if not nxt:
+            break
+        cursor = (parse_qs(urlparse(nxt).query).get("page[cursor]") or [""])[0]
+        if not cursor:
+            break
+        params = {"page[size]": 10, "page[cursor]": cursor}
     return {"ok": True, "segments": out}
 
 

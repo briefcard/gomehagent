@@ -1298,12 +1298,15 @@ def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
 
 @app.get("/admin/email_swipe")
 def admin_email_swipe(key: str = Depends(admin_key), tenant: str = "",
-                      url: str = "", ui: int = 1):
+                      url: str = "", asset: str = "", ui: int = 1):
     """Swipe one gallery email onto the board and read its structure.
 
     Two steps in one press: the screenshot is filed as REFERENCE (never a
     picture for anything), then read once, in words, into a PROPOSED structure
-    that waits on the Brand tab for approval.
+    that waits on the Brand tab for approval. With `asset` instead of `url`
+    an already-swiped screenshot is read AGAIN — the way a structure filed
+    before the renderer learned to arrange gets its look without a second
+    copy of the picture.
     """
     from urllib.parse import quote
 
@@ -1311,7 +1314,7 @@ def admin_email_swipe(key: str = Depends(admin_key), tenant: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import email_structures as _es
-    got = _es.add_swipe(url)
+    got = {"ok": True, "asset_id": asset} if asset else _es.add_swipe(url)
     if got.get("ok"):
         read = _es.read_swipe(got["asset_id"])
         msg = (f"swiped and read — {read.get('name', '')} is waiting for your "

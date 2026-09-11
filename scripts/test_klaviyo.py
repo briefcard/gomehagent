@@ -210,6 +210,37 @@ def main() -> int:
        "the sentence survives for the case where it is true")
 
     print()
+    print("— the audience read asks for the documented page size, and every page —")
+    # developers.klaviyo.com, Get Segments: page[size] "Default: 10. Min: 1.
+    # Max: 10." The adapter asked for 100 and every campaign's targeting read
+    # was refused — the owner's "the campaign is untargeted so far" (2026-09-11).
+    pages = {
+        "": {"ok": True, "data": {
+            "data": [{"id": f"S{i}", "attributes": {"name": f"seg {i}"}} for i in range(10)],
+            "links": {"next": "https://a.klaviyo.com/api/segments/?page%5Bcursor%5D=CUR2&page%5Bsize%5D=10"}}},
+        "CUR2": {"ok": True, "data": {
+            "data": [{"id": "S10", "attributes": {"name": "seg 10"}}],
+            "links": {"next": None}}},
+    }
+    SENT.clear()
+
+    def _paged(tenant, method, path, *, payload=None, params=None):
+        SENT.append({"method": method, "path": path, "params": dict(params or {})})
+        if params and int(params.get("page[size]", 0)) > 10:
+            return {"ok": False, "error": "400: Page size must be an integer between 1 and 10: "
+                                          + str(params["page[size]"])}
+        return pages[str((params or {}).get("page[cursor]", ""))]
+    klaviyo.call = _paged
+    got = klaviyo.segments("wm")
+    ck("the read succeeds — page size is within the documented maximum",
+       got["ok"] and all(int(c["params"]["page[size]"]) <= 10 for c in SENT),
+       str(got.get("error", ""))[:80])
+    ck("and it follows links.next until there is none — every segment, not page one",
+       len(got["segments"]) == 11 and len(SENT) == 2
+       and SENT[1]["params"].get("page[cursor]") == "CUR2",
+       f"{len(got['segments'])} segment(s) over {len(SENT)} page(s)")
+
+    print()
     print("— the API's own words survive —")
     klaviyo.call = klaviyo._call
     with db.SessionLocal() as s:

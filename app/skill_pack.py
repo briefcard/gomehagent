@@ -3599,12 +3599,23 @@ def _run_campaign_email(ctx: Context) -> dict:
         _undouble_blocks(blocks)
         c["preheader"] = _undouble(c.get("preheader", ""))
         c["subject"] = _undouble(c.get("subject", ""))
+        # THE LOOK OF THE STRUCTURE THIS SEND IS BUILT ON. A structure carried
+        # block ORDER only, and the renderer painted every block one fixed
+        # way — so a send built on a swiped shape read as the house template
+        # with the swipe's sequence, "not anywhere near the structure /
+        # styling / layout of the email reference" (owner, 2026-09-11). The
+        # arrangement the swipe was read to have rides here; the colours and
+        # typefaces stay the theme's, because those are the brand.
+        _look = ((craft.get("structure") or {}).get("profile") or {}).get("look")
         html = email_render.render(theme, blocks,
                                    preheader=c.get("preheader", ""),
                                    # Omnisend has no view-in-browser variable —
                                    # its caps say so, and a header link no
                                    # variable can fill ships as literal text.
-                                   webview=webview)
+                                   webview=webview, look=_look)
+        if _look:
+            ctx.note("arranged as the structure's look: "
+                     + ", ".join(f"{k} {str(v).lower()}" for k, v in _look.items()))
         native = esp.personalize(ctx.tenant, html)
         state.update(
             copy=c, blocks=blocks,

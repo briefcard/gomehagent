@@ -108,6 +108,25 @@ def profile_of(blocks: list) -> dict:
     }
 
 
+def look_of(raw: dict | None) -> dict:
+    """The arrangement a swipe was read to have, kept to the renderer's own
+    vocabulary (`email_render.LOOK`): a key the renderer does not draw is
+    dropped, a value it does not know is dropped, and what is left is what
+    the structure will actually reproduce. Colours and typefaces are not in
+    the vocabulary, so a reading cannot carry them even if the model
+    volunteered them — the brand's theme is the only source of those."""
+    from . import email_render
+    out = {}
+    for k, vals in email_render.LOOK.items():
+        v = (raw or {}).get(k)
+        if k == "bands":
+            if isinstance(v, bool):
+                out[k] = v
+        elif isinstance(v, str) and v.strip().lower() in vals:
+            out[k] = v.strip().lower()
+    return out
+
+
 def requires_of(sequence) -> list:
     """What a brand needs to have before this structure can be used."""
     out = []
@@ -136,8 +155,13 @@ def find_by_sequence(sequence) -> db.EmailStructure | None:
 def file_structure(*, name: str, sequence: list, source: str, review: str,
                    profile: dict | None = None, fits_intents=(), fits_formats=(),
                    source_url: str = "", source_asset_id: str = "",
-                   notes: str = "", by: str = "") -> dict:
+                   notes: str = "", by: str = "", look: dict | None = None) -> dict:
     """Put one structure in the library, once per distinct sequence.
+
+    `look` is the arrangement (hero treatment, type scale, density, bands,
+    button style, product layout) — filtered through `look_of` so only what
+    the renderer can draw is kept. It lives in `profile["look"]`, beside the
+    facts about the sequence, and rides to the renderer at use.
 
     `notes` are checked with `craft.leaks` BEFORE filing: a structure that
     names a brand, a URL or a person is one that would carry another account's
@@ -159,11 +183,25 @@ def file_structure(*, name: str, sequence: list, source: str, review: str,
                                      "fact about anyone")}
     have = find_by_sequence(seq)
     if have is not None:
+        # A structure filed before the look was read (or read again after
+        # the renderer learned a new axis) takes the arrangement now; its
+        # sequence, name and review are untouched, so a re-read never undoes
+        # an approval.
+        if lk := look_of(look):
+            with db.SessionLocal() as s:
+                row = s.get(db.EmailStructure, have.id)
+                prof = dict(row.profile or {})
+                if prof.get("look") != lk:
+                    prof["look"] = lk
+                    row.profile = prof
+                    s.commit()
         return {"ok": True, "id": have.id, "existing": True,
                 "name": have.name, "review": have.review}
     prof = dict(profile or profile_of([{"type": t} for t in seq]))
     if notes:
         prof["notes"] = notes[:600]
+    if lk := look_of(look):
+        prof["look"] = lk
     with db.SessionLocal() as s:
         row = db.EmailStructure(
             name=(name or signature(seq))[:120], source=source,
@@ -292,12 +330,33 @@ def usable_for(tenant: str, structure: dict) -> tuple[bool, str]:
             return False, "it needs product blocks and this brand has no products on file"
         if need == "proof" and not kb.claims(tenant):
             return False, "it needs proof blocks and this brand has no approved claim"
-        if need == "hero":
-            from . import creative
-            ill = creative.can_illustrate(tenant)
-            if not ill.get("ok"):
-                return False, "it leads with a picture and this brand cannot illustrate anything yet"
+        if need == "hero" and not can_hero(tenant):
+            return False, ("it leads with a picture and this brand has none to "
+                           "lead with — no publishable photograph, no product "
+                           "with a store image, and nothing it can draw")
     return True, ""
+
+
+def can_hero(tenant: str) -> bool:
+    """Whether an EMAIL for this brand can open on a picture.
+
+    NOT the same question as `creative.can_illustrate`, and the difference
+    refused a usable structure on 2026-09-11. The campaign run has a fallback
+    the library count does not see: when no library photograph fits, it leads
+    with the subject product's own store image — the same URL the catalogue
+    sync files as owned — and says so. So a brand can send hero-led emails
+    with an empty picture library, and a check that only read the library
+    told the owner the Ayoh structure was "not for this brand" while that
+    brand's emails were going out with a hero on them.
+    """
+    from . import creative, kb
+    if creative.can_illustrate(tenant).get("ok"):
+        return True
+    # `kb.entities` returns rows; the store image lives in the typed
+    # attributes bag, which is where the catalogue sync files it and where the
+    # run reads it from (`ents` is built from that bag).
+    return any(((getattr(e, "attributes", None) or {}).get("image") or "").strip()
+               for e in kb.entities(tenant))
 
 
 def eligible(tenant: str, *, intent: str = "", fmt: str = "",
@@ -393,6 +452,12 @@ def brief(structure: dict) -> str:
         lines.append("  Shape: " + "; ".join(facts) + ".")
     if prof.get("notes"):
         lines.append("  What it does well: " + str(prof["notes"])[:400])
+    if lk := prof.get("look"):
+        said = ", ".join(f"{k} {str(v).lower()}" for k, v in lk.items())
+        lines.append("  The renderer will arrange it as: " + said + ". Write for "
+                     "that shape — a display headline is short; a grid of "
+                     "products needs each name to stand on its own; a text-link "
+                     "ask is one plain sentence.")
     return "\n".join(lines)
 
 
@@ -495,6 +560,18 @@ offer. Answer as JSON with exactly these keys:
   "notes": one or two sentences on what the structure does well — the
            arrangement, the rhythm, where the ask lands. No brand names, no
            product names, no copy, no URLs.
+  "look": how it is ARRANGED, as an object with exactly these keys and only
+          these values —
+            "hero": "contained" (picture, then headline under it) |
+                    "bleed" (picture edge to edge, no rounding) |
+                    "overlay" (headline ON the picture) |
+                    "split" (picture one side, headline the other)
+            "scale": "modest" (headline about body size x1.5) | "display" (very large headline)
+            "density": "tight" | "regular" | "airy" (how much space between sections)
+            "bands": true if sections sit on alternating background bands, else false
+            "cta": "block" (a button) | "full" (a full-width bar) | "pill" (rounded button) | "link" (a text link with an arrow)
+            "products": "rows" (one product per row) | "grid2" (two across) | "grid3" (three across)
+          Describe the arrangement only — never a colour, a typeface or a picture's content.
 Nothing outside the JSON."""
 
 
@@ -542,6 +619,7 @@ def read_swipe(asset_id: str) -> dict:
         fits_intents=data.get("fits_intents") or [],
         fits_formats=data.get("fits_formats") or [],
         source_url=src or url, source_asset_id=asset_id,
-        notes=str(data.get("notes") or ""))
+        notes=str(data.get("notes") or ""),
+        look=data.get("look") if isinstance(data.get("look"), dict) else None)
     got["read"] = data
     return got

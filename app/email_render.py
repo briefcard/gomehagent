@@ -69,12 +69,56 @@ _DEFAULT = {
 }
 
 
-def _theme(theme: dict) -> dict:
+#: THE LOOK: how the blocks are ARRANGED. A closed vocabulary, every value a
+#: design pattern rather than anyone's artwork — the hero's treatment, the
+#: type scale, the density, alternating bands, the button style, the product
+#: layout. It sits ON TOP of the brand theme and never inside it: a look may
+#: not change a colour or a typeface, because those are the brand's identity
+#: and this is only the shape the identity is poured into. Read off a swiped
+#: email in words (`email_structures.read_swipe`), kept on the structure, and
+#: applied here — so "mimic the style" means the arrangement, and the words,
+#: pictures, colours and faces stay the brand's own.
+LOOK = {
+    "hero": ("contained", "bleed", "overlay", "split"),
+    "scale": ("modest", "display"),
+    "density": ("tight", "regular", "airy"),
+    "bands": (False, True),
+    "cta": ("block", "full", "pill", "link"),
+    "products": ("rows", "grid2", "grid3"),
+}
+_LOOK_DEFAULT = {"hero": "contained", "scale": "modest", "density": "regular",
+                 "bands": False, "cta": "block", "products": "rows"}
+
+
+def _look(look: dict | None) -> dict:
+    """A complete look: every axis filled from the default, every value one
+    the renderer knows. An unknown value is DROPPED to the default rather than
+    carried — a reading that said "hero: cinematic" must not become a hero
+    nothing draws."""
+    out = dict(_LOOK_DEFAULT)
+    for k, v in (look or {}).items():
+        if k not in LOOK:
+            continue
+        if k == "bands":
+            out[k] = bool(v)
+        elif v in LOOK[k]:
+            out[k] = v
+    return out
+
+
+#: Padding per density, for the blocks that take it.
+_PAD = {"tight": (6, 24), "regular": (10, 32), "airy": (18, 40)}
+
+
+def _theme(theme: dict, look: dict | None = None) -> dict:
     """A theme with every field filled from the default, deep enough for the
     nested dicts the renderer reads."""
     t = {**_DEFAULT, **(theme or {})}
     for k in ("colors", "font", "footer", "sender"):
         t[k] = {**_DEFAULT[k], **((theme or {}).get(k) or {})}
+    # The look rides beside the theme, never inside it: a theme row on file
+    # cannot smuggle an arrangement in, and a look cannot reach a colour.
+    t["look"] = _look(look)
     return t
 
 
@@ -120,23 +164,68 @@ def _sized(url: str, width: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _hero(b: dict, t: dict) -> str:
+    """The opening picture, in one of four treatments the look chooses.
+
+    contained  the picture, then the headline under it (the house default)
+    bleed      the same, edge to edge with no rounding — a magazine opener
+    overlay    the headline ON the picture, over a dark scrim, white type
+    split      picture on the left, headline and sub on the right, two columns
+
+    Every treatment is a table, because email. The overlay is the one that
+    needs care: the text colour is forced white over a scrim, which is the
+    one place a look touches colour — and it does so only because a headline
+    in the brand's dark text on a dark photograph is unreadable, which is a
+    worse offence than a white one.
+    """
     c = t["colors"]
-    img = ""
-    if b.get("image"):
-        img = (f'<tr><td style="padding:0">'
-               f'<img src="{_esc(_sized(b["image"], t["width"] * 2))}" '
-               f'width="{t["width"]}" alt="{_esc(b.get("alt",""))}" '
-               f'style="display:block;width:100%;max-width:{t["width"]}px;'
-               f'height:auto;border:0;border-radius:{t["radius"]} {t["radius"]} 0 0"></td></tr>')
-    head = (f'<tr><td style="padding:28px 32px 4px">'
+    lk = t["look"]
+    pv, ph = _PAD[lk["density"]]
+    h1 = 38 if lk["scale"] == "display" else 26
+    lh = "1.1" if lk["scale"] == "display" else "1.25"
+    src = _sized(b["image"], t["width"] * 2) if b.get("image") else ""
+    alt = _esc(b.get("alt", ""))
+    headline, sub = b.get("headline", ""), b.get("sub", "")
+
+    if lk["hero"] == "split" and src:
+        half = t["width"] // 2
+        return (f'<tr><td style="padding:0"><table role="presentation" width="100%" '
+                f'cellpadding="0" cellspacing="0" border="0"><tr>'
+                f'<td width="{half}" valign="top" style="padding:0">'
+                f'<img src="{_esc(src)}" width="{half}" alt="{alt}" '
+                f'style="display:block;width:100%;max-width:{half}px;height:auto;border:0"></td>'
+                f'<td valign="middle" style="padding:{pv + 8}px {ph - 8}px">'
+                + (f'<h1 style="margin:0 0 8px;font-family:{t["font"]["heading"]};'
+                   f'font-size:{h1 - 6}px;line-height:{lh};color:{c["text"]};font-weight:600">'
+                   f'{_esc(headline)}</h1>' if headline else "")
+                + (f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:15px;'
+                   f'line-height:1.5;color:{c["muted"]}">{_esc(sub)}</p>' if sub else "")
+                + '</td></tr></table></td></tr>')
+
+    if lk["hero"] == "overlay" and src:
+        return (f'<tr><td style="padding:0;background:{c["text"]} url({_esc(src)}) center/cover '
+                f'no-repeat" background="{_esc(src)}" valign="bottom">'
+                f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+                f'border="0"><tr><td style="padding:120px {ph}px {pv + 18}px;'
+                f'background:linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,.62) 100%)">'
+                + (f'<h1 style="margin:0;font-family:{t["font"]["heading"]};'
+                   f'font-size:{h1}px;line-height:{lh};color:#ffffff;font-weight:600">'
+                   f'{_esc(headline)}</h1>' if headline else "")
+                + (f'<p style="margin:8px 0 0;font-family:{t["font"]["body"]};font-size:16px;'
+                   f'line-height:1.5;color:#ffffff;opacity:.9">{_esc(sub)}</p>' if sub else "")
+                + '</td></tr></table></td></tr>')
+
+    radius = "0" if lk["hero"] == "bleed" else f'{t["radius"]} {t["radius"]} 0 0'
+    img = (f'<tr><td style="padding:0"><img src="{_esc(src)}" width="{t["width"]}" '
+           f'alt="{alt}" style="display:block;width:100%;max-width:{t["width"]}px;'
+           f'height:auto;border:0;border-radius:{radius}"></td></tr>') if src else ""
+    head = (f'<tr><td style="padding:{pv + 18}px {ph}px 4px">'
             f'<h1 style="margin:0;font-family:{t["font"]["heading"]};'
-            f'font-size:26px;line-height:1.25;color:{c["text"]};font-weight:600">'
-            f'{_esc(b.get("headline",""))}</h1></td></tr>') if b.get("headline") else ""
-    sub = (f'<tr><td style="padding:6px 32px 0">'
-           f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:16px;'
-           f'line-height:1.5;color:{c["muted"]}">{_esc(b.get("sub",""))}</p></td></tr>') \
-        if b.get("sub") else ""
-    return img + head + sub
+            f'font-size:{h1}px;line-height:{lh};color:{c["text"]};font-weight:600">'
+            f'{_esc(headline)}</h1></td></tr>') if headline else ""
+    subr = (f'<tr><td style="padding:6px {ph}px 0">'
+            f'<p style="margin:0;font-family:{t["font"]["body"]};font-size:16px;'
+            f'line-height:1.5;color:{c["muted"]}">{_esc(sub)}</p></td></tr>') if sub else ""
+    return img + head + subr
 
 
 def _text(b: dict, t: dict) -> str:
@@ -151,22 +240,36 @@ def _text(b: dict, t: dict) -> str:
     # 2026-08-21) is what default margins read as. Styled tags are left as
     # the generator wrote them.
     body = body.replace("<p>", '<p style="margin:0 0 14px">')
-    return (f'<tr><td style="padding:10px 32px 2px;font-family:{t["font"]["body"]};'
-            f'font-size:16px;line-height:1.65;color:{c["text"]}">{body}</td></tr>')
+    pv, ph = _PAD[t["look"]["density"]]
+    lh = {"tight": "1.5", "regular": "1.65", "airy": "1.8"}[t["look"]["density"]]
+    return (f'<tr><td style="padding:{pv}px {ph}px 2px;font-family:{t["font"]["body"]};'
+            f'font-size:16px;line-height:{lh};color:{c["text"]}">{body}</td></tr>')
 
 
 def _cta(b: dict, t: dict) -> str:
+    """The ask, in the style the look chooses: a block button (the house
+    default), a full-width bar, a pill, or a plain text link with an arrow.
+    A bulletproof button either way — a table cell with the fill, not a
+    styled <a>, so Outlook renders the background at all."""
     c = t["colors"]
-    # A bulletproof button: a table cell with the fill, not a styled <a>, so
-    # Outlook renders the background at all.
-    return (f'<tr><td style="padding:12px 32px 20px"><table role="presentation" '
-            f'cellpadding="0" cellspacing="0" border="0"><tr>'
-            f'<td style="background:{c["accent"]};border-radius:{t["radius"]}">'
-            f'<a href="{_esc(b.get("url","#"))}" '
-            f'style="display:inline-block;padding:13px 26px;'
-            f'font-family:{t["font"]["body"]};font-size:15px;font-weight:600;'
-            f'color:{c["accent_text"]};text-decoration:none">'
-            f'{_esc(b.get("label","Shop now"))}</a></td></tr></table></td></tr>')
+    lk = t["look"]
+    pv, ph = _PAD[lk["density"]]
+    url, label = _esc(b.get("url", "#")), _esc(b.get("label", "Shop now"))
+    if lk["cta"] == "link":
+        return (f'<tr><td style="padding:{pv}px {ph}px {pv + 8}px">'
+                f'<a href="{url}" style="font-family:{t["font"]["body"]};font-size:16px;'
+                f'font-weight:600;color:{c["accent"]};text-decoration:none">'
+                f'{label} &rarr;</a></td></tr>')
+    radius = "999px" if lk["cta"] == "pill" else t["radius"]
+    width = ' width="100%"' if lk["cta"] == "full" else ""
+    align = 'text-align:center;' if lk["cta"] == "full" else ""
+    return (f'<tr><td style="padding:{pv + 2}px {ph}px {pv + 10}px"><table role="presentation" '
+            f'cellpadding="0" cellspacing="0" border="0"{width}><tr>'
+            f'<td style="background:{c["accent"]};border-radius:{radius};{align}">'
+            f'<a href="{url}" style="display:{"block" if lk["cta"] == "full" else "inline-block"};'
+            f'padding:14px 28px;font-family:{t["font"]["body"]};font-size:15px;'
+            f'font-weight:600;color:{c["accent_text"]};text-decoration:none">'
+            f'{label}</a></td></tr></table></td></tr>')
 
 
 def _products(b: dict, t: dict) -> str:
@@ -176,6 +279,9 @@ def _products(b: dict, t: dict) -> str:
     sync has one, name in the brand accent with the price under it, an
     accent arrow on the right, and the WHOLE row is one link."""
     c = t["colors"]
+    pv, ph = _PAD[t["look"]["density"]]
+    if t["look"]["products"] in ("grid2", "grid3"):
+        return _product_grid(b, t, 2 if t["look"]["products"] == "grid2" else 3)
     rows = []
     for p in (b.get("items") or [])[:3]:
         url = p.get("url") or "#"
@@ -203,7 +309,51 @@ def _products(b: dict, t: dict) -> str:
             f'</tr></table></td></tr>')
     if not rows:
         return ""
-    return (f'<tr><td style="padding:4px 32px 12px"><table role="presentation" '
+    return (f'<tr><td style="padding:4px {ph}px {pv + 2}px"><table role="presentation" '
+            f'width="100%" cellpadding="0" cellspacing="0" border="0">'
+            f'{"".join(rows)}</table></td></tr>')
+
+
+def _product_grid(b: dict, t: dict, cols: int) -> str:
+    """Products as a grid of cards — the catalogue shape a swipe may carry.
+    Two or three across, square picture on top, name and price under it, the
+    whole card one link. Cells are fixed-width table cells so Outlook keeps
+    them side by side; on a narrow phone the two-up still fits and the
+    three-up is the one the reader pinches, which is the trade the swipe
+    already made. Rows of `cols`, up to six products."""
+    c = t["colors"]
+    pv, ph = _PAD[t["look"]["density"]]
+    items = [p for p in (b.get("items") or [])[:6] if p.get("name")]
+    if not items:
+        return ""
+    inner = t["width"] - 2 * ph
+    gap = 12
+    cw = (inner - gap * (cols - 1)) // cols
+    cells = []
+    for p in items:
+        url = _esc(p.get("url") or "#")
+        pic = (f'<img src="{_esc(_sized(p["image"], cw * 2))}" width="{cw}" '
+               f'alt="{_esc(p.get("name", ""))}" style="display:block;width:100%;'
+               f'max-width:{cw}px;height:auto;border:0;border-radius:{t["radius"]};'
+               f'background:{c["border"]}">' if p.get("image") else
+               f'<div style="width:100%;height:{cw}px;background:{c["border"]};'
+               f'border-radius:{t["radius"]}"></div>')
+        price = (f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
+                 f'color:{c["muted"]};padding-top:2px">{_esc(p.get("price", ""))}</div>'
+                 if p.get("price") else "")
+        cells.append(
+            f'<td width="{cw}" valign="top" style="padding:0 0 {gap}px">'
+            f'<a href="{url}" style="text-decoration:none">{pic}'
+            f'<div style="font-family:{t["font"]["body"]};font-size:15px;font-weight:600;'
+            f'color:{c["accent"]};padding-top:8px">{_esc(p.get("name", ""))}</div>'
+            f'{price}</a></td>')
+    rows = []
+    spacer = f'<td width="{gap}" style="font-size:0;line-height:0">&nbsp;</td>'
+    for i in range(0, len(cells), cols):
+        row = cells[i:i + cols]
+        # A short last row keeps its cell width rather than stretching.
+        rows.append("<tr>" + spacer.join(row) + "</tr>")
+    return (f'<tr><td style="padding:{pv}px {ph}px {pv}px"><table role="presentation" '
             f'width="100%" cellpadding="0" cellspacing="0" border="0">'
             f'{"".join(rows)}</table></td></tr>')
 
@@ -215,12 +365,22 @@ def _heading(b: dict, t: dict) -> str:
     paragraph. The owner's live drafts read as "just long text" while the
     section heads were plain bold lines one size off the body."""
     c = t["colors"]
+    pv, ph = _PAD[t["look"]["density"]]
+    display = t["look"]["scale"] == "display"
     if int(b.get("level") or 2) <= 1:
-        return (f'<tr><td style="padding:16px 32px 2px">'
-                f'<div style="font-family:{t["font"]["heading"]};font-size:24px;'
-                f'font-weight:700;line-height:1.25;color:{c["text"]}">'
+        return (f'<tr><td style="padding:{pv + 6}px {ph}px 2px">'
+                f'<div style="font-family:{t["font"]["heading"]};'
+                f'font-size:{34 if display else 24}px;'
+                f'font-weight:700;line-height:{"1.1" if display else "1.25"};'
+                f'color:{c["text"]}">{_esc(b.get("text", ""))}</div></td></tr>')
+    # At display scale the section head is a real title rather than a
+    # kicker — the one reading of "big type" that survives a small screen.
+    if display:
+        return (f'<tr><td style="padding:{pv + 4}px {ph}px 0">'
+                f'<div style="font-family:{t["font"]["heading"]};font-size:22px;'
+                f'font-weight:700;line-height:1.2;color:{c["text"]}">'
                 f'{_esc(b.get("text", ""))}</div></td></tr>')
-    return (f'<tr><td style="padding:14px 32px 0">'
+    return (f'<tr><td style="padding:{pv + 4}px {ph}px 0">'
             f'<div style="font-family:{t["font"]["body"]};font-size:13px;'
             f'font-weight:700;letter-spacing:1.5px;text-transform:uppercase;'
             f'color:{c["accent"]}">{_esc(b.get("text", ""))}</div></td></tr>')
@@ -361,6 +521,16 @@ _BLOCKS = {"hero": _hero, "text": _text, "cta": _cta, "button": _cta,
            "signature": _signature, "ps": _ps}
 
 
+def _band(row: str, bg: str) -> str:
+    """Paint a block's outer cell with the band colour. Every painter emits
+    `<tr><td style="…">` first, so the background is added to that first
+    cell's style and nothing else moves."""
+    return row.replace('<tr><td style="', f'<tr><td style="background:{bg};', 1) \
+        if row.startswith('<tr><td style="') else \
+        row.replace('<tr><td align="center" style="',
+                    f'<tr><td align="center" style="background:{bg};', 1)
+
+
 def _header(t: dict, webview: bool = True) -> str:
     c = t["colors"]
     logo = (f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t["logo_alt"] or t["name"])}" '
@@ -428,7 +598,7 @@ def _footer(t: dict) -> str:
 
 
 def render(theme: dict, blocks: list, *, preheader: str = "",
-           webview: bool = True) -> str:
+           webview: bool = True, look: dict | None = None) -> str:
     """Canonical blocks + a client theme → send-ready, email-safe HTML.
 
     The output carries NEUTRAL tokens still (`{{FIRST_NAME}}`, `{{UNSUBSCRIBE}}`,
@@ -438,13 +608,31 @@ def render(theme: dict, blocks: list, *, preheader: str = "",
     view-in-browser variable, and emitting the token for it would either ship
     literal text or trip personalize's unknown-token refusal. The header
     (logo) and the legal footer are added here, so no generator can omit them.
+
+    `look` is the arrangement (see LOOK): read off a swiped email and kept on
+    the structure that was picked. It is normalised before anything reads
+    it, so an unknown value falls back to the house default. With `bands`
+    on, every second SECTION (a run of blocks between headings, or between
+    the hero and the first heading) sits on the brand's page background
+    instead of the card surface — the alternating-band rhythm of a designed
+    email, painted with colours the brand already has.
     """
-    t = _theme(theme)
+    t = _theme(theme, look)
     c = t["colors"]
     rows = [_header(t, webview=webview)]
+    section, banded = 0, t["look"]["bands"]
     for b in (blocks or []):
-        fn = _BLOCKS.get((b or {}).get("type", ""))
-        rows.append(fn(b, t) if fn else f"<!-- skipped unknown block: {_esc(b.get('type',''))} -->")
+        kind = (b or {}).get("type", "")
+        fn = _BLOCKS.get(kind)
+        if kind == "heading" and int((b or {}).get("level") or 2) > 1:
+            section += 1
+        elif kind == "hero":
+            section = 0
+        row = (fn(b, t) if fn
+               else f"<!-- skipped unknown block: {_esc(b.get('type',''))} -->")
+        if banded and section % 2 == 1 and fn and kind != "hero":
+            row = _band(row, c["bg"])
+        rows.append(row)
     rows.append(_footer(t))
 
     pre = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0">'

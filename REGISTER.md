@@ -189,7 +189,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`panel_brief`**(panel_row) → `str`  ·  from `skill_pack.py`, `test_ad_panel.py`
 - **`panel_parse`**(raw) → `dict`  ·  from `skill_pack.py`, `test_ad_panel.py`
 - **`panel_prompt`**(bundle, concepts) → `list[str]`  ·  from `skill_pack.py`, `test_ad_panel.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`
-- **`parse`**(raw) → `dict`  ·  from `answer_engines.py`, `bundle.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
+- **`parse`**(raw) → `dict`  ·  from `answer_engines.py`, `bundle.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_a_structure_is_how_not_what.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
 - **`review`**(body?, headline?, angle?, offer?, levers?, urgency_backed_by?, proof?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_gbp_post.py`, `test_positioning.py`
 - **`score`**(findings) → `dict`  ·  from `skill_pack.py`, `test_ad_craft.py`, `test_blog_skill.py`, `test_console_controls.py`, `test_keyword_progress.py`, `test_keywords.py`, `test_plan_mix.py`, `web.py`
 
@@ -201,7 +201,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`creative_bar`**() → `int`  ·  **from nothing**
 - **`entity_select`**(tenant, current?, name?, blank?, multiple?) → `str`  ·  **from nothing**
 - **`model_select`**(name?, allow_both?, current?) → `str`  ·  from `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`
-- **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`render_assurance`**(key, tenant?, days?, system?, rule?, started?, page?, gap?) → `str`  ·  from `test_assurance_tab.py`, `test_claim_trace.py`, `test_kb_ui.py`, `web.py`
 - **`render_brand`**(key, tenant?, msg?, err?, derive_voice?, pick?) → `str`  ·  from `test_a_kept_frame_has_its_placements_and_no_painted_type.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_ban_list.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_every_system_draws.py`, `test_kb_ui.py`, `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `web.py`
 - **`render_connect`**(link, tenant, rows, msg?, err?) → `str`  ·  from `web.py`
@@ -256,7 +256,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`for_thread`**(tenant, thread_id) → `list[dict]`  ·  from `resolve.py`, `test_archive.py`
 - **`index`**(tenant, kind?, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `creative.py`, `data_tools.py`, `google_seo.py`, `skill_pack.py`, `systems.py`, `test_a_frame_arrives_in_canva_as_layers.py`, `test_a_run_that_made_nothing_says_why.py`, `test_ad_arrives_whole.py`, `test_ad_panel.py`, `test_archive.py`, `test_context.py`, `test_craft.py`, `test_creative_batch.py`, `test_digest.py`, `test_dossier.py`, `test_grounding.py`, `test_hosting.py`, `test_link_flag.py`, `test_omnisend.py`, `test_plan_tab.py`, `test_preview_links.py`, `test_review_tab.py`, `test_semrush_units.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_page_says_what_it_answers.py`, `test_workflow_ui.py`, `web.py`
 - **`indexable`**(bucket, sender, text) → `tuple[bool, str]`  ·  from `web.py`, `worker.py`
-- **`search`**(tenant, query, kinds?, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `email_structures.py`, `extract.py`, `fitness.py`, `gbp_listing.py`, `gbp_post.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `pinterest.py`, `resolve.py`, `sites.py`, `skill_pack.py`, `systems.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_can_the_engines_read_us.py`, `test_can_this_account_illustrate.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_entity_selectors.py`, `test_harvest.py`, `test_job_lease.py`, `test_learning.py`, `test_moments.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_render_smoke.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_the_image_model_is_a_setting.py`, `test_the_page_says_what_it_answers.py`, `test_the_review_answers_one_question.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
+- **`search`**(tenant, query, kinds?, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `email_structures.py`, `extract.py`, `fitness.py`, `gbp_listing.py`, `gbp_post.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `pinterest.py`, `resolve.py`, `sites.py`, `skill_pack.py`, `systems.py`, `test_a_structure_is_how_not_what.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_can_the_engines_read_us.py`, `test_can_this_account_illustrate.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_entity_selectors.py`, `test_harvest.py`, `test_job_lease.py`, `test_learning.py`, `test_moments.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_render_smoke.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_the_image_model_is_a_setting.py`, `test_the_page_says_what_it_answers.py`, `test_the_review_answers_one_question.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
 - **`store_document`**(tenant, doc_id, text) → `int`  ·  from `test_archive.py`
 - **`store_email`**(tenant, gmail_message_id, body) → `int`  ·  from `test_archive.py`
 
@@ -589,7 +589,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `email_render.py`
 
 - **`missing_to_send`**(theme) → `list[str]`  ·  from `brand_theme.py`, `skill_pack.py`, `test_brand_theme.py`, `test_email_render.py`
-- **`render`**(theme, blocks, preheader?, webview?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(theme, blocks, preheader?, webview?, look?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 
 ### `email_structures.py`
 
@@ -597,11 +597,13 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`approve`**(structure_id, by?) → `str`  ·  from `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_every_system_draws.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_workroom_email.py`, `web.py`
 - **`block_types`**() → `tuple`  ·  **from nothing**
 - **`brief`**(structure) → `str`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_digest.py`, `test_funnel.py`
+- **`can_hero`**(tenant) → `bool`  ·  **from nothing**
 - **`eligible`**(tenant, intent?, fmt?, recent_shapes?) → `list[dict]`  ·  from `test_a_structure_is_how_not_what.py`
 - **`file_from_output`**(output_id, by?) → `dict`  ·  from `approvals.py`, `test_a_structure_is_how_not_what.py`
-- **`file_structure`**(name?, sequence?, source?, review?, profile?, fits_intents?, fits_formats?, source_url?, source_asset_id?, notes?, by?) → `dict`  ·  from `test_a_structure_is_how_not_what.py`
+- **`file_structure`**(name?, sequence?, source?, review?, profile?, fits_intents?, fits_formats?, source_url?, source_asset_id?, notes?, by?, look?) → `dict`  ·  from `test_a_structure_is_how_not_what.py`
 - **`find_by_sequence`**(sequence) → `db.EmailStructure | None`  ·  **from nothing**
 - **`library`**(review?) → `list[dict]`  ·  from `admin_ui.py`, `test_a_structure_is_how_not_what.py`
+- **`look_of`**(raw) → `dict`  ·  from `test_a_structure_is_how_not_what.py`
 - **`mark_used`**(structure_id) → `None`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`
 - **`pick`**(tenant, intent?, fmt?, recent_shapes?, designated?) → `dict`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_creative_seam.py`, `test_the_board_reaches_the_generator.py`
 - **`profile_of`**(blocks) → `dict`  ·  **from nothing**
@@ -634,7 +636,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`ensure`**(tenant, kind, row_id, text) → `tuple[bool, str]`  ·  from `archive.py`, `kb.py`, `test_embed.py`
 - **`forget`**(tenant, kind, row_id) → `bool`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`
 - **`pairs`**(tenant, kind, min_score?, limit?) → `list[dict]`  ·  from `kb.py`
-- **`search`**(tenant, kind, query, limit?, min_score?) → `tuple[list[dict], str, dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `archive.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `email_structures.py`, `extract.py`, `fitness.py`, `gbp_listing.py`, `gbp_post.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `pinterest.py`, `resolve.py`, `sites.py`, `skill_pack.py`, `systems.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_can_the_engines_read_us.py`, `test_can_this_account_illustrate.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_entity_selectors.py`, `test_harvest.py`, `test_job_lease.py`, `test_learning.py`, `test_moments.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_render_smoke.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_the_image_model_is_a_setting.py`, `test_the_page_says_what_it_answers.py`, `test_the_review_answers_one_question.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
+- **`search`**(tenant, kind, query, limit?, min_score?) → `tuple[list[dict], str, dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `archive.py`, `artifact_check.py`, `brand_theme.py`, `claim_trace.py`, `coherence.py`, `command_agent.py`, `compliance.py`, `craft.py`, `email_craft.py`, `email_harvest.py`, `email_render.py`, `email_structures.py`, `extract.py`, `fitness.py`, `gbp_listing.py`, `gbp_post.py`, `harvest.py`, `kb.py`, `lookups.py`, `model_error.py`, `offers.py`, `pinterest.py`, `resolve.py`, `sites.py`, `skill_pack.py`, `systems.py`, `test_a_structure_is_how_not_what.py`, `test_archive.py`, `test_assurance_tab.py`, `test_brand_theme.py`, `test_can_the_engines_read_us.py`, `test_can_this_account_illustrate.py`, `test_console_auth.py`, `test_console_frame.py`, `test_control_piping.py`, `test_diagnostics_surface.py`, `test_embed.py`, `test_entity_selectors.py`, `test_harvest.py`, `test_job_lease.py`, `test_learning.py`, `test_moments.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_render_smoke.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_the_image_model_is_a_setting.py`, `test_the_page_says_what_it_answers.py`, `test_the_review_answers_one_question.py`, `test_workflow_ui.py`, `validator.py`, `web.py`
 - **`set_provider`**(fn) → `None`  ·  from `test_archive.py`, `test_embed.py`, `test_propose.py`
 - **`stats`**(tenant?) → `dict`  ·  route `GET /admin/stats`  ·  from `admin_ui.py`, `ops_commands.py`, `test_embed.py`, `test_gbp_listing.py`, `test_plans.py`, `test_systems.py`, `web.py`
 - **`text_hash`**(text) → `str`  ·  from `web.py`
@@ -692,7 +694,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`audit`**(listing?, state?, reviews?, posts?, media?, banned?, keywords?, entities?, domain?, open_post_plans?, today?) → `dict`  ·  from `skill_pack.py`, `test_bundle_contract.py`, `test_gbp_listing.py`
 - **`latest`**(tenant) → `dict`  ·  from `admin_ui.py`
-- **`render`**(report, when?, title?, proposed?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(report, when?, title?, proposed?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`trend`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_claim_trace.py`, `test_gbp_listing.py`, `test_learning.py`
 
 ### `gbp_post.py`
@@ -701,7 +703,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`block_reasons`**(findings) → `list[dict]`  ·  from `skill_pack.py`, `test_campaign_variety.py`, `test_coherence.py`
 - **`brief`**(keyword?, kind?, cta?, url?, source_kind?, source_text?, source_label?, objection?, response?, claim?, evidence?, offer_terms?, event_title?, event_start?, event_end?, place?, voice?, positioning?, revision_notes?) → `list[str]`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_digest.py`, `test_funnel.py`
 - **`compose`**(keyword?, cta?, source_text?, response?, claim?, place?) → `str`  ·  from `skill_pack.py`
-- **`parse`**(raw) → `dict`  ·  from `answer_engines.py`, `bundle.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
+- **`parse`**(raw) → `dict`  ·  from `answer_engines.py`, `bundle.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_a_structure_is_how_not_what.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
 - **`payload`**(body, kind?, cta?, url?, title?, offer_terms?, coupon?, event_start?, event_end?, media_url?, language?) → `dict`  ·  from `skill_pack.py`, `test_gbp_post.py`
 - **`review`**(body, keyword?, kind?, offer_terms?, event_start?, urgency_backed_by?) → `list[dict]`  ·  from `skill.py`, `skill_pack.py`, `test_ad_craft.py`, `test_campaign_variety.py`, `test_coherence.py`, `test_gbp_post.py`, `test_positioning.py`
 
@@ -757,7 +759,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `grounding.py`
 
 - **`for_mail`**(tenant, email, bucket?) → `dict`  ·  from `test_grounding.py`, `triage.py`
-- **`render`**(bundle) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(bundle) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`utterance_from`**(email) → `str`  ·  from `test_grounding.py`
 - **`verify`**(offered, claimed) → `list[str]`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
 
@@ -998,11 +1000,11 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`create_draft_campaign`**(tenant, name?, subject?, sender_name?, preheader?, include_segments?) → `dict`  ·  from `test_omnisend.py`
 - **`create_template`**(tenant, name, html) → `dict`  ·  **from nothing**
 - **`draft_from_html`**(tenant, name?, subject?, sender_name?, html?, preheader?, include_segments?) → `dict`  ·  from `skill_pack.py`, `test_constant_contact.py`, `test_klaviyo.py`, `test_omnisend.py`
-- **`segments`**(tenant) → `dict`  ·  from `test_omnisend.py`, `test_segments.py`
+- **`segments`**(tenant) → `dict`  ·  from `test_klaviyo.py`, `test_omnisend.py`, `test_segments.py`
 
 ### `landing.py`
 
-- **`render`**() → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**() → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`signin`**(err?, next?) → `str`  ·  from `web.py`
 
 ### `layers.py`
@@ -1162,7 +1164,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`import_template`**(tenant, name, html) → `dict`  ·  from `test_omnisend.py`
 - **`segment_conditions_for`**(key) → `list[dict] | None`  ·  **from nothing**
 - **`segment_count`**(tenant, segment_id) → `dict`  ·  from `test_omnisend.py`
-- **`segments`**(tenant) → `dict`  ·  from `test_omnisend.py`, `test_segments.py`
+- **`segments`**(tenant) → `dict`  ·  from `test_klaviyo.py`, `test_omnisend.py`, `test_segments.py`
 - **`send_campaign`**(tenant, campaign_id, confirm?) → `dict`  ·  from `test_constant_contact.py`, `test_omnisend.py`
 - **`send_test`**(tenant, campaign_id, emails) → `dict`  ·  **from nothing**
 - **`upload_image`**(tenant, url) → `dict`  ·  **from nothing**
@@ -1242,7 +1244,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `portal_ui.py`
 
-- **`render`**(tenant, tab?, days?, who?, notice?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(tenant, tab?, days?, who?, notice?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
 - **`render_signin`**(error?, sent?) → `str`  ·  from `web.py`
 
 ### `propose.py`
@@ -1635,7 +1637,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`admin_artifact`**(output_id, key?, raw?) → `—`  ·  route `GET /admin/artifact/{output_id}`  ·  **from nothing**
 - **`admin_blog_set`**(key?, tenant?, blog_id?, back?) → `error`  ·  route `GET /admin/blog_set`  ·  from `test_blog_readiness.py`
 - **`admin_email_structure`**(key?, tenant?, id?, verdict?, ui?) → `error, id, said`  ·  route `GET /admin/email_structure`  ·  from `test_a_structure_is_how_not_what.py`
-- **`admin_email_swipe`**(key?, tenant?, url?, ui?) → `error, ok, swipe, why`  ·  route `GET /admin/email_swipe`  ·  from `test_a_structure_is_how_not_what.py`
+- **`admin_email_swipe`**(key?, tenant?, url?, asset?, ui?) → `error, ok, swipe, why`  ·  route `GET /admin/email_swipe`  ·  from `test_a_structure_is_how_not_what.py`
 - **`admin_exclude_term`**(key?, tenant?, term?, ui?, back?, bsub?, bstate?, bpage?, bq?) → `error`  ·  route `GET /admin/exclude_term`  ·  **from nothing**
 - **`admin_forget_note`**(key?, id?) → `dict`  ·  route `GET /admin/forget_note`  ·  **from nothing**
 - **`admin_key`**(request, key?) → `str`  ·  **from nothing**

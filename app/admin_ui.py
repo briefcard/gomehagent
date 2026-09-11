@@ -6609,6 +6609,18 @@ def _structures_card(key: str, tenant: str) -> str:
                  f'alt="{_esc(shot["title"])}" style="max-width:120px;max-height:160px;'
                  f'float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
                  if shot and shot.get("image") else "")
+        look = st["profile"].get("look") or {}
+        # THE LOOK IS SAID. A structure with none is arranged the house way,
+        # and a swiped one can be read again for it — the reading is the
+        # same call that filed it, on the same screenshot.
+        look_html = (f'<br><span class="mut">arranged: '
+                     + _esc(", ".join(f"{k} {str(v).lower()}" for k, v in look.items()))
+                     + "</span>" if look else
+                     ('<br><span class="when">no look read — arranged the house way'
+                      + (f' · <a href="/admin/email_swipe?key={_esc(key)}&amp;tenant='
+                         f'{_esc(tenant)}&amp;asset={_esc(shot["asset_id"])}">'
+                         f'<button class="sec">Read its look</button></a>' if shot else "")
+                      + "</span>"))
         return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
@@ -6616,6 +6628,7 @@ def _structures_card(key: str, tenant: str) -> str:
                 + f'</span><br><code>{_esc(" → ".join(st["sequence"]))}</code>'
                 + (f'<br><span class="mut">{_esc(str(st["profile"].get("notes", ""))[:220])}</span>'
                    if st["profile"].get("notes") else "")
+                + look_html
                 + f'<br>{_usable(st)} {controls}</div>')
 
     def _ctl(st: dict) -> str:

@@ -690,6 +690,39 @@ use it, refuses with the reason and designs fresh rather than silently
 swapping. The run's notes say which happened. With nothing that fits the
 drafter designs fresh, as it always did.
 
+**The look: a structure carries the arrangement, never a colour.** Block
+order alone was not what the owner meant by "mimic the style" — the first
+send built on a swipe came out as the house template with the swipe's
+sequence, "not anywhere near the structure / styling / layout of the email
+reference" (2026-09-11). So the reading also records HOW the blocks are
+arranged, in a closed vocabulary the renderer draws (`email_render.LOOK`):
+
+| axis | values | what moves |
+|---|---|---|
+| `hero` | contained · bleed · overlay · split | the opening picture's treatment |
+| `scale` | modest · display | the headline size and the section heads |
+| `density` | tight · regular · airy | padding and line height everywhere |
+| `bands` | on · off | every second section on the page colour |
+| `cta` | block · full · pill · link | the ask's shape |
+| `products` | rows · grid2 · grid3 | the catalogue layout |
+
+Colours and typefaces are NOT axes — a look the model volunteers with an
+accent or a font has those dropped at filing (`look_of`), because the
+brand's theme is the only source of identity and the look is only the shape
+it is poured into. The one place a look touches colour is the overlay hero,
+which forces white type over a dark scrim so the headline stays readable on
+a photograph. The card says how each structure is arranged; a structure
+filed before this existed says "no look read" with **Read its look**, which
+re-reads the same screenshot into the same structure (its approval stands).
+The drafter's brief says the arrangement in words so the copy fits it (a
+display headline is short; a grid needs each product name to stand alone).
+The run's notes say `arranged as the structure's look: …`.
+
+**Klaviyo targeting reads segments ten a page.** Klaviyo's Get Segments caps
+`page[size]` at 10; the first cut asked for 100 and every campaign came back
+"the ESP could not be read (400: Page size must be an integer between 1 and
+10)" and untargeted. It pages by the `links.next` cursor now, to 500.
+
 ## 7. What does not work yet
 
 Read this before promising anything.

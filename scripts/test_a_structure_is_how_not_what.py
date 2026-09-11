@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import sys
 import tempfile
 
@@ -43,6 +44,27 @@ def ck(label, cond, detail=""):
 
 
 SEQ = ["hero", "heading", "text", "products", "cta", "ps"]
+
+
+def _card_for(tenant: str, strip: str = "") -> str:
+    """The Brand-tab structures card; with `strip`, that structure's look is
+    removed first so the card's 'not read' state can be seen."""
+    from app import admin_ui
+    if strip:
+        with db.SessionLocal() as s:
+            row = s.get(db.EmailStructure, strip)
+            prof = dict(row.profile or {}); had = prof.pop("look", None)
+            row.profile = prof; s.commit()
+        try:
+            return admin_ui._structures_card("s3cret", tenant)
+        finally:
+            with db.SessionLocal() as s:
+                row = s.get(db.EmailStructure, strip)
+                prof = dict(row.profile or {})
+                if had:
+                    prof["look"] = had
+                row.profile = prof; s.commit()
+    return admin_ui._structures_card("s3cret", tenant)
 
 
 def main() -> int:
@@ -99,8 +121,28 @@ def main() -> int:
     ck("a structure that needs products is refused where there are none",
        not ok and "no products" in why, why[:70])
     ok, why = es.usable_for("eien", st)
-    ck("one that leads with a picture is refused where nothing can illustrate",
-       not ok and "cannot illustrate" in why, why[:70])
+    ck("one that leads with a picture is refused where nothing can lead with one",
+       not ok and "none to lead with" in why, why[:70])
+    # THE EMAIL RUN'S OWN FALLBACK COUNTS. A product with a store image leads
+    # an email as its hero even with an empty picture library, and the check
+    # that only read the library refused the Ayoh structure for a brand whose
+    # emails were going out with a hero on them (2026-09-11).
+    with db.SessionLocal() as s:
+        # An entity the run would actually offer: active, approved, available —
+        # the same read `kb.entities` makes for the email itself.
+        from app import provenance as _prov
+        s.add(db.KbEntity(tenant="eien", type="product", key="capsules",
+                          name="Capsules", status="active", review=_prov.APPROVED,
+                          availability="available",
+                          attributes={"image": "https://cdn/x.png"}))
+        s.commit()
+    ok, why = es.usable_for("eien", st)
+    ck("a product with a store image makes a hero-led structure usable",
+       ok, why)
+    with db.SessionLocal() as s:
+        for e in s.query(db.KbEntity).filter(db.KbEntity.tenant == "eien").all():
+            s.delete(e)
+        s.commit()
     proof = es.file_structure(name="proof first", sequence=["heading", "quote", "text", "cta"],
                               source="hand", review="approved")
     ok, why = es.usable_for("eien", next(r for r in es.library() if r["id"] == proof["id"]))
@@ -211,7 +253,13 @@ def main() -> int:
         ok = True
         text = json.dumps({"sequence": ["hero", "heading", "text", "cta"],
                            "fits_intents": ["offer"], "fits_formats": ["designed"],
-                           "notes": "The picture carries the opening; one ask, late."})
+                           "notes": "The picture carries the opening; one ask, late.",
+                           "look": {"hero": "overlay", "scale": "display",
+                                    "density": "airy", "bands": True, "cta": "pill",
+                                    "products": "grid3",
+                                    # volunteered, and must not survive
+                                    "accent": "#ff0000", "font": "Futura",
+                                    "hero_style": "cinematic"}})
     real_ask = llm.ask
     llm.ask = lambda *a, **k: _Reply()
     try:
@@ -260,6 +308,112 @@ def main() -> int:
         drawn = es.pick("eien", intent="offer", fmt="designed")["structure"]
         ck("and a proposed swipe is not drawn for anyone",
            drawn is None or drawn["review"] == "approved")
+
+        print("\n— the LOOK: a structure carries the arrangement, never a colour —")
+        # Owner, 2026-09-11: the produced email *"was not anywhere near the
+        # structure / styling / layout of the email reference"* — because a
+        # structure carried block ORDER only. The reading now carries how the
+        # blocks are arranged, in the renderer's own vocabulary.
+        from app import email_render as er
+        lk = srow["profile"].get("look") or {}
+        ck("the reading's look is kept on the structure, every axis the renderer draws",
+           lk == {"hero": "overlay", "scale": "display", "density": "airy",
+                  "bands": True, "cta": "pill", "products": "grid3"}, str(lk))
+        ck("a colour, a typeface or a value the renderer does not know is dropped",
+           "accent" not in lk and "font" not in lk and "hero_style" not in lk
+           and es.look_of({"hero": "cinematic", "cta": "PILL"}) == {"cta": "pill"})
+        ck("the reader asks for exactly the renderer's axes, by name",
+           all(f'"{k}"' in es._READ for k in er.LOOK)
+           and all(v in es._READ for vals in er.LOOK.values()
+                   for v in vals if isinstance(v, str)))
+        ck("and the drafter's brief says how it will be arranged",
+           "arrange it as" in es.brief(srow) and "hero overlay" in es.brief(srow))
+        # A structure filed BEFORE the look existed takes it on a re-read,
+        # without a second structure and without touching its review.
+        with db.SessionLocal() as s:
+            row = s.get(db.EmailStructure, srow["id"])
+            prof = dict(row.profile or {}); prof.pop("look", None)
+            row.profile = prof; row.review = "approved"; s.commit()
+        again = web.admin_email_swipe(key="s3cret", tenant="baci",
+                                      asset=sw["asset_id"], ui=0)
+        after = next(r for r in es.library() if r["id"] == srow["id"])
+        ck("'Read its look' on the card re-reads the same screenshot into the same structure",
+           again.get("ok") is True and after["profile"].get("look", {}).get("hero") == "overlay"
+           and after["review"] == "approved"
+           and len([r for r in es.library() if r["sequence"] == srow["sequence"]]) == 1,
+           str(again)[:80])
+        card_look = _card_for("baci")
+        ck("the card says how each structure is arranged, or that it was not read",
+           "arranged: hero overlay" in card_look and "Read its look" in _card_for("baci", strip=srow["id"]))
+        with db.SessionLocal() as s:  # back to proposed for the sections below
+            row = s.get(db.EmailStructure, srow["id"]); row.review = "proposed"; s.commit()
+
+        # THE RENDERER HONOURS IT — and only the arrangement moves.
+        theme = {"name": "T", "colors": {"accent": "#123456"}}
+        blocks = [{"type": "hero", "image": "https://x/h.jpg", "headline": "H", "sub": "S"},
+                  {"type": "heading", "text": "Why", "level": 2},
+                  {"type": "text", "html": "<p>B</p>"},
+                  {"type": "products", "items": [{"name": "A", "url": "https://x/a",
+                                                  "image": "https://x/a.jpg", "price": "$1"},
+                                                 {"name": "B", "url": "https://x/b"}]},
+                  {"type": "heading", "text": "More", "level": 2},
+                  {"type": "cta", "label": "Go", "url": "https://x/go"}]
+        base = er.render(theme, blocks)
+        for axis, vals in er.LOOK.items():
+            for v in vals:
+                out = er.render(theme, blocks, look={axis: v})
+                is_default = (v == er._LOOK_DEFAULT[axis])
+                ck(f"look {axis}={v!r} {'is the house default' if is_default else 'changes the arrangement'}",
+                   (out == base) if is_default else (out != base and "H" in out and "Go" in out))
+        with_look = er.render(theme, blocks, look=lk)
+        import re as _re
+        _hexes = lambda h: set(m.lower() for m in _re.findall(r"#[0-9a-fA-F]{3,6}\b", h))
+        ck("no colour the theme does not own appears under any look",
+           _hexes(with_look) <= _hexes(base) and "#123456" in with_look
+           and all(_hexes(er.render(theme, blocks, look={a: v})) <= _hexes(base)
+                   for a, vals in er.LOOK.items() for v in vals),
+           str(_hexes(with_look) - _hexes(base)))
+        ck("only the overlay hero sets white type, over its scrim — no other look touches a colour",
+           _re.search(r"<h1[^>]*color:#ffffff", with_look)
+           and not _re.search(r"<h1[^>]*color:#ffffff", base)
+           and not _re.search(r"<h1[^>]*color:#ffffff", er.render(theme, blocks, look={"cta": "pill", "bands": True})))
+        banded = er.render(theme, blocks, look={"bands": True})
+        bg = er._DEFAULT["colors"]["bg"]
+        # section 1 = "Why" + text + products (three cells); section 2 =
+        # "More" + cta, unbanded; the hero is never banded.
+        ck("bands sit on every second section, painted with the theme's own page colour",
+           banded.count(f'style="background:{bg};') == 3
+           and base.count(f'style="background:{bg};') == 0,
+           str(banded.count(f'style="background:{bg};')))
+        ck("an unknown look value falls to the house default, never to a block nothing draws",
+           er.render(theme, blocks, look={"hero": "cinematic", "x": 1}) == base)
+        ck("the grid keeps the whole card one link and every product named",
+           er.render(theme, blocks, look={"products": "grid2"}).count('href="https://x/a"') == 1
+           and ">A<" in er.render(theme, blocks, look={"products": "grid2"}))
+
+        # THE SKILL PASSES IT — the claim turned into a check: the one render
+        # call in the campaign run reads the look off the picked structure.
+        import ast as _ast
+        src = pathlib.Path(skill_pack.__file__).read_text()
+        calls = [n for n in _ast.walk(_ast.parse(src)) if isinstance(n, _ast.Call)
+                 and isinstance(n.func, _ast.Attribute) and n.func.attr == "render"
+                 and isinstance(n.func.value, _ast.Name) and n.func.value.id == "email_render"]
+        # Not "a keyword named look is present" — `look=None` would pass
+        # that. The value must be a NAME, and that name must be assigned from
+        # the picked structure's profile in the same source.
+        tree = _ast.parse(src)
+        def _fed_from_structure(name: str) -> bool:
+            for n in _ast.walk(tree):
+                if (isinstance(n, _ast.Assign) and len(n.targets) == 1
+                        and isinstance(n.targets[0], _ast.Name) and n.targets[0].id == name):
+                    seg = _ast.get_source_segment(src, n.value) or ""
+                    if 'get("structure")' in seg and '.get("look")' in seg:
+                        return True
+            return False
+        looks = [next((k.value for k in c.keywords if k.arg == "look"), None) for c in calls]
+        ck("the campaign run's render call passes the structure's look",
+           calls and all(isinstance(v, _ast.Name) and _fed_from_structure(v.id) for v in looks),
+           f"{len(calls)} call(s)")
     finally:
         es.httpx.get = real_get
         llm.ask = real_ask
