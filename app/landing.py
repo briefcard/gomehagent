@@ -95,17 +95,26 @@ def render() -> str:
 </div>""")
 
 
-def signin(err: str = "") -> str:
+def signin(err: str = "", next: str = "") -> str:
     """The console door. The key travels in a POST body — never in a URL,
-    never into browser history; a valid one becomes the session cookie."""
+    never into browser history; a valid one becomes the session cookie.
+
+    `next` is the console page to return to once signed in — carried in the
+    form rather than the URL, and already reduced to one of our own paths by
+    the route, so the door can never be a hop to somewhere else."""
     msg = f'<p class="err">{_html.escape(err)}</p>' if err else ""
+    nxt = (f'<input type="hidden" name="next" value="{_html.escape(next)}">'
+           if next else "")
+    where = ('<p class="sub">You were in the middle of something; signing in '
+             'takes you back to it.</p>' if next else "")
     return _page(f"Console — {BRAND}", f"""
 <div>
   <h1>Console sign-in</h1>
   <p class="sub">For the {BRAND} operations team. Clients sign in through the
   <a class="back" href="/portal">client portal</a> instead.</p>
-  {msg}
+  {msg}{where}
   <form class="key" method="post" action="/admin/signin">
+    {nxt}
     <input type="password" name="key" placeholder="console key"
            autocomplete="current-password" autofocus required>
     <button>Sign in</button>

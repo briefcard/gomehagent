@@ -289,10 +289,17 @@ with TestClient(web.app) as cl:
     ck("the button disappears once the queue is empty",
        "Clear all" not in admin_ui.render_content("s3cret", "baci"))
 
+# REFUSED BY REDIRECTING TO SIGN-IN, not by rendering "unauthorized" at the
+# action's own address — a page there is what set up the 405 the owner met on
+# 2026-09-11. The refusal is the same; the proof is that nothing was purged.
+_before = len(kb.pending_claims("baci"))
+_r = TestClient(web.app, follow_redirects=False).post(
+    "/admin/purge_proposals", data={"tenant": "baci"}, params={"key": "wrong"})
 ck("an unauthenticated purge is refused",
-   "unauthorized" in TestClient(web.app).post(
-       "/admin/purge_proposals", data={"tenant": "baci"},
-       params={"key": "wrong"}).text)
+   _r.status_code == 303 and "/admin/signin" in _r.headers.get("location", "")
+   and len(kb.pending_claims("baci")) == _before,
+   f"{_r.status_code} {_r.headers.get('location', '')[:40]}; pending {_before} -> "
+   f"{len(kb.pending_claims('baci'))}")
 
 # ---------------------------------------------------------------------------
 # The fingerprint had to agree with itself — found live on Baci

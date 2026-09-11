@@ -157,6 +157,31 @@ SABOTAGES = [
         "suites": ['test_a_structure_is_how_not_what.py'],
         "why": "naming a structure on the plan bypasses the brand-rules check that the random draw obeys, so a person can designate a 'hand-crafted' showcase for Baci and it builds — the rules bend for a request, which is exactly what they must never do",
     },
+    # --- an action never renders at its own address (2026-09-11) -------------
+    {
+        "name": 'a_wrong_method_on_an_action_lands_somewhere',
+        "file": 'app/web.py',
+        "find": '    if exc.status_code == 405 and request.url.path.startswith("/admin/"):\n',
+        "replace": '    if False:  # SABOTAGE\n',
+        "suites": ['test_an_action_never_renders_at_its_own_address.py'],
+        "why": "a reload of an action's result, or a bookmark to it, shows the framework's raw {\"detail\":\"Method Not Allowed\"} — the dead end the owner met approving photographs, with no way out and no way to know why",
+    },
+    {
+        "name": 'a_lapsed_session_on_an_action_goes_to_sign_in',
+        "file": 'app/web.py',
+        "find": '    return RedirectResponse(\n        "/admin/signin" + (f"?next={quote(nxt, safe=\'\')}" if nxt else ""), 303)\n',
+        "replace": '    return HTMLResponse("<h3>unauthorized</h3>", status_code=403)  # SABOTAGE\n',
+        "suites": ['test_an_action_never_renders_at_its_own_address.py'],
+        "why": "an action without a session renders a page AT ITS OWN ADDRESS again, so the address bar reads /admin/assets_decide and the next reload is the 405 this whole fix exists to end",
+    },
+    {
+        "name": 'the_sign_in_door_is_not_an_open_redirect',
+        "file": 'app/web.py',
+        "find": '    return path if path.startswith("/admin/ui") else ""\n',
+        "replace": '    return raw  # SABOTAGE\n',
+        "suites": ['test_an_action_never_renders_at_its_own_address.py'],
+        "why": "a crafted link to our own sign-in page sends whoever signs in on to any site the link chose — the classic phishing hop, on the one page that asks for the console key",
+    },
     # --- a structure is how, not what (2026-09-11) --------------------------
     {
         "name": 'a_structures_notes_are_checked_against_this_brands_ban_list',

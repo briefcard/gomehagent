@@ -7,7 +7,9 @@ import logging
 import secrets
 
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import approvals, config, db
 
@@ -172,6 +174,29 @@ def resolve_context(request: Request, auth: str = Depends(read_key),
     return out
 
 
+@app.exception_handler(StarletteHTTPException)
+async def _console_http_error(request: Request, exc: StarletteHTTPException):
+    """A wrong method on a console action lands somewhere, not on JSON.
+
+    Every `/admin/*` action is POST-only, and a GET reaches one in exactly the
+    ways a person does by accident: a reload of a page that rendered at the
+    action's address, a bookmark, a back button. The framework's answer is
+    `{"detail":"Method Not Allowed"}`, which is a dead end with no way out.
+    This turns it into the console with a sentence saying what happened.
+    Everything that is not a console 405 keeps the framework's own answer.
+    """
+    if exc.status_code == 405 and request.url.path.startswith("/admin/"):
+        from urllib.parse import quote
+
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(
+            "/admin/ui?err=" + quote(
+                "that address only takes a form submission — the button "
+                "that sends it is on the page, so press it there rather than "
+                "reloading its result", safe=""), 303)
+    return await http_exception_handler(request, exc)
+
+
 @app.exception_handler(Exception)
 async def _console_error(request: Request, exc: Exception):
     """Show the operator what broke, instead of a bare Internal Server Error.
@@ -219,6 +244,30 @@ async def _console_session(request: Request, call_next):
             httponly=True, samesite="lax",
             secure=request.url.scheme == "https")
     return response
+
+
+def _signin_first(request: Request):
+    """Where an action lands when the session is missing: the sign-in door,
+    remembering the page the action came from.
+
+    Twenty-five POST routes answered a lapsed session by rendering a bare
+    "unauthorized" page AT THEIR OWN ADDRESS. Once that page is showing, the
+    address bar reads `/admin/assets_decide`; a reload or a return to it is a
+    GET to a route that only takes form posts, and the framework's raw
+    `{"detail":"Method Not Allowed"}` is what the person sees. The owner met
+    exactly that on 2026-09-11 trying to approve photographs. An action route
+    never renders at its own address: it redirects, every time, and the
+    sign-in page brings the person back to the page they were working on
+    rather than to the console's front door.
+    """
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+    back = request.headers.get("referer", "") or ""
+    # Only our own console pages are a place to return to.
+    nxt = back if back.startswith(str(request.base_url).rstrip("/") + "/admin/ui") else ""
+    return RedirectResponse(
+        "/admin/signin" + (f"?next={quote(nxt, safe='')}" if nxt else ""), 303)
 
 
 @app.get("/admin/logout")
@@ -292,14 +341,31 @@ def console_alias():
     return RedirectResponse("/admin/ui", 303)
 
 
+def _safe_next(raw: str) -> str:
+    """A return address is one of OUR console pages or nothing. An open
+    redirect on the sign-in page is the classic phishing hop, so anything
+    that is not a path under /admin/ui is dropped rather than followed."""
+    raw = (raw or "").strip()
+    if raw.startswith("/admin/ui") and "//" not in raw and "\\" not in raw:
+        return raw
+    # An absolute URL to our own host is reduced to its path.
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(raw)
+    except ValueError:
+        return ""
+    path = (u.path or "") + (f"?{u.query}" if u.query else "")
+    return path if path.startswith("/admin/ui") else ""
+
+
 @app.get("/admin/signin", response_class=HTMLResponse)
-def admin_signin_page(request: Request) -> str:
+def admin_signin_page(request: Request, next: str = "") -> str:
     from . import landing
-    # Already signed in? Straight to the console rather than asking again.
+    # Already signed in? Straight to where they were going.
     if admin_key(request):
         from fastapi.responses import RedirectResponse
-        return RedirectResponse("/admin/ui", 303)
-    return landing.signin()
+        return RedirectResponse(_safe_next(next) or "/admin/ui", 303)
+    return landing.signin(next=_safe_next(next))
 
 
 @app.post("/admin/signin", response_class=HTMLResponse)
@@ -317,7 +383,9 @@ async def admin_signin(request: Request):
         # part was wrong, and an unset secret fails closed via _matches.
         return HTMLResponse(landing.signin("That key was not recognised."),
                             status_code=401)
-    r = RedirectResponse("/admin/ui", 303)
+    # BACK TO WHERE THEY WERE. A person sent to sign in from the middle of
+    # approving photographs lands on the photographs, not on the front door.
+    r = RedirectResponse(_safe_next(str(form.get("next", ""))) or "/admin/ui", 303)
     r.set_cookie(ADMIN_COOKIE, _console_token(), max_age=_COOKIE_MAX_AGE,
                  httponly=True, samesite="lax",
                  secure=request.url.scheme == "https")
@@ -668,7 +736,7 @@ async def system_run_now(request: Request, key: str = Depends(admin_key)):
     needed a button, and the compliance sweeps get the same one for free."""
     from . import skill as _skill, systems as _sys
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant") or "")
     system = str(form.get("system") or "")
@@ -756,7 +824,7 @@ def brand_theme_page(request: Request, key: str = Depends(admin_key),
 
     from fastapi.responses import RedirectResponse
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     back = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
     if request.query_params.get("key"):
         back += f"&key={quote(str(request.query_params['key']))}"
@@ -784,7 +852,7 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
 
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     b = kbm.brand(tenant) or kbm.ensure_brand(tenant)
@@ -901,7 +969,7 @@ async def brand_sources(request: Request, key: str = Depends(admin_key)):
 
     from . import tenants as tn
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     msgs, errs = [], []
@@ -955,7 +1023,7 @@ async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
 
     from . import brand_theme
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     got = brand_theme.derive(tenant)
@@ -989,7 +1057,7 @@ async def brand_voice_derive(request: Request, key: str = Depends(admin_key)):
 
     from . import voice as vc
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     if not tenant:
@@ -1019,7 +1087,7 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
 
     from . import brand_theme
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     from . import admin_ui as ui
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -5271,7 +5339,7 @@ async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
 
     from . import credentials as cred
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     result = cred.revoke(str(form.get("tenant", "")),
                          str(form.get("provider", "")),
@@ -5299,7 +5367,7 @@ async def connect_save(request: Request, key: str = Depends(admin_key)):
 
     from . import credentials as cred
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     provider = str(form.get("provider", ""))
@@ -5337,7 +5405,7 @@ async def connect_test_post(request: Request, key: str = Depends(admin_key)):
 
     from . import credentials as cred
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant, provider = str(form.get("tenant", "")), str(form.get("provider", ""))
     site = str(form.get("site", ""))
@@ -5367,7 +5435,7 @@ async def connect_link_post(request: Request, key: str = Depends(admin_key)):
 
     from . import tenants as tn
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     if not tn.get(tenant):
@@ -6911,7 +6979,7 @@ async def entity_group_post(request: Request, key: str = Depends(admin_key)):
 
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     group = str(form.get("group", "")).strip()
@@ -7037,7 +7105,7 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     """
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", ""))
@@ -7113,7 +7181,7 @@ async def board_add(request: Request, key: str = Depends(admin_key)):
     for each run."* The board is the reference; a run selects by its slug."""
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     said = kbm.add_board(tenant, str(form.get("name", "")),
@@ -7132,7 +7200,7 @@ async def board_fill(request: Request, key: str = Depends(admin_key)):
     fetches and one vision call."""
     from . import kb as kbm, pinterest
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     slug = str(form.get("board", "")).strip()
@@ -7155,7 +7223,7 @@ async def board_read(request: Request, key: str = Depends(admin_key)):
     click — one vision call, never on a schedule."""
     from . import creative as _cr, kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     slug = str(form.get("board", "")).strip()
@@ -7172,7 +7240,7 @@ async def board_remove(request: Request, key: str = Depends(admin_key)):
     """Remove a board and every pin on it — said in the message, not silent."""
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     said = kbm.remove_board(tenant, str(form.get("board", "")))
@@ -7192,7 +7260,7 @@ async def board_pin(request: Request, key: str = Depends(admin_key)):
     """
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", ""))
@@ -7252,7 +7320,7 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
     """
     from . import creative as cr, kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     output_id = str(form.get("output_id", "")).strip()
     tenant = str(form.get("tenant", ""))
@@ -7344,7 +7412,7 @@ async def asset_canva(request: Request, key: str = Depends(admin_key)):
     """
     from . import hosting as _hosting
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     aid = str(form.get("asset_id", "")).strip()
@@ -7378,7 +7446,7 @@ async def asset_harvest(request: Request, key: str = Depends(admin_key)):
     route nobody could reach from the frame it belonged to.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     aid = str(form.get("asset_id", "")).strip()
@@ -7413,7 +7481,7 @@ async def asset_add(request: Request, key: str = Depends(admin_key)):
 
     from . import kb as kbm
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     url = str(form.get("url", "")).strip()
@@ -7861,7 +7929,7 @@ async def person_save(request: Request, key: str = Depends(admin_key)):
 
     from . import portal
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     got = portal.save_person(
@@ -7881,7 +7949,7 @@ async def person_access(request: Request, key: str = Depends(admin_key)):
 
     from . import portal
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     action = str(form.get("action", ""))
@@ -8710,7 +8778,7 @@ async def purge_proposals_do(request: Request, key: str = Depends(admin_key)):
     the tagger that noise is what rejection looks like.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse('<h3>unauthorized</h3>')
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -8742,7 +8810,7 @@ async def proposal_review(request: Request, key: str = Depends(admin_key)):
     upload or store sync may change it.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse('<h3>unauthorized</h3>')
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -8789,7 +8857,7 @@ def vocabulary_review(key: str = Depends(admin_key), tenant: str = "",
 async def merge_situation(request: Request, key: str = Depends(admin_key)):
     """Fold one situation into another. POST — it retags every row using it."""
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>", status_code=403)
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -8898,7 +8966,7 @@ async def objection_edit(request: Request, key: str = Depends(admin_key)):
     This is how those get fixed without deleting a real answer.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>")
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -8932,7 +9000,7 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
     timeless claim back on the clock, dated from today.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse("<h3>unauthorized</h3>")
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -8984,7 +9052,7 @@ async def claim_update(request: Request, key: str = Depends(admin_key)):
 async def conflict_resolve(request: Request, key: str = Depends(admin_key)):
     """Settle a disagreement between two sources about an approved value."""
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse('<h3>unauthorized</h3>')
+        return _signin_first(request)
     from . import provenance as prov
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -9012,7 +9080,7 @@ async def claims_decide(request: Request, key: str = Depends(admin_key)):
     list would retire something nothing covers.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse('<h3>unauthorized</h3>')
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     tenant = str(form.get("tenant", ""))
@@ -9079,7 +9147,7 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
     thing gets corrected before it becomes something the generator may say.
     """
     if key != config.APPROVAL_SECRET:
-        return HTMLResponse('<h3>unauthorized</h3>')
+        return _signin_first(request)
     from . import kb as kbm
     form = await request.form()
     claim_id = str(form.get("claim_id", ""))
