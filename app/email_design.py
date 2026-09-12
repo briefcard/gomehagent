@@ -86,10 +86,16 @@ class _F:
     AND rules); everything else is exactly one value. Values are strings,
     ints or bools — never a colour, never a face, never a word.
     """
-    __slots__ = ("values", "default", "meaning", "many")
+    __slots__ = ("values", "default", "meaning", "many", "by")
 
-    def __init__(self, values, default, meaning, *, many=False):
+    def __init__(self, values, default, meaning, *, many=False, by="painter"):
+        """`by` names who acts on the field — the PAINTER (a value changes
+        the HTML) or the FILLER (a value changes which picture is chosen);
+        the walk that refuses a value nothing acts on checks each with its
+        reader, so a field read only by the filler is not a knob nothing
+        reads and is not excused either."""
         self.values, self.default, self.meaning, self.many = tuple(values), default, meaning, many
+        self.by = by
         if many:
             assert all(d in self.values for d in default), (default, values)
         else:
@@ -126,6 +132,12 @@ SECTION = {
     "list": _F(("check", "pill", "arrow", "plain"), "check",
                "how a list is set: ticks; pill buttons two across (a quiz, a poll); "
                "rows with an arrow and a rule between (further reading); plain lines"),
+    "image_kind": _F(("inherit",) + IMAGERY + ("mark",), "inherit",
+                     "what KIND of picture this section's picture slots want — a product "
+                     "alone on a plain or a coloured ground, a lifestyle scene, a flat-lay, "
+                     "a person, a texture — or a brand mark (a logo band, not a photograph); "
+                     "inherit = the design's imagery default for this section's family",
+                     by="filler"),
 }
 
 #: The whole design. Every group is a dict of fields; `defaults` is SECTION
@@ -197,9 +209,9 @@ SCHEMA = {
         "rule": _F(_ONOFF, False, "a rule over the footer"),
     },
     "imagery": {
-        "hero": _F(IMAGERY, "lifestyle", "the kind of picture the opening wants"),
-        "product": _F(IMAGERY, "packshot-on-plain", "the kind of picture a product card wants"),
-        "feature": _F(IMAGERY, "lifestyle", "the kind of picture a feature section wants"),
+        "hero": _F(IMAGERY, "lifestyle", "the kind of picture the opening wants", by="filler"),
+        "product": _F(IMAGERY, "packshot-on-plain", "the kind of picture a product card wants", by="filler"),
+        "feature": _F(IMAGERY, "lifestyle", "the kind of picture a feature section wants", by="filler"),
     },
 }
 
@@ -460,6 +472,17 @@ def fields() -> list[tuple[str, str, tuple, object, str]]:
     return rows
 
 
+def readers() -> dict[tuple[str, str], str]:
+    """Who acts on each field — `{(group, name): "painter" | "filler"}`."""
+    out = {}
+    for group, fs in SCHEMA.items():
+        for name, f in fs.items():
+            out[(group, name)] = f.by
+    for name, f in SECTION.items():
+        out[("section", name)] = f.by
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The brand's pictures, by the kind of slot each can fill
 # ---------------------------------------------------------------------------
@@ -490,7 +513,7 @@ def assets_for(tenant: str, kind: str, aspect: str = "") -> dict:
     if fits is None:
         return {"ok": False, "kind": kind, "aspect": aspect, "assets": [],
                 "why": f"{kind!r} is not an imagery kind ({', '.join(_KIND_FIT)})"}
-    rows = [a for a in kb.assets(tenant) if (a.kind or "image") == "image"]
+    rows = [a for a in kb.assets(tenant) if (a.kind or "image") == "image"]   # publishable only: a pin fills nothing
     out, seen = [], set()
     for subject, tag in fits:
         for a in rows:
@@ -511,6 +534,287 @@ def assets_for(tenant: str, kind: str, aspect: str = "") -> dict:
                              "portrait": "file a photograph of a person, or a scene",
                              }.get(kind, "run the catalogue sync, or file a photograph"))
     return {"ok": bool(out), "kind": kind, "aspect": aspect, "assets": out, "why": why}
+
+
+#: The kinds a picture can be, for the reading and the owner's correction:
+#: the imagery kinds a slot wants, plus a brand mark, which is not a
+#: photograph and fills no photograph slot.
+PICTURE_KINDS = IMAGERY + ("mark",)
+
+_KIND_READ = """You are looking at one picture from a brand's own library. Answer as JSON only:
+{"kind": one of %s — "packshot-on-plain" is a product alone on a plain ground; "packshot-on-colour"
+ a product alone on a coloured ground; "lifestyle" a product among other things or in a setting;
+ "flat-lay" things arranged from above; "portrait" a person is the subject; "texture" a surface or
+ material with no product; "mark" a logo or wordmark, not a photograph,
+ "alone": true when one product is the whole subject, else false,
+ "person": true when a person is in the picture}
+Nothing outside the JSON — never a brand name, never words from the picture."""
+
+
+def _aspect_of(w: int, h: int) -> str:
+    if not w or not h:
+        return ""
+    r = w / h
+    return "square" if 0.9 <= r <= 1.1 else "portrait" if r < 0.9 else "wide" if r >= 1.9 else "landscape"
+
+
+def _kind_filed(asset) -> str:
+    """The kind the filing already says, when it says one: the sync's
+    packshot tag, a surface, a logo. '' when only a look could tell."""
+    tags = [str(t) for t in (getattr(asset, "tags", None) or [])]
+    subj = str(getattr(asset, "subject", "") or "")
+    if subj == "logo":
+        return "mark"
+    if "packshot" in tags:
+        return "packshot-on-plain"
+    if subj == "surface":
+        return "texture"
+    return ""
+
+
+def read_picture(asset, *, vision: bool = True) -> dict:
+    """The picture's reading — from the row when it has one, else read now
+    and STORED ON THE ROW. Colours, size and aspect by arithmetic; the kind
+    by the filing when it says (a packshot tag, a surface, a logo), else by
+    one vision call (`creative_review`), ever, with `how.kind` saying which.
+    The owner's hand (`set_picture_kind`) outranks both and is never
+    re-read. `{}` when the bytes cannot be fetched or are not a picture."""
+    import base64 as _b64
+    import io
+    import json as _json
+    from . import db, imagegen, llm, palette as _pal
+    aid = getattr(asset, "id", "")
+    have = dict(getattr(asset, "reading", None) or {})
+    if have.get("colours") and have.get("kind"):
+        return have
+    blob = _fetch(getattr(asset, "url", "") or "")
+    if not blob:
+        return have
+    colours = have.get("colours") or _pal.signature(blob)
+    if not colours:
+        return have
+    try:
+        from PIL import Image
+        w, h = Image.open(io.BytesIO(blob)).size
+    except Exception:                                            # noqa: BLE001
+        w = h = 0
+    reading = {**have, "colours": colours, "size": [w, h], "aspect": _aspect_of(w, h),
+               "how": dict(have.get("how") or {"colours": "arithmetic"})}
+    if not reading.get("kind"):
+        kind = _kind_filed(asset)
+        if kind:
+            reading["kind"], reading["how"]["kind"] = kind, "filed"
+            reading["alone"] = kind.startswith("packshot")
+        elif vision:
+            small, mime = imagegen.input_image(blob)
+            blocks = [{"type": "image", "source": {"type": "base64", "media_type": mime or imagegen._mime(blob),
+                                                   "data": _b64.standard_b64encode(small or blob).decode()}},
+                      {"type": "text", "text": _KIND_READ % ", ".join(f'"{k}"' for k in PICTURE_KINDS)}]
+            reply = llm.ask("creative_review", blocks, tenant=getattr(asset, "tenant", "") or "", max_tokens=200)
+            got = _json_of(getattr(reply, "text", "")) if getattr(reply, "ok", False) else {}
+            k = str(got.get("kind") or "").strip().lower()
+            if k in PICTURE_KINDS:
+                reading["kind"], reading["how"]["kind"] = k, "vision"
+                reading["alone"] = bool(got.get("alone"))
+                reading["person"] = bool(got.get("person"))
+            else:
+                reading["how"]["kind"] = "unread — " + (str(getattr(reply, "error", "")) or "the picture reviewer did not answer with a kind")
+        else:
+            reading["how"]["kind"] = "unread — the look was not asked for"
+    reading["read_at"] = db.utcnow().isoformat(timespec="seconds")
+    if aid:
+        try:
+            with db.SessionLocal() as s:
+                row = s.get(db.KbAsset, aid)
+                if row is not None:
+                    row.reading = reading
+                    s.commit()
+        except Exception:                                        # noqa: BLE001
+            pass
+    try:
+        asset.reading = reading
+    except Exception:                                            # noqa: BLE001
+        pass
+    return reading
+
+
+def _json_of(text: str) -> dict:
+    import json as _json
+    m = re.search(r"\{.*\}", str(text or ""), re.S)
+    if not m:
+        return {}
+    try:
+        got = _json.loads(m.group(0))
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def set_picture_kind(asset_id: str, kind: str, *, by: str = "owner") -> str:
+    """The owner's word on what a picture is — kept on the row, outranks
+    every reading, never re-read. Refuses a kind that is not one."""
+    from . import db
+    k = str(kind or "").strip().lower()
+    if k not in PICTURE_KINDS:
+        return f"{kind!r} is not a kind of picture ({', '.join(PICTURE_KINDS)})"
+    with db.SessionLocal() as s:
+        row = s.get(db.KbAsset, asset_id)
+        if row is None:
+            return "no such picture"
+        r = dict(row.reading or {})
+        r["kind"] = k
+        r["how"] = {**(r.get("how") or {}), "kind": f"hand ({by})"}
+        r["alone"] = k.startswith("packshot")
+        row.reading = r
+        s.commit()
+    return f"{k}: set by hand"
+
+
+def read_pictures(tenant: str, *, limit: int = 24, vision: bool = True) -> dict:
+    """Read every publishable picture of this brand that has no reading
+    yet, up to `limit` per press — the Brand tab's control. Says how many
+    were read and how many are still unread."""
+    from . import kb
+    rows = [a for a in kb.assets(tenant) if (a.kind or "image") == "image"]   # publishable only: a pin is never read
+    unread = [a for a in rows if not ((a.reading or {}).get("colours") and (a.reading or {}).get("kind"))]
+    done = 0
+    for a in unread[:limit]:
+        if read_picture(a, vision=vision).get("kind"):
+            done += 1
+    return {"ok": True, "read": done, "left": max(0, len(unread) - done),
+            "total": len(rows), "said": f"read {done} of {len(unread)} unread picture(s)"
+                                         + (f"; {len(unread) - done} left" if len(unread) - done else "")}
+
+
+def picture_signature(asset) -> dict:
+    """The colours a picture is made of — off its reading."""
+    return dict((read_picture(asset, vision=False) or {}).get("colours") or {})
+
+
+def choose_media(tenant: str, design: dict, *, entities: list | None = None,
+                 recent_media: list | None = None, seed: str = "") -> dict:
+    """THE ONE CHOOSER for every picture slot of an email (owner, 2026-09-12).
+    Returns `{by_section: {i: [asset, …]}, hero, signatures, why: [...]}`.
+
+    In this order, each step said in `why`:
+      1. SCOPE — the campaign's entities' own pictures when the campaign is
+         entity-specific (the hero and the complementary slots alike), the
+         brand's library as the fallback, brand-wide when it is not;
+      2. THE DESIGN — each section's picture kind and aspect, from the
+         reading on the asset;
+      3. NOT SEEN LATELY — a picture this list received in the last sends
+         ranks below one it has not, so the same base layout on the same
+         entity leads with a different photograph next time;
+      4. FIT — the design's key (`palette.fit`), then coherence with the
+         hero's tones for the complementary ones; ties broken by `seed`
+         (the run), so two sends with the same shelf are not the same pick.
+    Reference pins never enter (publishable only). Nothing here is a word.
+    """
+    import hashlib
+    import random
+    from . import kb, palette as _pal
+    ents = [k for k in (entities or []) if k]
+    recent = set(recent_media or [])
+    rnd = random.Random(hashlib.sha256((seed or "").encode()).hexdigest())
+    rows = [a for a in kb.assets(tenant) if (a.kind or "image") == "image"]   # publishable only: a pin never enters
+    scoped = [a for a in rows if ents and (a.entity_key or "") in ents]
+    mood = str((design.get("palette") or {}).get("mood") or "light")
+    why: list[str] = []
+    why.append(f"scope: {len(scoped)} picture(s) of {', '.join(ents)}; the library as the fallback"
+               if ents else "scope: brand-wide — the campaign names no entity")
+    secs = design.get("sections") or []
+    by_section: dict = {}
+    sigs: list[dict] = []
+    used: set = set()
+    hero: object = None
+
+    def _cands(kind: str, aspect: str):
+        pool = (scoped + [a for a in rows if a not in scoped]) if ents else rows
+        out = []
+        for a in pool:
+            if a.id in used:
+                continue
+            r = read_picture(a, vision=False) or {}
+            k = r.get("kind") or _kind_filed(a) or ""
+            if kind == "mark":
+                continue                       # a mark is the brand's logo, not a photograph
+            if k == "mark":
+                continue
+            fits_kind = (k == kind) if k else (kind in ("lifestyle", "flat-lay") and (a.subject or "") in ("photo", "scene", "object"))
+            if not fits_kind:
+                continue
+            out.append((a, r))
+        return out
+
+    def _rank(cands, lead_sig):
+        scored = []
+        for a, r in cands:
+            sig = r.get("colours") or {}
+            seen = 1 if a.id in recent else 0
+            if lead_sig and sig.get("dominant") and lead_sig.get("dominant"):
+                fit = -abs(_pal.luminance(sig["dominant"]) - _pal.luminance(lead_sig["dominant"]))
+            else:
+                fit = _pal.fit(sig, mood) if sig else -1.0
+            scoped_first = 0 if (a in scoped or not ents) else 1
+            scored.append((scoped_first, seen, -fit, rnd.random(), a, sig))
+        scored.sort(key=lambda t: t[:4])
+        return [(a, sig) for *_, a, sig in scored]
+
+    for i, sec in enumerate(secs):
+        wants = 0
+        for slot in sec.get("slots") or []:
+            name, _, n = slot.partition(":")
+            if name == "image":
+                wants = int(n or 1)
+        if not wants:
+            continue
+        kind = sec.get("image_kind") or "inherit"
+        if kind == "inherit":
+            fam = "hero" if sec.get("kind") == "hero" else "product" if sec.get("kind") == "products" else "feature"
+            kind = (design.get("imagery") or {}).get(fam, "lifestyle")
+        if kind == "mark":
+            by_section[i] = "mark"
+            why.append(f"section {i + 1}: the brand's mark")
+            continue
+        ranked = _rank(_cands(kind, sec.get("aspect", "")), sigs[0] if sigs else None)
+        picks = ranked[:wants]
+        by_section[i] = [a for a, _ in picks]
+        for a, sig in picks:
+            used.add(a.id)
+            if sig:
+                sigs.append(sig)
+            if hero is None and sec.get("kind") == "hero":
+                hero = a
+        if picks:
+            unseen = [a for a, _ in ranked if a.id not in recent and (a in scoped or not ents)]
+            names = ", ".join((a.title or "untitled") + (" (not seen lately)" if a.id not in recent else
+                                                        (" (seen lately — every fitting picture has been)" if not unseen
+                                                         else " (seen lately)"))
+                              for a, _ in picks)
+            why.append(f"section {i + 1} ({sec.get('kind')}, {kind}): {names}")
+        else:
+            fix = assets_for(tenant, kind).get("why") or "nothing on file fits"
+            why.append(f"section {i + 1} ({sec.get('kind')}, {kind}): nothing on file fits — {fix}")
+    return {"by_section": by_section, "hero": hero, "signatures": sigs, "why": why}
+
+
+def palette_for(theme: dict, design: dict, report: dict) -> tuple[dict, dict]:
+    """THE ONE PLACE an email's palette is decided — used by the campaign
+    run and by the card's preview alike, so the preview IS what the email
+    would be. Photo-led (`palette.from_photos`) from the pictures `fill`
+    chose, hero first, when the brand allows it (`theme["keyed_grounds"]`,
+    on by default); the brand's approved palette as it is when off or when
+    nothing was chosen. `(theme, how)`."""
+    from . import email_render, palette as _pal
+    sigs = [x for x in (report or {}).get("signatures") or [] if x]
+    base = email_render._theme(theme)
+    if not base.get("keyed_grounds", True):
+        return theme, {"_": "the pictures do not lead for this brand — the palette as approved"}
+    if not sigs:
+        return theme, {"_": "no photograph chosen to lead — the palette as approved"}
+    mood = str((design.get("palette") or {}).get("mood") or "light")
+    pal, how = _pal.from_photos(sigs, base["palette"], mood=mood)
+    return {**(theme or {}), "palette": pal}, how
 
 
 def assets_by_kind(tenant: str) -> dict[str, int]:
@@ -643,7 +947,13 @@ def prompt_strip(k: int, n: int, top: int, bottom: int, total: int) -> str:
             + _field_lines(SECTION) + "\n"
             f'    "slots": a list from {", ".join(SLOTS)} in reading order; products and image '
             f'take a count like "products:3" (1–{SLOT_MAX})\n'
-            "}]}\nNothing outside the JSON.")
+            "}]}\n"
+            "COUNT EVERY PHOTOGRAPH: an email usually opens on a hero picture and carries "
+            "complementary pictures further down — a picture beside a paragraph, a row of "
+            "small photographs, a collage. Each one is an image slot on its section, with "
+            "its count (\"image:3\" for three), and the section's image_kind says what kind "
+            "they are. A logo or wordmark on a band is image_kind \"mark\", never a photograph. "
+            "Nothing outside the JSON.")
 
 
 def prompt_critique(design: dict, n: int) -> str:
@@ -895,28 +1205,78 @@ def read(asset_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # The preview: a design executed with THIS brand's material (Phase 4)
 # ---------------------------------------------------------------------------
-def preview_blocks(tenant: str) -> list[dict]:
-    """Sample blocks a structure is previewed with for one brand — its own
-    photograph as the hero, its own three products, fixed sample copy that
-    is plainly sample copy. Nothing here is a draft; it exists so "would
-    this recreate the reference?" is answered on the card, before approval,
-    with the brand's material rather than lorem or another brand's."""
+_SAMPLE = {"kicker": ("heading", {"text": "A section kicker", "level": 2}),
+           "headline": ("heading", {"text": "A sample headline, set the design's way", "level": 1}),
+           "sub": ("text", {"html": "<p>A sub-line under it — sample copy; the drafter writes the real words.</p>"}),
+           "body": ("text", {"html": "<p>Sample body copy, so the measure, the leading and the ink on this "
+                                     "ground can be judged. The real email carries this brand's own words "
+                                     "and claims.</p>"}),
+           "list": ("list", {"items": ["The first point", "The second point", "The third point"]}),
+           "cta": ("cta", {"label": "The ask", "url": "#"}),
+           "quote": ("quote", {"text": "A pull-quote stands in for an approved claim.", "attribution": "sample"}),
+           "stat": ("stat", {"value": "3×", "caption": "a figure from an approved claim"}),
+           "caption": ("text", {"html": "<p>A caption under the picture.</p>"}),
+           "signature": ("signature", {"text": "Warmly,", "name": "The sender on file"}),
+           "ps": ("ps", {"text": "A postscript, set apart above the footer."})}
+
+
+def preview_blocks(tenant: str, design: dict | None = None, entity_key: str = "") -> list[dict]:
+    """Sample blocks a structure is previewed with for one brand — THE
+    DESIGN'S OWN SHAPE: one block per slot of every section, in the design's
+    order, with a divider between sections, so the preview is the email the
+    design describes and not the house sample. Products are the brand's own
+    three; every picture slot is left for `fill`, which chooses the brand's
+    own photographs by their colours exactly as a run would. Sample copy is
+    plainly sample copy. A design with no order (the house) gets the old
+    sample shape."""
     from . import kb
     ents = []
-    for e in kb.entities(tenant)[:12]:
+    rows = kb.entities(tenant)[:24]
+    # The entity the preview is about leads its product cards, as a run's
+    # subject leads the offered products.
+    rows = sorted(rows, key=lambda e: 0 if entity_key and getattr(e, "key", "") == entity_key else 1)
+    for e in rows:
         a = getattr(e, "attributes", None) or {}
         if getattr(e, "name", "") and a.get("image"):
             ents.append({"name": e.name, "price": str(a.get("price") or ""),
                          "url": str(a.get("url") or "#"), "image": str(a["image"])})
         if len(ents) == 3:
             break
+    secs = (design or {}).get("sections") or []
+    blocks: list[dict] = []
+    if secs:
+        # As a drafter writes it: one block per slot, in the slot order — a
+        # kicker is a level-2 heading, a headline a level-1, a sub a line of
+        # text, and a hero section's picture is a hero block with no words
+        # of its own (the picture comes from `fill`, chosen by its colours).
+        for i, sec in enumerate(secs):
+            if i:
+                blocks.append({"type": "divider"})
+            hero_placed = False
+            for slot in sec.get("slots") or []:
+                name, _, n = slot.partition(":")
+                if name == "image":
+                    if sec.get("kind") == "hero" and not hero_placed:
+                        blocks.append({"type": "hero", "alt": "the brand's own photograph"})
+                        hero_placed = True
+                    continue                         # other pictures: `fill` adds them
+                if name == "products":
+                    if ents:
+                        blocks.append({"type": "products", "items": ents[:int(n or 3)]})
+                    continue
+                if name in _SAMPLE:
+                    t, body = _SAMPLE[name]
+                    blocks.append({"type": t, **body})
+            if sec.get("kind") == "hero" and not hero_placed:
+                blocks.insert(len(blocks) - len(sec.get("slots") or []),
+                              {"type": "hero", "alt": "the brand's own photograph"})
+        return blocks
     hero = ""
     got = assets_for(tenant, "lifestyle")
     if got["ok"]:
         hero = got["assets"][0].url or ""
     elif ents:
         hero = ents[0]["image"]
-    blocks: list[dict] = []
     if hero:
         blocks.append({"type": "hero", "image": hero, "alt": "the brand's own photograph",
                        "headline": "A sample headline, set the design's way",
@@ -939,10 +1299,13 @@ def preview_blocks(tenant: str) -> list[dict]:
     return blocks
 
 
-def preview_html(tenant: str, design: dict) -> tuple[str, str]:
+def preview_html(tenant: str, design: dict, entity_key: str = "") -> tuple[str, str]:
     """`(html, why_not)`: the design executed with the brand's live theme —
-    or its proposal when nothing is approved yet, said — on its own material.
-    '' with a reason when the brand has no theme at all."""
+    or its proposal when nothing is approved yet, said — on its own material,
+    THE WAY A RUN WOULD: the design's own shape, the brand's photographs
+    chosen by their colours, the atmosphere keyed to them. What it chose and
+    what it keyed is left on `preview_html.last` for the card to show beside
+    the frame. '' with a reason when the brand has no theme at all."""
     from . import brand_theme, email_render
     theme = brand_theme.live_theme(tenant)
     note = ""
@@ -951,8 +1314,15 @@ def preview_html(tenant: str, design: dict) -> tuple[str, str]:
         note = "through the PROPOSED theme — nothing is approved on the Brand tab yet"
     if not theme:
         return "", "this brand has no theme yet — derive and approve one on the Brand tab to preview"
-    html = email_render.render_design(design, theme, preview_blocks(tenant),
-                                      preheader="Design preview")
+    blocks = preview_blocks(tenant, design, entity_key=entity_key)
+    blocks, report = fill(tenant, design, blocks, entities=[entity_key] if entity_key else None,
+                          seed=f"preview:{tenant}:{entity_key}")
+    theme, how = palette_for(theme, design, report)
+    html = email_render.render_design(design, theme, blocks, preheader="Design preview")
+    preview_html.last = {"pictures": report.get("pictures") or [], "keyed": how,
+                         "why": report.get("why") or [],
+                         "palette": email_render._theme(theme)["palette"],
+                         "missed": report.get("missed") or [], "entity": entity_key}
     return html, note
 
 
@@ -1020,36 +1390,45 @@ def brief(design: dict) -> str:
     return "\n".join(lines)
 
 
-def fill(tenant: str, design: dict, blocks: list, note=None) -> tuple[list, dict]:
+def fill(tenant: str, design: dict, blocks: list, note=None, *,
+         entities: list | None = None, recent_media: list | None = None,
+         seed: str = "", hero_basis: str = "") -> tuple[list, dict]:
     """The validated blocks with the design's PICTURE slots filled from the
-    brand's own library — by the imagery kind the design names for that
-    section and the aspect the slot wants — and every slot it could not
-    fill NAMED, never silent. `(blocks, report)`; `report` = {filled,
-    missed, notes}. A picture is added, never a word; the blocks the
-    drafter wrote are untouched.
+    brand's own library, chosen by ONE chooser (`choose_media`: the
+    campaign's entities, the design's kind and aspect per section, not seen
+    lately by this list, fit and coherence, the run's seed) — and every slot
+    it could not fill NAMED, never silent. `(blocks, report)`; `report` =
+    {filled, missed, notes, unreached, signatures, pictures, why}. A picture
+    is added, never a word; the blocks the drafter wrote are untouched.
 
-    Sections are consumed the way the renderer consumes them — the k-th
-    concrete section of a kind takes the k-th picture — so the filler and
-    the painter agree on which section a picture belongs to. Drawing a
-    picture when none fits (`creative.generate`) is not wired here yet;
-    the miss says so and the section degrades to its words."""
+    The hero the run already holds stands when it was DRAWN or drafted in
+    Canva (`hero_basis`) — the every-system-draws decision; a plain library
+    photograph gives way to the chooser's pick when the chooser found one
+    that fits the design better, and the report says so. A section whose
+    picture kind is `mark` takes the brand's logo, never a photograph.
+
+    Sections are consumed the way the renderer consumes them, so the filler
+    and the painter agree on which section a picture belongs to."""
     from . import email_render
     secs = [s for s in (design.get("sections") or [])]
+    empty = {"filled": 0, "missed": [], "notes": [], "unreached": [],
+             "signatures": [], "pictures": [], "why": []}
     if not secs:
-        return list(blocks or []), {"filled": 0, "missed": [], "notes": [], "unreached": []}
+        return list(blocks or []), empty
+    chosen = choose_media(tenant, design, entities=entities, recent_media=recent_media, seed=seed)
     grouped = email_render.group_sections(blocks or [], design)
     taken: dict = {}
     consumed: set = set()          # (family, index) of every design section a group took
-    used: set = set()
     out: list = []
-    report = {"filled": 0, "missed": [], "notes": [], "unreached": []}
+    report = {**empty, "why": list(chosen["why"])}
+    sigs_by_id: dict = {}
     for g in grouped:
         kind = g["kind"]
         fam = email_render._family(kind)
-        order = [s for s in secs if email_render._family(str(s.get("kind"))) == fam]
+        order = [(k, s_) for k, s_ in enumerate(secs) if email_render._family(str(s_.get("kind"))) == fam]
         i = taken.get(fam, 0)
-        j = next((k for k in range(i, len(order)) if email_render._holds(order[k], g["blocks"])), None)
-        spec = order[j] if j is not None else None
+        j = next((k for k in range(i, len(order)) if email_render._holds(order[k][1], g["blocks"])), None)
+        spec_i, spec = order[j] if j is not None else (None, None)
         taken[fam] = (j + 1) if j is not None else i
         if j is not None:
             consumed.add((fam, j))
@@ -1068,29 +1447,58 @@ def fill(tenant: str, design: dict, blocks: list, note=None) -> tuple[list, dict
             if first is not None:
                 blocks_g.append(dict(first))
                 report["notes"].append("the ask repeated where the design asks again — the same link")
-        has_pic = any(b.get("type") in ("hero", "image") and b.get("image") for b in blocks_g)
-        if spec and wants and not (kind == "hero" and has_pic):
-            ikind = (design.get("imagery") or {}).get(_IMAGERY_OF.get(kind, "feature"), "lifestyle")
-            got = assets_for(tenant, ikind, spec.get("aspect", ""))
-            cands = [a for a in got["assets"] if a.id not in used]
+        picks = chosen["by_section"].get(spec_i) if spec_i is not None else None
+        if picks == "mark":
+            blocks_g.insert(0, {"type": "image", "mark": True, "alt": "the brand's mark"})
+            report["notes"].append(f"the {kind} section carries the brand's mark, as the design has it")
+        elif spec and wants:
+            picks = list(picks or [])
             if kind == "hero" and blocks_g and blocks_g[0].get("type") == "hero":
-                if cands:
-                    blocks_g[0] = {**blocks_g[0], "image": cands[0].url,
-                                   "alt": blocks_g[0].get("alt") or (cands[0].title or "")}
-                    used.add(cands[0].id)
+                held = blocks_g[0].get("image")
+                if picks and hero_basis not in ("generated", "drafted_in_canva"):
+                    a = picks[0]
+                    if held and held != a.url:
+                        report["notes"].append("the hero the ladder chose gave way to the chooser's pick — "
+                                               "the design's kind, and not seen lately by this list")
+                    blocks_g[0] = {**blocks_g[0], "image": a.url,
+                                   "alt": blocks_g[0].get("alt") or (a.title or "")}
                     report["filled"] += 1
+                    report["pictures"].append({"id": a.id, "title": a.title or "", "url": a.url, "kind": "hero",
+                                               "why": chosen["why"][1] if len(chosen["why"]) > 1 else ""})
+                    sig = ((a.reading or {}).get("colours") or {})
+                    if sig:
+                        report["signatures"].insert(0, sig)
+                elif held:
+                    # A drawn hero stands, and still leads the palette when
+                    # its colours can be read off the asset it was filed as.
+                    from . import kb as _kb
+                    row = next((x for x in _kb.assets(tenant) if (x.url or "") == held), None)
+                    sig = picture_signature(row) if row is not None else {}
+                    report["pictures"].append({"id": row.id if row is not None else "",
+                                               "title": (row.title if row is not None else "") or "", "url": held,
+                                               "kind": "hero", "why": f"the run's own hero ({hero_basis or 'library'})"})
+                    if sig:
+                        report["signatures"].insert(0, sig)
                 else:
-                    report["missed"].append(f"the hero's picture — {got['why']}")
+                    fix = next((w.split(" — ", 1)[-1] for w in chosen["why"] if w.startswith(f"section {spec_i + 1} ")
+                                and "nothing on file fits" in w), "nothing on file fits the design's kind")
+                    report["missed"].append(f"the hero's picture — {fix}")
             else:
                 n_got = 0
-                for a in cands[:wants]:
+                for a in picks[:wants]:
                     blocks_g.insert(n_got, {"type": "image", "image": a.url, "alt": a.title or ""})
-                    used.add(a.id)
                     n_got += 1
+                    sig = ((a.reading or {}).get("colours") or {})
+                    if sig:
+                        report["signatures"].append(sig)
+                    report["pictures"].append({"id": a.id, "title": a.title or "", "url": a.url, "kind": kind,
+                                               "why": "sits with the hero's tones" if report["signatures"] else "fits the design's key"})
                 report["filled"] += n_got
                 if n_got < wants:
+                    fix = next((w.split(" — ", 1)[-1] for w in chosen["why"] if w.startswith(f"section {spec_i + 1} ")
+                                and "nothing on file fits" in w), "nothing on file fits its kind")
                     report["missed"].append(
-                        f"{wants - n_got} of {wants} picture(s) for the {kind} section ({ikind}) — {got['why']}")
+                        f"{wants - n_got} of {wants} picture(s) for the {kind} section — {fix}")
         out += blocks_g
     # A design section the drafter's blocks never reached — a closing band,
     # a second run of words — is said, so the difference between the

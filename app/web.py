@@ -1099,11 +1099,57 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     from .email_design import ROLES as _roles
     edits.update({f"palette.{r}": str(form.get(f"palette.{r}", ""))
                   for r in _roles if str(form.get(f"palette.{r}", "")).strip()})
+    # The keying switch: a checkbox posts "on" when ticked and nothing when
+    # not, so its hidden twin says which it was — a form that names the
+    # switch at all sets it either way.
+    if form.get("keyed_grounds_present"):
+        edits["keyed_grounds"] = "on" if form.get("keyed_grounds") else "off"
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
            if got.get("ok") else ("err", got.get("error", "approve failed")))
     back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
             f"&{arg[0]}={quote(arg[1])}")
+    if form.get("key"):
+        back += f"&key={quote(str(form['key']))}"
+    return RedirectResponse(back, 303)
+
+
+@app.post("/admin/pictures_read")
+async def pictures_read(request: Request, key: str = Depends(admin_key)):
+    """Read the brand's unread pictures — colours by arithmetic, the kind by
+    one look each — and keep the readings on the pictures. Back to the
+    Brand tab with what was read; never renders at its own address."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import email_design
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    got = email_design.read_pictures(tenant)
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&ok={quote(got.get('said', 'read'))}"
+    if form.get("key"):
+        back += f"&key={quote(str(form['key']))}"
+    return RedirectResponse(back, 303)
+
+
+@app.post("/admin/picture_kind")
+async def picture_kind(request: Request, key: str = Depends(admin_key)):
+    """The owner's word on what a picture is — outranks every reading."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import email_design
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    said = email_design.set_picture_kind(str(form.get("asset_id", "")), str(form.get("kind", "")))
+    arg = ("ok" if "set by hand" in said else "err", said)
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
     if form.get("key"):
         back += f"&key={quote(str(form['key']))}"
     return RedirectResponse(back, 303)
@@ -2670,7 +2716,8 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                err=request.query_params.get("err", ""),
                                derive_voice=bool(
                                    request.query_params.get("derive_voice")),
-                               pick=bool(request.query_params.get("pick")))
+                               pick=bool(request.query_params.get("pick")),
+                               preview_entity=request.query_params.get("preview_entity", ""))
     if tab == "assurance":
         try:
             days = int(request.query_params.get("days", "30"))

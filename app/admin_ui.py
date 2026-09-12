@@ -4080,9 +4080,18 @@ def _palette_rows(proposed: dict, live: dict, sources: dict, findings: list,
         dflt = _er._DEFAULT["font"][role].split(",")[0].strip().strip("'\"")
         faces.append(f"{role}: <b>{_esc(fam)}</b>" if fam and fam != dflt
                      else f"{role}: <span class='mut'>none on file — the design's classification chooses</span>")
+    keyed = (proposed or live or {}).get("keyed_grounds", True)
+    switch = (f'<p><label><input type="checkbox" name="keyed_grounds" value="on"'
+              f'{" checked" if keyed else ""}> <b>Key each email\'s grounds to its pictures</b>'
+              f'<input type="hidden" name="keyed_grounds_present" value="1"></label><br>'
+              f'<span class="mut">The page, tint, dark and secondary follow the photographs chosen '
+              f'for the email, so the picture and its grounds read as one composition; the accent, '
+              f'the ink and the faces never move. Off: every email sits on the palette above as '
+              f'it is.</span></p>')
     by_kind = _ed.assets_by_kind(tenant) if tenant else {}
     pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in by_kind.items())
     none = [k for k, n in by_kind.items() if not n]
+    gallery = _pictures_read(tenant) if tenant else ""
     return f"""<h4 style="margin:14px 0 4px">Palette of roles</h4>
 <p class="mut">A design names a role, never a colour; the brand's colour under
 that name is what ships. Every kit colour is placed by one stated rule; a role
@@ -4091,13 +4100,62 @@ hand — it survives re-derives like every hand-set field.</p>
 <div class="tblwrap"><table class="bt-table"><tr><th>role</th><th>proposed</th>
 <th>came from</th><th>live</th><th>set</th></tr>{rows}</table></div>
 {found}
+{switch}
 <p><b>Faces on file</b> — {' · '.join(faces)}</p>
 <p><b>Pictures by the kind of slot they fit</b> — {pics or '<span class=mut>none on file</span>'}
-{('<br><span class=mut>none for ' + _esc(', '.join(none)) + ' — ' + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>') if none and tenant else ''}</p>"""
+{('<br><span class=mut>none for ' + _esc(', '.join(none)) + ' — ' + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>') if none and tenant else ''}</p>
+{gallery}"""
+
+
+def _pictures_read(tenant: str, limit: int = 24) -> str:
+    """THE PICTURES AND WHAT WAS READ OFF THEM — kept on each asset in the
+    knowledge base (owner, 2026-09-12): the kind, whether the product is
+    alone, the tones the palette will lead with, the aspect; how each was
+    read (the filing, one look, or the owner's hand); a select to correct
+    the kind, which outranks every reading; and a control to read the
+    unread. Outside the approve form: these are facts about pictures, not
+    theme fields, and they post to their own routes."""
+    from . import email_design as _ed, kb as _kb
+    rows = [a for a in _kb.assets(tenant) if (a.kind or "image") == "image"]
+    if not rows:
+        return ""
+    unread = [a for a in rows if not ((a.reading or {}).get("colours") and (a.reading or {}).get("kind"))]
+    cards = ""
+    for a in rows[:limit]:
+        r = dict(a.reading or {})
+        cols = r.get("colours") or {}
+        sw = "".join(f'<span class=sw title="{_esc(k)}" style="background:{_esc(cols.get(k, ""))}"></span>'
+                     for k in ("dominant", "light", "mid", "dark") if cols.get(k))
+        how = (r.get("how") or {}).get("kind", "")
+        opts = "".join(f'<option value="{k}"{" selected" if r.get("kind") == k else ""}>{k}</option>'
+                       for k in _ed.PICTURE_KINDS)
+        facts = (f'{sw} {_esc(cols.get("key", ""))} key' if cols else '<span class=mut>not read yet</span>')
+        cards += (f'<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-top:1px solid var(--rule)">'
+                  f'<a href="{_esc(a.url or "")}"><img src="{_esc(a.url or "")}" alt="{_esc(a.title or "")}" '
+                  f'style="width:56px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--rule)"></a>'
+                  f'<div style="font-size:.85rem"><b>{_esc(a.title or "untitled")}</b>'
+                  + (f' <span class=mut>· {_esc(a.entity_key)}</span>' if a.entity_key else "")
+                  + f'<br>{facts}'
+                  + (f' · {_esc(r.get("aspect", ""))}' if r.get("aspect") else "")
+                  + (' · the product alone' if r.get("alone") else (' · among other things' if r.get("kind") and not r.get("alone") and r.get("kind") != "mark" else ""))
+                  + (f'<br><span class=mut>kind: {_esc(r.get("kind") or "unread")} — {_esc(how)}</span>' if r.get("kind") or how else "")
+                  + f'<form method="post" action="/admin/picture_kind" style="display:inline;margin-left:6px">'
+                    f'<input type="hidden" name="tenant" value="{_esc(tenant)}"><input type="hidden" name="asset_id" value="{_esc(a.id)}">'
+                    f'<select name="kind"><option value="">— correct the kind —</option>{opts}</select> <button class="sec">Set</button></form>'
+                  + '</div></div>')
+    more = f'<p class="mut">{len(rows) - limit} more not shown</p>' if len(rows) > limit else ""
+    read_ctl = (f'<form method="post" action="/admin/pictures_read" style="margin:6px 0">'
+                f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                f'<button class="sec">Read the {len(unread)} unread picture{"s" if len(unread) != 1 else ""}</button> '
+                f'<span class="mut">colours by arithmetic; the kind by one look each, kept on the picture</span></form>'
+                if unread else '<p class="mut">every picture is read; the readings stay with them</p>')
+    return (f'<details><summary class="mut"><b>The pictures, and what was read off them</b> — {len(rows)} on file, '
+            f'{len(rows) - len(unread)} read</summary>{read_ctl}{cards}{more}</details>')
 
 
 def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
-                 derive_voice: bool = False, pick: bool = False) -> str:
+                 derive_voice: bool = False, pick: bool = False,
+                 preview_entity: str = "") -> str:
     """One account's brand, whole: WHO they are and how they SOUND (identity —
     positioning, elevator, voice, hard rules) and how their email LOOKS (the
     derived, owner-approved theme).
@@ -4612,7 +4670,7 @@ and hand-set fields survive future re-derives.</p>
   {identity}
   {_channel_rules_card(key, tenant)}
   {_board_card(key, tenant)}
-  {_structures_card(key, tenant)}
+  {_structures_card(key, tenant, preview_entity=preview_entity)}
   {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
   {sources_card}
@@ -6646,7 +6704,7 @@ def _image_model_card(key: str, tenant: str) -> str:
 </div>"""
 
 
-def _design_preview(tenant: str, design: dict, shot: dict | None) -> str:
+def _design_preview(tenant: str, design: dict, shot: dict | None, entity_key: str = "") -> str:
     """THE REFERENCE BESIDE THE RECREATION: the design executed with this
     brand's palette, faces and its own pictures and products, in a sandboxed
     frame next to the screenshot it was read from — so "would this recreate
@@ -6655,13 +6713,40 @@ def _design_preview(tenant: str, design: dict, shot: dict | None) -> str:
     from . import email_design as _ed
     if not design or not design.get("sections"):
         return ""
-    html, note = _ed.preview_html(tenant, design)
+    html, note = _ed.preview_html(tenant, design, entity_key=entity_key)
     if not html:
         return f'<br><span class="when">no preview — {_esc(note)}</span>'
+    last = getattr(_ed.preview_html, "last", {}) or {}
+    # Not "picker": the console-frame suite forbids that name in this file,
+    # where the old per-tab client pickers lived; this is the entity the
+    # preview is about, one form on one card.
+    about = (f'<form method="get" action="/admin/ui" style="margin:4px 0;font-size:.85rem">'
+              f'<input type="hidden" name="tab" value="brand"><input type="hidden" name="tenant" value="{_esc(tenant)}">'
+              f'preview as an email about {entity_select(tenant, entity_key, name="preview_entity")} '
+              f'<button class="sec">Preview</button> <span class="mut">the same chooser and palette a run uses</span></form>')
+    pics = "".join(
+        f'<a href="{_esc(p["url"])}" title="{_esc(p["title"])}"><img src="{_esc(p["url"])}" '
+        f'alt="{_esc(p["title"])}" style="height:44px;width:44px;object-fit:cover;border-radius:4px;'
+        f'border:1px solid var(--rule)"></a>' for p in last.get("pictures") or [])
+    why = "; ".join(f"{p['kind']}: {p['title'] or 'untitled'} — {p['why']}" for p in last.get("pictures") or [])
+    how = last.get("keyed") or {}
+    pal = last.get("palette") or {}
+    keyed = "; ".join(f"{r} <span class=sw style=background:{_esc(pal.get(r, ''))}></span>{_esc(pal.get(r, ''))} — {_esc(v)}"
+                      for r, v in how.items() if r in ("page", "surface", "tint", "dark", "secondary", "ink", "accent"))
+    kept = how.get("_", "")
+    missed = "; ".join(last.get("missed") or [])
+    steps = "".join(f"<li>{_esc(w)}</li>" for w in last.get("why") or [])
+    chosen = (about
+              + f'<div class="mut" style="margin:6px 0;font-size:.85rem"><b>The pictures it chose</b> — {pics}'
+              + (f'<ol style="margin:4px 0 4px 18px">{steps}</ol>' if steps else " none")
+              + (f'<b>The palette they lead, the brand supporting</b> — {keyed}' if keyed else "")
+              + (f'<br>{_esc(kept)}' if kept else "")
+              + (f'<br>not filled: {_esc(missed)}' if missed else "") + "</div>")
     return (f'<details open><summary class="mut">preview — this design with {_esc(tenant)}&#39;s '
-            f'palette, faces and pictures'
+            f'palette, faces and pictures, as a run would build it'
             + (f' ({_esc(note)})' if note else "") + '</summary>'
-            f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin:6px 0">'
+            + chosen
+            + f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin:6px 0">'
             + (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" alt="the reference" '
                f'style="width:200px;border:1px solid var(--rule)"></a>' if shot and shot.get("image") else "")
             + f'<iframe sandbox="{PREVIEW_SANDBOX}" srcdoc="{_esc(_preview_html(html))}" '
@@ -6669,7 +6754,7 @@ def _design_preview(tenant: str, design: dict, shot: dict | None) -> str:
               f'border-radius:6px;background:#fff"></iframe></div></details>')
 
 
-def _structures_card(key: str, tenant: str) -> str:
+def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
     """The collective library of email structures, and the swipe board that
     feeds it. On Brand beside the visual boards because it is the same idea
     one channel over: a reference contributes words, never its own material.
@@ -6729,8 +6814,21 @@ def _structures_card(key: str, tenant: str) -> str:
                    + "".join(f"<li>{_esc(d)}</li>" for d in drops) + "</ul></details>" if drops else "")
                 + (f'<details><summary class="mut">{len(dsg.get("sections") or [])} sections</summary>'
                    f'<ol class="mut">{secs}</ol></details>' if secs else "")
-                + _design_preview(tenant, dsg, shot)
+                + _design_preview(tenant, dsg, shot, preview_entity)
                 + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
+        elif dsg.get("sections"):
+            # A design with a concrete order that did not come through the
+            # reader — filed by hand, or from an approved send — is previewed
+            # the same way: the preview is about the design, not the read.
+            secs = "".join(
+                f'<li>{_esc(x["kind"])} · {_esc(x["layout"])} on {_esc(x["bg"])}'
+                + (f' · {_esc(", ".join(x.get("slots") or []))}' if x.get("slots") else "")
+                + "</li>" for x in (dsg.get("sections") or []))
+            design_html = (f'<br><span class="mut">design: {_esc(_ed.summary(dsg))}</span>'
+                           + f'<details><summary class="mut">{len(dsg["sections"])} sections</summary>'
+                             f'<ol class="mut">{secs}</ol></details>'
+                           + _design_preview(tenant, dsg, shot, preview_entity)
+                           + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
         else:
             design_html = ('<br><span class="when">design not read — the house design, '
                            'arranged as above' + read_ctl + "</span>")

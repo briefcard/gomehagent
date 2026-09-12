@@ -743,6 +743,7 @@ drafter designs fresh, as it always did.
 | `section.text_on_image` | off · on | off | the words sit over the picture |
 | `section.rule_above` | none · thin · thick · dotted | none | a rule between this section and the one before |
 | `section.list` | check · pill · arrow · plain | check | how a list is set: ticks; pill buttons two across (a quiz, a poll); rows with an arrow and a rule between (further reading); plain lines |
+| `section.image_kind` | inherit · packshot-on-plain · packshot-on-colour · lifestyle · flat-lay · portrait · texture · mark | inherit | what KIND of picture this section's picture slots want — a product alone on a plain or a coloured ground, a lifestyle scene, a flat-lay, a person, a texture — or a brand mark (a logo band, not a photograph); inherit = the design's imagery default for this section's family |
 
 Section kinds: hero · intro · feature · products · proof · editorial · offer · closing · ps. Slots: kicker · headline · sub · body · list · cta · products · quote · stat · image · caption · signature · ps (products and image take a count, 1–6). Grounds a design may name: page · surface · dark · tint · accent; the roles a brand supplies: page · surface · ink · muted · accent · accent_ink · dark · dark_ink · tint · tint_ink · border · secondary.
 

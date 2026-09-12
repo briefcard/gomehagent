@@ -111,11 +111,15 @@ def main() -> int:
 
     print("— 1. every value is drawn —")
     walked, skipped, same, lost = 0, [], [], []
+    readers = ed.readers()
+    filler_fields = [(g, n) for (g, n), by in readers.items() if by == "filler"]
     for group, name, values, default, _meaning in ed.fields():
         key = f"{group}.{name}"
         if key in er.NOT_DRAWN_YET:
             skipped.append(key)
             continue
+        if readers.get((group, name)) == "filler":
+            continue                 # read by the filler; walked below with the filler
         for v in values:
             if isinstance(default, list):
                 if v in default:
@@ -135,6 +139,40 @@ def main() -> int:
     ck("every value the schema names changes the email — none is a knob nothing reads",
        walked > 60 and not same, str(same))
     ck("and none loses the copy, the ask or the legal footer", not lost, str(lost))
+    # THE FILLER'S FIELDS, walked with the filler: a value the chooser does
+    # not act on is as much a dead knob as one the painter ignores. Each
+    # kind names a picture of that kind when one is on file; "mark" fills
+    # the brand's mark; a design's imagery default reaches a section that
+    # inherits it.
+    from app import db as _db, kb as _kb, tenants as _tn
+    _db.init_db(); _tn.seed(); _kb.ensure_brand("baci", "Baci")
+    cdn = "https://cdn.shopify.com/s/files/1/0001/"
+    _kinds = {"packshot-on-plain": "pk", "packshot-on-colour": "pc", "lifestyle": "lf",
+              "flat-lay": "fl", "portrait": "pt", "texture": "tx"}
+    for kind, tag in _kinds.items():
+        _kb.add_asset("baci", f"{cdn}{tag}.jpg", rights=_kb.OWNED, subject="photo", title=kind, origin="human")
+    with _db.SessionLocal() as _s:
+        for a in _s.query(_db.KbAsset).filter(_db.KbAsset.tenant == "baci").all():
+            a.reading = {"colours": {"dominant": "#888888", "light": "#eeeeee", "dark": "#111111", "mid": "#5577aa",
+                                     "key": "mid", "luminance": 0.5, "warmth": 0.0},
+                         "kind": a.title, "how": {"colours": "arithmetic", "kind": "test"}, "aspect": "landscape"}
+        _s.commit()
+    filled_by_kind = {}
+    for kind in _kinds:
+        d, _ = ed.normalize({"sections": [{"kind": "feature", "image_kind": kind, "slots": ["headline", "body", "image:1"]}]})
+        got = ed.choose_media("baci", d)
+        filled_by_kind[kind] = [a.title for a in (got["by_section"].get(0) or [])]
+    ck("section.image_kind is read by the filler — each kind chooses a picture of that kind",
+       all(filled_by_kind[k] == [k] for k in _kinds), str(filled_by_kind))
+    d_mark, _ = ed.normalize({"sections": [{"kind": "closing", "layout": "band", "image_kind": "mark", "slots": ["image:1"]}]})
+    ck("and image_kind mark fills the brand's mark, never a photograph",
+       ed.choose_media("baci", d_mark)["by_section"].get(0) == "mark")
+    d_inh, _ = ed.normalize({"imagery": {"feature": "texture"}, "sections": [{"kind": "feature", "slots": ["body", "image:1"]}]})
+    ck("imagery.<family> is read by the filler — an inheriting section takes the design's default kind",
+       [a.title for a in ed.choose_media("baci", d_inh)["by_section"].get(0) or []] == ["texture"])
+    ck("the filler's fields are declared, and they are the picture-kind fields",
+       set(filler_fields) == {("section", "image_kind"), ("imagery", "hero"), ("imagery", "product"), ("imagery", "feature")},
+       str(filler_fields))
     ck("the fields skipped are exactly the ones NOT_DRAWN_YET names, each with its phase",
        set(skipped) == set(er.NOT_DRAWN_YET) and all(v.startswith("Phase") for v in er.NOT_DRAWN_YET.values()))
     # NOT_DRAWN_YET must be honest the other way too: a field it names must

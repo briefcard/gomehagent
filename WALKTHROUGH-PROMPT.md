@@ -1640,9 +1640,24 @@ the prompt**; **a review runs the real code with the model stubbed by a
 person, and every finding ships with its guard**. Ten guards, all
 `[ caught ]`.
 
-**Owner's move:** swipe one real RGE email, read the card, open the
-preview beside the reference, run one campaign on it and read the run
-note; then the six-email acceptance.
+**The pictures lead, the brand supports — 2026-09-12 (hash in the memory
+note).** The owner: the pictures decide an email's aesthetic; choose the
+media for the reference first, pull the palette from the photos, apply the
+brand to support; a picture's reading sticks in the KB; different sends on
+the same layout and entity use different pictures. Built: `KbAsset.reading`
+(arithmetic colours + one look for the kind, the owner's hand outranking;
+never a reference pin); `section.image_kind` + a mark; ONE chooser for every
+slot (entities → design's kind → not seen lately → fit/coherence → seed);
+`palette.from_photos` (accent by construction, ink while it reads, every
+ground measured); `Output.media_ids` carries every picture; the preview runs
+the run's chain on a chosen entity. Rules it adds: **a field says who reads
+it, and the walk checks each with its reader**; **a guard whose mutation
+is a no-op is dead — turn the claim into a source check**; **three
+identical lines are three anchors — say each in its own words**.
+
+**Owner's move:** on the Brand tab press "Read the unread pictures" (one
+look per picture, ever), correct any kind the look got wrong, then preview
+a structure as an email about a product and read the steps under it.
 
 ---
 

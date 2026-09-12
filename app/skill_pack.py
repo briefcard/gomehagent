@@ -2248,7 +2248,10 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
                 out.append({"shape": list(r.shape or []),
                             "intent": _intent, "format": _fmt,
                             "subject": lines[0] if lines else "",
-                            "opening": next((ln for ln in lines[3:]), "")})
+                            "opening": next((ln for ln in lines[3:]), ""),
+                            # The pictures this list saw — so the next send
+                            # on the same layout and entity leads with another.
+                            "media": list(r.media_ids or [])})
     except Exception:                                            # noqa: BLE001
         # History is an improvement, never a precondition: a brand-new
         # account, or a column an old database has not grown yet, must still
@@ -2392,7 +2395,7 @@ def _campaign_craft(ctx, seg: dict) -> dict:
             # signature survives, and a stub can observe it.
             "revision_notes": str(ctx.params.get("revision_notes")
                                   or "").strip(),
-            "avoid": [h for h in hist if h.get("shape") or h.get("subject")]}
+            "avoid": [h for h in hist if h.get("shape") or h.get("subject") or h.get("media")]}
 
 
 def _craft_brief(craft: dict) -> str:
@@ -3624,15 +3627,41 @@ def _run_campaign_email(ctx: Context) -> dict:
         from . import email_design as _ed
         _structure = craft.get("structure") or {}
         _design = _structure.get("design") or _ed.house()
-        blocks, _filled = _ed.fill(ctx.tenant, _design, blocks, note=ctx.note)
-        html = email_render.render_design(_design, theme, blocks,
+        # THE PICTURES CHOSEN FOR THIS SEND, THEN THE PALETTE FROM THEM
+        # (owner, 2026-09-12): the campaign's entities scope the choice, the
+        # design's kinds filter it, what this list saw lately ranks below
+        # what it has not, the run's id breaks ties — so the same base
+        # layout on the same entity leads with a different photograph next
+        # time and its palette follows. The same two functions the card's
+        # preview calls, so the preview is the email.
+        blocks, _filled = _ed.fill(
+            ctx.tenant, _design, blocks, note=ctx.note,
+            entities=[k for k in ([commitment.get("key")] + list(commitment.get("also") or [])
+                                  + [e.get("key", "") for e in ents]) if k],
+            recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
+            seed=str(ctx.run_id or ctx.tenant), hero_basis=str(hero_got.get("basis") or ""))
+        _keyed_theme, _how = _ed.palette_for(theme, _design, _filled)
+        state["media"] = [p_["id"] for p_ in (_filled.get("pictures") or []) if p_.get("id")]
+        html = email_render.render_design(_design, _keyed_theme, blocks,
                                           preheader=c.get("preheader", ""),
                                           # Omnisend has no view-in-browser variable —
                                           # its caps say so, and a header link no
                                           # variable can fill ships as literal text.
                                           webview=webview)
+        for _w in _filled.get("why") or []:
+            ctx.note("pictures — " + _w)
+        for _n in _filled.get("notes") or []:
+            if "gave way" in _n or "mark" in _n:
+                ctx.note("pictures — " + _n)
+        if _how and "_" not in _how:
+            _kp = email_render._theme(_keyed_theme)["palette"]
+            ctx.note("palette led by the pictures, the brand supporting: " + "; ".join(
+                f"{r} {_kp.get(r, '')} — {v}" for r, v in _how.items()
+                if r in ("page", "surface", "tint", "dark", "secondary", "ink", "accent")))
+        elif _how.get("_"):
+            ctx.note("palette: " + _how["_"])
         if _structure:
-            _pal = email_render._theme(theme)["palette"]
+            _pal = email_render._theme(_keyed_theme)["palette"]
             _faces = email_render._faces(email_render._theme(theme), _design.get("type") or {})[0]
             _own = {r for r in ("heading", "body")
                     if str(theme.get("font", {}).get(r) or "") and
@@ -3814,10 +3843,16 @@ def _run_campaign_email(ctx: Context) -> dict:
         # difference becomes real and silent: an asset would be credited, its
         # `uses` counter incremented, and "which picture worked" answered with
         # a photograph nobody ever received.
-        media_ids=lambda: ([hero_got["asset_id"]]
-                           if hero_got.get("asset_id") and hero
-                           and any(b.get("type") == "hero"
-                                   for b in state["blocks"]) else []),
+        # EVERY PICTURE THE EMAIL CARRIES — the ladder's hero when it
+        # stood, and the chooser's picks — so the next send to this list
+        # knows what it saw (owner, 2026-09-12: the same layout on the same
+        # entity leads with another photograph next time).
+        media_ids=lambda: list(dict.fromkeys(
+            ([hero_got["asset_id"]]
+             if hero_got.get("asset_id") and hero
+             and any(b.get("type") == "hero" and b.get("image") == (hero or {}).get("url")
+                     for b in state["blocks"]) else [])
+            + list(state.get("media") or []))),
         # Only reads actually taken in this run — see `live_reads` above.
         lookups=list(live_reads),
         # ONE ARTIFACT, ONE SUBJECT — checked at the same door, repaired by the

@@ -614,6 +614,63 @@ guarded in the same ship:
   half the style; after, it is recognisably the reference in Baci's colours
   with the brand's own photograph and copy. Ten guards, all `[ caught ]`.
 
+### The pictures lead, the brand supports — 2026-09-12
+The owner, on the card's preview: *"it shows that we are not really doing it
+well … One of the things that decide an email's aesthetic is not the brand
+per se but the colors of the images we choose so that it all looks
+intentional. But our emails will always default to the same thing and our
+preview will never provide images that actually show us what the email
+should look like."* Then the order: *"the main media assets should be chosen
+based on the email we are trying to recreate and then the colors lean first
+on the themes in the photos … then apply our branding to support that."*
+And: *"once you validate photos that meta information should stick with
+them in the knowledgebase"*; *"we will want different emails about the same
+entities to use different order / choice of photos which will affect the
+color palette of the email."*
+
+**What was true.** `preview_blocks` took the first lifestyle asset and the
+first three products every time and rendered a fixed house-shaped sample,
+not the design's sections; `fill` chose pictures by recency; `render_design`
+resolved every role through the one approved palette, so every email had the
+same grounds whatever picture it carried; the reader named one picture kind
+per family; the campaign recorded only the ladder's hero on the ledger.
+
+**What changed (all with guards):**
+- **The reading stays on the picture** — `KbAsset.reading`: colours (dominant,
+  light, mid, dark, key, warmth) and size/aspect by arithmetic; the KIND by
+  the filing when it says (packshot tag, surface, logo), else by ONE vision
+  look, kept on the row and never re-read; the owner's hand
+  (`/admin/picture_kind`) outranks both. `read_pictures` — the Brand tab's
+  control — reads the unread; the tab shows every picture with its reading.
+  A reference pin is never read.
+- **The reader counts every photograph** — `section.image_kind` (inherit |
+  the six kinds | `mark`), pass B told to count each photograph and to read
+  a logo band as a mark. A mark slot takes the brand's logo, never a photo.
+- **One chooser** (`choose_media`) for every slot: the campaign's entities
+  first (brand-wide when it names none), the design's kind per section,
+  not seen lately by this list (the Output's `media_ids`, now every picture
+  the email carried), fit to the design's key and coherence with the hero,
+  ties by the run's seed. Every step said on the run.
+- **The palette from the photos** (`palette.from_photos`): the hero's light
+  tone is the page, white warmed to it the surface, its soft tone the tint,
+  its deepest the dark, its saturated mid the secondary; on a dark key the
+  deepest tone is the page. The accent is the brand's by construction (the
+  suite reads the source to hold it); the ink the brand's while it reads at
+  4.5:1, else computed; every ground measured; a tone that will not carry
+  its ink replaced and said. `theme["keyed_grounds"]` (Brand tab checkbox)
+  turns the lead off. A drawn hero stands; a library hero gives way to the
+  chooser's pick and says so.
+- **The preview is the run** — `preview_html(entity_key)` runs the same
+  chooser and palette on an entity you pick on the card, on the design's
+  own blocks; the card shows the pictures, the steps and the derivation.
+- **Two sends, same layout, same entity, different pictures, different
+  palette** — a check in the suite, not a sentence.
+- Defaults chosen (the owner's three questions): accent, mark and faces
+  always the brand's, the ink while it reads; complementary slots entity
+  first then brand-wide, said; packshots on white surface cards over the
+  photo-led page. Fields now say who reads them (`_F.by`): the painter walk
+  covers painter fields with the renderer and filler fields with the chooser.
+
 ### Phase 7 — Learn, and tidy (later, not this initiative)
 Structures carry outcomes per brand (`results.py` joining `Output.meta
 ["design"]` to performance); a design signature of its own in the library

@@ -648,6 +648,8 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
                 + ", ".join(sorted(allowed)))}
         if isinstance(value, str) and not value.strip():
             continue                       # a blank form input is not an edit
+        if value is None:
+            continue
         want = allowed[path]
         if want is list and not isinstance(value, list):
             return {"ok": False, "error": f"{path} takes a list, got "
@@ -657,6 +659,11 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
                 value = int(value)
             except Exception:                                   # noqa: BLE001
                 return {"ok": False, "error": f"{path} takes a number"}
+        if want is bool and not isinstance(value, bool):
+            v = str(value).strip().lower()
+            if v not in ("on", "off", "true", "false", "1", "0", "yes", "no"):
+                return {"ok": False, "error": f"{path} takes on or off"}
+            value = v in ("on", "true", "1", "yes")
         if path.startswith("palette."):
             from . import palette as _pal
             if not _pal.norm(value):

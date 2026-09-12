@@ -61,6 +61,12 @@ _DEFAULT = {
     # Phase 4; it is in the shape now so a role is a theme field the owner
     # can approve and edit like any other.
     "palette": {},
+    # KEY THE GROUNDS TO THE PICTURES (owner, 2026-09-12): with this on —
+    # the default — an email's page, tint, dark and secondary are keyed to
+    # the photographs chosen for it (`palette.key_to_pictures`); the
+    # identity roles never move. Off, every email sits on the approved
+    # palette as it is. A brand field, approved and edited like the rest.
+    "keyed_grounds": True,
     "radius": "8px", "width": 600,
     # A working nav, brand data: [{"label","url"}]. Empty renders no nav bar.
     "nav": [],
@@ -712,9 +718,17 @@ def _image(b: dict, t: dict) -> str:
     the brand's library (never by a drafter: the filler is the only writer
     of this block). Cut to the slot's aspect through the CDN, treated as
     the section's `image` says, live alt text always."""
+    pv, ph = _PAD[t["look"]["density"]]
+    if b.get("mark"):
+        # THE BRAND'S MARK where the reference had its logo band — never a
+        # photograph. The mark is the theme's, sized to the band.
+        if not t.get("logo_url"):
+            return ""
+        return (f'<tr><td align="center" style="padding:{pv + 6}px {ph}px">'
+                f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t.get("logo_alt") or t.get("name") or "")}" '
+                f'height="36" style="display:inline-block;height:36px;border:0"></td></tr>')
     if not b.get("image"):
         return ""
-    pv, ph = _PAD[t["look"]["density"]]
     treat = t.get("image") or "contained"
     w = t["width"] if treat == "bleed" else t["width"] - 2 * ph
     rad = {"rounded": "16px", "circle": "50%", "bleed": "0"}.get(treat, t["radius"])

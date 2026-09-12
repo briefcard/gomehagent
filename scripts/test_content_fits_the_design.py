@@ -123,14 +123,25 @@ def main() -> int:
     notes = []
     filled2, rep2 = ed.fill("baci", dd, blocks, note=notes.append)
     ck("a slot nothing fits is named with its fix, on the run, and the section keeps its words",
-       rep2["missed"] and "2 of 2 picture(s) for the intro section (texture)" in rep2["missed"][0]
+       rep2["missed"] and "2 of 2 picture(s) for the intro section" in rep2["missed"][0]
        and "file a surface photograph" in rep2["missed"][0]
        and any(n.startswith("design slot not filled") for n in notes)
        and [x for x in filled2 if x.get("type") == "text"])
     ck("a design with no order fills nothing and says nothing",
-       ed.fill("baci", ed.house(), blocks) == (blocks, {"filled": 0, "missed": [], "notes": [], "unreached": []}))
-    hero_kept = ed.fill("baci", d, [{"type": "hero", "image": CDN + "own.jpg", "headline": "H"}])[0][0]
-    ck("a hero that already carries a picture keeps it", hero_kept["image"].endswith("own.jpg"))
+       ed.fill("baci", ed.house(), blocks)[0] == blocks
+       and ed.fill("baci", ed.house(), blocks)[1] == {"filled": 0, "missed": [], "notes": [], "unreached": [],
+                                                       "signatures": [], "pictures": [], "why": []})
+    # THE HERO AND THE CHOOSER (owner, 2026-09-12): a hero that was DRAWN or
+    # drafted in Canva stands whatever the chooser would prefer; a plain
+    # library photograph gives way to the chooser's pick — the design's kind,
+    # not seen lately — and the report says so.
+    drawn = ed.fill("baci", d, [{"type": "hero", "image": CDN + "own.jpg", "headline": "H"}], hero_basis="generated")
+    ck("a drawn hero stands, whatever the chooser would prefer",
+       drawn[0][0]["image"].endswith("own.jpg") and not any("gave way" in n for n in drawn[1]["notes"]))
+    lib = ed.fill("baci", d, [{"type": "hero", "image": CDN + "own.jpg", "headline": "H"}], hero_basis="library")
+    ck("a library hero gives way to the chooser's pick, and the report says so",
+       not lib[0][0]["image"].endswith("own.jpg") and any("gave way" in n for n in lib[1]["notes"]),
+       str(lib[1]["notes"])[:120])
 
     # THE PISTOL-SHRIMP REVIEW (2026-09-11): the reference's opening card is
     # ONE section — kicker, headline, byline, then the picture, body, ask —

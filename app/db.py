@@ -2343,6 +2343,15 @@ class KbAsset(_Provenance, Base):
     prompt = Column(Text)                      # what produced it, if generated
     derived_from = Column(JSON, default=list)  # asset ids used as inspiration
     tags = Column(JSON, default=list)          # ["on-white", "lifestyle"]
+    #: WHAT WAS READ OFF THE PICTURE, ONCE, AND KEPT HERE (owner, 2026-09-12:
+    #: "once you validate photos that meta information should stick with them
+    #: in the knowledgebase"): its colours (dominant, light, mid, dark, key,
+    #: warmth — arithmetic), its size and aspect, the KIND of picture it is
+    #: (packshot-on-plain … texture, or a brand mark — one vision call, ever,
+    #: or the owner's hand), whether the product is alone in it. Read by
+    #: `email_design.read_picture`; the chooser and the palette read this,
+    #: never the bytes again.
+    reading = Column(JSON, default=dict)
     entity_key = Column(String, default="")    # what it depicts, if anything
     uses = Column(String, default="0")         # times published
     last_used_at = Column(DateTime(timezone=True))

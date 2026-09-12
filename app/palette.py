@@ -289,3 +289,184 @@ def from_pictures(blobs: list[bytes]) -> dict[str, tuple[str, str]]:
     if light:
         out["tint"] = (light[0], f"{src}: the most frequent light colour")
     return out
+
+
+# ---------------------------------------------------------------------------
+# THE PICTURES LEAD, THE BRAND SUPPORTS. Owner, 2026-09-12: *"the main media
+# assets should be chosen based on the email we are trying to recreate and
+# then the colors lean first on the themes in the photos … This way we
+# optimize each email first for the main featured assets and then apply our
+# branding to support that."*
+#
+# So an email's palette is pulled from the photographs chosen for it — the
+# way a designer, or Canva, pulls a palette from a picture — and the brand
+# is the SUPPORT: the accent for the ask and the rules, the mark, the faces,
+# and the ink for as long as it reads on the photo-led grounds. Every role
+# says which tone it took and from where; every ground is measured for its
+# ink; a tone that would not carry the type is replaced and said.
+# ---------------------------------------------------------------------------
+#: The roles that are the brand's whatever the pictures say.
+IDENTITY = ("accent", "accent_ink")
+#: The roles the photographs set (the inks are computed from their grounds).
+FROM_PHOTOS = ("page", "surface", "tint", "tint_ink", "dark", "dark_ink",
+               "secondary", "muted", "border")
+
+
+def signature(blob: bytes) -> dict:
+    """What a picture is made of, small enough to key an email to: its
+    dominant colour, its most frequent LIGHT tone (a ground a page can take),
+    its deepest tone (a ground the dark can take), its most frequent
+    saturated mid-tone (a second colour), its average luminance as `key`,
+    and a warmth from -1 (cool) to 1 (warm). `{}` when it is not a picture.
+    Quantised to sixteen colours on a 64-pixel thumbnail, as `from_pictures`
+    is — a tone that does not survive that is not one the eye reads."""
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(blob)).convert("RGB")
+    except Exception:                                            # noqa: BLE001
+        return {}
+    q = im.resize((64, 64), Image.LANCZOS).quantize(colors=16).convert("RGB")
+    cols = sorted(q.getcolors(64 * 64) or [], key=lambda t: -t[0])
+    if not cols:
+        return {}
+    total = sum(f for f, _ in cols)
+    hexes = [(f, to_hex(rgb)) for f, rgb in cols]
+    dominant = hexes[0][1]
+    light = next((h for f, h in hexes if 0.7 < luminance(h) <= 0.97), "")
+    dark = next((h for f, h in hexes if luminance(h) < 0.2), "")
+    mid = next((h for f, h in hexes if 0.2 <= luminance(h) <= 0.7 and saturation(h) >= 0.18), "")
+    avg_l = sum(f * luminance(h) for f, h in hexes) / total
+    warmth = 0.0
+    for f, h in hexes:
+        r, g, b = parse(h)
+        warmth += f * ((r - b) / 255.0)
+    warmth = round(max(-1.0, min(1.0, warmth / total)), 2)
+    return {"dominant": dominant, "light": light, "dark": dark, "mid": mid,
+            "key": "light" if avg_l > 0.6 else "dark" if avg_l < 0.3 else "mid",
+            "luminance": round(avg_l, 3), "warmth": warmth}
+
+
+def fit(sig: dict, mood: str) -> float:
+    """How well a picture fits a design's key — higher is better. A light
+    design wants a light picture, a dark design a dark one, a tonal design a
+    quiet one, a high-contrast design one with both a light and a deep tone;
+    a mono design is indifferent. Deterministic, so a choice can be said."""
+    if not sig:
+        return -1.0
+    L = float(sig.get("luminance") or 0.5)
+    if mood == "light":
+        return 1.0 - abs(L - 0.75)
+    if mood == "dark":
+        return 1.0 - abs(L - 0.25)
+    if mood == "tonal":
+        return 1.0 - saturation(sig.get("dominant") or "#808080")
+    if mood == "high-contrast":
+        return (0.5 if sig.get("light") else 0.0) + (0.5 if sig.get("dark") else 0.0)
+    return 0.5
+
+
+def from_photos(sigs: list[dict], brand: dict, *, mood: str = "light") -> tuple[dict, dict]:
+    """The email's palette pulled from its photographs — the hero's signature
+    first and weighted, the complementary ones after it — with the brand as
+    support. `(palette, how)`: `how[role]` says which tone the role took and
+    from where, or why it kept the brand's.
+
+    light key   page = the hero's light tone; surface = white warmed a
+                quarter of the way to it (packshots sit on white); tint =
+                the surface with the hero's soft tone at twelve per cent
+    dark key    page = the hero's deepest tone; surface = the page lifted;
+                tint = the surface with the soft tone
+    dark        the hero's deepest tone, else a complementary one, else
+                the brand's;  secondary  the hero's saturated mid-tone,
+                else a complementary one, else the brand's
+    muted, border   computed between the ink and the grounds
+    ink         the brand's while it reads (4.5:1) on the page AND the
+                surface; otherwise the readable ink on the page
+    accent, accent_ink   the brand's, always
+    Nothing here is invented: a tone comes from a photograph the brand
+    owns, or from the brand's approved palette, or is computed from those
+    two by a rule that is named.
+    """
+    b = {k: norm(v) for k, v in (brand or {}).items() if norm(v)}
+    sigs = [x for x in (sigs or []) if x]
+    out = dict(b)
+    how: dict = {}
+    if not sigs:
+        return out, {"_": "no photograph to lead — the brand's palette as approved"}
+    lead, rest = sigs[0], sigs[1:]
+
+    def _first(key: str):
+        """The lead's tone of this kind, else the first complementary one."""
+        if lead.get(key):
+            return lead[key], "the hero photograph"
+        for i, s_ in enumerate(rest, 1):
+            if s_.get(key):
+                return s_[key], f"complementary photograph {i}"
+        return "", ""
+
+    light, light_from = _first("light")
+    dark, dark_from = _first("dark")
+    mid, mid_from = _first("mid")
+    if mood == "dark" and dark:
+        out["page"] = dark
+        how["page"] = f"{dark_from}'s deepest tone"
+        out["surface"] = mix(dark, "#ffffff", 0.08)
+        how["surface"] = "the page, lifted eight per cent"
+    else:
+        if light:
+            out["page"] = light
+            how["page"] = f"{light_from}'s light tone"
+            out["surface"] = mix("#ffffff", light, 0.25)
+            how["surface"] = "white, warmed a quarter of the way to the page"
+        else:
+            how["page"] = "kept the brand's — no light tone in the photographs"
+            how["surface"] = "kept the brand's"
+    soft = mid or light
+    if soft and out.get("surface"):
+        out["tint"] = mix(out["surface"], soft, 0.12)
+        how["tint"] = f"the surface with {mid_from if mid else light_from}'s soft tone at twelve per cent"
+    else:
+        how["tint"] = "kept the brand's — no soft tone in the photographs"
+    if dark and luminance(dark) < 0.2:
+        out["dark"] = dark
+        how["dark"] = f"{dark_from}'s deepest tone"
+    else:
+        how["dark"] = "kept the brand's — no deep tone in the photographs"
+    if mid:
+        out["secondary"] = mid
+        how["secondary"] = f"{mid_from}'s saturated mid-tone"
+    else:
+        how["secondary"] = "kept the brand's — no saturated tone in the photographs"
+    # The ink: the brand's while it reads on both grounds, else computed.
+    ink = b.get("ink", "#1c1e22")
+    page, surface = out.get("page", "#ffffff"), out.get("surface", "#ffffff")
+    if contrast(ink, page) >= BAR_TEXT and contrast(ink, surface) >= BAR_TEXT:
+        out["ink"] = ink
+        how["ink"] = "the brand's — it reads on the photo-led grounds"
+    else:
+        out["ink"] = on(page)
+        how["ink"] = (f"computed — the brand's ink reads at {min(contrast(ink, page), contrast(ink, surface))}:1 "
+                      f"on these grounds")
+    out["muted"] = mix(out["ink"], page, 0.45)
+    how["muted"] = "computed: the ink, forty-five per cent towards the page"
+    out["border"] = mix(surface, out["ink"], 0.1)
+    how["border"] = "computed: the surface, ten per cent towards the ink"
+    # The inks on the keyed grounds, computed; a ground that will not carry
+    # its ink goes back to the brand's and says so.
+    out["dark_ink"] = on(out.get("dark", ink), dark=out["ink"], light=surface)
+    out["tint_ink"] = on(out.get("tint", surface), dark=out["ink"], light=surface)
+    how["dark_ink"] = "computed: the readable ink on the dark ground"
+    how["tint_ink"] = "computed: the readable ink on the tint"
+    for ground, gink in (("tint", "tint_ink"), ("dark", "dark_ink")):
+        if out.get(ground) and contrast(out[ground], out[gink]) < BAR_TEXT and b.get(ground):
+            r = contrast(out[ground], out[gink])
+            out[ground], out[gink] = b[ground], b.get(gink, on(b[ground]))
+            how[ground] = f"kept the brand's — the photograph's tone would carry the ink at only {r}:1"
+    # The accent and its ink are never written here — they are the brand's
+    # by construction (`out` starts as the brand's palette and no line above
+    # touches them); the suite reads this function's source to hold that.
+    how["accent"] = "the brand's, always — the ask and the rules"
+    if b.get("accent") and contrast(b["accent"], page) < BAR_LARGE:
+        how["accent"] += f" (it sits at {contrast(b['accent'], page)}:1 on this page; keep it to buttons)"
+    return out, how
