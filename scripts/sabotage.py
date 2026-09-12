@@ -38,6 +38,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'a_run_in_flight_is_not_a_result',
+        "file": 'app/admin_ui.py',
+        "find": '    if last["status"] == recreate.RUNNING:\n',
+        "replace": '    if False:\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "while a recreation runs the card shows 'round 0 of 0 kept · no picture — the door did not answer', so the owner reads a run in progress as a failure — the first live press, 2026-09-12",
+    },
+    {
         "name": 'an_outside_picture_is_refused',
         "file": 'app/recreate.py',
         "find": '        if src not in allowed and host not in hosts:\n',

@@ -6794,6 +6794,20 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
         form += f' <span class="when">running — {_esc(bg.get("detail") or "")}</span>'
     if not last:
         return (brief_line + f'<br><span class="mut">not yet recreated for this brand</span> ' + form)
+    if last["status"] == recreate.RUNNING:
+        # IN FLIGHT IS NOT A RESULT. The row is written at the start of the
+        # run and finished at the end; between the two the card said "round
+        # 0 of 0 kept · no picture — the door did not answer" (owner,
+        # 2026-09-12, the first live press). The run's own progress is the
+        # only true thing to show — and a run whose thread died is said as
+        # failed, not left "running" forever.
+        if bg.get("state") == "failed":
+            line = f'<span class="when">failed — {_esc(bg.get("detail") or "")}</span>'
+        elif running:
+            line = f'<span class="mut">running since {_esc(last["at"])} — {_esc(bg.get("detail") or "starting")}</span>'
+        else:
+            line = f'<span class="when">the run of {_esc(last["at"])} did not finish — press again</span>'
+        return brief_line + "<br>" + line + "<br>" + form
     open_ = [f for f in last["findings"] if f.get("severity") in ("blocks", "cosmetic")]
     blocks_n = sum(1 for f in open_ if f.get("severity") == "blocks")
     status_cls = "ok" if last["status"] == recreate.SHIPPABLE else "when"

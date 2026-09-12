@@ -408,6 +408,20 @@ def main() -> int:
     card2 = admin_ui._structures_card("s3cret", "ironside")
     ck("for a brand it cannot be made for, the card says so and what it needs",
        "cannot be made" in card2 and "needs" in card2)
+    # a run in flight: the row exists, unfinished — the card says running with the
+    # step, never "round 0 of 0 kept" or "no picture" (the first live press, 2026-09-12)
+    with db.SessionLocal() as s:
+        s.add(db.Recreation(tenant="baci", structure_id=sid, status=rc.RUNNING))
+        s.commit()
+    web.bg_status = lambda label, tenant: {"state": "running", "detail": "casting its pictures"}
+    card3 = admin_ui._structures_card("s3cret", "baci")
+    ck("a run in flight is said as running with its step — never as a result",
+       "running since" in card3 and "casting its pictures" in card3 and "round 0 of 0" not in card3
+       and "no picture" not in card3, "")
+    web.bg_status = lambda label, tenant: {"state": "failed", "detail": "RuntimeError: x"}
+    card4 = admin_ui._structures_card("s3cret", "baci")
+    ck("a run whose thread died is said as failed, not left running",
+       "failed — RuntimeError" in card4 and "running since" not in card4)
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))
