@@ -9521,6 +9521,22 @@ SABOTAGES = [
         "suites": ['test_the_pictures_lead_the_palette.py'],
         "why": "the card's preview renders on the approved palette while a run renders on the photographs' — the owner approves one email and the customer gets another",
     },
+    {
+        "name": 'a_page_or_a_run_never_fetches_a_picture',
+        "file": 'app/email_design.py',
+        "find": "            r = read_picture(a, vision=False, fetch=False) or {}\n",
+        "replace": "            r = read_picture(a, vision=False, fetch=True) or {}  # SABOTAGE\n",
+        "suites": ['test_the_pictures_lead_the_palette.py'],
+        "why": "the Brand tab's preview and every campaign run pull every unread store image into memory in one request — the Render instance was restarted twice this way on 2026-09-12 and the owner saw Bad Gateway",
+    },
+    {
+        "name": 'a_picture_read_is_bounded',
+        "file": 'app/email_design.py',
+        "find": "            declared = int(r.headers.get(\"content-length\") or 0)\n            if declared > cap:\n                return b\"\"\n            chunks, n = [], 0\n            for chunk in r.iter_bytes():\n                n += len(chunk)\n                if n > cap:\n                    return b\"\"\n",
+        "replace": "            chunks, n = [], 0\n            for chunk in r.iter_bytes():\n                n += len(chunk)\n                if False:\n                    return b\"\"\n",
+        "suites": ['test_the_pictures_lead_the_palette.py'],
+        "why": "a photograph of any size is pulled into memory whole for a sixteen-colour thumbnail read — one large master per press is enough to restart the instance",
+    },
 ]
 
 

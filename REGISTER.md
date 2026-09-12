@@ -593,7 +593,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`mobile_url`**(url) → `str`  ·  from `test_the_reader_has_eyes.py`
 - **`normalize`**(raw) → `tuple[dict, list[str]]`  ·  from `email_render.py`, `email_structures.py`, `test_a_design_is_executed.py`, `test_a_design_is_words_the_renderer_can_draw.py`, `test_content_fits_the_design.py`, `test_the_pictures_lead_the_palette.py`, `test_the_reader_has_eyes.py`
 - **`palette_for`**(theme, design, report) → `tuple[dict, dict]`  ·  from `skill_pack.py`, `test_the_pictures_lead_the_palette.py`
-- **`picture_signature`**(asset) → `dict`  ·  **from nothing**
+- **`picture_signature`**(asset) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`
 - **`preview_blocks`**(tenant, design?, entity_key?) → `list[dict]`  ·  **from nothing**
 - **`preview_html`**(tenant, design, entity_key?) → `tuple[str, str]`  ·  from `admin_ui.py`, `test_the_pictures_lead_the_palette.py`
 - **`prompt_critique`**(design, n) → `str`  ·  from `test_the_reader_has_eyes.py`
@@ -601,7 +601,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`prompt_strip`**(k, n, top, bottom, total) → `str`  ·  from `test_a_structure_is_how_not_what.py`, `test_the_pictures_lead_the_palette.py`, `test_the_reader_has_eyes.py`
 - **`quoted_copy`**(notes) → `str`  ·  from `test_the_reader_has_eyes.py`
 - **`read`**(asset_id) → `dict`  ·  from `admin_ui.py`, `brief_demo.py`, `email_structures.py`, `layers.py`, `planner.py`, `test_a_canva_import_that_fails_falls_back_to_the_picture.py`, `test_a_claim_knows_what_it_is_about.py`, `test_a_second_image_provider_is_a_call_away.py`, `test_ad_arrives_whole.py`, `test_an_action_never_renders_at_its_own_address.py`, `test_can_the_engines_read_us.py`, `test_console_frame.py`, `test_creative_batch.py`, `test_creative_seam.py`, `test_effectiveness.py`, `test_job_lease.py`, `test_lead_reply.py`, `test_learning.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_render_smoke.py`, `test_results.py`, `test_semrush_asked_once.py`, `test_semrush_units.py`, `test_seo_guard.py`, `test_strategy.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_pictures_lead_the_palette.py`, `test_the_reader_has_eyes.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`, `web.py`
-- **`read_picture`**(asset, vision?) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`
+- **`read_picture`**(asset, vision?, fetch?) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`
 - **`read_pictures`**(tenant, limit?, vision?) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`, `web.py`
 - **`readers`**() → `dict[tuple[str, str], str]`  ·  from `test_a_design_is_executed.py`
 - **`sequence_for_library`**(design) → `list[str]`  ·  from `test_the_reader_has_eyes.py`

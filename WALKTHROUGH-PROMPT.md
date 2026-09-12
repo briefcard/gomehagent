@@ -1640,8 +1640,7 @@ the prompt**; **a review runs the real code with the model stubbed by a
 person, and every finding ships with its guard**. Ten guards, all
 `[ caught ]`.
 
-**The pictures lead, the brand supports — 2026-09-12 (hash in the memory
-note).** The owner: the pictures decide an email's aesthetic; choose the
+**The pictures lead, the brand supports — 2026-09-12 (`e1fd595`).** The owner: the pictures decide an email's aesthetic; choose the
 media for the reference first, pull the palette from the photos, apply the
 brand to support; a picture's reading sticks in the KB; different sends on
 the same layout and entity use different pictures. Built: `KbAsset.reading`
@@ -1655,9 +1654,25 @@ it, and the walk checks each with its reader**; **a guard whose mutation
 is a no-op is dead — turn the claim into a source check**; **three
 identical lines are three anchors — say each in its own words**.
 
-**Owner's move:** on the Brand tab press "Read the unread pictures" (one
-look per picture, ever), correct any kind the look got wrong, then preview
-a structure as an email about a product and read the steps under it.
+**The Bad Gateway, an hour later (hash in the memory note).** The owner
+opened the Brand tab on `e1fd595` and Render restarted the instance twice
+with no traceback — the chooser I shipped fetched every unread picture's
+bytes, whole, to read its colours, and a preview on the card ran it for
+every structure: every Baci store image decoded at full size in one
+request. Now a page or a run NEVER fetches: the chooser reads only what is
+on the row and says how many are unread; only the Brand tab's control
+reads, six per press, at the CDN's 600 px size, streamed and stopped at
+6 MB, decoded through `Image.draft` to a thumbnail; the swipe's screenshot
+keeps its own whole fetch, capped at 24 MB. Rules it adds: **a console page
+never fetches a client's media; a reading is made by a control, bounded,
+and stored**; **a guard's test must hold the real function before the
+stub replaces it**; **a fake stream in a test is finite, or a caught
+mutation is a hang**.
+
+**Owner's move:** on the Brand tab press "Read the unread pictures" (six
+per press — press until it says every picture is read), correct any kind
+the look got wrong, then preview a structure as an email about a product
+and read the steps under it.
 
 ---
 

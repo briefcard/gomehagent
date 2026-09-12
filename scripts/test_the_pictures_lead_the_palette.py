@@ -90,10 +90,13 @@ def main() -> int:
     tenants.seed()
     kb.ensure_brand("baci", "Baci")
     fetches: list = []
-    def _fetch(url):
+    real_bounded = ed._fetch_bounded          # captured BEFORE the stub replaces it
+
+    def _fetch(url, *, cap=ed.FETCH_MAX):
         fetches.append(url)
-        return BLOBS.get(url, b"")
-    ed._fetch = _fetch
+        blob = BLOBS.get(url) or BLOBS.get(url.replace("_600x", ""), b"")
+        return blob if len(blob) <= cap else b""
+    ed._fetch_bounded = _fetch
     calls: list = []
 
     class _R:
@@ -148,6 +151,47 @@ def main() -> int:
        "set by hand" in said and rr["kind"] == "flat-lay" and rr["how"]["kind"].startswith("hand")
        and ed.read_picture(row)["kind"] == "flat-lay")
     ck("a kind that is not one is refused by name", "not a kind of picture" in ed.set_picture_kind(rows["Aqua Bowl"].id, "hologram"))
+
+    # NEVER FROM A PAGE OR A RUN (the Render instance restarted twice on
+    # 2026-09-12 under a preview that pulled every store image whole): a
+    # preview and a chooser read only what is on the row, and say what is
+    # unread; only the control fetches, a few at a time, at the CDN's small
+    # size, decoded small.
+    kb.add_asset("baci", CDN + "unread.jpg", rights=kb.OWNED, subject="photo", title="an unread one", origin="human")
+    BLOBS[CDN + "unread.jpg"] = BLOBS[CDN + "sand.jpg"]
+    nf = len(fetches)
+    dsg0, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["image:1"]}]})
+    ch = ed.choose_media("baci", dsg0, seed="x")
+    ck("a chooser fetches nothing — an unread picture ranks last and the note says to press the control",
+       len(fetches) == nf and any("1 of" in w and "unread" in w and "Brand tab" in w for w in ch["why"]),
+       str(ch["why"][:2]))
+    ck("a signature off the row fetches nothing", ed.picture_signature(next(a for a in kb.assets("baci") if a.title == "an unread one")) == {}
+       and len(fetches) == nf)
+    got_small = ed.read_pictures("baci", limit=6)
+    ck("the control reads a few per press and asks for the CDN's small size first",
+       got_small["read"] == 1 and any(u.endswith("unread_600x.jpg") for u in fetches[nf:]), str(fetches[nf:]))
+    # THE REAL bounded fetch, against a fake stream that never ends: it must
+    # stop at the cap, not read to the end and then decline.
+    import httpx as _httpx
+    served: list = []
+
+    class _Stream:
+        status_code = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def iter_bytes(self):
+            for _ in range(64):               # 64 KB on offer, the cap at 10
+                served.append(1)
+                yield b"x" * 1024
+    real_stream = _httpx.stream
+    _httpx.stream = lambda *a, **k: _Stream()
+    try:
+        big = real_bounded("https://cdn.shopify.com/s/files/1/0001/huge.jpg", cap=10 * 1024)
+    finally:
+        _httpx.stream = real_stream
+    ck("a picture over the cap is left unread — the stream is stopped at the cap, never read whole",
+       big == b"" and len(served) <= 12, f"{len(served)} KB served")
 
     print("\n— 2. the reader counts every photograph —")
     pb = ed.prompt_strip(1, 2, 0, 1568, 2180)

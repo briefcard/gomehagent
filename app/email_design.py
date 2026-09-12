@@ -572,7 +572,7 @@ def _kind_filed(asset) -> str:
     return ""
 
 
-def read_picture(asset, *, vision: bool = True) -> dict:
+def read_picture(asset, *, vision: bool = True, fetch: bool = True) -> dict:
     """The picture's reading — from the row when it has one, else read now
     and STORED ON THE ROW. Colours, size and aspect by arithmetic; the kind
     by the filing when it says (a packshot tag, a surface, a logo), else by
@@ -587,17 +587,30 @@ def read_picture(asset, *, vision: bool = True) -> dict:
     have = dict(getattr(asset, "reading", None) or {})
     if have.get("colours") and have.get("kind"):
         return have
-    blob = _fetch(getattr(asset, "url", "") or "")
-    if not blob:
+    if not fetch:
+        # NEVER FROM A PAGE OR A RUN. A reading is made by the Brand tab's
+        # control, a few pictures at a time; a preview or a campaign reads
+        # only what is already on the row, and says what is unread.
         return have
-    colours = have.get("colours") or _pal.signature(blob)
-    if not colours:
+    url = getattr(asset, "url", "") or ""
+    blob = _fetch_bounded(_small_url(url)) or (_fetch_bounded(url) if _small_url(url) != url else b"")
+    if not blob:
         return have
     try:
         from PIL import Image
-        w, h = Image.open(io.BytesIO(blob)).size
+        im = Image.open(io.BytesIO(blob))
+        w, h = im.size
+        im.draft("RGB", (256, 256))      # decode small: a JPEG master is not read whole
+        im = im.convert("RGB")
+        im.thumbnail((256, 256))
+        small = io.BytesIO(); im.save(small, format="PNG")
+        blob_small = small.getvalue()
     except Exception:                                            # noqa: BLE001
-        w = h = 0
+        return have
+    colours = have.get("colours") or _pal.signature(blob_small)
+    if not colours:
+        return have
+    blob = blob_small
     reading = {**have, "colours": colours, "size": [w, h], "aspect": _aspect_of(w, h),
                "how": dict(have.get("how") or {"colours": "arithmetic"})}
     if not reading.get("kind"):
@@ -670,7 +683,7 @@ def set_picture_kind(asset_id: str, kind: str, *, by: str = "owner") -> str:
     return f"{k}: set by hand"
 
 
-def read_pictures(tenant: str, *, limit: int = 24, vision: bool = True) -> dict:
+def read_pictures(tenant: str, *, limit: int = 6, vision: bool = True) -> dict:
     """Read every publishable picture of this brand that has no reading
     yet, up to `limit` per press — the Brand tab's control. Says how many
     were read and how many are still unread."""
@@ -681,14 +694,15 @@ def read_pictures(tenant: str, *, limit: int = 24, vision: bool = True) -> dict:
     for a in unread[:limit]:
         if read_picture(a, vision=vision).get("kind"):
             done += 1
-    return {"ok": True, "read": done, "left": max(0, len(unread) - done),
+    left = max(0, len(unread) - done)
+    return {"ok": True, "read": done, "left": left,
             "total": len(rows), "said": f"read {done} of {len(unread)} unread picture(s)"
-                                         + (f"; {len(unread) - done} left" if len(unread) - done else "")}
+                                         + (f"; {left} left — press again" if left else "")}
 
 
 def picture_signature(asset) -> dict:
-    """The colours a picture is made of — off its reading."""
-    return dict((read_picture(asset, vision=False) or {}).get("colours") or {})
+    """The colours a picture is made of — off its reading, never fetched."""
+    return dict((read_picture(asset, vision=False, fetch=False) or {}).get("colours") or {})
 
 
 def choose_media(tenant: str, design: dict, *, entities: list | None = None,
@@ -722,6 +736,10 @@ def choose_media(tenant: str, design: dict, *, entities: list | None = None,
     why: list[str] = []
     why.append(f"scope: {len(scoped)} picture(s) of {', '.join(ents)}; the library as the fallback"
                if ents else "scope: brand-wide — the campaign names no entity")
+    unread = [a for a in rows if not ((a.reading or {}).get("colours"))]
+    if unread:
+        why.append(f"{len(unread)} of {len(rows)} picture(s) are unread — they rank last until "
+                   f"'Read the unread pictures' is pressed on the Brand tab")
     secs = design.get("sections") or []
     by_section: dict = {}
     sigs: list[dict] = []
@@ -734,7 +752,7 @@ def choose_media(tenant: str, design: dict, *, entities: list | None = None,
         for a in pool:
             if a.id in used:
                 continue
-            r = read_picture(a, vision=False) or {}
+            r = read_picture(a, vision=False, fetch=False) or {}
             k = r.get("kind") or _kind_filed(a) or ""
             if kind == "mark":
                 continue                       # a mark is the brand's logo, not a photograph
@@ -1089,14 +1107,59 @@ def mobile_url(url: str) -> str:
     return f"{m.group(1)}mobile/{m.group(2)}" if m else ""
 
 
+#: The most a picture read will pull into memory. A Shopify master can be
+#: several megabytes and decodes to tens; every read here is for a thumbnail
+#: of colours, so a bigger file is asked for at the CDN's own smaller size
+#: and, failing that, left unread and said.
+FETCH_MAX = 6 * 1024 * 1024
+#: A gallery screenshot is read whole — it is one file, once, on a press.
+SHOT_MAX = 24 * 1024 * 1024
+
+
 def _fetch(url: str) -> bytes:
+    """A swipe's screenshot, whole: one file, on the owner's press, capped."""
     import httpx
     from .email_structures import _UA
     try:
         r = httpx.get(url, headers={"User-Agent": _UA}, timeout=25, follow_redirects=True)
-        return r.content if r.status_code == 200 else b""
+        if r.status_code != 200 or len(r.content) > SHOT_MAX:
+            return b""
+        return r.content
     except Exception:                                            # noqa: BLE001
         return b""
+
+
+def _fetch_bounded(url: str, *, cap: int = FETCH_MAX) -> bytes:
+    """The bytes at `url`, streamed and STOPPED at `cap` — a picture too big
+    to read cheaply comes back empty rather than into memory whole. The
+    Render instance was restarted twice on 2026-09-12 by a preview that
+    pulled every store image at full size in one request."""
+    import httpx
+    from .email_structures import _UA
+    try:
+        with httpx.stream("GET", url, headers={"User-Agent": _UA}, timeout=25,
+                          follow_redirects=True) as r:
+            if r.status_code != 200:
+                return b""
+            declared = int(r.headers.get("content-length") or 0)
+            if declared > cap:
+                return b""
+            chunks, n = [], 0
+            for chunk in r.iter_bytes():
+                n += len(chunk)
+                if n > cap:
+                    return b""
+                chunks.append(chunk)
+            return b"".join(chunks)
+    except Exception:                                            # noqa: BLE001
+        return b""
+
+
+def _small_url(url: str) -> str:
+    """A Shopify CDN picture asked for at 600 px — the size a colour read
+    needs and a fraction of the master's bytes."""
+    from . import email_render
+    return email_render._sized(url, 600)
 
 
 def read(asset_id: str) -> dict:
