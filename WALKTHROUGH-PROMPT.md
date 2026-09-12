@@ -1737,8 +1737,33 @@ eye: the reference beside ours.* *Brief before code; I look before the
 owner does; no new machinery until one reference on one brand looks
 right.*
 
+**The first live press (same evening, Ironside):** the brief landed — the
+first live vision read ever, the concept right and three sections deeper
+than the owner's screenshot — while the card rendered the unfinished row as
+"round 0 of 0 kept · no picture"; fixed the same hour (`37703ea`: a run in
+flight is said as running with its step, a dead thread as failed).
+
+**THE BRAND PAGE, RESTRUCTURED (same evening; hash in the memory note).**
+Owner: *"The whole Brand page is such a mess right now. It's hard to
+understand what's what. Emails to begin with are part of the email system.
+I just wanted to centralize inspiration."* Ten cards accreted one ship at a
+time, five concerns interleaved. Now, in the order an email is made from
+the brand: **Identity** (+ copy rules by channel) · **Look** (what ships and
+the proposal in ONE card) · **Pictures — what they have** (counts by kind,
+the gallery with readings, *Read the unread*, and the two fills right there:
+catalogue sync, harvest) · **Visual boards** · **Reference emails** (the
+swipe form and the swiped pictures, shared) · **Sources** · the two settings.
+The design library and **Recreate** moved to the email system's page —
+**Systems → Campaign email → Designs** (`_workflow_subs` adds the room for
+`esp_campaign` systems). The token preview is gone from the card; the token
+reading folds away under the recreation until Phase 5. Composition only —
+no route moved. Guards `designs_live_on_the_email_systems_page`,
+`swiping_is_inspiration_on_brand`. Three suites that asserted the retired
+preview were edited to assert what the card shows now.
+
 **NOT PROVEN LIVE** — every model call is stubbed here (no key on this
-machine) and the deploy has no browser until `SHOTS_WS` is set. The
+machine) and the deploy has no browser until `SHOTS_WS` is set (the owner
+set it the same evening). The
 owner's move: a Browserless token in `SHOTS_WS`; then press **Recreate
 for baci** on the Ayoh structure and put the card beside
 `docs/recreations/ayoh-baci-portofino.html`. Phases 2–6 of the plan are

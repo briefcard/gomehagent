@@ -512,7 +512,7 @@ def main() -> int:  # noqa: PLR0915
        and 'action="/admin/brand_update"' in broken)
     ck("so do the hard rules and the source list",
        "Add hard rule" in broken
-       and "Where their words are read from" in broken)
+       and "Sources — their website and landing pages" in broken)
     ck("the failure is NAMED where the theme was, not swallowed",
        "shopify token expired" in broken
        and "could not be read" in broken)

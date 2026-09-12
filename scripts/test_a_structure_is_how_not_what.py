@@ -502,10 +502,32 @@ def main() -> int:
        "usable here" in card and "not for this brand" in card)
     ck("the reference screenshot is shown beside the structure it produced",
        'src="https://cdn.rge/acme.png"' in card)
-    ck("the swipe form on the card is the control that was pressed above",
-       'action="/admin/email_swipe"' in card and "/admin/email_structure?" in card)
-    ck("and the card says the library is shared, shape only",
-       "shared across every account" in card and "never words" in card)
+    # THE SWIPE FORM MOVED (2026-09-12): swiping is inspiration and lives on
+    # Brand · Reference emails; the structures card is what a swipe is read
+    # INTO, on the email system's page under Designs.
+    refs = admin_ui._references_card("s3cret", "baci")
+    ck("the swipe form is on the Reference-emails card, and it is the control that was pressed above",
+       'action="/admin/email_swipe"' in refs and 'action="/admin/email_swipe"' not in card)
+    ck("the swiped picture is listed there with what it was read into",
+       'src="https://cdn.rge/acme.png"' in refs and "read into" in refs)
+    ck("the structures card keeps the verdict controls and says the library is shared, a design never a client's words",
+       "/admin/email_structure?" in card and "shared across every account" in card
+       and "never a client's words or pictures" in card)
+    # AND THE LIBRARY IS ON THE EMAIL SYSTEM'S PAGE: the campaign email
+    # system's rail carries Designs, and that room is the structures card.
+    from app import systems as _sy
+    _sy.create("baci", "campaign_email")
+    _erow = _sy.find("baci", "campaign_email")
+    subs = dict(admin_ui._workflow_subs(_erow))
+    ck("the email system's rail carries Designs; a system that pushes nowhere does not",
+       subs.get("designs") == "Designs"
+       and "designs" not in dict(admin_ui._workflow_subs(_sy.create("baci", "blog"))))
+    page = admin_ui._system_view("s3cret", _erow, "", wf="designs")
+    # By now every proposal above was approved, so the room shows the library
+    # (no verdict controls) with the recreation control per structure.
+    ck("Designs on the email system's page is the structures card, for this brand",
+       "Designs — the references, recreated for baci" in page and "In the library" in page
+       and "Recreate for baci" in page)
 
     print("\n" + ("ALL PASSED" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0

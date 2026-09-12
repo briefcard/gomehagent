@@ -264,16 +264,16 @@ def main() -> int:
            "design: dark key" in card and f"read in {info['calls']} calls from {info['strips']} strip(s)" in card
            and "with the phone render" in card and "critiqued once" in card
            and "the vocabulary does not hold" in card and "products · grid2 on tint" in card
-           and "Read its design" in card
-           and ("no preview — this brand has no theme yet" in card))
-        # THE PREVIEW: with a theme on the Brand tab, the card shows the design
-        # executed with this brand's material beside the reference screenshot.
+           and "Read its design" in card)
+        # The token preview is gone from the card (2026-09-12): the recreation
+        # leads, the token reading folds away under it, and the reference is
+        # shown beside OURS — `test_the_model_makes_the_email` covers that.
         from app import brand_theme as _bt
         _bt.approve("baci", {"footer.address": "1 Main St", "palette.dark": "#0b1a0f"})
         card2 = admin_ui._structures_card("s3cret", "baci")
-        ck("with a theme approved, the reference sits beside a preview of the design in this brand's palette",
-           "preview — this design with baci" in card2 and 'alt="the reference"' in card2
-           and "srcdoc=" in card2 and "#0b1a0f" in card2)
+        ck("the recreation leads the card and the token reading folds away under it",
+           "not yet recreated for this brand" in card2 and "the token reading" in card2
+           and "srcdoc=" not in card2 and card2.index("Recreate for baci") < card2.index("Read its design"))
         # The quoted-copy gate, exercised: a critique with no notes leaves
         # pass A's, which quote three words of the email — dropped, and said.
         C_no_notes = {k: v for k, v in C.items() if k != "notes"}

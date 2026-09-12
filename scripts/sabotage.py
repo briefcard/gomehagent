@@ -38,6 +38,22 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'designs_live_on_the_email_systems_page',
+        "file": 'app/admin_ui.py',
+        "find": '        subs.insert(6, ("designs", "Designs"))\n',
+        "replace": '        pass\n',
+        "suites": ['test_a_structure_is_how_not_what.py'],
+        "why": "the reference library and its recreations have no room on the email system's page — the owner is sent back to Brand for something that is not the brand's",
+    },
+    {
+        "name": 'swiping_is_inspiration_on_brand',
+        "file": 'app/admin_ui.py',
+        "find": '  {_references_card(key, tenant)}\n',
+        "replace": '\n',
+        "suites": ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py', 'test_a_structure_is_how_not_what.py'],
+        "why": "the swipe form exists in a function nothing renders — a reference email can no longer be added from the console",
+    },
+    {
         "name": 'a_run_in_flight_is_not_a_result',
         "file": 'app/admin_ui.py',
         "find": '    if last["status"] == recreate.RUNNING:\n',
@@ -8396,8 +8412,8 @@ SABOTAGES = [
     {
         'name': 'the_brand_tab_carries_the_boards',
         'file': 'app/admin_ui.py',
-        'find': '  {_channel_rules_card(key, tenant)}\n  {_board_card(key, tenant)}\n',
-        'replace': '  {_channel_rules_card(key, tenant)}\n',
+        'find': '  {_pictures_card(key, tenant)}\n  {_board_card(key, tenant)}\n',
+        'replace': '  {_pictures_card(key, tenant)}\n',
         'suites': ['test_the_brand_tab_owns_the_boards_and_the_channel_rules.py'],
         'why': 'the boards are on no page at all — the Pictures page gave them up and the Brand tab never took them — and the owner cannot create or pin a board anywhere',
     },

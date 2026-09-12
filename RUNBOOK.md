@@ -784,7 +784,15 @@ The run's notes say `arranged as the structure's look: …`.
 
 ## 6e. Recreate a reference for a brand — the model makes the email, the code inspects it
 
-**What it is.** On the Brand tab, every structure with a reference picture
+**Where.** Swiping a reference is on **Brand · Reference emails** (beside the
+visual boards — inspiration is one place). What a reference is read into —
+the design library and its recreations for this brand — is on the email
+system's page: **Systems → Campaign email → Designs**. The Brand tab reads in
+the order an email is made from it: Identity, Look, Pictures, Visual boards,
+Reference emails, Sources, then the two settings (image model, blog
+destination).
+
+**What it is.** Under Designs, every structure with a reference picture
 carries **Recreate for ‹brand›** (about the brand, or about one entity).
 One press runs, off the request: the reference is read into a *brief* in
 words (once per structure; shown on the card as `brief: …`), the brand's
@@ -821,8 +829,9 @@ drafter's words; ship without the address and `{{UNSUBSCRIBE}}`; draw a
 verified tick or a count nobody has; call an email shippable that nobody
 looked at. Each of those is a named finding, and each has a sabotage guard.
 
-**Until Phase 5** the older token preview (§6d) stays on the same card
-beside the recreation. Judge by the recreation.
+**Until Phase 5** the older token reading (§6d) folds away under each
+design as *the token reading*; its preview is gone from the card. Judge by
+the recreation.
 
 ## 7. What does not work yet
 

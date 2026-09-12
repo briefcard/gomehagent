@@ -60,6 +60,18 @@ def main() -> int:
     page = ui.render_brand(KEY, tenant="baci")
     ck("the boards card renders on the Brand tab, each board by name",
        "Visual boards" in page and 'id="board"' in page and 'id="board-studio"' in page)
+    # INSPIRATION IS ONE PLACE (owner, 2026-09-12: "I just wanted to
+    # centralize inspiration"): the reference emails sit beside the boards,
+    # with the swipe form; the designs they are read into are the email
+    # system's, on its page.
+    ck("  the reference emails sit beside the boards with the swipe form, and say where the designs live",
+       "Reference emails" in page and 'action="/admin/email_swipe"' in page
+       and page.index("Visual boards") < page.index("Reference emails")
+       and "under <b>Designs</b>" in page and "Email structures" not in page)
+    ck("  the Brand tab reads in the order an email is made: sound, look, pictures, inspiration, sources",
+       page.index("Identity") < page.index("Look — how their email is dressed")
+       < page.index("Pictures — what they have") < page.index("Visual boards")
+       < page.index("Sources — their website and landing pages"))
     pics = ui.render_content(KEY, tenant="baci", sub="pictures")
     ck("  and no longer on the Pictures page, which says where the boards are",
        'id="board"' not in pics and "Brand tab" in pics)

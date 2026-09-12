@@ -3438,6 +3438,11 @@ def _workflow_subs(row) -> tuple:
     wf = systems.workflow(row.key)
     if wf["artifact"] == "esp_campaign":
         subs.insert(5, ("segments", "Segments"))
+        # THE DESIGNS an email can be made in — the reference library and
+        # its recreations for this brand — belong to the email system, not
+        # to Brand (owner, 2026-09-12: "emails to begin with are part of the
+        # email system").
+        subs.insert(6, ("designs", "Designs"))
     # A SYSTEM WHOSE DELIVERABLE IS THE REPORT gets the history as its own
     # room. Owner, 2026-08-31: *"dated and organized so it can be reviewed the
     # history of compliance checks."* Drafts is the wrong shelf for it — a
@@ -3515,6 +3520,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
         "shipped": lambda: _shipped_section(row),
         "measured": lambda: _measured_section(row),
         "segments": lambda: _segments_card(key, row),
+        "designs": lambda: _structures_card(key, row.tenant),
         "settings": lambda: _settings_section(key, row),
         "runs": lambda: _runs_section(key, row),
     }
@@ -4091,10 +4097,6 @@ def _palette_rows(proposed: dict, live: dict, sources: dict, findings: list,
               f'for the email, so the picture and its grounds read as one composition; the accent, '
               f'the ink and the faces never move. Off: every email sits on the palette above as '
               f'it is.</span></p>')
-    by_kind = _ed.assets_by_kind(tenant) if tenant else {}
-    pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in by_kind.items())
-    none = [k for k, n in by_kind.items() if not n]
-    gallery = _pictures_read(tenant) if tenant else ""
     return f"""<h4 style="margin:14px 0 4px">Palette of roles</h4>
 <p class="mut">A design names a role, never a colour; the brand's colour under
 that name is what ships. Every kit colour is placed by one stated rule; a role
@@ -4104,10 +4106,102 @@ hand — it survives re-derives like every hand-set field.</p>
 <th>came from</th><th>live</th><th>set</th></tr>{rows}</table></div>
 {found}
 {switch}
-<p><b>Faces on file</b> — {' · '.join(faces)}</p>
-<p><b>Pictures by the kind of slot they fit</b> — {pics or '<span class=mut>none on file</span>'}
-{('<br><span class=mut>none for ' + _esc(', '.join(none)) + ' — ' + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>') if none and tenant else ''}</p>
-{gallery}"""
+<p><b>Faces on file</b> — {' · '.join(faces)}</p>"""
+
+
+def _pictures_card(key: str, tenant: str) -> str:
+    """THE BRAND'S OWN PICTURES, in one place — what is on file by the kind
+    of slot it fits, every picture with its reading and a select to correct
+    it, the control that reads the unread, and the two ways pictures ARRIVE
+    (the catalogue sync for a store, the harvest for a website). Owner,
+    2026-09-12: the Brand page was "such a mess — hard to understand what's
+    what"; pictures were reported under the palette and filled from under a
+    heading about words."""
+    from . import email_design as _ed, kb as _kb
+    from .web import bg_status as _bg_status
+    if not tenant:
+        return ""
+    by_kind = _ed.assets_by_kind(tenant)
+    pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in by_kind.items())
+    none = [k for k, n in by_kind.items() if not n]
+    # Counted as rows, not summed by kind — an unread picture fits three
+    # kinds and would count three times.
+    total = sum(1 for a in _kb.assets(tenant) if (a.kind or "image") == "image")
+    none_line = (('<br><span class="mut">none for ' + _esc(', '.join(none)) + ' — '
+                  + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>')
+                 if none else '')
+    sync_state = _bg_status("sync", tenant)
+    harvest_state = _bg_status("harvest", tenant)
+
+    def _ran(st: dict) -> str:
+        if not st:
+            return '<span class="mut">never run</span>'
+        stamp = _esc((st.get("at") or "")[:16].replace("T", " "))
+        if st.get("state") == "running":
+            return f'<span class="chip nb">running · {stamp}</span>'
+        if st.get("state") == "failed":
+            return f'<span class="chip off">failed {stamp}</span>'
+        return f'<span class="mut">ran {stamp}</span>'
+    fill = (f'<div class="conn-site"><span><b>From the store</b> — every product\'s images, the packshot first</span>'
+            f'{_ran(sync_state)}<span class="row">'
+            + _act(key, "/admin/catalog_sync", "Run catalogue sync", tenant, {"ui": "1"}, small=True)
+            + '</span></div>'
+            f'<div class="conn-site"><span><b>From the website</b> — the photographs on its pages, approved on filing</span>'
+            f'{_ran(harvest_state)}<span class="row">'
+            + _act(key, "/admin/harvest", "Run harvest", tenant, {"apply": "1"}, small=True)
+            + '</span></div>')
+    return f"""
+<div class="card">
+  <div class="head"><h2>Pictures — what they have</h2>
+    <span class="mut">{total} on file</span></div>
+  <p class="mut">The brand's own photographs and packshots — the only pictures
+  an email, an ad or an article may carry. A recreation casts from these by
+  looking at them; the palette of an email follows the ones it casts.</p>
+  <p><b>Pictures by the kind of slot they fit</b> — {pics or '<span class="mut">none on file</span>'}{none_line}</p>
+  {_pictures_read(tenant)}
+  <h4 style="margin:14px 0 4px">Where they come from</h4>
+  {fill}
+</div>"""
+
+
+def _references_card(key: str, tenant: str) -> str:
+    """REFERENCE EMAILS — the swipe board, beside the visual boards, because
+    it is the same idea one channel over: inspiration, shared across every
+    account, never a client's own material. Swiping files the picture and
+    reads it; what it was read into — the design library, the recreations
+    for this brand — lives on the email system's page, under Designs."""
+    from . import email_structures as _es
+    sw = _es.swipes()
+    rows = "".join(
+        f'<div class="msg"><a href="{_esc(x["image"])}"><img src="{_esc(x["image"])}" alt="{_esc(x["title"])}" '
+        f'style="max-width:90px;max-height:120px;float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
+        f'<b>{_esc(x["title"])}</b> '
+        + (f'<a href="{_esc(x["source_url"])}" class="mut">source</a> ' if x["source_url"] else "")
+        + (f'<br><span class="mut">read into <b>{_esc(x["structure_name"])}</b> — '
+           + ("in the library" if x["review"] == "approved" else
+              "waiting for your approval" if x["review"] == "proposed" else _esc(x["review"]))
+           + "</span>" if x["structure_id"] else
+           '<br><span class="when">swiped, not read — the reading did not land; swipe it again</span>')
+        + '</div>' for x in sw)
+    add = f"""
+    <form method="get" action="/admin/email_swipe" style="margin:8px 0">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
+      <button type="submit">Swipe this email</button>
+      <span class="when">one email's own page, not a category — read for its design in
+      words, never its copy or its pictures</span>
+    </form>"""
+    where = (f'<p class="mut">The designs these were read into, and their recreations for '
+             f'{_esc(tenant)}, are on the email system\'s page under <b>Designs</b>.</p>' if tenant else "")
+    return f"""
+<div class="card">
+  <div class="head"><h2>Reference emails</h2>
+    <span class="mut">shared across every account — inspiration, never material</span></div>
+  {add}
+  {rows or '<p class="mut">Nothing swiped yet.</p>'}
+  {where}
+</div>"""
 
 
 def _pictures_read(tenant: str, limit: int = 24) -> str:
@@ -4526,7 +4620,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     sources_card = f"""
 <div class="anchor" id="sources"></div>
 <div class="card">
-  <div class="head"><h2>Where their words are read from</h2>
+  <div class="head"><h2>Sources — their website and landing pages</h2>
     <span class="mut">{len(srcs)} site{"" if len(srcs) == 1 else "s"}</span></div>
   <p class="mut">The <b>website</b> is the identity source: positioning, tone
   and the email theme are derived from it and from nothing else. Landing
@@ -4666,19 +4760,24 @@ and hand-set fields survive future re-derives.</p>
     return _shell(key, "brand", "Brand", tenant=tenant, head=_BRAND_CSS, body=f"""
 {note}
 <div>
-  <p class="mut">Who this account is, how it sounds, and how its email looks —
-  positioning and voice feed every draft; the theme is rendered into every
-  campaign email once approved. What may be ASSERTED (claims, objections, the
-  catalogue) lives on Knowledge.</p>
+  <p class="mut">Who this account is and what it has, in the order an email
+  is made from it: how they sound, how their email is dressed, their own
+  pictures, the inspiration they draw on, and where all of it is read from.
+  What may be ASSERTED (claims, objections, the catalogue) lives on Knowledge;
+  how emails are made from this — the designs and their recreations — lives
+  on the email system's page.</p>
   {identity}
   {_channel_rules_card(key, tenant)}
+  <div class="card"><div class="head"><h2>Look — how their email is dressed</h2></div>
+    <h3>What ships</h3>{live_body}
+    <h3>Proposed</h3>{prop_body}{actions}
+  </div>
+  {_pictures_card(key, tenant)}
   {_board_card(key, tenant)}
-  {_structures_card(key, tenant, preview_entity=preview_entity)}
+  {_references_card(key, tenant)}
+  {sources_card}
   {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
-  {sources_card}
-  <div class="card"><div class="head"><h2>Live theme</h2></div>{live_body}</div>
-  <div class="card"><div class="head"><h2>Proposed</h2></div>{prop_body}{actions}</div>
 </div>""")
 
 
@@ -6905,7 +7004,6 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
                    + "".join(f"<li>{_esc(d)}</li>" for d in drops) + "</ul></details>" if drops else "")
                 + (f'<details><summary class="mut">{len(dsg.get("sections") or [])} sections</summary>'
                    f'<ol class="mut">{secs}</ol></details>' if secs else "")
-                + _design_preview(tenant, dsg, shot, preview_entity)
                 + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
         elif dsg.get("sections"):
             # A design with a concrete order that did not come through the
@@ -6918,17 +7016,17 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
             design_html = (f'<br><span class="mut">design: {_esc(_ed.summary(dsg))}</span>'
                            + f'<details><summary class="mut">{len(dsg["sections"])} sections</summary>'
                              f'<ol class="mut">{secs}</ol></details>'
-                           + _design_preview(tenant, dsg, shot, preview_entity)
                            + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
         else:
             design_html = ('<br><span class="when">design not read — the house design, '
                            'arranged as above' + read_ctl + "</span>")
-        look_html += design_html
-        # THE RECREATION — the model's email for THIS brand beside the
+        # THE RECREATION LEADS — the model's email for THIS brand beside the
         # reference, with the judge's open findings under it
-        # (INITIATIVE-email-recreation.md, Phase 1). Next to the old preview
-        # until Phase 5 retires it.
-        look_html += _recreation_block(key, tenant, st, shot)
+        # (INITIATIVE-email-recreation.md, Phase 1). The token reading
+        # folds away under it until Phase 5 retires it; its wireframe
+        # preview is gone from the card (owner, 2026-09-12).
+        look_html = (_recreation_block(key, tenant, st, shot)
+                     + f'<details><summary class="mut">the token reading</summary>{look_html}{design_html}</details>')
         return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
@@ -6944,39 +7042,24 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
         return (f'<a href="{base}&amp;verdict=approved"><button class="sec">Approve</button></a> '
                 f'<a href="{base}&amp;verdict=rejected"><button class="sec">Reject</button></a>')
 
-    add = f"""
-    <form method="get" action="/admin/email_swipe" style="margin:8px 0">
-      <input type="hidden" name="key" value="{_esc(key)}">
-      <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
-      <button type="submit">Swipe this email</button>
-      <span class="when">read for its structure, in words — never its copy
-      or its pictures. One email's page, not a category.</span>
-    </form>"""
-
-    unread = [sw for sw in _es.swipes() if sw["review"] == "unread"]
-    unread_html = ("".join(
-        f'<div class="msg"><a href="{_esc(sw["image"])}"><img src="{_esc(sw["image"])}" '
-        f'alt="{_esc(sw["title"])}" style="max-width:120px;max-height:160px;float:right;'
-        f'margin:0 0 6px 10px;border:1px solid #ddd"></a><b>{_esc(sw["title"])}</b> '
-        f'<span class="when">swiped, not read into a structure — the reading '
-        f'did not land; swipe it again</span></div>' for sw in unread)
-        if unread else "")
-    body = (add + unread_html
-            + (f'<h4>Waiting for you ({len(proposed)})</h4>'
+    # Swiping and the swiped pictures live on Brand · Reference emails
+    # (`_references_card`); this card is what they were read INTO.
+    body = ((f'<h4>Waiting for you ({len(proposed)})</h4>'
                + "".join(_one(st, _ctl(st)) for st in proposed) if proposed else "")
             + (f'<h4>In the library ({len(approved)})</h4>'
                + "".join(_one(st, "") for st in approved) if approved else
                '<p class="mut">Nothing in the library yet. The first approved '
-               'send files its shape here on its own; a swipe files one for '
-               'you to approve.</p>'))
+               'send files its shape here on its own; a reference swiped on '
+               'Brand files one for you to approve.</p>'))
     return f"""
-<div class="card"><div class="head"><h2>Email structures</h2>
-  <span class="mut">shared across every account — shape only, never words</span></div>
-  <p class="when">A structure is the block order and why: where the picture
-  sits, how many asks and where, how dense. Every approved send files its
-  shape here once; a swipe from the gallery arrives as a proposal. Each is
-  checked against THIS brand's rules before its drafter ever sees it.</p>
+<div class="card"><div class="head"><h2>Designs — the references, recreated for {_esc(tenant)}</h2>
+  <span class="mut">shared across every account — a design, never a client's words or pictures</span></div>
+  <p class="when">Each reference was read into a brief in words. <b>Recreate</b>
+  makes this brand's version of it — the brand's own pictures cast by looking,
+  its copy written to the brief's jobs, the email written whole, checked,
+  photographed and judged beside the reference — and shows the two side by
+  side with what still differs. Every design is checked against THIS brand's
+  rules before a drafter sees it.</p>
   {body}
 </div>"""
 

@@ -395,10 +395,11 @@ def main() -> int:
     theme_b = brand_theme.live_theme("baci")
     sh = er.render_design(shifty, theme_b, sf)
     ck("nobody on file signs nothing — no 'Warmly,' over a blank", "Warmly" not in sh)
+    # The token preview left the card on 2026-09-12 (the recreation leads it);
+    # `preview_html` itself is still exercised above until Phase 5 retires it.
     card = admin_ui._structures_card("s3cret", "baci", preview_entity="aqua-bowl")
-    ck("the card carries the entity picker, the pictures chosen, the steps and the palette's derivation",
-       'name="preview_entity"' in card and "The pictures it chose" in card and "scope: " in card
-       and "The palette they lead" in card and "hero photograph" in card)
+    ck("the card no longer carries the token preview or its own entity picker",
+       'name="preview_entity"' not in card and "The pictures it chose" not in card)
 
     print("\n— 8. the Brand tab —")
     html_b = admin_ui.render_brand("s3cret", "baci")
