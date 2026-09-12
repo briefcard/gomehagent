@@ -1106,12 +1106,61 @@ class EmailStructure(Base):
     #: Rows filed before it existed carry `email_design.house(look)` — today's
     #: renderer as a design, with the old six-axis look folded in.
     design = Column(JSON, default=dict)
+    #: THE BRIEF — the reference read in WORDS, the way a designer briefs it
+    #: (INITIATIVE-email-recreation.md §1 row 1): the concept in a sentence,
+    #: each section as what it is / what it does / the asset it carries and
+    #: what it must show / its copy jobs / its look, the visual system, the
+    #: devices — under a light schema, never a closed vocabulary. It carries
+    #: the reference's visible words and dominant hexes ONLY so
+    #: `recreate.check` can refuse an email that leaked them.
+    brief = Column(JSON, default=dict)
     #: proposed | approved | rejected
     review = Column(String, default="proposed", index=True)
     reviewed_by = Column(String, default="")
     reviewed_at = Column(DateTime(timezone=True))
     used_count = Column(Integer, default=0)
     last_used_at = Column(DateTime(timezone=True))
+
+
+class Recreation(Base):
+    """One reference recreated for one brand — the model's email, judged.
+
+    THE MODEL MAKES THE EMAIL; THE CODE INSPECTS IT (INITIATIVE-email-
+    recreation.md §0). A row is one run of that chain: the brief the reference
+    was read into, the pictures cast for it and why, the copy written to its
+    jobs, the HTML the model wrote, the picture a browser took of it, the
+    judge's findings beside the reference, the checks, round by round — and
+    which round was kept. The card shows the reference beside ours with the
+    open findings under it; a note from the owner is one more finding.
+
+    Nothing in it is a design vocabulary. `brief` is words; `rounds` is what
+    happened; `html` is the artifact.
+    """
+
+    __tablename__ = "email_recreations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    tenant = Column(String, nullable=False, index=True)
+    structure_id = Column(String, default="", index=True)
+    #: The subject the email is about, when the run named one.
+    entity_key = Column(String, default="")
+    #: running | shippable | not shippable | cannot be made | failed
+    status = Column(String, default="running", index=True)
+    brief = Column(JSON, default=dict)
+    cast = Column(JSON, default=dict)
+    copy = Column(JSON, default=dict)
+    html = Column(Text, default="")
+    #: `media` blob id of the kept round's picture.
+    png_id = Column(String, default="")
+    #: [{n, png_id, judge, check, blocking, edited_lines}] in order.
+    rounds = Column(JSON, default=list)
+    #: The kept round's open findings — the judge's and the checks' — as one list.
+    findings = Column(JSON, default=list)
+    best = Column(Integer, default=0)
+    #: The run's story in sentences: what was read, cast, cut, kept, skipped.
+    note = Column(Text, default="")
+    models = Column(JSON, default=dict)
 
 
 class SemrushPull(Base):

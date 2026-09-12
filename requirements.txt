@@ -30,3 +30,8 @@ Pillow>=10.0
 # (owner, 2026-09-08); the package a mature writer produces is the one every
 # importer sees all day, so the deck is written with it.
 python-pptx>=1.0
+# THE SCREENSHOT DOOR (`app/shots.py`): Playwright drives a local Chromium on
+# a laptop and Browserless over CDP in production — the package only; the
+# deploy downloads no browser (`SHOTS_WS` names the remote one). A judge that
+# cannot see the email is skipped and says so; it never raises.
+playwright>=1.47

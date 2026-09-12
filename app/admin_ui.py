@@ -708,7 +708,10 @@ BG_LABELS = (("harvest", "Harvest"), ("scan", "Compliance scan"),
 BG_BRAND_LABELS = (("voice", "Voice derive"),
                    # a Pinterest board filled onto a visual board, or a
                    # board's reference pins read into direction (boards card)
-                   ("boards", "Board fill / direction read"))
+                   ("boards", "Board fill / direction read"),
+                   # a reference recreated for this brand — the model's
+                   # email, judged beside the reference (structures card)
+                   ("email_recreate", "Reference recreated"))
 
 #: And the one Review's PICTURES section reports, through `_frames_run`. A
 #: third group for the same reason the second exists: making an ad's frames
@@ -6754,6 +6757,80 @@ def _design_preview(tenant: str, design: dict, shot: dict | None, entity_key: st
               f'border-radius:6px;background:#fff"></iframe></div></details>')
 
 
+def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str:
+    """The reference beside OURS for this brand — the model's email, judged —
+    and the control that makes one. Status first, then the pictures, then
+    every open finding as a sentence, then the rounds; a run in flight says
+    what it is doing; a brand it cannot be made for says what it needs."""
+    from . import kb, recreate, web as _web
+    brief_line = ""
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, st["id"])
+        concept = ((row.brief or {}).get("concept") if row else "") or ""
+        # THE REFERENCE PICTURE IS THE STRUCTURE'S OWN — read off its row, not
+        # off the swipe board's map, which keeps one structure per picture and
+        # loses the second structure read from the same screenshot.
+        ref_asset = s.get(db.KbAsset, row.source_asset_id) if row and row.source_asset_id else None
+        ref_image = str(getattr(ref_asset, "url", "") or "") if ref_asset else ""
+    if not ref_image:
+        return ""
+    shot = {"image": ref_image}
+    if concept:
+        brief_line = f'<br><span class="mut">brief: {_esc(concept)}</span>'
+    bg = _web.bg_status("email_recreate", tenant)
+    last = recreate.latest(st["id"], tenant)
+    running = bg.get("state") == "running"
+    ents = kb.entities(tenant)[:24]
+    about = ('<select name="entity"><option value="">the brand</option>'
+             + "".join(f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>' for e in ents)
+             + "</select>")
+    form = (f'<form method="post" action="/admin/email_recreate" style="margin:6px 0 0;display:inline">'
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="structure" value="{_esc(st["id"])}">'
+            f'about {about} <button type="submit" class="sec"'
+            + (" disabled" if running else "") + f'>Recreate for {_esc(tenant)}</button></form>')
+    if running:
+        form += f' <span class="when">running — {_esc(bg.get("detail") or "")}</span>'
+    if not last:
+        return (brief_line + f'<br><span class="mut">not yet recreated for this brand</span> ' + form)
+    open_ = [f for f in last["findings"] if f.get("severity") in ("blocks", "cosmetic")]
+    blocks_n = sum(1 for f in open_ if f.get("severity") == "blocks")
+    status_cls = "ok" if last["status"] == recreate.SHIPPABLE else "when"
+    head = (f'<br><span class="{status_cls}">{_esc(last["status"])}</span> '
+            f'<span class="mut">· {_esc(last["at"])}'
+            + (f' · about {_esc(last["entity_key"])}' if last["entity_key"] else "")
+            + f' · round {last["best"]} of {len(last["rounds"])} kept'
+            + (f' · <a href="/admin/email_recreation?key={_esc(key)}&amp;id={_esc(last["id"])}">open the HTML</a>'
+               if last["has_html"] else "") + "</span>")
+    ours = (f'<a href="{_esc(last["png"])}"><img src="{_esc(last["png"])}" alt="ours" '
+            f'style="max-width:240px;border:1px solid #ddd;display:block"></a>' if last["png"] else
+            '<span class="when">no picture — the screenshot door did not answer</span>')
+    ref = (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" alt="the reference" '
+           f'style="max-width:240px;border:1px solid #ddd;display:block"></a>')
+    side = (f'<table role="presentation" style="margin:6px 0"><tr>'
+            f'<td style="vertical-align:top;padding-right:10px"><span class="mut">the reference</span><br>{ref}</td>'
+            f'<td style="vertical-align:top"><span class="mut">ours, for {_esc(tenant)}</span><br>{ours}</td></tr></table>')
+    finds = ("".join(
+        f'<li><b>{_esc(f.get("where", ""))}</b> — {_esc(f.get("what", ""))}'
+        + (f' <span class="mut">→ {_esc(f["do"])}</span>' if f.get("do") else "")
+        + (' <span class="when">blocks</span>' if f.get("severity") == "blocks" else "") + "</li>"
+        for f in open_) if open_ else "")
+    finds_html = (f'<details open><summary class="mut">{len(open_)} open finding(s), {blocks_n} blocking</summary>'
+                  f'<ul class="mut">{finds}</ul></details>' if open_ else
+                  '<span class="ok">no open findings</span>')
+    rounds = "".join(
+        f'<li>round {r.get("n")}: {r.get("blocking", 0)} blocking'
+        + (f', {r.get("edited", 0)} lines edited' if r.get("n") else "")
+        + (f' · not judged — {_esc(r.get("why_not_judged", ""))}' if not r.get("judged") else "")
+        + "</li>" for r in last["rounds"])
+    return (brief_line + head + side + finds_html
+            + (f'<details><summary class="mut">{len(last["rounds"])} round(s)</summary><ul class="mut">{rounds}</ul></details>'
+               if last["rounds"] else "")
+            + (f'<br><span class="mut">{_esc(last["note"][:600])}</span>' if last["note"] else "")
+            + "<br>" + form)
+
+
 def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
     """The collective library of email structures, and the swipe board that
     feeds it. On Brand beside the visual boards because it is the same idea
@@ -6833,6 +6910,11 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
             design_html = ('<br><span class="when">design not read — the house design, '
                            'arranged as above' + read_ctl + "</span>")
         look_html += design_html
+        # THE RECREATION — the model's email for THIS brand beside the
+        # reference, with the judge's open findings under it
+        # (INITIATIVE-email-recreation.md, Phase 1). Next to the old preview
+        # until Phase 5 retires it.
+        look_html += _recreation_block(key, tenant, st, shot)
         return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")

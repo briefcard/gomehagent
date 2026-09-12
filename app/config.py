@@ -166,6 +166,11 @@ SWEEP_MODEL = os.environ.get("SWEEP_MODEL", "claude-haiku-4-5-20251001")
 # somebody will want to change without a deploy.
 CREATIVE_REVIEW_MODEL = os.environ.get("CREATIVE_REVIEW_MODEL",
                                        "claude-sonnet-4-6")
+# THE SCREENSHOT DOOR (`app/shots.py`). A Browserless endpoint,
+# `wss://production-sfo.browserless.io?token=<token>`; unset, a local
+# Chromium is used when Playwright has one, and otherwise the judge is
+# skipped and says so. The deploy has no browser of its own.
+SHOTS_WS = os.environ.get("SHOTS_WS", "")
 # THE PICTURE GENERATOR. Every text model on this platform has been
 # overridable for months — CLAUDE_MODEL, CLASSIFY_MODEL, SWEEP_MODEL,
 # SEO_MODEL, CREATIVE_REVIEW_MODEL — and the one call the owner is actually

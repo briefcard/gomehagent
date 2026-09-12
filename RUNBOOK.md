@@ -782,6 +782,48 @@ The run's notes say `arranged as the structure's look: …`.
 "the ESP could not be read (400: Page size must be an integer between 1 and
 10)" and untargeted. It pages by the `links.next` cursor now, to 500.
 
+## 6e. Recreate a reference for a brand — the model makes the email, the code inspects it
+
+**What it is.** On the Brand tab, every structure with a reference picture
+carries **Recreate for ‹brand›** (about the brand, or about one entity).
+One press runs, off the request: the reference is read into a *brief* in
+words (once per structure; shown on the card as `brief: …`), the brand's
+material is gathered, its pictures are cast by looking at a numbered sheet,
+the copy is written to the brief's jobs, **the model writes the email's
+HTML**, the checks run, a browser photographs it, a judge compares that
+picture to the reference and names what differs, the model edits, and the
+round with the fewest blocking findings is kept (up to three rounds). The
+card then shows *the reference | ours*, the status, every open finding
+(*where — what → do*), the rounds, and the run's story in sentences.
+`open the HTML` serves the kept email as a page. Plan and rule:
+`INITIATIVE-email-recreation.md` §0–§1.
+
+**Statuses.** `shippable` — no check blocks and the judge names nothing
+blocking. `not shippable` — something blocks (each is listed) or the
+email was never judged (no picture). `cannot be made` — the brand has no
+publishable picture for a slot the design needs; the finding says what
+it needs (*needs a photograph of the product in use*). `failed` — a step
+did not answer; the story says which.
+
+**What it costs.** Five to seven model calls (three of them vision) and one
+browser unit per round. The brief is read once and reused.
+
+**The screenshot door.** `SHOTS_WS` in the env group — a Browserless
+endpoint `wss://production-sfo.browserless.io?token=…` (free plan: 1,000
+shots a month, 2 at a time). Without it the deploy has no browser: the
+email is still made and checked, but *not judged* and never called
+shippable, and the card says so. On a laptop with Playwright's Chromium
+installed no setting is needed.
+
+**What it will not do.** Use a picture that is not the brand's own; carry
+five words in a row, a colour or a picture from the reference; change the
+drafter's words; ship without the address and `{{UNSUBSCRIBE}}`; draw a
+verified tick or a count nobody has; call an email shippable that nobody
+looked at. Each of those is a named finding, and each has a sabotage guard.
+
+**Until Phase 5** the older token preview (§6d) stays on the same card
+beside the recreation. Judge by the recreation.
+
 ## 7. What does not work yet
 
 Read this before promising anything.

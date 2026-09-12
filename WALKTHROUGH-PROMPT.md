@@ -1674,6 +1674,76 @@ per press — press until it says every picture is read), correct any kind
 the look got wrong, then preview a structure as an email about a product
 and read the steps under it.
 
+### The model makes the email; the code inspects it — 2026-09-12 (Phase 1 of INITIATIVE-email-recreation.md; hash in the memory note)
+
+**The owner's words**, on the Ayoh reference beside the app's preview:
+*"what the fuck am I supposed to do with that?"* — then *"you are focusing
+on the wrong things constantly"* — then, after the hand-made recreation:
+*"that's already better than anything our app has made. Why is that?"*
+and *"this is how everything should run when it comes to creative
+output."*
+
+**THE CENTRE IS REPLACED.** The closed vocabulary was the wrong centre:
+a reader that has to round every reference to the nearest token
+guarantees every reference comes out as a variant of the same email (the
+Ayoh centrepiece — a recipe delivered as a screenshot of the brand's own
+Instagram post — has no token and became "proof: image + list"). The rule
+now (plan §0): **the model makes the email, the code inspects it, a judge
+compares it to the reference, the owner approves it. The only closed
+lists are invariants.** A device nobody has seen needs nothing added.
+
+**The proof it was traced from:** `docs/recreations/ayoh-baci-portofino.html`
+— Ayoh "Sauce the meat" recreated for Baci by hand in about an hour:
+brief in words → Baci's catalogue → 71 photographs cast by LOOKING →
+palette measured from the cast → copy to the reference's copy JOBS →
+HTML written directly → rendered → judged by eye → two rounds. Plan §1 is
+that trace as a table; each row's right-hand side is a function in
+`app/recreate.py`.
+
+**The ship.** `app/recreate.py`: `brief` (one vision call over the strips
+at the reviewer's tier → words under a light schema; refused BY NAME
+when not a brief; stored as `EmailStructure.brief`), `kit` (what is on
+file, gathered), `cast` (a numbered contact sheet → picks with reasons;
+the same picture never twice; a slot nothing fits is cut and says what
+it needs; no pictures → *cannot be made* with the needs, never a
+wireframe), `copy` (per job, gated by the ban list), `compose` (the model
+writes the HTML; a revise call EDITS the previous HTML against findings
+and the edit is counted in lines), `check` (the invariants — brand
+assets only, no 5-gram or hex or host from the reference, copy verbatim,
+email-safe HTML under 100 KB, contrast ≥ 4.5 measured off the inline
+styles, the address, `{{UNSUBSCRIBE}}`, no unknown token, no
+view-in-browser where the platform has none, the ban list, no fabricated
+tick or count, links live, no placeholder link), `judge` (reference
+beside ours, whole and top strip → findings *where / what / do /
+severity*, never a score), `run` (≤ 3 rounds, best kept by blocking
+count, unjudged never shippable), `latest`/`html_of`. `app/shots.py`:
+the screenshot door — Playwright, local Chromium here, Browserless over
+CDP in production (`SHOTS_WS`); the provider's contract pinned from its
+docs (a unit = 30 s, free 1,000/month, 2 concurrent, 2-minute sessions;
+the semaphore holds the concurrency); no door → said, never raised.
+`db.Recreation`; POST `/admin/email_recreate` (303, off the request via
+`_run_bg`), GET `/admin/email_recreation?id=`; the structures card shows
+*brief · status · the reference | ours · open findings · rounds · the
+run's story* and **Recreate for ‹brand›** about an entity. Purposes
+`email_brief/cast/judge` on the reviewer, `email_copy/compose` on the
+default model. Suite `test_the_model_makes_the_email.py` (asserts the
+chain and the invariants — NEVER what an email looks like); 13 guards
+caught. The door proven locally: the hand-made email shot at 1280×4288
+in 8.5 s.
+
+**Rules it adds.** *If the reader has to round, the representation is
+wrong.* *A suite that asserts a layout is the old mistake.* *Gates are by
+eye: the reference beside ours.* *Brief before code; I look before the
+owner does; no new machinery until one reference on one brand looks
+right.*
+
+**NOT PROVEN LIVE** — every model call is stubbed here (no key on this
+machine) and the deploy has no browser until `SHOTS_WS` is set. The
+owner's move: a Browserless token in `SHOTS_WS`; then press **Recreate
+for baci** on the Ayoh structure and put the card beside
+`docs/recreations/ayoh-baci-portofino.html`. Phases 2–6 of the plan are
+not started; the old preview stays on the card until Phase 5.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)

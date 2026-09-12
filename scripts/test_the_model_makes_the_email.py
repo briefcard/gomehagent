@@ -1,0 +1,418 @@
+"""THE MODEL MAKES THE EMAIL; THE CODE INSPECTS IT — Phase 1 of
+INITIATIVE-email-recreation.md, proven in the shape of the hand-made
+Ayoh → Baci recreation of 2026-09-12 (`docs/recreations/ayoh-baci-portofino.html`).
+
+What is asserted here is the chain and its INVARIANTS — never what an email
+looks like. That is the judge's job and the owner's eye. A suite that
+asserted a layout would be the old mistake this initiative exists to undo.
+
+  1. THE BRIEF is words under a light schema; a reply that is not one is
+     refused BY NAME (no concept, no sections, a section that does not say
+     what it is); the reference's own words and hexes ride along ONLY for the
+     leak check; the brief lands on the structure.
+  2. THE KIT gathers what is on file and invents nothing: the brand's
+     pictures with their readings, its entities, claims, theme, handle, the
+     platform's tokens.
+  3. THE CAST is chosen by looking at a numbered sheet: a pick names the
+     picture and why; the same picture cannot fill two slots; a slot nothing
+     fits is cut and says what it needs; a brand with no pictures cannot be
+     made for, and the run says so instead of drawing a wireframe.
+  4. THE COPY is written per job and gated by the brand's ban list.
+  5. THE CHECKS are the only closed list: each invariant has a failing
+     fixture here — an outside picture, five words from the reference, the
+     reference's hex, a colour that does not read, a lost address, a lost
+     unsubscribe, an unknown token, an <svg>, a message Gmail would clip,
+     changed copy, a verified tick, a placeholder link — and the good email
+     passes them all.
+  6. THE LOOP keeps the round with the fewest blocking findings, edits rather
+     than rewrites (the revise call receives the previous HTML and the
+     findings), stops when nothing blocks, and never calls an unjudged email
+     shippable.
+  7. THE DOOR's contract is pinned (Browserless: a unit, the free plan's
+     concurrency and session) and a missing door is said, not raised.
+  8. THE CARD shows the reference beside ours with the open findings, and
+     the button posts to /admin/email_recreate, which runs off the request
+     and comes back 303; /admin/email_recreation serves the kept HTML.
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import sys
+import tempfile
+import types
+
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'rc.db')}"
+os.environ["APPROVAL_SECRET"] = "s3cret"
+os.environ.pop("SHOTS_WS", None)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import (admin_ui, brand_theme, db, email_design as ed, email_structures as es,  # noqa: E402
+                 kb, llm, media, recreate as rc, shots, tenants, web)
+
+CDN = "https://cdn.shopify.com/s/files/1/0002/"
+_fail: list[str] = []
+
+
+def ck(label, cond, detail=""):
+    print(f"[{'  ok  ' if cond else ' FAIL '}] {label}" + (f"  — {detail}" if detail else ""))
+    if not cond:
+        _fail.append(label)
+
+
+def png(w=400, h=300, bg="#e7dcc8", fg="#9b3c1c"):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), bg)
+    ImageDraw.Draw(im).ellipse([w * .3, h * .2, w * .7, h * .75], fill=fg)
+    b = io.BytesIO(); im.save(b, format="PNG")
+    return b.getvalue()
+
+
+# THE BRIEF THE READER SHOULD PRODUCE FOR THE AYOH REFERENCE — written by
+# hand first, as §8 of the plan demands, and checked against §1 row 1: the
+# concept in a sentence, each section's job, asset and copy jobs, the devices.
+BRIEF = {
+    "concept": "a recipe delivered as a screenshot of the brand's own Instagram post; a pun hook above; "
+               "shop the product used below; the product at the table underneath",
+    "sections": [
+        {"n": 1, "what": "the brand's wordmark, small, centred on the page colour", "does": "signs the email",
+         "asset": {"kind": "mark", "shows": "the mark"}, "copy": [], "look": "centred, cream on brown, 34 px"},
+        {"n": 2, "what": "a two-line hook: a letter-spaced small-caps kicker over a huge display headline",
+         "does": "stops the reader with a pun on how the product is used",
+         "asset": {"kind": "none", "shows": ""},
+         "copy": [{"id": "s2_kicker", "job": "a small-caps line that sets up the turn", "limit": "6 words"},
+                  {"id": "s2_headline", "job": "the turn: an imperative that uses the product more boldly", "limit": "2 lines, 3 words"}],
+         "look": "centred; kicker 12 px tracked; headline ~75% of the column, heavy condensed, cream on brown"},
+        {"n": 3, "what": "a social post shown as a post: avatar, handle, a square photograph, an icon row with dots, "
+                         "then a small-caps title and four numbered steps inside the same cream card",
+         "does": "gives the recipe as if lifted from the brand's feed",
+         "asset": {"kind": "photograph", "shows": "the product in use — food on it, hands, sunlight"},
+         "copy": [{"id": "s3_title", "job": "a small-caps title naming the secret", "limit": "5 words"},
+                  {"id": "s3_steps", "job": "four numbered steps naming the product, the last step one word", "limit": "4 steps"}],
+         "look": "cream card, thin dark border, 14 px radius, inset 30 px; photo square with straight corners"},
+        {"n": 4, "what": "a closer: two lines of display caps then a script tail, and a bordered cream button",
+         "does": "lands the joke and asks once",
+         "asset": {"kind": "none", "shows": ""},
+         "copy": [{"id": "s4_closer", "job": "two display lines that set up the script", "limit": "2 lines"},
+                  {"id": "s4_script", "job": "the script tail", "limit": "2 words"},
+                  {"id": "s4_cta", "job": "shop the product used, by name", "limit": "3 words"}],
+         "look": "centred; button cream with a dark 2 px border, small caps tracked"},
+        {"n": 5, "what": "the page turns cream; the product in a scene, then a line naming the pieces",
+         "does": "shows the thing to buy where it lives",
+         "asset": {"kind": "photograph", "shows": "the pieces at the table"},
+         "copy": [{"id": "s5_line", "job": "one line naming the pieces on the table", "limit": "1 line"}],
+         "look": "cream ground, photo inset 34 px"},
+    ],
+    "visual_system": {"type": "heavy condensed display; tracked small caps; brush script accent; 13 px sans body",
+                      "colour": "the page is the brand's deep tone; one cream card; the page turns cream at the end",
+                      "rhythm": "one column, everything centred, generous padding, 14 px radii", "column": "600"},
+    "devices": ["a social post shown as a post: avatar circle, handle, square photo, heart/comment/send/bookmark row, dots",
+                "a display line with a script tail", "a cream button with a dark border"],
+    "reference_text": ["Ayoh!", "DON'T JUST SAUCE THE BREAD.", "SAUCE THE MEAT!", "eatayoh", "THE DELI COUNTER SECRET",
+                       "1. Whisk 1/3 cup Tangy Dijonayo with a glug of olive oil, a splash of red wine vinegar",
+                       "NOW THAT'S A SANDO WORTH singing about", "SHOP TANGY DIJONAYO"],
+    "reference_hexes": ["#7a4a1c", "#f5ecd7", "#3a2410", "#c8a15a", "#8b5a2b", "#fff8e8"],
+}
+
+COPY = {"s2_kicker": "Don't just set the table.", "s2_headline": "Set the scene!",
+        "s3_title": "The Sunday-lunch secret",
+        "s3_steps": ["Start with the Portofino melamine dinner plates.", "Add the Aqua water glasses in orange.",
+                     "Pile the pasta straight onto the plates.", "Mangia!"],
+        "s4_closer": "Now that's a lunch worth", "s4_script": "lingering over", "s4_cta": "Shop Portofino",
+        "s5_line": "On the table: Portofino melamine dinner plates and Aqua water glasses."}
+
+LOGO = CDN + "logo.png"
+PHOTO_A, PHOTO_B, PHOTO_C = CDN + "pasta.jpg", CDN + "table.jpg", CDN + "bowl.jpg"
+ADDRESS = "1 Main St, Hallandale Beach, FL 33009"
+
+
+def email_html(copy=COPY, *, photo_a=PHOTO_A, photo_b=PHOTO_B, logo=LOGO, address=ADDRESS,
+               ink="#4a2418", page="#9b3c1c", cream="#f4e8d3", unsub="{{UNSUBSCRIBE}}", extra="",
+               headline_px=96) -> str:
+    """An email the way the composer writes one: tables, inline styles, the
+    copy verbatim, only the brand's pictures, the address and the token."""
+    steps = "".join(f'<p style="margin:0 0 8px;color:{ink}">{i + 1}. {s}</p>' for i, s in enumerate(copy["s3_steps"]))
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{copy["s2_headline"]}</title></head>
+<body style="margin:0;background:{page}">{extra}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{page}"><tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px">
+<tr><td align="center" style="padding:30px"><img src="{logo}" alt="the brand" width="150"></td></tr>
+<tr><td align="center" style="color:{cream};font-family:Helvetica,Arial,sans-serif;font-size:12px">{copy["s2_kicker"]}</td></tr>
+<tr><td align="center" style="color:{cream};font-family:Impact,'Arial Black',sans-serif;font-size:{headline_px}px">{copy["s2_headline"]}</td></tr>
+<tr><td style="padding:0 34px 30px"><table role="presentation" width="100%" style="background:{cream};border:1px solid {ink};border-radius:14px">
+<tr><td style="padding:16px;color:{ink};font-family:Helvetica,Arial,sans-serif;font-size:13px">bacimilanousa</td></tr>
+<tr><td style="padding:0 16px"><img src="{photo_a}" alt="the product in use" width="500" style="width:100%"></td></tr>
+<tr><td style="padding:16px;color:{ink};font-family:Helvetica,Arial,sans-serif;font-size:12px">{copy["s3_title"]}</td></tr>
+<tr><td style="padding:0 16px 16px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:{ink}">{steps}</td></tr>
+</table></td></tr>
+<tr><td align="center" style="color:{cream};font-family:Impact,'Arial Black',sans-serif;font-size:24px">{copy["s4_closer"]}</td></tr>
+<tr><td align="center" style="color:{cream};font-family:'Brush Script MT',cursive;font-size:40px">{copy["s4_script"]}</td></tr>
+<tr><td align="center" style="padding:20px"><a href="https://example-brand.test/collections/portofino" style="display:inline-block;padding:14px 40px;background:{cream};border:2px solid {ink};color:{ink};font-family:Helvetica,Arial,sans-serif;font-size:13px;text-decoration:none">{copy["s4_cta"]}</a></td></tr>
+</table></td></tr>
+<tr><td align="center" style="background:{cream}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px">
+<tr><td style="padding:30px 34px 0"><img src="{photo_b}" alt="the pieces at the table" width="532" style="width:100%"></td></tr>
+<tr><td align="center" style="padding:20px;color:{ink};font-family:Helvetica,Arial,sans-serif;font-size:13px">{copy["s5_line"]}</td></tr>
+<tr><td align="center" style="padding:0 20px 30px;color:#6b4a3a;font-family:Helvetica,Arial,sans-serif;font-size:11px">{address}<br>
+<a href="{unsub}" style="color:#6b4a3a">Unsubscribe</a></td></tr>
+</table></td></tr></table></body></html>"""
+
+
+def main() -> int:
+    db.init_db()
+    tenants.seed()
+    kb.ensure_brand("baci", "Baci")
+    kb.set_brand("baci", positioning="Italian-designed tableware.", tone="direct")
+    with db.SessionLocal() as s:
+        b = s.get(db.KbBrand, "baci")
+        b.banned_claims = ["handmade", "made in Italy"]
+        s.commit()
+    brand_theme.approve("baci", {"footer.address": ADDRESS, "logo_url": LOGO, "colors.accent": "#9b3c1c"})
+    kb.add_entity("baci", "collection", "portofino", "Portofino", description="Melamine and porcelain, coral and shells.",
+                  attributes={"image": PHOTO_C, "url": "https://example-brand.test/collections/portofino"}, origin="human")
+    kb.add_entity("baci", "product", "aqua-glass", "Aqua water glass, orange", price="$220",
+                  attributes={"image": PHOTO_C, "url": "https://example-brand.test/products/aqua"}, origin="human")
+    kb.add_asset("baci", PHOTO_A, rights=kb.OWNED, subject="photo", title="spaghetti on the Portofino plate",
+                 entity_key="portofino", origin="human")
+    kb.add_asset("baci", PHOTO_B, rights=kb.OWNED, subject="photo", title="the Portofino place setting",
+                 entity_key="portofino", origin="human")
+    kb.add_asset("baci", PHOTO_C, rights=kb.OWNED, subject="object", tags=["store-image:1", "packshot"],
+                 title="Aqua glass packshot", entity_key="aqua-glass", origin="store_sync")
+    kb.add_asset("baci", CDN + "ref.jpg", rights=kb.REFERENCE, subject="scene", title="a pin", origin="pinterest")
+    ids = {a.url: a.id for a in kb.assets("baci")}
+    a_id, b_id, c_id = ids[PHOTO_A], ids[PHOTO_B], ids[PHOTO_C]
+    with db.SessionLocal() as s:
+        for aid, kind in ((a_id, "lifestyle"), (b_id, "lifestyle"), (c_id, "packshot-on-plain")):
+            row = s.get(db.KbAsset, aid)
+            row.reading = {"kind": kind, "colours": {"light": "#e8d8c0", "dark": "#502818", "mid": "#983818"},
+                           "size": [1170, 1170], "aspect": "square", "alone": kind.startswith("packshot"), "person": False}
+        s.commit()
+
+    # the reference: a swiped screenshot on the agency board, and its structure
+    kb.add_asset("agency", "https://images.example.test/ayoh.png", rights=kb.REFERENCE, kind=es.SWIPE_KIND,
+                 subject="scene", title="Ayoh — Sauce the meat", source="https://reallygoodemails.com/emails/x",
+                 origin="swipe")
+    ref_id = next(a.id for a in kb.assets("agency", publishable_only=False) if "ayoh" in (a.url or ""))
+    st = es.file_structure(name="Ayoh — Sauce the meat", sequence=["hero", "heading", "text", "cta"], source="swipe",
+                           review="approved", source_asset_id=ref_id, source_url="https://reallygoodemails.com/emails/x")
+    sid = st["id"] if isinstance(st, dict) else st
+
+    # THE STUBS: the reference bytes, the thumbnails, the model by purpose, the door, the blob store, the links
+    ref_png = png(680, 2400, "#7a4a1c", "#f5ecd7")
+    ed._fetch = lambda url: ref_png if "ayoh" in url else b""
+    ed._fetch_bounded = lambda url, *, cap=ed.FETCH_MAX: png() if CDN in url else b""
+    calls: list[str] = []
+    answers: dict = {}
+    seen_prompts: dict = {}
+
+    class _R:
+        ok = True
+        error = ""
+        model = "stub"
+        def __init__(self, text): self.text = text
+
+    def _ask(purpose, prompt, **k):
+        calls.append(purpose)
+        seen_prompts.setdefault(purpose, []).append(prompt)
+        ans = answers.get(purpose)
+        if callable(ans):
+            ans = ans(prompt)
+        return _R(ans if isinstance(ans, str) else json.dumps(ans))
+    llm.ask = _ask
+    shots_calls: list[int] = []
+    shots.shoot = lambda html, **k: (shots_calls.append(len(html)) or {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""})
+    media.put = lambda tenant, blob, **k: {"ok": True, "id": f"blob{len(shots_calls)}", "url": "http://x/media/blob.png"}
+    import httpx
+    httpx.head = lambda *a, **k: types.SimpleNamespace(status_code=200)
+
+    print("— 1. the brief is words, refused by name when it is not —")
+    answers["email_brief"] = BRIEF
+    got = rc.brief(ref_id, tenant="baci")
+    ck("the reference is read into a brief and stored on its structure",
+       got["ok"] and got["structure_id"] == sid and got["brief"]["concept"].startswith("a recipe"), str(got.get("why")))
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, sid)
+        ck("the brief on the row carries the concept, the sections and the reference's words for the leak check",
+           (row.brief or {}).get("concept") and len(row.brief["sections"]) == 5 and row.brief["reference_text"])
+    ck("a reply with no sections is refused by name", rc.brief_problem({**BRIEF, "sections": []}) == "the brief has no sections")
+    ck("a reply with no concept is refused by name", rc.brief_problem({**BRIEF, "concept": ""}) == "the brief has no concept")
+    ck("a section that does not say what it is is refused by name",
+       rc.brief_problem({**BRIEF, "sections": [{"n": 1}]}) == "section 1 does not say what it is")
+    ck("a tokenised reply is not a brief", rc.brief_problem({"sections": [{"kind": "hero"}]}).startswith("the brief lacks"))
+    ck("the copy jobs are flat, in order, with their section",
+       [j["id"] for j in rc.copy_jobs(BRIEF)][:3] == ["s2_kicker", "s2_headline", "s3_title"]
+       and rc.copy_jobs(BRIEF)[0]["section"] == 2)
+
+    print("— 2. the kit gathers what is on file —")
+    kit = rc.kit("baci")
+    ck("the kit carries the brand's publishable pictures with their readings, never a reference pin",
+       {p["id"] for p in kit["pictures"]} == {a_id, b_id, c_id} and all(p["kind"] for p in kit["pictures"]))
+    ck("the kit carries the entities, the theme's mark and address, the platform's tokens",
+       {e["key"] for e in kit["entities"]} >= {"portofino", "aqua-glass"} and kit["theme"]["logo_url"] == LOGO
+       and kit["theme"]["footer"]["address"] == ADDRESS and "UNSUBSCRIBE" in kit["esp"]["tokens"])
+
+    print("— 3. the cast is chosen by looking —")
+    answers["email_cast"] = lambda prompt: {"picks": [{"section": 3, "cell": 1, "why": "food on the plate, in the sun"},
+                                                      {"section": 5, "cell": 1, "why": "again"},
+                                                      {"section": 5, "cell": 2, "why": "the pieces at the table"}], "none": []}
+    cast = rc.cast("baci", BRIEF, kit, entity_key="portofino", seed="one")
+    ck("a pick names the picture and why", cast["picks"][3]["asset_id"] in (a_id, b_id) and "sun" in cast["picks"][3]["why"], str(cast))
+    ck("the same picture cannot fill two slots — the second slot took the next pick",
+       cast["picks"][5]["asset_id"] != cast["picks"][3]["asset_id"] and cast["picks"][5]["asset_id"] in (a_id, b_id))
+    ck("the caster saw a numbered sheet and the pictures' facts",
+       any(isinstance(p, list) and p and p[0].get("type") == "image" for p in seen_prompts["email_cast"])
+       and "spaghetti on the Portofino plate" in seen_prompts["email_cast"][-1][-1]["text"])
+    ck("the subject's pictures come first on the sheet",
+       rc.candidates(kit, entity_key="portofino", seed="x")[0]["entity_key"] == "portofino")
+    answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}
+    cast_none = rc.cast("baci", BRIEF, kit)
+    ck("a slot nothing fits is cut and says what it needs",
+       not cast_none["picks"] and {x["section"] for x in cast_none["none"]} == {3, 5}
+       and cast_none["none"][0]["needs"].startswith("a photograph") and "cut" in cast_none["said"][-1])
+
+    print("— 4. the copy is written per job and gated —")
+    answers["email_copy"] = {**COPY, "s5_line": "Handmade in Italy, on the table."}
+    cp = rc.copy("baci", BRIEF, kit, cast, entity_key="portofino")
+    ck("every job gets its words", set(cp["copy"]) == set(COPY), str(set(cp["copy"]) ^ set(COPY)))
+    ck("the brand's ban list blocks the copy by phrase",
+       any(f["code"] == "banned" and "handmade" in f["what"].lower() for f in cp["findings"]), str(cp["findings"]))
+    answers["email_copy"] = COPY
+
+    print("— 5. the checks — each invariant fails on its fixture, the good email passes —")
+    good = email_html()
+    f0 = rc.check(good, kit, BRIEF, COPY)
+    ck("the good email passes every check", not rc.blocking(f0), str(rc.blocking(f0)))
+
+    def blocks(html, code, **kw):
+        fs = rc.check(html, kit, BRIEF, kw.pop("copy", COPY), **kw)
+        return any(f["code"] == code and f["severity"] == "blocks" for f in fs)
+    ck("an outside picture blocks", blocks(email_html(photo_a="https://images.someone-else.test/sando.jpg"), "asset"))
+    ck("five words in a row from the reference block",
+       blocks(email_html({**COPY, "s5_line": "Don't just sauce the bread. Sauce the meat!"}),
+              "leak_words", copy={**COPY, "s5_line": "Don't just sauce the bread. Sauce the meat!"}))
+    ck("the reference's own hex blocks", blocks(email_html(page="#7a4a1c"), "leak_hex"))
+    ck("a picture from the reference's host blocks",
+       blocks(email_html(photo_a="https://images.example.test/ayoh.png"), "leak_image", reference_host="images.example.test"))
+    ck("a colour that does not read blocks", blocks(email_html(cream="#b0705a"), "contrast"))
+    ck("a lost address blocks", blocks(email_html(address="somewhere"), "address"))
+    ck("a lost unsubscribe blocks", blocks(email_html(unsub="#"), "unsubscribe"))
+    ck("an unknown token blocks", blocks(email_html(extra="{{FirstName}}"), "token"))
+    ck("an <svg> blocks", blocks(email_html(extra="<svg width='1' height='1'></svg>"), "tag"))
+    ck("a message Gmail would clip blocks", blocks(email_html(extra="<!--" + "x" * 101_000 + "-->"), "size"))
+    ck("changed copy blocks", blocks(email_html({**COPY, "s4_cta": "Shop now"}), "copy"))
+    ck("a verified tick blocks", blocks(email_html(extra='<p style="color:#ffffff">bacimilanousa ✓</p>'), "fabricated"))
+    ck("a placeholder link blocks", blocks(email_html(unsub="#unsubscribe"), "link_placeholder"))
+    ck("the brand's ban list blocks at the email too", blocks(email_html({**COPY, "s5_line": "Handmade for you."}),
+                                                             "banned", copy={**COPY, "s5_line": "Handmade for you."}))
+
+    print("— 6. the loop keeps the best round, edits rather than rewrites, stops when nothing blocks —")
+    answers["email_cast"] = {"picks": [{"section": 3, "cell": 1, "why": "food"}, {"section": 5, "cell": 2, "why": "table"}], "none": []}
+    compose_seen: list = []
+
+    def _compose(prompt):
+        compose_seen.append(prompt)
+        if "FINDINGS" in prompt and "THE HTML" in prompt:
+            return "```html\n" + email_html(headline_px=112) + "\n```"      # the edit: the headline grows
+        return "```html\n" + email_html() + "\n```"
+    answers["email_compose"] = _compose
+    judged: list = []
+
+    def _judge(prompt):
+        judged.append(1)
+        if len(judged) == 1:
+            return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "headline light",
+                    "brand_material": True,
+                    "findings": [{"where": "section 2", "what": "the headline sits at half the column; the reference's fills it",
+                                  "do": "set it larger", "severity": "blocks"}]}
+        return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "matched", "brand_material": True, "findings": []}
+    answers["email_judge"] = _judge
+    got = rc.run(sid, "baci", "portofino", seed="s")
+    ck("the run kept round 1 — the edit closed the judge's finding — and calls it shippable",
+       got["status"] == rc.SHIPPABLE and len(got["rounds"]) == 2 and got["rounds"][1]["blocking"] == 0
+       and got["rounds"][0]["blocking"] == 1, got.get("note"))
+    ck("the revise call received the previous HTML and the finding, and the edit is counted in lines",
+       len(compose_seen) == 2 and "THE HTML" in compose_seen[1] and "half the column" in compose_seen[1]
+       and got["rounds"][1]["edited"] > 0)
+    last = rc.latest(sid, "baci")
+    ck("the recreation is on file with its picture, brief, rounds and no open finding",
+       last and last["status"] == rc.SHIPPABLE and last["png"] and last["best"] == 1 and not last["findings"]
+       and last["concept"].startswith("a recipe") and last["has_html"])
+    ck("the kept HTML is the edited one", "font-size:112px" in rc.html_of(last["id"]))
+    ck("the run says what it did, in sentences", "Round 0" in got["note"] and "Kept round 1" in got["note"])
+
+    # a later round that is WORSE is not kept: the best round wins, not the last
+    judged.clear()
+    worse = iter([1, 2, 2])
+
+    def _judge_worse(prompt):
+        n = next(worse)
+        return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                "findings": [{"where": f"section {i}", "what": "off", "do": "fix", "severity": "blocks"} for i in range(n)]}
+    answers["email_judge"] = _judge_worse
+    got_w = rc.run(sid, "baci", "portofino", seed="w")
+    ck("when every edit made it worse, round 0 is kept — the best round, never the last",
+       got_w["status"] == rc.NOT_SHIPPABLE and len(got_w["rounds"]) == 3 and rc.latest(sid, "baci")["best"] == 0
+       and [r["blocking"] for r in got_w["rounds"]] == [1, 2, 2], got_w.get("note"))
+    answers["email_judge"] = _judge
+
+    # no door → not judged → never shippable
+    shots.shoot = lambda html, **k: {"ok": False, "png": b"", "door": "", "ms": 0, "why": "playwright is not installed"}
+    judged.clear()
+    got2 = rc.run(sid, "baci", "portofino", seed="t")
+    ck("without a picture nothing is judged and the email is not called shippable — and it says why",
+       got2["status"] == rc.NOT_SHIPPABLE and "not judged" in got2["note"] and "playwright" in got2["note"], got2.get("note"))
+
+    # no pictures → cannot be made
+    shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
+    kb.ensure_brand("ironside", "Ironside")
+    brand_theme.approve("ironside", {"footer.address": ADDRESS})
+    st2 = es.file_structure(name="Ayoh again", sequence=["hero", "cta"], source="swipe", review="approved",
+                            source_asset_id=ref_id)
+    sid2 = st2["id"] if isinstance(st2, dict) else st2
+    got3 = rc.run(sid2, "ironside")
+    ck("a brand with no pictures gets 'cannot be made' with what each slot needs — never a wireframe",
+       got3["status"] == rc.CANNOT and any("needs" in f["what"] for f in got3["findings"]) and "cannot be made" in got3["note"],
+       got3.get("note"))
+
+    print("— 7. the door's contract —")
+    ck("the provider's contract is pinned with its documents",
+       shots.BROWSERLESS["free_units_per_month"] == 1000 and shots.BROWSERLESS["free_concurrent"] == 2
+       and shots.BROWSERLESS["free_session_seconds"] == 120 and shots.BROWSERLESS["connect"] == "connect_over_cdp"
+       and all(d.startswith("https://") for d in shots.DOCS))
+    ck("the semaphore holds the free plan's concurrency", shots._SEM._initial_value == shots.BROWSERLESS["free_concurrent"])
+    from app import config
+    config.SHOTS_WS = "https://not-a-socket"
+    ck("a malformed endpoint is refused by name", shots.door()[0] == "" and "wss://" in shots.door()[1])
+    config.SHOTS_WS = "wss://production-sfo.browserless.io?token=abc"
+    which, why = shots.door()
+    ck("with a Browserless endpoint the door is Browserless (when Playwright is installed) or says what is missing",
+       which == "browserless" or "playwright" in why)
+    config.SHOTS_WS = ""
+
+    print("— 8. the card and the routes —")
+    from fastapi.testclient import TestClient
+    bg: list = []
+    web._run_bg = lambda label, fn, *a, **k: bg.append((label, a, k))
+    c = TestClient(web.app)
+    r = c.post("/admin/email_recreate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": sid, "entity": "portofino"},
+               follow_redirects=False)
+    ck("the button posts and comes back 303 to the Brand tab, the run off the request",
+       r.status_code == 303 and "tab=brand" in r.headers.get("location", "") and bg and bg[0][0] == "email_recreate"
+       and bg[0][1] == (sid,) and bg[0][2]["tenant"] == "baci" and bg[0][2]["entity_key"] == "portofino")
+    r2 = c.get(f"/admin/email_recreation?key=s3cret&id={last['id']}")
+    ck("the kept HTML is served as a page", r2.status_code == 200 and "font-size:112px" in r2.text)
+    card = admin_ui._structures_card("s3cret", "baci")
+    needles = ("ours, for baci", "the reference", "shippable", "brief: a recipe", 'action="/admin/email_recreate"', "Recreate for baci")
+    ck("the card shows the reference beside ours, the status, the brief and the button that posts to /admin/email_recreate",
+       all(n in card for n in needles), "missing: " + ", ".join(n for n in needles if n not in card))
+    card2 = admin_ui._structures_card("s3cret", "ironside")
+    ck("for a brand it cannot be made for, the card says so and what it needs",
+       "cannot be made" in card2 and "needs" in card2)
+
+    print()
+    print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))
+    return 0 if not _fail else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

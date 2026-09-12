@@ -78,7 +78,10 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "tool_calls", "reported_figures", "compliance_events",
               "moments", "keyword_targets", "keyword_readings",
               "artifact_bodies", "artifact_versions", "feedback_items",
-              "digest_acks", "keyword_serps", "answer_engine_checks"}
+              "digest_acks", "keyword_serps", "answer_engine_checks",
+              # a reference recreated for a brand: the model's email and its
+              # rounds — made from what the brand knows, not knowledge itself
+              "email_recreations"}
 # `answer_engine_checks` is OPERATIONS: it records what WE observed about the
 # client's site on a date — which crawlers it let in and who it sent — not
 # anything the brand knows about itself. Clearing it costs a re-run of the

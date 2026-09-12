@@ -63,6 +63,16 @@ PURPOSE_MODEL: dict[str, str] = {
     # classifier cannot do it, but a future model might do it better or for
     # less.
     "creative_review": "CREATIVE_REVIEW_MODEL",
+    # THE MODEL MAKES THE EMAIL (`app/recreate.py`). The three that look —
+    # the reference read into a brief, the brand's pictures cast by looking,
+    # ours judged beside the reference — are vision jobs and sit with the
+    # reviewer. The two that write — the copy to the brief's jobs, the HTML
+    # itself — are the strongest text model, the default.
+    "email_brief": "CREATIVE_REVIEW_MODEL",
+    "email_cast": "CREATIVE_REVIEW_MODEL",
+    "email_judge": "CREATIVE_REVIEW_MODEL",
+    "email_copy": "CLAUDE_MODEL",
+    "email_compose": "CLAUDE_MODEL",
 }
 
 

@@ -1155,6 +1155,51 @@ async def picture_kind(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(back, 303)
 
 
+@app.post("/admin/email_recreate")
+async def email_recreate(request: Request, key: str = Depends(admin_key)):
+    """RECREATE A REFERENCE FOR THIS BRAND — the model makes the email, the
+    code inspects it, a judge compares it to the reference (INITIATIVE-
+    email-recreation.md, Phase 1). Slow (five to seven model calls and a
+    browser), so it runs off the request like a creative set; the card shows
+    the reference beside ours with the findings when it lands."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    from . import recreate
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    structure = str(form.get("structure", ""))
+    entity = str(form.get("entity", ""))
+    if not (tenant and structure):
+        arg = ("err", "a brand and a structure are needed")
+    else:
+        _run_bg("email_recreate", recreate.run, structure, tenant=tenant, entity_key=entity,
+                seed=f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}")
+        arg = ("ok", "recreating — the reference beside ours appears on the structure's card when it lands")
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
+    if form.get("key"):
+        back += f"&key={quote(str(form['key']))}"
+    return RedirectResponse(back, 303)
+
+
+@app.get("/admin/email_recreation")
+def email_recreation(key: str = Depends(admin_key), id: str = ""):
+    """The kept round's HTML of one recreation, as a page — to open, read,
+    or send to a client for a look. Not a preview route for anything else."""
+    from fastapi.responses import HTMLResponse
+
+    from . import recreate
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    html = recreate.html_of(id)
+    if not html:
+        return HTMLResponse("<p>no recreation at that id, or nothing kept</p>", status_code=404)
+    return HTMLResponse(html)
+
+
 @app.get("/admin/segments_build")
 def segments_build(key: str = Depends(admin_key), tenant: str = "",
                    apply: int = 0, ui: int = 0, system: str = ""):
