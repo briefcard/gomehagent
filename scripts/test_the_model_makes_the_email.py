@@ -449,9 +449,9 @@ def main() -> int:
     ck("the recreation of that press is on file with its picture and its review",
        first and first["status"] == rc.SHIPPABLE and first["png"] and first["via"] == "press"
        and first["verdict"].get("same_concept") is True)
-    ck("the design is keyed by its picture, carries the brief, and waits to be chosen",
-       new["source_asset_id"] == shrimp_id and new["brief"]["concept"].startswith("a recipe") and new["review"] == "proposed"
-       and new["name"].startswith("a recipe"))
+    ck("the design is keyed by its picture, carries the brief, and is in the rotation the moment it lands",
+       new["source_asset_id"] == shrimp_id and new["brief"]["concept"].startswith("a recipe") and new["review"] == "approved"
+       and new["name"].startswith("a recipe") and new["fits_formats"] == [])
     ck("its rough order is read off the brief for the rules that bind at use, never drawn from",
        "hero" in new["sequence"] and "cta" in new["sequence"] and "list" in new["sequence"] and new["requires"])
     got2 = rc.swipe("https://reallygoodemails.com/emails/pistol-shrimp", "baci")
@@ -465,7 +465,8 @@ def main() -> int:
        and "grid2" not in es.brief(new))
 
     print("— 10. choose it, or let the draw decide —")
-    ck("a design not yet in the rotation cannot be the standing choice",
+    es.reject(new["id"])
+    ck("a design taken out of the rotation cannot be the standing choice",
        "not in the rotation" in es.designate("baci", new["id"]))
     es.approve(new["id"])
     said = es.designate("baci", new["id"])
@@ -475,6 +476,23 @@ def main() -> int:
        es.pick("baci", designated=sid)["structure"]["id"] == sid)
     ck("back to random draws from the rotation", "random" in es.designate("baci", "")
        and es.pick("baci")["designated"] is False and es.pick("baci")["structure"] is not None)
+    # THE ROTATION BEFORE THE HOUSE: a design excluded only by the send's
+    # intent, form or the list's recent shapes is still used — and said.
+    got_r = es.pick("baci", recent_shapes=[r["sequence"] for r in es.library(review="approved")], fmt="letter")
+    ck("a design excluded only by recent shapes or the send's form is used anyway, and said",
+       got_r["structure"] is not None and "used anyway" in got_r["why"], got_r["why"])
+    # a brief-based design is never refused for a block the brand lacks — the recreation cuts and says
+    with db.SessionLocal() as s:
+        st_new = s.get(db.EmailStructure, new["id"]); st_new.requires = ["proof", "products"]; s.commit()
+    kb.ensure_brand("nothing", "Nothing")
+    ck("a design with a brief is usable for a brand with no claims and no products — the recreation cuts what it lacks",
+       es.usable_for("nothing", next(r for r in es.library() if r["id"] == new["id"]))[0] is True)
+    ck("so the rotation is not empty for that brand either — a design is drawn",
+       es.pick("nothing")["structure"] is not None)
+    with db.SessionLocal() as s:
+        b_ = s.get(db.KbBrand, "nothing"); b_.banned_claims = ["recipe", "ayoh"]; s.commit()
+    ck("only a rotation with nothing this brand may use falls back to the house — and says so",
+       es.pick("nothing")["structure"] is None and "the house way" in es.pick("nothing")["why"], es.pick("nothing")["why"])
 
     print("— 11. the campaigns are built in the design —")
     from app import esp, skill, skill_pack, systems, tenants as _tn
@@ -529,6 +547,11 @@ def main() -> int:
        "Sunday-lunch secret" in (out1.body or out1.text or "") if hasattr(out1, "body") or hasattr(out1, "text") else True)
     ck("the design's recreation is on the Designs page as the latest, marked from a campaign",
        rc.latest(new["id"], "baci")["via"] == "campaign")
+    with db.SessionLocal() as s:
+        art_ = s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out1.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        label = admin_ui.artifact_label(art_)
+    ck("the drafted item names the design it came out in and the recreation's status",
+       meta1.get("design_name", "").startswith("a recipe") and "in a recipe" in label and "shippable" in label, label)
     # a blocking finding holds the unattended ship
     from app import approvals
     with db.SessionLocal() as s:
@@ -555,6 +578,11 @@ def main() -> int:
                    entity_key="portofino", generate_visual="no")
     ck("when the recreation fails the send is built the old way and the notes say so",
        r2.get("status") == "produced" and any("built the old way" in n for n in (r2.get("notes") or [])))
+    with db.SessionLocal() as s:
+        out2 = s.query(db.Output).filter(db.Output.tenant == "baci").order_by(db.Output.created_at.desc()).first()
+        art2 = s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out2.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        label2 = admin_ui.artifact_label(art2)
+    ck("and the item says the design was not recreated — built the old way", "built the old way" in label2, label2)
     answers["email_compose"] = _compose
 
     print("— 12. the Designs room: paste, look, choose —")
@@ -564,12 +592,15 @@ def main() -> int:
        'action="/admin/email_reference"' in room and room.index("/admin/email_reference") < room.index("In the rotation"))
     ck("the room says how campaigns choose — at random from the rotation this brand may use",
        "draws at random from" in room and "Use this for every campaign" in room)
+    room2 = admin_ui._structures_card("s3cret", "baci")
+    ck("a design in the rotation shows the review and the choice: Not this one, or Use this for every campaign",
+       "In the rotation" in room2 and "Not this one" in room2 and "Use this for every campaign" in room2
+       and "the judge: same concept <b>yes</b>" in room2 and "Only with nothing in the rotation is the house design used" in room2)
     with db.SessionLocal() as s:
         st_new = s.get(db.EmailStructure, new["id"]); st_new.review = "proposed"; s.commit()
-    room2 = admin_ui._structures_card("s3cret", "baci")
-    ck("a new design shows the review and the choice: Use it or Not this one",
-       "New — look, then choose (1)" in room2 and "Use it — into the rotation" in room2 and "Not this one" in room2
-       and "the judge: same concept <b>yes</b>" in room2)
+    room2b = admin_ui._structures_card("s3cret", "baci")
+    ck("a design filed by the older reader still waits to be chosen",
+       "Filed by the older reader" in room2b and "Use it — into the rotation" in room2b)
     es.approve(new["id"]); es.designate("baci", new["id"])
     room3 = admin_ui._structures_card("s3cret", "baci")
     ck("the standing choice is said at the top and on its design, with the way back",

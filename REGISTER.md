@@ -196,7 +196,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `admin_ui.py`
 
 - **`approval_title`**(a, arts?) → `str`  ·  from `test_review_tab.py`
-- **`artifact_label`**(art) → `str`  ·  from `test_article_review.py`, `test_artifact_identity.py`
+- **`artifact_label`**(art) → `str`  ·  from `test_article_review.py`, `test_artifact_identity.py`, `test_the_model_makes_the_email.py`
 - **`boards_select`**(tenant, name?) → `str`  ·  from `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`
 - **`creative_bar`**() → `int`  ·  **from nothing**
 - **`entity_select`**(tenant, current?, name?, blank?, multiple?) → `str`  ·  **from nothing**
@@ -649,14 +649,14 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`pick`**(tenant, intent?, fmt?, recent_shapes?, designated?) → `dict`  ·  from `skill_pack.py`, `test_a_structure_is_how_not_what.py`, `test_creative_seam.py`, `test_the_board_reaches_the_generator.py`, `test_the_model_makes_the_email.py`
 - **`profile_of`**(blocks) → `dict`  ·  **from nothing**
 - **`read_swipe`**(asset_id) → `dict`  ·  from `test_a_reference_is_recreated.py`, `test_a_structure_is_how_not_what.py`, `test_the_reader_has_eyes.py`, `web.py`
-- **`reject`**(structure_id, by?) → `str`  ·  from `web.py`
+- **`reject`**(structure_id, by?) → `str`  ·  from `test_the_model_makes_the_email.py`, `web.py`
 - **`requires_of`**(sequence) → `list`  ·  from `test_a_structure_is_how_not_what.py`
 - **`sequence_from_brief`**(brief) → `list`  ·  **from nothing**
 - **`signature`**(sequence) → `str`  ·  from `email_design.py`, `skill.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_review_is_honest.py`, `test_tenant_isolation.py`, `test_the_route_sends_what_the_callee_takes.py`, `web.py`
 - **`standing_designation`**(tenant) → `str`  ·  from `admin_ui.py`, `test_the_model_makes_the_email.py`
 - **`swipe_url`**(raw) → `tuple[str, str]`  ·  from `test_a_structure_is_how_not_what.py`, `web.py`
 - **`swipes`**(tenant?) → `list[dict]`  ·  from `admin_ui.py`, `test_a_structure_is_how_not_what.py`
-- **`usable_for`**(tenant, structure) → `tuple[bool, str]`  ·  from `admin_ui.py`, `test_a_structure_is_how_not_what.py`
+- **`usable_for`**(tenant, structure) → `tuple[bool, str]`  ·  from `admin_ui.py`, `test_a_structure_is_how_not_what.py`, `test_the_model_makes_the_email.py`
 
 ### `emailfmt.py`
 

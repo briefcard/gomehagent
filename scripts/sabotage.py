@@ -38,6 +38,38 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_rotation_comes_before_the_house',
+        "file": 'app/email_structures.py',
+        "find": '    any_usable = [st for st in library(review="approved") if usable_for(tenant, st)[0]]\n',
+        "replace": '    any_usable = []\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "a campaign falls back to the house design while a reference sits in the rotation — the exact outcome the owner reported",
+    },
+    {
+        "name": 'a_reference_lands_in_the_rotation',
+        "file": 'app/email_structures.py',
+        "find": '                design=email_design.house(), review="approved")\n',
+        "replace": '                design=email_design.house(), review="proposed")\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "an added reference waits for a press nobody knows to make, and the campaigns keep coming out in the house design",
+    },
+    {
+        "name": 'a_design_with_a_brief_is_not_refused_for_a_missing_block',
+        "file": 'app/email_structures.py',
+        "find": '    if structure.get("brief"):\n        # A DESIGN WITH A BRIEF is made by the recreation, which casts what\n',
+        "replace": '    if False:\n        # A DESIGN WITH A BRIEF is made by the recreation, which casts what\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "a reference with a quotes section is refused for every brand without an approved claim, and the house design ships instead",
+    },
+    {
+        "name": 'the_item_says_which_design_it_came_out_in',
+        "file": 'app/skill_pack.py',
+        "find": '                      "design_name": str((craft.get("structure") or {}).get("name") or ""),\n',
+        "replace": '                      "design_name": "",\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "the owner cannot tell from the drafted item which design it came out in, or that it fell back to the house",
+    },
+    {
         "name": 'no_token_reading_on_the_console',
         "file": 'app/admin_ui.py',
         "find": '        body = _recreation_block(key, tenant, st, shot)\n',

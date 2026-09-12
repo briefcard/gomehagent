@@ -493,8 +493,8 @@ def main() -> int:
     print("\n— the card shows the library, the verdict per brand, and the controls —")
     from app import admin_ui
     card = admin_ui._structures_card("s3cret", "baci")
-    ck("new designs wait to be looked at and chosen — use it, or not this one",
-       "New — look, then choose" in card and "verdict=approved" in card and "verdict=rejected" in card)
+    ck("designs filed by the older reader wait to be looked at and chosen — use it, or not this one",
+       "Filed by the older reader" in card and "verdict=approved" in card and "verdict=rejected" in card)
     from app import web as _web
     pending = [r for r in es.library() if r["review"] == "proposed"][0]
     said = _web.admin_email_structure(key="s3cret", tenant="baci",

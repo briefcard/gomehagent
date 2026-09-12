@@ -801,12 +801,22 @@ The run's notes say `arranged as the structure's look: …`.
    the judge's line (*same concept · devices in order · all the brand's own ·
    weight and rhythm*), every open finding (*where — what → do*), the rounds,
    the run's story. *open the HTML* serves the kept email.
-3. **Choose** — **Use it — into the rotation** or **Not this one**. In the
-   rotation, **Use this for every campaign** makes it the standing choice
-   (*Back to random* undoes it). The line under the paste form says what the
-   campaigns will do: draw at random from the rotation this brand may use,
-   or build every one on the standing choice. A plan's own `structure` field
-   still outranks both for that send.
+3. **Choose** — a reference is **in the rotation the moment it lands**;
+   **Not this one** takes it out, **Use this for every campaign** makes it the
+   standing choice (*Back to random* undoes it). The line under the paste
+   form says what the campaigns will do: draw at random from the rotation
+   this brand may use, or build every one on the standing choice. A plan's
+   own `structure` field still outranks both for that send. **The rotation
+   comes before the house:** a design excluded only by the send's intent or
+   form, or by the list's recent shapes, is used anyway and the note says so;
+   the house design is built on only when the rotation holds nothing this
+   brand may use (its name trips the brand's ban list). A design with a brief
+   is never refused for a block the brand lacks — the recreation cuts that
+   section and says so.
+
+**Which design an email came out in is on the item** — *in ‹design› —
+shippable*, or *the house design — ‹why›*, or *design ‹name› — built the old
+way* — on the Drafts and Waiting-on-you lists.
 
 **The campaigns are built in the design.** When a campaign's design has a
 brief, the drafter writes the MESSAGE as before (subject, angle, offer, the

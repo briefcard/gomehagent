@@ -343,8 +343,9 @@ def sequence_from_brief(brief: dict) -> list:
 def file_reference(asset_id: str, *, brief: dict, source_url: str = "") -> dict:
     """ONE STRUCTURE PER REFERENCE PICTURE — keyed by the swipe's asset, never
     by a block sequence, because two references can share a rough order and
-    be nothing alike; the brief is the design now. Lands PROPOSED: it is
-    chosen when the owner has seen it recreated and said so."""
+    be nothing alike; the brief is the design now. Lands IN THE ROTATION —
+    the review beside it is there to take it out or to make it the standing
+    choice, never a step before it may be used."""
     name = str(brief.get("concept") or "a reference")[:120]
     with db.SessionLocal() as s:
         a = s.get(db.KbAsset, asset_id)
@@ -356,8 +357,12 @@ def file_reference(asset_id: str, *, brief: dict, source_url: str = "") -> dict:
             row = db.EmailStructure(
                 name=name, source="swipe", source_url=(source_url or (a.source if a else "") or "")[:500],
                 source_asset_id=asset_id, sequence=seq, profile=profile_of([{"type": t} for t in seq]),
-                fits_intents=[], fits_formats=["designed"], requires=requires_of(seq),
-                design=email_design.house(), review="proposed")
+                # fits any intent and any format — the design is the design;
+                # IN THE ROTATION on arrival (owner, 2026-09-12: "let it
+                # randomly be chosen for the email campaigns I generate"),
+                # and "Not this one" takes it out.
+                fits_intents=[], fits_formats=[], requires=requires_of(seq),
+                design=email_design.house(), review="approved")
             s.add(row)
         row.brief = dict(brief)
         if not row.name or (a is not None and row.name == (a.title or "")):
@@ -478,6 +483,13 @@ def usable_for(tenant: str, structure: dict) -> tuple[bool, str]:
             bad = ", ".join(sorted({str(h.get("phrase", "")) for h in hits}))
             return False, (f"its description uses words this brand bars — "
                            f"{bad}")
+    if structure.get("brief"):
+        # A DESIGN WITH A BRIEF is made by the recreation, which casts what
+        # the brand has and CUTS what it lacks, saying so per section — so a
+        # missing claim or product does not refuse the whole design here. The
+        # words gate above still binds. (Owner, 2026-09-12: a campaign fell
+        # back to the house design while a reference sat in the rotation.)
+        return True, ""
     for need in structure.get("requires") or []:
         if need == "products" and not kb.entities(tenant):
             return False, "it needs product blocks and this brand has no products on file"
@@ -569,12 +581,24 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
         return {"structure": st, "designated": True,
                 "why": f"designated: {st['name']}"}
     pool = eligible(tenant, intent=intent, fmt=fmt, recent_shapes=recent_shapes)
-    if not pool:
-        return {"structure": None, "designated": False,
-                "why": "nothing in the library fits this send — designed fresh"}
-    st = random.choice(pool)
-    return {"structure": st, "designated": False,
-            "why": f"drawn from {len(pool)} that fit: {st['name']}"}
+    if pool:
+        st = random.choice(pool)
+        return {"structure": st, "designated": False,
+                "why": f"drawn from {len(pool)} that fit: {st['name']}"}
+    # THE ROTATION BEFORE THE HOUSE (owner, 2026-09-12: a campaign came out
+    # in "the old design which is not in our references"). A design excluded
+    # only because this list saw its shape last time, or because the send's
+    # intent or form is not one it declares, is still the owner's chosen
+    # design — used, and said. The house is built on only when the rotation
+    # holds nothing this brand may use at all.
+    any_usable = [st for st in library(review="approved") if usable_for(tenant, st)[0]]
+    if any_usable:
+        st = random.choice(any_usable)
+        return {"structure": st, "designated": False,
+                "why": (f"none of the {len(any_usable)} in the rotation fits this send's intent, "
+                        f"form or recent shapes — used anyway: {st['name']}")}
+    return {"structure": None, "designated": False,
+            "why": "nothing in the rotation this brand may use — designed fresh, the house way"}
 
 
 def mark_used(structure_id: str) -> None:

@@ -2385,9 +2385,10 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     # SAID EITHER WAY. A designated structure that could not be used is the
     # one case where silence would look like the request was honoured.
     ctx.note("structure: " + chosen["why"])
+    structure_why = chosen["why"]
 
     return {"intent": intent, "format": fmt, "warmth": warmth, "why": why,
-            "funnel": plan, "structure": structure,
+            "funnel": plan, "structure": structure, "structure_why": structure_why,
             "deadline": str(ctx.bundle.get("deadline") or "").strip(),
             # A redraft's marching orders — set by the workroom's
             # Request-changes path, empty on a fresh draft. Rides `craft`
@@ -3958,6 +3959,12 @@ def _run_campaign_email(ctx: Context) -> dict:
                       # findings — read by `ship_unattended`, which holds a
                       # send the judge or the checks still object to.
                       "recreation": state.get("recreation") or {},
+                      # WHICH DESIGN, SAID ON THE ARTIFACT — the owner ran a
+                      # campaign and could not tell why it came out in the
+                      # house design (2026-09-12); the drawn design's name, or
+                      # the house and why, is on the item itself.
+                      "design_name": str((craft.get("structure") or {}).get("name") or ""),
+                      "design_why": str(craft.get("structure_why") or ""),
                       "sendable": not missing, "missing_to_send": missing},
         redraft=_repair if basis == "model" else None)
 

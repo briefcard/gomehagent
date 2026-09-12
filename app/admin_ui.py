@@ -6125,10 +6125,24 @@ def artifact_label(art) -> str:
         seg = str(meta.get("segment")
                   or push.get("segment_key") or "").strip()
         intent = str(meta.get("intent") or "").strip()
+        # THE DESIGN IT CAME OUT IN, on the item: the reference's name and the
+        # recreation's status — or the house, and why (a design that could
+        # not be recreated says so here too).
+        dname = str(meta.get("design_name") or "").strip()
+        rec = meta.get("recreation") or {}
+        if dname and rec.get("status"):
+            design = f"in {dname[:60]} — {rec['status']}"
+        elif dname:
+            design = f"design {dname[:60]} — built the old way"
+        elif "design_why" in meta:
+            design = "the house design — " + str(meta.get("design_why") or "")[:90]
+        else:
+            design = ""
         if subject:
             return _dated(subject,
                           f"to {seg}" if seg else "",
-                          intent.replace("_", " ") if intent else "")
+                          intent.replace("_", " ") if intent else "",
+                          design)
     elif fmt == "cms_article":
         title = str(meta.get("title") or "").strip()
         kw = str(meta.get("keyword") or "").strip()
@@ -6871,6 +6885,8 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
     base = f'/admin/email_structure?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;id={_esc(st["id"])}'
     standing = _es_standing(tenant)
     if st["review"] == "proposed":
+        # a design filed by the older reader, before references landed in
+        # the rotation on arrival
         choose = (f'<a href="{base}&amp;verdict=approved"><button>Use it — into the rotation</button></a> '
                   f'<a href="{base}&amp;verdict=rejected"><button class="sec">Not this one</button></a>')
     elif st["review"] == "approved":
@@ -6880,7 +6896,7 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
         else:
             choose = ('<span class="ok">in the rotation</span> '
                       + _designate_form(key, tenant, st["id"], "Use this for every campaign")
-                      + f' <a href="{base}&amp;verdict=rejected"><button class="sec">Take it out</button></a>')
+                      + f' <a href="{base}&amp;verdict=rejected"><button class="sec">Not this one</button></a>')
     else:
         choose = (f'<span class="mut">not used</span> '
                   f'<a href="{base}&amp;verdict=approved"><button class="sec">Use it after all</button></a>')
@@ -7022,14 +7038,15 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
     draw = (f'<p><b>Your campaigns:</b> every one is built on <b>{_esc(standing_name)}</b> until you say otherwise.</p>'
             if standing_name else
             f'<p><b>Your campaigns:</b> each draws at random from the {len(pool)} design(s) in the rotation '
-            f'this brand may use{"" if pool else " — none yet; use one below"}. A plan can still name one.</p>')
+            f'this brand may use{"" if pool else " — none yet; add a reference above"}. '
+            f'A plan can still name one. Only with nothing in the rotation is the house design used.</p>')
     body = (paste + draw
-            + (f'<h4>New — look, then choose ({len(proposed)})</h4>'
-               + "".join(_one(st, "") for st in proposed) if proposed else "")
             + (f'<h4>In the rotation ({len(approved)})</h4>'
                + "".join(_one(st, "") for st in approved) if approved else
-               '<p class="mut">Nothing in the rotation yet — add a reference above, '
-               'look at the recreation, and use it.</p>'))
+               '<p class="mut">Nothing in the rotation yet — add a reference above; it is in '
+               'the rotation the moment it lands, and <i>Not this one</i> takes it out.</p>')
+            + (f'<h4>Filed by the older reader — look, then choose ({len(proposed)})</h4>'
+               + "".join(_one(st, "") for st in proposed) if proposed else ""))
     return f"""
 <div class="card"><div class="head"><h2>Designs — the references, recreated for {_esc(tenant)}</h2>
   <span class="mut">shared across every account — a design, never a client's words or pictures</span></div>
