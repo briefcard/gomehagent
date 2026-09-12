@@ -483,7 +483,7 @@ def usable_for(tenant: str, structure: dict) -> tuple[bool, str]:
             bad = ", ".join(sorted({str(h.get("phrase", "")) for h in hits}))
             return False, (f"its description uses words this brand bars — "
                            f"{bad}")
-    if structure.get("brief"):
+    if _is_reference(structure):
         # A DESIGN WITH A BRIEF is made by the recreation, which casts what
         # the brand has and CUTS what it lacks, saying so per section — so a
         # missing claim or product does not refuse the whole design here. The
@@ -524,19 +524,31 @@ def can_hero(tenant: str) -> bool:
                for e in kb.entities(tenant))
 
 
+def _is_reference(st: dict) -> bool:
+    """A design made by the recreation — it has a brief, or a reference
+    picture the brief is read from at the first use."""
+    return bool(st.get("brief") or st.get("source_asset_id"))
+
+
 def eligible(tenant: str, *, intent: str = "", fmt: str = "",
-             recent_shapes: list | None = None) -> list[dict]:
+             recent_shapes: list | None = None, recent_designs: list | None = None) -> list[dict]:
     """Every structure this send COULD be built on: approved, usable for this
     brand, fitting the send's intent and form where it declares any, and not
-    one of the last shapes this list received."""
+    one this list received lately — by DESIGN for a reference (a rough block
+    order is shared between designs that are nothing alike), by shape for
+    the older, order-only structures."""
     recent = {signature(s) for s in (recent_shapes or []) if s}
+    recent_ids = {d for d in (recent_designs or []) if d}
     out = []
     for st in library(review="approved"):
         if intent and st["fits_intents"] and intent not in st["fits_intents"]:
             continue
         if fmt and st["fits_formats"] and fmt not in st["fits_formats"]:
             continue
-        if signature(st["sequence"]) in recent:
+        if _is_reference(st):
+            if st["id"] in recent_ids:
+                continue
+        elif signature(st["sequence"]) in recent:
             continue
         ok, _why = usable_for(tenant, st)
         if not ok:
@@ -545,8 +557,31 @@ def eligible(tenant: str, *, intent: str = "", fmt: str = "",
     return out
 
 
+def least_recent(candidates: list[dict], recent_designs: list | None, recent_shapes: list | None) -> list[dict]:
+    """THE CLOCK RESETS (owner, 2026-09-12: *"if there are only five design
+    options and we've sent five different emails, then which is the least
+    recent?"*): among designs this list has all seen, the ones seen longest
+    ago — `recent_*` are newest first, so the largest index is the oldest;
+    a design not in the history at all is older than any that is."""
+    ids = [d or "" for d in (recent_designs or [])]
+    shapes = [signature(s) if s else "" for s in (recent_shapes or [])]
+
+    def age(st: dict) -> int:
+        key = st["id"] if _is_reference(st) else signature(st["sequence"])
+        seq = ids if _is_reference(st) else shapes
+        try:
+            return seq.index(key)
+        except ValueError:
+            return 10 ** 6
+    if not candidates:
+        return []
+    oldest = max(age(st) for st in candidates)
+    return [st for st in candidates if age(st) == oldest]
+
+
 def pick(tenant: str, *, intent: str = "", fmt: str = "",
-         recent_shapes: list | None = None, designated: str = "") -> dict:
+         recent_shapes: list | None = None, designated: str = "",
+         recent_designs: list | None = None) -> dict:
     """The structure to build this send on — RANDOM among the eligible, unless
     one is designated. Owner, 2026-09-11: *"It should be random unless
     designated specifically (optional)."*
@@ -580,23 +615,29 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
                     "why": f"{st['name']!r} is not for this brand — {why}; designed fresh"}
         return {"structure": st, "designated": True,
                 "why": f"designated: {st['name']}"}
-    pool = eligible(tenant, intent=intent, fmt=fmt, recent_shapes=recent_shapes)
+    pool = eligible(tenant, intent=intent, fmt=fmt, recent_shapes=recent_shapes,
+                    recent_designs=recent_designs)
     if pool:
         st = random.choice(pool)
         return {"structure": st, "designated": False,
                 "why": f"drawn from {len(pool)} that fit: {st['name']}"}
     # THE ROTATION BEFORE THE HOUSE (owner, 2026-09-12: a campaign came out
-    # in "the old design which is not in our references"). A design excluded
-    # only because this list saw its shape last time, or because the send's
-    # intent or form is not one it declares, is still the owner's chosen
-    # design — used, and said. The house is built on only when the rotation
-    # holds nothing this brand may use at all.
+    # in "the old design which is not in our references"), AND THE CLOCK
+    # RESETS: when this list has seen every design in the rotation, the one
+    # it saw longest ago is used (a draw among ties), and the note says so.
+    # A design excluded only by the send's intent or form is likewise used.
+    # The house is built on only when the rotation holds nothing this brand
+    # may use at all.
     any_usable = [st for st in library(review="approved") if usable_for(tenant, st)[0]]
     if any_usable:
-        st = random.choice(any_usable)
+        seen = any(recent_designs or []) or any(recent_shapes or [])
+        oldest = least_recent(any_usable, recent_designs, recent_shapes) if seen else any_usable
+        st = random.choice(oldest or any_usable)
         return {"structure": st, "designated": False,
-                "why": (f"none of the {len(any_usable)} in the rotation fits this send's intent, "
-                        f"form or recent shapes — used anyway: {st['name']}")}
+                "why": (f"this list has seen every design in the rotation ({len(any_usable)}) — "
+                        f"the clock resets and the least recent is used: {st['name']}" if seen else
+                        f"none of the {len(any_usable)} in the rotation declares this send's intent "
+                        f"or form — used anyway: {st['name']}")}
     return {"structure": None, "designated": False,
             "why": "nothing in the rotation this brand may use — designed fresh, the house way"}
 

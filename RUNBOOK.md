@@ -806,13 +806,24 @@ The run's notes say `arranged as the structure's look: …`.
    standing choice (*Back to random* undoes it). The line under the paste
    form says what the campaigns will do: draw at random from the rotation
    this brand may use, or build every one on the standing choice. A plan's
-   own `structure` field still outranks both for that send. **The rotation
-   comes before the house:** a design excluded only by the send's intent or
-   form, or by the list's recent shapes, is used anyway and the note says so;
-   the house design is built on only when the rotation holds nothing this
-   brand may use (its name trips the brand's ban list). A design with a brief
-   is never refused for a block the brand lacks — the recreation cuts that
-   section and says so.
+   own `structure` field still outranks both for that send. **A chosen design
+   overrides recency** — designated on the plan or as the standing choice, it
+   is used whatever the list saw lately. **The rotation comes before the
+   house, and the clock resets:** recency is by design (not by a rough block
+   order); when a list has seen every design in the rotation, the one it saw
+   longest ago is used (a draw among ties) and the note says *the clock
+   resets*; a design excluded only by the send's intent or form is used
+   anyway; the house design is built on only when the rotation holds nothing
+   this brand may use (its name trips the brand's ban list). **An approved
+   reference is approved:** a design with a brief — or a reference picture the
+   brief is read from at first use — is never refused for a block the brand
+   lacks; approving one starts its review for the brand on its own; a
+   campaign on a reference whose brief was never read reads it in the run.
+   **Social proof with nothing on file is reworked:** a quotes / testimonials
+   / reviews section becomes, in the same place, a short piece of useful
+   content — a tip or a fact from the brand's own material, no attribution,
+   no quotation marks — and the story says so; a quote with a name under it
+   when nothing is on file is a blocking finding.
 
 **Which design an email came out in is on the item** — *in ‹design› —
 shippable*, or *the house design — ‹why›*, or *design ‹name› — built the old

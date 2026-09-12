@@ -360,6 +360,48 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
 
 
 # ---------------------------------------------------------------------------
+# 3b. THE REWORK — a section the brand has no material for takes another job
+# ---------------------------------------------------------------------------
+
+_PROOF = re.compile(r"\b(quote|quotes|testimonial|testimonials|review|reviews|social proof|customer says|what people say|rating|ratings|stars)\b", re.I)
+
+
+def rework(brief_: dict, kit_: dict) -> tuple[dict, list[str]]:
+    """The brief with its SOCIAL-PROOF sections reworked when the brand has
+    no proof on file — the same block, the same place, a different job.
+    Owner, 2026-09-12: *"The social proof quote can be reworked into a
+    different kind of content when social proof is missing — potentially
+    educational content in the same block that doesn't pretend to be a
+    review anymore."* A proof section with claims on file is left alone;
+    the copy carries the claims verbatim. Returns the reworked brief and a
+    sentence per section reworked."""
+    has_proof = bool(kit_.get("claims"))
+    if has_proof:
+        return brief_, []
+    out = json.loads(json.dumps(brief_))
+    said: list[str] = []
+    for sec in out.get("sections") or []:
+        text = " ".join([str(sec.get("what") or ""), str(sec.get("does") or "")]
+                        + [str(j.get("job") or "") for j in (sec.get("copy") or []) if isinstance(j, dict)])
+        if not _PROOF.search(text):
+            continue
+        n = sec.get("n")
+        sec["reworked_from"] = str(sec.get("what") or "")
+        sec["what"] = ("the same block, set the same way, carrying a short piece of USEFUL content "
+                       "instead of quotes: a tip, a how-to, or a fact the brand can stand behind — "
+                       "no attribution, no quotation marks, nothing presented as what a customer said")
+        sec["does"] = "gives the reader something worth knowing, where the reference gave proof"
+        for j in sec.get("copy") or []:
+            if isinstance(j, dict):
+                j["job"] = ("a short useful note for this block — a tip or a fact from the brand's own "
+                            "material; NOT a quote, not attributed to anyone, no quotation marks"
+                            + (f" (was: {j.get('job')})" if j.get("job") else ""))
+        said.append(f"section {n} reworked: the reference's social proof becomes useful content — "
+                    "no claim or review is on file to quote")
+    return out, said
+
+
+# ---------------------------------------------------------------------------
 # 4. THE COPY — written to the brief's jobs, in the brand's own terms
 # ---------------------------------------------------------------------------
 
@@ -774,6 +816,13 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     m = _FABRICATED.search(text)
     if m:
         add("fabricated", "blocks", "copy", f"asserts something not on file: {m.group(0)!r}")
+    if not kit_.get("claims"):
+        # A QUOTE WITH NOBODY BEHIND IT: quotation marks and an attribution
+        # dash where the brand has no claim or review on file.
+        q = re.search(r"[\"“][^\"”]{20,}[\"”]\s*[—–-]\s*[A-Z][\w.]+", text)
+        if q or "<blockquote" in html.lower():
+            add("fabricated_quote", "blocks", "copy",
+                "a quote presented as someone's words — nothing is on file to quote")
     # 8. links live
     if links:
         import httpx
@@ -921,6 +970,8 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     # the kit and the cast
     say("gathering the brand's material and casting its pictures")
     kit_ = kit(tenant)
+    brief_, reworked = rework(brief_, kit_)
+    story.extend(reworked)
     cast_ = cast(tenant, brief_, kit_, entity_key=entity_key, recent_media=recent_media, seed=seed)
     calls += cast_.get("calls", 0)
     story.extend(cast_.get("said") or [])

@@ -478,9 +478,9 @@ def main() -> int:
        and es.pick("baci")["designated"] is False and es.pick("baci")["structure"] is not None)
     # THE ROTATION BEFORE THE HOUSE: a design excluded only by the send's
     # intent, form or the list's recent shapes is still used — and said.
-    got_r = es.pick("baci", recent_shapes=[r["sequence"] for r in es.library(review="approved")], fmt="letter")
-    ck("a design excluded only by recent shapes or the send's form is used anyway, and said",
-       got_r["structure"] is not None and "used anyway" in got_r["why"], got_r["why"])
+    got_r = es.pick("baci", recent_designs=[r["id"] for r in es.library(review="approved")], fmt="letter")
+    ck("a design excluded only by recency or the send's form is still used, and said",
+       got_r["structure"] is not None and ("the clock resets" in got_r["why"] or "used anyway" in got_r["why"]), got_r["why"])
     # a brief-based design is never refused for a block the brand lacks — the recreation cuts and says
     with db.SessionLocal() as s:
         st_new = s.get(db.EmailStructure, new["id"]); st_new.requires = ["proof", "products"]; s.commit()
@@ -493,6 +493,53 @@ def main() -> int:
         b_ = s.get(db.KbBrand, "nothing"); b_.banned_claims = ["recipe", "ayoh"]; s.commit()
     ck("only a rotation with nothing this brand may use falls back to the house — and says so",
        es.pick("nothing")["structure"] is None and "the house way" in es.pick("nothing")["why"], es.pick("nothing")["why"])
+
+    print("— 10b. designation over recency; the clock resets; approved is approved —")
+    ck("a designated design is used whatever this list saw lately",
+       es.pick("baci", designated=new["id"], recent_designs=[new["id"], new["id"]])["structure"]["id"] == new["id"])
+    es.designate("baci", new["id"])
+    ck("so is the standing choice",
+       es.pick("baci", recent_designs=[new["id"]])["structure"]["id"] == new["id"] and es.pick("baci", recent_designs=[new["id"]])["designated"])
+    es.designate("baci", "")
+    # three designs in the rotation, all seen: the least recent wins
+    kb.add_asset("agency", "https://images.example.test/third.png", rights=kb.REFERENCE, kind=es.SWIPE_KIND,
+                 subject="scene", title="third", source="https://reallygoodemails.com/emails/third", origin="swipe")
+    third_id = next(a.id for a in kb.assets("agency", publishable_only=False) if "third" in (a.url or ""))
+    third = es.file_reference(third_id, brief={**BRIEF, "concept": "a third design"})
+    es.approve(sid)
+    others = [r["id"] for r in es.library(review="approved") if r["id"] not in (third["id"], new["id"], sid)]
+    seen_all = [third["id"], new["id"]] + others + [sid]     # newest first: third just went out, sid longest ago
+    got_lr = es.pick("baci", recent_designs=seen_all)
+    ck("when this list has seen every design, the clock resets and the least recent is used — and said",
+       got_lr["structure"]["id"] == sid and "the clock resets" in got_lr["why"], got_lr["why"])
+    ck("a design the list has never seen is older than any it has",
+       [x["id"] for x in es.least_recent([{"id": "a", "brief": {"concept": "a"}}, {"id": "b", "brief": {"concept": "b"}}], ["b"], [])] == ["a"]
+       and es.pick("baci", recent_designs=[i for i in seen_all if i != new["id"]])["structure"]["id"] == new["id"])
+    ck("a reference approved before its brief was read counts as a reference — usable and recreated at first use",
+       es._is_reference({"brief": {}, "source_asset_id": "x"}) and es.usable_for("nothing", {"name": "plain", "profile": {},
+                                                                                                "requires": ["proof"], "source_asset_id": "x", "brief": {}})[0])
+    es.reject(third["id"])
+
+    print("— 10c. social proof with nothing on file becomes useful content, never a fake review —")
+    kit_np = {**kit, "claims": []}
+    rb, said_rw = rc.rework(BRIEF, kit_np)
+    ck("a brief with no proof section is left alone", rb == BRIEF and said_rw == [])
+    BRIEF_PROOF = {**BRIEF, "sections": BRIEF["sections"] + [
+        {"n": 6, "what": "social proof: three customer quotes with names", "does": "reassures",
+         "asset": {"kind": "none", "shows": ""},
+         "copy": [{"id": "s6_quotes", "job": "three short customer quotes with first names", "limit": "3 quotes"}], "look": "cards"}]}
+    rb2, said2 = rc.rework(BRIEF_PROOF, kit_np)
+    sec6 = next(x for x in rb2["sections"] if x["n"] == 6)
+    ck("with nothing on file the quotes block is reworked into useful content in the same place — and said",
+       "USEFUL content" in sec6["what"] and "NOT a quote" in sec6["copy"][0]["job"] and sec6["reworked_from"].startswith("social proof")
+       and said2 and "reworked" in said2[0] and next(x for x in rb2["sections"] if x["n"] == 3)["what"] == BRIEF["sections"][2]["what"])
+    kit_p = {**kit, "claims": [{"id": "c1", "claim": "Designed in Milan."}]}
+    rb3, said3 = rc.rework(BRIEF_PROOF, kit_p)
+    ck("with claims on file the quotes block stays — the copy carries them verbatim", said3 == [] and rb3 == BRIEF_PROOF)
+    fake = email_html(extra='<p style="color:#ffffff">“The best plates we have ever owned, hands down.” — Maria K.</p>')
+    ck("a quote presented as someone's words with nothing on file blocks",
+       any(f["code"] == "fabricated_quote" for f in rc.check(fake, kit_np, BRIEF, COPY))
+       and not any(f["code"] == "fabricated_quote" for f in rc.check(fake, kit_p, BRIEF, COPY)))
 
     print("— 11. the campaigns are built in the design —")
     from app import esp, skill, skill_pack, systems, tenants as _tn
@@ -584,6 +631,16 @@ def main() -> int:
         label2 = admin_ui.artifact_label(art2)
     ck("and the item says the design was not recreated — built the old way", "built the old way" in label2, label2)
     answers["email_compose"] = _compose
+    # a reference approved before its brief was read: the campaign reads it and builds in it
+    with db.SessionLocal() as s:
+        st_2 = s.get(db.EmailStructure, sid2); st_2.review = "approved"; st_2.brief = {}; s.commit()
+    r3 = skill.run("campaign_email", "baci", segment="reorder_due", structure=sid2, intent="education",
+                   entity_key="portofino", generate_visual="no")
+    ck("a reference with no brief on file yet is read inside the campaign run and built in — approved is approved",
+       r3.get("status") == "produced" and any(n.startswith("built in the design") for n in (r3.get("notes") or []))
+       and (next(x for x in es.library() if x["id"] == sid2)["brief"] or {}).get("concept"),
+       str([n[:300] for n in (r3.get("notes") or []) if "design" in n]))
+    answers["email_compose"] = _compose
 
     print("— 12. the Designs room: paste, look, choose —")
     es.designate("baci", "")
@@ -616,6 +673,16 @@ def main() -> int:
                follow_redirects=False)
     ck("a category page is refused with the reason, on the same room",
        r.status_code == 303 and "err=" in r.headers.get("location", "") and "wf=designs" in r.headers.get("location", ""))
+    bg.clear()
+    with db.SessionLocal() as s:
+        for r_ in s.query(db.Recreation).filter(db.Recreation.structure_id == sid).all():
+            s.delete(r_)
+        st_s = s.get(db.EmailStructure, sid); st_s.review = "proposed"; s.commit()
+    r = c.get(f"/admin/email_structure?key=s3cret&tenant=baci&id={sid}&verdict=approved", follow_redirects=False)
+    ck("approving a reference is the whole step — its review for this brand starts on its own",
+       r.status_code == 303 and "wf=designs" in r.headers.get("location", "") and bg and bg[-1][0] == "email_recreate"
+       and bg[-1][1] == (sid,) and bg[-1][2]["tenant"] == "baci"
+       and next(x for x in es.library() if x["id"] == sid)["review"] == "approved")
     r = c.post("/admin/email_design_designate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"]},
                follow_redirects=False)
     ck("the standing choice posts and comes back to the room", r.status_code == 303 and "wf=designs" in r.headers.get("location", "")

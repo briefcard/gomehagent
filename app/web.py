@@ -1494,6 +1494,13 @@ def admin_email_structure(key: str = Depends(admin_key), tenant: str = "",
     if verdict not in ("approved", "rejected"):
         return {"error": "verdict must be approved or rejected"}
     said = (_es.approve(id) if verdict == "approved" else _es.reject(id))
+    if verdict == "approved" and tenant:
+        # AN APPROVED REFERENCE IS APPROVED (owner, 2026-09-12): nothing else
+        # stands between it and the campaigns — and its review for this brand
+        # is made now if none exists, so the room shows it.
+        from . import recreate
+        if recreate.latest(id, tenant) is None:
+            _run_bg("email_recreate", recreate.run, id, tenant=tenant)
     if not ui:
         return {"id": id, "said": said}
     return RedirectResponse(_designs_back(tenant, key, ("ok", said)), 303)

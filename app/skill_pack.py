@@ -2240,6 +2240,15 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
                             db.Output.status.notin_(ledger.NOT_A_SEND))
                     .order_by(db.Output.created_at.desc())
                     .limit(CRAFT_HISTORY).all())
+            # WHICH DESIGN each send was built in, off its artifact — the
+            # recency the picker keys on (a rough block order is shared
+            # between designs that are nothing alike).
+            designs = {}
+            for art in (s.query(db.ArtifactBody)
+                        .filter(db.ArtifactBody.output_id.in_([r.id for r in rows] or [""])).all()):
+                did = str((art.meta or {}).get("structure_id") or "")
+                if did:
+                    designs[art.output_id] = did
             for r in rows:
                 lines = [ln.strip() for ln in (r.body or "").split("\n")
                          if ln.strip()]
@@ -2251,7 +2260,8 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
                             "opening": next((ln for ln in lines[3:]), ""),
                             # The pictures this list saw — so the next send
                             # on the same layout and entity leads with another.
-                            "media": list(r.media_ids or [])})
+                            "media": list(r.media_ids or []),
+                            "design": designs.get(r.id, "")})
     except Exception:                                            # noqa: BLE001
         # History is an improvement, never a precondition: a brand-new
         # account, or a column an old database has not grown yet, must still
@@ -2378,6 +2388,7 @@ def _campaign_craft(ctx, seg: dict) -> dict:
     from . import email_structures as _es
     chosen = _es.pick(ctx.tenant, intent=intent, fmt=fmt,
                       recent_shapes=[h.get("shape") for h in hist if h.get("shape")],
+                      recent_designs=[h.get("design") for h in hist],
                       designated=str(ctx.params.get("structure") or "").strip())
     structure = chosen["structure"]
     if structure:
@@ -3655,7 +3666,10 @@ def _run_campaign_email(ctx: Context) -> dict:
         # checked below. A design with no brief (the house, a hand-filed
         # order) is built the old way, and a recreation that fails falls
         # back to it AND SAYS SO.
-        if _structure.get("brief"):
+        if _structure.get("brief") or _structure.get("source_asset_id"):
+            # a reference approved before its brief was read is read now,
+            # inside the run — an approved reference is approved (owner,
+            # 2026-09-12), with no other step between it and the campaign
             _key = (str(_structure.get("id")), _hash_message(c))
             _rec = state.setdefault("recreations", {}).get(_key)
             if _rec is None:
