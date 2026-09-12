@@ -251,8 +251,7 @@ def main() -> int:
     ck("every layout the schema names has a painter; a layout nothing draws falls to stack",
        set(ed.SECTION["layout"].values) == set(er.LAYOUTS)
        and er.LAYOUTS.get("hologram", er._lay_stack) is er._lay_stack)
-    centred, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline"]},
-                                            {"kind": "intro", "slots": ["headline", "body"]},
+    centred, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["image:1", "headline", "body"]},
                                             {"kind": "closing", "align": "center", "slots": ["body", "cta"]}]})
     c_blocks = [{"type": "hero", "image": CDN + "h.jpg"}, {"type": "heading", "text": "H", "level": 1},
                 {"type": "text", "html": "<p>Words.</p>"}, {"type": "divider"},

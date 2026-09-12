@@ -2147,7 +2147,7 @@ CAMPAIGN_FORMATS: dict[str, dict] = {
                  "Keep live text under every image: a reader with images off "
                  "must still get the message.",
         "blocks": ("hero", "heading", "text", "quote", "stat", "list",
-                   "banner", "products", "cta", "divider", "ps")},
+                   "banner", "products", "cta", "divider", "ps", "image")},
 }
 
 
@@ -2980,6 +2980,12 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
             out.append({"type": "signature", "text": b.get("text", ""),
                         "name": who,
                         "role": str((signatory or {}).get("role") or "")})
+        elif kind == "image":
+            # A PICTURE SLOT, placement only — like the hero, the model may
+            # say WHERE a picture goes and never WHICH: any address it wrote
+            # is discarded here and the filler places the brand's own
+            # picture (or drops the placeholder and says so).
+            out.append({"type": "image", "alt": str(b.get("alt") or "")[:160]})
         elif kind in ("heading", "text", "list", "banner", "divider", "ps"):
             out.append(b)
         else:

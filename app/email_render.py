@@ -679,6 +679,8 @@ def _signature(b: dict, t: dict) -> str:
     is brand data, never invented here.
     """
     c = t["colors"]
+    if not str(b.get("name") or "").strip():
+        return ""        # nobody on file signs nothing — no "Warmly," over a blank
     role = (f'<div style="font-family:{t["font"]["body"]};font-size:14px;'
             f'color:{c["muted"]};padding-top:2px">{_esc(b.get("role", ""))}'
             f'</div>') if b.get("role") else ""
@@ -724,9 +726,12 @@ def _image(b: dict, t: dict) -> str:
         # photograph. The mark is the theme's, sized to the band.
         if not t.get("logo_url"):
             return ""
-        return (f'<tr><td align="center" style="padding:{pv + 6}px {ph}px">'
+        # On a band the mark is the whole section — the reference's big
+        # wordmark — so it stands taller than the header's.
+        hgt = 64 if t.get("layout") == "band" else 36
+        return (f'<tr><td align="center" style="padding:{pv + 10}px {ph}px">'
                 f'<img src="{_esc(t["logo_url"])}" alt="{_esc(t.get("logo_alt") or t.get("name") or "")}" '
-                f'height="36" style="display:inline-block;height:36px;border:0"></td></tr>')
+                f'height="{hgt}" style="display:inline-block;height:{hgt}px;max-width:70%;border:0"></td></tr>')
     if not b.get("image"):
         return ""
     treat = t.get("image") or "contained"
@@ -1031,6 +1036,22 @@ _BLOCK_KIND = {"hero": "hero", "products": "products", "quote": "proof", "stat":
 _HERO_WORDS = ("body", "list", "cta", "quote", "stat", "caption")
 
 
+def _runs(blocks: list) -> list[list]:
+    """The blocks split on dividers — each run one section of a design with
+    a concrete order. The divider stays with the run it closes."""
+    runs: list[list] = [[]]
+    for b in blocks or []:
+        runs[-1].append(b)
+        if (b or {}).get("type") == "divider":
+            runs.append([])
+    # A run that is only its divider is an EMPTY section (a picture-only
+    # section a drafter wrote nothing for) and keeps its place; only the
+    # trailing nothing after the last divider is dropped.
+    if runs and not runs[-1]:
+        runs.pop()
+    return runs
+
+
 def group_sections(blocks: list, design: dict | None = None) -> list[dict]:
     """The drafter's flat blocks as sections: a hero, a product block, a
     proof block, a banner, a signature and a P.S. are each their own; a
@@ -1039,12 +1060,31 @@ def group_sections(blocks: list, design: dict | None = None) -> list[dict]:
     and an ask join the run they are in; an ask with no run is the closing.
     Returns `[{kind, blocks}]`.
 
-    With a `design` whose first hero section carries WORD slots — body, a
-    list, an ask — the hero is a card in the reference (its headline and
-    copy live with its picture), so the run that follows the hero block is
-    absorbed into the hero section; without this the design's next words
-    section landed on the hero's own copy and everything after was off by
-    one (the pistol-shrimp review, 2026-09-11)."""
+    WITH A DESIGN THAT HAS AN ORDER, AND BLOCKS WRITTEN WITH DIVIDERS
+    BETWEEN SECTIONS — what the brief asks the drafter for and what the
+    preview writes — the grouping is exact: the i-th run of blocks IS the
+    i-th section of the design, whatever it holds, and carries `index`.
+    The heuristics below (a heading starts a run, a picture joins the words
+    after it) exist for blocks with no dividers — the house design and the
+    old drafter — and could not reconstruct a reference's sections from
+    per-slot blocks: the hero's words became a section of their own, the
+    next section's picture landed on them, and every ground after was off
+    (the Ayoh preview, 2026-09-12)."""
+    secs = (design or {}).get("sections") or []
+    if secs and any((b or {}).get("type") == "divider" for b in (blocks or [])):
+        out = []
+        for i, run in enumerate(_runs(blocks)):
+            if i < len(secs):
+                out.append({"kind": str(secs[i].get("kind") or "editorial"), "blocks": run, "index": i})
+            else:
+                # A run past the design's last section: painted by what it
+                # holds, on the defaults of that kind, and reported.
+                kind = ("products" if any(b.get("type") == "products" for b in run)
+                        else "proof" if any(b.get("type") in ("quote", "stat") for b in run)
+                        else "closing" if all(b.get("type") in ("cta", "button", "divider", "ps", "signature") for b in run)
+                        else "editorial")
+                out.append({"kind": kind, "blocks": run, "index": None, "extra": True})
+        return out
     out: list[dict] = []
     cur: dict | None = None
     runs = 0
@@ -1138,7 +1178,8 @@ def _holds(sec: dict, blocks: list | None) -> bool:
     return True
 
 
-def _spec_for(design: dict, kind: str, taken: dict, blocks: list | None = None) -> dict:
+def _spec_for(design: dict, kind: str, taken: dict, blocks: list | None = None,
+              index: int | None = None) -> dict:
     """How a section of this kind is painted: the design's per-kind default,
     overlaid by the next unconsumed section of that FAMILY in the design's
     concrete order that can HOLD what the group carries — a reference's
@@ -1146,8 +1187,12 @@ def _spec_for(design: dict, kind: str, taken: dict, blocks: list | None = None) 
     second run of words the second run of words; a closing of words skips a
     closing that is only a picture (a logo band) for the one with a body."""
     spec = dict((design.get("defaults") or {}).get(kind) or {})
+    secs = design.get("sections") or []
+    if index is not None and 0 <= index < len(secs):
+        spec.update({k: v for k, v in secs[index].items() if k != "kind"})
+        return spec
     fam = _family(kind)
-    order = [s for s in (design.get("sections") or []) if _family(str(s.get("kind"))) == fam]
+    order = [s for s in secs if _family(str(s.get("kind"))) == fam]
     i = taken.get(fam, 0)
     j = next((k for k in range(i, len(order)) if _holds(order[k], blocks)), None)
     if j is not None:
@@ -1210,6 +1255,7 @@ def _context(base: dict, design: dict, spec: dict, role: str, kind: str) -> dict
     t["image"] = spec.get("image", "contained")
     t["aspect"] = spec.get("aspect", "")
     t["list_style"] = spec.get("list", "check")
+    t["layout"] = spec.get("layout", "stack")
     t["split"] = "right" if spec.get("layout") == "split-right" else "left"
     layout = spec.get("layout", "stack")
     hero = ("overlay" if layout == "overlay" or spec.get("text_on_image") else
@@ -1298,6 +1344,34 @@ def _lay_columns(blocks: list, t: dict, spec: dict) -> str:
     return _paint(heads, t) + cols + _paint(others, t)
 
 
+def _lay_grid(blocks: list, t: dict, spec: dict) -> str:
+    """Two or three across for what is not a product grid: two quotes side
+    by side, three stats in a row, pictures in a row. The section's headings
+    and its ask stay full width above and below; everything between is
+    dealt into the columns in order. Products keep their own grid painter."""
+    cols_n = 3 if spec.get("layout") == "grid3" else 2
+    heads = [b for b in blocks if b.get("type") == "heading"]
+    tail = [b for b in blocks if b.get("type") in ("cta", "button", "ps", "signature", "divider")]
+    cells = [b for b in blocks if b.get("type") not in ("heading", "cta", "button", "ps", "signature", "divider")]
+    if any(b.get("type") == "products" for b in cells) or len(cells) < 2:
+        return _paint(blocks, t)
+    ph = _PAD[t["look"]["density"]][1]
+    gap = 12
+    cw = (t["width"] - 2 * ph - gap * (cols_n - 1)) // cols_n
+    inner = {**t, "width": cw}
+    spacer = f'<td width="{gap}" style="font-size:0;line-height:0">&nbsp;</td>'
+    rows = ""
+    for i in range(0, len(cells), cols_n):
+        row = cells[i:i + cols_n]
+        rows += "<tr>" + spacer.join(
+            f'<td width="{cw}" valign="top"><table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0">{_paint([b], {**inner, "look": {**inner["look"], "density": "tight"}})}'
+            f'</table></td>' for b in row) + "</tr>"
+    grid = (f'<tr><td style="padding:0 {ph}px"><table role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" border="0">{rows}</table></td></tr>')
+    return _paint(heads, t) + grid + _paint(tail, t)
+
+
 def _lay_split(blocks: list, t: dict, spec: dict) -> str:
     """A picture beside the words: the section's picture block in one cell,
     everything else in the other, the side the layout says. A hero section
@@ -1361,7 +1435,7 @@ def _lay_band(blocks: list, t: dict, spec: dict) -> str:
 
 
 LAYOUTS = {"stack": _lay_stack, "split-left": _lay_split, "split-right": _lay_split,
-           "grid2": _lay_stack, "grid3": _lay_stack, "collage": _lay_collage,
+           "grid2": _lay_grid, "grid3": _lay_grid, "collage": _lay_collage,
            "overlay": _lay_stack, "columns": _lay_columns, "band": _lay_band,
            "letter": _lay_stack}
 #: Vocabulary values that are not drawn by this renderer YET, and which
@@ -1430,10 +1504,18 @@ def render_design(design: dict, theme: dict, blocks: list, *, preheader: str = "
     if cards:
         rows.append(f'<tr><td style="background:{card["page"]};font-size:0;line-height:0;height:20px">&nbsp;</td></tr>')
     for sec in group_sections(blocks, design):
-        spec = _spec_for(design, sec["kind"], taken, sec["blocks"])
+        spec = _spec_for(design, sec["kind"], taken, sec["blocks"], sec.get("index"))
         role = spec.get("bg", "surface")
         t = _context(base, design, spec, role, sec["kind"])
         blocks_s = ordered(sec["blocks"], spec.get("slots"))
+        if all(b.get("type") == "divider" for b in blocks_s):
+            continue                      # an empty run keeps its place and paints nothing
+        # AN ASK STANDING ALONE IN ITS SECTION IS A BAR — the reference's
+        # banner ("get $3 off · build your bundle"), not a button floating
+        # in white space.
+        if blocks_s and all(b.get("type") in ("cta", "button", "divider") for b in blocks_s) \
+                and any(b.get("type") in ("cta", "button") for b in blocks_s):
+            t = {**t, "cta": {**t["cta"], "style": "full", "align": "center"}}
         if cards and blocks_s and blocks_s[-1].get("type") == "divider":
             # In a stack of cards the gap IS the divider; a boundary divider
             # at the end of a card would paint a rule under nothing.

@@ -375,8 +375,26 @@ def main() -> int:
     ck("the preview chooses with the entity, leads its palette with the photograph, and says its steps",
        last["entity"] == "aqua-bowl" and last["why"][0].startswith("scope: ") and "aqua-bowl" in last["why"][0]
        and last["keyed"].get("page") and last["palette"]["page"] in (sand["light"], window["light"]))
-    ck("the preview's blocks are the design's own shape — a divider between sections, a hero, the products",
-       html_p.count("Aqua Bowl") >= 1 and "own photograph" in html_p and html_p.count("height:1px") >= 2)
+    ck("the preview's blocks are the design's own shape, in the brand's own words — the product's name, its "
+       "cards, an ask that names it; no placeholder copy",
+       html_p.count("Aqua Bowl") >= 2 and "Shop Aqua Bowl" in html_p
+       and not any(x in html_p for x in ("The ask", "A sample headline", "sender on file", "A caption under")))
+    # A dropped second ask keeps its divider so the sections after it keep
+    # their place; nobody on file signs nothing.
+    shifty, _ = ed.normalize({"sections": [{"kind": "products", "slots": ["products:2", "cta"]},
+                                           {"kind": "offer", "layout": "band", "bg": "dark", "slots": ["cta"]},
+                                           {"kind": "closing", "layout": "band", "bg": "dark", "image_kind": "mark", "slots": ["image:1"]},
+                                           {"kind": "closing", "align": "center", "slots": ["signature", "cta"]}]})
+    sb = [{"type": "products", "items": [{"name": "A", "url": "#", "image": CDN + "bowl.jpg"}]}, {"type": "cta", "label": "Go", "url": "#"},
+          {"type": "divider"}, {"type": "cta", "label": "Go", "url": "#"}, {"type": "divider"},
+          {"type": "image"}, {"type": "divider"}, {"type": "signature", "text": "Warmly,", "name": ""}, {"type": "cta", "label": "Go", "url": "#"}]
+    sf, sr = ed.fill("baci", shifty, sb)
+    ck("a dropped second ask keeps its divider — the mark band still gets the mark and the closing its ask",
+       len(er._runs(sf)) == 4 and any(b.get("mark") for b in er._runs(sf)[2]) and er._runs(sf)[3][-1]["type"] == "cta",
+       str([[b["type"] for b in r] for r in er._runs(sf)]))
+    theme_b = brand_theme.live_theme("baci")
+    sh = er.render_design(shifty, theme_b, sf)
+    ck("nobody on file signs nothing — no 'Warmly,' over a blank", "Warmly" not in sh)
     card = admin_ui._structures_card("s3cret", "baci", preview_entity="aqua-bowl")
     ck("the card carries the entity picker, the pictures chosen, the steps and the palette's derivation",
        'name="preview_entity"' in card and "The pictures it chose" in card and "scope: " in card

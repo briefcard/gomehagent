@@ -292,7 +292,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`approve`**(tenant, edits?) → `dict`  ·  from `test_a_brand_fills_the_roles.py`, `test_brand_theme.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_claim_tagging.py`, `test_coherence.py`, `test_craft.py`, `test_every_system_draws.py`, `test_objection_scope.py`, `test_offers.py`, `test_propose.py`, `test_provenance.py`, `test_strategy_ledger.py`, `test_the_pictures_lead_the_palette.py`, `test_the_reader_has_eyes.py`, `test_workroom_email.py`, `web.py`
 - **`derive`**(tenant) → `dict`  ·  from `test_a_brand_fills_the_roles.py`, `test_brand_theme.py`, `web.py`
-- **`live_theme`**(tenant) → `dict`  ·  from `admin_ui.py`, `email_design.py`, `links.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_brand_theme.py`
+- **`live_theme`**(tenant) → `dict`  ·  from `admin_ui.py`, `email_design.py`, `links.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_brand_theme.py`, `test_the_pictures_lead_the_palette.py`
 - **`proposed`**(tenant) → `dict`  ·  from `admin_ui.py`, `email_design.py`, `test_brand_theme.py`
 - **`status`**(tenant) → `dict`  ·  from `admin_ui.py`, `portal_ui.py`, `test_a_brand_fills_the_roles.py`, `test_brand_theme.py`, `test_canva_falls_back_to_the_agency.py`, `test_connect_ui.py`, `test_credentials.py`, `test_oauth.py`, `test_review_ui.py`, `test_shopify_oauth.py`, `web.py`
 
@@ -587,7 +587,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`complete`**(design) → `bool`  ·  from `test_a_design_is_words_the_renderer_can_draw.py`, `test_content_fits_the_design.py`
 - **`contact_sheet`**(blob, max_edge) → `bytes`  ·  from `test_the_reader_has_eyes.py`
 - **`fields`**() → `list[tuple[str, str, tuple, object, str]]`  ·  from `gen_email_design_doc.py`, `test_a_design_is_executed.py`, `test_a_design_is_words_the_renderer_can_draw.py`
-- **`fill`**(tenant, design, blocks, note?, entities?, recent_media?, seed?, hero_basis?) → `tuple[list, dict]`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `web.py`
+- **`fill`**(tenant, design, blocks, note?, entities?, recent_media?, seed?, hero_basis?) → `tuple[list, dict]`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `test_the_pictures_lead_the_palette.py`, `web.py`
 - **`house`**(look?, width?) → `dict`  ·  from `email_structures.py`, `skill_pack.py`, `test_a_design_is_executed.py`, `test_a_design_is_words_the_renderer_can_draw.py`, `test_a_structure_is_how_not_what.py`, `test_content_fits_the_design.py`, `test_the_reader_has_eyes.py`
 - **`look_of_design`**(design) → `dict`  ·  from `test_the_reader_has_eyes.py`
 - **`mobile_url`**(url) → `str`  ·  from `test_the_reader_has_eyes.py`
@@ -604,6 +604,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`read_picture`**(asset, vision?, fetch?) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`
 - **`read_pictures`**(tenant, limit?, vision?) → `dict`  ·  from `test_the_pictures_lead_the_palette.py`, `web.py`
 - **`readers`**() → `dict[tuple[str, str], str]`  ·  from `test_a_design_is_executed.py`
+- **`sample_copy`**(tenant, entity_key?) → `dict`  ·  **from nothing**
 - **`sequence_for_library`**(design) → `list[str]`  ·  from `test_the_reader_has_eyes.py`
 - **`sequence_of`**(design) → `list[str]`  ·  from `test_a_design_is_words_the_renderer_can_draw.py`
 - **`set_picture_kind`**(asset_id, kind, by?) → `str`  ·  from `test_the_pictures_lead_the_palette.py`, `web.py`
@@ -626,7 +627,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`missing_to_send`**(theme) → `list[str]`  ·  from `brand_theme.py`, `skill_pack.py`, `test_brand_theme.py`, `test_email_render.py`
 - **`ordered`**(blocks, slots) → `list`  ·  from `test_content_fits_the_design.py`
 - **`render`**(theme, blocks, preheader?, webview?, look?) → `str`  ·  from `admin_ui.py`, `skill_pack.py`, `test_a_design_is_words_the_renderer_can_draw.py`, `test_a_reference_is_recreated.py`, `test_a_structure_is_how_not_what.py`, `test_brand_theme.py`, `test_craft.py`, `test_email_render.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
-- **`render_design`**(design, theme, blocks, preheader?, webview?) → `str`  ·  from `email_design.py`, `skill_pack.py`, `test_a_design_is_executed.py`, `test_content_fits_the_design.py`
+- **`render_design`**(design, theme, blocks, preheader?, webview?) → `str`  ·  from `email_design.py`, `skill_pack.py`, `test_a_design_is_executed.py`, `test_content_fits_the_design.py`, `test_the_pictures_lead_the_palette.py`
 
 ### `email_structures.py`
 
@@ -865,7 +866,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`board`**(tenant, boards_?) → `dict`  ·  from `admin_ui.py`, `creative.py`, `test_a_structure_is_how_not_what.py`, `test_article_review.py`, `test_keyword_attention.py`, `test_keywords.py`, `test_mute_replacement.py`, `test_plan_lifecycle.py`, `test_systems.py`, `test_the_board_reaches_the_generator.py`, `web.py`
 - **`board_direction`**(tenant, boards_?) → `str`  ·  from `creative.py`
 - **`boards`**(tenant) → `dict`  ·  from `admin_ui.py`, `creative.py`, `pinterest.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `web.py`
-- **`brand`**(tenant) → `db.KbBrand | None`  ·  from `admin_ui.py`, `brand_theme.py`, `creative.py`, `dossier.py`, `extract.py`, `hosting.py`, `kb_seed.py`, `resolve.py`, `skill_pack.py`, `tenants.py`, `test_assets.py`, `test_brand_theme.py`, `test_intake.py`, `test_kb.py`, `test_kb_ui.py`, `test_reset.py`, `test_schema_tab.py`, `test_shopify_compliance.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `test_voice.py`, `validator.py`, `voice.py`, `web.py`
+- **`brand`**(tenant) → `db.KbBrand | None`  ·  from `admin_ui.py`, `brand_theme.py`, `creative.py`, `dossier.py`, `email_design.py`, `extract.py`, `hosting.py`, `kb_seed.py`, `resolve.py`, `skill_pack.py`, `tenants.py`, `test_assets.py`, `test_brand_theme.py`, `test_intake.py`, `test_kb.py`, `test_kb_ui.py`, `test_reset.py`, `test_schema_tab.py`, `test_shopify_compliance.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `test_voice.py`, `validator.py`, `voice.py`, `web.py`
 - **`brand_level_duplicates`**(tenant) → `list[tuple[str, str]]`  ·  from `admin_ui.py`, `test_review_ui.py`, `web.py`
 - **`calibration`**(tenant) → `dict`  ·  from `calibrate_classify.py`, `test_embed.py`, `web.py`
 - **`channel_for`**(system_key) → `str`  ·  from `resolve.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`
@@ -874,7 +875,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`claim_expiry`**(row) → `dict`  ·  from `admin_ui.py`, `test_claim_expiry.py`, `test_kb_ui.py`
 - **`claim_inventory`**(tenant) → `dict[str, list[db.KbClaim]]`  ·  from `admin_ui.py`, `client_report.py`, `dossier.py`, `ledger.py`, `resolve.py`, `seed_demo.py`, `test_claim_expiry.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `test_skill.py`, `validator.py`, `web.py`
 - **`claim_to_context`**(claim_id) → `str`  ·  from `test_context.py`, `web.py`
-- **`claims`**(tenant, situations?, limit?, entity_key?, entity_keys?) → `list[db.KbClaim]`  ·  from `admin_ui.py`, `assurance.py`, `brief.py`, `claim_trace.py`, `correlate.py`, `email_harvest.py`, `email_structures.py`, `funnel.py`, `harvest.py`, `kb_seed.py`, `keywords.py`, `planner.py`, `resolve.py`, `responder.py`, `skill_pack.py`, `systems.py`, `test_a_claim_knows_what_it_is_about.py`, `test_assurance_tab.py`, `test_bridge.py`, `test_campaign_variety.py`, `test_claim_expiry.py`, `test_claim_fix.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_classify.py`, `test_coherence.py`, `test_console_controls.py`, `test_context.py`, `test_email_harvest.py`, `test_embed.py`, `test_entity_scope.py`, `test_gbp_post.py`, `test_harvest.py`, `test_intake.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_migration.py`, `test_propose.py`, `test_provenance.py`, `test_reset.py`, `test_scope.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_sources.py`, `test_the_brands_own_pictures_are_the_references.py`, `web.py`
+- **`claims`**(tenant, situations?, limit?, entity_key?, entity_keys?) → `list[db.KbClaim]`  ·  from `admin_ui.py`, `assurance.py`, `brief.py`, `claim_trace.py`, `correlate.py`, `email_design.py`, `email_harvest.py`, `email_structures.py`, `funnel.py`, `harvest.py`, `kb_seed.py`, `keywords.py`, `planner.py`, `resolve.py`, `responder.py`, `skill_pack.py`, `systems.py`, `test_a_claim_knows_what_it_is_about.py`, `test_assurance_tab.py`, `test_bridge.py`, `test_campaign_variety.py`, `test_claim_expiry.py`, `test_claim_fix.py`, `test_claim_rotation.py`, `test_claim_tagging.py`, `test_claim_trace.py`, `test_classify.py`, `test_coherence.py`, `test_console_controls.py`, `test_context.py`, `test_email_harvest.py`, `test_embed.py`, `test_entity_scope.py`, `test_gbp_post.py`, `test_harvest.py`, `test_intake.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_migration.py`, `test_propose.py`, `test_provenance.py`, `test_reset.py`, `test_scope.py`, `test_shopify_compliance.py`, `test_skill.py`, `test_sources.py`, `test_the_brands_own_pictures_are_the_references.py`, `web.py`
 - **`completeness`**(tenant) → `dict`  ·  from `admin_ui.py`, `brief.py`, `brief_demo.py`, `kb_seed.py`, `ops_commands.py`, `resolve.py`, `sources.py`, `systems.py`, `test_intake.py`, `test_kb.py`, `test_provenance.py`, `web.py`
 - **`contested_positioning`**(tenant) → `list`  ·  from `resolve.py`, `test_positioning.py`
 - **`context_to_claim`**(context_id) → `str`  ·  from `web.py`
@@ -1235,7 +1236,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `palette.py`
 
 - **`contrast`**(a, b) → `float`  ·  from `test_a_brand_fills_the_roles.py`, `test_the_pictures_lead_the_palette.py`
-- **`fill`**(given, colors) → `tuple[dict, dict]`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `web.py`
+- **`fill`**(given, colors) → `tuple[dict, dict]`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `test_the_pictures_lead_the_palette.py`, `web.py`
 - **`findings`**(palette) → `list[str]`  ·  from `brand_theme.py`, `test_a_brand_fills_the_roles.py`, `test_the_pictures_lead_the_palette.py`
 - **`fit`**(sig, mood) → `float`  ·  from `email_design.py`
 - **`from_photos`**(sigs, brand, mood?) → `tuple[dict, dict]`  ·  from `email_design.py`, `test_the_pictures_lead_the_palette.py`
@@ -1486,7 +1487,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `sources.py`
 
 - **`available`**(tenant) → `list[dict]`  ·  from `email_harvest.py`, `harvest.py`, `test_embed.py`, `test_extract.py`, `test_sources.py`, `web.py`
-- **`fill`**(tenant, apply?, budget?, only?) → `dict`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `web.py`
+- **`fill`**(tenant, apply?, budget?, only?) → `dict`  ·  from `brand_theme.py`, `email_render.py`, `skill_pack.py`, `test_a_brand_fills_the_roles.py`, `test_content_fits_the_design.py`, `test_sources.py`, `test_the_pictures_lead_the_palette.py`, `web.py`
 
 ### `strategy.py`
 

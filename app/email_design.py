@@ -1268,19 +1268,47 @@ def read(asset_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # The preview: a design executed with THIS brand's material (Phase 4)
 # ---------------------------------------------------------------------------
-_SAMPLE = {"kicker": ("heading", {"text": "A section kicker", "level": 2}),
-           "headline": ("heading", {"text": "A sample headline, set the design's way", "level": 1}),
-           "sub": ("text", {"html": "<p>A sub-line under it — sample copy; the drafter writes the real words.</p>"}),
-           "body": ("text", {"html": "<p>Sample body copy, so the measure, the leading and the ink on this "
-                                     "ground can be judged. The real email carries this brand's own words "
-                                     "and claims.</p>"}),
-           "list": ("list", {"items": ["The first point", "The second point", "The third point"]}),
-           "cta": ("cta", {"label": "The ask", "url": "#"}),
-           "quote": ("quote", {"text": "A pull-quote stands in for an approved claim.", "attribution": "sample"}),
-           "stat": ("stat", {"value": "3×", "caption": "a figure from an approved claim"}),
-           "caption": ("text", {"html": "<p>A caption under the picture.</p>"}),
-           "signature": ("signature", {"text": "Warmly,", "name": "The sender on file"}),
-           "ps": ("ps", {"text": "A postscript, set apart above the footer."})}
+def sample_copy(tenant: str, entity_key: str = "") -> dict:
+    """THE BRAND'S OWN MATERIAL for a preview — never placeholder junk. A
+    product's name is the headline, its description the body, its price on
+    the card, "Shop <name>" the ask; an approved claim is the quote; a
+    figure in a claim is the stat; the brand's positioning is the sub-line;
+    the sender on file signs, or nobody does. What the brand lacks, the
+    preview leaves out rather than fills with words nobody wrote. No model
+    is called: every word here is already in the knowledge base."""
+    from . import kb
+    rows = kb.entities(tenant)[:24]
+    rows = sorted(rows, key=lambda e: 0 if entity_key and getattr(e, "key", "") == entity_key else 1)
+    ent = rows[0] if rows else None
+    b = kb.brand(tenant)
+    name = (getattr(ent, "name", "") or "").strip()
+    desc = re.sub(r"<[^>]+>", " ", str(getattr(ent, "description", "") or "")).strip()
+    desc = re.sub(r"\s+", " ", desc)
+    first = desc.split(". ")[0].strip().rstrip(".") if desc else ""
+    claims = kb.claims(tenant, entity_keys=[entity_key] if entity_key else None) or kb.claims(tenant)
+    claim = str(getattr(claims[0], "claim", "") or "").strip() if claims else ""
+    stat = next((str(getattr(c, "claim", "")) for c in claims if re.search(r"\d", str(getattr(c, "claim", "")))), "")
+    num = re.search(r"[\d][\d,.]*\s?(?:%|×|x|\+)?", stat) if stat else None
+    pos = str(getattr(b, "positioning", "") or "").strip()
+    sender = ""
+    try:
+        from . import brand_theme
+        sender = str(((brand_theme.live_theme(tenant) or {}).get("sender") or {}).get("name") or "").strip()
+    except Exception:                                            # noqa: BLE001
+        sender = ""
+    out = {
+        "kicker": (getattr(ent, "type", "") or "new").replace("_", " ").title() if ent else "",
+        "headline": name or (getattr(b, "display_name", "") if b else ""),
+        "sub": pos or first,
+        "body": desc or pos,
+        "list": [x.strip() for x in re.split(r"[.;]\s", desc) if 12 < len(x.strip()) < 90][:4] if desc else [],
+        "cta": f"Shop {name}" if name else "Shop now",
+        "quote": claim, "quote_by": "an approved claim",
+        "stat": num.group(0).strip() if num else "", "stat_caption": stat if num else "",
+        "caption": name,
+        "signature": sender, "ps": (f"{name} ships this week." if name else ""),
+    }
+    return out
 
 
 def preview_blocks(tenant: str, design: dict | None = None, entity_key: str = "") -> list[dict]:
@@ -1312,6 +1340,11 @@ def preview_blocks(tenant: str, design: dict | None = None, entity_key: str = ""
         # kicker is a level-2 heading, a headline a level-1, a sub a line of
         # text, and a hero section's picture is a hero block with no words
         # of its own (the picture comes from `fill`, chosen by its colours).
+        # THE WORDS ARE THE BRAND'S OWN (`sample_copy`): a slot the brand has
+        # no material for is left empty, never filled with a placeholder.
+        sc = sample_copy(tenant, entity_key)
+        cta_url = next((e["url"] for e in ents if e.get("url") and e["url"] != "#"), "#")
+        asked = False
         for i, sec in enumerate(secs):
             if i:
                 blocks.append({"type": "divider"})
@@ -1320,45 +1353,73 @@ def preview_blocks(tenant: str, design: dict | None = None, entity_key: str = ""
                 name, _, n = slot.partition(":")
                 if name == "image":
                     if sec.get("kind") == "hero" and not hero_placed:
-                        blocks.append({"type": "hero", "alt": "the brand's own photograph"})
+                        blocks.append({"type": "hero", "alt": sc["caption"] or "the brand's own photograph"})
                         hero_placed = True
-                    continue                         # other pictures: `fill` adds them
+                    else:
+                        # A placeholder per picture wanted — so a section that
+                        # is only pictures is still a run, and the filler
+                        # places the brand's picture into it.
+                        for _ in range(int(n or 1)):
+                            blocks.append({"type": "image", "alt": sc["caption"] or ""})
+                    continue
                 if name == "products":
                     if ents:
                         blocks.append({"type": "products", "items": ents[:int(n or 3)]})
                     continue
-                if name in _SAMPLE:
-                    t, body = _SAMPLE[name]
-                    blocks.append({"type": t, **body})
-            if sec.get("kind") == "hero" and not hero_placed:
-                blocks.insert(len(blocks) - len(sec.get("slots") or []),
-                              {"type": "hero", "alt": "the brand's own photograph"})
+                if name == "kicker" and sc["kicker"]:
+                    blocks.append({"type": "heading", "text": sc["kicker"], "level": 2})
+                elif name == "headline" and sc["headline"]:
+                    blocks.append({"type": "heading", "text": sc["headline"], "level": 1})
+                elif name == "sub" and sc["sub"]:
+                    blocks.append({"type": "text", "html": f"<p>{sc['sub']}</p>"})
+                elif name == "body" and sc["body"]:
+                    blocks.append({"type": "text", "html": f"<p>{sc['body']}</p>"})
+                elif name == "list" and sc["list"]:
+                    blocks.append({"type": "list", "items": sc["list"]})
+                elif name == "cta":
+                    # ONE ASK, repeated only where the design asks again with
+                    # something around it: a section that is only an ask is
+                    # the reference's banner, and the renderer paints it as a
+                    # bar; two asks with nothing between them are one.
+                    blocks.append({"type": "cta", "label": sc["cta"], "url": cta_url})
+                    asked = True
+                elif name == "quote" and sc["quote"]:
+                    blocks.append({"type": "quote", "text": sc["quote"], "attribution": sc["quote_by"]})
+                elif name == "stat" and sc["stat"]:
+                    blocks.append({"type": "stat", "value": sc["stat"], "caption": sc["stat_caption"]})
+                elif name == "caption" and sc["caption"]:
+                    blocks.append({"type": "text", "html": f"<p>{sc['caption']}</p>", "caption": True})
+                elif name == "signature" and sc["signature"]:
+                    blocks.append({"type": "signature", "text": "Warmly,", "name": sc["signature"]})
+                elif name == "ps" and sc["ps"]:
+                    blocks.append({"type": "ps", "text": sc["ps"]})
         return blocks
+    # A design with no order — the house — previews with the same real
+    # material in the house's own shape.
+    sc = sample_copy(tenant, entity_key)
     hero = ""
     got = assets_for(tenant, "lifestyle")
     if got["ok"]:
         hero = got["assets"][0].url or ""
     elif ents:
         hero = ents[0]["image"]
+    cta_url = next((e["url"] for e in ents if e.get("url") and e["url"] != "#"), "#")
     if hero:
-        blocks.append({"type": "hero", "image": hero, "alt": "the brand's own photograph",
-                       "headline": "A sample headline, set the design's way",
-                       "sub": "Sample copy — the drafter writes the real words."})
-    else:
-        blocks.append({"type": "heading", "text": "A sample headline, set the design's way", "level": 1})
-    blocks += [{"type": "heading", "text": "A section kicker"},
-               {"type": "text", "html": "<p>Sample body copy, so the measure, the leading and the "
-                                        "ink on this ground can be judged. The real email carries "
-                                        "this brand's own words and claims.</p>"},
-               {"type": "text", "html": "<p>A second paragraph, for the layouts that deal words "
-                                        "into two columns.</p>"}]
+        blocks.append({"type": "hero", "image": hero, "alt": sc["caption"] or "the brand's own photograph",
+                       "headline": sc["headline"], "sub": sc["sub"]})
+    elif sc["headline"]:
+        blocks.append({"type": "heading", "text": sc["headline"], "level": 1})
+    if sc["kicker"]:
+        blocks.append({"type": "heading", "text": sc["kicker"]})
+    if sc["body"]:
+        blocks.append({"type": "text", "html": f"<p>{sc['body']}</p>"})
     if ents:
         blocks.append({"type": "products", "items": ents})
-    blocks += [{"type": "quote", "text": "A pull-quote stands in for an approved claim.",
-                "attribution": "sample"},
-               {"type": "divider"},
-               {"type": "cta", "label": "The ask", "url": "#"},
-               {"type": "ps", "text": "A postscript, set apart above the footer."}]
+    if sc["quote"]:
+        blocks.append({"type": "quote", "text": sc["quote"], "attribution": sc["quote_by"]})
+    blocks += [{"type": "divider"}, {"type": "cta", "label": sc["cta"], "url": cta_url}]
+    if sc["ps"]:
+        blocks.append({"type": "ps", "text": sc["ps"]})
     return blocks
 
 
@@ -1438,7 +1499,8 @@ def brief(design: dict) -> str:
                 slots.append(f"products ×{n or 1} — each name stands on its own"
                              + (", one line each" if s.get("layout") in ("grid2", "grid3") else ""))
             elif name == "image":
-                slots.append(f"picture ×{n or 1} — from the brand's own library; you write its alt line only")
+                slots.append(f"picture ×{n or 1} — write an image block with no address for each "
+                             f"(the brand's own picture is placed there; you write its alt line only)")
             else:
                 slots.append(f"{name} ({_SLOT_WORDS.get(name, 'brief')})")
         where = f"{s.get('layout', 'stack')} on the {s.get('bg', 'surface')}"
@@ -1488,13 +1550,23 @@ def fill(tenant: str, design: dict, blocks: list, note=None, *,
     for g in grouped:
         kind = g["kind"]
         fam = email_render._family(kind)
-        order = [(k, s_) for k, s_ in enumerate(secs) if email_render._family(str(s_.get("kind"))) == fam]
-        i = taken.get(fam, 0)
-        j = next((k for k in range(i, len(order)) if email_render._holds(order[k][1], g["blocks"])), None)
-        spec_i, spec = order[j] if j is not None else (None, None)
-        taken[fam] = (j + 1) if j is not None else i
-        if j is not None:
-            consumed.add((fam, j))
+        if g.get("index") is not None:
+            # Exact: the i-th run is the i-th section.
+            spec_i, spec = g["index"], secs[g["index"]]
+            consumed.add((fam, sum(1 for k, s_ in enumerate(secs) if k < spec_i
+                                   and email_render._family(str(s_.get("kind"))) == fam)))
+            consumed.add(("idx", spec_i))
+        elif g.get("extra"):
+            spec_i, spec = None, None
+            report["notes"].append(f"a run of blocks past the design's last section was painted as a {kind}")
+        else:
+            order = [(k, s_) for k, s_ in enumerate(secs) if email_render._family(str(s_.get("kind"))) == fam]
+            i = taken.get(fam, 0)
+            j = next((k for k in range(i, len(order)) if email_render._holds(order[k][1], g["blocks"])), None)
+            spec_i, spec = order[j] if j is not None else (None, None)
+            taken[fam] = (j + 1) if j is not None else i
+            if j is not None:
+                consumed.add((fam, j))
         blocks_g = list(g["blocks"])
         wants = 0
         for slot in (spec or {}).get("slots") or []:
@@ -1512,7 +1584,13 @@ def fill(tenant: str, design: dict, blocks: list, note=None, *,
                 report["notes"].append("the ask repeated where the design asks again — the same link")
         picks = chosen["by_section"].get(spec_i) if spec_i is not None else None
         if picks == "mark":
-            blocks_g.insert(0, {"type": "image", "mark": True, "alt": "the brand's mark"})
+            holders = [k for k, b in enumerate(blocks_g) if b.get("type") == "image" and not b.get("image")]
+            if holders:
+                blocks_g[holders[0]] = {"type": "image", "mark": True, "alt": "the brand's mark"}
+                for k in holders[1:][::-1]:
+                    del blocks_g[k]
+            else:
+                blocks_g.insert(0, {"type": "image", "mark": True, "alt": "the brand's mark"})
             report["notes"].append(f"the {kind} section carries the brand's mark, as the design has it")
         elif spec and wants:
             picks = list(picks or [])
@@ -1548,8 +1626,14 @@ def fill(tenant: str, design: dict, blocks: list, note=None, *,
                     report["missed"].append(f"the hero's picture — {fix}")
             else:
                 n_got = 0
+                holders = [k for k, b in enumerate(blocks_g) if b.get("type") == "image" and not b.get("image") and not b.get("mark")]
                 for a in picks[:wants]:
-                    blocks_g.insert(n_got, {"type": "image", "image": a.url, "alt": a.title or ""})
+                    filled_block = {"type": "image", "image": a.url, "alt": a.title or ""}
+                    if holders:
+                        k = holders.pop(0)
+                        blocks_g[k] = {**blocks_g[k], **filled_block, "alt": blocks_g[k].get("alt") or filled_block["alt"]}
+                    else:
+                        blocks_g.insert(n_got, filled_block)
                     n_got += 1
                     sig = ((a.reading or {}).get("colours") or {})
                     if sig:
@@ -1562,18 +1646,48 @@ def fill(tenant: str, design: dict, blocks: list, note=None, *,
                                 and "nothing on file fits" in w), "nothing on file fits its kind")
                     report["missed"].append(
                         f"{wants - n_got} of {wants} picture(s) for the {kind} section — {fix}")
+        # A PLACEHOLDER NOTHING FILLED IS DROPPED — said above, where the
+        # slot was missed; an empty image block paints nothing but is not
+        # left to confuse the next reader of the blocks.
+        if any(b.get("type") == "image" and not b.get("image") and not b.get("mark") for b in blocks_g):
+            blocks_g = [b for b in blocks_g if not (b.get("type") == "image" and not b.get("image") and not b.get("mark"))]
+        # A CAPTION WITHOUT ITS PICTURE IS NOTHING. A section that wanted a
+        # picture and got none loses its caption too, and says so.
+        if spec and wants and not any(b.get("type") in ("hero", "image") and (b.get("image") or b.get("mark"))
+                                      for b in blocks_g):
+            caps = [b for b in blocks_g if b.get("caption")]
+            if caps:
+                blocks_g = [b for b in blocks_g if not b.get("caption")]
+                report["notes"].append(f"the {kind} section's caption was dropped with the picture it was under")
+        # TWO ASKS WITH NOTHING BETWEEN THEM ARE ONE. A section that is only
+        # an ask (the reference's banner) directly after a section that
+        # ended on the ask paints as one bar, not a stack of buttons.
+        only_ask = [b for b in blocks_g if b.get("type") not in ("divider",)]
+        if only_ask and all(b.get("type") in ("cta", "button") for b in only_ask) and out \
+                and any(b.get("type") in ("cta", "button") for b in out[-3:]):
+            report["notes"].append("a second ask with nothing between it and the first was dropped — one bar, not a stack")
+            # The run's divider stays, so the sections after it keep their
+            # place — an empty run paints nothing but still counts.
+            if any(b.get("type") == "divider" for b in blocks_g):
+                out.append({"type": "divider"})
+            continue
         out += blocks_g
     # A design section the drafter's blocks never reached — a closing band,
     # a second run of words — is said, so the difference between the
     # reference and the email is on the run and not a surprise on the card.
-    fams: dict = {}
-    for s_ in secs:
-        fam = email_render._family(str(s_.get("kind")))
-        fams.setdefault(fam, []).append(s_)
-    for fam, lst in fams.items():
-        for k, s_ in enumerate(lst):
-            if (fam, k) not in consumed:
+    if any(g.get("index") is not None for g in grouped):
+        for k, s_ in enumerate(secs):
+            if ("idx", k) not in consumed:
                 report["unreached"].append(f"{s_.get('kind')} ({s_.get('layout')} on the {s_.get('bg')})")
+    else:
+        fams: dict = {}
+        for s_ in secs:
+            fam = email_render._family(str(s_.get("kind")))
+            fams.setdefault(fam, []).append(s_)
+        for fam, lst in fams.items():
+            for k, s_ in enumerate(lst):
+                if (fam, k) not in consumed:
+                    report["unreached"].append(f"{s_.get('kind')} ({s_.get('layout')} on the {s_.get('bg')})")
     if report["unreached"] and note:
         note("design sections the draft did not reach: " + "; ".join(report["unreached"])
              + " — the drafter wrote fewer sections than the design has")

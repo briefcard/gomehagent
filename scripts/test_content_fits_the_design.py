@@ -66,7 +66,7 @@ def main() -> int:
        and "kicker (at most 3 words)" in b and "body (40–90 words)" in b
        and "APPROVED claim, verbatim, or leave the slot" in b and "products ×3" in b)
     ck("a picture slot is the brand's to fill — the drafter writes its alt line only",
-       "picture ×1 — from the brand's own library; you write its alt line only" in b)
+       "picture ×1 — write an image block with no address" in b and "you write its alt line only" in b)
     ck("the ask's style is said in plain words, one destination; the brief never carries copy",
        "an outlined button" in b and "ONE destination" in b and not re.search(r'"[A-Z][^"]{10,}"', b))
     twice, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline", "cta"]},
@@ -169,12 +169,23 @@ def main() -> int:
        h.index("Head") < h.index("h_") and h.index("Body words") > h.index("h_") and "Which?" in h)
     notes2 = []
     _, rep3 = ed.fill("baci", card, story, note=notes2.append)
-    with_div = story + [{"type": "divider"}, {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
+    # The drafter's form: a divider between EVERY section.
+    with_div = story[:6] + [{"type": "divider"}] + story[6:] + [{"type": "divider"},
+               {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
     kinds_div = [g["kind"] for g in er.group_sections(with_div, card)]
-    ck("a divider is a section boundary — the closing after it is its own run, not the tail of the one above, "
-       "and a last run of words with no heading IS the closing",
-       kinds_div == ["hero", "intro", "closing"] and er.group_sections(with_div, card)[1]["blocks"][-1]["type"] == "divider",
-       str(kinds_div))
+    # WITH DIVIDERS THE GROUPING IS EXACT (the Ayoh preview, 2026-09-12): the
+    # i-th run IS the i-th section of the design, so `card`'s three sections
+    # take the three runs in order — hero, feature, closing — whatever the
+    # heuristics would have called them.
+    ck("with dividers, the i-th run is the i-th section — hero, feature, closing — each run carrying its index",
+       kinds_div == ["hero", "feature", "closing"] and [g["index"] for g in er.group_sections(with_div, card)] == [0, 1, 2]
+       and er.group_sections(with_div, card)[1]["blocks"][-1]["type"] == "divider", str(kinds_div))
+    ck("without dividers the heuristics still group — a heading starts a run and the hero card absorbs its words",
+       [g["kind"] for g in er.group_sections(story, card)] == ["hero", "intro"])
+    ck("a run past the design's last section is painted by what it holds and marked extra",
+       er.group_sections(with_div + [{"type": "divider"}, {"type": "quote", "text": "q"}], card)[-1].get("extra") is True)
+    ck("an empty run — two dividers with nothing between — keeps its place as an empty section",
+       [len(r) for r in er._runs([{"type": "text", "html": "a"}, {"type": "divider"}, {"type": "divider"}, {"type": "text", "html": "b"}])] == [2, 1, 1])
     both, _ = ed.normalize({"sections": [{"kind": "closing", "layout": "band", "bg": "dark", "slots": ["image:1"]},
                                          {"kind": "closing", "bg": "surface", "slots": ["body", "cta"]}]})
     taken = {}
@@ -199,8 +210,21 @@ def main() -> int:
                    {"type": "text", "html": "<p>W.</p>"}, {"type": "divider"},
                    {"type": "text", "html": "<p>Forwarded?</p>"}, {"type": "cta", "label": "Go", "url": "#"}]
     _, rep4 = ed.fill("baci", both, skip_blocks)
-    ck("a section the match stepped past is reported as unreached, not only the ones after the cursor",
-       rep4["unreached"] == ["closing (band on the dark)"], str(rep4["unreached"]))
+    ck("with dividers, every run takes its section in order — two runs, two sections, nothing unreached",
+       rep4["unreached"] == [], str(rep4["unreached"]))
+    three, _ = ed.normalize({"sections": [{"kind": "hero", "slots": ["headline"]}, {"kind": "feature", "slots": ["body"]},
+                                          {"kind": "closing", "layout": "band", "bg": "dark", "slots": ["cta"]}]})
+    _, rep5 = ed.fill("baci", three, skip_blocks)
+    ck("and a section the drafter wrote no run for is reported as unreached — the third here",
+       rep5["unreached"] == ["closing (band on the dark)"], str(rep5["unreached"]))
+    # An image placeholder is filled in place; a leftover one is dropped, never painted.
+    ph_design, _ = ed.normalize({"sections": [{"kind": "feature", "image_kind": "texture", "slots": ["image:1", "body"]},
+                                              {"kind": "closing", "slots": ["cta"]}]})
+    ph_blocks = [{"type": "image", "alt": "a texture"}, {"type": "text", "html": "<p>W.</p>"}, {"type": "divider"},
+                 {"type": "cta", "label": "Go", "url": "#"}]
+    ph_filled, ph_rep = ed.fill("baci", ph_design, ph_blocks)
+    ck("a placeholder no picture fills is dropped and the miss said",
+       not any(b.get("type") == "image" for b in ph_filled) and ph_rep["missed"])
 
     print("\n— 3. the painter —")
     html = er.render_design(d, THEME, filled)

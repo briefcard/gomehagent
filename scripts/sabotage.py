@@ -9537,6 +9537,46 @@ SABOTAGES = [
         "suites": ['test_the_pictures_lead_the_palette.py'],
         "why": "a photograph of any size is pulled into memory whole for a sixteen-colour thumbnail read — one large master per press is enough to restart the instance",
     },
+    {
+        "name": 'with_dividers_the_ith_run_is_the_ith_section',
+        "file": 'app/email_render.py',
+        "find": "    if secs and any((b or {}).get(\"type\") == \"divider\" for b in (blocks or [])):\n",
+        "replace": "    if False:  # SABOTAGE\n",
+        "suites": ['test_content_fits_the_design.py'],
+        "why": "the sections are guessed again from headings and pictures, the hero's words become a section of their own, the next section's picture lands on them and every ground after is off — the Ayoh preview the owner called embarrassing, back",
+    },
+    {
+        "name": 'a_preview_carries_the_brands_own_words',
+        "file": 'app/email_design.py',
+        "find": "        \"cta\": f\"Shop {name}\" if name else \"Shop now\",\n",
+        "replace": "        \"cta\": \"The ask\",  # SABOTAGE\n",
+        "suites": ['test_the_pictures_lead_the_palette.py'],
+        "why": "the card previews a design with placeholder copy — 'THE ASK' four times over — and the owner judges the design on words nobody wrote",
+    },
+    {
+        "name": 'a_placeholder_nothing_fills_is_dropped',
+        "file": 'app/email_design.py',
+        "find": "        if any(b.get(\"type\") == \"image\" and not b.get(\"image\") and not b.get(\"mark\") for b in blocks_g):\n",
+        "replace": "        if False:  # SABOTAGE\n",
+        "suites": ['test_content_fits_the_design.py'],
+        "why": "an image block with no picture rides into the email and the ESP, an empty tag the next reader of the blocks takes for a filled one",
+    },
+    {
+        "name": 'a_dropped_run_keeps_its_divider',
+        "file": 'app/email_design.py',
+        "find": "            if any(b.get(\"type\") == \"divider\" for b in blocks_g):\n                out.append({\"type\": \"divider\"})\n",
+        "replace": "            pass  # SABOTAGE\n",
+        "suites": ['test_the_pictures_lead_the_palette.py'],
+        "why": "when a second bare ask is dropped the sections after it shift up one — the mark band paints the closing's ask and the closing paints the footer's ground",
+    },
+    {
+        "name": 'nobody_on_file_signs_nothing',
+        "file": 'app/email_render.py',
+        "find": "    if not str(b.get(\"name\") or \"\").strip():\n        return \"\"        # nobody on file signs nothing",
+        "replace": "    if False:\n        return \"\"        # SABOTAGE",
+        "suites": ['test_the_pictures_lead_the_palette.py'],
+        "why": "'Warmly,' over a blank line, signed by nobody, in a customer's inbox",
+    },
 ]
 
 
