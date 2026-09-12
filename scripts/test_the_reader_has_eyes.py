@@ -259,21 +259,17 @@ def main() -> int:
         ck("fits and the source ride along",
            set(row["fits_intents"]) == {"story", "offer"} and row["fits_formats"] == ["designed"]
            and row["source_url"].endswith("/emails/an-editorial-gallery-email"))
-        card = admin_ui._structures_card("s3cret", "baci")
-        ck("the card says the design, the read, the drops, the sections and offers Read its design",
-           "design: dark key" in card and f"read in {info['calls']} calls from {info['strips']} strip(s)" in card
-           and "with the phone render" in card and "critiqued once" in card
-           and "the vocabulary does not hold" in card and "products · grid2 on tint" in card
-           and "Read its design" in card)
-        # The token preview is gone from the card (2026-09-12): the recreation
-        # leads, the token reading folds away under it, and the reference is
-        # shown beside OURS — `test_the_model_makes_the_email` covers that.
+        # The token reading is stored on the row (until Phase 5 deletes the
+        # reader) but is GONE from the console (2026-09-12): the room shows
+        # the recreation and the choice — `test_the_model_makes_the_email`.
+        ck("the reading's facts are on the row, not on the console",
+           row["profile"]["read"]["calls"] == info["calls"] and row["design"].get("sections"))
         from app import brand_theme as _bt
         _bt.approve("baci", {"footer.address": "1 Main St", "palette.dark": "#0b1a0f"})
         card2 = admin_ui._structures_card("s3cret", "baci")
-        ck("the recreation leads the card and the token reading folds away under it",
-           "not yet recreated for this brand" in card2 and "the token reading" in card2
-           and "srcdoc=" not in card2 and card2.index("Recreate again") < card2.index("Read its design"))
+        ck("the room carries the recreation and no token reading",
+           "not yet recreated for this brand" in card2 and "the token reading" not in card2
+           and "srcdoc=" not in card2 and "Read its design" not in card2 and "design: dark key" not in card2)
         # The quoted-copy gate, exercised: a critique with no notes leaves
         # pass A's, which quote three words of the email — dropped, and said.
         C_no_notes = {k: v for k, v in C.items() if k != "notes"}

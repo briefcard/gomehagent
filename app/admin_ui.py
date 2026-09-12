@@ -6980,62 +6980,12 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
                  f'alt="{_esc(shot["title"])}" style="max-width:120px;max-height:160px;'
                  f'float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
                  if shot and shot.get("image") else "")
-        look = st["profile"].get("look") or {}
-        # THE LOOK IS SAID — it is what the LIVE renderer draws until Phase 4
-        # of INITIATIVE-email-design.md executes the design itself.
-        look_html = (f'<br><span class="mut">arranged: '
-                     + _esc(", ".join(f"{k} {str(v).lower()}" for k, v in look.items()))
-                     + "</span>" if look else "")
-        # THE DESIGN IS SAID: what the reader saw, in how many calls, from
-        # how many strips, and everything it volunteered that the vocabulary
-        # does not hold. A structure never read (its design is the house)
-        # says so, and a swiped one can be read — on the same screenshot.
-        from . import email_design as _ed
-        rd = st["profile"].get("read") or {}
-        dsg = st.get("design") or {}
-        read_ctl = (f' · <a href="/admin/email_swipe?key={_esc(key)}&amp;tenant='
-                    f'{_esc(tenant)}&amp;asset={_esc(shot["asset_id"])}">'
-                    f'<button class="sec">Read its design</button></a>' if shot else "")
-        if rd:
-            secs = "".join(
-                f'<li>{_esc(x["kind"])} · {_esc(x["layout"])} on {_esc(x["bg"])}'
-                + (f' · {_esc(", ".join(x.get("slots") or []))}' if x.get("slots") else "")
-                + "</li>" for x in (dsg.get("sections") or []))
-            drops = rd.get("dropped") or []
-            design_html = (
-                f'<br><span class="mut">design: {_esc(_ed.summary(dsg))} · read in '
-                f'{rd.get("calls", "?")} calls from {rd.get("strips", "?")} strip(s) on the '
-                f'{_esc(rd.get("tier", "?"))} tier'
-                + (" · with the phone render" if rd.get("mobile") else "")
-                + (" · critiqued once" if rd.get("critiqued") else "") + "</span>"
-                + (f'<details><summary class="mut">{len(drops)} thing(s) the reading said '
-                   f'that the vocabulary does not hold</summary><ul class="mut">'
-                   + "".join(f"<li>{_esc(d)}</li>" for d in drops) + "</ul></details>" if drops else "")
-                + (f'<details><summary class="mut">{len(dsg.get("sections") or [])} sections</summary>'
-                   f'<ol class="mut">{secs}</ol></details>' if secs else "")
-                + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
-        elif dsg.get("sections"):
-            # A design with a concrete order that did not come through the
-            # reader — filed by hand, or from an approved send — is previewed
-            # the same way: the preview is about the design, not the read.
-            secs = "".join(
-                f'<li>{_esc(x["kind"])} · {_esc(x["layout"])} on {_esc(x["bg"])}'
-                + (f' · {_esc(", ".join(x.get("slots") or []))}' if x.get("slots") else "")
-                + "</li>" for x in (dsg.get("sections") or []))
-            design_html = (f'<br><span class="mut">design: {_esc(_ed.summary(dsg))}</span>'
-                           + f'<details><summary class="mut">{len(dsg["sections"])} sections</summary>'
-                             f'<ol class="mut">{secs}</ol></details>'
-                           + (f'<br><span class="when">{read_ctl.lstrip(" ·")}</span>' if shot else ""))
-        else:
-            design_html = ('<br><span class="when">design not read — the house design, '
-                           'arranged as above' + read_ctl + "</span>")
-        # THE RECREATION LEADS — the model's email for THIS brand beside the
-        # reference, with the judge's open findings under it
-        # (INITIATIVE-email-recreation.md, Phase 1). The token reading
-        # folds away under it until Phase 5 retires it; its wireframe
-        # preview is gone from the card (owner, 2026-09-12).
-        look_html = (_recreation_block(key, tenant, st, shot)
-                     + f'<details><summary class="mut">the token reading</summary>{look_html}{design_html}</details>')
+        # THE RECREATION IS THE DESIGN — the model's email for THIS brand
+        # beside the reference, the judge's review and the choice under it.
+        # The token reading that used to fold away here is gone from the
+        # console (owner, 2026-09-12: "why do we have to tell it to read the
+        # design instead of it happening automatically" — it reads on Add).
+        body = _recreation_block(key, tenant, st, shot)
         return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
@@ -7046,7 +6996,7 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
                 + (f'<br><code>{_esc(" → ".join(st["sequence"]))}</code>' if not st.get("brief") else "")
                 + (f'<br><span class="mut">{_esc(str(st["profile"].get("notes", ""))[:220])}</span>'
                    if st["profile"].get("notes") else "")
-                + look_html
+                + body
                 + f'<br>{_usable(st)}</div>')
 
     # THE WHOLE FLOW ON ONE PAGE (owner, 2026-09-12): paste a link → the

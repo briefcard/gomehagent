@@ -847,9 +847,9 @@ verified tick or a count nobody has; call an email shippable that nobody
 looked at; make a design the standing choice before it is in the rotation.
 Each is a named finding with a sabotage guard.
 
-**Until Phase 5** the older token reading (§6d) folds away under each design
-as *the token reading* with its *Read its design* control; nothing else of it
-shows.
+**The older token reading (§6d) no longer shows anywhere on the console**;
+its code and its route survive only until Phase 5 deletes them. Nothing is
+read on a press: a reference is read the moment it is added.
 
 ## 7. What does not work yet
 

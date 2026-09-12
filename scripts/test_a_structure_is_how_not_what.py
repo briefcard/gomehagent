@@ -383,15 +383,19 @@ def main() -> int:
         again = web.admin_email_swipe(key="s3cret", tenant="baci",
                                       asset=sw["asset_id"], ui=0)
         after = next(r for r in es.library() if r["id"] == srow["id"])
-        ck("'Read its design' on the card re-reads the same screenshot into the same structure",
+        ck("the token route with asset= re-reads the same screenshot into the same structure (until Phase 5 deletes it)",
            again.get("ok") is True and after["profile"].get("look", {}).get("hero") == "overlay"
            and after["design"]["sections"] and after["review"] == "approved"
            and len([r for r in es.library() if r["sequence"] == srow["sequence"]]) == 1,
            str(again)[:80])
+        # THE TOKEN READING IS GONE FROM THE CONSOLE (owner, 2026-09-12: "why
+        # do we have to tell it to read the design instead of it happening
+        # automatically"): the room shows the recreation and the choice, no
+        # arrangement, no design summary, no control to press.
         card_look = _card_for("baci")
-        ck("the card says how each structure is arranged and designed, or that it was not read",
-           "arranged: hero overlay" in card_look and "design:" in card_look
-           and "Read its design" in _card_for("baci", strip=srow["id"]))
+        ck("the room carries no token reading and no control to read one",
+           "arranged:" not in card_look and "Read its design" not in card_look
+           and "the token reading" not in card_look and "design not read" not in card_look)
         with db.SessionLocal() as s:  # back to proposed for the sections below
             row = s.get(db.EmailStructure, srow["id"]); row.review = "proposed"; s.commit()
 

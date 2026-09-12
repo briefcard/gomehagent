@@ -38,6 +38,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'no_token_reading_on_the_console',
+        "file": 'app/admin_ui.py',
+        "find": '        body = _recreation_block(key, tenant, st, shot)\n',
+        "replace": '        body = _recreation_block(key, tenant, st, shot) + \'<details><summary class="mut">the token reading</summary>design not read · <button>Read its design</button></details>\'\n',
+        "suites": ['test_a_structure_is_how_not_what.py', 'test_the_reader_has_eyes.py'],
+        "why": "the old reader's fold and its 'Read its design' button come back on the room — a control the owner asked why they had to press",
+    },
+    {
         "name": 'the_doors_reason_stands_where_the_picture_would_be',
         "file": 'app/admin_ui.py',
         "find": '            f\'<span class="when">no picture — {_esc(door_why or "the screenshot door did not answer")}</span>\'\n',
