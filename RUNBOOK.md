@@ -782,56 +782,74 @@ The run's notes say `arranged as the structure's look: …`.
 "the ESP could not be read (400: Page size must be an integer between 1 and
 10)" and untargeted. It pages by the `links.next` cursor now, to 500.
 
-## 6e. Recreate a reference for a brand — the model makes the email, the code inspects it
+## 6e. Designs — a reference from a link, reviewed, chosen, used by the campaigns
 
-**Where.** Swiping a reference is on **Brand · Reference emails** (beside the
-visual boards — inspiration is one place). What a reference is read into —
-the design library and its recreations for this brand — is on the email
-system's page: **Systems → Campaign email → Designs**. The Brand tab reads in
-the order an email is made from it: Identity, Look, Pictures, Visual boards,
-Reference emails, Sources, then the two settings (image model, blog
-destination).
+**One room, three moves** — *Systems → Campaign email → Designs*:
 
-**What it is.** Under Designs, every structure with a reference picture
-carries **Recreate for ‹brand›** (about the brand, or about one entity).
-One press runs, off the request: the reference is read into a *brief* in
-words (once per structure; shown on the card as `brief: …`), the brand's
-material is gathered, its pictures are cast by looking at a numbered sheet,
-the copy is written to the brief's jobs, **the model writes the email's
-HTML**, the checks run, a browser photographs it, a judge compares that
-picture to the reference and names what differs, the model edits, and the
-round with the fewest blocking findings is kept (up to three rounds). The
-card then shows *the reference | ours*, the status, every open finding
-(*where — what → do*), the rounds, and the run's story in sentences.
-`open the HTML` serves the kept email as a page. Plan and rule:
-`INITIATIVE-email-recreation.md` §0–§1.
+1. **Add this reference** — paste one email's page on Really Good Emails.
+   In one press, off the request: the page's picture is filed on the shared
+   swipe board (once — the same link finds it), read into a *brief* in words
+   (concept, each section's job / asset / copy jobs, the visual system, the
+   devices), filed as ONE design keyed by that picture, and **recreated for
+   this brand**: its pictures cast by looking at a numbered sheet, its copy
+   written to the brief's jobs, the email HTML written whole by the model,
+   checked (the invariants), photographed, judged beside the reference,
+   edited up to twice, the best round kept. The room shows *running — ‹step›*
+   until it lands.
+2. **Look** — the design lands under *New — look, then choose*: the reference
+   beside ours, the status (*shippable / not shippable / cannot be made*),
+   the judge's line (*same concept · devices in order · all the brand's own ·
+   weight and rhythm*), every open finding (*where — what → do*), the rounds,
+   the run's story. *open the HTML* serves the kept email.
+3. **Choose** — **Use it — into the rotation** or **Not this one**. In the
+   rotation, **Use this for every campaign** makes it the standing choice
+   (*Back to random* undoes it). The line under the paste form says what the
+   campaigns will do: draw at random from the rotation this brand may use,
+   or build every one on the standing choice. A plan's own `structure` field
+   still outranks both for that send.
+
+**The campaigns are built in the design.** When a campaign's design has a
+brief, the drafter writes the MESSAGE as before (subject, angle, offer, the
+blocks, the claims it cites — through every gate it went through before) and
+the email is then made in the design: the message poured into its copy jobs,
+the brand's pictures cast, the HTML written, checked, photographed and judged
+beside the reference. The words checked at the emit door are the words that
+ship. The run's notes say *built in the design ‹name›: ‹status› — ‹story›*
+and list any blocking finding; the Designs room shows that recreation as the
+latest, marked *from a campaign*. A recreation that fails builds the send the
+old way **and says so**. A design with no brief (the house, a hand-filed order)
+is built the old way. An unattended ship is held while a recreation has a
+blocking finding.
+
+**Recreate again / Read the reference again** — a fresh recreation (about an
+entity, if chosen), or a fresh brief and recreation when the reading itself
+was wrong.
 
 **Statuses.** `shippable` — no check blocks and the judge names nothing
-blocking. `not shippable` — something blocks (each is listed) or the
-email was never judged (no picture). `cannot be made` — the brand has no
-publishable picture for a slot the design needs; the finding says what
-it needs (*needs a photograph of the product in use*). `failed` — a step
-did not answer; the story says which.
+blocking. `not shippable` — something blocks (listed) or the email was never
+judged (no picture; the note says why). `cannot be made` — the brand has no
+publishable picture for a slot the design needs; the finding names what it
+needs. `failed` — a step did not answer; the story says which.
 
 **What it costs.** Five to seven model calls (three of them vision) and one
-browser unit per round. The brief is read once and reused.
+browser unit per round; the brief is read once per reference and reused. A
+campaign draft rebuilt with the same words reuses its recreation.
 
 **The screenshot door.** `SHOTS_WS` in the env group — a Browserless
 endpoint `wss://production-sfo.browserless.io?token=…` (free plan: 1,000
-shots a month, 2 at a time). Without it the deploy has no browser: the
-email is still made and checked, but *not judged* and never called
-shippable, and the card says so. On a laptop with Playwright's Chromium
-installed no setting is needed.
+shots a month, 2 at a time). Without it the email is still made and checked
+but *not judged* and never called shippable, and the room says so.
 
 **What it will not do.** Use a picture that is not the brand's own; carry
 five words in a row, a colour or a picture from the reference; change the
 drafter's words; ship without the address and `{{UNSUBSCRIBE}}`; draw a
 verified tick or a count nobody has; call an email shippable that nobody
-looked at. Each of those is a named finding, and each has a sabotage guard.
+looked at; make a design the standing choice before it is in the rotation.
+Each is a named finding with a sabotage guard.
 
-**Until Phase 5** the older token reading (§6d) folds away under each
-design as *the token reading*; its preview is gone from the card. Judge by
-the recreation.
+**Until Phase 5** the older token reading (§6d) folds away under each design
+as *the token reading* with its *Read its design* control; nothing else of it
+shows.
 
 ## 7. What does not work yet
 

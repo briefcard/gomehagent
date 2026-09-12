@@ -11,10 +11,12 @@
 > §2 is a list of facts with `file:line`, each checkable in a minute. If they
 > still hold, the plan holds.
 >
-> **Phase 1 is built (2026-09-12, same day; hash in the memory note) — every
-> component of §1 lives in `app/recreate.py`, the door in `app/shots.py`. Not
-> proven live: the model calls are stubbed on this machine and the deploy
-> needs `SHOTS_WS`. Phases 2–6 are not started.**
+> **Phases 1 and 3 are built, Phase 2 in part (2026-09-12, same day; hashes
+> in the memory note) — the chain in `app/recreate.py`, the door in
+> `app/shots.py`, the campaign seam in `skill_pack._build`, the whole flow in
+> one room (Systems → Campaign email → Designs: add a link → look → choose).
+> Not proven live: the model calls are stubbed on this machine. Phase 2's
+> owner-note-as-a-finding, Phases 4–6 are not started.**
 
 ---
 

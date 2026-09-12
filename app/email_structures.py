@@ -308,6 +308,102 @@ def _review(structure_id: str, verdict: str, by: str) -> str:
         return f"{verdict}: {row.name}"
 
 
+def sequence_from_brief(brief: dict) -> list:
+    """A rough block order read off a brief's sections — ONLY so the rules
+    that bind at use keep working (`requires_of`: products need a catalogue,
+    proof needs claims, a hero needs a picture; `recent_shapes` keeps the
+    same people from the same shape twice running). Never drawn from: the
+    email is made from the brief, not from this."""
+    out: list[str] = []
+    first_photo = True
+    for sec in brief.get("sections") or []:
+        what = str(sec.get("what") or "").lower()
+        kind = str(((sec.get("asset") or {}).get("kind") or "")).lower()
+        jobs = " ".join(str(j.get("job") or "") for j in (sec.get("copy") or []) if isinstance(j, dict)).lower()
+        if kind in ("photograph", "illustration"):
+            out.append("hero" if first_photo else "image")
+            first_photo = False
+        if "quote" in what or "testimonial" in what or "review" in what:
+            out.append("quote")
+        if "grid" in what and "product" in what or "flavour" in what or "flavor" in what:
+            out.append("products")
+        if "step" in jobs or "list" in what or "recipe" in what:
+            out.append("list")
+        if any(w in what or w in jobs for w in ("headline", "hook", "title")):
+            out.append("heading")
+        if any(w in what or w in jobs for w in ("cta", "button", "shop", "ask")):
+            out.append("cta")
+        if not out or out[-1] in ("hero", "image", "quote", "products", "cta"):
+            if jobs and "step" not in jobs:
+                out.append("text")
+    seq = [t for t in out if t in block_types()]
+    return seq if len(seq) >= 2 else ["hero", "text", "cta"]
+
+
+def file_reference(asset_id: str, *, brief: dict, source_url: str = "") -> dict:
+    """ONE STRUCTURE PER REFERENCE PICTURE — keyed by the swipe's asset, never
+    by a block sequence, because two references can share a rough order and
+    be nothing alike; the brief is the design now. Lands PROPOSED: it is
+    chosen when the owner has seen it recreated and said so."""
+    name = str(brief.get("concept") or "a reference")[:120]
+    with db.SessionLocal() as s:
+        a = s.get(db.KbAsset, asset_id)
+        row = (s.query(db.EmailStructure).filter(db.EmailStructure.source_asset_id == asset_id)
+               .order_by(db.EmailStructure.created_at.desc()).first())
+        if row is None:
+            from . import email_design
+            seq = sequence_from_brief(brief)
+            row = db.EmailStructure(
+                name=name, source="swipe", source_url=(source_url or (a.source if a else "") or "")[:500],
+                source_asset_id=asset_id, sequence=seq, profile=profile_of([{"type": t} for t in seq]),
+                fits_intents=[], fits_formats=["designed"], requires=requires_of(seq),
+                design=email_design.house(), review="proposed")
+            s.add(row)
+        row.brief = dict(brief)
+        if not row.name or (a is not None and row.name == (a.title or "")):
+            row.name = name
+        s.commit()
+        return {"ok": True, "id": row.id, "name": row.name, "review": row.review}
+
+
+#: Where the standing choice lives: on the brand's own row, under `visual`
+#: — it is a fact about how THIS brand's emails look, written through
+#: `kb.set_brand` like every other brand field (the register keeps one
+#: writer per table; `Setting` has none and is not given a twelfth).
+DESIGNATED_FIELD = "email_design"
+
+
+def standing_designation(tenant: str) -> str:
+    """The design every campaign of this brand is built on until the owner
+    says otherwise — "" when campaigns draw at random."""
+    from . import kb
+    b = kb.brand(tenant)
+    return str(((getattr(b, "visual", None) or {}).get(DESIGNATED_FIELD) or "")) if b else ""
+
+
+def designate(tenant: str, structure_id: str = "") -> str:
+    """Set (or, with "", clear) the standing choice. Owner, 2026-09-12: *"I
+    should be able to choose it or let it randomly be chosen for the email
+    campaigns I generate."* A plan's own `structure` field still outranks
+    this for that one send."""
+    if structure_id:
+        st = next((r for r in library() if r["id"] == structure_id), None)
+        if st is None:
+            return "no design with that id"
+        if st["review"] != "approved":
+            return f"{st['name']!r} is not in the rotation yet — use it first"
+        ok, why = usable_for(tenant, st)
+        if not ok:
+            return f"{st['name']!r} is not for this brand — {why}"
+    from . import kb
+    b = kb.ensure_brand(tenant)
+    visual = dict(getattr(b, "visual", None) or {})
+    visual[DESIGNATED_FIELD] = structure_id
+    kb.set_brand(tenant, visual=visual)
+    return ("every campaign now uses this design until you say otherwise" if structure_id
+            else "campaigns draw at random from the rotation again")
+
+
 def library(*, review: str = "") -> list[dict]:
     with db.SessionLocal() as s:
         q = s.query(db.EmailStructure)
@@ -341,6 +437,8 @@ def _row(r) -> dict:
             "fits_intents": list(r.fits_intents or []),
             "fits_formats": list(r.fits_formats or []),
             "requires": list(r.requires or []), "review": r.review,
+            "brief": dict(getattr(r, "brief", None) or {}),
+            "source_asset_id": r.source_asset_id or "",
             "used_count": int(r.used_count or 0),
             "last_used_at": (db.as_utc(r.last_used_at).isoformat(timespec="minutes")
                              if r.last_used_at else "")}
@@ -452,6 +550,9 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
     `{structure, why, designated}`; `structure` None means design fresh.
     """
     import random
+    # THE STANDING CHOICE, when the plan names none: what the owner picked
+    # on the Designs page for every campaign of this brand.
+    designated = designated or standing_designation(tenant)
     if designated:
         st = next((r for r in library() if r["id"] == designated), None)
         if st is None:
@@ -459,8 +560,8 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
                     "why": f"no structure with id {designated!r} — designed fresh"}
         if st["review"] != "approved":
             return {"structure": None, "designated": True,
-                    "why": (f"{st['name']!r} is {st['review']}, not approved — "
-                            f"approve it on the Brand tab first; designed fresh")}
+                    "why": (f"{st['name']!r} is {st['review']}, not in the rotation — "
+                            f"use it on the Designs page first; designed fresh")}
         ok, why = usable_for(tenant, st)
         if not ok:
             return {"structure": None, "designated": True,
@@ -493,6 +594,21 @@ def brief(structure: dict) -> str:
     from . import email_design
     prof = structure.get("profile") or {}
     seq = structure.get("sequence") or []
+    bf = structure.get("brief") or {}
+    if bf.get("concept"):
+        # THE DESIGN IN WORDS. The drafter writes the MESSAGE — subject, angle,
+        # the claims and products it carries; the recreation writes each of
+        # the design's copy jobs to carry that message and builds the email.
+        jobs = []
+        for sec in bf.get("sections") or []:
+            for j in sec.get("copy") or []:
+                if isinstance(j, dict) and j.get("job"):
+                    jobs.append(f"    - {j['job']}" + (f" ({j['limit']})" if j.get("limit") else ""))
+        return ("\n## THE DESIGN THIS SEND IS BUILT IN: " + str(bf["concept"])[:300]
+                + "\nWrite the MESSAGE — the subject, the angle, the products and claims it "
+                  "carries, the ask — in blocks as usual. The email itself is then written "
+                  "in this design with your message poured into its copy jobs, which are:\n"
+                + "\n".join(jobs[:14]) + "\n  Keep the message tight enough to fit them.")
     dsg = email_design.brief(structure.get("design") or {})
     if dsg:
         lines = [dsg]

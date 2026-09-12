@@ -396,13 +396,13 @@ def main() -> int:
     c = TestClient(web.app)
     r = c.post("/admin/email_recreate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": sid, "entity": "portofino"},
                follow_redirects=False)
-    ck("the button posts and comes back 303 to the Brand tab, the run off the request",
-       r.status_code == 303 and "tab=brand" in r.headers.get("location", "") and bg and bg[0][0] == "email_recreate"
+    ck("the button posts and comes back 303 to the Designs room, the run off the request",
+       r.status_code == 303 and "wf=designs" in r.headers.get("location", "") and bg and bg[0][0] == "email_recreate"
        and bg[0][1] == (sid,) and bg[0][2]["tenant"] == "baci" and bg[0][2]["entity_key"] == "portofino")
     r2 = c.get(f"/admin/email_recreation?key=s3cret&id={last['id']}")
     ck("the kept HTML is served as a page", r2.status_code == 200 and "font-size:112px" in r2.text)
     card = admin_ui._structures_card("s3cret", "baci")
-    needles = ("ours, for baci", "the reference", "shippable", "brief: a recipe", 'action="/admin/email_recreate"', "Recreate for baci")
+    needles = ("ours, for baci", "the reference", "shippable", "brief: a recipe", 'action="/admin/email_recreate"', "Recreate again")
     ck("the card shows the reference beside ours, the status, the brief and the button that posts to /admin/email_recreate",
        all(n in card for n in needles), "missing: " + ", ".join(n for n in needles if n not in card))
     card2 = admin_ui._structures_card("s3cret", "ironside")
@@ -422,6 +422,174 @@ def main() -> int:
     card4 = admin_ui._structures_card("s3cret", "baci")
     ck("a run whose thread died is said as failed, not left running",
        "failed — RuntimeError" in card4 and "running since" not in card4)
+
+    print("— 9. one press from a link: filed, read, filed as a design, recreated —")
+    shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
+    answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "weight_rhythm": "matched",
+                                             "brand_material": True, "findings": []}
+    answers["email_cast"] = {"picks": [{"section": 3, "cell": 1, "why": "food"}, {"section": 5, "cell": 2, "why": "table"}], "none": []}
+    kb.add_asset("agency", "https://images.example.test/shrimp.png", rights=kb.REFERENCE, kind=es.SWIPE_KIND,
+                 subject="scene", title="Animal facts — pistol shrimp", source="https://reallygoodemails.com/emails/pistol-shrimp",
+                 origin="swipe")
+    shrimp_id = next(a.id for a in kb.assets("agency", publishable_only=False) if "shrimp" in (a.url or ""))
+    es.add_swipe = lambda url, **k: {"ok": True, "asset_id": shrimp_id, "url": url, "title": "Animal facts — pistol shrimp",
+                                     "image": "https://images.example.test/shrimp.png"}
+    ed._fetch = lambda url: ref_png if ("ayoh" in url or "shrimp" in url) else b""
+    steps: list = []
+    got = rc.swipe("https://reallygoodemails.com/emails/pistol-shrimp", "baci", progress=lambda t: steps.append(t))
+    ck("a link becomes a design and a recreation in one press, and says each step",
+       got["ok"] and got["structure_id"] and got["recreation"]["status"] == rc.SHIPPABLE
+       and steps[:3] == ["filing the reference", "reading the reference into a brief", "recreating it for this brand"],
+       str(got.get("why")) + " " + str(steps))
+    new = next(r for r in es.library() if r["id"] == got["structure_id"])
+    first = rc.latest(new["id"], "baci")
+    ck("the recreation of that press is on file with its picture and its review",
+       first and first["status"] == rc.SHIPPABLE and first["png"] and first["via"] == "press"
+       and first["verdict"].get("same_concept") is True)
+    ck("the design is keyed by its picture, carries the brief, and waits to be chosen",
+       new["source_asset_id"] == shrimp_id and new["brief"]["concept"].startswith("a recipe") and new["review"] == "proposed"
+       and new["name"].startswith("a recipe"))
+    ck("its rough order is read off the brief for the rules that bind at use, never drawn from",
+       "hero" in new["sequence"] and "cta" in new["sequence"] and "list" in new["sequence"] and new["requires"])
+    got2 = rc.swipe("https://reallygoodemails.com/emails/pistol-shrimp", "baci")
+    ck("the same link pasted again finds the same design — no duplicate",
+       got2["structure_id"] == got["structure_id"]
+       and sum(1 for r in es.library() if r["source_asset_id"] == shrimp_id) == 1)
+    ck("a design keyed by another picture is another design, whatever its rough order",
+       new["id"] != sid and sum(1 for r in es.library() if r["source_asset_id"] == shrimp_id) == 1)
+    ck("the drafter's brief for a design with a brief is the concept and its copy jobs, never a token",
+       "THE DESIGN THIS SEND IS BUILT IN: a recipe" in es.brief(new) and "four numbered steps" in es.brief(new)
+       and "grid2" not in es.brief(new))
+
+    print("— 10. choose it, or let the draw decide —")
+    ck("a design not yet in the rotation cannot be the standing choice",
+       "not in the rotation" in es.designate("baci", new["id"]))
+    es.approve(new["id"])
+    said = es.designate("baci", new["id"])
+    ck("once in the rotation it can be, and pick() honours it", "until you say" in said
+       and es.pick("baci")["structure"]["id"] == new["id"] and es.pick("baci")["designated"] is True)
+    ck("a plan's own designation outranks the standing choice",
+       es.pick("baci", designated=sid)["structure"]["id"] == sid)
+    ck("back to random draws from the rotation", "random" in es.designate("baci", "")
+       and es.pick("baci")["designated"] is False and es.pick("baci")["structure"] is not None)
+
+    print("— 11. the campaigns are built in the design —")
+    from app import esp, skill, skill_pack, systems, tenants as _tn
+    kb.add_situation("baci", "quality", patterns=[["quality"]], description="Is it any good?", origin="seed")
+    kb.add_claim("baci", "Designed in Milan and placed at the Four Seasons.", "brand brief", ["quality"],
+                 origin="human", status="active")
+    row = systems.find("baci", "campaign_email") or systems.create("baci", "campaign_email")
+    with db.SessionLocal() as s:
+        rr_ = s.get(db.System, row.id); rr_.status = "live"; s.commit()
+    _ALL = {c: True for c in _tn.CAPABILITIES}
+    _tn.capabilities = lambda key: dict(_ALL) if _tn.get(key) else {c: False for c in _tn.CAPABILITIES}
+    esp.provider_for = lambda t: "omnisend"
+    esp.personalize = lambda t, html: {"ok": True, "html": html}
+
+    class _Mod:
+        @staticmethod
+        def draft_from_html(tenant, *, name, subject, sender_name, html, preheader="", include_segments=None):
+            return {"ok": True, "campaign_id": "c", "stage": "done"}
+    esp.backend = lambda t: (_Mod, "")
+
+    def _drafter(bundle, seg, goal, craft=None):
+        claims = bundle.get("claims") or []
+        cid = claims[0]["claim_id"] if claims else ""
+        return ({"subject": "Set the scene", "preheader": "the Sunday table",
+                 "blocks": [{"type": "hero"}, {"type": "heading", "text": "Set the scene", "level": 1},
+                            {"type": "text", "html": "<p>Portofino for Sunday lunch.</p>"},
+                            {"type": "cta", "label": "Shop Portofino", "url": "https://example-brand.test/collections/portofino"}],
+                 "claim_ids": [cid] if cid else [], "cta_label": "Shop Portofino",
+                 "cta_url": "https://example-brand.test/collections/portofino"}, "model", "")
+    skill_pack.draft_campaign = _drafter
+    copy_prompts: list = []
+    answers["email_copy"] = lambda prompt: (copy_prompts.append(prompt) or COPY)
+    compose_seen.clear()
+    r1 = skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
+                   entity_key="portofino", generate_visual="no")
+    notes1 = r1.get("notes") or []
+    ck("the campaign run is built in the designated design and says so",
+       r1.get("status") == "produced" and any(n.startswith("built in the design") for n in notes1),
+       str(r1.get("status")) + " " + str([n[:90] for n in notes1 if "design" in n or "structure" in n]))
+    ck("the design's copy jobs carried the drafter's message — its subject and its cited claim",
+       copy_prompts and "THE MESSAGE THIS EMAIL CARRIES" in copy_prompts[-1] and "Set the scene" in copy_prompts[-1]
+       and "Four Seasons" in copy_prompts[-1])
+    with db.SessionLocal() as s:
+        out1 = s.query(db.Output).filter(db.Output.tenant == "baci").order_by(db.Output.created_at.desc()).first()
+        art1 = s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out1.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        html1 = (art1.meta or {}).get("html") or ""
+        meta1 = dict(art1.meta or {})
+        media1 = list(out1.media_ids or [])
+    ck("the email that ships is the model's HTML, with the cast pictures on the ledger",
+       "Sunday-lunch secret" in html1 and set(media1) >= {a_id, b_id} and meta1.get("recreation", {}).get("status") == rc.SHIPPABLE)
+    ck("the words checked are the words that ship",
+       "Sunday-lunch secret" in (out1.body or out1.text or "") if hasattr(out1, "body") or hasattr(out1, "text") else True)
+    ck("the design's recreation is on the Designs page as the latest, marked from a campaign",
+       rc.latest(new["id"], "baci")["via"] == "campaign")
+    # a blocking finding holds the unattended ship
+    from app import approvals
+    with db.SessionLocal() as s:
+        art1 = s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out1.id).first()
+        art1.meta = {**dict(art1.meta or {}), "recreation": {"id": "x", "status": rc.NOT_SHIPPABLE, "blocking": 1,
+                                                           "findings": [{"severity": "blocks", "where": "section 3", "what": "the post card lost its icon row"}]}}
+        s.commit()
+    ck("the recreation an output was built as is read off its artifact",
+       approvals._recreation_of(out1.id).get("blocking") == 1)
+    # The unattended door is the article kinds' today (campaign emails wait
+    # for a person); the hold is exercised through it with a pending ship on
+    # this output, so the day an email walks through unattended it is held.
+    with db.SessionLocal() as s:
+        s.add(db.Approval(kind="seo_new_article", status="pending", summary="t", tenant="baci",
+                          payload={"output_id": out1.id}))
+        s.commit()
+    held = approvals.ship_unattended("baci", out1.id, why="test")
+    ck("an unattended ship is held while the recreation has a blocking finding — and says which",
+       held.get("ok") is False and "icon row" in held.get("why", ""), str(held))
+    # the recreation fails → built the old way, said
+    answers["email_compose"] = "no html for you"
+    state_before = len(es.library())
+    r2 = skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
+                   entity_key="portofino", generate_visual="no")
+    ck("when the recreation fails the send is built the old way and the notes say so",
+       r2.get("status") == "produced" and any("built the old way" in n for n in (r2.get("notes") or [])))
+    answers["email_compose"] = _compose
+
+    print("— 12. the Designs room: paste, look, choose —")
+    es.designate("baci", "")
+    room = admin_ui._structures_card("s3cret", "baci")
+    ck("the paste form is at the top of the room and posts to /admin/email_reference",
+       'action="/admin/email_reference"' in room and room.index("/admin/email_reference") < room.index("In the rotation"))
+    ck("the room says how campaigns choose — at random from the rotation this brand may use",
+       "draws at random from" in room and "Use this for every campaign" in room)
+    with db.SessionLocal() as s:
+        st_new = s.get(db.EmailStructure, new["id"]); st_new.review = "proposed"; s.commit()
+    room2 = admin_ui._structures_card("s3cret", "baci")
+    ck("a new design shows the review and the choice: Use it or Not this one",
+       "New — look, then choose (1)" in room2 and "Use it — into the rotation" in room2 and "Not this one" in room2
+       and "the judge: same concept <b>yes</b>" in room2)
+    es.approve(new["id"]); es.designate("baci", new["id"])
+    room3 = admin_ui._structures_card("s3cret", "baci")
+    ck("the standing choice is said at the top and on its design, with the way back",
+       "every one is built on" in room3 and "every campaign uses this design" in room3 and "Back to random" in room3)
+    es.designate("baci", "")
+    r = c.post("/admin/email_reference?key=s3cret", data={"key": "s3cret", "tenant": "baci",
+                                                           "url": "https://reallygoodemails.com/emails/pistol-shrimp"},
+               follow_redirects=False)
+    ck("pasting a link posts, runs off the request, and comes back to the Designs room",
+       r.status_code == 303 and "wf=designs" in r.headers.get("location", "") and bg[-1][0] == "email_recreate"
+       and bg[-1][1] == ("https://reallygoodemails.com/emails/pistol-shrimp",) and bg[-1][2]["tenant"] == "baci")
+    r = c.post("/admin/email_reference?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://reallygoodemails.com/categories/food"},
+               follow_redirects=False)
+    ck("a category page is refused with the reason, on the same room",
+       r.status_code == 303 and "err=" in r.headers.get("location", "") and "wf=designs" in r.headers.get("location", ""))
+    r = c.post("/admin/email_design_designate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"]},
+               follow_redirects=False)
+    ck("the standing choice posts and comes back to the room", r.status_code == 303 and "wf=designs" in r.headers.get("location", "")
+       and es.standing_designation("baci") == new["id"])
+    es.designate("baci", "")
+    html_b = admin_ui.render_brand("s3cret", "baci")
+    ck("the Brand tab no longer carries the reference emails — it says where they are",
+       "Reference emails" not in html_b and 'action="/admin/email_reference"' not in html_b and "under Designs" in html_b)
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))

@@ -3012,6 +3012,16 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
     return out, extra_cited
 
 
+def _hash_message(c: dict) -> str:
+    """The drafter's message, hashed — so a rebuild with the same words
+    reuses the recreation instead of paying for it again (the craft redraft
+    and the repair loop each rebuild)."""
+    import hashlib
+    import json as _json
+    keep = {k: c.get(k) for k in ("subject", "preheader", "headline", "blocks", "claim_ids")}
+    return hashlib.sha1(_json.dumps(keep, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
 def _blocks_text(blocks: list) -> str:
     """Every human-readable string in the layout, for the validator — a
     banned phrase in a banner or a quote is as banned as one in a
@@ -3633,6 +3643,55 @@ def _run_campaign_email(ctx: Context) -> dict:
         from . import email_design as _ed
         _structure = craft.get("structure") or {}
         _design = _structure.get("design") or _ed.house()
+        # THE MODEL MAKES THE EMAIL (INITIATIVE-email-recreation.md, Phase 3;
+        # owner, 2026-09-12: the design chosen at random or designated is
+        # what "the email campaigns I generate" are built in). A design that
+        # was read into a BRIEF is recreated for this send: the drafter's
+        # message — subject, angle, offer, the blocks it wrote, the claims it
+        # cited — poured into the design's copy jobs, the brand's pictures
+        # cast by looking, the HTML written whole, checked, photographed and
+        # judged beside the reference. The words that ship are the words
+        # checked below. A design with no brief (the house, a hand-filed
+        # order) is built the old way, and a recreation that fails falls
+        # back to it AND SAYS SO.
+        if _structure.get("brief"):
+            _key = (str(_structure.get("id")), _hash_message(c))
+            _rec = state.setdefault("recreations", {}).get(_key)
+            if _rec is None:
+                from . import recreate as _rc
+                _rec = _rc.run(
+                    str(_structure.get("id")), ctx.tenant, _subject, via="campaign",
+                    recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
+                    seed=str(ctx.run_id or ctx.tenant),
+                    message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
+                             "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
+                             "text": _blocks_text(blocks),
+                             "claims": [offered[cid]["claim"] for cid in (c.get("claim_ids") or []) if cid in offered]})
+                state["recreations"][_key] = _rec
+            if _rec.get("ok") and _rec.get("html"):
+                ctx.note(f"built in the design {_structure.get('name', '')!r}: {_rec.get('status')} — "
+                         + str(_rec.get("note", ""))[:700])
+                for _f in (_rec.get("findings") or []):
+                    if _f.get("severity") == "blocks":
+                        ctx.note(f"design finding (blocks): {_f.get('where', '')} — {_f.get('what', '')}")
+                state["media"] = list(_rec.get("media_ids") or [])
+                state["recreation"] = {"id": _rec.get("id"), "status": _rec.get("status"),
+                                       "blocking": int(_rec.get("blocking") or 0),
+                                       "findings": list(_rec.get("findings") or [])[:12]}
+                state.update(design=_design, structure_id=str(_structure.get("id") or ""))
+                native = esp.personalize(ctx.tenant, _rec["html"])
+                state.update(
+                    copy=c, blocks=blocks,
+                    cited=list(dict.fromkeys(
+                        [cid for cid in (c.get("claim_ids") or []) if cid in offered]
+                        + extra_cited)),
+                    html=native["html"] if native.get("ok") else _rec["html"],
+                    native_ok=bool(native.get("ok")),
+                    native_why=str(native.get("error") or native.get("why") or ""))
+                return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n" + str(_rec.get("text") or ""))
+            ctx.note("the design could not be recreated for this send — "
+                     + str(_rec.get("note") or _rec.get("why") or "no reason given")[:300]
+                     + " — built the old way instead")
         # THE PICTURES CHOSEN FOR THIS SEND, THEN THE PALETTE FROM THEM
         # (owner, 2026-09-12): the campaign's entities scope the choice, the
         # design's kinds filter it, what this list saw lately ranks below
@@ -3895,6 +3954,10 @@ def _run_campaign_email(ctx: Context) -> dict:
                       # it into the library with its shape (Phase 5).
                       "design": state.get("design") or {},
                       "structure_id": state.get("structure_id", ""),
+                      # THE RECREATION IT WAS BUILT AS, with its blocking
+                      # findings — read by `ship_unattended`, which holds a
+                      # send the judge or the checks still object to.
+                      "recreation": state.get("recreation") or {},
                       "sendable": not missing, "missing_to_send": missing},
         redraft=_repair if basis == "model" else None)
 

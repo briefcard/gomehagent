@@ -64,11 +64,13 @@ def main() -> int:
     # centralize inspiration"): the reference emails sit beside the boards,
     # with the swipe form; the designs they are read into are the email
     # system's, on its page.
-    ck("  the reference emails sit beside the boards with the swipe form, and say where the designs live",
-       "Reference emails" in page and 'action="/admin/email_swipe"' in page
-       and page.index("Visual boards") < page.index("Reference emails")
-       and "under <b>Designs</b>" in page and "Email structures" not in page)
-    ck("  the Brand tab reads in the order an email is made: sound, look, pictures, inspiration, sources",
+    # THE REFERENCE EMAILS ARE THE EMAIL SYSTEM'S (owner, 2026-09-12: "emails
+    # to begin with are part of the email system"): they live on its Designs
+    # page with the recreations; Brand says so and carries neither.
+    ck("  the reference emails are not on Brand — it says where they are",
+       "Reference emails" not in page and 'action="/admin/email_reference"' not in page
+       and "under Designs" in page and "Email structures" not in page)
+    ck("  the Brand tab reads in the order an email is made: sound, look, pictures, boards, sources",
        page.index("Identity") < page.index("Look — how their email is dressed")
        < page.index("Pictures — what they have") < page.index("Visual boards")
        < page.index("Sources — their website and landing pages"))

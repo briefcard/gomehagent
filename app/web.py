@@ -1175,14 +1175,68 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
     entity = str(form.get("entity", ""))
     if not (tenant and structure):
         arg = ("err", "a brand and a structure are needed")
+    elif str(form.get("reread") or ""):
+        _run_bg("email_recreate", recreate.again, structure, tenant=tenant, entity_key=entity)
+        arg = ("ok", "reading the reference again and recreating — it appears below when it lands")
     else:
         _run_bg("email_recreate", recreate.run, structure, tenant=tenant, entity_key=entity,
                 seed=f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}")
-        arg = ("ok", "recreating — the reference beside ours appears on the structure's card when it lands")
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
-    return RedirectResponse(back, 303)
+        arg = ("ok", "recreating — the reference beside ours appears below when it lands")
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
+def _designs_back(tenant: str, key: str, arg: tuple) -> str:
+    """Back to the Designs room of this brand's campaign email system — the
+    one page the reference flow lives on."""
+    from urllib.parse import quote
+    back = (f"/admin/ui?tab=systems&tenant={quote(tenant)}&system=campaign_email&wf=designs"
+            f"&{arg[0]}={quote(arg[1])}")
+    if key:
+        back += f"&key={quote(key)}"
+    return back
+
+
+@app.post("/admin/email_reference")
+async def email_reference(request: Request, key: str = Depends(admin_key)):
+    """A REFERENCE FROM A LINK, ONE PRESS: filed, read into a brief, filed as
+    a design, recreated for this brand — the reference beside ours with the
+    judge's review lands on the Designs page. Owner, 2026-09-12: *"I add a
+    reference from a link, it needs to give me the initial review of how we
+    recreated it and then I should be able to choose it or let it randomly
+    be chosen … It shouldn't be so many steps."*"""
+    from fastapi.responses import RedirectResponse
+
+    from . import email_structures as _es, recreate
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    url, why = _es.swipe_url(str(form.get("url", "")))
+    if not tenant:
+        arg = ("err", "a brand is needed")
+    elif not url:
+        arg = ("err", why)
+    else:
+        _run_bg("email_recreate", recreate.swipe, url, tenant=tenant,
+                entity_key=str(form.get("entity", "")))
+        arg = ("ok", "reading the reference and recreating it for this brand — it appears below when it lands")
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
+@app.post("/admin/email_design_designate")
+async def email_design_designate(request: Request, key: str = Depends(admin_key)):
+    """The standing choice: every campaign of this brand is built on this
+    design — or, with an empty structure, campaigns draw at random again."""
+    from fastapi.responses import RedirectResponse
+
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    said = _es.designate(tenant, str(form.get("structure", "")))
+    arg = ("ok" if ("until you say" in said or "random" in said) else "err", said)
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
 @app.get("/admin/email_recreation")
@@ -1442,8 +1496,7 @@ def admin_email_structure(key: str = Depends(admin_key), tenant: str = "",
     said = (_es.approve(id) if verdict == "approved" else _es.reject(id))
     if not ui:
         return {"id": id, "said": said}
-    return RedirectResponse(
-        f"/admin/ui?tab=brand&tenant={quote(tenant)}&key={quote(key)}&ok={quote(said)}", 303)
+    return RedirectResponse(_designs_back(tenant, key, ("ok", said)), 303)
 
 
 @app.get("/admin/ai_training")

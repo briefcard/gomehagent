@@ -273,7 +273,7 @@ def main() -> int:
         card2 = admin_ui._structures_card("s3cret", "baci")
         ck("the recreation leads the card and the token reading folds away under it",
            "not yet recreated for this brand" in card2 and "the token reading" in card2
-           and "srcdoc=" not in card2 and card2.index("Recreate for baci") < card2.index("Read its design"))
+           and "srcdoc=" not in card2 and card2.index("Recreate again") < card2.index("Read its design"))
         # The quoted-copy gate, exercised: a critique with no notes leaves
         # pass A's, which quote three words of the email — dropped, and said.
         C_no_notes = {k: v for k, v in C.items() if k != "notes"}

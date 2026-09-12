@@ -4164,46 +4164,6 @@ def _pictures_card(key: str, tenant: str) -> str:
 </div>"""
 
 
-def _references_card(key: str, tenant: str) -> str:
-    """REFERENCE EMAILS — the swipe board, beside the visual boards, because
-    it is the same idea one channel over: inspiration, shared across every
-    account, never a client's own material. Swiping files the picture and
-    reads it; what it was read into — the design library, the recreations
-    for this brand — lives on the email system's page, under Designs."""
-    from . import email_structures as _es
-    sw = _es.swipes()
-    rows = "".join(
-        f'<div class="msg"><a href="{_esc(x["image"])}"><img src="{_esc(x["image"])}" alt="{_esc(x["title"])}" '
-        f'style="max-width:90px;max-height:120px;float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
-        f'<b>{_esc(x["title"])}</b> '
-        + (f'<a href="{_esc(x["source_url"])}" class="mut">source</a> ' if x["source_url"] else "")
-        + (f'<br><span class="mut">read into <b>{_esc(x["structure_name"])}</b> — '
-           + ("in the library" if x["review"] == "approved" else
-              "waiting for your approval" if x["review"] == "proposed" else _esc(x["review"]))
-           + "</span>" if x["structure_id"] else
-           '<br><span class="when">swiped, not read — the reading did not land; swipe it again</span>')
-        + '</div>' for x in sw)
-    add = f"""
-    <form method="get" action="/admin/email_swipe" style="margin:8px 0">
-      <input type="hidden" name="key" value="{_esc(key)}">
-      <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
-      <button type="submit">Swipe this email</button>
-      <span class="when">one email's own page, not a category — read for its design in
-      words, never its copy or its pictures</span>
-    </form>"""
-    where = (f'<p class="mut">The designs these were read into, and their recreations for '
-             f'{_esc(tenant)}, are on the email system\'s page under <b>Designs</b>.</p>' if tenant else "")
-    return f"""
-<div class="card">
-  <div class="head"><h2>Reference emails</h2>
-    <span class="mut">shared across every account — inspiration, never material</span></div>
-  {add}
-  {rows or '<p class="mut">Nothing swiped yet.</p>'}
-  {where}
-</div>"""
-
-
 def _pictures_read(tenant: str, limit: int = 24) -> str:
     """THE PICTURES AND WHAT WAS READ OFF THEM — kept on each asset in the
     knowledge base (owner, 2026-09-12): the kind, whether the product is
@@ -4762,10 +4722,10 @@ and hand-set fields survive future re-derives.</p>
 <div>
   <p class="mut">Who this account is and what it has, in the order an email
   is made from it: how they sound, how their email is dressed, their own
-  pictures, the inspiration they draw on, and where all of it is read from.
-  What may be ASSERTED (claims, objections, the catalogue) lives on Knowledge;
-  how emails are made from this — the designs and their recreations — lives
-  on the email system's page.</p>
+  pictures, the boards their pictures are drawn from, and where all of it is
+  read from. What may be ASSERTED (claims, objections, the catalogue) lives on
+  Knowledge; the reference emails and the designs made from them live on the
+  email system's page, under Designs.</p>
   {identity}
   {_channel_rules_card(key, tenant)}
   <div class="card"><div class="head"><h2>Look — how their email is dressed</h2></div>
@@ -4774,7 +4734,6 @@ and hand-set fields survive future re-derives.</p>
   </div>
   {_pictures_card(key, tenant)}
   {_board_card(key, tenant)}
-  {_references_card(key, tenant)}
   {sources_card}
   {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
@@ -6856,6 +6815,19 @@ def _design_preview(tenant: str, design: dict, shot: dict | None, entity_key: st
               f'border-radius:6px;background:#fff"></iframe></div></details>')
 
 
+def _es_standing(tenant: str) -> str:
+    from . import email_structures as _es
+    return _es.standing_designation(tenant)
+
+
+def _designate_form(key: str, tenant: str, structure_id: str, label: str) -> str:
+    return (f'<form method="post" action="/admin/email_design_designate" style="display:inline">'
+            f'<input type="hidden" name="key" value="{_esc(key)}">'
+            f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+            f'<input type="hidden" name="structure" value="{_esc(structure_id)}">'
+            f'<button class="{"sec" if structure_id == "" else ""}">{_esc(label)}</button></form>')
+
+
 def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str:
     """The reference beside OURS for this brand — the model's email, judged —
     and the control that makes one. Status first, then the pictures, then
@@ -6874,13 +6846,14 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
     if not ref_image:
         return ""
     shot = {"image": ref_image}
-    if concept:
+    if concept and concept[:120] != (st.get("name") or "")[:120]:
+        # said once: a design named by its concept does not repeat it
         brief_line = f'<br><span class="mut">brief: {_esc(concept)}</span>'
     bg = _web.bg_status("email_recreate", tenant)
     last = recreate.latest(st["id"], tenant)
     running = bg.get("state") == "running"
     ents = kb.entities(tenant)[:24]
-    about = ('<select name="entity"><option value="">the brand</option>'
+    about = ('<select name="entity" style="max-width:260px"><option value="">the brand</option>'
              + "".join(f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>' for e in ents)
              + "</select>")
     form = (f'<form method="post" action="/admin/email_recreate" style="margin:6px 0 0;display:inline">'
@@ -6888,11 +6861,31 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
             f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
             f'<input type="hidden" name="structure" value="{_esc(st["id"])}">'
             f'about {about} <button type="submit" class="sec"'
-            + (" disabled" if running else "") + f'>Recreate for {_esc(tenant)}</button></form>')
+            + (" disabled" if running else "") + '>Recreate again</button> '
+            '<button type="submit" name="reread" value="1" class="sec"'
+            + (" disabled" if running else "") + '>Read the reference again</button></form>')
     if running:
         form += f' <span class="when">running — {_esc(bg.get("detail") or "")}</span>'
+    # CHOOSE, where the review is: into the rotation, or not; and the standing
+    # choice for every campaign of this brand.
+    base = f'/admin/email_structure?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;id={_esc(st["id"])}'
+    standing = _es_standing(tenant)
+    if st["review"] == "proposed":
+        choose = (f'<a href="{base}&amp;verdict=approved"><button>Use it — into the rotation</button></a> '
+                  f'<a href="{base}&amp;verdict=rejected"><button class="sec">Not this one</button></a>')
+    elif st["review"] == "approved":
+        if standing == st["id"]:
+            choose = ('<span class="ok">every campaign uses this design</span> '
+                      + _designate_form(key, tenant, "", "Back to random"))
+        else:
+            choose = ('<span class="ok">in the rotation</span> '
+                      + _designate_form(key, tenant, st["id"], "Use this for every campaign")
+                      + f' <a href="{base}&amp;verdict=rejected"><button class="sec">Take it out</button></a>')
+    else:
+        choose = (f'<span class="mut">not used</span> '
+                  f'<a href="{base}&amp;verdict=approved"><button class="sec">Use it after all</button></a>')
     if not last:
-        return (brief_line + f'<br><span class="mut">not yet recreated for this brand</span> ' + form)
+        return (brief_line + '<br><span class="mut">not yet recreated for this brand</span><br>' + choose + "<br>" + form)
     if last["status"] == recreate.RUNNING:
         # IN FLIGHT IS NOT A RESULT. The row is written at the start of the
         # run and finished at the end; between the two the card said "round
@@ -6910,8 +6903,18 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
     open_ = [f for f in last["findings"] if f.get("severity") in ("blocks", "cosmetic")]
     blocks_n = sum(1 for f in open_ if f.get("severity") == "blocks")
     status_cls = "ok" if last["status"] == recreate.SHIPPABLE else "when"
+    v = last.get("verdict") or {}
+
+    def _yn(x) -> str:
+        return "yes" if x is True else "no" if x is False else "—"
+    verdict = ((f'<br><span class="mut">the judge: same concept <b>{_yn(v.get("same_concept"))}</b> · '
+                f'devices in order <b>{_yn(v.get("devices_in_order"))}</b> · '
+                f"all the brand's own <b>{_yn(v.get('brand_material'))}</b>"
+                + (f' · weight and rhythm: {_esc(str(v.get("weight_rhythm"))[:160])}' if v.get("weight_rhythm") else "")
+                + "</span>") if v else "")
     head = (f'<br><span class="{status_cls}">{_esc(last["status"])}</span> '
             f'<span class="mut">· {_esc(last["at"])}'
+            + (" · from a campaign" if last.get("via") == "campaign" else "")
             + (f' · about {_esc(last["entity_key"])}' if last["entity_key"] else "")
             + f' · round {last["best"]} of {len(last["rounds"])} kept'
             + (f' · <a href="/admin/email_recreation?key={_esc(key)}&amp;id={_esc(last["id"])}">open the HTML</a>'
@@ -6937,11 +6940,11 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
         + (f', {r.get("edited", 0)} lines edited' if r.get("n") else "")
         + (f' · not judged — {_esc(r.get("why_not_judged", ""))}' if not r.get("judged") else "")
         + "</li>" for r in last["rounds"])
-    return (brief_line + head + side + finds_html
+    return (brief_line + head + verdict + side + finds_html
             + (f'<details><summary class="mut">{len(last["rounds"])} round(s)</summary><ul class="mut">{rounds}</ul></details>'
                if last["rounds"] else "")
             + (f'<br><span class="mut">{_esc(last["note"][:600])}</span>' if last["note"] else "")
-            + "<br>" + form)
+            + "<br>" + choose + "<br>" + form)
 
 
 def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
@@ -7031,35 +7034,49 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
                 f'<span class="when">{_esc(st["source"])}'
                 + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
                 + (f' · used {st["used_count"]}×' if st["used_count"] else "")
-                + f'</span><br><code>{_esc(" → ".join(st["sequence"]))}</code>'
+                + "</span>"
+                # a design read into a brief is the brief; its rough block
+                # order serves the rules at use and is not shown as the design
+                + (f'<br><code>{_esc(" → ".join(st["sequence"]))}</code>' if not st.get("brief") else "")
                 + (f'<br><span class="mut">{_esc(str(st["profile"].get("notes", ""))[:220])}</span>'
                    if st["profile"].get("notes") else "")
                 + look_html
-                + f'<br>{_usable(st)} {controls}</div>')
+                + f'<br>{_usable(st)}</div>')
 
-    def _ctl(st: dict) -> str:
-        base = f'/admin/email_structure?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;id={_esc(st["id"])}'
-        return (f'<a href="{base}&amp;verdict=approved"><button class="sec">Approve</button></a> '
-                f'<a href="{base}&amp;verdict=rejected"><button class="sec">Reject</button></a>')
-
-    # Swiping and the swiped pictures live on Brand · Reference emails
-    # (`_references_card`); this card is what they were read INTO.
-    body = ((f'<h4>Waiting for you ({len(proposed)})</h4>'
-               + "".join(_one(st, _ctl(st)) for st in proposed) if proposed else "")
-            + (f'<h4>In the library ({len(approved)})</h4>'
+    # THE WHOLE FLOW ON ONE PAGE (owner, 2026-09-12): paste a link → the
+    # reference beside ours with the judge's review → choose it, or leave
+    # the draw to chance. The verdict controls sit inside each recreation
+    # block, where the review is.
+    from . import web as _web
+    bg = _web.bg_status("email_recreate", tenant)
+    running = bg.get("state") == "running"
+    paste = f"""
+    <form method="post" action="/admin/email_reference" style="margin:8px 0">
+      <input type="hidden" name="key" value="{_esc(key)}">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
+      <button type="submit"{" disabled" if running else ""}>Add this reference</button>
+      <span class="when">one email's page on Really Good Emails. It is read in
+      words, recreated for {_esc(tenant)} with its own pictures and copy, and
+      judged beside the reference — the review lands below.</span>
+    </form>""" + (f'<p class="when">running — {_esc(bg.get("detail") or "starting")}</p>' if running else "")
+    standing = _es_standing(tenant)
+    standing_name = next((st["name"] for st in approved if st["id"] == standing), "")
+    pool = [st for st in approved if _es.usable_for(tenant, st)[0]]
+    draw = (f'<p><b>Your campaigns:</b> every one is built on <b>{_esc(standing_name)}</b> until you say otherwise.</p>'
+            if standing_name else
+            f'<p><b>Your campaigns:</b> each draws at random from the {len(pool)} design(s) in the rotation '
+            f'this brand may use{"" if pool else " — none yet; use one below"}. A plan can still name one.</p>')
+    body = (paste + draw
+            + (f'<h4>New — look, then choose ({len(proposed)})</h4>'
+               + "".join(_one(st, "") for st in proposed) if proposed else "")
+            + (f'<h4>In the rotation ({len(approved)})</h4>'
                + "".join(_one(st, "") for st in approved) if approved else
-               '<p class="mut">Nothing in the library yet. The first approved '
-               'send files its shape here on its own; a reference swiped on '
-               'Brand files one for you to approve.</p>'))
+               '<p class="mut">Nothing in the rotation yet — add a reference above, '
+               'look at the recreation, and use it.</p>'))
     return f"""
 <div class="card"><div class="head"><h2>Designs — the references, recreated for {_esc(tenant)}</h2>
   <span class="mut">shared across every account — a design, never a client's words or pictures</span></div>
-  <p class="when">Each reference was read into a brief in words. <b>Recreate</b>
-  makes this brand's version of it — the brand's own pictures cast by looking,
-  its copy written to the brief's jobs, the email written whole, checked,
-  photographed and judged beside the reference — and shows the two side by
-  side with what still differs. Every design is checked against THIS brand's
-  rules before a drafter sees it.</p>
   {body}
 </div>"""
 

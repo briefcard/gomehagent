@@ -199,7 +199,7 @@ def main() -> int:
     pending = next(r for r in es.library() if r["review"] == "proposed")
     got = es.pick("eien", designated=pending["id"])
     ck("a designated one that is still a proposal is refused too",
-       got["structure"] is None and "not approved" in got["why"], got["why"])
+       got["designated"] and got["structure"] is None and "not in the rotation" in got["why"], got["why"])
     ck("designating nothing that exists says so and designs fresh",
        es.pick("eien", designated="nope")["structure"] is None)
     got = es.pick("eien", intent="story", fmt="letter")
@@ -489,8 +489,8 @@ def main() -> int:
     print("\n— the card shows the library, the verdict per brand, and the controls —")
     from app import admin_ui
     card = admin_ui._structures_card("s3cret", "baci")
-    ck("proposed structures wait with approve and reject beside them",
-       "Waiting for you" in card and "verdict=approved" in card and "verdict=rejected" in card)
+    ck("new designs wait to be looked at and chosen — use it, or not this one",
+       "New — look, then choose" in card and "verdict=approved" in card and "verdict=rejected" in card)
     from app import web as _web
     pending = [r for r in es.library() if r["review"] == "proposed"][0]
     said = _web.admin_email_structure(key="s3cret", tenant="baci",
@@ -502,15 +502,14 @@ def main() -> int:
        "usable here" in card and "not for this brand" in card)
     ck("the reference screenshot is shown beside the structure it produced",
        'src="https://cdn.rge/acme.png"' in card)
-    # THE SWIPE FORM MOVED (2026-09-12): swiping is inspiration and lives on
-    # Brand · Reference emails; the structures card is what a swipe is read
-    # INTO, on the email system's page under Designs.
-    refs = admin_ui._references_card("s3cret", "baci")
-    ck("the swipe form is on the Reference-emails card, and it is the control that was pressed above",
-       'action="/admin/email_swipe"' in refs and 'action="/admin/email_swipe"' not in card)
-    ck("the swiped picture is listed there with what it was read into",
-       'src="https://cdn.rge/acme.png"' in refs and "read into" in refs)
-    ck("the structures card keeps the verdict controls and says the library is shared, a design never a client's words",
+    # THE WHOLE FLOW IS ONE ROOM (2026-09-12): a reference is added from a
+    # link at the top of Designs (`/admin/email_reference` — read into a
+    # brief and recreated in one press); the token route `/admin/email_swipe`
+    # pressed above survives only as "Read its design" under the folded token
+    # reading, until Phase 5 deletes it.
+    ck("a reference is added where its review lands — at the top of the Designs room",
+       'action="/admin/email_reference"' in card and 'action="/admin/email_swipe"' not in card)
+    ck("the room keeps the verdict controls and says the library is shared, a design never a client's words",
        "/admin/email_structure?" in card and "shared across every account" in card
        and "never a client's words or pictures" in card)
     # AND THE LIBRARY IS ON THE EMAIL SYSTEM'S PAGE: the campaign email
@@ -526,8 +525,8 @@ def main() -> int:
     # By now every proposal above was approved, so the room shows the library
     # (no verdict controls) with the recreation control per structure.
     ck("Designs on the email system's page is the structures card, for this brand",
-       "Designs — the references, recreated for baci" in page and "In the library" in page
-       and "Recreate for baci" in page)
+       "Designs — the references, recreated for baci" in page and "In the rotation" in page
+       and "Recreate again" in page and "Add this reference" in page)
 
     print("\n" + ("ALL PASSED" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0

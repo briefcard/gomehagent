@@ -1761,9 +1761,38 @@ no route moved. Guards `designs_live_on_the_email_systems_page`,
 `swiping_is_inspiration_on_brand`. Three suites that asserted the retired
 preview were edited to assert what the card shows now.
 
+**THE WHOLE FLOW IN ONE ROOM (same evening; hash in the memory note).**
+Owner: *"I want from top down a review of this process. I add a reference
+from a link, it needs to give me the initial review of how we recreated it
+and then I should be able to choose it or let it randomly be chosen for the
+email campaigns I generate. It shouldn't be so many steps."* It was nine:
+Brand → paste → the token reader → a PROPOSED reading → Systems → Designs
+→ approve the reading → Recreate → wait → look → nowhere to say "use it" →
+Plan → designate. Now three, on *Systems → Campaign email → Designs*:
+**Add this reference** (`POST /admin/email_reference` → `recreate.swipe`:
+filed once, read into a brief, filed as ONE design keyed by the picture via
+`email_structures.file_reference`, recreated — one background job, its step
+shown) → **look** (the reference beside ours, the judge's line, findings,
+rounds, story) → **choose** (*Use it — into the rotation / Not this one*;
+*Use this for every campaign* = `email_structures.designate`, a standing
+choice `pick()` honours under the plan's own field; *Back to random*). The
+token reader is off the live path (its route survives only under the folded
+token reading). Brand lost the reference card: emails are the email
+system's. **THE CAMPAIGNS ARE BUILT IN THE DESIGN (Phase 3, pulled forward
+on the owner's words):** in `skill_pack._build`, a design with a brief runs
+`recreate.run(..., message=…, via="campaign")` — the drafter's message
+(subject, angle, offer, blocks, cited claims) poured into the design's copy
+jobs, the HTML written whole, checked, shot, judged — the emitted text is
+the recreation's copy, so the emit gates check the words that ship; memoised
+per message hash so the craft redraft and the repair loop do not pay twice;
+`meta.recreation` on the artifact; `ship_unattended` holds on a blocking
+finding; a failure builds the old way AND SAYS SO. `latest()` prefers the
+newest RESULT over a newer failed row. Ten guards caught.
+
 **NOT PROVEN LIVE** — every model call is stubbed here (no key on this
-machine) and the deploy has no browser until `SHOTS_WS` is set (the owner
-set it the same evening). The
+machine); `SHOTS_WS` is set in the deploy (the owner, the same evening). The
+owner's press: Systems → Campaign email → Designs → paste the Ayoh link →
+look → Use it → run one campaign. The
 owner's move: a Browserless token in `SHOTS_WS`; then press **Recreate
 for baci** on the Ayoh structure and put the card beside
 `docs/recreations/ayoh-baci-portofino.html`. Phases 2–6 of the plan are

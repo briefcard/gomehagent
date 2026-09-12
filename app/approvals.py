@@ -393,6 +393,16 @@ def ship_unattended(tenant: str, output_id: str, why: str = "") -> dict:
                         + "; ".join((", ".join(g["failed"]) if g["failed"]
                                      else "its review could not run")
                                     for g in held[:2]))}
+    # AN EMAIL THE JUDGE OR THE CHECKS STILL OBJECT TO needs a person too
+    # (INITIATIVE-email-recreation.md, Phase 3): a recreation with a blocking
+    # finding is presented, never auto-shipped.
+    rec = _recreation_of(output_id)
+    if rec and int(rec.get("blocking") or 0):
+        return {"ok": False,
+                "why": (f"the design's recreation has {rec['blocking']} blocking finding(s): "
+                        + "; ".join(f"{f.get('where', '')} — {f.get('what', '')}"
+                                    for f in (rec.get("findings") or [])
+                                    if f.get("severity") == "blocks")[:400])}
     said = apply_decision(ids[0], "approved")
     with db.SessionLocal() as s:
         run = s.get(db.SystemRun, runs[ids[0]]) if runs[ids[0]] else None
@@ -673,6 +683,22 @@ def reconcile_drafts() -> dict:
                     "already done. What was sent is compared with what was "
                     "drafted, and that difference is what the generator "
                     "learns from."}
+
+
+def _recreation_of(output_id: str) -> dict:
+    """The recreation an email output was built as, off its artifact's meta —
+    `{}` when it was built the old way or there is no artifact."""
+    if not output_id:
+        return {}
+    try:
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id).first())
+            meta = dict(art.meta or {}) if art is not None else {}
+    except Exception:                                            # noqa: BLE001
+        return {}
+    rec = meta.get("recreation") or {}
+    return rec if isinstance(rec, dict) else {}
 
 
 def _fields_from_artifact(output_id: str, payload_fields: dict) -> dict:

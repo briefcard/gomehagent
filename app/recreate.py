@@ -367,7 +367,7 @@ _COPY_PROMPT = """You write email copy for %(name)s. %(positioning)s
 
 The email recreates a reference design. Its concept: %(concept)s
 The subject of this email: %(subject)s
-
+%(message)s
 Write the copy for each job below. Every job's words must fit its job exactly — a hook that
 turns on how the product is used, steps that name the real pieces, a closer that lands —
 and every product, collection, place or fact named must be one of the brand's own listed
@@ -387,9 +387,15 @@ array of strings; every other job is one string. No markdown, no quotation marks
 the whole, no emoji."""
 
 
-def copy(tenant: str, brief_: dict, kit_: dict, cast_: dict, *, entity_key: str = "") -> dict:
-    """`{ok, copy: {id: str|list}, findings: [...], calls}` — the drafter's
-    words per job, gated by the brand's ban list (`validator._banned`)."""
+def copy(tenant: str, brief_: dict, kit_: dict, cast_: dict, *, entity_key: str = "",
+         message: dict | None = None) -> dict:
+    """`{ok, copy: {id: str|list}, findings: [...], calls}` — the words per
+    job, gated by the brand's ban list (`validator._banned`).
+
+    With a campaign `message` — the drafter's subject, angle, offer, the
+    blocks it wrote and the claims it cited — every job is written to CARRY
+    that message: the design is the reference's, the message is this send's
+    (the campaign seam, INITIATIVE-email-recreation.md Phase 3)."""
     from . import validator
     jobs = copy_jobs(brief_)
     if not jobs:
@@ -411,9 +417,24 @@ def copy(tenant: str, brief_: dict, kit_: dict, cast_: dict, *, entity_key: str 
         rules += "The brand's email instructions: " + kit_["rules"]["channel"][:800] + "\n"
     job_text = "\n".join(f'- id "{j["id"]}" (section {j.get("section")}): {j.get("job")}'
                          + (f' — limit: {j["limit"]}' if j.get("limit") else "") for j in jobs)
+    msg = ""
+    if message:
+        lines = [f"- {k}: {v}" for k, v in (("subject line", message.get("subject")),
+                                              ("preheader", message.get("preheader")),
+                                              ("angle", message.get("angle")),
+                                              ("offer", message.get("offer"))) if v]
+        if message.get("text"):
+            lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n"
+                         + str(message["text"])[:2200])
+        if message.get("claims"):
+            lines.append("- claims it cites — use them VERBATIM or not at all:\n"
+                         + "\n".join(f"  · {c}" for c in message["claims"][:8]))
+        msg = ("THE MESSAGE THIS EMAIL CARRIES — every job below must carry it; add no fact, "
+               "product or claim that is not in it or in the brand's material:\n" + "\n".join(lines) + "\n")
     prompt = _COPY_PROMPT % {
         "name": kit_.get("name"), "positioning": kit_.get("positioning") or "", "concept": brief_.get("concept"),
         "subject": (f'{subj["name"]} — {subj.get("description", "")[:300]}' if subj else "the brand"),
+        "message": msg,
         "rules": rules, "material": material or "(nothing on file)", "pictures": pictures, "jobs": job_text}
     reply = _ask("email_copy", prompt, tenant=tenant, max_tokens=2500)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -845,20 +866,23 @@ def _reference_png(structure_id: str) -> tuple[bytes, str]:
 
 
 def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=(),
-        seed: str = "", progress=None) -> dict:
+        seed: str = "", progress=None, message: dict | None = None, via: str = "press") -> dict:
     """One recreation of `structure_id` for `tenant`, stored as a `Recreation`
-    row and returned as `{ok, id, status, note, findings, rounds}`."""
+    row and returned as `{ok, id, status, note, findings, rounds, html, text,
+    media_ids, blocking}`. With a campaign `message` the copy carries it and
+    `via` says so on the row."""
     from . import media, shots
     say = progress or (lambda *_: None)
     story: list[str] = []
     with db.SessionLocal() as s:
         st = s.get(db.EmailStructure, structure_id)
         if not st:
-            return {"ok": False, "why": "no structure at that id"}
+            return {"ok": False, "why": "no structure at that id", "status": FAILED}
         brief_ = dict(st.brief or {})
         aid = st.source_asset_id or ""
         name = st.name or structure_id
-        row = db.Recreation(tenant=tenant, structure_id=structure_id, entity_key=entity_key, status=RUNNING)
+        row = db.Recreation(tenant=tenant, structure_id=structure_id, entity_key=entity_key, status=RUNNING,
+                            models={"via": via})
         s.add(row)
         s.commit()
         rid = row.id
@@ -871,9 +895,16 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             r.note = " ".join(story)
             for k, v in fields.items():
                 setattr(r, k, v)
+            r.models = {**(r.models or {}), **(fields.get("models") or {}), "via": via}
             s.commit()
+        cp = fields.get("copy") or {}
+        text = "\n".join(" ".join(v) if isinstance(v, list) else str(v) for v in cp.values())
         return {"ok": status not in (FAILED,), "id": rid, "status": status, "note": " ".join(story),
-                "findings": fields.get("findings", []), "rounds": fields.get("rounds", []), "calls": calls}
+                "findings": fields.get("findings", []), "rounds": fields.get("rounds", []), "calls": calls,
+                "html": fields.get("html", ""), "text": text,
+                "media_ids": [p.get("asset_id") for p in ((fields.get("cast") or {}).get("picks") or {}).values()
+                              if p.get("asset_id")],
+                "blocking": len(blocking(fields.get("findings", [])))}
 
     # the brief
     if not brief_:
@@ -903,7 +934,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                                   "what": f"needs {x['needs']}"} for x in cast_.get("none") or []])
     # the copy
     say("writing the copy to the brief's jobs")
-    cp = copy(tenant, brief_, kit_, cast_, entity_key=entity_key)
+    cp = copy(tenant, brief_, kit_, cast_, entity_key=entity_key, message=message)
     calls += cp.get("calls", 0)
     if not cp.get("ok"):
         story.append(cp.get("why", "the copy did not land") + ".")
@@ -964,20 +995,72 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                    models={"calls": calls, "door": best["shot"]["door"]})
 
 
+def swipe(url: str, tenant: str, *, entity_key: str = "", progress=None) -> dict:
+    """ONE PRESS FROM A LINK (owner, 2026-09-12: *"I add a reference from a
+    link, it needs to give me the initial review of how we recreated it"*):
+    the gallery page's picture is filed on the swipe board (once — a second
+    paste of the same page finds it), read into a brief, filed as ONE design
+    keyed by that picture, and recreated for this brand — so what lands on the
+    Designs page is the reference beside ours with the judge's review, not a
+    reading to approve. `{ok, structure_id, recreation, why}`."""
+    from . import email_structures as es
+    say = progress or (lambda *_: None)
+    say("filing the reference")
+    got = es.add_swipe(url)            # a page already on file comes back with its picture
+    asset_id = got.get("asset_id", "")
+    if not asset_id:
+        return {"ok": False, "why": got.get("why") or "the page could not be filed", "structure_id": ""}
+    say("reading the reference into a brief")
+    read = brief(asset_id, tenant=tenant)
+    if not read.get("ok"):
+        return {"ok": False, "why": read.get("why"), "structure_id": ""}
+    filed = es.file_reference(asset_id, brief=read["brief"], source_url=url)
+    say("recreating it for this brand")
+    rec = run(filed["id"], tenant, entity_key, seed=f"{filed['id']}:{tenant}:first", progress=progress, via="press")
+    return {"ok": rec.get("ok", False), "structure_id": filed["id"], "recreation": rec,
+            "why": rec.get("note", "") if not rec.get("ok") else ""}
+
+
+def again(structure_id: str, tenant: str, *, entity_key: str = "", progress=None) -> dict:
+    """Read the reference again (a fresh brief) and recreate — the control
+    for a design whose reading was wrong, not merely whose recreation was."""
+    from . import email_structures as es
+    with db.SessionLocal() as s:
+        st = s.get(db.EmailStructure, structure_id)
+        aid = st.source_asset_id if st else ""
+    if not aid:
+        return {"ok": False, "why": "this design has no reference picture to read"}
+    read = brief(aid, tenant=tenant)
+    if not read.get("ok"):
+        return {"ok": False, "why": read.get("why")}
+    es.file_reference(aid, brief=read["brief"])
+    return run(structure_id, tenant, entity_key, seed=f"{structure_id}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}",
+               progress=progress, via="press")
+
+
 def latest(structure_id: str, tenant: str) -> dict | None:
     """The newest recreation of this structure for this brand, for the card."""
     from . import media
     with db.SessionLocal() as s:
-        r = (s.query(db.Recreation).filter(db.Recreation.structure_id == structure_id,
-                                           db.Recreation.tenant == tenant)
-             .order_by(db.Recreation.created_at.desc()).first())
+        rows = (s.query(db.Recreation).filter(db.Recreation.structure_id == structure_id,
+                                              db.Recreation.tenant == tenant)
+                .order_by(db.Recreation.created_at.desc()).limit(6).all())
+        # THE NEWEST RESULT, not the newest row: a run that failed before it
+        # made anything must not hide the last picture and review behind
+        # "failed" — unless nothing else exists. A run in flight is shown as
+        # such by the card.
+        r = next((x for x in rows if x.status == RUNNING), None) or \
+            next((x for x in rows if x.status not in (FAILED,)), None) or (rows[0] if rows else None)
         if not r:
             return None
+        rounds = list(r.rounds or [])
+        best = r.best or 0
+        verdict = (rounds[best].get("verdict") or {}) if 0 <= best < len(rounds) else {}
         return {"id": r.id, "status": r.status, "note": r.note or "", "entity_key": r.entity_key or "",
                 "png": media.url_for(r.png_id) if r.png_id else "", "findings": list(r.findings or []),
-                "rounds": list(r.rounds or []), "best": r.best or 0, "at": r.created_at.isoformat(timespec="minutes")
+                "rounds": rounds, "best": best, "at": r.created_at.isoformat(timespec="minutes")
                 if r.created_at else "", "concept": (r.brief or {}).get("concept", ""),
-                "has_html": bool(r.html)}
+                "has_html": bool(r.html), "verdict": verdict, "via": (r.models or {}).get("via", "")}
 
 
 def html_of(recreation_id: str) -> str:
