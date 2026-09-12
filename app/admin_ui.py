@@ -6919,9 +6919,15 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
             + f' · round {last["best"]} of {len(last["rounds"])} kept'
             + (f' · <a href="/admin/email_recreation?key={_esc(key)}&amp;id={_esc(last["id"])}">open the HTML</a>'
                if last["has_html"] else "") + "</span>")
+    kept = last["rounds"][last["best"]] if 0 <= last["best"] < len(last["rounds"]) else {}
+    door_why = str((kept.get("shot") or {}).get("why") or kept.get("why_not_judged") or "")
     ours = (f'<a href="{_esc(last["png"])}"><img src="{_esc(last["png"])}" alt="ours" '
             f'style="max-width:240px;border:1px solid #ddd;display:block"></a>' if last["png"] else
-            '<span class="when">no picture — the screenshot door did not answer</span>')
+            # THE DOOR'S OWN REASON, where the picture would be — "did not
+            # answer" sent the owner one fold down to find it (2026-09-12)
+            f'<span class="when">no picture — {_esc(door_why or "the screenshot door did not answer")}</span>'
+            + (f'<br><a href="/admin/email_recreation?key={_esc(key)}&amp;id={_esc(last["id"])}">open the HTML</a>'
+               if last["has_html"] else ""))
     ref = (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" alt="the reference" '
            f'style="max-width:240px;border:1px solid #ddd;display:block"></a>')
     side = (f'<table role="presentation" style="margin:6px 0"><tr>'

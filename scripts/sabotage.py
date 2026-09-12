@@ -38,6 +38,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_doors_reason_stands_where_the_picture_would_be',
+        "file": 'app/admin_ui.py',
+        "find": '            f\'<span class="when">no picture — {_esc(door_why or "the screenshot door did not answer")}</span>\'\n',
+        "replace": '            f\'<span class="when">no picture — the screenshot door did not answer</span>\'\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "the owner reads 'the door did not answer' and has to open a fold to learn which of five reasons it was",
+    },
+    {
         "name": 'designs_live_on_the_email_systems_page',
         "file": 'app/admin_ui.py',
         "find": '        subs.insert(6, ("designs", "Designs"))\n',

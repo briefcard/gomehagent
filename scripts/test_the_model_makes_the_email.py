@@ -361,6 +361,9 @@ def main() -> int:
     got2 = rc.run(sid, "baci", "portofino", seed="t")
     ck("without a picture nothing is judged and the email is not called shippable — and it says why",
        got2["status"] == rc.NOT_SHIPPABLE and "not judged" in got2["note"] and "playwright" in got2["note"], got2.get("note"))
+    card_nd = admin_ui._structures_card("s3cret", "baci")
+    ck("the door's own reason stands where the picture would be, with the HTML still openable",
+       "no picture — playwright is not installed" in card_nd and "open the HTML" in card_nd)
 
     # no pictures → cannot be made
     shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
