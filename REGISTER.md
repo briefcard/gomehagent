@@ -1058,7 +1058,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`image_tier`**(model) → `tuple[str, str]`  ·  from `pictures.py`
 - **`image_tokens`**(width, height) → `int`  ·  **from nothing**
 - **`model_for`**(purpose) → `str`  ·  from `test_creative_seam.py`, `test_llm.py`, `test_the_image_model_is_a_setting.py`
-- **`resized_size`**(width, height, max_edge?, max_tokens?) → `tuple[int, int]`  ·  from `pictures.py`
+- **`resized_size`**(width, height, max_edge?, max_tokens?) → `tuple[int, int]`  ·  from `pictures.py`, `recreate.py`
 - **`text_or_raise`**(reply) → `str`  ·  from `ops_jobs.py`
 
 ### `lookups.py`
@@ -1289,7 +1289,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `recreate.py`
 
-- **`again`**(structure_id, tenant, entity_key?, progress?) → `dict`  ·  **from nothing**
+- **`again`**(structure_id, tenant, entity_key?, progress?) → `dict`  ·  from `recreate_once.py`
 - **`bake`**(html, tenant) → `tuple[str, list[str]]`  ·  from `test_the_model_makes_the_email.py`
 - **`blocking`**(findings) → `list[dict]`  ·  from `test_artifact_check.py`, `test_the_model_makes_the_email.py`
 - **`brief`**(asset_id, tenant?) → `dict`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`, `test_the_model_makes_the_email.py`

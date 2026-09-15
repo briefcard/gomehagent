@@ -108,8 +108,14 @@ Write the brief as JSON with exactly these keys:
             avatar, handle, photo, icon row, dots, caption'),
     "does": what it does for the reader,
     "asset": {"kind": "photograph" | "mark" | "illustration" | "none",
-              "shows": what the picture must show for the device to work — the product in
-              use, hands, food on it, the pack in a scene, a person — in the brand's terms},
+              "shows": the ROLE the picture plays, in terms ANY brand's own photograph could
+              fill — "the hero product, alone, big", "the product in a scene of use — food on
+              it, hands, sunlight", "the product being bought — in a basket, a bag, at the
+              counter", "the range side by side, packs standing together", "a person with the
+              product". NEVER the reference's own product, props, colours or background: the
+              other brand has none of them. What the reference's picture LOOKS like (its
+              ground colour, its frame, its angle) belongs in "look", where it is recreated
+              in the other brand's tones},
     "copy": [{"id": "s1_kicker", "job": what these words must do, in one line —
               'a two-line hook that turns on how the product is used', 'four numbered steps
               naming the product, the last step one word', "limit": words or lines}],
@@ -234,14 +240,17 @@ _CAST_PROMPT = """You are casting photographs for an email that recreates a refe
 brand %(name)s. The sheet shows the brand's own pictures, numbered. Each numbered cell is one
 picture; under the sheet are the same pictures' filed facts.
 
-The brief's picture slots:
+The brief's picture slots — each names the ROLE a picture plays in the design:
 %(slots)s
 
-For each slot pick the ONE picture that does that slot's job — what it must SHOW matters
-more than its colours — and say why in a line. Prefer a picture not used lately
-(%(recent)s), and among equals prefer the ones about %(subject)s. If no picture on the
-sheet can do a slot's job, do not force one: list it under "none" with what would be needed.
-Never pick the same picture for two slots.
+The brand's pictures will never match the reference's subject — a different product, in
+different colours, on different tables. Cast by ROLE: for each slot pick the ONE picture on
+the sheet that plays that role best for this brand (a hero of the product; the product in
+use or in a scene; the product being bought or carried; the range side by side; a person
+with it) and say why in a line. Colours do not matter — the email's tones follow the
+picture you pick. Prefer a picture not used lately (%(recent)s), and among equals prefer
+the ones about %(subject)s. Say "none" for a slot only when no picture on the sheet could
+play the role at all. Never pick the same picture for two slots.
 
 Return JSON only: {"picks": [{"section": n, "cell": k, "why": "..."}],
                    "none": [{"section": n, "needs": "a photograph of ..."}]}"""
@@ -252,7 +261,13 @@ def _sheet(cells: list[bytes]) -> bytes:
     reviewer's tier so nothing is downscaled."""
     import io
     from PIL import Image, ImageDraw, ImageFont
-    cols, cell, pad = 6, 246, 10          # 6 × 256 + 10 = 1546 px, under the 1568 edge
+    from . import llm, pictures as ed
+    # BOTH limits the model holds a picture to: the long edge AND the total
+    # pixels (≈1.18 M at the standard tier — the API refused a 1546×1034
+    # sheet on the owner's first real run, 2026-09-15). Six across, four
+    # down at 208 px is 1318×882; the sheet is measured with the model's
+    # own arithmetic afterwards and shrunk if it would still be refused.
+    cols, cell, pad = 6, 208, 10
     rows = max(1, (len(cells) + cols - 1) // cols)
     W, H = cols * (cell + pad) + pad, rows * (cell + pad) + pad
     sheet = Image.new("RGB", (W, H), "#ffffff")
@@ -271,6 +286,10 @@ def _sheet(cells: list[bytes]) -> bytes:
             d.rectangle([x, y, x + cell, y + cell], outline="#999")
         d.rectangle([x, y, x + 44, y + 34], fill="#111111")
         d.text((x + 6, y + 3), str(i + 1), fill="#ffffff", font=font)
+    tier, edge = ed._tier_edge()
+    fit_w, fit_h = llm.resized_size(W, H, edge, llm.IMAGE_TIERS[tier]["max_tokens"])
+    if (fit_w, fit_h) != (W, H):
+        sheet = sheet.resize((fit_w, fit_h), Image.LANCZOS)
     buf = io.BytesIO()
     sheet.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -299,10 +318,15 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
     is cut and said with what it needs."""
     from . import pictures as ed
     slots = [sec for sec in brief_.get("sections") or []
-             if str(((sec.get("asset") or {}).get("kind") or "none")).lower() in ("photograph", "illustration")]
+             if str(((sec.get("asset") or {}).get("kind") or "none")).lower() == "photograph"]
     marks = [sec.get("n") for sec in brief_.get("sections") or []
              if str(((sec.get("asset") or {}).get("kind") or "")).lower() == "mark"]
-    out = {"ok": True, "picks": {}, "none": [], "marks": marks, "said": [], "calls": 0}
+    # an illustration (a cartoon figure, drawn lettering) is a DEVICE: the
+    # composer draws it in HTML/CSS or a baked block, or leaves it out — it
+    # is never a photograph to find on the brand's shelf
+    drawn = [sec.get("n") for sec in brief_.get("sections") or []
+             if str(((sec.get("asset") or {}).get("kind") or "")).lower() == "illustration"]
+    out = {"ok": True, "picks": {}, "none": [], "marks": marks, "drawn": drawn, "said": [], "calls": 0}
     if not slots:
         out["said"].append("the design carries no photograph")
         return out
@@ -565,6 +589,9 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
                         + ("\n   tones: " + ", ".join(f"{k} {v}" for k, v in c.items() if isinstance(v, str)) if c else ""))
         for n in cast_.get("marks") or []:
             pics.append(f"section {n} — the brand's mark: {theme.get('logo_url') or '(none on file: set the name in type)'}")
+        for n in cast_.get("drawn") or []:
+            pics.append(f"section {n} — an ILLUSTRATION in the reference: draw a simple equivalent in HTML/CSS "
+                        f"or inside a baked block, in the brand's tones, or leave it out — never a photograph")
         cut = ("Slots with no picture that fits — leave the section out, keep the flow:\n"
                + "\n".join(f'section {x["section"]}: needs {x["needs"]}' for x in cast_.get("none") or [])
                if cast_.get("none") else "")
@@ -1030,7 +1057,10 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     calls += cast_.get("calls", 0)
     story.extend(cast_.get("said") or [])
     photo_slots = [sec for sec in brief_.get("sections") or []
-                   if str(((sec.get("asset") or {}).get("kind") or "")).lower() in ("photograph", "illustration")]
+                   if str(((sec.get("asset") or {}).get("kind") or "")).lower() == "photograph"]
+    if not cast_.get("ok"):
+        story.append("The caster did not answer: " + "; ".join(cast_.get("said") or []) + ".")
+        return _finish(FAILED, brief=brief_, cast=cast_)
     if brief_.get("designless") and not cast_.get("picks"):
         # NO REFERENCE AND NO PICTURE: a type-led email, said — a brand with
         # nothing on file still gets its send; a reference that needs
@@ -1122,11 +1152,19 @@ def swipe(url: str, tenant: str, *, entity_key: str = "", progress=None) -> dict
     asset_id = got.get("asset_id", "")
     if not asset_id:
         return {"ok": False, "why": got.get("why") or "the page could not be filed", "structure_id": ""}
-    say("reading the reference into a brief")
-    read = brief(asset_id, tenant=tenant)
-    if not read.get("ok"):
-        return {"ok": False, "why": read.get("why"), "structure_id": ""}
-    filed = es.file_reference(asset_id, brief=read["brief"], source_url=url)
+    with db.SessionLocal() as s:
+        have = (s.query(db.EmailStructure).filter(db.EmailStructure.source_asset_id == asset_id)
+                .order_by(db.EmailStructure.created_at.desc()).first())
+        on_file = dict(have.brief or {}) if have else {}
+    if on_file.get("concept"):
+        say("brief on file")
+        filed = es.file_reference(asset_id, brief=on_file, source_url=url)
+    else:
+        say("reading the reference into a brief")
+        read = brief(asset_id, tenant=tenant)
+        if not read.get("ok"):
+            return {"ok": False, "why": read.get("why"), "structure_id": ""}
+        filed = es.file_reference(asset_id, brief=read["brief"], source_url=url)
     say("recreating it for this brand")
     rec = run(filed["id"], tenant, entity_key, seed=f"{filed['id']}:{tenant}:first", progress=progress, via="press")
     return {"ok": rec.get("ok", False), "structure_id": filed["id"], "recreation": rec,

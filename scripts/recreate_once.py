@@ -33,6 +33,7 @@ def main() -> int:
     ap.add_argument("--out", default="")
     ap.add_argument("--db", default="", help="reuse a seeded database from an earlier run")
     ap.add_argument("--max-pictures", type=int, default=60)
+    ap.add_argument("--reread", action="store_true", help="read the reference again even if its brief is on file")
     a = ap.parse_args()
     out = a.out or os.path.join(tempfile.gettempdir(), f"once-{a.tenant}-{int(time.time())}")
     os.makedirs(out, exist_ok=True)
@@ -61,7 +62,13 @@ def main() -> int:
         _seed(a.tenant, a.store, a.max_pictures)
     print(f"— recreating {a.url} for {a.tenant}" + (f" about {a.entity}" if a.entity else ""))
     steps: list[str] = []
-    got = recreate.swipe(a.url, a.tenant, entity_key=a.entity, progress=lambda t: (steps.append(t), print("  ·", t)))
+    if a.reread and a.db:
+        from app import email_structures as _es2
+        _sid = next((r["id"] for r in _es2.library() if r.get("source_url") == a.url or (r.get("brief") or {}).get("concept")), "")
+        got = {"ok": True, "structure_id": _sid,
+               "recreation": recreate.again(_sid, a.tenant, entity_key=a.entity, progress=lambda t: (steps.append(t), print("  ·", t)))} if _sid else recreate.swipe(a.url, a.tenant, entity_key=a.entity, progress=lambda t: (steps.append(t), print("  ·", t)))
+    else:
+        got = recreate.swipe(a.url, a.tenant, entity_key=a.entity, progress=lambda t: (steps.append(t), print("  ·", t)))
     rec = got.get("recreation") or {}
     if not got.get("ok") and not rec:
         print("FAILED:", got.get("why"))
